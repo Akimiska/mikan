@@ -12,16 +12,8 @@ node_modules/
 .env.*
 !.env.example
 
-# throwaway keys, configs with keys and raw outputs of spikes; findings stay in RESULT.md
-docs/pipeline/spikes/**/certs/
-docs/pipeline/spikes/**/out/
-docs/pipeline/spikes/**/reality-keypair.txt
-docs/pipeline/spikes/**/*.yaml
-docs/pipeline/spikes/**/results/
-docs/pipeline/spikes/**/pebble-fs/
-docs/pipeline/spikes/**/www/
-docs/pipeline/spikes/**/_src/
-docs/pipeline/spikes/**/go.sum
+# local documentation
+/docs/
 
 # editors / OS / local tooling
 .claude/

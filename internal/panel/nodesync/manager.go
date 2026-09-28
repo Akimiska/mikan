@@ -259,12 +259,19 @@ func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRe
 }
 
 // Retire tells a node being removed from the panel to drop its listeners and users.
+// Call it after the node's row is deleted: its syncer stops first, so it cannot push the
+// old state back, and reconcile does not start it again.
 func (m *Manager) Retire(ctx context.Context, id int64) error {
-	s, ok := m.Syncer(id)
+	m.mu.Lock()
+	r, ok := m.running[id]
+	delete(m.running, id)
+	m.mu.Unlock()
 	if !ok {
 		return nodeapi.ErrUnavailable
 	}
-	_, err := s.node.Apply(ctx, nodeapi.DesiredState{Inbounds: []nodeapi.Inbound{}, Slots: []nodeapi.Slot{}})
+	r.cancel()
+	<-r.done
+	_, err := r.s.node.Apply(ctx, nodeapi.DesiredState{Inbounds: []nodeapi.Inbound{}, Slots: []nodeapi.Slot{}})
 	return err
 }
 

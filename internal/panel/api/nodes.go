@@ -309,12 +309,6 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 	if n.Address == "" {
 		return nil, huma.Error409Conflict("local_node")
 	}
-	if h.d.Nodes != nil {
-		// Best effort: an unreachable node keeps serving until it is reinstalled.
-		if err := h.d.Nodes.Retire(ctx, n.ID); err != nil {
-			h.d.Log.Warn("retire node", "node", n.ID, "err", err)
-		}
-	}
 	if err := h.d.Store.Q.DeleteNode(ctx, n.ID); err != nil {
 		return nil, err
 	}
@@ -322,6 +316,10 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 		return nil, err
 	}
 	if h.d.Nodes != nil {
+		// Best effort: an unreachable node keeps serving until it is reinstalled.
+		if err := h.d.Nodes.Retire(ctx, n.ID); err != nil {
+			h.d.Log.Warn("retire node", "node", n.ID, "err", err)
+		}
 		h.d.Nodes.NodesChanged()
 	}
 	h.d.Changes.SlotsChanged()

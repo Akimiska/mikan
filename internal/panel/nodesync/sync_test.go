@@ -306,3 +306,21 @@ func TestCountersPerNode(t *testing.T) {
 		t.Fatalf("local position %s/%d", e, s)
 	}
 }
+
+// A removed node gets an empty state and its syncer is gone for good, so nothing pushes
+// the old listeners back.
+func TestRetireStopsTheNode(t *testing.T) {
+	local, _, st, _, _ := setup(t)
+	ctx := context.Background()
+	remote, fake := addRemote(t, local, st)
+	if err := local.m.Retire(ctx, remote.id); err != nil {
+		t.Fatal(err)
+	}
+	last := fake.applied[len(fake.applied)-1]
+	if len(last.Inbounds) != 0 || len(last.Slots) != 0 {
+		t.Fatalf("retired node must be emptied: %+v", last)
+	}
+	if _, ok := local.m.Syncer(remote.id); ok {
+		t.Fatal("the retired node's syncer must be gone")
+	}
+}

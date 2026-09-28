@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -122,5 +123,33 @@ func TestPolicies(t *testing.T) {
 		if p.Allowed {
 			t.Fatalf("expired user %d still allowed", owners[p.Slot])
 		}
+	}
+}
+
+// The server CLI writes inbounds straight to the database; the running panel must push
+// them to the node without a restart.
+func TestMaintainAppliesChangesMadeOutsideTheAPI(t *testing.T) {
+	s, node, st, _, _ := setup(t)
+	ctx := context.Background()
+	s.applyState(ctx)
+	s.maintain(ctx)
+	base := len(node.applied)
+	s.maintain(ctx)
+	if len(node.applied) != base {
+		t.Fatalf("an unchanged state was applied again: %d → %d", base, len(node.applied))
+	}
+	if _, err := domain.AddPreset(ctx, st, settings.New(st.Q), "trojan_reality", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.maintain(ctx)
+	if len(node.applied) != base+1 {
+		t.Fatalf("the new inbound was not applied: %d applies", len(node.applied))
+	}
+	var ports []string
+	for _, in := range node.applied[len(node.applied)-1].Inbounds {
+		ports = append(ports, in.Port)
+	}
+	if !slices.Contains(ports, "2087") {
+		t.Fatalf("applied inbounds: %v", ports)
 	}
 }

@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
+import { t } from "../i18n";
 import { Button } from "./ui";
 
 /** Side sheet on desktop, full-height sheet on phones. Title is required for screen readers. */
@@ -47,7 +48,7 @@ export function Drawer({
                     </Dialog.Title>
                     {meta ? <div className="dr-meta">{meta}</div> : null}
                   </div>
-                  <Dialog.Close className="icon-btn" aria-label="Закрыть">
+                  <Dialog.Close className="icon-btn" aria-label={t("common.close")}>
                     <X size={18} />
                   </Dialog.Close>
                 </header>
@@ -99,7 +100,7 @@ export function Confirm({
                 </Dialog.Description>
                 <div className="mt-6 flex justify-end gap-2">
                   <Dialog.Close asChild>
-                    <Button variant="ghost">Отмена</Button>
+                    <Button variant="ghost">{t("common.cancel")}</Button>
                   </Dialog.Close>
                   <Button variant={danger ? "danger-solid" : "primary"} loading={loading} onClick={onConfirm}>
                     {confirm}

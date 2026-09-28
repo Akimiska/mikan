@@ -4,15 +4,17 @@ import { LayoutDashboard, LogOut, Server, SlidersHorizontal, Tag, Users } from "
 import { api, unwrap } from "../api/client";
 import { meQuery, useNode, useOverview } from "../api/hooks";
 import { Logo } from "../components/atmosphere";
+import { LangSwitch } from "../components/lang";
 import { Avatar, Bar, Pill } from "../components/ui";
+import { t } from "../i18n";
 import { num, uptime } from "../lib/format";
 
 const NAV = [
-  { to: "/", label: "Обзор", short: "Обзор", icon: LayoutDashboard },
-  { to: "/users", label: "Пользователи", short: "Люди", icon: Users },
-  { to: "/tariffs", label: "Тарифы", short: "Тарифы", icon: Tag },
-  { to: "/inbounds", label: "Подключения", short: "Протоколы", icon: Server },
-  { to: "/settings", label: "Настройки", short: "Настройки", icon: SlidersHorizontal },
+  { to: "/", key: "overview", icon: LayoutDashboard },
+  { to: "/users", key: "users", icon: Users },
+  { to: "/tariffs", key: "tariffs", icon: Tag },
+  { to: "/inbounds", key: "inbounds", icon: Server },
+  { to: "/settings", key: "settings", icon: SlidersHorizontal },
 ] as const;
 
 export function Shell() {
@@ -20,16 +22,16 @@ export function Shell() {
   return (
     <>
       <div className="app">
-        <aside className="sidebar glass" aria-label="Боковая панель">
+        <aside className="sidebar glass" aria-label={t("shell.sidebar")}>
           <div className="brand">
             <Logo />
             <span className="brand-name">mikan</span>
           </div>
-          <nav className="nav" aria-label="Разделы">
+          <nav className="nav" aria-label={t("shell.sections")}>
             {NAV.map((n) => (
-              <Link key={n.to} to={n.to} className="nav-item" activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }} title={n.label}>
+              <Link key={n.to} to={n.to} className="nav-item" activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }} title={t(`nav.${n.key}`)}>
                 <n.icon size={18} aria-hidden />
-                <span className="nav-label">{n.label}</span>
+                <span className="nav-label">{t(`nav.${n.key}`)}</span>
                 {n.to === "/users" && overview.data ? <span className="nav-count num">{num(overview.data.users_total)}</span> : null}
               </Link>
             ))}
@@ -37,17 +39,18 @@ export function Shell() {
           <div className="side-foot">
             <NodeCard />
             <AdminRow />
+            <LangSwitch className="self-start" />
           </div>
         </aside>
         <main className="main">
           <Outlet />
         </main>
       </div>
-      <nav className="mnav glass" aria-label="Разделы">
+      <nav className="mnav glass" aria-label={t("shell.sections")}>
         {NAV.map((n) => (
           <Link key={n.to} to={n.to} activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }}>
             <n.icon size={20} aria-hidden />
-            <span>{n.short}</span>
+            <span>{t(`navShort.${n.key}`)}</span>
           </Link>
         ))}
       </nav>
@@ -70,12 +73,10 @@ function NodeCard() {
   return (
     <div className="node-card">
       <div className="node-top">
-        <span className="node-name">Сервер</span>
-        {n.ok ? <Pill tone="ok">работает</Pill> : <Pill tone="bad">нет связи</Pill>}
+        <span className="node-name">{t("shell.server")}</span>
+        {n.ok ? <Pill tone="ok">{t("shell.running")}</Pill> : <Pill tone="bad">{t("shell.offline")}</Pill>}
       </div>
-      <div className="node-sub">
-        {n.ok ? `${n.core}${n.started_at ? ` · ${uptime(n.started_at)}` : ""}` : "Нода не отвечает"}
-      </div>
+      <div className="node-sub">{n.ok ? `${n.core}${n.started_at ? ` · ${uptime(n.started_at)}` : ""}` : t("shell.nodeDown")}</div>
       {n.ok ? (
         <div className="node-bars">
           <span>CPU</span>
@@ -107,9 +108,9 @@ function AdminRow() {
       <Avatar name={name} seed={4} size="sm" />
       <div className="who-wrap min-w-0">
         <div className="truncate text-[13px] font-medium">{name}</div>
-        <div className="text-xs text-[var(--ink-500)]">{me.data?.admin.totp_enabled ? "2FA включена" : "владелец"}</div>
+        <div className="text-xs text-[var(--ink-500)]">{me.data?.admin.totp_enabled ? t("shell.twoFactorOn") : t("shell.owner")}</div>
       </div>
-      <button type="button" className="icon-btn logout ml-auto" aria-label="Выйти" onClick={() => logout.mutate()} disabled={logout.isPending}>
+      <button type="button" className="icon-btn logout ml-auto" aria-label={t("shell.logout")} onClick={() => logout.mutate()} disabled={logout.isPending}>
         <LogOut size={18} />
       </button>
     </div>

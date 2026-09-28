@@ -3,6 +3,7 @@ package nodeapi
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,19 +14,35 @@ import (
 	"time"
 )
 
-// Client talks to a node over its unix socket.
+// Client talks to a node: the local one over its unix socket, a remote one over TLS.
 type Client struct {
-	hc *http.Client
+	hc   *http.Client
+	base string
 }
 
 func NewUnixClient(socket string) *Client {
-	return &Client{hc: &http.Client{Transport: &http.Transport{
+	return &Client{base: "http://node", hc: &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "unix", socket)
 		},
 		MaxIdleConns: 4,
 	}}}
 }
+
+// NewTLSClient reaches a remote node at host:port; cfg pins both sides (see nodetls).
+func NewTLSClient(address string, cfg *tls.Config) *Client {
+	return &Client{base: "https://" + address, hc: &http.Client{Transport: &http.Transport{
+		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSClientConfig:     cfg,
+		TLSHandshakeTimeout: 5 * time.Second,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        4,
+		IdleConnTimeout:     90 * time.Second,
+	}}}
+}
+
+// CloseIdle drops kept-alive connections, e.g. when the node's address changes.
+func (c *Client) CloseIdle() { c.hc.CloseIdleConnections() }
 
 var ErrUnavailable = errors.New("node unavailable")
 
@@ -40,7 +57,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 		}
 		body = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, "http://node"+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
 		return err
 	}
@@ -69,6 +86,11 @@ func (c *Client) Apply(ctx context.Context, s DesiredState) (ApplyResult, error)
 	var r ApplyResult
 	err := c.do(ctx, http.MethodPut, "/v1/state", s, &r, 60*time.Second)
 	return r, err
+}
+
+// Validate returns *Error{Code: "invalid_config"} when mihomo refuses the inbound.
+func (c *Client) Validate(ctx context.Context, req ValidateRequest) error {
+	return c.do(ctx, http.MethodPost, "/v1/validate", req, nil, 10*time.Second)
 }
 
 func (c *Client) SetPolicies(ctx context.Context, epoch string, p []Policy) error {

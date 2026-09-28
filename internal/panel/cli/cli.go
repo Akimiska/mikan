@@ -39,6 +39,9 @@ const usage = `mikan — панель управления VPN на ядре mih
   admin reset-path              выдать новую секретную ссылку на панель
   admin disable-2fa             выключить 2FA у админа
   admin backup ФАЙЛ             сделать консистентную копию базы на ходу
+  admin inbound list            подключения: имя, пресет, порт
+  admin inbound add ПРЕСЕТ [--port ПОРТ]
+                                добавить подключение из пресета со свежими ключами
   health                        проверить, что панель отвечает (healthcheck контейнера)
   openapi                       вывести OpenAPI-спецификацию (для генерации клиента)
   version                       версия
@@ -104,7 +107,11 @@ func adminCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(u)
+		login := ""
+		if a, err := findAdmin(ctx, st, ""); err == nil {
+			login = a.Username
+		}
+		printURL(os.Stdout, os.Stderr, u, login)
 		return nil
 	case "reset-password":
 		return resetPassword(ctx, st, args[1:])
@@ -133,15 +140,17 @@ func adminCmd(ctx context.Context, args []string) error {
 		}
 		fmt.Println("Копия базы:", args[1])
 		return nil
+	case "inbound":
+		return inboundCmd(ctx, st, set, args[1:], os.Stdout, os.Stderr)
 	case "disable-2fa":
 		fs := flag.NewFlagSet("disable-2fa", flag.ContinueOnError)
-		username := fs.String("username", "admin", "логин админа")
+		username := fs.String("username", "", "логин админа (можно не указывать, если админ один)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		a, err := st.Q.GetAdminByUsername(ctx, strings.ToLower(*username))
+		a, err := findAdmin(ctx, st, *username)
 		if err != nil {
-			return fmt.Errorf("админ %q не найден: %w", *username, err)
+			return err
 		}
 		if err := st.Q.SetAdminTOTP(ctx, db.SetAdminTOTPParams{ID: a.ID}); err != nil {
 			return err
@@ -156,7 +165,7 @@ func adminCmd(ctx context.Context, args []string) error {
 
 func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, args []string) error {
 	fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
-	username := fs.String("username", "admin", "логин админа")
+	username := fs.String("username", "", "логин админа (по умолчанию — случайный)")
 	host := fs.String("public-host", "", "публичный IP или домен сервера (обязательно)")
 	port := fs.Int("port", 0, "порт панели (обязательно)")
 	domain := fs.String("domain", "", "домен для сертификата Let's Encrypt (необязательно)")
@@ -191,11 +200,17 @@ func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, arg
 	if err := validPathSegment(*subPath, 8); err != nil {
 		return fmt.Errorf("--sub-path: %w", err)
 	}
+	name := strings.ToLower(strings.TrimSpace(*username))
+	if name == "" {
+		name = secure.Login()
+	}
+	if err := validLogin(name); err != nil {
+		return fmt.Errorf("--username: %w", err)
+	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		return err
 	}
-	name := strings.ToLower(strings.TrimSpace(*username))
 	err = st.Tx(ctx, func(q *db.Queries) error {
 		txSet := settings.New(q)
 		if _, err := q.CreateAdmin(ctx, db.CreateAdminParams{Username: name, PasswordHash: hash, CreatedAt: time.Now().Unix()}); err != nil {
@@ -230,15 +245,12 @@ func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, arg
 
 func resetPassword(ctx context.Context, st *store.Store, args []string) error {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
-	username := fs.String("username", "admin", "логин админа")
+	username := fs.String("username", "", "логин админа (можно не указывать, если админ один)")
 	passwordStdin := fs.Bool("password-stdin", false, "прочитать пароль из stdin вместо генерации")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	a, err := st.Q.GetAdminByUsername(ctx, strings.ToLower(*username))
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("админ %q не найден", *username)
-	}
+	a, err := findAdmin(ctx, st, *username)
 	if err != nil {
 		return err
 	}
@@ -302,7 +314,7 @@ func health() error {
 
 func readOrGeneratePassword(fromStdin bool, r io.Reader) (string, bool, error) {
 	if !fromStdin {
-		return secure.Token(20), true, nil
+		return secure.Token(32), true, nil
 	}
 	line, err := bufio.NewReader(r).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -313,6 +325,51 @@ func readOrGeneratePassword(fromStdin bool, r io.Reader) (string, bool, error) {
 		return "", false, errors.New("пароль должен быть не короче 12 символов")
 	}
 	return pw, false, nil
+}
+
+// printURL: stdout carries only the link, because the host `mikan` script of every
+// installed version parses it (`mikan update` waits for the panel with it); the login goes
+// to stderr, which still shows in a terminal.
+func printURL(stdout, stderr io.Writer, url, login string) {
+	fmt.Fprintln(stdout, url)
+	if login != "" {
+		fmt.Fprintln(stderr, "Логин: "+login)
+	}
+}
+
+// findAdmin resolves --username; an empty name means "the only admin", since the login
+// is random since 0.1.2 and nobody should have to look it up to reset a password.
+func findAdmin(ctx context.Context, st *store.Store, username string) (db.Admin, error) {
+	if username != "" {
+		a, err := st.Q.GetAdminByUsername(ctx, strings.ToLower(strings.TrimSpace(username)))
+		if errors.Is(err, sql.ErrNoRows) {
+			return a, fmt.Errorf("админ %q не найден", username)
+		}
+		return a, err
+	}
+	admins, err := st.Q.ListAdmins(ctx)
+	if err != nil {
+		return db.Admin{}, err
+	}
+	switch len(admins) {
+	case 0:
+		return db.Admin{}, errors.New("админов нет: панель не инициализирована")
+	case 1:
+		return admins[0], nil
+	}
+	return db.Admin{}, errors.New("админов несколько, укажите --username")
+}
+
+func validLogin(s string) error {
+	if len(s) < 3 || len(s) > 32 {
+		return errors.New("длина логина — от 3 до 32 символов")
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+			return errors.New("логин — только a-z, 0-9, точка, дефис и подчёркивание")
+		}
+	}
+	return nil
 }
 
 func validPathSegment(s string, minLen int) error {

@@ -40,6 +40,7 @@ type slot struct {
 	exhausted   bool
 	inbounds    map[string]bool // nil = all
 	deviceLimit int
+	otherIPs    map[string]bool // the slot's devices on other nodes of the panel
 	conns       map[*countingConn]struct{}
 	ips         map[string]*ipUse
 }
@@ -118,6 +119,7 @@ func (r *Registry) SetPolicies(epoch string, list []nodeapi.Policy) {
 		s.allowed = ok && p.Allowed
 		s.inbounds = nil
 		s.deviceLimit = 0
+		s.otherIPs = nil
 		s.exhausted = false
 		s.quotaOn.Store(false)
 		if ok {
@@ -128,6 +130,12 @@ func (r *Registry) SetPolicies(epoch string, list []nodeapi.Policy) {
 				}
 			}
 			s.deviceLimit = p.DeviceLimit
+			if len(p.OtherIPs) > 0 {
+				s.otherIPs = make(map[string]bool, len(p.OtherIPs))
+				for _, ip := range p.OtherIPs {
+					s.otherIPs[ip] = true
+				}
+			}
 			if p.QuotaRemaining >= 0 {
 				// Bytes the panel has not seen yet as of BaseSeq still count against the quota.
 				after := s.up.Load() + s.down.Load()
@@ -185,7 +193,8 @@ func (r *Registry) admit(user, inName, ip string, tcp bool) *slot {
 	}
 	u := s.ips[ip]
 	if u == nil {
-		if s.deviceLimit > 0 && len(s.ips) >= s.deviceLimit {
+		// A device already counted on another node is not a new one.
+		if s.deviceLimit > 0 && !s.otherIPs[ip] && s.devicesLocked() >= s.deviceLimit {
 			return nil
 		}
 		u = &ipUse{}
@@ -387,4 +396,15 @@ func values(m map[string]*slot) []*slot {
 		out = append(out, s)
 	}
 	return out
+}
+
+// devicesLocked counts the slot's devices on this node and on the panel's other nodes.
+func (s *slot) devicesLocked() int {
+	n := len(s.ips)
+	for ip := range s.otherIPs {
+		if s.ips[ip] == nil {
+			n++
+		}
+	}
+	return n
 }

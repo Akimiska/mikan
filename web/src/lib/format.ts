@@ -1,63 +1,58 @@
+import { getLocale, t } from "../i18n";
+
 export const GiB = 1024 ** 3;
 
-const nf1 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
-const nf0 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
+// Formatters follow the UI language; the apps remount on a switch, so caching per call
+// site is not needed, only per locale.
+const cache = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat>();
+function nf(max: number): Intl.NumberFormat {
+  const key = `n${getLocale()}${max}`;
+  let f = cache.get(key) as Intl.NumberFormat | undefined;
+  if (!f) cache.set(key, (f = new Intl.NumberFormat(getLocale(), { maximumFractionDigits: max })));
+  return f;
+}
+function df(opts: Intl.DateTimeFormatOptions, id: string): Intl.DateTimeFormat {
+  const key = `d${getLocale()}${id}`;
+  let f = cache.get(key) as Intl.DateTimeFormat | undefined;
+  if (!f) cache.set(key, (f = new Intl.DateTimeFormat(getLocale(), opts)));
+  return f;
+}
 
-export function bytes(n: number): string {
-  if (n < 1024) return `${nf0.format(n)} Б`;
-  const units = ["КБ", "МБ", "ГБ", "ТБ", "ПБ"];
-  let v = n / 1024;
+function scaled(v: number, units: string[], step: number, first: string): string {
+  if (v < step) return `${nf(0).format(v)} ${first}`;
+  let x = v / step;
   let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
+  while (x >= step && i < units.length - 1) {
+    x /= step;
     i++;
   }
-  return `${v >= 100 ? nf0.format(v) : nf1.format(v)} ${units[i]}`;
+  return `${x >= 100 ? nf(0).format(x) : nf(1).format(x)} ${units[i]}`;
+}
+
+export function bytes(n: number): string {
+  return scaled(n, [t("units.kb"), t("units.mb"), t("units.gb"), t("units.tb"), t("units.pb")], 1024, t("units.b"));
 }
 
 export function bits(bps: number): string {
-  if (bps < 1000) return `${nf0.format(bps)} бит/с`;
-  const units = ["Кбит/с", "Мбит/с", "Гбит/с"];
-  let v = bps / 1000;
-  let i = 0;
-  while (v >= 1000 && i < units.length - 1) {
-    v /= 1000;
-    i++;
-  }
-  return `${v >= 100 ? nf0.format(v) : nf1.format(v)} ${units[i]}`;
+  return scaled(bps, [t("units.kbps"), t("units.mbps"), t("units.gbps")], 1000, t("units.bps"));
 }
 
 export function num(n: number): string {
-  return nf0.format(n);
+  return nf(0).format(n);
 }
 
-export function plural(n: number, one: string, few: string, many: string): string {
-  const m = Math.abs(n) % 100;
-  const k = m % 10;
-  if (m > 10 && m < 20) return many;
-  if (k > 1 && k < 5) return few;
-  if (k === 1) return one;
-  return many;
-}
-
-export const days = (n: number) => `${n} ${plural(n, "день", "дня", "дней")}`;
-
-const MONTHS = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
-const MONTHS_LONG = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+export const days = (n: number) => t("time.days", { n });
 
 export function dateShort(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  return df({ day: "numeric", month: "short" }, "short").format(new Date(iso));
 }
 
 export function dateLong(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+  return df({ day: "numeric", month: "long", year: "numeric" }, "long").format(new Date(iso));
 }
 
 export function time(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return df({ hour: "2-digit", minute: "2-digit", hour12: false }, "time").format(new Date(iso));
 }
 
 /** Whole days until iso (negative when in the past), counted by calendar-free 24 h steps. */
@@ -66,23 +61,22 @@ export function daysUntil(iso: string, now = Date.now()): number {
 }
 
 export function expiryText(iso: string | null | undefined): { text: string; tone: "" | "warn" | "bad" } {
-  if (!iso) return { text: "бессрочно", tone: "" };
+  if (!iso) return { text: t("time.forever"), tone: "" };
   const d = daysUntil(iso);
-  if (d < 0) return { text: `истёк ${days(-d)} назад`, tone: "bad" };
-  if (d === 0) return { text: "сегодня", tone: "warn" };
-  if (d === 1) return { text: "завтра", tone: "warn" };
+  if (d < 0) return { text: t("time.expiredAgo", { n: -d }), tone: "bad" };
+  if (d === 0) return { text: t("time.today"), tone: "warn" };
+  if (d === 1) return { text: t("time.tomorrow"), tone: "warn" };
   return { text: days(d), tone: d <= 7 ? "warn" : "" };
 }
 
 export function ago(iso: string, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
-  if (s < 60) return "только что";
+  if (s < 60) return t("time.justNow");
   const m = Math.round(s / 60);
-  if (m < 60) return `${m} мин назад`;
+  if (m < 60) return t("time.minAgo", { n: m });
   const h = Math.round(m / 60);
-  if (h < 24) return `${h} ч назад`;
-  const d = Math.round(h / 24);
-  return `${days(d)} назад`;
+  if (h < 24) return t("time.hAgo", { n: h });
+  return t("time.daysAgo", { n: Math.round(h / 24) });
 }
 
 export function uptime(iso: string, now = Date.now()): string {
@@ -90,9 +84,9 @@ export function uptime(iso: string, now = Date.now()): string {
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d} д ${h} ч`;
-  if (h > 0) return `${h} ч ${m} мин`;
-  return `${m} мин`;
+  if (d > 0) return t("time.uptimeDays", { d, h });
+  if (h > 0) return t("time.uptimeHours", { h, m });
+  return t("time.uptimeMinutes", { m });
 }
 
 /** Keeps the network part of an IP readable and hides the rest in lists. */

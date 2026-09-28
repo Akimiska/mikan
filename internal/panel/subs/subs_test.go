@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"mikan/internal/nodeapi"
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/store/db"
 )
@@ -41,11 +40,14 @@ func profile(t *testing.T, pin string) Profile {
 	t.Helper()
 	var ins []db.Inbound
 	for i, p := range presets.All {
-		s, err := presets.NewSettings(p.ID, "www.example.com:443")
+		if !p.Default {
+			continue
+		}
+		c, err := presets.NewConfig(p.ID, "www.example.com:443")
 		if err != nil {
 			t.Fatal(err)
 		}
-		ins = append(ins, db.Inbound{ID: int64(i + 1), Name: p.Name, Preset: p.ID, Port: p.Port, Enabled: 1, Settings: string(s)})
+		ins = append(ins, db.Inbound{ID: int64(i + 1), Name: p.Name, Preset: p.ID, Port: p.Port, Enabled: 1, Config: c})
 	}
 	return Profile{
 		Slot:     db.Slot{Name: "s000001", Uuid: "0b4ddc4c-7c4f-4a36-9d62-6f1a44b8c4e1", Secret: "S3cr3t+/="},
@@ -63,27 +65,33 @@ func TestURIs(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("got %d links", len(lines))
 	}
-	vision, err := url.Parse(lines[0])
-	if err != nil {
-		t.Fatal(err)
+	byName := map[string]*url.URL{}
+	for _, l := range lines {
+		u, err := url.Parse(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byName[u.Fragment] = u
 	}
+	xhttp := byName["VLESS XHTTP"]
+	if lines[0] != xhttp.String() || xhttp.Host != "203.0.113.7:443" ||
+		xhttp.Query().Get("type") != "xhttp" || xhttp.Query().Get("mode") != "stream-one" || !strings.HasPrefix(xhttp.Query().Get("path"), "/") {
+		t.Fatalf("xhttp must be the first link, on 443: %s", links)
+	}
+	vision := byName["VLESS Vision"]
 	q := vision.Query()
-	if vision.Scheme != "vless" || vision.User.Username() != "0b4ddc4c-7c4f-4a36-9d62-6f1a44b8c4e1" || vision.Host != "203.0.113.7:443" ||
+	if vision.Scheme != "vless" || vision.User.Username() != "0b4ddc4c-7c4f-4a36-9d62-6f1a44b8c4e1" || vision.Host != "203.0.113.7:8443" ||
 		q.Get("flow") != "xtls-rprx-vision" || q.Get("security") != "reality" || q.Get("pbk") == "" || q.Get("sid") == "" || q.Get("sni") != "www.example.com" {
-		t.Fatalf("vision link: %s", lines[0])
+		t.Fatalf("vision link: %s", vision)
 	}
-	xhttp, _ := url.Parse(lines[1])
-	if xhttp.Query().Get("type") != "xhttp" || xhttp.Query().Get("mode") != "stream-one" || !strings.HasPrefix(xhttp.Query().Get("path"), "/") {
-		t.Fatalf("xhttp link: %s", lines[1])
-	}
-	hy2, _ := url.Parse(lines[2])
+	hy2 := byName["Hysteria2"]
 	if hy2.Scheme != "hysteria2" || hy2.User.Username() != "S3cr3t+/=" || hy2.Query().Get("pinSHA256") != "ab12" || hy2.Query().Get("obfs") != "salamander" {
-		t.Fatalf("hy2 link: %s", lines[2])
+		t.Fatalf("hy2 link: %s", hy2)
 	}
-	tuic, _ := url.Parse(lines[3])
+	tuic := byName["TUIC"]
 	pw, _ := tuic.User.Password()
 	if tuic.Scheme != "tuic" || pw != "S3cr3t+/=" || tuic.Query().Get("allow_insecure") != "1" {
-		t.Fatalf("tuic link: %s", lines[3])
+		t.Fatalf("tuic link: %s", tuic)
 	}
 }
 
@@ -98,7 +106,56 @@ func TestURIsWithRealCertificateDoNotPin(t *testing.T) {
 }
 
 func TestMihomoProfile(t *testing.T) {
-	raw, err := Mihomo(profile(t, "ab12"), []string{"MATCH,VPN"})
+	prof := profile(t, "ab12")
+	prof.Endpoint.Direct = []string{"203.0.113.7", "vpn.example.com", ""}
+	raw, err := Mihomo(prof, Groups{}, RoutingAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Proxies []map[string]any `json:"proxies"`
+		Groups  []struct {
+			Name    string   `json:"name"`
+			Proxies []string `json:"proxies"`
+			Hidden  bool     `json:"hidden"`
+		} `json:"proxy-groups"`
+		Rules []string `json:"rules"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Proxies) != 4 || cfg.Groups[0].Name != "VPN" || cfg.Groups[1].Name != "Авто" {
+		t.Fatalf("profile: %s", raw)
+	}
+	// Rules injected by the app itself ("PROCESS-NAME,x.exe,PROXY") need a PROXY group.
+	if alias := cfg.Groups[2]; alias.Name != "PROXY" || !alias.Hidden || len(alias.Proxies) != 1 || alias.Proxies[0] != "VPN" {
+		t.Fatalf("PROXY alias: %+v", cfg.Groups)
+	}
+	wantRules := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "DOMAIN,vpn.example.com,DIRECT", "GEOIP,LAN,DIRECT,no-resolve", "MATCH,VPN"}
+	if strings.Join(cfg.Rules, "|") != strings.Join(wantRules, "|") {
+		t.Fatalf("rules: %v", cfg.Rules)
+	}
+	byType := map[string]map[string]any{}
+	for _, p := range cfg.Proxies {
+		byType[p["name"].(string)] = p
+	}
+	if byType["VLESS XHTTP"]["network"] != "xhttp" || byType["VLESS Vision"]["flow"] != "xtls-rprx-vision" {
+		t.Fatalf("vless proxies: %v", cfg.Proxies)
+	}
+	// Without reuse-settings mihomo opens a TLS handshake per app connection (see xmux).
+	if opts, _ := byType["VLESS XHTTP"]["xhttp-opts"].(map[string]any); opts["reuse-settings"] == nil {
+		t.Fatalf("xhttp must multiplex: %v", byType["VLESS XHTTP"])
+	}
+	if byType["Hysteria2"]["fingerprint"] != "ab12" || byType["TUIC"]["password"] != "S3cr3t+/=" {
+		t.Fatalf("quic proxies: %v", cfg.Proxies)
+	}
+}
+
+func TestCustomNames(t *testing.T) {
+	prof := profile(t, "")
+	prof.Inbounds[0].DisplayName = "🇳🇱 Нидерланды"
+	prof.Inbounds[1].DisplayName = "🇳🇱 Нидерланды" // duplicates must not break the profile
+	raw, err := Mihomo(prof, Groups{Main: "🚀 Мой VPN", Auto: "⚡ Быстрый"}, RoutingRUDirect)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,18 +170,105 @@ func TestMihomoProfile(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Proxies) != 4 || cfg.Groups[0].Name != "VPN" || cfg.Rules[0] != "MATCH,VPN" {
-		t.Fatalf("profile: %s", raw)
+	if cfg.Proxies[0]["name"] != "🇳🇱 Нидерланды" || cfg.Proxies[1]["name"] != "🇳🇱 Нидерланды 2" {
+		t.Fatalf("names: %v %v", cfg.Proxies[0]["name"], cfg.Proxies[1]["name"])
 	}
-	byType := map[string]map[string]any{}
-	for _, p := range cfg.Proxies {
-		byType[p["name"].(string)] = p
+	if cfg.Groups[0].Name != "🚀 Мой VPN" || cfg.Groups[0].Proxies[0] != "⚡ Быстрый" || cfg.Rules[len(cfg.Rules)-1] != "MATCH,🚀 Мой VPN" {
+		t.Fatalf("groups: %+v rules: %v", cfg.Groups, cfg.Rules)
 	}
-	if byType["VLESS XHTTP"]["network"] != "xhttp" || byType["VLESS Vision"]["flow"] != "xtls-rprx-vision" {
-		t.Fatalf("vless proxies: %v", cfg.Proxies)
+	links, err := URIs(prof)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if byType["Hysteria2"]["fingerprint"] != "ab12" || byType["TUIC"]["password"] != "S3cr3t+/=" {
-		t.Fatalf("quic proxies: %v", cfg.Proxies)
+	first, _ := url.Parse(strings.Split(links, "\n")[0])
+	if first.Fragment != "🇳🇱 Нидерланды" {
+		t.Fatalf("link name: %q", first.Fragment)
 	}
-	_ = nodeapi.PresetTUIC
+}
+
+func TestRouting(t *testing.T) {
+	type dns struct {
+		Nameserver  []string            `json:"nameserver"`
+		ProxyServer []string            `json:"proxy-server-nameserver"`
+		Policy      map[string][]string `json:"nameserver-policy"`
+	}
+	type profileJSON struct {
+		Groups []struct {
+			Name string `json:"name"`
+		} `json:"proxy-groups"`
+		Rules   []string          `json:"rules"`
+		DNS     dns               `json:"dns"`
+		GeoxURL map[string]string `json:"geox-url"`
+	}
+	render := func(g Groups, r Routing) profileJSON {
+		t.Helper()
+		prof := profile(t, "")
+		prof.Endpoint.Direct = []string{"203.0.113.7"}
+		raw, err := Mihomo(prof, g, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg profileJSON
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+
+	ru := render(Groups{}, RoutingRUDirect)
+	want := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "GEOIP,LAN,DIRECT,no-resolve", "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT", "MATCH,VPN"}
+	if strings.Join(ru.Rules, "|") != strings.Join(want, "|") {
+		t.Fatalf("ru_direct rules: %v", ru.Rules)
+	}
+	if !strings.HasPrefix(ru.GeoxURL["geosite"], "https://github.com/MetaCubeX/meta-rules-dat/") || ru.GeoxURL["mmdb"] == "" {
+		t.Fatalf("geodata must come from MetaCubeX: %v", ru.GeoxURL)
+	}
+	// Every domain gets resolved on the client for GEOIP,ru: through the tunnel, except
+	// Russian ones and the server's own name (resolving it through itself would deadlock).
+	for _, ns := range ru.DNS.Nameserver {
+		if !strings.HasSuffix(ns, "#PROXY") {
+			t.Errorf("nameserver %q must go through the tunnel", ns)
+		}
+	}
+	if len(ru.DNS.ProxyServer) == 0 || strings.Contains(strings.Join(ru.DNS.ProxyServer, ""), "#") {
+		t.Errorf("proxy-server-nameserver must be direct: %v", ru.DNS.ProxyServer)
+	}
+	if len(ru.DNS.Policy["geosite:category-ru"]) == 0 {
+		t.Errorf("Russian domains need a Russian resolver: %v", ru.DNS.Policy)
+	}
+
+	// The "#PROXY" suffix must name a group even when the admin calls the main group PROXY.
+	named := render(Groups{Main: "PROXY"}, RoutingRUDirect)
+	if named.Groups[0].Name != "PROXY" || named.Rules[len(named.Rules)-1] != "MATCH,PROXY" {
+		t.Fatalf("main group named PROXY: %+v %v", named.Groups, named.Rules)
+	}
+
+	all := render(Groups{}, RoutingAll)
+	for _, r := range all.Rules {
+		if strings.HasPrefix(r, "GEOSITE,") || r == "GEOIP,ru,DIRECT" {
+			t.Errorf("all mode needs no geodata: %v", all.Rules)
+		}
+	}
+	if all.GeoxURL != nil || len(all.DNS.Policy) != 0 || strings.Contains(strings.Join(all.DNS.Nameserver, ""), "#") {
+		t.Errorf("all mode keeps plain DNS: %+v %v", all.DNS, all.GeoxURL)
+	}
+
+	for in, want := range map[string]Routing{"": RoutingRUDirect, "all": RoutingAll, "ru_direct": RoutingRUDirect, "blocked": RoutingRUDirect} {
+		if got := ParseRouting(in); got != want {
+			t.Errorf("ParseRouting(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestValidName(t *testing.T) {
+	for _, ok := range []string{"VPN", "🇳🇱 Нидерланды", "Авто", "PROXY"} {
+		if err := ValidName(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", " VPN", "a,b", "DIRECT", "global", "x\ny", strings.Repeat("я", 49)} {
+		if ValidName(bad) == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
 }

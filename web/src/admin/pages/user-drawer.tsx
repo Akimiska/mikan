@@ -6,6 +6,7 @@ import { useDevices, useInbounds, userActions, useTariffs, useUser, useUserMutat
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Avatar, Button, ErrorState, QR, Ring, Skeleton, StatePill, Switch } from "../../components/ui";
+import { t } from "../../i18n";
 import { ago, bytes, dateLong, dateShort, days, expiryText, maskIP } from "../../lib/format";
 import { tariffSummary } from "./tariffs";
 
@@ -16,15 +17,15 @@ export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }
     <Drawer
       open={!!id}
       onOpenChange={(v) => !v && onClose()}
-      title={u?.name ?? "Пользователь"}
+      title={u?.name ?? t("userDrawer.fallbackTitle")}
       lead={u ? <Avatar name={u.name} seed={u.id} size="lg" /> : undefined}
       meta={
         u ? (
           <>
             <StatePill state={u.state} />
-            <span>создан {dateShort(u.created_at)}</span>
+            <span>{t("userDrawer.created", { date: dateShort(u.created_at) })}</span>
             <span className="mono">#{u.id}</span>
-            {u.online ? <span className="text-[var(--leaf-700)]">онлайн</span> : u.online_at ? <span>был {ago(u.online_at)}</span> : null}
+            {u.online ? <span className="text-[var(--leaf-700)]">{t("userDrawer.online")}</span> : u.online_at ? <span>{t("userDrawer.seen", { ago: ago(u.online_at) })}</span> : null}
           </>
         ) : undefined
       }
@@ -58,37 +59,37 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
   return (
     <>
       <div className="flex flex-wrap gap-2 py-4">
-        <Button variant="primary" loading={extend.isPending} onClick={() => extend.mutate({ id: u.id, days: 30 }, { onSuccess: (r) => toast.ok(`Продлено до ${dateShort(r.expires_at!)}`), onError: fail })}>
-          <CalendarPlus size={18} aria-hidden /> Продлить на 30 дней
+        <Button variant="primary" loading={extend.isPending} onClick={() => extend.mutate({ id: u.id, days: 30 }, { onSuccess: (r) => toast.ok(t("userDrawer.extendedUntil", { date: dateShort(r.expires_at!) })), onError: fail })}>
+          <CalendarPlus size={18} aria-hidden /> {t("userDrawer.extend30")}
         </Button>
-        <Button loading={reset.isPending} onClick={() => reset.mutate(u.id, { onSuccess: () => toast.ok("Трафик сброшен"), onError: fail })}>
-          <RotateCcw size={18} aria-hidden /> Сбросить трафик
+        <Button loading={reset.isPending} onClick={() => reset.mutate(u.id, { onSuccess: () => toast.ok(t("userDrawer.trafficReset")), onError: fail })}>
+          <RotateCcw size={18} aria-hidden /> {t("users.resetTraffic")}
         </Button>
         <Button
           loading={update.isPending && update.variables?.body.disabled !== undefined}
           onClick={() =>
             update.mutate(
               { id: u.id, body: { disabled: !disabled } },
-              { onSuccess: () => toast.ok(disabled ? `${u.name} снова может подключаться` : `${u.name} отключён — соединения закрыты`), onError: fail },
+              { onSuccess: () => toast.ok(disabled ? t("userDrawer.enabledToast", { name: u.name }) : t("userDrawer.disabledToast", { name: u.name })), onError: fail },
             )
           }
         >
-          <Power size={18} aria-hidden /> {disabled ? "Включить" : "Отключить"}
+          <Power size={18} aria-hidden /> {disabled ? t("common.enable") : t("users.disable")}
         </Button>
         <Menu.Root>
           <Menu.Trigger asChild>
-            <button type="button" className="icon-btn h-10 w-10" aria-label="Ещё действия">
+            <button type="button" className="icon-btn h-10 w-10" aria-label={t("userDrawer.more")}>
               <MoreHorizontal size={18} />
             </button>
           </Menu.Trigger>
           <Menu.Portal>
             <Menu.Content className="menu glass-strong" align="end" sideOffset={6}>
               <Menu.Item className="menu-item" onSelect={() => setConfirm("reissue")}>
-                <RefreshCw size={16} aria-hidden /> Перевыпустить ссылку
+                <RefreshCw size={16} aria-hidden /> {t("userDrawer.reissue")}
               </Menu.Item>
               <Menu.Separator className="menu-sep" />
               <Menu.Item className="menu-item danger" onSelect={() => setConfirm("delete")}>
-                <Trash2 size={16} aria-hidden /> Удалить пользователя
+                <Trash2 size={16} aria-hidden /> {t("userDrawer.delete")}
               </Menu.Item>
             </Menu.Content>
           </Menu.Portal>
@@ -106,15 +107,15 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
       <Confirm
         open={confirm === "reissue"}
         onOpenChange={(v) => !v && setConfirm(null)}
-        title="Перевыпустить ссылку?"
-        text="Старая ссылка и все устройства на ней перестанут работать сразу. Новую ссылку нужно будет отправить пользователю."
-        confirm="Перевыпустить"
+        title={t("userDrawer.reissueTitle")}
+        text={t("userDrawer.reissueText")}
+        confirm={t("userDrawer.reissueConfirm")}
         loading={reissue.isPending}
         onConfirm={() =>
           reissue.mutate(u.id, {
             onSuccess: () => {
               setConfirm(null);
-              toast.ok("Готово: старая ссылка больше не работает");
+              toast.ok(t("userDrawer.reissued"));
             },
             onError: fail,
           })
@@ -123,16 +124,16 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
       <Confirm
         open={confirm === "delete"}
         onOpenChange={(v) => !v && setConfirm(null)}
-        title={`Удалить ${u.name}?`}
-        text="Ссылка перестанет работать сразу, история трафика будет удалена. Отменить это нельзя."
-        confirm="Удалить"
+        title={t("userDrawer.deleteTitle", { name: u.name })}
+        text={t("userDrawer.deleteText")}
+        confirm={t("common.delete")}
         danger
         loading={remove.isPending}
         onConfirm={() =>
           remove.mutate(u.id, {
             onSuccess: () => {
               setConfirm(null);
-              toast.ok(`${u.name} удалён`);
+              toast.ok(t("userDrawer.deleted", { name: u.name }));
               onDeleted();
             },
             onError: fail,
@@ -160,22 +161,22 @@ function TariffSection({ u }: { u: User }) {
   const toast = useToast();
   const update = useUserMutation(userActions.update);
   const [pick, setPick] = useState<number | null>(null);
-  const t = tariffs.data?.find((x) => x.id === u.tariff_id);
+  const current = tariffs.data?.find((x) => x.id === u.tariff_id);
   const next = tariffs.data?.find((x) => x.id === pick);
   return (
-    <Section title="Тариф">
+    <Section title={t("users.colTariff")}>
       <div className="panel-soft flex items-center justify-between gap-3 p-4">
         <div className="min-w-0">
-          <div className="font-display text-base font-medium tracking-tight">{t?.name ?? "Свои условия"}</div>
+          <div className="font-display text-base font-medium tracking-tight">{current?.name ?? t("userDrawer.customTerms")}</div>
           <div className="mt-0.5 text-xs text-[var(--ink-500)]">
-            {u.traffic_limit != null ? bytes(u.traffic_limit) : "без лимита трафика"} · {u.device_limit != null ? `${u.device_limit} устр.` : "без лимита устройств"}
-            {t?.price_label ? ` · ${t.price_label}` : ""}
+            {u.traffic_limit != null ? bytes(u.traffic_limit) : t("userDrawer.noTrafficLimit")} · {u.device_limit != null ? t("userDrawer.devicesShort", { n: u.device_limit }) : t("userDrawer.noDeviceLimit")}
+            {current?.price_label ? ` · ${current.price_label}` : ""}
           </div>
         </div>
         <Menu.Root>
           <Menu.Trigger asChild>
             <Button variant="ghost" size="sm">
-              Сменить
+              {t("userDrawer.change")}
             </Button>
           </Menu.Trigger>
           <Menu.Portal>
@@ -193,9 +194,9 @@ function TariffSection({ u }: { u: User }) {
       <Confirm
         open={pick !== null}
         onOpenChange={(v) => !v && setPick(null)}
-        title={`Перевести на «${next?.name ?? ""}»?`}
-        text="Лимиты возьмутся из тарифа, срок начнётся заново от сегодня. Израсходованный трафик сохранится."
-        confirm="Перевести"
+        title={t("userDrawer.switchTitle", { name: next?.name ?? "" })}
+        text={t("userDrawer.switchText")}
+        confirm={t("userDrawer.switchConfirm")}
         loading={update.isPending}
         onConfirm={() =>
           update.mutate(
@@ -203,7 +204,7 @@ function TariffSection({ u }: { u: User }) {
             {
               onSuccess: () => {
                 setPick(null);
-                toast.ok("Тариф изменён");
+                toast.ok(t("userDrawer.tariffChanged"));
               },
               onError: (e) => toast.error(errorText(e)),
             },
@@ -221,15 +222,19 @@ function TrafficSection({ u }: { u: User }) {
   const pts = traffic.data?.points ?? [];
   const max = Math.max(1, ...pts.map((p) => p.up + p.down));
   return (
-    <Section title="Трафик" aside={u.resets_at ? `сбросится ${dateShort(u.resets_at)}` : "без сброса"}>
+    <Section title={t("users.colTraffic")} aside={u.resets_at ? t("userDrawer.resetsOn", { date: dateShort(u.resets_at) }) : t("userDrawer.noReset")}>
       <div className="grid grid-cols-1 items-center gap-5 sm:grid-cols-[112px_minmax(0,1fr)]">
-        <Ring pct={u.traffic_limit != null ? pct : 100} label={u.traffic_limit != null ? `${Math.min(999, Math.round(pct))}%` : "∞"} sub={u.traffic_limit != null ? `из ${bytes(u.traffic_limit)}` : "без лимита"} />
+        <Ring
+          pct={u.traffic_limit != null ? pct : 100}
+          label={u.traffic_limit != null ? `${Math.min(999, Math.round(pct))}%` : "∞"}
+          sub={u.traffic_limit != null ? t("users.of", { total: bytes(u.traffic_limit) }) : t("users.unlimited")}
+        />
         <div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs text-[var(--ink-500)]">
-            <Stat label="Израсходовано" value={bytes(used)} />
-            <Stat label="Осталось" value={u.traffic_limit != null ? bytes(Math.max(0, u.traffic_limit - used)) : "∞"} />
-            <Stat label="Скачано" value={bytes(u.used_down)} />
-            <Stat label="Отдано" value={bytes(u.used_up)} />
+            <Stat label={t("userDrawer.used")} value={bytes(used)} />
+            <Stat label={t("userDrawer.left")} value={u.traffic_limit != null ? bytes(Math.max(0, u.traffic_limit - used)) : "∞"} />
+            <Stat label={t("chart.down")} value={bytes(u.used_down)} />
+            <Stat label={t("chart.up")} value={bytes(u.used_up)} />
           </div>
           {pts.length > 0 ? (
             <>
@@ -240,13 +245,13 @@ function TrafficSection({ u }: { u: User }) {
               </div>
               <div className="mt-1.5 flex justify-between text-[11px] text-[var(--ink-400)]">
                 <span>{dateShort(pts.slice(-14)[0]!.t)}</span>
-                <span>сегодня</span>
+                <span>{t("time.today")}</span>
               </div>
             </>
           ) : null}
         </div>
       </div>
-      <div className="mt-3 text-xs text-[var(--ink-500)]">За всё время: {bytes(u.total_up + u.total_down)}</div>
+      <div className="mt-3 text-xs text-[var(--ink-500)]">{t("userDrawer.allTime", { bytes: bytes(u.total_up + u.total_down) })}</div>
     </Section>
   );
 }
@@ -266,18 +271,18 @@ function ExpirySection({ u }: { u: User }) {
   const update = useUserMutation(userActions.update);
   const e = expiryText(u.expires_at);
   return (
-    <Section title="Срок действия">
-      <div className="font-display text-lg font-medium tracking-tight">{u.expires_at ? `до ${dateLong(u.expires_at)}` : "Бессрочно"}</div>
-      {u.expires_at ? <div className={`exp-days ${e.tone}`}>{e.tone === "bad" ? e.text : `осталось ${e.text}`}</div> : null}
+    <Section title={t("userDrawer.expiry")}>
+      <div className="font-display text-lg font-medium tracking-tight">{u.expires_at ? t("users.until", { date: dateLong(u.expires_at) }) : t("userDrawer.forever")}</div>
+      {u.expires_at ? <div className={`exp-days ${e.tone}`}>{e.tone === "bad" ? e.text : t("userDrawer.leftDays", { text: e.text })}</div> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {[7, 30, 90, 365].map((n) => (
           <button key={n} type="button" className="chip-btn" disabled={extend.isPending} onClick={() => extend.mutate({ id: u.id, days: n }, { onSuccess: () => toast.ok(`+${days(n)}`), onError: (x) => toast.error(errorText(x)) })}>
-            +{n === 365 ? "год" : days(n)}
+            +{n === 365 ? t("userDrawer.year") : days(n)}
           </button>
         ))}
         {u.expires_at ? (
-          <button type="button" className="chip-btn" disabled={update.isPending} onClick={() => update.mutate({ id: u.id, body: { never_expires: true } }, { onSuccess: () => toast.ok("Теперь бессрочно") })}>
-            Бессрочно
+          <button type="button" className="chip-btn" disabled={update.isPending} onClick={() => update.mutate({ id: u.id, body: { never_expires: true } }, { onSuccess: () => toast.ok(t("userDrawer.nowForever")) })}>
+            {t("userDrawer.forever")}
           </button>
         ) : null}
       </div>
@@ -290,37 +295,37 @@ function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () => void 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(u.sub_url);
-      toast.ok("Ссылка скопирована");
+      toast.ok(t("common.linkCopied"));
     } catch {
-      toast.error("Браузер не дал скопировать — выделите ссылку вручную");
+      toast.error(t("common.copyFailed"));
     }
   };
   if (!u.sub_url) {
     return (
-      <Section title="Подписка">
-        <p className="text-[13px] text-[var(--ink-500)]">Укажите адрес сервера в настройках, чтобы появилась ссылка.</p>
+      <Section title={t("userDrawer.subscription")}>
+        <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.noHost")}</p>
       </Section>
     );
   }
   return (
-    <Section title="Подписка">
+    <Section title={t("userDrawer.subscription")}>
       <div className="link-field">
         <span className="mono" title={u.sub_url}>
           {u.sub_url}
         </span>
-        <button type="button" className="icon-btn" onClick={copy} aria-label="Скопировать ссылку">
+        <button type="button" className="icon-btn" onClick={copy} aria-label={t("common.copyLink")}>
           <Copy size={18} />
         </button>
       </div>
       <div className="mt-4 grid grid-cols-1 items-start gap-4 sm:grid-cols-[136px_minmax(0,1fr)]">
         <QR value={u.sub_url} />
         <div className="flex flex-col items-start gap-2">
-          <p className="mb-1 text-[13px] text-[var(--ink-500)]">Отправьте ссылку клиенту или дайте отсканировать QR-код в приложении.</p>
+          <p className="mb-1 text-[13px] text-[var(--ink-500)]">{t("userDrawer.sendHint")}</p>
           <a className="btn btn-glass btn-sm" href={u.sub_url} target="_blank" rel="noreferrer noopener">
-            Страница подписки <ExternalLink size={14} aria-hidden />
+            {t("userDrawer.subPage")} <ExternalLink size={14} aria-hidden />
           </a>
           <Button size="sm" variant="danger" onClick={onReissue}>
-            <RefreshCw size={16} aria-hidden /> Перевыпустить ссылку
+            <RefreshCw size={16} aria-hidden /> {t("userDrawer.reissue")}
           </Button>
         </div>
       </div>
@@ -336,10 +341,10 @@ function DevicesSection({ u }: { u: User }) {
   const setLimit = (n: number | null) =>
     update.mutate({ id: u.id, body: n === null ? { devices_unlimited: true } : { device_limit: n } }, { onError: (e) => toast.error(errorText(e)) });
   return (
-    <Section title="Устройства" aside={`${u.online_ips.length} онлайн · лимит ${u.device_limit ?? "∞"}`}>
+    <Section title={t("userDrawer.devices")} aside={t("userDrawer.devicesAside", { online: u.online_ips.length, limit: u.device_limit ?? "∞" })}>
       <div className="mb-3 flex items-center gap-2 text-[13px]">
-        <span className="text-[var(--ink-600)]">Лимит устройств:</span>
-        <div className="seg" role="group" aria-label="Лимит устройств">
+        <span className="text-[var(--ink-600)]">{t("userDrawer.deviceLimit")}</span>
+        <div className="seg" role="group" aria-label={t("userDrawer.deviceLimit")}>
           {[1, 2, 3, 5, 10].map((n) => (
             <button key={n} type="button" aria-pressed={u.device_limit === n} onClick={() => setLimit(n)}>
               {n}
@@ -351,23 +356,23 @@ function DevicesSection({ u }: { u: User }) {
         </div>
       </div>
       {list.length === 0 ? (
-        <p className="text-[13px] text-[var(--ink-500)]">Ещё ни одного подключения. Устройство появится здесь после первого входа.</p>
+        <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.noDevices")}</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {list.slice(0, 8).map((d) => (
             <li key={d.ip} className="panel-soft grid grid-cols-[36px_minmax(0,1fr)] items-center gap-3 p-2">
               <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] text-[var(--ink-600)]">{d.client.toLowerCase().includes("windows") ? <Laptop size={18} /> : <Smartphone size={18} />}</span>
               <div className="min-w-0">
-                <div className="text-[13px] font-medium">{d.client || "Устройство"}</div>
+                <div className="text-[13px] font-medium">{d.client || t("userDrawer.device")}</div>
                 <div className="text-xs text-[var(--ink-500)]">
-                  <span className="mono">{maskIP(d.ip)}</span> · {d.online ? <span className="text-[var(--leaf-700)]">сейчас онлайн</span> : ago(d.last_seen)}
+                  <span className="mono">{maskIP(d.ip)}</span> · {d.online ? <span className="text-[var(--leaf-700)]">{t("users.onlineNow")}</span> : ago(d.last_seen)}
                 </div>
               </div>
             </li>
           ))}
         </ul>
       )}
-      <p className="mt-2 text-xs text-[var(--ink-500)]">Устройство — это IP-адрес с активным подключением. Место освобождается через минуту после отключения.</p>
+      <p className="mt-2 text-xs text-[var(--ink-500)]">{t("userDrawer.devicesNote")}</p>
     </Section>
   );
 }
@@ -383,23 +388,23 @@ function ProtocolsSection({ u }: { u: User }) {
     if (on) next.add(id);
     else next.delete(id);
     if (next.size === 0) {
-      toast.error("Нужен хотя бы один протокол — иначе лучше отключить пользователя");
+      toast.error(t("userDrawer.needOneProtocol"));
       return;
     }
     const ids = next.size === all.length ? [] : [...next];
     update.mutate({ id: u.id, body: { inbounds: ids } }, { onError: (e) => toast.error(errorText(e)) });
   };
   return (
-    <Section title="Протоколы">
+    <Section title={t("userDrawer.protocols")}>
       {all.map((i) => (
         <div key={i.id} className="flex items-center justify-between gap-3 py-2">
           <div>
-            <div className="text-[13px] font-medium">{i.title}</div>
+            <div className="text-[13px] font-medium">{i.sub_name}</div>
             <div className="text-xs text-[var(--ink-500)]">
-              {i.port}/{i.network}
+              {i.title} · {i.port}/{i.network}
             </div>
           </div>
-          <Switch checked={allowed.has(i.id)} onChange={(v) => toggle(i.id, v)} label={i.title} disabled={update.isPending} />
+          <Switch checked={allowed.has(i.id)} onChange={(v) => toggle(i.id, v)} label={i.sub_name} disabled={update.isPending} />
         </div>
       ))}
     </Section>
@@ -412,16 +417,16 @@ function NoteSection({ u }: { u: User }) {
   const toast = useToast();
   useEffect(() => setNote(u.note), [u.note]);
   return (
-    <Section title="Заметка" aside={update.isPending ? "сохраняем…" : undefined}>
+    <Section title={t("userDrawer.note")} aside={update.isPending ? t("userDrawer.saving") : undefined}>
       <textarea
         className="input"
-        aria-label="Заметка о пользователе"
-        placeholder="Например: оплата в Telegram, продлевать 1-го числа"
+        aria-label={t("userDrawer.noteLabel")}
+        placeholder={t("userDrawer.notePlaceholder")}
         maxLength={2000}
         value={note}
         onChange={(e) => setNote(e.target.value)}
         onBlur={() => {
-          if (note !== u.note) update.mutate({ id: u.id, body: { note } }, { onSuccess: () => toast.ok("Заметка сохранена"), onError: (e) => toast.error(errorText(e)) });
+          if (note !== u.note) update.mutate({ id: u.id, body: { note } }, { onSuccess: () => toast.ok(t("userDrawer.noteSaved")), onError: (e) => toast.error(errorText(e)) });
         }}
       />
     </Section>

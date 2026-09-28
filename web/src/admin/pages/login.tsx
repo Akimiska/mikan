@@ -6,7 +6,9 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, setCsrf, unwrap } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Logo } from "../../components/atmosphere";
+import { LangSwitch } from "../../components/lang";
 import { Button, Field } from "../../components/ui";
+import { t } from "../../i18n";
 
 export function LoginPage() {
   const { next } = useSearch({ from: "/login" });
@@ -22,8 +24,8 @@ export function LoginPage() {
 
   useEffect(() => {
     if (wait <= 0) return;
-    const t = window.setTimeout(() => setWait((w) => w - 1), 1000);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => window.clearTimeout(timer);
   }, [wait]);
 
   useEffect(() => {
@@ -45,7 +47,7 @@ export function LoginPage() {
           setError("");
           return;
         }
-        setError(e.detail === "invalid_totp" ? "Код не подошёл. Проверьте время на телефоне и попробуйте снова." : "Неверный логин или пароль.");
+        setError(e.detail === "invalid_totp" ? t("login.badCode") : t("login.badCredentials"));
         if (e.detail === "invalid_totp") setCode("");
         return;
       }
@@ -66,6 +68,7 @@ export function LoginPage() {
 
   return (
     <div className="grid min-h-screen place-items-center px-4 py-12">
+      <LangSwitch className="fixed top-4 right-4" />
       <motion.form
         onSubmit={submit}
         className="glass-strong w-full max-w-[400px] rounded-[28px] p-8"
@@ -78,16 +81,16 @@ export function LoginPage() {
           <Logo size={40} />
           <div>
             <div className="font-display text-[22px] leading-7 font-semibold tracking-tight">mikan</div>
-            <div className="text-[13px] text-[var(--ink-500)]">Вход в панель управления</div>
+            <div className="text-[13px] text-[var(--ink-500)]">{t("login.subtitle")}</div>
           </div>
         </div>
 
         {step === "password" ? (
           <>
-            <Field label="Логин" htmlFor="login-user">
+            <Field label={t("login.username")} htmlFor="login-user">
               <input id="login-user" className="input" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus />
             </Field>
-            <Field label="Пароль" htmlFor="login-pass">
+            <Field label={t("login.password")} htmlFor="login-pass">
               <input id="login-pass" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             </Field>
           </>
@@ -95,9 +98,9 @@ export function LoginPage() {
           <>
             <div className="panel-soft mb-4 flex gap-3 p-3 text-[13px] text-[var(--ink-600)]">
               <ShieldCheck size={18} className="mt-0.5 shrink-0 text-[var(--leaf-500)]" aria-hidden />
-              Введите 6 цифр из приложения-аутентификатора или один из резервных кодов.
+              {t("login.totpHint")}
             </div>
-            <Field label="Код подтверждения" htmlFor="login-code">
+            <Field label={t("login.code")} htmlFor="login-code">
               <input
                 id="login-code"
                 ref={codeRef}
@@ -119,20 +122,28 @@ export function LoginPage() {
         ) : null}
         {wait > 0 ? (
           <p className="mb-4 text-[13px] text-[var(--honey-600)]" role="alert">
-            Слишком много неудачных попыток. Попробовать снова можно через {wait} с.
+            {t("login.tooMany", { s: wait })}
           </p>
         ) : null}
 
         <Button type="submit" variant="primary" block loading={login.isPending} disabled={wait > 0 || !username || !password || (step === "totp" && code.length < 6)}>
-          {step === "password" ? "Войти" : "Подтвердить"}
+          {step === "password" ? t("login.submit") : t("login.confirm")}
         </Button>
         {step === "totp" ? (
-          <button type="button" className="link-btn mt-4 block w-full text-center text-[13px]" onClick={() => { setStep("password"); setCode(""); setError(""); }}>
-            Назад к паролю
+          <button
+            type="button"
+            className="link-btn mt-4 block w-full text-center text-[13px]"
+            onClick={() => {
+              setStep("password");
+              setCode("");
+              setError("");
+            }}
+          >
+            {t("login.back")}
           </button>
         ) : (
           <p className="mt-6 text-center text-xs text-[var(--ink-500)]">
-            Забыли пароль? На сервере выполните <span className="mono">mikan reset-password</span>
+            {t("login.forgot")} <span className="mono">mikan reset-password</span>
           </p>
         )}
       </motion.form>

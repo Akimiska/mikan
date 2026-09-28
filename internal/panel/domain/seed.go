@@ -3,11 +3,13 @@ package domain
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 )
 
 const gib = int64(1) << 30
@@ -21,13 +23,29 @@ func Seed(ctx context.Context, st *store.Store, now time.Time) error {
 	}
 	if len(inbounds) == 0 {
 		for _, p := range presets.All {
-			settings, err := presets.NewSettings(p.ID, presets.DefaultDest)
+			if !p.Default {
+				continue
+			}
+			config, err := presets.NewConfig(p.ID, presets.DefaultDest)
 			if err != nil {
 				return err
 			}
-			if _, err := st.Q.CreateInbound(ctx, db.CreateInboundParams{Name: p.Name, Preset: p.ID, Port: p.Port, Settings: string(settings), CreatedAt: now.Unix(), UpdatedAt: now.Unix()}); err != nil {
+			if _, err := st.Q.CreateInbound(ctx, db.CreateInboundParams{Name: p.Name, Preset: p.ID, Port: p.Port, Config: config, CreatedAt: now.Unix(), UpdatedAt: now.Unix()}); err != nil {
 				return err
 			}
+		}
+	}
+	// Inbounds created by mikan ≤ 0.1.2 carry per-preset settings; give them a template.
+	for _, in := range inbounds {
+		if in.Config != "" {
+			continue
+		}
+		t, err := proto.FromPreset(in.Preset, []byte(in.Settings))
+		if err != nil {
+			return fmt.Errorf("inbound %s: %w", in.Name, err)
+		}
+		if err := st.Q.SetInboundConfig(ctx, db.SetInboundConfigParams{Config: proto.Marshal(t), ID: in.ID}); err != nil {
+			return err
 		}
 	}
 	if n, err := st.Q.CountTariffs(ctx); err != nil {

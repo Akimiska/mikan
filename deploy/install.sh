@@ -73,7 +73,12 @@ confirm() {
   case "$answer" in "" | y | Y | д | Д) return 0 ;; *) return 1 ;; esac
 }
 
-rand() { tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1" || true; }
+# tr's stderr goes to /dev/null: it reports a broken pipe once head has enough bytes.
+rand() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c "$1" || true; }
+rand_login() {
+  printf '%s%s' "$(LC_ALL=C tr -dc 'a-z' </dev/urandom 2>/dev/null | head -c 1 || true)" \
+    "$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom 2>/dev/null | head -c 11 || true)"
+}
 
 port_busy() { # port proto
   if [ "$2" = udp ]; then ss -Hlnu "sport = :$1" | grep -q .; else ss -Hlnt "sport = :$1" | grep -q .; fi
@@ -97,6 +102,27 @@ esac
 [ -f "$MIKAN_DIR/.env" ] && die "mikan уже установлен в $MIKAN_DIR. Обновление: mikan update"
 [ -n "$IMAGE" ] || [ -n "$IMAGE_TAR" ] || { usage; die "укажите --image-tar или --image"; }
 [ -z "$IMAGE_TAR" ] || [ -f "$IMAGE_TAR" ] || die "нет файла $IMAGE_TAR"
+export DEBIAN_FRONTEND=noninteractive
+# A fresh VPS keeps apt busy for minutes (hoster provisioning, unattended-upgrades);
+# get.docker.com fails on the dpkg lock instead of waiting.
+dpkg_busy() {
+  if command -v fuser >/dev/null; then
+    fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1
+  else
+    pgrep -x apt-get >/dev/null || pgrep -x apt >/dev/null || pgrep -x dpkg >/dev/null
+  fi
+}
+if dpkg_busy; then
+  log "Жду, пока система закончит установку пакетов…"
+  for _ in $(seq 1 120); do dpkg_busy || break; sleep 5; done
+  dpkg_busy && die "Пакетный менеджер занят больше 10 минут. Повторите установку позже."
+fi
+# Some VPS images ship with half-configured packages (cloud-init waiting on a conffile
+# question); every apt call then fails. Keep the hoster's config files and finish the job.
+if [ -n "$(dpkg --audit 2>/dev/null || true)" ]; then
+  log "Довожу незавершённую настройку пакетов хостера (dpkg --configure -a)…"
+  dpkg --configure -a --force-confdef --force-confold >/dev/null 2>&1 || warn "dpkg --configure -a завершился с ошибкой"
+fi
 command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }
 
 # ---------- docker ----------
@@ -155,12 +181,14 @@ fi
 # ---------- files ----------
 ADMIN_PATH=$(rand 24)
 SUB_PATH=$(rand 12)
-PASSWORD=$(rand 20)
+ADMIN_USER=$(rand_login)
+PASSWORD=$(rand 32)
 umask 077
 mkdir -p "$MIKAN_DIR/data/panel" "$MIKAN_DIR/data/node" "$MIKAN_DIR/backups"
 cat >"$MIKAN_DIR/.env" <<EOF
 MIKAN_IMAGE=$IMAGE
 PANEL_PORT=$PANEL_PORT
+MIKAN_UFW=$FIREWALL
 EOF
 cat >"$MIKAN_DIR/compose.yaml" <<'EOF'
 name: mikan
@@ -213,7 +241,7 @@ chmod 700 "$MIKAN_DIR/data"
 
 cd "$MIKAN_DIR"
 log "Создаю администратора и секретную ссылку…"
-bootstrap=(admin bootstrap --public-host "$PUBLIC_HOST" --port "$PANEL_PORT" --admin-path "$ADMIN_PATH" --sub-path "$SUB_PATH" --password-stdin)
+bootstrap=(admin bootstrap --public-host "$PUBLIC_HOST" --port "$PANEL_PORT" --admin-path "$ADMIN_PATH" --sub-path "$SUB_PATH" --username "$ADMIN_USER" --password-stdin)
 [ -z "$DOMAIN" ] || bootstrap+=(--domain "$DOMAIN")
 [ -z "$EMAIL" ] || bootstrap+=(--email "$EMAIL")
 printf '%s\n' "$PASSWORD" | docker compose run --rm --no-deps -T panel "${bootstrap[@]}" >/dev/null
@@ -277,6 +305,15 @@ case "${1:-help}" in
   reset-password) admin reset-password ;;
   reset-path) admin reset-path ;;
   disable-2fa) admin disable-2fa ;;
+  inbound)
+    shift
+    if [ "${1:-}" != add ]; then admin inbound "$@"; exit; fi
+    # stdout is "port/network"; the message goes to stderr.
+    rule=$(admin inbound "$@")
+    if [ "$(env_get MIKAN_UFW)" != 0 ] && command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+      ufw allow "${rule/-/:}" >/dev/null && echo "Открыл $rule в ufw."
+    fi
+    ;;
   restart) dc restart ;;
   backup)
     ts=$(date +%Y%m%d-%H%M%S)
@@ -335,6 +372,8 @@ mikan — управление панелью
   reset-password  новый пароль администратора
   reset-path      новая секретная ссылка
   disable-2fa     выключить 2FA (если потерян телефон)
+  inbound list    подключения: имя, пресет, порт
+  inbound add ПРЕСЕТ [--port ПОРТ]  добавить подключение (vless_reality_grpc, trojan_reality, anytls…)
   backup          бэкап в /opt/mikan/backups
   restore ФАЙЛ    восстановить из бэкапа
   update [ОБРАЗ|ФАЙЛ.tar.gz]  обновить с откатом при ошибке
@@ -353,7 +392,7 @@ cat <<EOF
 ${c_ok}Готово!${c_0} mikan работает.
 
   Панель:  ${c_b}$URL${c_0}
-  Логин:   ${c_b}admin${c_0}
+  Логин:   ${c_b}$ADMIN_USER${c_0}
   Пароль:  ${c_b}$PASSWORD${c_0}   ${c_dim}← показывается один раз, сохраните в менеджер паролей${c_0}
 
   Сертификат Let's Encrypt выпустится в течение минуты. До этого браузер

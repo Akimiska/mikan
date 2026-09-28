@@ -6,6 +6,7 @@ import { userActions, useTariffs, useUserMutation } from "../../api/hooks";
 import { Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, Field, Skeleton } from "../../components/ui";
+import { t } from "../../i18n";
 import { tariffSummary } from "./tariffs";
 
 export function CreateUserDrawer({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: (id: number) => void }) {
@@ -33,11 +34,11 @@ export function CreateUserDrawer({ open, onOpenChange, onCreated }: { open: bool
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setErrors({ name: "Укажите имя — так пользователя будет проще найти" });
+      setErrors({ name: t("userCreate.nameRequired") });
       return;
     }
     if (!tariffId) {
-      setErrors({ tariff_id: "Выберите тариф" });
+      setErrors({ tariff_id: t("userCreate.tariffRequired") });
       return;
     }
     create.mutate(
@@ -46,9 +47,9 @@ export function CreateUserDrawer({ open, onOpenChange, onCreated }: { open: bool
         onSuccess: async (u) => {
           try {
             await navigator.clipboard.writeText(u.sub_url);
-            toast.ok(`${u.name} создан — ссылка скопирована`);
+            toast.ok(t("userCreate.createdCopied", { name: u.name }));
           } catch {
-            toast.ok(`${u.name} создан`);
+            toast.ok(t("userCreate.created", { name: u.name }));
           }
           onCreated(u.id);
         },
@@ -64,39 +65,39 @@ export function CreateUserDrawer({ open, onOpenChange, onCreated }: { open: bool
     <Drawer
       open={open}
       onOpenChange={onOpenChange}
-      title="Новый пользователь"
-      meta="Ссылка на подписку появится сразу после создания"
+      title={t("userCreate.title")}
+      meta={t("userCreate.meta")}
       footer={
         <>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Отмена
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" type="submit" form="create-user" loading={create.isPending}>
-            <Check size={18} aria-hidden /> Создать и скопировать ссылку
+            <Check size={18} aria-hidden /> {t("userCreate.submit")}
           </Button>
         </>
       }
     >
       <form id="create-user" onSubmit={submit} className="pt-5" noValidate>
-        <Field label="Имя или название" htmlFor="nu-name" hint="Видно только вам и на странице подписки клиента." error={errors.name}>
-          <input id="nu-name" className="input" placeholder="Например, Анна или ООО «Север»" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!errors.name} maxLength={100} autoFocus autoComplete="off" />
+        <Field label={t("userCreate.name")} htmlFor="nu-name" hint={t("userCreate.nameHint")} error={errors.name}>
+          <input id="nu-name" className="input" placeholder={t("userCreate.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!errors.name} maxLength={100} autoFocus autoComplete="off" />
         </Field>
-        <Field label="Контакт" htmlFor="nu-contact" hint="Необязательно: @telegram или телефон, чтобы быстро найти.">
+        <Field label={t("userCreate.contact")} htmlFor="nu-contact" hint={t("userCreate.contactHint")}>
           <input id="nu-contact" className="input" placeholder="@telegram" value={contact} onChange={(e) => setContact(e.target.value)} maxLength={100} autoComplete="off" />
         </Field>
-        <Field label="Тариф" error={errors.tariff_id} hint="Срок, объём и лимит устройств подставятся из тарифа — их можно поменять в карточке.">
+        <Field label={t("userCreate.tariff")} error={errors.tariff_id} hint={t("userCreate.tariffHint")}>
           {tariffs.isPending ? (
             <div className="grid grid-cols-2 gap-2">
               <Skeleton style={{ height: 76, borderRadius: 16 }} />
               <Skeleton style={{ height: 76, borderRadius: 16 }} />
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Тариф">
-              {(tariffs.data ?? []).map((t) => (
-                <button key={t.id} type="button" role="radio" aria-checked={tariffId === t.id} className={clsx("opt")} onClick={() => setTariffId(t.id)}>
-                  <span className="font-semibold">{t.name}</span>
-                  <span className="text-xs text-[var(--ink-500)]">{tariffSummary(t)}</span>
-                  {t.price_label ? <span className="mt-1 text-[13px] font-medium text-[var(--mikan-700)]">{t.price_label}</span> : null}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label={t("userCreate.tariff")}>
+              {(tariffs.data ?? []).map((tr) => (
+                <button key={tr.id} type="button" role="radio" aria-checked={tariffId === tr.id} className={clsx("opt")} onClick={() => setTariffId(tr.id)}>
+                  <span className="font-semibold">{tr.name}</span>
+                  <span className="text-xs text-[var(--ink-500)]">{tariffSummary(tr)}</span>
+                  {tr.price_label ? <span className="mt-1 text-[13px] font-medium text-[var(--mikan-700)]">{tr.price_label}</span> : null}
                 </button>
               ))}
             </div>

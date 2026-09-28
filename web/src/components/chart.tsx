@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { TrafficPoint } from "../api/client";
+import { t } from "../i18n";
 import { bytes, dateShort, time } from "../lib/format";
 
 type Pt = { x: number; y: number };
@@ -107,7 +108,7 @@ export function TrafficChart({ points, range }: { points: TrafficPoint[]; range:
 
   return (
     <div className="relative" style={{ margin: "0 -4px" }}>
-      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible" role="img" aria-label="График трафика: скачано и отдано">
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible" role="img" aria-label={t("chart.label")}>
         <defs>
           <linearGradient id="g-down" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0" style={{ stopColor: "var(--mikan-500)", stopOpacity: 0.24 }} />
@@ -160,11 +161,11 @@ export function TrafficChart({ points, range }: { points: TrafficPoint[]; range:
         >
           <b className="font-semibold">{label(hp.t)}</b>
           <div className="flex justify-between gap-3">
-            <span>Скачано</span>
+            <span>{t("chart.down")}</span>
             <span className="num">{bytes(hp.down)}</span>
           </div>
           <div className="flex justify-between gap-3">
-            <span>Отдано</span>
+            <span>{t("chart.up")}</span>
             <span className="num">{bytes(hp.up)}</span>
           </div>
         </div>

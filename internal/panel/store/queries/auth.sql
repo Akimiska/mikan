@@ -11,6 +11,9 @@ SELECT key, value FROM settings ORDER BY key;
 -- name: CountAdmins :one
 SELECT count(*) FROM admins;
 
+-- name: ListAdmins :many
+SELECT * FROM admins ORDER BY id;
+
 -- name: GetAdmin :one
 SELECT * FROM admins WHERE id = ?;
 

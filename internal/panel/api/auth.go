@@ -241,7 +241,7 @@ func (h *handlers) changePassword(ctx context.Context, in *passwordInput) (*stru
 		return nil, err
 	}
 	if !ok {
-		return nil, huma.Error422UnprocessableEntity("wrong_password", &huma.ErrorDetail{Location: "body.current", Message: "Неверный текущий пароль"})
+		return nil, huma.Error422UnprocessableEntity("wrong_password", &huma.ErrorDetail{Location: "body.current", Message: "wrong_password"})
 	}
 	hash, err := auth.HashPassword(in.Body.New)
 	if err != nil {
@@ -289,7 +289,7 @@ func (h *handlers) totpEnable(ctx context.Context, in *totpCodeInput) (*recovery
 		return nil, huma.Error409Conflict("totp_setup_expired")
 	}
 	if !h.d.TOTP.Validate(sess.AdminID, p.secret, in.Body.Code, now) {
-		return nil, huma.Error422UnprocessableEntity("invalid_totp", &huma.ErrorDetail{Location: "body.code", Message: "Код не подошёл — проверьте время на телефоне"})
+		return nil, huma.Error422UnprocessableEntity("invalid_totp", &huma.ErrorDetail{Location: "body.code", Message: "invalid_totp"})
 	}
 	plain, stored := auth.NewRecoveryCodes(10)
 	if err := h.d.Store.Q.SetAdminTOTP(ctx, db.SetAdminTOTPParams{
@@ -322,7 +322,7 @@ func (h *handlers) totpDisable(ctx context.Context, in *totpDisableInput) (*stru
 		return nil, err
 	}
 	if !ok || !h.d.TOTP.Validate(admin.ID, admin.TotpSecret.String, in.Body.Code, h.d.Now()) {
-		return nil, huma.Error422UnprocessableEntity("invalid_credentials", &huma.ErrorDetail{Location: "body", Message: "Неверный пароль или код"})
+		return nil, huma.Error422UnprocessableEntity("invalid_credentials", &huma.ErrorDetail{Location: "body", Message: "invalid_password_or_code"})
 	}
 	if err := h.d.Store.Q.SetAdminTOTP(ctx, db.SetAdminTOTPParams{ID: admin.ID}); err != nil {
 		return nil, err

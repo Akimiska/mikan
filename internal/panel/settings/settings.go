@@ -17,6 +17,9 @@ const (
 	KeyPanelPort  = "panel_port"
 	KeyDomain     = "domain"
 	KeyACMEEmail  = "acme_email"
+	KeyGroupMain  = "sub_group_main" // subscription group names, see subs.Groups
+	KeyGroupAuto  = "sub_group_auto"
+	KeyRouting    = "sub_routing" // subs.Routing
 )
 
 type Settings struct{ q *db.Queries }

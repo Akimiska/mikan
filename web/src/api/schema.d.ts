@@ -167,8 +167,59 @@ export interface paths {
         /** Подключения */
         get: operations["list-inbounds"];
         put?: never;
-        /** Добавить подключение из пресета */
+        /** Добавить подключение */
         post: operations["create-inbound"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inbounds/check-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Проверить сайт как цель REALITY */
+        post: operations["check-target"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inbounds/scan-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Подобрать цели REALITY рядом с сервером */
+        post: operations["scan-targets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/inbounds/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Проверить шаблон листенера без сохранения */
+        post: operations["validate-inbound"];
         delete?: never;
         options?: never;
         head?: never;
@@ -511,12 +562,20 @@ export interface components {
             /** Format: int64 */
             affected: number;
         };
+        CheckTargetInputBody: {
+            /** @description host:port */
+            dest: string;
+            /** @description Имя для клиентов; по умолчанию — хост из dest */
+            sni?: string;
+        };
         CreateInboundInputBody: {
+            /** @description Шаблон листенера (YAML) для preset=custom */
+            config?: string;
             /** @description host:port для REALITY */
             dest?: string;
             port?: string;
             /** @enum {string} */
-            preset: "vless_reality_vision" | "vless_reality_xhttp" | "hysteria2" | "tuic_v5";
+            preset: "vless_reality_xhttp" | "hysteria2" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "custom";
         };
         CreateUserInputBody: {
             contact?: string;
@@ -581,10 +640,12 @@ export interface components {
             days: number;
         };
         InboundView: {
-            /** Format: int64 */
-            conns: number;
+            /** @description Шаблон листенера (YAML) */
+            config: string;
             /** @description Сайт для маскировки REALITY */
             dest?: string;
+            /** @description Своё имя в подписке; пусто — имя по умолчанию */
+            display_name: string;
             enabled: boolean;
             error?: string;
             /** Format: int64 */
@@ -596,17 +657,24 @@ export interface components {
             server_names?: string[];
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
+            /** @description Имя, которое увидит клиент */
+            sub_name: string;
             title: string;
+            /** @description Тип листенера mihomo */
+            type: string;
             /** Format: date-time */
             updated_at: string;
         };
         Info: {
+            default: boolean;
             default_name: string;
             default_port: string;
             id: string;
             network: string;
+            sub_name: string;
             summary: string;
             title: string;
+            type: string;
         };
         ListUsersOutputBody: {
             counts: components["schemas"]["UserCounts"];
@@ -673,9 +741,15 @@ export interface components {
             new: string;
         };
         PatchInboundInputBody: {
+            /** @description Шаблон листенера (YAML) */
+            config?: string;
             dest?: string;
+            /** @description Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию */
+            display_name?: string;
             enabled?: boolean;
             port?: string;
+            /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
+            server_name?: string;
         };
         PatchSettingsInputBody: {
             brand?: string;
@@ -683,6 +757,10 @@ export interface components {
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
+            sub_group_auto?: string;
+            sub_group_main?: string;
+            /** @enum {string} */
+            sub_routing?: "ru_direct" | "all";
             /** @description https://… или tg://… */
             support_url?: string;
         };
@@ -715,6 +793,34 @@ export interface components {
         ResetPathOutputBody: {
             admin_url: string;
         };
+        Result: {
+            cert_valid: boolean;
+            /** @description host:port, который будет набирать нода */
+            dest: string;
+            /** @description Имя резолвится в этот IP: сайт настоящий, а не чужая маскировка */
+            dns_match: boolean;
+            error?: string;
+            h2: boolean;
+            ip: string;
+            issuer?: string;
+            /** @description Подходит как цель REALITY */
+            ok: boolean;
+            /** Format: int64 */
+            rtt_ms: number;
+            /** @description Имя сервера, которое отправят клиенты */
+            sni: string;
+            tls13: boolean;
+            x25519: boolean;
+        };
+        ScanTargetsOutputBody: {
+            /** @description Адрес сервера, вокруг которого искали */
+            ip: string;
+            results: components["schemas"]["Result"][];
+            /** Format: int64 */
+            scanned: number;
+            /** @description Свой домен с сертификатом панели */
+            self_steal?: components["schemas"]["Result"];
+        };
         SessionView: {
             /** Format: date-time */
             created_at: string;
@@ -739,6 +845,15 @@ export interface components {
              */
             quiet_hour_utc: number;
             sub_base_url: string;
+            /** @description Группа автовыбора самого быстрого подключения */
+            sub_group_auto: string;
+            /** @description Главная группа в Clash-приложениях */
+            sub_group_main: string;
+            /**
+             * @description Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN
+             * @enum {string}
+             */
+            sub_routing: "ru_direct" | "all";
             support_url: string;
         };
         Status: {
@@ -888,6 +1003,14 @@ export interface components {
             used_down: number;
             /** Format: int64 */
             used_up: number;
+        };
+        ValidateInboundInputBody: {
+            config: string;
+            port?: string;
+        };
+        ValidateInboundOutputBody: {
+            network: string;
+            type: string;
         };
     };
     responses: never;
@@ -1220,6 +1343,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "check-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckTargetInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Result"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "scan-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanTargetsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "validate-inbound": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateInboundInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidateInboundOutputBody"];
                 };
             };
             /** @description Error */

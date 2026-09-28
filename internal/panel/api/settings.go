@@ -12,6 +12,7 @@ import (
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/subs"
 )
 
 type SettingsView struct {
@@ -23,6 +24,9 @@ type SettingsView struct {
 	QuietHourUTC int         `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
 	AdminURL     string      `json:"admin_url"`
 	SubBaseURL   string      `json:"sub_base_url"`
+	SubGroupMain string      `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
+	SubGroupAuto string      `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
+	SubRouting   string      `json:"sub_routing" enum:"ru_direct,all" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN"`
 	Certificate  acme.Status `json:"certificate"`
 }
 
@@ -35,6 +39,9 @@ type patchSettingsInput struct {
 		PublicHost   *string `json:"public_host,omitempty" maxLength:"253"`
 		Domain       *string `json:"domain,omitempty" maxLength:"253"`
 		QuietHourUTC *int    `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
+		SubGroupMain *string `json:"sub_group_main,omitempty" maxLength:"200"`
+		SubGroupAuto *string `json:"sub_group_auto,omitempty" maxLength:"200"`
+		SubRouting   *string `json:"sub_routing,omitempty" enum:"ru_direct,all"`
 	}
 }
 
@@ -72,6 +79,16 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	get("support_url", &v.SupportURL)
 	get(settings.KeyPublicHost, &v.PublicHost)
 	get(settings.KeyDomain, &v.Domain)
+	get(settings.KeyGroupMain, &v.SubGroupMain)
+	get(settings.KeyGroupAuto, &v.SubGroupAuto)
+	get(settings.KeyRouting, &v.SubRouting)
+	v.SubRouting = string(subs.ParseRouting(v.SubRouting))
+	if v.SubGroupMain == "" {
+		v.SubGroupMain = subs.DefaultMainGroup
+	}
+	if v.SubGroupAuto == "" {
+		v.SubGroupAuto = subs.DefaultAutoGroup
+	}
 	if err != nil {
 		return v, err
 	}
@@ -136,13 +153,27 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	b := in.Body
 	var details []error
 	if b.PublicHost != nil && (*b.PublicHost == "" || !validHost(*b.PublicHost)) {
-		details = append(details, &huma.ErrorDetail{Location: "body.public_host", Message: "Укажите IP-адрес или имя сервера"})
+		details = append(details, &huma.ErrorDetail{Location: "body.public_host", Message: "public_host_invalid"})
 	}
 	if b.Domain != nil && !validHost(*b.Domain) {
-		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "Домен вида vpn.example.com или пусто"})
+		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 	}
 	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {
-		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "Ссылка должна начинаться с https:// или tg://"})
+		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
+	}
+	if b.SubGroupMain != nil || b.SubGroupAuto != nil {
+		cur, err := h.groups(ctx)
+		if err != nil {
+			return nil, err
+		}
+		next := cur
+		if b.SubGroupMain != nil {
+			next.Main = strings.TrimSpace(*b.SubGroupMain)
+		}
+		if b.SubGroupAuto != nil {
+			next.Auto = strings.TrimSpace(*b.SubGroupAuto)
+		}
+		details = append(details, h.checkGroups(ctx, next)...)
 	}
 	if len(details) > 0 {
 		return nil, huma.Error422UnprocessableEntity("validation", details...)
@@ -153,7 +184,8 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 		return settings.Set(ctx, h.d.Settings, key, strings.TrimSpace(*v))
 	}
-	for key, v := range map[string]*string{"brand": b.Brand, "support_url": b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain} {
+	for key, v := range map[string]*string{"brand": b.Brand, "support_url": b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
+		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting} {
 		if err := set(key, v); err != nil {
 			return nil, err
 		}
@@ -169,6 +201,76 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		return nil, err
 	}
 	return &settingsOutput{Body: v}, nil
+}
+
+// groups returns the subscription group names with defaults applied.
+func (h *handlers) groups(ctx context.Context) (subs.Groups, error) {
+	var g subs.Groups
+	var err error
+	if g.Main, err = h.d.Settings.String(ctx, settings.KeyGroupMain); err != nil {
+		return g, err
+	}
+	if g.Auto, err = h.d.Settings.String(ctx, settings.KeyGroupAuto); err != nil {
+		return g, err
+	}
+	if g.Main == "" {
+		g.Main = subs.DefaultMainGroup
+	}
+	if g.Auto == "" {
+		g.Auto = subs.DefaultAutoGroup
+	}
+	return g, nil
+}
+
+// checkGroups: a profile with a group named like a proxy, a built-in policy or the
+// other group does not load in any Clash app.
+func (h *handlers) checkGroups(ctx context.Context, g subs.Groups) []error {
+	var out []error
+	bad := func(field, code string, value any) {
+		out = append(out, &huma.ErrorDetail{Location: "body." + field, Message: code, Value: value})
+	}
+	if err := subs.ValidName(g.Main); err != nil {
+		bad("sub_group_main", err.Error(), nil)
+	}
+	if err := subs.ValidName(g.Auto); err != nil {
+		bad("sub_group_auto", err.Error(), nil)
+	}
+	if strings.EqualFold(g.Auto, subs.AliasGroup) {
+		bad("sub_group_auto", "group_alias_taken", subs.AliasGroup)
+	}
+	if strings.EqualFold(g.Main, g.Auto) {
+		bad("sub_group_auto", "groups_same", nil)
+	}
+	if inbounds, err := h.d.Store.Q.ListInbounds(ctx); err == nil {
+		for _, in := range inbounds {
+			name := subs.ProxyName(in)
+			if strings.EqualFold(name, g.Main) {
+				bad("sub_group_main", "group_is_proxy", in.Name)
+			}
+			if strings.EqualFold(name, g.Auto) {
+				bad("sub_group_auto", "group_is_proxy", in.Name)
+			}
+		}
+	}
+	return out
+}
+
+// checkSubName validates an inbound's name in the subscription and returns an error
+// code, "" when the name is fine.
+func (h *handlers) checkSubName(ctx context.Context, name string) string {
+	if err := subs.ValidName(name); err != nil {
+		return err.Error()
+	}
+	g, err := h.groups(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, x := range []string{g.Main, g.Auto, subs.AliasGroup} {
+		if strings.EqualFold(name, x) {
+			return "name_is_group"
+		}
+	}
+	return ""
 }
 
 func (h *handlers) resetAdminPath(ctx context.Context, _ *struct{}) (*resetPathOutput, error) {

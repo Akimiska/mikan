@@ -1,5 +1,6 @@
-// Package nodesync keeps the node in line with the database: desired state, access
-// policies, traffic counters, period resets and the slot pool.
+// Package nodesync keeps the panel's nodes in line with the database: desired state,
+// access policies and traffic counters per node (Syncer), and the panel-wide upkeep of
+// period resets, the slot pool and devices (Manager).
 package nodesync
 
 import (
@@ -18,8 +19,8 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
-	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 )
 
 // Node is the subset of the node API the syncer needs.
@@ -34,14 +35,14 @@ type Node interface {
 // TLSSource returns the certificate the node uses for Hysteria2/TUIC.
 type TLSSource func() (*nodeapi.TLSFiles, error)
 
+// Syncer drives one node.
 type Syncer struct {
-	st   *store.Store
-	set  *settings.Settings
-	pool *domain.Pool
-	node Node
-	tls  TLSSource
-	log  *slog.Logger
-	now  func() time.Time
+	id    int64
+	m     *Manager
+	node  Node
+	tls   TLSSource
+	local bool
+	log   *slog.Logger
 
 	policiesDirty chan struct{}
 	stateDirty    chan struct{}
@@ -50,7 +51,6 @@ type Syncer struct {
 	stateKey    string
 	policyKey   string
 	lastApplied nodeapi.ApplyResult
-	lastPurge   time.Time
 
 	health atomic.Pointer[HealthView]
 	online atomic.Pointer[map[string]nodeapi.Online]
@@ -64,8 +64,8 @@ type HealthView struct {
 	CheckedAt time.Time
 }
 
-func New(st *store.Store, set *settings.Settings, pool *domain.Pool, node Node, tls TLSSource, log *slog.Logger, now func() time.Time) *Syncer {
-	s := &Syncer{st: st, set: set, pool: pool, node: node, tls: tls, log: log, now: now,
+func newSyncer(m *Manager, id int64, t Target) *Syncer {
+	s := &Syncer{id: id, m: m, node: t.Node, tls: t.TLS, local: t.Local, log: m.log.With("node", id),
 		policiesDirty: make(chan struct{}, 1), stateDirty: make(chan struct{}, 1)}
 	empty := map[string]nodeapi.Online{}
 	s.online.Store(&empty)
@@ -73,6 +73,8 @@ func New(st *store.Store, set *settings.Settings, pool *domain.Pool, node Node, 
 	return s
 }
 
+func (s *Syncer) ID() int64         { return s.id }
+func (s *Syncer) Client() Node      { return s.node }
 func (s *Syncer) PoliciesChanged() { signal(s.policiesDirty) }
 func (s *Syncer) SlotsChanged()    { signal(s.stateDirty) }
 
@@ -85,15 +87,13 @@ func signal(ch chan struct{}) {
 
 func (s *Syncer) Health() HealthView { return *s.health.Load() }
 
-// Online returns the live connection view keyed by slot name.
+// Online returns the node's live connection view keyed by slot name.
 func (s *Syncer) Online() map[string]nodeapi.Online { return *s.online.Load() }
 
-func (s *Syncer) Run(ctx context.Context) {
+func (s *Syncer) run(ctx context.Context) {
 	counters := time.NewTicker(2 * time.Second)
-	maintain := time.NewTicker(30 * time.Second)
 	health := time.NewTicker(5 * time.Second)
 	defer counters.Stop()
-	defer maintain.Stop()
 	defer health.Stop()
 	s.applyState(ctx)
 	s.refreshHealth(ctx)
@@ -109,28 +109,45 @@ func (s *Syncer) Run(ctx context.Context) {
 			s.pushPolicies(ctx, true)
 		case <-counters.C:
 			s.pullCounters(ctx)
-		case <-maintain.C:
-			s.maintain(ctx)
 		case <-health.C:
 			s.refreshHealth(ctx)
 		}
 	}
 }
 
-// desired builds the full node state from the database.
+// desired builds the node's full state from the database.
 func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 	var st nodeapi.DesiredState
-	inbounds, err := s.st.Q.ListInbounds(ctx)
+	q := s.m.st.Q
+	n, err := q.GetNode(ctx, s.id)
 	if err != nil {
 		return st, err
 	}
+	inbounds, err := q.ListInbounds(ctx)
+	if err != nil {
+		return st, err
+	}
+	st.Inbounds = []nodeapi.Inbound{}
 	for _, in := range inbounds {
-		if in.Enabled == 0 {
+		// A disabled node keeps running but serves nothing.
+		if in.NodeID != s.id || in.Enabled == 0 || n.Enabled == 0 {
 			continue
 		}
-		st.Inbounds = append(st.Inbounds, nodeapi.Inbound{Name: in.Name, Preset: in.Preset, Port: in.Port, Settings: json.RawMessage(in.Settings)})
+		t, err := proto.Parse(in.Config)
+		if err != nil {
+			// Saved configs are validated; a broken one must not take the others down.
+			s.log.Error("inbound config", "inbound", in.Name, "err", err)
+			continue
+		}
+		st.Inbounds = append(st.Inbounds, nodeapi.Inbound{Name: in.Name, Port: in.Port, Config: t.JSON()})
 	}
-	slots, err := s.st.Q.ListSlots(ctx)
+	if s.local {
+		// The panel runs next to its own node, so its HTTPS port is the self-steal REALITY target.
+		if st.SelfStealPort, _, err = settings.Get[int](ctx, s.m.set, settings.KeyPanelPort); err != nil {
+			return st, err
+		}
+	}
+	slots, err := q.ListSlots(ctx)
 	if err != nil {
 		return st, err
 	}
@@ -204,20 +221,23 @@ func (s *Syncer) pushPolicies(ctx context.Context, force bool) {
 	s.mu.Unlock()
 }
 
+// policies are the same slots on every node; what differs is the counter position the
+// quota refers to, the inbounds that exist here and the devices seen elsewhere.
 func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Policy, slotUser map[string]int64, err error) {
+	q := s.m.st.Q
 	epoch, seq, err := s.countersPos(ctx)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	users, err := s.st.Q.ListUsers(ctx)
+	users, err := q.ListUsers(ctx)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	slots, err := s.st.Q.ListSlots(ctx)
+	slots, err := q.ListSlots(ctx)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	inbounds, err := s.st.Q.ListInbounds(ctx)
+	inbounds, err := q.ListInbounds(ctx)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -225,11 +245,14 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 	for _, sl := range slots {
 		slotName[sl.ID] = sl.Name
 	}
-	inboundName := make(map[int64]string, len(inbounds))
+	here := map[int64]string{}
 	for _, in := range inbounds {
-		inboundName[in.ID] = in.Name
+		if in.NodeID == s.id {
+			here[in.ID] = in.Name
+		}
 	}
-	now := s.now()
+	others := s.m.otherIPs(s.id)
+	now := s.m.now()
 	slotUser = map[string]int64{}
 	for _, u := range users {
 		if !u.SlotID.Valid {
@@ -237,16 +260,22 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 		}
 		name := slotName[u.SlotID.Int64]
 		slotUser[name] = u.ID
-		p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(domain.State(u, now)), QuotaRemaining: -1, BaseSeq: seq}
+		p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(domain.State(u, now)), QuotaRemaining: -1, BaseSeq: seq, OtherIPs: others[name]}
 		if u.DeviceLimit.Valid {
 			p.DeviceLimit = int(u.DeviceLimit.Int64)
 		}
 		if u.TrafficLimit.Valid {
 			p.QuotaRemaining = max(0, u.TrafficLimit.Int64-u.UsedUp-u.UsedDown)
 		}
-		for _, id := range domain.DecodeInbounds(u.Inbounds) {
-			if n, ok := inboundName[id]; ok {
-				p.Inbounds = append(p.Inbounds, n)
+		if allowed := domain.DecodeInbounds(u.Inbounds); len(allowed) > 0 {
+			for _, id := range allowed {
+				if n, ok := here[id]; ok {
+					p.Inbounds = append(p.Inbounds, n)
+				}
+			}
+			// An empty list means "all": a user limited to other nodes' inbounds gets none here.
+			if len(p.Inbounds) == 0 {
+				p.Allowed = false
 			}
 		}
 		out = append(out, p)
@@ -254,8 +283,6 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 	return epoch, out, slotUser, nil
 }
 
-// pullCounters applies one batch of traffic deltas. The batch position is stored in
-// the same transaction, so a lost ack only causes a harmless re-delivery.
 func (s *Syncer) pullCounters(ctx context.Context) {
 	c, err := s.node.Counters(ctx)
 	if err != nil {
@@ -276,9 +303,9 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		_ = s.node.Ack(ctx, c.Epoch, c.Seq)
 		return
 	}
-	now := s.now()
+	now := s.m.now()
 	hour, day := now.Unix()/3600, now.Unix()/86400
-	err = s.st.Tx(ctx, func(q *db.Queries) error {
+	err = s.m.st.Tx(ctx, func(q *db.Queries) error {
 		rows, err := q.ListSlotUsers(ctx)
 		if err != nil {
 			return err
@@ -302,10 +329,10 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 				return err
 			}
 		}
-		if err := q.SetNodeState(ctx, db.SetNodeStateParams{Key: "counters_epoch", Value: c.Epoch}); err != nil {
+		if err := q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("counters_epoch", s.id), Value: c.Epoch}); err != nil {
 			return err
 		}
-		return q.SetNodeState(ctx, db.SetNodeStateParams{Key: "counters_seq", Value: strconv.FormatInt(c.Seq, 10)})
+		return q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("counters_seq", s.id), Value: strconv.FormatInt(c.Seq, 10)})
 	})
 	if err != nil {
 		s.log.Error("store counters", "err", err)
@@ -321,11 +348,11 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 }
 
 func (s *Syncer) countersPos(ctx context.Context) (string, int64, error) {
-	epoch, err := s.st.Q.GetNodeState(ctx, "counters_epoch")
+	epoch, err := s.m.st.Q.GetNodeState(ctx, stateKeyOf("counters_epoch", s.id))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", 0, err
 	}
-	raw, err := s.st.Q.GetNodeState(ctx, "counters_seq")
+	raw, err := s.m.st.Q.GetNodeState(ctx, stateKeyOf("counters_seq", s.id))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", 0, err
 	}
@@ -334,18 +361,19 @@ func (s *Syncer) countersPos(ctx context.Context) (string, int64, error) {
 }
 
 func (s *Syncer) nextRevision(ctx context.Context) (int64, error) {
-	raw, err := s.st.Q.GetNodeState(ctx, "revision")
+	key := stateKeyOf("revision", s.id)
+	raw, err := s.m.st.Q.GetNodeState(ctx, key)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
 	rev, _ := strconv.ParseInt(raw, 10, 64)
 	rev++
-	return rev, s.st.Q.SetNodeState(ctx, db.SetNodeStateParams{Key: "revision", Value: strconv.FormatInt(rev, 10)})
+	return rev, s.m.st.Q.SetNodeState(ctx, db.SetNodeStateParams{Key: key, Value: strconv.FormatInt(rev, 10)})
 }
 
 func (s *Syncer) refreshHealth(ctx context.Context) {
 	h, err := s.node.Health(ctx)
-	view := &HealthView{CheckedAt: s.now()}
+	view := &HealthView{CheckedAt: s.m.now()}
 	if err != nil {
 		view.Error = err.Error()
 		s.health.Store(view)
@@ -365,135 +393,13 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 	}
 }
 
-func (s *Syncer) maintain(ctx context.Context) {
-	now := s.now()
-	if err := s.resetPeriods(ctx, now); err != nil {
-		s.log.Error("period resets", "err", err)
-	}
-	s.maintainPool(ctx, now)
-	if err := s.st.Q.PruneTrafficHourly(ctx, now.Add(-62*24*time.Hour).Unix()/3600); err != nil {
-		s.log.Error("prune traffic", "err", err)
-	}
-	if err := s.recordDevices(ctx, now); err != nil {
-		s.log.Error("record devices", "err", err)
-	}
-	// Expiry is time-driven: the policy key changes when a user crosses expires_at.
-	s.pushPolicies(ctx, false)
-}
-
-func (s *Syncer) resetPeriods(ctx context.Context, now time.Time) error {
-	users, err := s.st.Q.ListUsers(ctx)
-	if err != nil {
-		return err
-	}
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Unix()
-	changed := false
-	for _, u := range users {
-		start := u.PeriodStart
-		switch u.ResetStrategy {
-		case "month_start":
-			if start >= monthStart {
-				continue
-			}
-			start = monthStart
-		case "period":
-			length := max(u.PeriodDays, 1) * 86400
-			if now.Unix() < start+length {
-				continue
-			}
-			start += (now.Unix() - start) / length * length
-		default:
-			continue
-		}
-		if err := s.st.Q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: start, UpdatedAt: now.Unix(), ID: u.ID}); err != nil {
-			return err
-		}
-		changed = true
-	}
-	if changed {
-		s.pushPolicies(ctx, true)
-	}
-	return nil
-}
-
-func (s *Syncer) maintainPool(ctx context.Context, now time.Time) {
-	stats, err := s.pool.Stats(ctx)
-	if err != nil {
-		s.log.Error("pool stats", "err", err)
-		return
-	}
-	quietHour, _, err := settings.Get[int](ctx, s.set, "quiet_hour_utc")
-	if err != nil {
-		s.log.Error("quiet hour", "err", err)
-	}
-	inQuietHour := now.UTC().Hour() == quietHour && now.Sub(s.lastPurge) > 20*time.Hour
-	var refill, purge bool
-	switch {
-	case stats.Free < domain.CriticalFree:
-		refill = true
-	case inQuietHour && stats.Free < domain.LowWatermark:
-		refill, purge = true, true
-	case inQuietHour && stats.Burned > 0:
-		purge = true
-	}
-	if !refill && !purge {
-		return
-	}
-	if purge {
-		if err := s.pool.PurgeBurned(ctx); err != nil {
-			s.log.Error("purge slots", "err", err)
-			return
-		}
-		s.lastPurge = now
-	}
-	if refill {
-		if err := s.pool.Refill(ctx, domain.RefillBatch); err != nil {
-			s.log.Error("refill slots", "err", err)
-			return
-		}
-	}
-	s.log.Info("slot pool maintained", "free", stats.Free, "refill", refill, "purge", purge)
-	s.applyState(ctx)
-}
-
-func (s *Syncer) recordDevices(ctx context.Context, now time.Time) error {
-	online := s.Online()
-	if len(online) == 0 {
-		return nil
-	}
-	rows, err := s.st.Q.ListSlotUsers(ctx)
-	if err != nil {
-		return err
-	}
-	owner := make(map[string]int64, len(rows))
-	for _, r := range rows {
-		owner[r.SlotName] = r.UserID
-	}
-	return s.st.Tx(ctx, func(q *db.Queries) error {
-		for slot, on := range online {
-			uid, ok := owner[slot]
-			if !ok {
-				continue
-			}
-			if err := q.SetUserOnline(ctx, db.SetUserOnlineParams{OnlineAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, ID: uid}); err != nil {
-				return err
-			}
-			for _, ip := range on.IPs {
-				if err := q.UpsertDevice(ctx, db.UpsertDeviceParams{UserID: uid, Ip: ip, FirstSeen: now.Unix(), LastSeen: now.Unix()}); err != nil {
-					return err
-				}
-			}
-		}
-		return q.PruneDevices(ctx, now.Add(-30*24*time.Hour).Unix())
-	})
-}
-
 func stateKey(st nodeapi.DesiredState) string {
 	raw, _ := json.Marshal(struct {
 		I []nodeapi.Inbound
 		S []nodeapi.Slot
 		T *nodeapi.TLSFiles
-	}{st.Inbounds, st.Slots, st.TLS})
+		P int
+	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -503,7 +409,7 @@ func stateKey(st nodeapi.DesiredState) string {
 func policyKey(ps []nodeapi.Policy) string {
 	h := sha256.New()
 	for _, p := range ps {
-		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0})
+		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs})
 		h.Write(raw)
 	}
 	return hex.EncodeToString(h.Sum(nil))

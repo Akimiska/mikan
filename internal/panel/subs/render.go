@@ -4,21 +4,116 @@ package subs
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net"
-	"net/url"
+	"net/netip"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
-	"mikan/internal/nodeapi"
+	"mikan/internal/panel/presets"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 )
 
 // Endpoint describes how clients reach the node.
 type Endpoint struct {
-	Host      string // IP or domain the client connects to
-	SNI       string // TLS server name for Hysteria2/TUIC; empty for IP-only installs
-	PinSHA256 string // hex SHA-256 of the certificate when it is self-signed
+	Host      string   // IP or domain the client connects to
+	SNI       string   // TLS server name for Hysteria2/TUIC; empty for IP-only installs
+	PinSHA256 string   // hex SHA-256 of the certificate when it is self-signed
+	Direct    []string // server IPs and names that bypass the tunnel (panel, SSH)
+}
+
+// Groups are the proxy-group names Clash-family apps show; the admin can rename them.
+type Groups struct {
+	Main string // selector, "VPN" by default
+	Auto string // url-test, "Авто" by default
+}
+
+const (
+	DefaultMainGroup = "VPN"
+	DefaultAutoGroup = "Авто"
+	// AliasGroup is the name Clash apps assume for the main group in the rules they
+	// inject themselves (Koala Clash per-app routing: "PROCESS-NAME,app.exe,PROXY").
+	AliasGroup = "PROXY"
+)
+
+// Routing is how Clash-family apps split traffic between the tunnel and the direct path.
+type Routing string
+
+const (
+	// RoutingRUDirect sends Russian sites and IPs past the tunnel by mihomo's own geodata
+	// (MetaCubeX geosite category-ru and GeoIP ru): banks and state services refuse
+	// foreign IPs, and the node does not carry traffic that needs no VPN.
+	RoutingRUDirect Routing = "ru_direct"
+	// RoutingAll sends everything but the LAN through the tunnel and needs no geodata.
+	RoutingAll     Routing = "all"
+	DefaultRouting         = RoutingRUDirect
+)
+
+// ParseRouting maps a stored setting to a mode; empty and unknown values get the default.
+func ParseRouting(s string) Routing {
+	if r := Routing(s); r == RoutingRUDirect || r == RoutingAll {
+		return r
+	}
+	return DefaultRouting
+}
+
+// geoxURL is the geodata Koala Clash ships (MetaCubeX meta-rules-dat, mihomo's own
+// default). Apps without the files download them from here before the profile starts.
+var geoxURL = map[string]string{
+	"geoip":   "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip-lite.dat",
+	"geosite": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat",
+	"mmdb":    "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb",
+	"asn":     "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb",
+}
+
+func (g Groups) withDefaults() Groups {
+	if g.Main == "" {
+		g.Main = DefaultMainGroup
+	}
+	if g.Auto == "" {
+		g.Auto = DefaultAutoGroup
+	}
+	return g
+}
+
+// reserved names are mihomo's built-in policies; a group or proxy with such a name
+// breaks the profile.
+var reserved = []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"}
+
+// ValidName checks a group or proxy name the admin typed. Commas are refused because
+// rules reference groups as "MATCH,<name>".
+func ValidName(s string) error {
+	switch {
+	case s == "" || strings.TrimSpace(s) != s:
+		return errors.New("name_blank")
+	case utf8.RuneCountInString(s) > 48:
+		return errors.New("name_too_long")
+	case strings.ContainsAny(s, ",\"'\\"):
+		return errors.New("name_bad_char")
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return errors.New("name_bad_char")
+		}
+	}
+	for _, x := range reserved {
+		if strings.EqualFold(s, x) {
+			return errors.New("name_reserved")
+		}
+	}
+	return nil
+}
+
+// ProxyName is the name an inbound gets in subscriptions.
+func ProxyName(in db.Inbound) string {
+	if in.DisplayName != "" {
+		return in.DisplayName
+	}
+	info, _ := presets.Get(in.Preset)
+	return info.SubName
 }
 
 type Profile struct {
@@ -35,112 +130,32 @@ type proxy struct {
 
 func build(p Profile) ([]proxy, error) {
 	var out []proxy
-	host := p.Endpoint.Host
+	used := map[string]bool{}
+	slot := proto.Slot{Name: p.Slot.Name, UUID: p.Slot.Uuid, Secret: p.Slot.Secret}
 	for _, in := range p.Inbounds {
 		port, err := firstPort(in.Port)
 		if err != nil {
 			return nil, err
 		}
-		addr := net.JoinHostPort(host, strconv.Itoa(port))
-		switch in.Preset {
-		case nodeapi.PresetVlessVision:
-			var s nodeapi.VlessVisionSettings
-			if err := json.Unmarshal([]byte(in.Settings), &s); err != nil {
-				return nil, err
-			}
-			name := "VLESS Vision"
-			q := realityQuery(s.Reality)
-			q.Set("flow", "xtls-rprx-vision")
-			q.Set("type", "tcp")
-			out = append(out, proxy{name: name,
-				uri: "vless://" + p.Slot.Uuid + "@" + addr + "?" + q.Encode() + "#" + url.PathEscape(name),
-				yaml: map[string]any{"name": name, "type": "vless", "server": host, "port": port, "uuid": p.Slot.Uuid,
-					"network": "tcp", "tls": true, "udp": true, "flow": "xtls-rprx-vision",
-					"servername": s.Reality.ServerNames[0], "client-fingerprint": "chrome",
-					"reality-opts": map[string]any{"public-key": s.Reality.PublicKey, "short-id": s.Reality.ShortIDs[0]}}})
-		case nodeapi.PresetVlessXHTTP:
-			var s nodeapi.VlessXHTTPSettings
-			if err := json.Unmarshal([]byte(in.Settings), &s); err != nil {
-				return nil, err
-			}
-			name := "VLESS XHTTP"
-			q := realityQuery(s.Reality)
-			q.Set("type", "xhttp")
-			q.Set("path", s.Path)
-			q.Set("mode", s.Mode)
-			out = append(out, proxy{name: name,
-				uri: "vless://" + p.Slot.Uuid + "@" + addr + "?" + q.Encode() + "#" + url.PathEscape(name),
-				yaml: map[string]any{"name": name, "type": "vless", "server": host, "port": port, "uuid": p.Slot.Uuid,
-					"network": "xhttp", "tls": true, "udp": false,
-					"servername": s.Reality.ServerNames[0], "client-fingerprint": "chrome",
-					"reality-opts": map[string]any{"public-key": s.Reality.PublicKey, "short-id": s.Reality.ShortIDs[0]},
-					"xhttp-opts":   map[string]any{"path": s.Path, "mode": s.Mode}}})
-		case nodeapi.PresetHysteria2:
-			var s nodeapi.Hysteria2Settings
-			if err := json.Unmarshal([]byte(in.Settings), &s); err != nil {
-				return nil, err
-			}
-			name := "Hysteria2"
-			q := url.Values{}
-			y := map[string]any{"name": name, "type": "hysteria2", "server": host, "port": port, "password": p.Slot.Secret, "alpn": []string{"h3"}}
-			if in.Port != strconv.Itoa(port) {
-				q.Set("mport", in.Port)
-				y["ports"] = in.Port
-			}
-			if s.ObfsPassword != "" {
-				q.Set("obfs", "salamander")
-				q.Set("obfs-password", s.ObfsPassword)
-				y["obfs"], y["obfs-password"] = "salamander", s.ObfsPassword
-			}
-			tlsParams(p.Endpoint, q, y, "insecure", "pinSHA256")
-			out = append(out, proxy{name: name,
-				uri:  "hysteria2://" + url.PathEscape(p.Slot.Secret) + "@" + addr + "/?" + q.Encode() + "#" + url.PathEscape(name),
-				yaml: y})
-		case nodeapi.PresetTUIC:
-			var s nodeapi.TUICSettings
-			if err := json.Unmarshal([]byte(in.Settings), &s); err != nil {
-				return nil, err
-			}
-			name := "TUIC"
-			cc := s.CongestionControl
-			if cc == "" {
-				cc = "bbr"
-			}
-			q := url.Values{"congestion_control": {cc}, "alpn": {"h3"}, "udp_relay_mode": {"native"}}
-			y := map[string]any{"name": name, "type": "tuic", "server": host, "port": port, "uuid": p.Slot.Uuid,
-				"password": p.Slot.Secret, "alpn": []string{"h3"}, "congestion-controller": cc, "udp-relay-mode": "native"}
-			tlsParams(p.Endpoint, q, y, "allow_insecure", "")
-			out = append(out, proxy{name: name,
-				uri:  "tuic://" + p.Slot.Uuid + ":" + url.PathEscape(p.Slot.Secret) + "@" + addr + "?" + q.Encode() + "#" + url.PathEscape(name),
-				yaml: y})
+		t, err := proto.Parse(in.Config)
+		if err != nil {
+			// Saved configs are validated; one broken inbound must not empty the subscription.
+			continue
 		}
+		// mihomo refuses a profile with two proxies of the same name.
+		name := ProxyName(in)
+		for i := 2; used[name]; i++ {
+			name = ProxyName(in) + " " + strconv.Itoa(i)
+		}
+		c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: p.Endpoint.Host, Port: port, PortSpec: in.Port,
+			SNI: p.Endpoint.SNI, PinSHA256: p.Endpoint.PinSHA256, Slot: slot})
+		if err != nil {
+			continue
+		}
+		used[name] = true
+		out = append(out, proxy{name: name, uri: c.URI, yaml: c.Mihomo})
 	}
 	return out, nil
-}
-
-func realityQuery(r nodeapi.RealitySettings) url.Values {
-	return url.Values{
-		"encryption": {"none"}, "security": {"reality"}, "sni": {r.ServerNames[0]},
-		"fp": {"chrome"}, "pbk": {r.PublicKey}, "sid": {r.ShortIDs[0]},
-	}
-}
-
-// tlsParams: with a self-signed certificate the link pins its fingerprint; with a real
-// certificate the client verifies it normally.
-func tlsParams(ep Endpoint, q url.Values, y map[string]any, insecureKey, pinKey string) {
-	if ep.SNI != "" {
-		q.Set("sni", ep.SNI)
-		y["sni"] = ep.SNI
-	}
-	if ep.PinSHA256 == "" {
-		return
-	}
-	q.Set(insecureKey, "1")
-	if pinKey != "" {
-		q.Set(pinKey, ep.PinSHA256)
-	}
-	y["fingerprint"] = ep.PinSHA256
-	y["skip-cert-verify"] = false
 }
 
 func firstPort(spec string) (int, error) {
@@ -167,30 +182,72 @@ func URIs(p Profile) (string, error) {
 }
 
 // Mihomo renders a complete client profile. mihomo's parser accepts JSON as YAML.
-func Mihomo(p Profile, rules []string) ([]byte, error) {
+func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 	ps, err := build(p)
 	if err != nil {
 		return nil, err
 	}
+	g = g.withDefaults()
 	proxies := make([]map[string]any, len(ps))
 	names := make([]string, len(ps))
 	for i, x := range ps {
 		proxies[i], names[i] = x.yaml, x.name
 	}
+	groups := []map[string]any{
+		{"name": g.Main, "type": "select", "proxies": append([]string{g.Auto}, names...)},
+		{"name": g.Auto, "type": "url-test", "proxies": names, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50},
+	}
+	if g.Main != AliasGroup {
+		groups = append(groups, map[string]any{"name": AliasGroup, "type": "select", "proxies": []string{g.Main}, "hidden": true})
+	}
+	dns := map[string]any{
+		"enable": true, "ipv6": false, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
+		"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
+		"nameserver":         []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"},
+	}
+	rules := append(directRules(p.Endpoint.Direct), "GEOIP,LAN,DIRECT,no-resolve")
 	cfg := map[string]any{
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning",
-		"ipv6": true, "unified-delay": true, "tcp-concurrent": true,
-		"dns": map[string]any{
-			"enable": true, "ipv6": true, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
-			"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
-			"nameserver":         []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"},
-		},
-		"proxies": proxies,
-		"proxy-groups": []map[string]any{
-			{"name": "VPN", "type": "select", "proxies": append([]string{"Авто"}, names...)},
-			{"name": "Авто", "type": "url-test", "proxies": names, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50},
-		},
-		"rules": rules,
+		// The node has no IPv6 on most VPS: with it on, apps first try IPv6 through the
+		// tunnel and wait for the node's "network unreachable" before falling back.
+		"ipv6": false, "unified-delay": true, "tcp-concurrent": true,
+		"dns":          dns,
+		"proxies":      proxies,
+		"proxy-groups": groups,
 	}
+	if r == RoutingRUDirect {
+		rules = append(rules, "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT")
+		cfg["geodata-mode"], cfg["geox-url"] = false, geoxURL
+		// GEOIP,ru makes the app resolve every domain itself. DoH straight from Russia
+		// stalls under TSPU throttling, so it goes through the tunnel (the alias group has
+		// a fixed name: "&" or "=" in a renamed group would break the "#group" suffix).
+		// Russian domains resolve with Yandex DNS directly and keep working without the VPN.
+		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + AliasGroup, "https://8.8.8.8/dns-query#" + AliasGroup}
+		dns["proxy-server-nameserver"] = []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"}
+		dns["nameserver-policy"] = map[string]any{"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"}}
+	}
+	cfg["rules"] = append(rules, "MATCH,"+g.Main)
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// directRules keep traffic to the server itself (panel, SSH, subscription updates) out
+// of the tunnel: in TUN mode it would otherwise loop through the node and die with it.
+func directRules(hosts []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, h := range hosts {
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		switch ip, err := netip.ParseAddr(h); {
+		case err != nil:
+			out = append(out, "DOMAIN,"+h+",DIRECT")
+		case ip.Is4():
+			out = append(out, "IP-CIDR,"+ip.String()+"/32,DIRECT,no-resolve")
+		default:
+			out = append(out, "IP-CIDR6,"+ip.String()+"/128,DIRECT,no-resolve")
+		}
+	}
+	return out
 }

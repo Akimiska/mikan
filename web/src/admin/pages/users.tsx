@@ -8,20 +8,14 @@ import { userActions, useTariffs, useUserMutation, useUsers } from "../../api/ho
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Avatar, Bar, Button, EmptyState, ErrorState, PageHeader, Skeleton, StatePill } from "../../components/ui";
-import { bytes, dateShort, expiryText, num, plural } from "../../lib/format";
+import { t } from "../../i18n";
+import { bytes, dateShort, expiryText, num } from "../../lib/format";
 import { CreateUserDrawer } from "./user-create";
 import { UserDrawer } from "./user-drawer";
 
 export type UsersSearch = { state: "all" | User["state"]; q: string; user?: number; create?: true };
 
-const FILTERS: { id: UsersSearch["state"]; label: string; count: keyof NonNullable<ReturnType<typeof useUsers>["data"]>["counts"] }[] = [
-  { id: "all", label: "Все", count: "all" },
-  { id: "active", label: "Активные", count: "active" },
-  { id: "expiring", label: "Истекают", count: "expiring" },
-  { id: "limited", label: "Исчерпан лимит", count: "limited" },
-  { id: "expired", label: "Истекли", count: "expired" },
-  { id: "disabled", label: "Отключены", count: "disabled" },
-];
+const FILTERS: UsersSearch["state"][] = ["all", "active", "expiring", "limited", "expired", "disabled"];
 
 export function UsersPage() {
   const search = useSearch({ from: "/_app/users" });
@@ -32,13 +26,13 @@ export function UsersPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (q !== search.q) void navigate({ search: (s) => ({ ...s, q }), replace: true });
     }, 250);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, [q, search.q, navigate]);
 
-  const tariffById = useMemo(() => new Map((tariffs.data ?? []).map((t) => [t.id, t])), [tariffs.data]);
+  const tariffById = useMemo(() => new Map((tariffs.data ?? []).map((tr) => [tr.id, tr])), [tariffs.data]);
   const items = users.data?.items ?? [];
   const counts = users.data?.counts;
   const openUser = (id?: number) => void navigate({ search: (s) => ({ ...s, user: id, create: undefined }) });
@@ -55,25 +49,25 @@ export function UsersPage() {
   if (users.isPending) {
     body = <TableSkeleton />;
   } else if (users.isError) {
-    body = <ErrorState title="Не удалось загрузить список" text={errorText(users.error)} onRetry={() => void users.refetch()} />;
+    body = <ErrorState title={t("users.loadFailed")} text={errorText(users.error)} onRetry={() => void users.refetch()} />;
   } else if (counts && counts.all === 0) {
     body = (
-      <EmptyState title="Пока ни одного пользователя" text="Создайте первого — ссылка на подписку и QR-код появятся сразу.">
+      <EmptyState title={t("users.emptyTitle")} text={t("users.emptyText")}>
         <Button variant="primary" onClick={() => void navigate({ search: (s) => ({ ...s, create: true }) })}>
-          <Plus size={18} aria-hidden /> Новый пользователь
+          <Plus size={18} aria-hidden /> {t("dashboard.newUser")}
         </Button>
       </EmptyState>
     );
   } else if (items.length === 0) {
     body = (
-      <EmptyState search title="Никого не нашли" text={search.q ? `По запросу «${search.q}» совпадений нет. Проверьте написание или сбросьте фильтр.` : "В этой группе сейчас никого нет."}>
+      <EmptyState search title={t("users.notFoundTitle")} text={search.q ? t("users.notFoundQuery", { q: search.q }) : t("users.notFoundGroup")}>
         <Button
           onClick={() => {
             setQ("");
             void navigate({ search: { state: "all", q: "" } });
           }}
         >
-          Сбросить фильтр
+          {t("users.resetFilter")}
         </Button>
       </EmptyState>
     );
@@ -88,18 +82,18 @@ export function UsersPage() {
                   type="checkbox"
                   className="check"
                   checked={allSelected}
-                  aria-label="Выбрать всех на странице"
+                  aria-label={t("users.selectAll")}
                   onChange={() => setSelected(allSelected ? new Set() : new Set(items.map((u) => u.id)))}
                 />
               </th>
-              <th>Пользователь</th>
-              <th>Тариф</th>
-              <th>Трафик</th>
-              <th>Срок</th>
-              <th>Устройства</th>
-              <th>Статус</th>
+              <th>{t("users.colUser")}</th>
+              <th>{t("users.colTariff")}</th>
+              <th>{t("users.colTraffic")}</th>
+              <th>{t("users.colExpiry")}</th>
+              <th>{t("users.colDevices")}</th>
+              <th>{t("users.colStatus")}</th>
               <th className="w-12">
-                <span className="sr-only">Открыть</span>
+                <span className="sr-only">{t("common.open")}</span>
               </th>
             </tr>
           </thead>
@@ -115,10 +109,8 @@ export function UsersPage() {
           ))}
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-[var(--hairline)] p-3 text-[13px] text-[var(--ink-500)]">
-          <span>
-            Показано {num(items.length)} из {num(users.data?.total ?? 0)}
-          </span>
-          <span className="max-md:hidden">Строка открывает карточку · пробел выбирает</span>
+          <span>{t("users.shown", { n: num(items.length), total: num(users.data?.total ?? 0) })}</span>
+          <span className="max-md:hidden">{t("users.keyboardHint")}</span>
         </div>
       </>
     );
@@ -127,39 +119,39 @@ export function UsersPage() {
   return (
     <>
       <PageHeader
-        title="Пользователи"
-        sub={counts ? `${num(counts.all)} ${plural(counts.all, "человек", "человека", "человек")} · ${num(counts.active)} с активной подпиской` : "…"}
+        title={t("nav.users")}
+        sub={counts ? t("users.subtitle", { n: counts.all, active: num(counts.active) }) : "…"}
         actions={
           <Button variant="primary" onClick={() => void navigate({ search: (s) => ({ ...s, create: true, user: undefined }) })}>
             <Plus size={18} aria-hidden />
-            <span className="max-[760px]:hidden">Новый пользователь</span>
+            <span className="max-[760px]:hidden">{t("dashboard.newUser")}</span>
           </Button>
         }
       />
       <div className="reveal flex flex-col items-stretch justify-between gap-3 lg:flex-row lg:items-center">
-        <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 lg:pb-0" role="group" aria-label="Фильтр">
+        <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 lg:pb-0" role="group" aria-label={t("users.filter")}>
           {FILTERS.map((f) => (
             <button
-              key={f.id}
+              key={f}
               type="button"
               className="chip shrink-0"
-              aria-pressed={search.state === f.id}
+              aria-pressed={search.state === f}
               onClick={() => {
                 setSelected(new Set());
-                void navigate({ search: (s) => ({ ...s, state: f.id }) });
+                void navigate({ search: (s) => ({ ...s, state: f }) });
               }}
             >
-              {f.label}
-              {counts ? <span className="chip-count num">{num(counts[f.count])}</span> : null}
+              {t(`users.filters.${f}`)}
+              {counts ? <span className="chip-count num">{num(counts[f])}</span> : null}
             </button>
           ))}
         </div>
         <label className="search-field">
           <Search size={16} aria-hidden />
-          <input type="search" placeholder="Имя, контакт, тег или заметка" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Поиск пользователей" />
+          <input type="search" placeholder={t("users.searchPlaceholder")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("users.searchLabel")} />
         </label>
       </div>
-      <section className="card glass reveal overflow-hidden !p-2 md:!pb-0" style={{ "--i": 1 } as React.CSSProperties} aria-label="Список пользователей" aria-busy={users.isFetching}>
+      <section className="card glass reveal overflow-hidden !p-2 md:!pb-0" style={{ "--i": 1 } as React.CSSProperties} aria-label={t("users.listLabel")} aria-busy={users.isFetching}>
         {body}
       </section>
 
@@ -183,7 +175,7 @@ function Usage({ u }: { u: User }) {
           <span>
             <b className="num">{bytes(used)}</b>
           </span>
-          <span>без лимита</span>
+          <span>{t("users.unlimited")}</span>
         </div>
         <Bar pct={100} />
       </div>
@@ -194,7 +186,7 @@ function Usage({ u }: { u: User }) {
     <div className={clsx("usage min-w-[160px]", pct >= 100 ? "bad" : pct >= 85 && "warn")}>
       <div className="usage-txt">
         <span>
-          <b className="num">{bytes(used)}</b> из {bytes(u.traffic_limit)}
+          <b className="num">{bytes(used)}</b> {t("users.of", { total: bytes(u.traffic_limit) })}
         </span>
         <span className="num">{Math.min(100, Math.round(pct))}%</span>
       </div>
@@ -207,7 +199,7 @@ function Expiry({ u }: { u: User }) {
   const e = expiryText(u.expires_at);
   return (
     <>
-      <div className="font-medium">{u.expires_at ? `до ${dateShort(u.expires_at)}` : "бессрочно"}</div>
+      <div className="font-medium">{u.expires_at ? t("users.until", { date: dateShort(u.expires_at) }) : t("time.forever")}</div>
       {u.expires_at ? <div className={clsx("exp-days", e.tone)}>{e.text}</div> : null}
     </>
   );
@@ -229,7 +221,7 @@ function UserRow({ u, tariff, selected, onToggle, onOpen }: { u: User; tariff?: 
       }}
     >
       <td onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" className="check" checked={selected} onChange={onToggle} aria-label={`Выбрать: ${u.name}`} />
+        <input type="checkbox" className="check" checked={selected} onChange={onToggle} aria-label={t("users.select", { name: u.name })} />
       </td>
       <td>
         <div className="flex min-w-[200px] items-center gap-3">
@@ -237,13 +229,13 @@ function UserRow({ u, tariff, selected, onToggle, onOpen }: { u: User; tariff?: 
           <div className="min-w-0">
             <div className="truncate font-medium">
               {u.name}
-              {u.online ? <span className="online-dot" title="Сейчас онлайн" /> : null}
+              {u.online ? <span className="online-dot" title={t("users.onlineNow")} /> : null}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--ink-500)]">
               {u.contact ? <span>{u.contact}</span> : null}
-              {u.tags.map((t) => (
-                <span key={t} className="tag">
-                  {t}
+              {u.tags.map((tag) => (
+                <span key={tag} className="tag">
+                  {tag}
                 </span>
               ))}
             </div>
@@ -252,7 +244,7 @@ function UserRow({ u, tariff, selected, onToggle, onOpen }: { u: User; tariff?: 
       </td>
       <td>
         <div className="font-medium">{tariff?.name ?? "—"}</div>
-        <div className="mt-0.5 text-xs text-[var(--ink-500)]">{u.traffic_limit != null ? `${bytes(u.traffic_limit)}` : "без лимита"}</div>
+        <div className="mt-0.5 text-xs text-[var(--ink-500)]">{u.traffic_limit != null ? bytes(u.traffic_limit) : t("users.unlimited")}</div>
       </td>
       <td>
         <Usage u={u} />
@@ -263,7 +255,7 @@ function UserRow({ u, tariff, selected, onToggle, onOpen }: { u: User; tariff?: 
       <td>
         <span className={clsx("num font-medium", u.device_limit != null && devices >= u.device_limit && devices > 0 && "text-[var(--honey-600)]")}>
           {devices}
-          <small className="font-normal text-[var(--ink-500)]"> из {u.device_limit ?? "∞"}</small>
+          <small className="font-normal text-[var(--ink-500)]"> {t("users.of", { total: u.device_limit ?? "∞" })}</small>
         </span>
       </td>
       <td>
@@ -289,7 +281,7 @@ function UserCard({ u, tariff, onOpen }: { u: User; tariff?: Tariff; onOpen: () 
           {u.online ? <span className="online-dot" /> : null}
         </div>
         <div className="truncate text-xs text-[var(--ink-500)]">
-          {tariff?.name ?? "без тарифа"} · {e.text}
+          {tariff?.name ?? t("users.noTariff")} · {e.text}
         </div>
       </div>
       <StatePill state={u.state} />
@@ -302,7 +294,7 @@ function UserCard({ u, tariff, onOpen }: { u: User; tariff?: Tariff; onOpen: () 
 
 function TableSkeleton() {
   return (
-    <div aria-busy aria-label="Загрузка списка">
+    <div aria-busy aria-label={t("users.loadingList")}>
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="grid grid-cols-[40px_2fr_1fr_1.4fr_1fr_0.8fr_0.9fr] items-center gap-3 border-t border-[var(--hairline)] px-3 py-4 first:border-t-0">
           <Skeleton style={{ width: 18, height: 18, borderRadius: 6 }} />
@@ -324,18 +316,20 @@ function TableSkeleton() {
   );
 }
 
+type BulkAction = "extend" | "reset" | "disable" | "enable" | "delete";
+
 function BulkBar({ selected, clear }: { selected: Set<number>; clear: () => void }) {
   const toast = useToast();
   const bulk = useUserMutation(userActions.bulk);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const ids = [...selected];
   const n = ids.length;
-  const run = (action: "extend" | "reset" | "disable" | "enable" | "delete", done: string) =>
+  const run = (action: BulkAction) =>
     bulk.mutate(
       { ids, action, days: action === "extend" ? 30 : undefined },
       {
         onSuccess: (r) => {
-          toast.ok(`${done}: ${r.affected}`);
+          toast.ok(t(`users.bulkDone.${action}`, { n: r.affected }));
           clear();
           setConfirmDelete(false);
         },
@@ -349,29 +343,29 @@ function BulkBar({ selected, clear }: { selected: Set<number>; clear: () => void
           <motion.div
             className="bulk-bar glass-strong"
             role="region"
-            aria-label="Действия с выбранными"
+            aria-label={t("users.bulkLabel")}
             initial={{ opacity: 0, y: 24, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: 24, x: "-50%" }}
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
           >
-            <span className="num mr-2 font-semibold whitespace-nowrap">Выбрано {n}</span>
-            <Button size="sm" loading={bulk.isPending && bulk.variables?.action === "extend"} onClick={() => run("extend", "Продлено")}>
+            <span className="num mr-2 font-semibold whitespace-nowrap">{t("users.selected", { n })}</span>
+            <Button size="sm" loading={bulk.isPending && bulk.variables?.action === "extend"} onClick={() => run("extend")}>
               <CalendarPlus size={16} aria-hidden />
-              <span className="max-sm:hidden">+30 дней</span>
+              <span className="max-sm:hidden">{t("dashboard.plus30")}</span>
             </Button>
-            <Button size="sm" onClick={() => run("reset", "Трафик сброшен")}>
+            <Button size="sm" onClick={() => run("reset")}>
               <RotateCcw size={16} aria-hidden />
-              <span className="max-sm:hidden">Сбросить трафик</span>
+              <span className="max-sm:hidden">{t("users.resetTraffic")}</span>
             </Button>
-            <Button size="sm" variant="danger" onClick={() => run("disable", "Отключено")}>
+            <Button size="sm" variant="danger" onClick={() => run("disable")}>
               <Power size={16} aria-hidden />
-              <span className="max-sm:hidden">Отключить</span>
+              <span className="max-sm:hidden">{t("users.disable")}</span>
             </Button>
-            <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)} aria-label="Удалить выбранных">
+            <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)} aria-label={t("users.deleteSelected")}>
               <Trash2 size={16} aria-hidden />
             </Button>
-            <button type="button" className="icon-btn" aria-label="Снять выделение" onClick={clear}>
+            <button type="button" className="icon-btn" aria-label={t("users.clearSelection")} onClick={clear}>
               <X size={16} />
             </button>
           </motion.div>
@@ -380,12 +374,12 @@ function BulkBar({ selected, clear }: { selected: Set<number>; clear: () => void
       <Confirm
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={`Удалить ${n} ${plural(n, "пользователя", "пользователей", "пользователей")}?`}
-        text="Их ссылки перестанут работать сразу, а статистика будет удалена. Отменить это нельзя."
-        confirm="Удалить"
+        title={t("users.deleteTitle", { n })}
+        text={t("users.deleteText")}
+        confirm={t("common.delete")}
         danger
         loading={bulk.isPending}
-        onConfirm={() => run("delete", "Удалено")}
+        onConfirm={() => run("delete")}
       />
     </>
   );

@@ -74,9 +74,33 @@
         ],
         "type": "object"
       },
+      "CheckTargetInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "dest": {
+            "description": "host:port",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "sni": {
+            "description": "Имя для клиентов; по умолчанию — хост из dest",
+            "maxLength": 253,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dest"
+        ],
+        "type": "object"
+      },
       "CreateInboundInputBody": {
         "additionalProperties": false,
         "properties": {
+          "config": {
+            "description": "Шаблон листенера (YAML) для preset=custom",
+            "maxLength": 65536,
+            "type": "string"
+          },
           "dest": {
             "description": "host:port для REALITY",
             "maxLength": 255,
@@ -88,10 +112,14 @@
           },
           "preset": {
             "enum": [
-              "vless_reality_vision",
               "vless_reality_xhttp",
               "hysteria2",
-              "tuic_v5"
+              "tuic_v5",
+              "vless_reality_vision",
+              "vless_reality_grpc",
+              "trojan_reality",
+              "anytls",
+              "custom"
             ],
             "type": "string"
           }
@@ -253,12 +281,16 @@
       "InboundView": {
         "additionalProperties": false,
         "properties": {
-          "conns": {
-            "format": "int64",
-            "type": "integer"
+          "config": {
+            "description": "Шаблон листенера (YAML)",
+            "type": "string"
           },
           "dest": {
             "description": "Сайт для маскировки REALITY",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Своё имя в подписке; пусто — имя по умолчанию",
             "type": "string"
           },
           "enabled": {
@@ -297,7 +329,15 @@
             ],
             "type": "string"
           },
+          "sub_name": {
+            "description": "Имя, которое увидит клиент",
+            "type": "string"
+          },
           "title": {
+            "type": "string"
+          },
+          "type": {
+            "description": "Тип листенера mihomo",
             "type": "string"
           },
           "updated_at": {
@@ -310,11 +350,14 @@
           "name",
           "preset",
           "title",
+          "type",
           "network",
           "port",
           "enabled",
+          "display_name",
+          "sub_name",
+          "config",
           "status",
-          "conns",
           "updated_at"
         ],
         "type": "object"
@@ -322,6 +365,9 @@
       "Info": {
         "additionalProperties": false,
         "properties": {
+          "default": {
+            "type": "boolean"
+          },
           "default_name": {
             "type": "string"
           },
@@ -334,10 +380,16 @@
           "network": {
             "type": "string"
           },
+          "sub_name": {
+            "type": "string"
+          },
           "summary": {
             "type": "string"
           },
           "title": {
+            "type": "string"
+          },
+          "type": {
             "type": "string"
           }
         },
@@ -345,9 +397,12 @@
           "id",
           "title",
           "summary",
+          "type",
           "network",
           "default_port",
-          "default_name"
+          "default_name",
+          "sub_name",
+          "default"
         ],
         "type": "object"
       },
@@ -568,8 +623,18 @@
       "PatchInboundInputBody": {
         "additionalProperties": false,
         "properties": {
+          "config": {
+            "description": "Шаблон листенера (YAML)",
+            "maxLength": 65536,
+            "type": "string"
+          },
           "dest": {
             "maxLength": 255,
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию",
+            "maxLength": 200,
             "type": "string"
           },
           "enabled": {
@@ -577,6 +642,11 @@
           },
           "port": {
             "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+            "type": "string"
+          },
+          "server_name": {
+            "description": "SNI для клиентов, если dest — IP (цель из подбора соседей)",
+            "maxLength": 253,
             "type": "string"
           }
         },
@@ -602,6 +672,21 @@
             "maximum": 23,
             "minimum": 0,
             "type": "integer"
+          },
+          "sub_group_auto": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "sub_group_main": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "sub_routing": {
+            "enum": [
+              "ru_direct",
+              "all"
+            ],
+            "type": "string"
           },
           "support_url": {
             "description": "https://… или tg://…",
@@ -705,6 +790,94 @@
         ],
         "type": "object"
       },
+      "Result": {
+        "additionalProperties": false,
+        "properties": {
+          "cert_valid": {
+            "type": "boolean"
+          },
+          "dest": {
+            "description": "host:port, который будет набирать нода",
+            "type": "string"
+          },
+          "dns_match": {
+            "description": "Имя резолвится в этот IP: сайт настоящий, а не чужая маскировка",
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "h2": {
+            "type": "boolean"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "ok": {
+            "description": "Подходит как цель REALITY",
+            "type": "boolean"
+          },
+          "rtt_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sni": {
+            "description": "Имя сервера, которое отправят клиенты",
+            "type": "string"
+          },
+          "tls13": {
+            "type": "boolean"
+          },
+          "x25519": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dest",
+          "sni",
+          "ip",
+          "rtt_ms",
+          "tls13",
+          "h2",
+          "x25519",
+          "cert_valid",
+          "dns_match",
+          "ok"
+        ],
+        "type": "object"
+      },
+      "ScanTargetsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ip": {
+            "description": "Адрес сервера, вокруг которого искали",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/Result"
+            },
+            "type": "array"
+          },
+          "scanned": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "self_steal": {
+            "$ref": "#/components/schemas/Result",
+            "description": "Свой домен с сертификатом панели"
+          }
+        },
+        "required": [
+          "ip",
+          "scanned",
+          "results"
+        ],
+        "type": "object"
+      },
       "SessionView": {
         "additionalProperties": false,
         "properties": {
@@ -769,6 +942,22 @@
           "sub_base_url": {
             "type": "string"
           },
+          "sub_group_auto": {
+            "description": "Группа автовыбора самого быстрого подключения",
+            "type": "string"
+          },
+          "sub_group_main": {
+            "description": "Главная группа в Clash-приложениях",
+            "type": "string"
+          },
+          "sub_routing": {
+            "description": "Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN",
+            "enum": [
+              "ru_direct",
+              "all"
+            ],
+            "type": "string"
+          },
           "support_url": {
             "type": "string"
           }
@@ -782,6 +971,9 @@
           "quiet_hour_utc",
           "admin_url",
           "sub_base_url",
+          "sub_group_main",
+          "sub_group_auto",
+          "sub_routing",
           "certificate"
         ],
         "type": "object"
@@ -1267,6 +1459,39 @@
           "created_at"
         ],
         "type": "object"
+      },
+      "ValidateInboundInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "maxLength": 65536,
+            "type": "string"
+          },
+          "port": {
+            "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "config"
+        ],
+        "type": "object"
+      },
+      "ValidateInboundOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "network": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "network"
+        ],
+        "type": "object"
       }
     }
   },
@@ -1663,7 +1888,120 @@
             "description": "Error"
           }
         },
-        "summary": "Добавить подключение из пресета",
+        "summary": "Добавить подключение",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/inbounds/check-target": {
+      "post": {
+        "operationId": "check-target",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckTargetInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Проверить сайт как цель REALITY",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/inbounds/scan-targets": {
+      "post": {
+        "operationId": "scan-targets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanTargetsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Подобрать цели REALITY рядом с сервером",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/inbounds/validate": {
+      "post": {
+        "operationId": "validate-inbound",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateInboundInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidateInboundOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Проверить шаблон листенера без сохранения",
         "tags": [
           "inbounds"
         ]

@@ -115,7 +115,7 @@ func (m *Manager) ensure(ctx context.Context) {
 	}
 	if id == "" || id == "localhost" || isPrivate(id) {
 		m.useFallback()
-		st.Error = "нужен публичный IP или домен"
+		st.Error = "no_public_host"
 		return
 	}
 	if cert, err := m.load(); err == nil && covers(cert.Leaf, id) {
@@ -265,15 +265,16 @@ func isPrivate(id string) bool {
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }
 
+// humanError maps known failures to codes the UI translates; anything else goes out raw.
 func humanError(err error) string {
 	s := err.Error()
 	switch {
 	case strings.Contains(s, "address already in use"):
-		return "порт 80 занят другой программой — Let's Encrypt проверяет сервер через него"
+		return "port80_busy"
 	case strings.Contains(s, "rateLimited") || strings.Contains(s, "too many"):
-		return "Let's Encrypt временно ограничил выпуск (много переустановок) — попробуем позже"
+		return "rate_limited"
 	case strings.Contains(s, "connection") || strings.Contains(s, "timeout"):
-		return "Let's Encrypt не достучался до сервера по порту 80 — проверьте файрвол"
+		return "unreachable"
 	}
 	return s
 }

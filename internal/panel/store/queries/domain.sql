@@ -141,12 +141,15 @@ SELECT * FROM inbounds ORDER BY id;
 SELECT * FROM inbounds WHERE id = ?;
 
 -- name: CreateInbound :one
-INSERT INTO inbounds (name, preset, port, enabled, settings, created_at, updated_at)
-VALUES (?, ?, ?, 1, ?, ?, ?)
+INSERT INTO inbounds (node_id, name, preset, port, enabled, settings, config, created_at, updated_at)
+VALUES (?, ?, ?, ?, 1, '{}', ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateInbound :one
-UPDATE inbounds SET port = ?, enabled = ?, settings = ?, updated_at = ? WHERE id = ? RETURNING *;
+UPDATE inbounds SET port = ?, enabled = ?, config = ?, display_name = ?, updated_at = ? WHERE id = ? RETURNING *;
+
+-- name: SetInboundConfig :exec
+UPDATE inbounds SET config = ? WHERE id = ?;
 
 -- name: DeleteInbound :exec
 DELETE FROM inbounds WHERE id = ?;
@@ -157,3 +160,6 @@ SELECT value FROM node_state WHERE key = ?;
 -- name: SetNodeState :exec
 INSERT INTO node_state (key, value) VALUES (?, ?)
 ON CONFLICT (key) DO UPDATE SET value = excluded.value;
+
+-- name: DeleteNodeStateOf :exec
+DELETE FROM node_state WHERE key LIKE '%/' || CAST(sqlc.arg(node_id) AS TEXT);

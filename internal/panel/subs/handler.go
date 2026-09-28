@@ -24,7 +24,8 @@ type Config struct {
 	Brand      string
 	SupportURL string
 	Endpoint   Endpoint
-	Rules      []string
+	Groups     Groups
+	Routing    Routing
 }
 
 type Handler struct {
@@ -82,7 +83,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	switch format {
 	case "clash":
-		body, err := Mihomo(prof, cfg.Rules)
+		body, err := Mihomo(prof, cfg.Groups, cfg.Routing)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

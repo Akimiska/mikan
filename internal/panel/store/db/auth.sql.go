@@ -256,6 +256,41 @@ func (q *Queries) ListAdminSessions(ctx context.Context, adminID int64) ([]Sessi
 	return items, nil
 }
 
+const listAdmins = `-- name: ListAdmins :many
+SELECT id, username, password_hash, totp_secret, recovery_codes, created_at, last_login_at FROM admins ORDER BY id
+`
+
+func (q *Queries) ListAdmins(ctx context.Context) ([]Admin, error) {
+	rows, err := q.db.QueryContext(ctx, listAdmins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Admin{}
+	for rows.Next() {
+		var i Admin
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.PasswordHash,
+			&i.TotpSecret,
+			&i.RecoveryCodes,
+			&i.CreatedAt,
+			&i.LastLoginAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAudit = `-- name: ListAudit :many
 SELECT id, ts, admin_id, "action", target_type, target_id, ip, details FROM audit_log WHERE id < ?1 ORDER BY id DESC LIMIT ?2
 `

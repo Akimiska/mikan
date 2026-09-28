@@ -139,32 +139,35 @@ func (q *Queries) CountTariffs(ctx context.Context) (int64, error) {
 }
 
 const createInbound = `-- name: CreateInbound :one
-INSERT INTO inbounds (name, preset, port, enabled, settings, created_at, updated_at)
-VALUES (?, ?, ?, 1, ?, ?, ?)
-RETURNING id, name, preset, port, enabled, settings, created_at, updated_at
+INSERT INTO inbounds (node_id, name, preset, port, enabled, settings, config, created_at, updated_at)
+VALUES (?, ?, ?, ?, 1, '{}', ?, ?, ?)
+RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config
 `
 
 type CreateInboundParams struct {
+	NodeID    int64
 	Name      string
 	Preset    string
 	Port      string
-	Settings  string
+	Config    string
 	CreatedAt int64
 	UpdatedAt int64
 }
 
 func (q *Queries) CreateInbound(ctx context.Context, arg CreateInboundParams) (Inbound, error) {
 	row := q.db.QueryRowContext(ctx, createInbound,
+		arg.NodeID,
 		arg.Name,
 		arg.Preset,
 		arg.Port,
-		arg.Settings,
+		arg.Config,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
 	var i Inbound
 	err := row.Scan(
 		&i.ID,
+		&i.NodeID,
 		&i.Name,
 		&i.Preset,
 		&i.Port,
@@ -172,6 +175,8 @@ func (q *Queries) CreateInbound(ctx context.Context, arg CreateInboundParams) (I
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Config,
 	)
 	return i, err
 }
@@ -310,6 +315,15 @@ func (q *Queries) DeleteInbound(ctx context.Context, id int64) error {
 	return err
 }
 
+const deleteNodeStateOf = `-- name: DeleteNodeStateOf :exec
+DELETE FROM node_state WHERE key LIKE '%/' || CAST(?1 AS TEXT)
+`
+
+func (q *Queries) DeleteNodeStateOf(ctx context.Context, nodeID string) error {
+	_, err := q.db.ExecContext(ctx, deleteNodeStateOf, nodeID)
+	return err
+}
+
 const deleteUser = `-- name: DeleteUser :exec
 DELETE FROM users WHERE id = ?
 `
@@ -320,7 +334,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
 }
 
 const getInbound = `-- name: GetInbound :one
-SELECT id, name, preset, port, enabled, settings, created_at, updated_at FROM inbounds WHERE id = ?
+SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config FROM inbounds WHERE id = ?
 `
 
 func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
@@ -328,6 +342,7 @@ func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
 	var i Inbound
 	err := row.Scan(
 		&i.ID,
+		&i.NodeID,
 		&i.Name,
 		&i.Preset,
 		&i.Port,
@@ -335,6 +350,8 @@ func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Config,
 	)
 	return i, err
 }
@@ -483,7 +500,7 @@ func (q *Queries) InsertSlot(ctx context.Context, arg InsertSlotParams) error {
 }
 
 const listInbounds = `-- name: ListInbounds :many
-SELECT id, name, preset, port, enabled, settings, created_at, updated_at FROM inbounds ORDER BY id
+SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config FROM inbounds ORDER BY id
 `
 
 func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
@@ -497,6 +514,7 @@ func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
 		var i Inbound
 		if err := rows.Scan(
 			&i.ID,
+			&i.NodeID,
 			&i.Name,
 			&i.Preset,
 			&i.Port,
@@ -504,6 +522,8 @@ func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
 			&i.Settings,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DisplayName,
+			&i.Config,
 		); err != nil {
 			return nil, err
 		}
@@ -766,6 +786,20 @@ func (q *Queries) SetDeviceClient(ctx context.Context, arg SetDeviceClientParams
 	return err
 }
 
+const setInboundConfig = `-- name: SetInboundConfig :exec
+UPDATE inbounds SET config = ? WHERE id = ?
+`
+
+type SetInboundConfigParams struct {
+	Config string
+	ID     int64
+}
+
+func (q *Queries) SetInboundConfig(ctx context.Context, arg SetInboundConfigParams) error {
+	_, err := q.db.ExecContext(ctx, setInboundConfig, arg.Config, arg.ID)
+	return err
+}
+
 const setNodeState = `-- name: SetNodeState :exec
 INSERT INTO node_state (key, value) VALUES (?, ?)
 ON CONFLICT (key) DO UPDATE SET value = excluded.value
@@ -947,28 +981,31 @@ func (q *Queries) TotalTrafficHourly(ctx context.Context, hour int64) ([]TotalTr
 }
 
 const updateInbound = `-- name: UpdateInbound :one
-UPDATE inbounds SET port = ?, enabled = ?, settings = ?, updated_at = ? WHERE id = ? RETURNING id, name, preset, port, enabled, settings, created_at, updated_at
+UPDATE inbounds SET port = ?, enabled = ?, config = ?, display_name = ?, updated_at = ? WHERE id = ? RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config
 `
 
 type UpdateInboundParams struct {
-	Port      string
-	Enabled   int64
-	Settings  string
-	UpdatedAt int64
-	ID        int64
+	Port        string
+	Enabled     int64
+	Config      string
+	DisplayName string
+	UpdatedAt   int64
+	ID          int64
 }
 
 func (q *Queries) UpdateInbound(ctx context.Context, arg UpdateInboundParams) (Inbound, error) {
 	row := q.db.QueryRowContext(ctx, updateInbound,
 		arg.Port,
 		arg.Enabled,
-		arg.Settings,
+		arg.Config,
+		arg.DisplayName,
 		arg.UpdatedAt,
 		arg.ID,
 	)
 	var i Inbound
 	err := row.Scan(
 		&i.ID,
+		&i.NodeID,
 		&i.Name,
 		&i.Preset,
 		&i.Port,
@@ -976,6 +1013,8 @@ func (q *Queries) UpdateInbound(ctx context.Context, arg UpdateInboundParams) (I
 		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Config,
 	)
 	return i, err
 }

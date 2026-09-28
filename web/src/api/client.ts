@@ -1,4 +1,5 @@
 import createClient, { type Middleware } from "openapi-fetch";
+import { t, tMaybe } from "../i18n";
 import type { components, paths } from "./schema";
 
 export type Schemas = components["schemas"];
@@ -35,10 +36,15 @@ export class ApiError extends Error {
     this.detail = b.detail ?? "";
     this.retryAfter = retryAfter;
     this.fields = {};
+    // The API sends codes ("port_in_use") with an optional value; texts live in i18n.
     for (const e of b.errors ?? []) {
-      if (e.location) this.fields[e.location.replace(/^body\./, "")] = e.message ?? "";
+      if (e.location) this.fields[e.location.replace(/^body\./, "")] = apiMessage(e.message ?? "", e.value);
     }
   }
+}
+
+function apiMessage(code: string, value: unknown): string {
+  return tMaybe(`errors.api.${code}`, { value: typeof value === "string" || typeof value === "number" ? value : "" }) ?? code;
 }
 
 const session: Middleware = {
@@ -76,13 +82,13 @@ export async function unwrap<T>(p: Promise<Result<T>>): Promise<T> {
 
 /** Human-readable message for errors the UI does not handle specially. */
 export function errorText(e: unknown): string {
-  if (!(e instanceof ApiError)) return "Что-то пошло не так. Попробуйте ещё раз.";
-  if (e.status === 0) return "Нет связи с панелью. Проверьте интернет.";
-  if (e.status === 503 && e.detail === "no_free_slots") return "Закончились слоты, пополняем пул — повторите через минуту.";
-  if (e.status === 503) return "Нода не отвечает. VPN у пользователей при этом может работать.";
-  if (e.status === 403) return "Сессия устарела. Обновите страницу.";
-  if (e.status === 404) return "Не найдено — возможно, уже удалено.";
-  if (e.status === 409 || e.status === 422) return Object.values(e.fields)[0] || "Проверьте введённые данные.";
-  if (e.status === 429) return `Слишком много попыток. Подождите ${e.retryAfter || 60} с.`;
-  return "Ошибка сервера. Попробуйте ещё раз.";
+  if (!(e instanceof ApiError)) return t("errors.generic");
+  if (e.status === 0) return t("errors.network");
+  if (e.status === 503 && e.detail === "no_free_slots") return t("errors.noSlots");
+  if (e.status === 503) return t("errors.nodeDown");
+  if (e.status === 403) return t("errors.forbidden");
+  if (e.status === 404) return t("errors.notFound");
+  if (e.status === 409 || e.status === 422) return Object.values(e.fields)[0] || tMaybe(`errors.api.${e.detail}`) || t("errors.checkInput");
+  if (e.status === 429) return t("errors.tooMany", { s: e.retryAfter || 60 });
+  return t("errors.server");
 }

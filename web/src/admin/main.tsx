@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { ApiError } from "../api/client";
 import { Atmosphere } from "../components/atmosphere";
 import { ToastProvider } from "../components/toast";
+import { useLocale } from "../i18n";
 import { createAppRouter } from "./router";
 
 const queryClient = new QueryClient({
@@ -27,14 +28,23 @@ window.addEventListener("mikan:unauthorized", () => {
   void router.navigate({ to: "/login", search: { next: router.state.location.href } });
 });
 
+// Texts are read at render time; a language switch remounts the tree (the query cache and
+// the router state survive, they live outside it).
+function Root() {
+  const locale = useLocale();
+  return (
+    <ToastProvider key={locale}>
+      <Atmosphere />
+      <RouterProvider router={router} />
+    </ToastProvider>
+  );
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <Tooltip.Provider delayDuration={300}>
-        <ToastProvider>
-          <Atmosphere />
-          <RouterProvider router={router} />
-        </ToastProvider>
+        <Root />
       </Tooltip.Provider>
     </QueryClientProvider>
   </StrictMode>,

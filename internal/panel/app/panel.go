@@ -83,6 +83,11 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		deps.Online = p.Syncer.Online
 		deps.Health = p.Syncer.Health
 		deps.Listeners = func() []nodeapi.ListenerStatus { return p.Syncer.Health().Listeners }
+		if v, ok := o.Node.(interface {
+			Validate(context.Context, nodeapi.ValidateRequest) error
+		}); ok {
+			deps.NodeValidate = v.Validate
+		}
 	}
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
@@ -128,11 +133,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return subs.Config{}, err
 		}
-		domainName, err := set.String(ctx, settings.KeyDomain)
-		if err != nil {
-			return subs.Config{}, err
+		var domainName, publicHost, routing string
+		var groups subs.Groups
+		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto,
+			settings.KeyRouting: &routing} {
+			if *dst, err = set.String(ctx, key); err != nil {
+				return subs.Config{}, err
+			}
 		}
-		cfg := subs.Config{Brand: brand, SupportURL: support, Endpoint: subs.Endpoint{Host: ep.Host, SNI: domainName}, Rules: []string{"MATCH,VPN"}}
+		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing),
+			Endpoint: subs.Endpoint{Host: ep.Host, SNI: domainName, Direct: []string{publicHost, domainName}}}
 		if o.TLS != nil {
 			if _, pin, err := o.TLS(); err == nil {
 				cfg.Endpoint.PinSHA256 = pin

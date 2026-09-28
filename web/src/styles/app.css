@@ -137,6 +137,7 @@
   .seg button { height: 28px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-600); transition: background-color 0.2s, color 0.2s, box-shadow 0.2s; }
   .seg button:hover { color: var(--ink-900); }
   .seg button[aria-pressed="true"] { background: #fff; color: var(--ink-900); box-shadow: var(--shadow-sm); }
+  .lang-switch button { padding: 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
   .metric { padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.55); border: 1px solid var(--hairline); }
   .metric-label { font-size: 12px; color: var(--ink-500); }
   .metric-value { font: 500 18px/24px var(--font-display-stack); letter-spacing: -0.02em; margin-top: 4px; }
@@ -228,6 +229,11 @@
   .input:focus { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }
   .input[aria-invalid="true"] { border-color: var(--berry-600); }
   textarea.input { height: auto; min-height: 80px; padding: 12px; resize: vertical; line-height: 20px; }
+  .config-editor { border-radius: var(--r-md); border: 1px solid var(--hairline); background: rgba(255, 255, 255, 0.8); overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s; }
+  .config-editor .cm-editor { min-height: 280px; max-height: 60vh; }
+  .config-editor .cm-scroller { overflow: auto; }
+  .config-editor:focus-within { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }
+  .config-editor[aria-invalid="true"] { border-color: var(--berry-600); }
   .opt { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.65); border: 1.5px solid var(--hairline); text-align: left; transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s; }
   .opt:hover { background: #fff; }
   .opt[aria-checked="true"] { border-color: var(--ink-900); background: #fff; box-shadow: var(--shadow-sm); }
@@ -272,6 +278,7 @@
   .brand { padding: 4px; }
   .brand-name, .nav-label, .nav-count, .node-card, .admin-row .who-wrap, .admin-row .logout { display: none; }
   .nav-item { justify-content: center; width: 48px; padding: 0; }
+  .sidebar .lang-switch { flex-direction: column; align-self: center; }
 }
 @media (max-width: 1023px) {
   .app { grid-template-columns: minmax(0, 1fr); padding: 12px; }

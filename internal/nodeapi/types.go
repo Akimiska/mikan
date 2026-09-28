@@ -5,6 +5,8 @@ package nodeapi
 import (
 	"encoding/json"
 	"time"
+
+	"mikan/internal/proto"
 )
 
 const (
@@ -23,20 +25,27 @@ type DesiredState struct {
 	Slots    []Slot    `json:"slots"`
 	Policies []Policy  `json:"policies"`
 	TLS      *TLSFiles `json:"tls,omitempty"`
+	// SelfStealPort allows REALITY dest 127.0.0.1:<port> (the panel's own HTTPS).
+	SelfStealPort int `json:"self_steal_port,omitempty"`
 }
 
 type Inbound struct {
-	Name     string          `json:"name"`
-	Preset   string          `json:"preset"`
-	Listen   string          `json:"listen"`
-	Port     string          `json:"port"` // "443" or a range "20000-20100"
-	Settings json.RawMessage `json:"settings"`
+	Name   string          `json:"name"`
+	Listen string          `json:"listen"`
+	Port   string          `json:"port"`             // "443" or a range "20000-20100"
+	Config json.RawMessage `json:"config,omitempty"` // proto.Template as JSON
+	// Preset and Settings are the format of mikan ≤ 0.1.2; the node still reads them
+	// from a saved state, the panel no longer sends them.
+	Preset   string          `json:"preset,omitempty"`
+	Settings json.RawMessage `json:"settings,omitempty"`
 }
 
-type Slot struct {
-	Name   string `json:"name"`
-	UUID   string `json:"uuid"`
-	Secret string `json:"secret"`
+type Slot = proto.Slot
+
+// ValidateRequest asks the node to parse one inbound with mihomo without applying it.
+type ValidateRequest struct {
+	Inbound       Inbound `json:"inbound"`
+	SelfStealPort int     `json:"self_steal_port,omitempty"`
 }
 
 type Policy struct {
@@ -46,6 +55,9 @@ type Policy struct {
 	DeviceLimit    int      `json:"device_limit"`       // 0 = unlimited
 	QuotaRemaining int64    `json:"quota_remaining"`    // bytes left as of BaseSeq; -1 = unlimited
 	BaseSeq        int64    `json:"base_seq"`
+	// OtherIPs are the slot's devices on the panel's other nodes: they count against
+	// DeviceLimit here too, and may connect here without taking another device.
+	OtherIPs []string `json:"other_ips,omitempty"`
 }
 
 type PoliciesRequest struct {

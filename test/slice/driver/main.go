@@ -30,8 +30,13 @@ const (
 	mib       = 1 << 20
 )
 
+// protos: the default inbounds of a fresh install, then the ones prepare adds through the
+// API the way an admin would, including an own template in the editor.
+// protos: the four default inbounds of a fresh install, then the ones prepare adds through
+// the API the way an admin would, the last one as an own template from the editor.
 var protos = []struct{ name, proxy string }{
 	{"vision", "VLESS Vision"}, {"xhttp", "VLESS XHTTP"}, {"hy2", "Hysteria2"}, {"tuic", "TUIC"},
+	{"grpc", "VLESS gRPC"}, {"trojan", "Trojan"}, {"anytls", "AnyTLS"}, {"custom-vmess", "Custom"},
 }
 
 type panel struct {
@@ -79,6 +84,20 @@ func (p *panel) call(method, path string, in, out any) int {
 	return resp.StatusCode
 }
 
+// try is call for requests that are expected to fail: it returns the status instead.
+func (p *panel) try(method, path string, in any) int {
+	raw, _ := json.Marshal(in)
+	req, _ := http.NewRequest(method, panelURL+path, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", p.csrf)
+	resp, err := p.hc.Do(req)
+	if err != nil {
+		log.Fatalf("%s %s: %v", method, path, err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
 type user struct {
 	ID       int64  `json:"id"`
 	State    string `json:"state"`
@@ -99,7 +118,23 @@ func main() {
 
 func prepare() {
 	p := login()
-	waitNode(p)
+	waitNode(p, 4)
+	for _, in := range []map[string]any{
+		{"preset": "vless_reality_grpc"},
+		{"preset": "trojan_reality"},
+		{"preset": "anytls"},
+		{"preset": "custom", "port": "2096", "config": "type: vmess\nws-path: /vm\nmikan:\n  tls: node\n"},
+	} {
+		p.call("POST", "/api/v1/inbounds", in, nil)
+	}
+	// An own template that mihomo cannot run is refused before it reaches the node.
+	if code := p.try("POST", "/api/v1/inbounds", map[string]any{"preset": "custom", "port": "2097", "config": "type: vless\nws-path: /plain\n"}); code != 422 {
+		log.Fatalf("an unencrypted vless template must be refused, got %d", code)
+	}
+	waitNode(p, len(protos))
+	// GEOSITE/GEOIP rules of the default routing would make the client download geodata
+	// from GitHub on start; the slice checks the tunnel, not the geodata.
+	p.call("PATCH", "/api/v1/settings", map[string]any{"sub_routing": "all"}, nil)
 	var tariffs []struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
@@ -119,10 +154,10 @@ func prepare() {
 	}
 	token := u.SubURL[strings.LastIndex(u.SubURL, "/")+1:]
 
-	// URI format for Happ-like clients: four links.
+	// URI format for Happ-like clients: one link per inbound.
 	links := fetchSub(token, "Happ/3.4.1")
 	decoded, err := base64.StdEncoding.DecodeString(string(links))
-	if err != nil || strings.Count(string(decoded), "\n") != 3 {
+	if err != nil || strings.Count(string(decoded), "\n") != len(protos)-1 {
 		log.Fatalf("uri subscription: %v %q", err, decoded)
 	}
 
@@ -149,7 +184,7 @@ func prepare() {
 	log.Print("client config written from the subscription")
 }
 
-func waitNode(p *panel) {
+func waitNode(p *panel, want int) {
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		var n struct {
@@ -160,12 +195,12 @@ func waitNode(p *panel) {
 			} `json:"listeners"`
 		}
 		p.call("GET", "/api/v1/node", nil, &n)
-		ok := n.OK && len(n.Listeners) == 4
+		ok := n.OK && len(n.Listeners) == want
 		for _, l := range n.Listeners {
 			ok = ok && l.OK
 		}
 		if ok {
-			log.Print("node is up with 4 listeners")
+			log.Printf("node is up with %d listeners", want)
 			return
 		}
 		time.Sleep(time.Second)

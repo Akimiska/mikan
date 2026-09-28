@@ -1,0 +1,240 @@
+package proto
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net"
+	"net/url"
+	"strconv"
+)
+
+// ClientInput is what a subscription knows about one user and the node.
+type ClientInput struct {
+	Name      string // proxy name in the subscription
+	Host      string // address clients connect to
+	Port      int    // first port of PortSpec
+	PortSpec  string // "443" or a range for Hysteria2 port hopping
+	SNI       string // TLS name for node-certificate protocols; empty on IP-only installs
+	PinSHA256 string // hex SHA-256 of the node certificate when it is self-signed
+	Slot      Slot
+}
+
+// Client is one proxy in both subscription formats.
+type Client struct {
+	Mihomo map[string]any // mihomo proxy
+	URI    string         // share link for Xray/sing-box apps
+}
+
+// xmux makes mihomo reuse a few HTTP/2 connections for XHTTP (Xray clients do this by
+// default). Without it every app connection is a fresh TLS handshake, and bursts of
+// those get the server's port frozen by the RU DPI.
+var xmux = map[string]any{"max-concurrency": "16-32", "h-max-request-times": "600-900", "h-max-reusable-secs": "1800-3000"}
+
+// ClientConfig derives the client side of a template.
+func ClientConfig(t Template, in ClientInput) (Client, error) {
+	if err := Validate(t, Options{AnyDest: true}); err != nil {
+		return Client{}, err
+	}
+	ext := t.Ext()
+	host, port := in.Host, in.Port
+	if ext.Client.Server != "" {
+		host = ext.Client.Server
+	}
+	if ext.Client.Port > 0 {
+		port = ext.Client.Port
+	}
+	c := clientBuilder{t: t, ext: ext, in: in, host: host, port: port,
+		y: map[string]any{"name": in.Name, "type": t.Type(), "server": host, "port": port}, q: url.Values{}}
+	if err := c.security(); err != nil {
+		return Client{}, err
+	}
+	c.transport()
+	return c.finish()
+}
+
+type clientBuilder struct {
+	t    Template
+	ext  Ext
+	in   ClientInput
+	host string
+	port int
+	y    map[string]any
+	q    url.Values
+}
+
+func (c *clientBuilder) addr() string { return net.JoinHostPort(c.host, strconv.Itoa(c.port)) }
+
+func (c *clientBuilder) fingerprint() string {
+	if c.ext.Client.Fingerprint != "" {
+		return c.ext.Client.Fingerprint
+	}
+	return "chrome"
+}
+
+// sniKey: vless and vmess call the TLS name "servername", everything else "sni".
+func (c *clientBuilder) sniKey() string {
+	if typ := c.t.Type(); typ == "vless" || typ == "vmess" {
+		return "servername"
+	}
+	return "sni"
+}
+
+func (c *clientBuilder) security() error {
+	if r := c.t.section("reality-config"); r != nil {
+		pbk, err := RealityPublicKey(str(r["private-key"]))
+		if err != nil {
+			return err
+		}
+		sni := c.ext.Client.SNI
+		if sni == "" {
+			sni = strings1(r["server-names"])[0]
+		}
+		sid := strings1(r["short-id"])[0]
+		c.y["tls"] = true
+		c.y[c.sniKey()] = sni
+		c.y["client-fingerprint"] = c.fingerprint()
+		c.y["reality-opts"] = map[string]any{"public-key": pbk, "short-id": sid}
+		for k, v := range map[string]string{"security": "reality", "sni": sni, "fp": c.fingerprint(), "pbk": pbk, "sid": sid} {
+			c.q.Set(k, v)
+		}
+		return nil
+	}
+	if !rules[c.t.Type()].cert && c.ext.TLS != "node" {
+		return nil
+	}
+	sni := c.ext.Client.SNI
+	if sni == "" {
+		sni = c.in.SNI
+	}
+	typ := c.t.Type()
+	if typ == "vless" || typ == "vmess" || typ == "trojan" || typ == "anytls" {
+		c.y["tls"] = true
+		c.y["client-fingerprint"] = c.fingerprint()
+		c.q.Set("security", "tls")
+		c.q.Set("fp", c.fingerprint())
+	}
+	if typ == "hysteria2" || typ == "tuic" {
+		delete(c.y, "tls")
+	}
+	if sni != "" {
+		c.y[c.sniKey()] = sni
+		c.q.Set("sni", sni)
+	}
+	if c.in.PinSHA256 != "" {
+		// A self-signed certificate is pinned; links without a pin field fall back to
+		// insecure mode, which is the only way to carry such a certificate there.
+		c.y["fingerprint"] = c.in.PinSHA256
+		c.y["skip-cert-verify"] = false
+		switch typ {
+		case "hysteria2":
+			c.q.Set("insecure", "1")
+			c.q.Set("pinSHA256", c.in.PinSHA256)
+		case "tuic":
+			c.q.Set("allow_insecure", "1")
+		default:
+			c.q.Set("allowInsecure", "1")
+			c.q.Set("insecure", "1")
+		}
+	}
+	return nil
+}
+
+func (c *clientBuilder) transport() {
+	typ := c.t.Type()
+	if typ != "vless" && typ != "vmess" && typ != "trojan" {
+		return
+	}
+	switch transport(c.t) {
+	case "xhttp":
+		x := c.t.section("xhttp-config")
+		opts := map[string]any{"reuse-settings": xmux}
+		for _, k := range []string{"path", "mode", "host"} {
+			if v, ok := x[k].(string); ok && v != "" {
+				opts[k] = v
+				c.q.Set(k, v)
+			}
+		}
+		c.y["network"], c.y["xhttp-opts"] = "xhttp", opts
+		c.q.Set("type", "xhttp")
+	case "grpc":
+		name := c.t.str("grpc-service-name")
+		c.y["network"], c.y["grpc-opts"] = "grpc", map[string]any{"grpc-service-name": name}
+		c.q.Set("type", "grpc")
+		c.q.Set("serviceName", name)
+		c.q.Set("mode", "gun")
+	case "ws":
+		path := c.t.str("ws-path")
+		c.y["network"], c.y["ws-opts"] = "ws", map[string]any{"path": path}
+		c.q.Set("type", "ws")
+		c.q.Set("path", path)
+	default:
+		c.y["network"] = "tcp"
+		c.q.Set("type", "tcp")
+	}
+	// mihomo carries UDP over VLESS/VMess/Trojan streams, but not over XHTTP in v1.19.31.
+	c.y["udp"] = transport(c.t) != "xhttp"
+}
+
+func (c *clientBuilder) finish() (Client, error) {
+	s := c.in.Slot
+	name := url.PathEscape(c.in.Name)
+	switch c.t.Type() {
+	case "vless":
+		c.y["uuid"] = s.UUID
+		c.q.Set("encryption", "none")
+		if c.ext.Flow != "" {
+			c.y["flow"] = c.ext.Flow
+			c.q.Set("flow", c.ext.Flow)
+		}
+		return Client{c.y, "vless://" + s.UUID + "@" + c.addr() + "?" + c.q.Encode() + "#" + name}, nil
+	case "vmess":
+		c.y["uuid"], c.y["alterId"], c.y["cipher"] = s.UUID, 0, "auto"
+		link := map[string]string{"v": "2", "ps": c.in.Name, "add": c.host, "port": strconv.Itoa(c.port), "id": s.UUID, "aid": "0", "scy": "auto",
+			"net": c.q.Get("type"), "type": "none", "path": c.q.Get("path"), "tls": c.q.Get("security"), "sni": c.q.Get("sni"), "fp": c.q.Get("fp"),
+			"pbk": c.q.Get("pbk"), "sid": c.q.Get("sid")}
+		if link["net"] == "grpc" {
+			link["path"] = c.q.Get("serviceName")
+		}
+		b, _ := json.Marshal(link)
+		return Client{c.y, "vmess://" + base64.StdEncoding.EncodeToString(b)}, nil
+	case "trojan":
+		c.y["password"] = s.Secret
+		return Client{c.y, "trojan://" + url.PathEscape(s.Secret) + "@" + c.addr() + "?" + c.q.Encode() + "#" + name}, nil
+	case "hysteria2":
+		c.y["password"] = s.Secret
+		if alpn := strings1(c.t["alpn"]); len(alpn) > 0 {
+			c.y["alpn"] = alpn
+		}
+		if c.in.PortSpec != "" && c.in.PortSpec != strconv.Itoa(c.in.Port) {
+			c.y["ports"] = c.in.PortSpec
+			c.q.Set("mport", c.in.PortSpec)
+		}
+		if obfs := c.t.str("obfs"); obfs != "" {
+			c.y["obfs"], c.y["obfs-password"] = obfs, c.t.str("obfs-password")
+			c.q.Set("obfs", obfs)
+			c.q.Set("obfs-password", c.t.str("obfs-password"))
+		}
+		return Client{c.y, "hysteria2://" + url.PathEscape(s.Secret) + "@" + c.addr() + "/?" + c.q.Encode() + "#" + name}, nil
+	case "tuic":
+		cc := c.t.str("congestion-controller")
+		if cc == "" {
+			cc = "bbr"
+		}
+		alpn := strings1(c.t["alpn"])
+		if len(alpn) == 0 {
+			alpn = []string{"h3"}
+		}
+		c.y["uuid"], c.y["password"], c.y["alpn"] = s.UUID, s.Secret, alpn
+		c.y["congestion-controller"], c.y["udp-relay-mode"] = cc, "native"
+		c.q.Set("congestion_control", cc)
+		c.q.Set("alpn", alpn[0])
+		c.q.Set("udp_relay_mode", "native")
+		return Client{c.y, "tuic://" + s.UUID + ":" + url.PathEscape(s.Secret) + "@" + c.addr() + "?" + c.q.Encode() + "#" + name}, nil
+	case "anytls":
+		c.y["password"], c.y["udp"] = s.Secret, true
+		c.q.Del("security")
+		c.q.Del("fp")
+		return Client{c.y, "anytls://" + url.PathEscape(s.Secret) + "@" + c.addr() + "/?" + c.q.Encode() + "#" + name}, nil
+	}
+	return Client{}, fail("config_type", "type")
+}

@@ -291,7 +291,7 @@ func (h *handlers) userResult(ctx context.Context, u db.User, err error) (*userO
 func (h *handlers) createUser(ctx context.Context, in *createUserInput) (*userOutput, error) {
 	u, err := h.d.Users.Create(ctx, domain.CreateInput{Name: in.Body.Name, Contact: in.Body.Contact, Note: in.Body.Note, Tags: in.Body.Tags, TariffID: in.Body.TariffID})
 	if errors.Is(err, domain.ErrNotFound) {
-		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "Тариф не найден"})
+		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "tariff_not_found"})
 	}
 	if err == nil {
 		h.audit(ctx, sessionOf(ctx).AdminID, "user.create", "user", strconv.FormatInt(u.ID, 10), map[string]any{"tariff_id": in.Body.TariffID})

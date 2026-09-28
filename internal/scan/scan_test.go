@@ -1,0 +1,46 @@
+package scan
+
+import (
+	"context"
+	"crypto/tls"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func server(t *testing.T, cfg func(*tls.Config)) string {
+	t.Helper()
+	s := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	s.EnableHTTP2 = true
+	s.TLS = &tls.Config{}
+	if cfg != nil {
+		cfg(s.TLS)
+	}
+	s.StartTLS()
+	t.Cleanup(s.Close)
+	return strings.TrimPrefix(s.URL, "https://")
+}
+
+func TestCheckReportsWhatTheTargetSupports(t *testing.T) {
+	ctx := context.Background()
+	// httptest's certificate is self-signed for example.com: everything but trust passes.
+	r := Check(ctx, server(t, nil), "example.com")
+	if !r.TLS13 || !r.H2 || !r.X25519 || r.CertValid || r.OK || r.RTTms < 0 || r.Error != "" {
+		t.Fatalf("modern server: %+v", r)
+	}
+	r = Check(ctx, server(t, func(c *tls.Config) { c.MaxVersion = tls.VersionTLS12 }), "example.com")
+	if r.TLS13 || r.OK {
+		t.Fatalf("TLS 1.2 only: %+v", r)
+	}
+	r = Check(ctx, server(t, func(c *tls.Config) { c.CurvePreferences = []tls.CurveID{tls.CurveP256} }), "example.com")
+	if r.X25519 || !r.TLS13 || r.OK {
+		t.Fatalf("no X25519: %+v", r)
+	}
+}
+
+func TestCheckNeedsNameForIP(t *testing.T) {
+	if r := Check(context.Background(), "192.0.2.1:443", ""); r.Error != "sni_required" {
+		t.Fatalf("an IP dest needs an explicit SNI: %+v", r)
+	}
+}

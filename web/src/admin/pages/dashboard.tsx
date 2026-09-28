@@ -6,24 +6,22 @@ import { useInbounds, useNode, useOverview, userActions, useServerTraffic, useUs
 import { buckets, TrafficChart, type Range } from "../../components/chart";
 import { useToast } from "../../components/toast";
 import { Avatar, Bar, Button, PageHeader, Pill, Segmented, Skeleton, StatePill } from "../../components/ui";
+import { getLocale, t } from "../../i18n";
 import { bits, bytes, dateShort, expiryText, num, uptime } from "../../lib/format";
 
-const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
-const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-
 export function Dashboard() {
-  const now = new Date();
   const node = useNode();
-  const status = node.data ? (node.data.ok ? "всё работает штатно" : "нода не отвечает") : "проверяем сервер…";
+  const status = node.data ? (node.data.ok ? t("dashboard.statusOk") : t("dashboard.statusDown")) : t("dashboard.statusChecking");
+  const today = new Intl.DateTimeFormat(getLocale(), { weekday: "long", day: "numeric", month: "long" }).format(new Date());
   return (
     <>
       <PageHeader
-        title="Обзор"
-        sub={`${WEEKDAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} · ${status}`}
+        title={t("dashboard.title")}
+        sub={`${today.charAt(0).toUpperCase()}${today.slice(1)} · ${status}`}
         actions={
           <Link to="/users" search={{ state: "all", q: "", create: true }} className="btn btn-primary">
             <Plus size={18} aria-hidden />
-            <span className="max-[760px]:hidden">Новый пользователь</span>
+            <span className="max-[760px]:hidden">{t("dashboard.newUser")}</span>
           </Link>
         }
       />
@@ -69,30 +67,36 @@ function Kpis() {
   const [value, unit] = bytes(d.traffic_today).split(" ");
   return (
     <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-      <Kpi i={0} label="Онлайн сейчас" value={num(d.online)} foot={<span>подключённых пользователей</span>} />
-      <Kpi i={1} label="Активные подписки" value={num(d.users_active)} foot={<span>из {num(d.users_total)}</span>} />
+      <Kpi i={0} label={t("dashboard.online")} value={num(d.online)} foot={<span>{t("dashboard.onlineFoot")}</span>} />
+      <Kpi i={1} label={t("dashboard.active")} value={num(d.users_active)} foot={<span>{t("dashboard.activeFoot", { total: num(d.users_total) })}</span>} />
       <Kpi
         i={2}
-        label="Трафик сегодня"
+        label={t("dashboard.trafficToday")}
         value={
           <>
             {value}
             <small>{unit}</small>
           </>
         }
-        foot={delta === null ? <span>вчера трафика не было</span> : <span className={delta >= 0 ? "text-[var(--leaf-700)]" : ""}>{delta >= 0 ? `на ${delta}% больше, чем вчера` : `на ${-delta}% меньше, чем вчера`}</span>}
+        foot={
+          delta === null ? (
+            <span>{t("dashboard.noTrafficYesterday")}</span>
+          ) : (
+            <span className={delta >= 0 ? "text-[var(--leaf-700)]" : ""}>{delta >= 0 ? t("dashboard.moreThanYesterday", { pct: delta }) : t("dashboard.lessThanYesterday", { pct: -delta })}</span>
+          )
+        }
       />
       <Kpi
         i={3}
-        label="Истекают за 7 дней"
+        label={t("dashboard.expiring7d")}
         value={num(d.expiring_7d)}
         foot={
           d.expiring_7d > 0 ? (
             <Link to="/users" search={{ state: "expiring", q: "" }} className="link-btn">
-              Показать список
+              {t("dashboard.showList")}
             </Link>
           ) : (
-            <span>никто не истекает</span>
+            <span>{t("dashboard.noneExpiring")}</span>
           )
         }
       />
@@ -102,8 +106,8 @@ function Kpis() {
 
 function TrafficCard() {
   const [range, setRange] = useState<Range>("24h");
-  const t = useServerTraffic(range);
-  const points = useMemo(() => buckets(t.data?.points ?? [], range), [t.data, range]);
+  const traffic = useServerTraffic(range);
+  const points = useMemo(() => buckets(traffic.data?.points ?? [], range), [traffic.data, range]);
   const totalDown = points.reduce((a, p) => a + p.down, 0);
   const totalUp = points.reduce((a, p) => a + p.up, 0);
   return (
@@ -111,35 +115,35 @@ function TrafficCard() {
       <div className="card-head">
         <div>
           <h2 className="card-title" id="traffic-title">
-            Трафик
+            {t("dashboard.traffic")}
           </h2>
           <div className="mt-1.5 flex gap-4 text-[13px] text-[var(--ink-600)]">
             <span className="inline-flex items-center gap-2">
-              <i className="h-2 w-2 rounded-full bg-[var(--mikan-500)]" /> Скачано
+              <i className="h-2 w-2 rounded-full bg-[var(--mikan-500)]" /> {t("chart.down")}
             </span>
             <span className="inline-flex items-center gap-2">
-              <i className="h-2 w-2 rounded-full bg-[var(--lagoon-500)]" /> Отдано
+              <i className="h-2 w-2 rounded-full bg-[var(--lagoon-500)]" /> {t("chart.up")}
             </span>
           </div>
         </div>
         <Segmented
-          label="Период"
+          label={t("dashboard.period")}
           value={range}
           onChange={setRange}
           options={[
-            { value: "24h", label: "24 ч" },
-            { value: "7d", label: "7 дней" },
-            { value: "30d", label: "30 дней" },
+            { value: "24h", label: t("dashboard.range24h") },
+            { value: "7d", label: t("dashboard.range7d") },
+            { value: "30d", label: t("dashboard.range30d") },
           ]}
         />
       </div>
-      {t.isPending ? <Skeleton style={{ height: 220, borderRadius: 16 }} /> : <TrafficChart points={points} range={range} />}
+      {traffic.isPending ? <Skeleton style={{ height: 220, borderRadius: 16 }} /> : <TrafficChart points={points} range={range} />}
       <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-[var(--ink-500)]">
         <span>
-          Скачано <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalDown)}</b>
+          {t("chart.down")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalDown)}</b>
         </span>
         <span>
-          Отдано <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalUp)}</b>
+          {t("chart.up")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalUp)}</b>
         </span>
       </div>
     </section>
@@ -156,15 +160,15 @@ function ServerCard() {
       <div className="card-head">
         <div>
           <h2 className="card-title" id="srv-title">
-            Сервер
+            {t("shell.server")}
           </h2>
-          <div className="card-sub">{n?.ok ? `${n.core}${n.started_at ? ` · без перезапуска ${uptime(n.started_at)}` : ""}` : "состояние ноды"}</div>
+          <div className="card-sub">{n?.ok ? `${n.core}${n.started_at ? ` · ${t("dashboard.uptime", { uptime: uptime(n.started_at) })}` : ""}` : t("dashboard.nodeState")}</div>
         </div>
-        {n ? n.ok ? <Pill tone="ok">работает</Pill> : <Pill tone="bad">нет связи</Pill> : null}
+        {n ? n.ok ? <Pill tone="ok">{t("shell.running")}</Pill> : <Pill tone="bad">{t("shell.offline")}</Pill> : null}
       </div>
       {n && !n.ok ? (
         <div className="banner err mb-4" role="alert">
-          Панель не достучалась до ноды. Если VPN у пользователей работает, проверьте контейнер «node»: <span className="mono">mikan logs node</span>
+          {t("dashboard.nodeUnreachable")} <span className="mono">mikan logs node</span>
         </div>
       ) : null}
       <div className="mb-4 grid grid-cols-3 gap-2">
@@ -177,7 +181,7 @@ function ServerCard() {
           <Bar pct={n?.system.cpu_percent ?? 0} className="mt-2" />
         </div>
         <div className="metric">
-          <div className="metric-label">Память</div>
+          <div className="metric-label">{t("dashboard.memory")}</div>
           <div className="metric-value num">
             {n ? Math.round(memPct) : "—"}
             <small>%</small>
@@ -185,7 +189,7 @@ function ServerCard() {
           <Bar pct={memPct} className="mt-2" />
         </div>
         <div className="metric">
-          <div className="metric-label">Сеть ↓</div>
+          <div className="metric-label">{t("dashboard.netDown")}</div>
           <div className="metric-value num text-[15px]">{n ? bits(n.system.net_rx_bps) : "—"}</div>
         </div>
       </div>
@@ -193,19 +197,27 @@ function ServerCard() {
         {(inbounds.data ?? []).map((l) => (
           <div key={l.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
             <div className="min-w-0">
-              <div className="text-[13px] font-medium">{l.title}</div>
+              <div className="text-[13px] font-medium">{l.sub_name}</div>
               <div className="truncate text-xs text-[var(--ink-500)]">
                 {l.port}/{l.network}
-                {l.dest ? ` · маскировка под ${l.dest.replace(/:443$/, "")}` : ""}
+                {l.dest ? ` · ${t("inbounds.maskedAs", { dest: l.dest.replace(/:443$/, "") })}` : ""}
               </div>
             </div>
-            {!l.enabled ? <Pill tone="off">выключено</Pill> : l.status === "error" ? <Pill tone="bad">ошибка</Pill> : l.status === "ok" ? <Pill tone="ok">ок</Pill> : <Pill tone="off">…</Pill>}
+            {!l.enabled ? (
+              <Pill tone="off">{t("inbounds.off")}</Pill>
+            ) : l.status === "error" ? (
+              <Pill tone="bad">{t("inbounds.error")}</Pill>
+            ) : l.status === "ok" ? (
+              <Pill tone="ok">{t("inbounds.ok")}</Pill>
+            ) : (
+              <Pill tone="off">…</Pill>
+            )}
           </div>
         ))}
       </div>
       <div className="panel-soft mt-3 flex items-start gap-2 p-3 text-xs leading-4 text-[var(--ink-600)]">
         <ShieldCheck size={16} className="shrink-0 text-[var(--leaf-500)]" aria-hidden />
-        <span>Клиентам закрыт доступ к локальным сетям сервера, исходящая почта (порт 25) заблокирована.</span>
+        <span>{t("dashboard.safetyNote")}</span>
       </div>
     </section>
   );
@@ -224,9 +236,9 @@ function AttentionCard() {
       <div className="card-head">
         <div>
           <h2 className="card-title" id="att-title">
-            Требует внимания
+            {t("dashboard.attention")}
           </h2>
-          <div className="card-sub">{loading ? "…" : list.length ? "истекают, исчерпали лимит или уже истекли" : "всё в порядке"}</div>
+          <div className="card-sub">{loading ? "…" : list.length ? t("dashboard.attentionSub") : t("dashboard.allGood")}</div>
         </div>
       </div>
       {loading ? (
@@ -235,7 +247,7 @@ function AttentionCard() {
           <Skeleton style={{ height: 36 }} />
         </div>
       ) : list.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-[var(--ink-500)]">Ни одной подписки, которая закончится в ближайшую неделю.</p>
+        <p className="py-6 text-center text-[13px] text-[var(--ink-500)]">{t("dashboard.attentionEmpty")}</p>
       ) : (
         <div className="row-list">
           {list.map((u) => {
@@ -249,12 +261,12 @@ function AttentionCard() {
                     <StatePill state={u.state} />
                   </div>
                   <div className="text-xs text-[var(--ink-500)]">
-                    {u.state === "limited" ? `израсходовано ${bytes(u.used_up + u.used_down)}` : u.expires_at ? `до ${dateShort(u.expires_at)} · ${exp.text}` : ""}
+                    {u.state === "limited" ? t("dashboard.used", { bytes: bytes(u.used_up + u.used_down) }) : u.expires_at ? t("dashboard.until", { date: dateShort(u.expires_at), left: exp.text }) : ""}
                   </div>
                 </div>
                 {u.state === "limited" ? (
                   <Link to="/users" search={{ state: "all", q: "", user: u.id }} className="btn btn-glass btn-sm">
-                    Открыть
+                    {t("common.open")}
                   </Link>
                 ) : (
                   <Button
@@ -263,11 +275,11 @@ function AttentionCard() {
                     onClick={() =>
                       extend.mutate(
                         { id: u.id, days: 30 },
-                        { onSuccess: () => toast.ok(`${u.name}: продлено на 30 дней`), onError: () => toast.error("Не удалось продлить") },
+                        { onSuccess: () => toast.ok(t("dashboard.extended", { name: u.name })), onError: () => toast.error(t("dashboard.extendFailed")) },
                       )
                     }
                   >
-                    +30 дней
+                    {t("dashboard.plus30")}
                   </Button>
                 )}
               </div>
@@ -288,15 +300,15 @@ function TopCard() {
       <div className="card-head">
         <div>
           <h2 className="card-title" id="top-title">
-            Больше всего трафика
+            {t("dashboard.top")}
           </h2>
-          <div className="card-sub">с начала месяца</div>
+          <div className="card-sub">{t("dashboard.topSub")}</div>
         </div>
       </div>
       {o.isPending ? (
         <Skeleton style={{ height: 120 }} />
       ) : top.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-[var(--ink-500)]">Статистика появится, когда пользователи начнут подключаться.</p>
+        <p className="py-6 text-center text-[13px] text-[var(--ink-500)]">{t("dashboard.topEmpty")}</p>
       ) : (
         top.map((u, i) => (
           <Link key={u.id} to="/users" search={{ state: "all", q: "", user: u.id }} className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl py-2 hover:bg-[var(--hover)]">

@@ -22,6 +22,7 @@ import (
 	"github.com/metacubex/mihomo/tunnel"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/proto"
 )
 
 const (
@@ -52,6 +53,7 @@ type Engine struct {
 
 	mu        sync.Mutex // serializes Apply
 	applied   nodeapi.DesiredState
+	cert      proto.Cert // node certificate files written by the last Apply
 	listeners map[string]nodeapi.ListenerStatus
 
 	logs   *logRing
@@ -88,7 +90,7 @@ func Start(o Options) (*Engine, error) {
 	e.Reg = NewRegistry(cs.Epoch, cs.Seq, o.DeviceRelease, time.Now)
 	e.tun = &Tunnel{inner: tunnel.Tunnel, reg: e.Reg}
 
-	base, err := buildConfig(nodeapi.DesiredState{}, "", "", o.AllowPrivate)
+	base, err := buildConfig(nodeapi.DesiredState{}, proto.Cert{}, o.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -124,17 +126,18 @@ func Start(o Options) (*Engine, error) {
 func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	certPath, keyPath := "", ""
+	var cert proto.Cert
 	if st.TLS != nil && st.TLS.CertPEM != "" {
-		certPath, keyPath = filepath.Join(e.home, "tls", "node.crt"), filepath.Join(e.home, "tls", "node.key")
-		if err := writeFileAtomic(certPath, []byte(st.TLS.CertPEM), 0o600); err != nil {
+		cert = proto.Cert{CertPath: filepath.Join(e.home, "tls", "node.crt"), KeyPath: filepath.Join(e.home, "tls", "node.key")}
+		if err := writeFileAtomic(cert.CertPath, []byte(st.TLS.CertPEM), 0o600); err != nil {
 			return nodeapi.ApplyResult{}, err
 		}
-		if err := writeFileAtomic(keyPath, []byte(st.TLS.KeyPEM), 0o600); err != nil {
+		if err := writeFileAtomic(cert.KeyPath, []byte(st.TLS.KeyPEM), 0o600); err != nil {
 			return nodeapi.ApplyResult{}, err
 		}
 	}
-	raw, err := buildConfig(st, certPath, keyPath, e.allowPrivate)
+	e.cert = cert
+	raw, err := buildConfig(st, cert, e.allowPrivate)
 	if err != nil {
 		return nodeapi.ApplyResult{}, &nodeapi.Error{Code: "invalid_state", Message: err.Error()}
 	}
@@ -185,6 +188,23 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		e.log.Error("save state", "err", err)
 	}
 	return nodeapi.ApplyResult{Revision: st.Revision, Recreated: recreated, Listeners: statuses}, nil
+}
+
+// Validate parses one inbound with mihomo's own parser without applying it, so the
+// panel can refuse a template before it replaces a working listener.
+func (e *Engine) Validate(req nodeapi.ValidateRequest) error {
+	e.mu.Lock()
+	cert := e.cert
+	e.mu.Unlock()
+	in := req.Inbound
+	in.Name = "mikan-validate"
+	probe := []nodeapi.Slot{{Name: "validate", UUID: "00000000-0000-4000-8000-000000000000", Secret: "validate"}}
+	l, err := listenerFor(in, probe, cert, proto.Options{SelfStealPort: req.SelfStealPort})
+	if err != nil {
+		return err
+	}
+	_, err = listener.ParseListener(l)
+	return err
 }
 
 func (e *Engine) SetPolicies(req nodeapi.PoliciesRequest) {
@@ -246,7 +266,7 @@ func (e *Engine) pumpLogs() {
 			}
 			continue
 		}
-		if ev.LogLevel < mlog.WARNING {
+		if ev.LogLevel < mlog.WARNING || connLine(msg) {
 			continue
 		}
 		if name, rest, ok := parseListenErr(msg); ok {
@@ -284,6 +304,12 @@ func (e *Engine) syncLogs() {
 			return
 		}
 	}
+}
+
+// connLine reports per-connection lines ("[TCP] 1.2.3.4:5 --> host:443 error: ..."). They
+// carry user IPs and destinations, so they never reach our logs, even as warnings.
+func connLine(msg string) bool {
+	return strings.HasPrefix(msg, "[TCP] ") || strings.HasPrefix(msg, "[UDP] ")
 }
 
 func parseListenErr(msg string) (name, reason string, ok bool) {

@@ -5,6 +5,7 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 import { useMemo } from "react";
 import { renderSVG } from "uqr";
 import type { UserState } from "../api/client";
+import { t } from "../i18n";
 
 type Variant = "primary" | "glass" | "ghost" | "danger" | "danger-solid";
 
@@ -33,12 +34,12 @@ export function Button({
   );
 }
 
-export const stateInfo: Record<UserState, { tone: "ok" | "warn" | "bad" | "off"; label: string }> = {
-  active: { tone: "ok", label: "активен" },
-  expiring: { tone: "warn", label: "истекает" },
-  limited: { tone: "bad", label: "лимит исчерпан" },
-  expired: { tone: "bad", label: "истёк" },
-  disabled: { tone: "off", label: "отключён" },
+const stateTone: Record<UserState, "ok" | "warn" | "bad" | "off"> = {
+  active: "ok",
+  expiring: "warn",
+  limited: "bad",
+  expired: "bad",
+  disabled: "off",
 };
 
 export function Pill({ tone, children }: { tone: "ok" | "warn" | "bad" | "off"; children: ReactNode }) {
@@ -46,8 +47,7 @@ export function Pill({ tone, children }: { tone: "ok" | "warn" | "bad" | "off"; 
 }
 
 export function StatePill({ state }: { state: UserState }) {
-  const s = stateInfo[state];
-  return <Pill tone={s.tone}>{s.label}</Pill>;
+  return <Pill tone={stateTone[state]}>{t(`states.${state}`)}</Pill>;
 }
 
 const AVATAR_COLORS = ["#FBE3D2", "#DCEBFA", "#DDF1E6", "#F4E6C9", "#EADFF3", "#F6DDE0", "#DDEFF1"];
@@ -127,9 +127,9 @@ export function Ring({ pct, label, sub, size = 112 }: { pct: number; label: Reac
   );
 }
 
-export function QR({ value, size = 136, label = "QR-код подписки" }: { value: string; size?: number; label?: string }) {
+export function QR({ value, size = 136, label }: { value: string; size?: number; label?: string }) {
   const svg = useMemo(() => renderSVG(value, { ecc: "M", border: 1, blackColor: "#161A24", whiteColor: "#FFFFFF" }), [value]);
-  return <div className="qr" style={{ width: size, height: size }} role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <div className="qr" style={{ width: size, height: size }} role="img" aria-label={label ?? t("common.qrLabel")} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 export function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
@@ -137,7 +137,7 @@ export function Skeleton({ className, style }: { className?: string; style?: CSS
 }
 
 export function Spinner({ size = 16 }: { size?: number }) {
-  return <LoaderCircle size={size} className="spin" aria-label="Загрузка" />;
+  return <LoaderCircle size={size} className="spin" aria-label={t("common.loading")} />;
 }
 
 export function EmptyState({ title, text, children, search }: { title: string; text: ReactNode; children?: ReactNode; search?: boolean }) {
@@ -151,17 +151,17 @@ export function EmptyState({ title, text, children, search }: { title: string; t
   );
 }
 
-export function ErrorState({ title = "Не удалось загрузить", text, onRetry }: { title?: string; text: string; onRetry?: () => void }) {
+export function ErrorState({ title, text, onRetry }: { title?: string; text: string; onRetry?: () => void }) {
   return (
     <div className="state-box" role="alert">
       <div className="state-mark err">
         <TriangleAlert size={22} />
       </div>
-      <h2>{title}</h2>
+      <h2>{title ?? t("common.loadFailed")}</h2>
       <p>{text}</p>
       {onRetry ? (
         <Button variant="primary" onClick={onRetry}>
-          Повторить
+          {t("common.retry")}
         </Button>
       ) : null}
     </div>

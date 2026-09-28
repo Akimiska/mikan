@@ -38,14 +38,29 @@ type Device struct {
 }
 
 type Inbound struct {
-	ID        int64
-	Name      string
-	Preset    string
-	Port      string
-	Enabled   int64
-	Settings  string
-	CreatedAt int64
-	UpdatedAt int64
+	ID          int64
+	NodeID      int64
+	Name        string
+	Preset      string
+	Port        string
+	Enabled     int64
+	Settings    string
+	CreatedAt   int64
+	UpdatedAt   int64
+	DisplayName string
+	Config      string
+}
+
+type Node struct {
+	ID         int64
+	Name       string
+	Address    string
+	PublicHost string
+	Domain     string
+	CertSha256 string
+	Enabled    int64
+	CreatedAt  int64
+	UpdatedAt  int64
 }
 
 type NodeState struct {

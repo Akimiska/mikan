@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -46,6 +47,8 @@ type Deps struct {
 	Health    func() nodesync.HealthView
 	Cert      func() acme.Status
 	RenewCert func()
+	// NodeValidate runs mihomo's parser on an inbound; nil without a node.
+	NodeValidate func(ctx context.Context, req nodeapi.ValidateRequest) error
 }
 
 type ctxKey int
@@ -80,7 +83,27 @@ func Config(version string) huma.Config {
 	return cfg
 }
 
+var hideInternalOnce sync.Once
+
+// hideInternal keeps the text of unexpected errors (SQL constraints, file paths) out of
+// responses: huma would put it into the 500 body. It is logged instead.
+func hideInternal(log *slog.Logger) {
+	hideInternalOnce.Do(func() {
+		base := huma.NewError
+		huma.NewError = func(status int, msg string, errs ...error) huma.StatusError {
+			if status >= 500 && len(errs) > 0 {
+				if log != nil {
+					log.Error("api internal error", "status", status, "err", errors.Join(errs...))
+				}
+				return base(status, msg)
+			}
+			return base(status, msg, errs...)
+		}
+	})
+}
+
 func New(d Deps) (http.Handler, huma.API, error) {
+	hideInternal(d.Log)
 	mux := http.NewServeMux()
 	api := humago.New(mux, Config(d.Version))
 	dummy, err := auth.HashPassword(secure.Token(32))
@@ -92,6 +115,8 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerAuth()
 	h.registerUsers()
 	h.registerCatalog()
+	h.registerInbounds()
+	h.registerTargets()
 	h.registerStats()
 	h.registerSettings()
 	return noStore(mux), api, nil

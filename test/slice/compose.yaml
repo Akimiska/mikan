@@ -19,6 +19,19 @@ services:
       MIKAN_PANEL_LISTEN: 0.0.0.0:2053
     volumes: ["data:/data", "run:/run/mikan"]
 
+  # A remote node: the panel reaches it over mTLS by the name it was added with.
+  node2:
+    image: mikan:slice
+    entrypoint: ["sh", "-c", "MIKAN_NODE_JOIN=$$(cat /work/node2.key) exec /usr/local/bin/mikan-node"]
+    environment:
+      MIKAN_DATA_DIR: /data/node
+      MIKAN_ALLOW_PRIVATE: "true"
+    volumes: ["work:/work:ro", "data2:/data"]
+    networks:
+      default:
+        aliases: [node2.slice]
+    profiles: ["node2"]
+
   target:
     build: {context: ../.., dockerfile: test/e2e/Dockerfile}
     command: ["target"]
@@ -41,6 +54,7 @@ services:
 
 volumes:
   data: {}
+  data2: {}
   run: {}
   work: {}
   mikan-gomod: {external: true}

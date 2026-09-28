@@ -47,12 +47,12 @@ func profile(t *testing.T, pin string) Profile {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ins = append(ins, db.Inbound{ID: int64(i + 1), Name: p.Name, Preset: p.ID, Port: p.Port, Enabled: 1, Config: c})
+		ins = append(ins, db.Inbound{ID: int64(i + 1), NodeID: 1, Name: p.Name, Preset: p.ID, Port: p.Port, Enabled: 1, Config: c})
 	}
 	return Profile{
 		Slot:     db.Slot{Name: "s000001", Uuid: "0b4ddc4c-7c4f-4a36-9d62-6f1a44b8c4e1", Secret: "S3cr3t+/="},
 		Inbounds: ins,
-		Endpoint: Endpoint{Host: "203.0.113.7", PinSHA256: pin},
+		Nodes:    []Node{{ID: 1, Endpoint: Endpoint{Host: "203.0.113.7", PinSHA256: pin}}},
 	}
 }
 
@@ -107,7 +107,7 @@ func TestURIsWithRealCertificateDoNotPin(t *testing.T) {
 
 func TestMihomoProfile(t *testing.T) {
 	prof := profile(t, "ab12")
-	prof.Endpoint.Direct = []string{"203.0.113.7", "vpn.example.com", ""}
+	prof.Direct = []string{"203.0.113.7", "vpn.example.com", ""}
 	raw, err := Mihomo(prof, Groups{}, RoutingAll)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestRouting(t *testing.T) {
 	render := func(g Groups, r Routing) profileJSON {
 		t.Helper()
 		prof := profile(t, "")
-		prof.Endpoint.Direct = []string{"203.0.113.7"}
+		prof.Direct = []string{"203.0.113.7"}
 		raw, err := Mihomo(prof, g, r)
 		if err != nil {
 			t.Fatal(err)
@@ -269,6 +269,101 @@ func TestValidName(t *testing.T) {
 	for _, bad := range []string{"", " VPN", "a,b", "DIRECT", "global", "x\ny", strings.Repeat("я", 49)} {
 		if ValidName(bad) == nil {
 			t.Errorf("%q must be refused", bad)
+		}
+	}
+}
+
+func TestMultiNodeProfile(t *testing.T) {
+	prof := profile(t, "aa11")
+	nl := Node{ID: 1, Name: "🇳🇱 Нидерланды", Endpoint: Endpoint{Host: "203.0.113.7", PinSHA256: "aa11"}}
+	us := Node{ID: 2, Name: "🇺🇸 США", Endpoint: Endpoint{Host: "usa.example.com", SNI: "usa.example.com", PinSHA256: "bb22"}}
+	prof.Nodes = []Node{nl, us}
+	for i, p := range []string{"vless_reality_xhttp", "hysteria2"} {
+		info, _ := presets.Get(p)
+		c, err := presets.NewConfig(p, "www.example.com:443")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prof.Inbounds = append(prof.Inbounds, db.Inbound{ID: int64(100 + i), NodeID: 2, Name: info.Name, Preset: p, Port: info.Port, Enabled: 1, Config: c})
+	}
+	prof.Inbounds[len(prof.Inbounds)-1].DisplayName = "Особый"
+	// An inbound of a node the user is not given (disabled node) stays out.
+	prof.Inbounds = append(prof.Inbounds, db.Inbound{ID: 200, NodeID: 3, Name: "x", Preset: "hysteria2", Port: "443", Enabled: 1, Config: prof.Inbounds[0].Config})
+
+	raw, err := Mihomo(prof, Groups{}, RoutingAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Proxies []map[string]any `json:"proxies"`
+		Groups  []struct {
+			Name    string   `json:"name"`
+			Type    string   `json:"type"`
+			Proxies []string `json:"proxies"`
+		} `json:"proxy-groups"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	server := map[string]any{}
+	var names []string
+	for _, p := range cfg.Proxies {
+		name := p["name"].(string)
+		names = append(names, name)
+		server[name] = p["server"]
+	}
+	want := []string{"🇳🇱 VLESS XHTTP", "🇳🇱 Hysteria2", "🇳🇱 TUIC", "🇳🇱 VLESS Vision", "🇺🇸 VLESS XHTTP", "Особый"}
+	if strings.Join(names, "|") != strings.Join(want, "|") {
+		t.Fatalf("proxies: %v", names)
+	}
+	if server["🇺🇸 VLESS XHTTP"] != "usa.example.com" || server["🇳🇱 VLESS XHTTP"] != "203.0.113.7" {
+		t.Fatalf("each node is reached at its own address: %v", server)
+	}
+	for _, p := range cfg.Proxies {
+		if p["name"] == "Особый" && (p["sni"] != "usa.example.com" || p["fingerprint"] != "bb22") {
+			t.Fatalf("Hysteria2 on the US node pins its own certificate: %v", p)
+		}
+	}
+	main, byName := cfg.Groups[0], map[string][]string{}
+	for _, g := range cfg.Groups {
+		byName[g.Name] = g.Proxies
+	}
+	if strings.Join(main.Proxies[:3], "|") != "Авто|🇳🇱 Нидерланды|🇺🇸 США" {
+		t.Fatalf("main group lists the country groups first: %v", main.Proxies)
+	}
+	if strings.Join(byName["🇺🇸 США"], "|") != "🇺🇸 VLESS XHTTP|Особый" || len(byName["Авто"]) != len(want) {
+		t.Fatalf("country groups: %v", byName)
+	}
+	links, err := URIs(prof)
+	if err != nil || strings.Count(links, "\n") != len(want)-1 {
+		t.Fatalf("links: %v %q", err, links)
+	}
+
+	// A node named like a group must not break the profile: it just gets no group.
+	prof.Nodes[1].Name = "VPN"
+	raw, err = Mihomo(prof, Groups{}, RoutingAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Groups = nil
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	vpn := 0
+	for _, g := range cfg.Groups {
+		if g.Name == "VPN" {
+			vpn++
+		}
+	}
+	if vpn != 1 {
+		t.Fatalf("group names must stay unique: %+v", cfg.Groups)
+	}
+}
+
+func TestNodePrefix(t *testing.T) {
+	for in, want := range map[string]string{"🇳🇱 Нидерланды": "🇳🇱", "🇺🇸США": "🇺🇸", "Германия": "Германия", "": "", " 🇩🇪 DE ": "🇩🇪"} {
+		if got := NodePrefix(in); got != want {
+			t.Errorf("NodePrefix(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

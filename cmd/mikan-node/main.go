@@ -25,6 +25,17 @@ import (
 var version = "dev"
 
 func main() {
+	// The installer checks a join key before it sets the node up and learns the API port
+	// from it; the key comes in the environment so it does not show in the process list.
+	if len(os.Args) > 1 && os.Args[1] == "key-port" {
+		key, err := nodetls.DecodeKey(os.Getenv("MIKAN_NODE_JOIN"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "mikan-node:", err)
+			os.Exit(1)
+		}
+		fmt.Println(key.Port)
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "mikan-node:", err)
 		os.Exit(1)

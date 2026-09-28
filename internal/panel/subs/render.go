@@ -17,12 +17,20 @@ import (
 	"mikan/internal/proto"
 )
 
-// Endpoint describes how clients reach the node.
+// Endpoint describes how clients reach one node.
 type Endpoint struct {
-	Host      string   // IP or domain the client connects to
-	SNI       string   // TLS server name for Hysteria2/TUIC; empty for IP-only installs
-	PinSHA256 string   // hex SHA-256 of the certificate when it is self-signed
-	Direct    []string // server IPs and names that bypass the tunnel (panel, SSH)
+	Host      string // IP or domain the client connects to
+	SNI       string // TLS server name for Hysteria2/TUIC; empty for IP-only nodes
+	PinSHA256 string // hex SHA-256 of the node's self-signed Hysteria2/TUIC certificate
+}
+
+// Node is one server in the subscription.
+type Node struct {
+	ID int64
+	// Name is the node's country group, e.g. "🇳🇱 Нидерланды"; with several nodes its
+	// leading flag (or the whole name) prefixes proxy names.
+	Name     string
+	Endpoint Endpoint
 }
 
 // Groups are the proxy-group names Clash-family apps show; the admin can rename them.
@@ -119,41 +127,67 @@ func ProxyName(in db.Inbound) string {
 type Profile struct {
 	Slot     db.Slot
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
-	Endpoint Endpoint
+	Nodes    []Node       // enabled nodes in display order; inbounds of other nodes are skipped
+	Direct   []string     // hosts that bypass the tunnel: the panel and every node
 }
 
 type proxy struct {
 	name string
+	node int64
 	uri  string
 	yaml map[string]any
 }
 
+// NodePrefix is what precedes proxy names of a node when a subscription has several:
+// the flag a name starts with, or the whole name.
+func NodePrefix(name string) string {
+	rs := []rune(strings.TrimSpace(name))
+	if len(rs) >= 2 && isRegional(rs[0]) && isRegional(rs[1]) {
+		return string(rs[:2])
+	}
+	return string(rs)
+}
+
+func isRegional(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }
+
+// build renders the user's proxies node by node, in the nodes' order.
 func build(p Profile) ([]proxy, error) {
 	var out []proxy
 	used := map[string]bool{}
 	slot := proto.Slot{Name: p.Slot.Name, UUID: p.Slot.Uuid, Secret: p.Slot.Secret}
-	for _, in := range p.Inbounds {
-		port, err := firstPort(in.Port)
-		if err != nil {
-			return nil, err
+	multi := len(p.Nodes) > 1
+	for _, n := range p.Nodes {
+		for _, in := range p.Inbounds {
+			if in.NodeID != n.ID {
+				continue
+			}
+			port, err := firstPort(in.Port)
+			if err != nil {
+				return nil, err
+			}
+			t, err := proto.Parse(in.Config)
+			if err != nil {
+				// Saved configs are validated; one broken inbound must not empty the subscription.
+				continue
+			}
+			base := ProxyName(in)
+			// A name the admin typed is used as is; preset names get the node's flag.
+			if prefix := NodePrefix(n.Name); multi && in.DisplayName == "" && prefix != "" {
+				base = prefix + " " + base
+			}
+			// mihomo refuses a profile with two proxies of the same name.
+			name := base
+			for i := 2; used[name]; i++ {
+				name = base + " " + strconv.Itoa(i)
+			}
+			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: in.Port,
+				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Slot: slot})
+			if err != nil {
+				continue
+			}
+			used[name] = true
+			out = append(out, proxy{name: name, node: n.ID, uri: c.URI, yaml: c.Mihomo})
 		}
-		t, err := proto.Parse(in.Config)
-		if err != nil {
-			// Saved configs are validated; one broken inbound must not empty the subscription.
-			continue
-		}
-		// mihomo refuses a profile with two proxies of the same name.
-		name := ProxyName(in)
-		for i := 2; used[name]; i++ {
-			name = ProxyName(in) + " " + strconv.Itoa(i)
-		}
-		c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: p.Endpoint.Host, Port: port, PortSpec: in.Port,
-			SNI: p.Endpoint.SNI, PinSHA256: p.Endpoint.PinSHA256, Slot: slot})
-		if err != nil {
-			continue
-		}
-		used[name] = true
-		out = append(out, proxy{name: name, uri: c.URI, yaml: c.Mihomo})
 	}
 	return out, nil
 }
@@ -193,10 +227,16 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 	for i, x := range ps {
 		proxies[i], names[i] = x.yaml, x.name
 	}
-	groups := []map[string]any{
-		{"name": g.Main, "type": "select", "proxies": append([]string{g.Auto}, names...)},
-		{"name": g.Auto, "type": "url-test", "proxies": names, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50},
+	countries := countryGroups(p.Nodes, ps, g, names)
+	selector := []string{g.Auto}
+	for _, c := range countries {
+		selector = append(selector, c["name"].(string))
 	}
+	groups := []map[string]any{
+		{"name": g.Main, "type": "select", "proxies": append(selector, names...)},
+		urlTest(g.Auto, names),
+	}
+	groups = append(groups, countries...)
 	if g.Main != AliasGroup {
 		groups = append(groups, map[string]any{"name": AliasGroup, "type": "select", "proxies": []string{g.Main}, "hidden": true})
 	}
@@ -205,7 +245,7 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
 		"nameserver":         []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"},
 	}
-	rules := append(directRules(p.Endpoint.Direct), "GEOIP,LAN,DIRECT,no-resolve")
+	rules := append(directRules(p.Direct), "GEOIP,LAN,DIRECT,no-resolve")
 	cfg := map[string]any{
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning",
 		// The node has no IPv6 on most VPS: with it on, apps first try IPv6 through the
@@ -228,6 +268,39 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 	}
 	cfg["rules"] = append(rules, "MATCH,"+g.Main)
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+func urlTest(name string, proxies []string) map[string]any {
+	return map[string]any{"name": name, "type": "url-test", "proxies": proxies, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50}
+}
+
+// countryGroups picks the fastest proxy of each node when there are several nodes. A
+// node whose name would clash with another group or a proxy gets no group: the profile
+// must load whatever the admin typed.
+func countryGroups(nodes []Node, ps []proxy, g Groups, names []string) []map[string]any {
+	if len(nodes) < 2 {
+		return nil
+	}
+	taken := map[string]bool{strings.ToLower(g.Main): true, strings.ToLower(g.Auto): true, strings.ToLower(AliasGroup): true}
+	for _, n := range names {
+		taken[strings.ToLower(n)] = true
+	}
+	var out []map[string]any
+	for _, n := range nodes {
+		var own []string
+		for _, x := range ps {
+			if x.node == n.ID {
+				own = append(own, x.name)
+			}
+		}
+		key := strings.ToLower(n.Name)
+		if len(own) == 0 || ValidName(n.Name) != nil || taken[key] {
+			continue
+		}
+		taken[key] = true
+		out = append(out, urlTest(n.Name, own))
+	}
+	return out
 }
 
 // directRules keep traffic to the server itself (panel, SSH, subscription updates) out

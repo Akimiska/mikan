@@ -261,6 +261,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ноды */
+        get: operations["list-nodes"];
+        put?: never;
+        /** Добавить ноду */
+        post: operations["create-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Удалить ноду */
+        delete: operations["delete-node"];
+        options?: never;
+        head?: never;
+        /** Изменить ноду */
+        patch: operations["update-node"];
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Выпустить новый ключ ноды (старый перестаёт работать) */
+        post: operations["rekey-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/presets": {
         parameters: {
             query?: never;
@@ -573,9 +626,26 @@ export interface components {
             config?: string;
             /** @description host:port для REALITY */
             dest?: string;
+            /**
+             * Format: int64
+             * @description Нода; по умолчанию — своя нода панели
+             */
+            node_id?: number;
             port?: string;
             /** @enum {string} */
             preset: "vless_reality_xhttp" | "hysteria2" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "custom";
+        };
+        CreateNodeInputBody: {
+            /**
+             * Format: int64
+             * @description Порт API ноды; по умолчанию случайный
+             */
+            api_port?: number;
+            /** @description Домен для Hysteria2/TUIC и ссылок (необязательно) */
+            domain?: string;
+            /** @description IP или имя сервера ноды */
+            host: string;
+            name: string;
         };
         CreateUserInputBody: {
             contact?: string;
@@ -652,6 +722,8 @@ export interface components {
             id: number;
             name: string;
             network: string;
+            /** Format: int64 */
+            node_id: number;
             port: string;
             preset: string;
             server_names?: string[];
@@ -699,6 +771,47 @@ export interface components {
         MeBody: {
             admin: components["schemas"]["AdminView"];
             csrf_token: string;
+        };
+        NodeInfo: {
+            /** @description host:port API ноды; пусто у своей ноды */
+            address: string;
+            /** Format: date-time */
+            checked_at?: string;
+            /** Format: int64 */
+            conns: number;
+            /** Format: double */
+            cpu_percent: number;
+            domain: string;
+            enabled: boolean;
+            error?: string;
+            /** @description Адрес для клиентов */
+            host: string;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            inbounds: number;
+            /** Format: int64 */
+            listeners: number;
+            /** Format: int64 */
+            listeners_ok: number;
+            /** @description Своя нода панели */
+            local: boolean;
+            /** Format: int64 */
+            mem_total: number;
+            /** Format: int64 */
+            mem_used: number;
+            /** @description Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений */
+            name: string;
+            /** @enum {string} */
+            status: "ok" | "error" | "unknown";
+            version?: string;
+        };
+        NodeKeyOutputBody: {
+            /** @description Команда установки на сервере ноды */
+            command: string;
+            /** @description Ключ подключения ноды: показывается один раз */
+            key: string;
+            node: components["schemas"]["NodeInfo"];
         };
         NodeView: {
             /** Format: date-time */
@@ -750,6 +863,12 @@ export interface components {
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
+        };
+        PatchNodeInputBody: {
+            domain?: string;
+            enabled?: boolean;
+            host?: string;
+            name?: string;
         };
         PatchSettingsInputBody: {
             brand?: string;
@@ -1006,6 +1125,8 @@ export interface components {
         };
         ValidateInboundInputBody: {
             config: string;
+            /** Format: int64 */
+            node_id?: number;
             port?: string;
         };
         ValidateInboundOutputBody: {
@@ -1391,7 +1512,10 @@ export interface operations {
     };
     "scan-targets": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Нода, рядом с которой искать */
+                node_id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1517,7 +1641,10 @@ export interface operations {
     };
     "node-health": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Нода; 1 — своя нода панели */
+                id?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1531,6 +1658,163 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNodeInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchNodeInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "rekey-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeKeyOutputBody"];
                 };
             };
             /** @description Error */

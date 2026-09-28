@@ -2,11 +2,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleCheck, Pencil, Plus, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Inbound, type Preset, type Schemas } from "../../api/client";
-import { qk, useInbounds, usePresets } from "../../api/hooks";
+import { qk, useInbounds, useNodes, usePresets } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
+
+import { nodeLabel } from "./nodes";
 
 const ConfigEditor = lazy(() => import("../../components/config-editor"));
 
@@ -28,9 +30,15 @@ function Editor(props: { value: string; onChange: (v: string) => void; invalid?:
 }
 
 export function InboundsPage() {
-  const inbounds = useInbounds();
+  const all = useInbounds();
+  const nodes = useNodes();
   const qc = useQueryClient();
   const toast = useToast();
+  const [nodeId, setNodeId] = useState(1);
+  const multi = (nodes.data?.length ?? 0) > 1;
+  const node = nodes.data?.find((n) => n.id === nodeId);
+  // One node: its inbounds are all there is; several: the chosen node's.
+  const inbounds = { ...all, data: all.data?.filter((i) => !multi || i.node_id === nodeId) } as typeof all;
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Inbound | null>(null);
   const [removing, setRemoving] = useState<Inbound | null>(null);
@@ -65,6 +73,16 @@ export function InboundsPage() {
         <TriangleAlert size={18} className="shrink-0" aria-hidden />
         <span>{t("inbounds.reconnectWarning")}</span>
       </div>
+      {multi && nodes.data ? (
+        <div className="mb-4">
+          <Segmented
+            value={String(nodeId)}
+            label={t("inbounds.node")}
+            options={nodes.data.map((n) => ({ value: String(n.id), label: nodeLabel(n) }))}
+            onChange={(v) => setNodeId(Number(v))}
+          />
+        </div>
+      ) : null}
       {inbounds.isPending ? (
         <div className="grid gap-4 lg:grid-cols-2">
           {[0, 1, 2, 3].map((i) => (
@@ -77,7 +95,7 @@ export function InboundsPage() {
         </section>
       ) : inbounds.data.length === 0 ? (
         <section className="card glass">
-          <EmptyState title={t("inbounds.emptyTitle")} text={t("inbounds.emptyText")}>
+          <EmptyState title={multi ? t("inbounds.nodeEmptyTitle") : t("inbounds.emptyTitle")} text={multi ? t("inbounds.nodeEmptyText") : t("inbounds.emptyText")}>
             <Button variant="primary" onClick={() => setAdding(true)}>
               <Plus size={18} aria-hidden /> {t("inbounds.add")}
             </Button>
@@ -134,7 +152,7 @@ export function InboundsPage() {
           ))}
         </div>
       )}
-      <AddDrawer open={adding} onOpenChange={setAdding} />
+      <AddDrawer open={adding} onOpenChange={setAdding} nodeId={multi ? nodeId : 1} nodeName={multi && node ? nodeLabel(node) : undefined} />
       <EditDrawer inbound={editing} onClose={() => setEditing(null)} />
       <Confirm
         open={!!removing}
@@ -182,7 +200,7 @@ function ValidateResult({ v }: { v: ReturnType<typeof useValidate> }) {
   return null;
 }
 
-function AddDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: boolean; onOpenChange: (v: boolean) => void; nodeId: number; nodeName?: string }) {
   const presets = usePresets();
   const qc = useQueryClient();
   const toast = useToast();
@@ -226,14 +244,14 @@ function AddDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
       setErrors({ port: t("inbounds.portRequired") });
       return;
     }
-    create.mutate({ preset: preset as Schemas["CreateInboundInputBody"]["preset"], port: port.trim() || undefined, config: custom ? config : undefined });
+    create.mutate({ preset: preset as Schemas["CreateInboundInputBody"]["preset"], node_id: nodeId, port: port.trim() || undefined, config: custom ? config : undefined });
   };
   return (
     <Drawer
       open={open}
       onOpenChange={onOpenChange}
       title={t("inbounds.newTitle")}
-      meta={custom ? t("inbounds.customMeta") : t("inbounds.newMeta")}
+      meta={nodeName ? t("inbounds.newOn", { name: nodeName }) : custom ? t("inbounds.customMeta") : t("inbounds.newMeta")}
       footer={
         <>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
@@ -268,7 +286,7 @@ function AddDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (v: bo
           <Field label={t("inbounds.configLabel")} hint={t("inbounds.configHint")} error={errors.config}>
             <Editor value={config} onChange={editConfig} invalid={!!errors.config} />
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <Button size="sm" loading={validate.isPending} onClick={() => validate.mutate({ config, port: port.trim() || undefined })}>
+              <Button size="sm" loading={validate.isPending} onClick={() => validate.mutate({ config, node_id: nodeId, port: port.trim() || undefined })}>
                 {t("inbounds.validate")}
               </Button>
               <ValidateResult v={validate} />
@@ -305,9 +323,9 @@ function TargetBadges({ r }: { r: Target }) {
 }
 
 /** Check the camouflage site or pick one next to the server (and the self-steal option). */
-function TargetPicker({ dest, onPick }: { dest: string; onPick: (dest: string, sni: string) => void }) {
+function TargetPicker({ dest, nodeId, onPick }: { dest: string; nodeId: number; onPick: (dest: string, sni: string) => void }) {
   const check = useMutation({ mutationFn: (d: string) => unwrap(api.POST("/api/v1/inbounds/check-target", { body: { dest: d } })) });
-  const scan = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/inbounds/scan-targets")) });
+  const scan = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/inbounds/scan-targets", { params: { query: { node_id: nodeId } } })) });
   const candidates = scan.data ? [...(scan.data.self_steal?.ok ? [scan.data.self_steal] : []), ...scan.data.results] : [];
   return (
     <div className="-mt-2 mb-4">
@@ -497,6 +515,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
                   {!configChanged ? (
                     <TargetPicker
                       dest={dest}
+                      nodeId={inbound.node_id}
                       onPick={(d, s) => {
                         setDest(d);
                         setSni(s);
@@ -510,7 +529,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
             <Field label={t("inbounds.configLabel")} hint={t("inbounds.configHint")} error={errors.config}>
               <Editor value={config} onChange={editConfig} invalid={!!errors.config} />
               <div className="mt-2 flex flex-wrap items-center gap-3">
-                <Button size="sm" loading={validate.isPending} onClick={() => validate.mutate({ config, port: port.trim() || undefined })}>
+                <Button size="sm" loading={validate.isPending} onClick={() => validate.mutate({ config, node_id: inbound?.node_id, port: port.trim() || undefined })}>
                   {t("inbounds.validate")}
                 </Button>
                 <Button size="sm" variant="ghost" disabled={!configChanged} onClick={() => inbound && editConfig(inbound.config)}>

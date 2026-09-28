@@ -22,14 +22,16 @@
     "users": "Users",
     "tariffs": "Plans",
     "inbounds": "Protocols",
-    "settings": "Settings"
+    "settings": "Settings",
+    "nodes": "Nodes"
   },
   "navShort": {
     "overview": "Overview",
     "users": "Users",
     "tariffs": "Plans",
     "inbounds": "Protocols",
-    "settings": "Settings"
+    "settings": "Settings",
+    "nodes": "Nodes"
   },
   "shell": {
     "sidebar": "Sidebar",
@@ -136,7 +138,10 @@
       "config_mihomo": "mihomo rejected the config: {value}",
       "scan_busy": "A search is already running — wait for it",
       "scan_no_ip": "Could not find the server's IPv4 — check the address in the settings",
-      "bad_dest": "host:port of a public site is required"
+      "bad_dest": "host:port of a public site is required",
+      "unknown_node": "No such node",
+      "local_node": "This is the panel's own node: its address is set in the panel settings",
+      "nodes_disabled": "Nodes are unavailable: the panel runs without nodes"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -444,7 +449,11 @@
       "dns": "The name does not resolve",
       "bad_dest": "host:port is required",
       "sni_required": "An IP needs an SNI"
-    }
+    },
+    "node": "Node",
+    "nodeEmptyTitle": "This node has no protocols",
+    "nodeEmptyText": "Add protocols — they appear in the subscription with the node's flag.",
+    "newOn": "Node «{name}»"
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
@@ -550,12 +559,76 @@
     },
     "howTo": "How to connect",
     "steps": {
-      "1": { "title": "Install the app", "text": "Any from the list above, from the official store." },
-      "2": { "title": "Tap «Add»", "text": "The app opens and adds your profile by itself." },
-      "3": { "title": "Turn on the VPN", "text": "Allow adding the configuration if the phone asks." }
+      "1": {
+        "title": "Install the app",
+        "text": "Any from the list above, from the official store."
+      },
+      "2": {
+        "title": "Tap «Add»",
+        "text": "The app opens and adds your profile by itself."
+      },
+      "3": {
+        "title": "Turn on the VPN",
+        "text": "Allow adding the configuration if the phone asks."
+      }
     },
     "link": "Subscription link",
     "qrOther": "QR code for another device",
     "support": "Contact support"
+  },
+  "nodes": {
+    "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",
+    "add": "Add node",
+    "addSubmit": "Add and get the key",
+    "emptyTitle": "No nodes yet",
+    "emptyText": "The panel's own node appears here once it starts.",
+    "localName": "Own node",
+    "kindLocal": "Node on the panel's server",
+    "kindRemote": "Remote node",
+    "disabled": "Off",
+    "online": "Working",
+    "offline": "No connection",
+    "checking": "Checking…",
+    "localOffline": "The panel cannot see its own node. Check on the server: mikan status.",
+    "remoteOffline": "The panel cannot reach the node. If it was just added, install it with the command from its key; otherwise check that the server is up and the API port is open.",
+    "protocols": "Protocols",
+    "listeners": "{ok} of {total} working",
+    "conns": "Connections",
+    "cpu": "CPU",
+    "memory": "Memory",
+    "api": "Node API",
+    "version": "Version",
+    "configure": "Configure",
+    "rekey": "New key",
+    "rekeyTitle": "Issue a new key for «{name}»?",
+    "rekeyText": "The old key stops working at once: the node is disconnected until mikan join runs on its server with the new key.",
+    "rekeyConfirm": "Issue key",
+    "deleteTitle": "Delete node «{name}»?",
+    "deleteText": "The node stops serving clients and its protocols leave the subscriptions. To clean up the server itself, run mikan uninstall on it.",
+    "deleted": "Node deleted",
+    "saved": "Node saved",
+    "newTitle": "New node",
+    "newMeta": "A server that will serve VPN for this panel",
+    "name": "Name",
+    "nameHint": "The group in the subscription. A leading flag prefixes its protocol names: «🇺🇸 VLESS XHTTP».",
+    "host": "Server IP",
+    "hostHint": "The panel connects to the node at this address, and clients connect to its protocols.",
+    "domain": "Domain",
+    "domainHint": "Optional. Used instead of the IP in Hysteria2 and TUIC links.",
+    "apiPort": "API port",
+    "apiPortHint": "The panel connects to the node on this port over key-checked TLS.",
+    "apiPortAuto": "random",
+    "keyTitle": "Join key",
+    "keyOnce": "The key is shown once. If you lose it, issue a new one on the node's card.",
+    "keyStep1": "Copy install.sh and the mikan image to the node's server — as when installing the panel.",
+    "keyStep2": "Run the command below, adding --image-tar FILE or --image IMAGE.",
+    "keyStep3": "In half a minute the node shows up here as «Working».",
+    "keyDone": "Done",
+    "copyCommand": "Copy command",
+    "commandCopied": "Command copied",
+    "localAddress": "The own node's address is the panel's address; change it in the settings.",
+    "serving": "Serves clients",
+    "servingHint": "A disabled node accepts no connections and leaves the subscriptions.",
+    "nameLocalHint": "Name your own node with a flag, e.g. «🇳🇱 Netherlands»: that is its group in the subscription, and the flag prefixes its protocols."
   }
 }

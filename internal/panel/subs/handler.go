@@ -23,7 +23,8 @@ import (
 type Config struct {
 	Brand      string
 	SupportURL string
-	Endpoint   Endpoint
+	Nodes      []Node   // enabled nodes in display order
+	Direct     []string // the panel's and nodes' hosts: kept out of the tunnel
 	Groups     Groups
 	Routing    Routing
 }
@@ -65,7 +66,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	prof, err := h.profile(r.Context(), u, cfg.Endpoint)
+	prof, err := h.profile(r.Context(), u, cfg)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -102,8 +103,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) profile(ctx context.Context, u db.User, ep Endpoint) (Profile, error) {
-	prof := Profile{Endpoint: ep}
+func (h *Handler) profile(ctx context.Context, u db.User, cfg Config) (Profile, error) {
+	prof := Profile{Nodes: cfg.Nodes, Direct: cfg.Direct}
 	if !u.SlotID.Valid {
 		return prof, errors.New("user has no slot")
 	}
@@ -117,8 +118,12 @@ func (h *Handler) profile(ctx context.Context, u db.User, ep Endpoint) (Profile,
 		return prof, err
 	}
 	allowed := domain.DecodeInbounds(u.Inbounds)
+	nodes := map[int64]bool{}
+	for _, n := range cfg.Nodes {
+		nodes[n.ID] = true
+	}
 	for _, in := range all {
-		if in.Enabled == 0 || (len(allowed) > 0 && !slices.Contains(allowed, in.ID)) {
+		if in.Enabled == 0 || !nodes[in.NodeID] || (len(allowed) > 0 && !slices.Contains(allowed, in.ID)) {
 			continue
 		}
 		prof.Inbounds = append(prof.Inbounds, in)
@@ -158,6 +163,7 @@ type Info struct {
 	ResetsAt   *time.Time `json:"resets_at,omitempty"`
 	Devices    int        `json:"device_limit"`
 	Protocols  []string   `json:"protocols"`
+	Locations  []string   `json:"locations,omitempty"`
 }
 
 func (h *Handler) info(w http.ResponseWriter, u db.User, prof Profile, cfg Config) {
@@ -176,8 +182,17 @@ func (h *Handler) info(w http.ResponseWriter, u db.User, prof Profile, cfg Confi
 	if u.DeviceLimit.Valid {
 		out.Devices = int(u.DeviceLimit.Int64)
 	}
+	onNode := map[int64]bool{}
 	for _, in := range prof.Inbounds {
-		out.Protocols = append(out.Protocols, in.Preset)
+		onNode[in.NodeID] = true
+		if !slices.Contains(out.Protocols, in.Preset) {
+			out.Protocols = append(out.Protocols, in.Preset)
+		}
+	}
+	for _, n := range cfg.Nodes {
+		if onNode[n.ID] && n.Name != "" {
+			out.Locations = append(out.Locations, n.Name)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

@@ -1,7 +1,8 @@
 // driver runs the vertical slice against a real panel and node:
 //
+//	nodes:   add a remote node through the API and hand its join key to the node2 container
 //	prepare: log in, create a user by tariff, turn its subscription into a client config
-//	verify:  push traffic through every protocol and check the panel's accounting
+//	verify:  push traffic through every protocol of both nodes and check the accounting
 package main
 
 import (
@@ -30,14 +31,20 @@ const (
 	mib       = 1 << 20
 )
 
-// protos: the default inbounds of a fresh install, then the ones prepare adds through the
-// API the way an admin would, including an own template in the editor.
 // protos: the four default inbounds of a fresh install, then the ones prepare adds through
-// the API the way an admin would, the last one as an own template from the editor.
+// the API the way an admin would (the last local one as an own template from the editor),
+// then two default inbounds of the remote node, named with its flag in the subscription.
 var protos = []struct{ name, proxy string }{
 	{"vision", "VLESS Vision"}, {"xhttp", "VLESS XHTTP"}, {"hy2", "Hysteria2"}, {"tuic", "TUIC"},
 	{"grpc", "VLESS gRPC"}, {"trojan", "Trojan"}, {"anytls", "AnyTLS"}, {"custom-vmess", "Custom"},
+	{"us-xhttp", "🇺🇸 VLESS XHTTP"}, {"us-hy2", "🇺🇸 Hysteria2"},
 }
+
+// localProtos run on the panel's own node; a new node gets remoteInbounds defaults.
+const (
+	localProtos    = 8
+	remoteInbounds = 4
+)
 
 type panel struct {
 	hc   *http.Client
@@ -109,6 +116,8 @@ type user struct {
 func main() {
 	log.SetFlags(log.Ltime)
 	switch os.Args[1] {
+	case "nodes":
+		addNode()
 	case "prepare":
 		prepare()
 	case "verify":
@@ -131,7 +140,8 @@ func prepare() {
 	if code := p.try("POST", "/api/v1/inbounds", map[string]any{"preset": "custom", "port": "2097", "config": "type: vless\nws-path: /plain\n"}); code != 422 {
 		log.Fatalf("an unencrypted vless template must be refused, got %d", code)
 	}
-	waitNode(p, len(protos))
+	waitNode(p, localProtos)
+	waitRemote(p)
 	// GEOSITE/GEOIP rules of the default routing would make the client download geodata
 	// from GitHub on start; the slice checks the tunnel, not the geodata.
 	p.call("PATCH", "/api/v1/settings", map[string]any{"sub_routing": "all"}, nil)
@@ -157,7 +167,8 @@ func prepare() {
 	// URI format for Happ-like clients: one link per inbound.
 	links := fetchSub(token, "Happ/3.4.1")
 	decoded, err := base64.StdEncoding.DecodeString(string(links))
-	if err != nil || strings.Count(string(decoded), "\n") != len(protos)-1 {
+	// Every inbound of both nodes has a link; only some of the remote ones are downloaded through.
+	if err != nil || strings.Count(string(decoded), "\n") != localProtos+remoteInbounds-1 {
 		log.Fatalf("uri subscription: %v %q", err, decoded)
 	}
 
@@ -280,6 +291,9 @@ func verify() {
 	if _, err := download(11001, mib); err == nil {
 		log.Fatal("AC-5 failed: disabled user can still download")
 	}
+	if _, err := download(11001+localProtos, mib); err == nil {
+		log.Fatal("AC-5 failed: the remote node still lets a disabled user in")
+	}
 	log.Print("disabled user is cut off")
 	p.call("PATCH", "/api/v1/users/"+strconv.FormatInt(id, 10), map[string]any{"disabled": false}, nil)
 	time.Sleep(1500 * time.Millisecond)
@@ -288,4 +302,48 @@ func verify() {
 	}
 	log.Print("re-enabled user works again")
 	log.Print("SLICE OK")
+}
+
+// addNode registers the node2 container the way an admin adds a remote node and passes
+// its one-time join key on through the shared volume.
+func addNode() {
+	p := login()
+	var out struct {
+		Node struct {
+			ID int64 `json:"id"`
+		} `json:"node"`
+		Key string `json:"key"`
+	}
+	p.call("POST", "/api/v1/nodes", map[string]any{"name": "🇺🇸 US", "host": "node2.slice", "api_port": 7443}, &out)
+	if !strings.HasPrefix(out.Key, "mikan1.") {
+		log.Fatalf("join key: %q", out.Key)
+	}
+	// Test key in a throwaway volume: node2 runs as the image user, not as the driver.
+	if err := os.WriteFile("/work/node2.key", []byte(out.Key), 0o644); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("remote node %d added, key handed over", out.Node.ID)
+}
+
+// waitRemote waits until the panel drives node2 over mTLS with healthy listeners.
+func waitRemote(p *panel) {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		var nodes []struct {
+			ID          int64  `json:"id"`
+			Status      string `json:"status"`
+			Error       string `json:"error"`
+			Listeners   int    `json:"listeners"`
+			ListenersOK int    `json:"listeners_ok"`
+		}
+		p.call("GET", "/api/v1/nodes", nil, &nodes)
+		for _, n := range nodes {
+			if n.ID != 1 && n.Status == "ok" && n.Listeners == 4 && n.ListenersOK == 4 {
+				log.Printf("remote node %d is up over mTLS with 4 listeners", n.ID)
+				return
+			}
+		}
+		time.Sleep(time.Second)
+	}
+	log.Fatal("the remote node did not come up")
 }

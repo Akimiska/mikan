@@ -139,13 +139,20 @@ func (h *handlers) serverTraffic(ctx context.Context, in *rangeInput) (*trafficO
 	return out, nil
 }
 
-func (h *handlers) nodeHealth(ctx context.Context, _ *struct{}) (*nodeOutput, error) {
+type nodeHealthInput struct {
+	ID int64 `query:"id" default:"1" minimum:"1" doc:"Нода; 1 — своя нода панели"`
+}
+
+func (h *handlers) nodeHealth(ctx context.Context, in *nodeHealthInput) (*nodeOutput, error) {
 	out := &nodeOutput{}
-	if h.d.Health == nil {
+	if h.d.Nodes == nil {
 		out.Body = NodeView{Error: "node sync disabled", Listeners: []nodeapi.ListenerStatus{}}
 		return out, nil
 	}
-	hv := h.d.Health()
+	hv, ok := h.d.Nodes.Health(in.ID)
+	if !ok {
+		hv.Error = "not connected"
+	}
 	v := NodeView{OK: hv.OK, Error: hv.Error, Version: hv.Health.Version, Core: hv.Health.Core, Conns: hv.Health.Conns,
 		System: hv.Health.System, Listeners: hv.Listeners, CheckedAt: hv.CheckedAt}
 	if !hv.Health.StartedAt.IsZero() {

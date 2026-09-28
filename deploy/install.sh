@@ -3,10 +3,12 @@
 #
 #   sudo bash install.sh --image-tar mikan-image.tar.gz
 #   sudo bash install.sh --image ghcr.io/OWNER/mikan:latest --registry-user OWNER --registry-token-file token.txt
+#   sudo bash install.sh --image-tar mikan-image.tar.gz --node --join KEY   # a node of another panel
 #
 # Installs Docker if needed, generates the secret admin link and password, writes
 # /opt/mikan (compose, .env, data), starts the panel and the node, and installs the
 # `mikan` command. The admin password is printed once and stored nowhere in clear text.
+# With --node it installs only the node, which the panel that issued KEY then drives.
 set -euo pipefail
 
 MIKAN_DIR=/opt/mikan
@@ -21,6 +23,8 @@ REGISTRY_TOKEN_FILE=""
 ASSUME_YES=0
 FIREWALL=1
 TUNE=1
+NODE_ONLY=0
+JOIN_KEY=""
 
 c_ok=$'\033[1;32m' c_warn=$'\033[1;33m' c_err=$'\033[1;31m' c_dim=$'\033[2m' c_b=$'\033[1m' c_0=$'\033[0m'
 log() { printf '%s▸%s %s\n' "$c_ok" "$c_0" "$*"; }
@@ -44,6 +48,7 @@ usage() {
   --port ПОРТ                порт панели (по умолчанию случайный 20000–60000)
   --no-firewall              не трогать ufw
   --no-tune                  не включать BBR и буферы UDP
+  --node --join КЛЮЧ         поставить только ноду для другой панели (ключ — из раздела «Ноды»)
   --yes                      не задавать вопросов
 EOF
 }
@@ -60,6 +65,8 @@ while [ $# -gt 0 ]; do
     --port) PANEL_PORT="$2"; shift 2 ;;
     --no-firewall) FIREWALL=0; shift ;;
     --no-tune) TUNE=0; shift ;;
+    --node) NODE_ONLY=1; shift ;;
+    --join) JOIN_KEY="$2"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "неизвестный параметр: $1" ;;
@@ -102,6 +109,7 @@ esac
 [ -f "$MIKAN_DIR/.env" ] && die "mikan уже установлен в $MIKAN_DIR. Обновление: mikan update"
 [ -n "$IMAGE" ] || [ -n "$IMAGE_TAR" ] || { usage; die "укажите --image-tar или --image"; }
 [ -z "$IMAGE_TAR" ] || [ -f "$IMAGE_TAR" ] || die "нет файла $IMAGE_TAR"
+[ "$NODE_ONLY" = 0 ] || [ -n "$JOIN_KEY" ] || die "Для ноды нужен ключ из панели (раздел «Ноды»): --join КЛЮЧ"
 export DEBIAN_FRONTEND=noninteractive
 # A fresh VPS keeps apt busy for minutes (hoster provisioning, unattended-upgrades);
 # get.docker.com fails on the dpkg lock instead of waiting.
@@ -134,13 +142,16 @@ systemctl enable --now docker >/dev/null 2>&1 || true
 docker compose version >/dev/null 2>&1 || die "Нет docker compose v2. Обновите Docker."
 
 # ---------- address and ports ----------
-if [ -z "$PUBLIC_HOST" ]; then
-  PUBLIC_HOST=$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || curl -4 -fsS --max-time 5 https://ifconfig.me 2>/dev/null || true)
-  [ -n "$PUBLIC_HOST" ] || PUBLIC_HOST=$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+# A node's address lives in the panel that issued its key.
+if [ "$NODE_ONLY" = 0 ]; then
+  if [ -z "$PUBLIC_HOST" ]; then
+    PUBLIC_HOST=$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || curl -4 -fsS --max-time 5 https://ifconfig.me 2>/dev/null || true)
+    [ -n "$PUBLIC_HOST" ] || PUBLIC_HOST=$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+  fi
+  [ -n "$PUBLIC_HOST" ] || die "Не удалось определить IP сервера, укажите --host."
+  log "Адрес сервера: ${c_b}${PUBLIC_HOST}${c_0}"
+  confirm "Верно?" || die "Запустите снова с --host ВАШ_IP"
 fi
-[ -n "$PUBLIC_HOST" ] || die "Не удалось определить IP сервера, укажите --host."
-log "Адрес сервера: ${c_b}${PUBLIC_HOST}${c_0}"
-confirm "Верно?" || die "Запустите снова с --host ВАШ_IP"
 
 busy=""
 for spec in 443/tcp 443/udp 8443/tcp 8443/udp; do
@@ -152,16 +163,18 @@ if [ -n "$busy" ]; then
   printf '%s✗%s Порты для VPN заняты:%b\n' "$c_err" "$c_0" "$busy" >&2
   die "Освободите их (например, остановите старую панель: Hiddify, 3x-ui, nginx) и запустите снова."
 fi
-if port_busy 80 tcp; then
-  warn "Порт 80 занят ($(port_owner 80 tcp)) — сертификат Let's Encrypt не выпустится, пока он не освободится."
-fi
-if [ -z "$PANEL_PORT" ]; then
-  while :; do
-    PANEL_PORT=$(shuf -i 20000-60000 -n 1)
-    port_busy "$PANEL_PORT" tcp || break
-  done
-elif port_busy "$PANEL_PORT" tcp; then
-  die "Порт $PANEL_PORT занят."
+if [ "$NODE_ONLY" = 0 ]; then
+  if port_busy 80 tcp; then
+    warn "Порт 80 занят ($(port_owner 80 tcp)) — сертификат Let's Encrypt не выпустится, пока он не освободится."
+  fi
+  if [ -z "$PANEL_PORT" ]; then
+    while :; do
+      PANEL_PORT=$(shuf -i 20000-60000 -n 1)
+      port_busy "$PANEL_PORT" tcp || break
+    done
+  elif port_busy "$PANEL_PORT" tcp; then
+    die "Порт $PANEL_PORT занят."
+  fi
 fi
 
 # ---------- image ----------
@@ -179,11 +192,57 @@ else
 fi
 
 # ---------- files ----------
+umask 077
+if [ "$NODE_ONLY" = 1 ]; then
+  # The image checks the key and names the port the panel will connect to.
+  API_PORT=$(MIKAN_NODE_JOIN="$JOIN_KEY" docker run --rm -e MIKAN_NODE_JOIN --entrypoint /usr/local/bin/mikan-node "$IMAGE" key-port 2>/dev/null) ||
+    die "Ключ ноды не подходит — скопируйте его из панели заново."
+  ! port_busy "$API_PORT" tcp || die "Порт API ноды $API_PORT занят ($(port_owner "$API_PORT" tcp))."
+  mkdir -p "$MIKAN_DIR/data/node" "$MIKAN_DIR/backups"
+  cat >"$MIKAN_DIR/.env" <<EOF
+MIKAN_MODE=node
+MIKAN_IMAGE=$IMAGE
+NODE_API_PORT=$API_PORT
+MIKAN_UFW=$FIREWALL
+MIKAN_NODE_JOIN=$JOIN_KEY
+EOF
+  cat >"$MIKAN_DIR/compose.yaml" <<'EOF'
+name: mikan
+
+services:
+  node:
+    image: ${MIKAN_IMAGE}
+    network_mode: host
+    restart: unless-stopped
+    user: "65532:65532"
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp:rw,size=64m"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    entrypoint: ["/usr/local/bin/mikan-node"]
+    environment:
+      MIKAN_DATA_DIR: /data/node
+      MIKAN_NODE_SOCKET: /run/mikan/node.sock
+      MIKAN_NODE_JOIN: ${MIKAN_NODE_JOIN}
+    volumes: ["./data:/data", "run:/run/mikan"]
+
+volumes:
+  run: {}
+EOF
+  chmod 600 "$MIKAN_DIR/.env" "$MIKAN_DIR/compose.yaml"
+  chown -R 65532:65532 "$MIKAN_DIR/data"
+  chmod 700 "$MIKAN_DIR/data"
+  cd "$MIKAN_DIR"
+else
+# The panel with its own node.
 ADMIN_PATH=$(rand 24)
 SUB_PATH=$(rand 12)
 ADMIN_USER=$(rand_login)
 PASSWORD=$(rand 32)
-umask 077
 mkdir -p "$MIKAN_DIR/data/panel" "$MIKAN_DIR/data/node" "$MIKAN_DIR/backups"
 cat >"$MIKAN_DIR/.env" <<EOF
 MIKAN_IMAGE=$IMAGE
@@ -245,6 +304,7 @@ bootstrap=(admin bootstrap --public-host "$PUBLIC_HOST" --port "$PANEL_PORT" --a
 [ -z "$DOMAIN" ] || bootstrap+=(--domain "$DOMAIN")
 [ -z "$EMAIL" ] || bootstrap+=(--email "$EMAIL")
 printf '%s\n' "$PASSWORD" | docker compose run --rm --no-deps -T panel "${bootstrap[@]}" >/dev/null
+fi
 
 # ---------- system tuning ----------
 if [ "$TUNE" = 1 ]; then
@@ -258,7 +318,9 @@ EOF
   sysctl --system >/dev/null 2>&1 || warn "Не удалось применить sysctl — продолжаю без BBR."
 fi
 if [ "$FIREWALL" = 1 ] && command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
-  for rule in "$PANEL_PORT/tcp" 80/tcp 443/tcp 443/udp 8443/tcp 8443/udp; do ufw allow "$rule" >/dev/null; done
+  rules=("$PANEL_PORT/tcp" 80/tcp)
+  [ "$NODE_ONLY" = 0 ] || rules=("$API_PORT/tcp")
+  for rule in "${rules[@]}" 443/tcp 443/udp 8443/tcp 8443/udp; do ufw allow "$rule" >/dev/null; done
   log "Открыл порты в ufw."
 fi
 
@@ -267,11 +329,15 @@ log "Запускаю…"
 docker compose up -d >/dev/null
 ok=0
 for _ in $(seq 1 60); do
-  code=$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$PANEL_PORT/$ADMIN_PATH/" || true)
-  if [ "$code" = 200 ]; then ok=1; break; fi
+  if [ "$NODE_ONLY" = 1 ]; then
+    if port_busy "$API_PORT" tcp; then ok=1; break; fi
+  else
+    code=$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$PANEL_PORT/$ADMIN_PATH/" || true)
+    if [ "$code" = 200 ]; then ok=1; break; fi
+  fi
   sleep 1
 done
-[ "$ok" = 1 ] || { docker compose logs --tail 50; die "Панель не ответила за минуту. Логи выше."; }
+[ "$ok" = 1 ] || { docker compose logs --tail 50; die "mikan не поднялся за минуту. Логи выше."; }
 
 # ---------- server command ----------
 cat >/usr/local/bin/mikan <<'CLI'
@@ -283,8 +349,18 @@ dc() { docker compose --project-directory "$MIKAN_DIR" "$@"; }
 admin() { dc exec -T panel mikan admin "$@"; }
 env_get() { grep -E "^$1=" .env | cut -d= -f2-; }
 
+node_mode() { [ "$(env_get MIKAN_MODE || true)" = node ]; }
+
 wait_healthy() {
   local port path code
+  if node_mode; then
+    port=$(env_get NODE_API_PORT)
+    for _ in $(seq 1 60); do
+      ss -Hlnt "sport = :$port" | grep -q . && return 0
+      sleep 1
+    done
+    return 1
+  fi
   port=$(env_get PANEL_PORT)
   path=$(admin url | sed -E 's#https?://[^/]+/##')
   for _ in $(seq 1 60); do
@@ -295,16 +371,38 @@ wait_healthy() {
   return 1
 }
 
+# A node has no panel: users, protocols and settings live in the panel it is joined to.
+if node_mode; then
+  case "${1:-help}" in
+    url | reset-password | reset-path | disable-2fa | inbound | node)
+      echo "Это нода: управление — в разделе «Ноды» панели." >&2
+      exit 1
+      ;;
+  esac
+fi
+
 case "${1:-help}" in
   status)
     dc ps
-    dc exec -T panel mikan health >/dev/null && echo "Панель отвечает."
+    if node_mode; then
+      wait_healthy && echo "Нода ждёт панель на порту $(env_get NODE_API_PORT)."
+    else
+      dc exec -T panel mikan health >/dev/null && echo "Панель отвечает."
+    fi
+    ;;
+  join)
+    node_mode || { echo "join — команда ноды" >&2; exit 1; }
+    [ -n "${2:-}" ] || { echo "Использование: mikan join КЛЮЧ (новый ключ из раздела «Ноды»)" >&2; exit 1; }
+    sed -i "s#^MIKAN_NODE_JOIN=.*#MIKAN_NODE_JOIN=$2#" .env
+    dc up -d
+    wait_healthy && echo "Нода перезапущена с новым ключом." || { echo "Нода не поднялась: mikan logs" >&2; exit 1; }
     ;;
   logs) shift; dc logs -f --tail 200 "$@" ;;
   url) admin url ;;
   reset-password) admin reset-password ;;
   reset-path) admin reset-path ;;
   disable-2fa) admin disable-2fa ;;
+  node) shift; admin node "$@" ;;
   inbound)
     shift
     if [ "${1:-}" != add ]; then admin inbound "$@"; exit; fi
@@ -317,10 +415,14 @@ case "${1:-help}" in
   restart) dc restart ;;
   backup)
     ts=$(date +%Y%m%d-%H%M%S)
-    admin backup /data/panel/backup.db >/dev/null
     umask 077
-    tar -czf "backups/mikan-$ts.tar.gz" .env compose.yaml data/panel/backup.db data/panel/tls data/node 2>/dev/null
-    rm -f data/panel/backup.db
+    if node_mode; then
+      tar -czf "backups/mikan-$ts.tar.gz" .env compose.yaml data/node 2>/dev/null
+    else
+      admin backup /data/panel/backup.db >/dev/null
+      tar -czf "backups/mikan-$ts.tar.gz" .env compose.yaml data/panel/backup.db data/panel/tls data/node 2>/dev/null
+      rm -f data/panel/backup.db
+    fi
     echo "Бэкап: $MIKAN_DIR/backups/mikan-$ts.tar.gz"
     ;;
   restore)
@@ -374,9 +476,11 @@ mikan — управление панелью
   disable-2fa     выключить 2FA (если потерян телефон)
   inbound list    подключения: имя, пресет, порт
   inbound add ПРЕСЕТ [--port ПОРТ]  добавить подключение (vless_reality_grpc, trojan_reality, anytls…)
+  node list|add|key|set  ноды панели (mikan node add --name "🇺🇸 США" --host IP)
   backup          бэкап в /opt/mikan/backups
   restore ФАЙЛ    восстановить из бэкапа
   update [ОБРАЗ|ФАЙЛ.tar.gz]  обновить с откатом при ошибке
+  join КЛЮЧ       (нода) новый ключ из раздела «Ноды» панели
   restart         перезапуск
   uninstall       остановить и удалить команду
 EOF
@@ -384,6 +488,17 @@ EOF
 esac
 CLI
 chmod 755 /usr/local/bin/mikan
+
+if [ "$NODE_ONLY" = 1 ]; then
+  cat <<EOF
+
+${c_ok}Готово!${c_0} Нода mikan работает и ждёт панель на порту ${c_b}$API_PORT${c_0}.
+
+  Панель подключится сама в течение 30 секунд — статус в разделе «Ноды».
+  Команды на сервере: ${c_b}mikan${c_0} (status, logs, update, join…)
+EOF
+  exit 0
+fi
 
 URL="https://$PUBLIC_HOST:$PANEL_PORT/$ADMIN_PATH/"
 [ -z "$DOMAIN" ] || URL="https://$DOMAIN:$PANEL_PORT/$ADMIN_PATH/"

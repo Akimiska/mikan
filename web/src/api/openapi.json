@@ -106,6 +106,12 @@
             "maxLength": 255,
             "type": "string"
           },
+          "node_id": {
+            "description": "Нода; по умолчанию — своя нода панели",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "port": {
             "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
             "type": "string"
@@ -126,6 +132,37 @@
         },
         "required": [
           "preset"
+        ],
+        "type": "object"
+      },
+      "CreateNodeInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "api_port": {
+            "description": "Порт API ноды; по умолчанию случайный",
+            "format": "int64",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "domain": {
+            "description": "Домен для Hysteria2/TUIC и ссылок (необязательно)",
+            "maxLength": 253,
+            "type": "string"
+          },
+          "host": {
+            "description": "IP или имя сервера ноды",
+            "maxLength": 253,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "host"
         ],
         "type": "object"
       },
@@ -309,6 +346,10 @@
           "network": {
             "type": "string"
           },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
           "port": {
             "type": "string"
           },
@@ -347,6 +388,7 @@
         },
         "required": [
           "id",
+          "node_id",
           "name",
           "preset",
           "title",
@@ -488,6 +530,125 @@
         "required": [
           "admin",
           "csrf_token"
+        ],
+        "type": "object"
+      },
+      "NodeInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "description": "host:port API ноды; пусто у своей ноды",
+            "type": "string"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "conns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cpu_percent": {
+            "format": "double",
+            "type": "number"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "host": {
+            "description": "Адрес для клиентов",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "inbounds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "listeners_ok": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "local": {
+            "description": "Своя нода панели",
+            "type": "boolean"
+          },
+          "mem_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mem_used": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "description": "Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "local",
+          "address",
+          "host",
+          "domain",
+          "enabled",
+          "inbounds",
+          "status",
+          "listeners",
+          "listeners_ok",
+          "conns",
+          "cpu_percent",
+          "mem_used",
+          "mem_total"
+        ],
+        "type": "object"
+      },
+      "NodeKeyOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "description": "Команда установки на сервере ноды",
+            "type": "string"
+          },
+          "key": {
+            "description": "Ключ подключения ноды: показывается один раз",
+            "type": "string"
+          },
+          "node": {
+            "$ref": "#/components/schemas/NodeInfo"
+          }
+        },
+        "required": [
+          "node",
+          "key",
+          "command"
         ],
         "type": "object"
       },
@@ -647,6 +808,27 @@
           "server_name": {
             "description": "SNI для клиентов, если dest — IP (цель из подбора соседей)",
             "maxLength": 253,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PatchNodeInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "host": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
             "type": "string"
           }
         },
@@ -1467,6 +1649,11 @@
             "maxLength": 65536,
             "type": "string"
           },
+          "node_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "port": {
             "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
             "type": "string"
@@ -1938,6 +2125,21 @@
     "/api/v1/inbounds/scan-targets": {
       "post": {
         "operationId": "scan-targets",
+        "parameters": [
+          {
+            "description": "Нода, рядом с которой искать",
+            "explode": false,
+            "in": "query",
+            "name": "node_id",
+            "schema": {
+              "default": 1,
+              "description": "Нода, рядом с которой искать",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -2097,6 +2299,21 @@
     "/api/v1/node": {
       "get": {
         "operationId": "node-health",
+        "parameters": [
+          {
+            "description": "Нода; 1 — своя нода панели",
+            "explode": false,
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "default": 1,
+              "description": "Нода; 1 — своя нода панели",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -2120,6 +2337,209 @@
           }
         },
         "summary": "Состояние ноды",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes": {
+      "get": {
+        "operationId": "list-nodes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NodeInfo"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Ноды",
+        "tags": [
+          "node"
+        ]
+      },
+      "post": {
+        "operationId": "create-node",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNodeInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeKeyOutputBody"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Добавить ноду",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}": {
+      "delete": {
+        "operationId": "delete-node",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить ноду",
+        "tags": [
+          "node"
+        ]
+      },
+      "patch": {
+        "operationId": "update-node",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchNodeInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить ноду",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/key": {
+      "post": {
+        "operationId": "rekey-node",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeKeyOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Выпустить новый ключ ноды (старый перестаёт работать)",
         "tags": [
           "node"
         ]

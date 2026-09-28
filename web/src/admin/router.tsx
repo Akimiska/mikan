@@ -5,6 +5,7 @@ import { meQuery } from "../api/hooks";
 import { Dashboard } from "./pages/dashboard";
 import { InboundsPage } from "./pages/inbounds";
 import { LoginPage } from "./pages/login";
+import { NodesPage } from "./pages/nodes";
 import { SettingsPage } from "./pages/settings";
 import { TariffsPage } from "./pages/tariffs";
 import { UsersPage, type UsersSearch } from "./pages/users";
@@ -53,9 +54,10 @@ export function createAppRouter(queryClient: QueryClient) {
   });
   const tariffs = createRoute({ getParentRoute: () => app, path: "/tariffs", component: TariffsPage });
   const inbounds = createRoute({ getParentRoute: () => app, path: "/inbounds", component: InboundsPage });
+  const nodes = createRoute({ getParentRoute: () => app, path: "/nodes", component: NodesPage });
   const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: SettingsPage });
 
-  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, settings])]);
+  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, settings])]);
   return createRouter({ routeTree, basepath: basePath || "/", context: { queryClient }, defaultPreload: "intent", scrollRestoration: true });
 }
 

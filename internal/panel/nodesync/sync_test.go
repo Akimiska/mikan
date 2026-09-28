@@ -2,6 +2,7 @@ package nodesync
 
 import (
 	"context"
+	"crypto/x509"
 	"io"
 	"log/slog"
 	"slices"
@@ -9,9 +10,11 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/nodetls"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/db"
 )
 
 type fakeNode struct {
@@ -36,6 +39,8 @@ func (f *fakeNode) Ack(_ context.Context, _ string, seq int64) error {
 }
 func (f *fakeNode) Health(context.Context) (nodeapi.Health, error) { return nodeapi.Health{}, nil }
 
+func fakeTLS() (*nodeapi.TLSFiles, error) { return &nodeapi.TLSFiles{CertPEM: "c", KeyPEM: "k"}, nil }
+
 func setup(t *testing.T) (*Syncer, *fakeNode, *store.Store, *domain.Users, *time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -49,11 +54,28 @@ func setup(t *testing.T) (*Syncer, *fakeNode, *store.Store, *domain.Users, *time
 		t.Fatal(err)
 	}
 	clock := func() time.Time { return now }
-	node := &fakeNode{}
 	pool := domain.NewPool(st, clock)
-	s := New(st, settings.New(st.Q), pool, node, func() (*nodeapi.TLSFiles, error) { return &nodeapi.TLSFiles{CertPEM: "c", KeyPEM: "k"}, nil },
+	m := NewManager(st, settings.New(st.Q), pool, func(db.Node) (Target, error) { return Target{}, ErrNoNode },
 		slog.New(slog.NewTextHandler(io.Discard, nil)), clock)
-	return s, node, st, domain.NewUsers(st, pool, s, clock), &now
+	node := &fakeNode{}
+	s := m.attach(t, LocalNode, Target{Node: node, TLS: fakeTLS, Local: true})
+	return s, node, st, domain.NewUsers(st, pool, m, clock), &now
+}
+
+// attach registers a syncer without its loop, so a test drives it step by step.
+func (m *Manager) attach(t *testing.T, id int64, target Target) *Syncer {
+	t.Helper()
+	n, err := m.st.Q.GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSyncer(m, id, target)
+	done := make(chan struct{})
+	close(done)
+	m.mu.Lock()
+	m.running[id] = &running{s: s, key: nodeKey(n), cancel: func() {}, done: done}
+	m.mu.Unlock()
+	return s
 }
 
 func TestCountersAppliedOnce(t *testing.T) {
@@ -131,17 +153,27 @@ func TestPolicies(t *testing.T) {
 func TestMaintainAppliesChangesMadeOutsideTheAPI(t *testing.T) {
 	s, node, st, _, _ := setup(t)
 	ctx := context.Background()
+	reconcile := func() {
+		t.Helper()
+		s.m.maintain(ctx)
+		select {
+		case <-s.stateDirty:
+			s.applyState(ctx)
+		default:
+			t.Fatal("maintain must ask the node to reconcile")
+		}
+	}
 	s.applyState(ctx)
-	s.maintain(ctx)
+	reconcile()
 	base := len(node.applied)
-	s.maintain(ctx)
+	reconcile()
 	if len(node.applied) != base {
 		t.Fatalf("an unchanged state was applied again: %d → %d", base, len(node.applied))
 	}
-	if _, err := domain.AddPreset(ctx, st, settings.New(st.Q), "trojan_reality", "", time.Now()); err != nil {
+	if _, err := domain.AddPreset(ctx, st, settings.New(st.Q), LocalNode, "trojan_reality", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	s.maintain(ctx)
+	reconcile()
 	if len(node.applied) != base+1 {
 		t.Fatalf("the new inbound was not applied: %d applies", len(node.applied))
 	}
@@ -151,5 +183,126 @@ func TestMaintainAppliesChangesMadeOutsideTheAPI(t *testing.T) {
 	}
 	if !slices.Contains(ports, "2087") {
 		t.Fatalf("applied inbounds: %v", ports)
+	}
+}
+
+// addRemote registers a second node the way the panel does and attaches a fake for it.
+func addRemote(t *testing.T, s *Syncer, st *store.Store) (*Syncer, *fakeNode) {
+	t.Helper()
+	panel, err := nodetls.Generate("mikan-panel", x509.ExtKeyUsageClientAuth, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, _, err := domain.AddNode(context.Background(), st, panel, domain.NodeInput{Name: "🇺🇸 США", Host: "198.51.100.20", APIPort: 40000}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeNode{}
+	return s.m.attach(t, n.ID, Target{Node: fake, TLS: fakeTLS}), fake
+}
+
+func TestEachNodeGetsItsOwnInbounds(t *testing.T) {
+	local, _, st, _, _ := setup(t)
+	ctx := context.Background()
+	remote, _ := addRemote(t, local, st)
+	if err := settings.Set(ctx, settings.New(st.Q), settings.KeyPanelPort, 21355); err != nil {
+		t.Fatal(err)
+	}
+	a, err := local.desired(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := remote.desired(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Inbounds) != 4 || len(b.Inbounds) != 4 {
+		t.Fatalf("each node runs its own default inbounds: %d and %d", len(a.Inbounds), len(b.Inbounds))
+	}
+	// Only the panel's own node may use the panel as its REALITY target.
+	if a.SelfStealPort != 21355 || b.SelfStealPort != 0 {
+		t.Fatalf("self-steal ports: %d and %d", a.SelfStealPort, b.SelfStealPort)
+	}
+	if len(a.Slots) == 0 || len(a.Slots) != len(b.Slots) {
+		t.Fatalf("all nodes get the same slots: %d and %d", len(a.Slots), len(b.Slots))
+	}
+
+	// A disabled node keeps its syncer but serves nothing.
+	n, _ := st.Q.GetNode(ctx, remote.id)
+	if _, err := st.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, Enabled: 0, ID: n.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ = remote.desired(ctx); len(b.Inbounds) != 0 {
+		t.Fatalf("a disabled node must stop its listeners: %d", len(b.Inbounds))
+	}
+}
+
+func TestPoliciesAcrossNodes(t *testing.T) {
+	local, _, st, users, _ := setup(t)
+	ctx := context.Background()
+	remote, _ := addRemote(t, local, st)
+	tariffs, _ := st.Q.ListTariffs(ctx)
+	free, _ := users.Create(ctx, domain.CreateInput{Name: "free", TariffID: tariffs[1].ID})
+	pinned, _ := users.Create(ctx, domain.CreateInput{Name: "pinned", TariffID: tariffs[1].ID})
+	all, _ := st.Q.ListInbounds(ctx)
+	first := domain.NodeInbounds(all, LocalNode)[0]
+	if _, err := users.Update(ctx, pinned.ID, domain.Patch{Inbounds: &[]int64{first.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	freeSlot, _ := st.Q.GetSlot(ctx, free.SlotID.Int64)
+	local.online.Store(&map[string]nodeapi.Online{freeSlot.Name: {IPs: []string{"203.0.113.5"}, Conns: 1}})
+
+	policy := func(s *Syncer) map[int64]nodeapi.Policy {
+		t.Helper()
+		_, ps, owners, err := s.policies(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		by := map[int64]nodeapi.Policy{}
+		for _, p := range ps {
+			by[owners[p.Slot]] = p
+		}
+		return by
+	}
+	here, there := policy(local), policy(remote)
+	if p := here[pinned.ID]; !p.Allowed || len(p.Inbounds) != 1 || p.Inbounds[0] != first.Name {
+		t.Fatalf("pinned user on its node: %+v", p)
+	}
+	// An empty list means "all": a user limited to another node's inbounds gets none here.
+	if there[pinned.ID].Allowed {
+		t.Fatalf("pinned user must not reach the other node: %+v", there[pinned.ID])
+	}
+	if p := there[free.ID]; !p.Allowed || p.Inbounds != nil || !slices.Equal(p.OtherIPs, []string{"203.0.113.5"}) {
+		t.Fatalf("the other node must count the device seen here: %+v", p)
+	}
+	if p := here[free.ID]; len(p.OtherIPs) != 0 {
+		t.Fatalf("a node's own devices are not \"other\": %+v", p)
+	}
+	if on := local.m.Online(); len(on[freeSlot.Name].IPs) != 1 {
+		t.Fatalf("online view: %+v", on)
+	}
+}
+
+func TestCountersPerNode(t *testing.T) {
+	local, n1, st, users, _ := setup(t)
+	ctx := context.Background()
+	remote, n2 := addRemote(t, local, st)
+	tariffs, _ := st.Q.ListTariffs(ctx)
+	u, _ := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	slot, _ := st.Q.GetSlot(ctx, u.SlotID.Int64)
+	n2.batch = nodeapi.Counters{Epoch: "us", Seq: 5, Slots: map[string]nodeapi.Traffic{slot.Name: {Down: 700}}}
+	n1.batch = nodeapi.Counters{Epoch: "nl", Seq: 1, Slots: map[string]nodeapi.Traffic{slot.Name: {Down: 300}}}
+	remote.pullCounters(ctx)
+	local.pullCounters(ctx)
+	remote.pullCounters(ctx) // re-delivered batch
+	got, _ := st.Q.GetUser(ctx, u.ID)
+	if got.UsedDown != 1000 {
+		t.Fatalf("traffic of both nodes adds up once: %d", got.UsedDown)
+	}
+	if e, s, _ := remote.countersPos(ctx); e != "us" || s != 5 {
+		t.Fatalf("remote position %s/%d", e, s)
+	}
+	if e, s, _ := local.countersPos(ctx); e != "nl" || s != 1 {
+		t.Fatalf("local position %s/%d", e, s)
 	}
 }

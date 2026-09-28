@@ -13,14 +13,18 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/config"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tlscert"
 )
 
@@ -54,15 +58,44 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	holder.Set(self)
 
 	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, Log: logger, Now: time.Now}
-	opts.TLS = func() (*nodeapi.TLSFiles, string, error) {
-		c, k, pin, err := tlscert.PEM(tlsDir)
+	nodesDir := filepath.Join(tlsDir, "nodes")
+	// The local node shares the panel's self-signed certificate; each remote node gets
+	// its own for its address, pinned in links the same way.
+	opts.QUIC = func(n db.Node) (*nodeapi.TLSFiles, string, error) {
+		dir := tlsDir
+		if n.Address != "" {
+			dir = filepath.Join(nodesDir, strconv.FormatInt(n.ID, 10))
+			if _, err := tlscert.LoadOrCreateSelfSigned(dir, domain.NodeHost(n), time.Now()); err != nil {
+				return nil, "", err
+			}
+		}
+		c, k, pin, err := tlscert.PEM(dir)
 		if err != nil {
 			return nil, "", err
 		}
 		return &nodeapi.TLSFiles{CertPEM: c, KeyPEM: k}, pin, nil
 	}
-	if cfg.NodeSocket != "" {
-		opts.Node = nodeapi.NewUnixClient(cfg.NodeSocket)
+	opts.PanelCert = func() (nodetls.Pair, error) { return nodetls.LoadOrCreate(nodesDir, time.Now()) }
+	opts.Connect = func(n db.Node) (nodesync.Target, error) {
+		quic := func() (*nodeapi.TLSFiles, error) {
+			f, _, err := opts.QUIC(n)
+			return f, err
+		}
+		if n.Address == "" {
+			if cfg.NodeSocket == "" {
+				return nodesync.Target{}, nodesync.ErrNoNode
+			}
+			return nodesync.Target{Node: nodeapi.NewUnixClient(cfg.NodeSocket), TLS: quic, Local: true}, nil
+		}
+		panel, err := opts.PanelCert()
+		if err != nil {
+			return nodesync.Target{}, err
+		}
+		tc, err := nodetls.ClientConfig(panel, n.CertSha256)
+		if err != nil {
+			return nodesync.Target{}, err
+		}
+		return nodesync.Target{Node: nodeapi.NewTLSClient(n.Address, tc), TLS: quic}, nil
 	}
 	var certs *acme.Manager
 	if !cfg.Dev {

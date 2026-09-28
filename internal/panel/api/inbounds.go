@@ -21,6 +21,7 @@ import (
 
 type InboundView struct {
 	ID          int64     `json:"id"`
+	NodeID      int64     `json:"node_id"`
 	Name        string    `json:"name"`
 	Preset      string    `json:"preset"`
 	Title       string    `json:"title"`
@@ -44,6 +45,7 @@ type inboundOutput struct{ Body InboundView }
 type createInboundInput struct {
 	Body struct {
 		Preset string `json:"preset" enum:"vless_reality_xhttp,hysteria2,tuic_v5,vless_reality_vision,vless_reality_grpc,trojan_reality,anytls,custom"`
+		NodeID int64  `json:"node_id,omitempty" minimum:"1" doc:"Нода; по умолчанию — своя нода панели"`
 		Port   string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$"`
 		Dest   string `json:"dest,omitempty" maxLength:"255" doc:"host:port для REALITY"`
 		Config string `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML) для preset=custom"`
@@ -64,6 +66,7 @@ type patchInboundInput struct {
 
 type validateInboundInput struct {
 	Body struct {
+		NodeID int64  `json:"node_id,omitempty" minimum:"1"`
 		Config string `json:"config" maxLength:"65536"`
 		Port   string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$"`
 	}
@@ -93,7 +96,7 @@ func (h *handlers) listPresets(context.Context, *struct{}) (*presetsOutput, erro
 
 func (h *handlers) viewInbound(in db.Inbound) InboundView {
 	info, _ := presets.Get(in.Preset)
-	v := InboundView{ID: in.ID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
+	v := InboundView{ID: in.ID, NodeID: in.NodeID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
 		DisplayName: in.DisplayName, SubName: subs.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: time.Unix(in.UpdatedAt, 0).UTC()}
 	if t, err := proto.Parse(in.Config); err == nil {
 		v.Type, v.Network = t.Type(), t.Network()
@@ -102,8 +105,9 @@ func (h *handlers) viewInbound(in db.Inbound) InboundView {
 			v.Title = t.Type()
 		}
 	}
-	if h.d.Listeners != nil {
-		for _, l := range h.d.Listeners() {
+	if h.d.Nodes != nil {
+		hv, _ := h.d.Nodes.Health(in.NodeID)
+		for _, l := range hv.Listeners {
 			if l.Name == in.Name {
 				v.Status, v.Error = "ok", ""
 				if !l.OK {
@@ -129,16 +133,19 @@ func (h *handlers) listInbounds(ctx context.Context, _ *struct{}) (*inboundsOutp
 
 // checkConfig parses and validates a template: mikan's rules first, then mihomo's own
 // parser on the node, so a broken template never replaces a working listener.
-func (h *handlers) checkConfig(ctx context.Context, config, port string) (proto.Template, error) {
+func (h *handlers) checkConfig(ctx context.Context, node db.Node, config, port string) (proto.Template, error) {
 	t, err := proto.Parse(config)
 	if err == nil {
 		var panelPort int
-		if panelPort, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeyPanelPort); err != nil {
-			return nil, err
+		// Only the panel's own node can use the panel as its REALITY target.
+		if node.Address == "" {
+			if panelPort, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeyPanelPort); err != nil {
+				return nil, err
+			}
 		}
 		err = proto.Validate(t, proto.Options{SelfStealPort: panelPort})
-		if err == nil && h.d.NodeValidate != nil {
-			err = h.d.NodeValidate(ctx, nodeapi.ValidateRequest{Inbound: nodeapi.Inbound{Name: "validate", Port: port, Config: t.JSON()}, SelfStealPort: panelPort})
+		if err == nil && h.d.Nodes != nil {
+			err = h.d.Nodes.Validate(ctx, node.ID, nodeapi.ValidateRequest{Inbound: nodeapi.Inbound{Name: "validate", Port: port, Config: t.JSON()}, SelfStealPort: panelPort})
 			// The node validates again on apply; when it is down, saving still works.
 			if errors.Is(err, nodeapi.ErrUnavailable) {
 				err = nil
@@ -169,7 +176,11 @@ func (h *handlers) validateInbound(ctx context.Context, in *validateInboundInput
 	if port == "" {
 		port = "443"
 	}
-	t, err := h.checkConfig(ctx, in.Body.Config, port)
+	node, err := h.nodeOf(ctx, in.Body.NodeID)
+	if err != nil {
+		return nil, err
+	}
+	t, err := h.checkConfig(ctx, node, in.Body.Config, port)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +194,10 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	if !ok {
 		return nil, huma.Error422UnprocessableEntity("unknown_preset")
 	}
+	node, err := h.nodeOf(ctx, in.Body.NodeID)
+	if err != nil {
+		return nil, err
+	}
 	port := in.Body.Port
 	if port == "" {
 		port = info.Port
@@ -192,19 +207,19 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	}
 	config := in.Body.Config
 	if info.ID != presets.Custom {
-		var err error
 		if config, err = presets.NewConfig(info.ID, in.Body.Dest); err != nil {
 			return nil, err
 		}
 	}
-	t, err := h.checkConfig(ctx, config, port)
+	t, err := h.checkConfig(ctx, node, config, port)
 	if err != nil {
 		return nil, err
 	}
-	existing, err := h.d.Store.Q.ListInbounds(ctx)
+	all, err := h.d.Store.Q.ListInbounds(ctx)
 	if err != nil {
 		return nil, err
 	}
+	existing := domain.NodeInbounds(all, node.ID)
 	base := info.Name
 	if info.ID == presets.Custom {
 		base = t.Type()
@@ -214,7 +229,7 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	}
 	name := domain.FreeName(existing, base)
 	now := h.d.Now().Unix()
-	row, err := h.d.Store.Q.CreateInbound(ctx, db.CreateInboundParams{Name: name, Preset: info.ID, Port: port, Config: config, CreatedAt: now, UpdatedAt: now})
+	row, err := h.d.Store.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: name, Preset: info.ID, Port: port, Config: config, CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +284,11 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	if b.DisplayName != nil {
 		display = strings.TrimSpace(*b.DisplayName)
 	}
-	t, err := h.checkConfig(ctx, config, port)
+	node, err := h.nodeOf(ctx, row.NodeID)
+	if err != nil {
+		return nil, err
+	}
+	t, err := h.checkConfig(ctx, node, config, port)
 	if err != nil {
 		if b.Dest != nil {
 			// The simple form edits dest only; report the error on that field.
@@ -280,10 +299,12 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		}
 		return nil, err
 	}
-	existing, err := h.d.Store.Q.ListInbounds(ctx)
+	all, err := h.d.Store.Q.ListInbounds(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// Ports and names are per node: other nodes' links get their own flag prefix.
+	existing := domain.NodeInbounds(all, row.NodeID)
 	next := row
 	next.DisplayName = display
 	if owner, busy := domain.PortOwner(existing, port, t.Network(), row.ID); busy && enabled != 0 {
@@ -334,4 +355,16 @@ func (h *handlers) deleteInbound(ctx context.Context, in *userIDInput) (*struct{
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.delete", "inbound", row.Name, nil)
 	return nil, nil
+}
+
+// nodeOf loads the node an inbound belongs to; 0 is the panel's own node.
+func (h *handlers) nodeOf(ctx context.Context, id int64) (db.Node, error) {
+	if id == 0 {
+		id = 1
+	}
+	n, err := h.d.Store.Q.GetNode(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return n, huma.Error422UnprocessableEntity("unknown_node", &huma.ErrorDetail{Location: "body.node_id", Message: "unknown_node"})
+	}
+	return n, err
 }

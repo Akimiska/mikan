@@ -63,18 +63,30 @@ func (h *handlers) checkTarget(ctx context.Context, in *checkTargetInput) (*chec
 	return &checkTargetOutput{Body: scan.Check(ctx, in.Body.Dest, in.Body.SNI)}, nil
 }
 
-func (h *handlers) scanTargets(ctx context.Context, _ *struct{}) (*scanTargetsOutput, error) {
+type scanTargetsInput struct {
+	NodeID int64 `query:"node_id" default:"1" minimum:"1" doc:"Нода, рядом с которой искать"`
+}
+
+func (h *handlers) scanTargets(ctx context.Context, in *scanTargetsInput) (*scanTargetsOutput, error) {
 	if !scanning.TryLock() {
 		return nil, huma.Error409Conflict("scan_busy")
 	}
 	defer scanning.Unlock()
+	node, err := h.nodeOf(ctx, in.NodeID)
+	if err != nil {
+		return nil, err
+	}
 	var publicHost, domain string
-	var err error
 	if publicHost, err = h.d.Settings.String(ctx, settings.KeyPublicHost); err != nil {
 		return nil, err
 	}
 	if domain, err = h.d.Settings.String(ctx, settings.KeyDomain); err != nil {
 		return nil, err
+	}
+	local := node.Address == ""
+	if !local {
+		// The scan still runs from the panel: RTTs are the panel's, the checks are the same.
+		publicHost, domain = node.PublicHost, ""
 	}
 	ip := publicHost
 	if _, err := netip.ParseAddr(ip); err != nil {
@@ -90,7 +102,7 @@ func (h *handlers) scanTargets(ctx context.Context, _ *struct{}) (*scanTargetsOu
 	out.Body.IP = ip
 	// Self-steal: the SNI is the server's own domain and matches its IP, the target is the
 	// panel with its Let's Encrypt certificate.
-	if domain != "" && h.d.Cert != nil && h.d.Cert().Kind == "letsencrypt" {
+	if local && domain != "" && h.d.Cert != nil && h.d.Cert().Kind == "letsencrypt" {
 		r := scan.Check(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(h.panelPort(ctx))), domain)
 		out.Body.SelfSteal = &r
 	}

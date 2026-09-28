@@ -3,10 +3,12 @@ package nodesync
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,10 @@ type Target struct {
 
 // Connect builds the client for a node row; the app knows the socket and certificates.
 type Connect func(n db.Node) (Target, error)
+
+// ErrNoNode is what Connect returns for the local node of a panel run without one
+// (UI development): the node is skipped quietly.
+var ErrNoNode = errors.New("no node")
 
 // Manager runs a Syncer per node and the panel-wide upkeep: period resets, the slot
 // pool, devices. Every node gets the same slots and policies, so one subscription works
@@ -190,7 +196,9 @@ func (m *Manager) reconcile(ctx context.Context) {
 		}
 		t, err := m.connect(n)
 		if err != nil {
-			m.log.Error("connect node", "node", n.ID, "err", err)
+			if !errors.Is(err, ErrNoNode) {
+				m.log.Error("connect node", "node", n.ID, "err", err)
+			}
 			continue
 		}
 		s := newSyncer(m, n.ID, t)
@@ -206,7 +214,11 @@ func (m *Manager) reconcile(ctx context.Context) {
 	}
 }
 
-func nodeKey(n db.Node) string { return n.Address + "|" + n.CertSha256 }
+// nodeKey changes when the syncer must restart: a new address or key, or a new name
+// in the node's Hysteria2/TUIC certificate.
+func nodeKey(n db.Node) string {
+	return strings.Join([]string{n.Address, n.CertSha256, n.PublicHost, n.Domain}, "|")
+}
 
 func (m *Manager) stopAll() {
 	m.mu.Lock()
@@ -222,9 +234,37 @@ func (m *Manager) stopAll() {
 	}
 }
 
-// Retire tells a node that was removed from the panel to drop its listeners and users.
-func (m *Manager) Retire(ctx context.Context, n Node) error {
-	_, err := n.Apply(ctx, nodeapi.DesiredState{Inbounds: []nodeapi.Inbound{}, Slots: []nodeapi.Slot{}})
+// Health is the last health check of a node.
+func (m *Manager) Health(id int64) (HealthView, bool) {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return HealthView{}, false
+	}
+	return s.Health(), true
+}
+
+// Validate runs mihomo's parser on an inbound on the node that will run it.
+func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRequest) error {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return nodeapi.ErrUnavailable
+	}
+	v, ok := s.node.(interface {
+		Validate(context.Context, nodeapi.ValidateRequest) error
+	})
+	if !ok {
+		return nodeapi.ErrUnavailable
+	}
+	return v.Validate(ctx, req)
+}
+
+// Retire tells a node being removed from the panel to drop its listeners and users.
+func (m *Manager) Retire(ctx context.Context, id int64) error {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return nodeapi.ErrUnavailable
+	}
+	_, err := s.node.Apply(ctx, nodeapi.DesiredState{Inbounds: []nodeapi.Inbound{}, Slots: []nodeapi.Slot{}})
 	return err
 }
 

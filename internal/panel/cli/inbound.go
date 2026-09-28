@@ -30,27 +30,30 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 			return err
 		}
 		tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "ИМЯ\tПРЕСЕТ\tПОРТ\tВКЛЮЧЕНО")
+		fmt.Fprintln(tw, "НОДА\tИМЯ\tПРЕСЕТ\tПОРТ\tВКЛЮЧЕНО")
 		for _, in := range inbounds {
 			on := "да"
 			if in.Enabled == 0 {
 				on = "нет"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s/%s\t%s\n", in.Name, in.Preset, in.Port, domain.InboundNetwork(in), on)
+			fmt.Fprintf(tw, "%d\t%s\t%s\t%s/%s\t%s\n", in.NodeID, in.Name, in.Preset, in.Port, domain.InboundNetwork(in), on)
 		}
 		return tw.Flush()
 	case "add":
 		if len(args) < 2 || strings.HasPrefix(args[1], "-") {
-			return errors.New("укажите пресет: mikan admin inbound add ПРЕСЕТ [--port ПОРТ]\nПресеты: " + presetIDs())
+			return errors.New("укажите пресет: mikan admin inbound add ПРЕСЕТ [--port ПОРТ] [--node НОДА]\nПресеты: " + presetIDs())
 		}
 		fs := flag.NewFlagSet("inbound add", flag.ContinueOnError)
 		port := fs.String("port", "", "порт или диапазон (по умолчанию — порт пресета)")
+		node := fs.Int64("node", 1, "нода (1 — своя нода панели, см. mikan admin node list)")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
-		row, err := domain.AddPreset(ctx, st, set, args[1], *port, time.Now())
+		row, err := domain.AddPreset(ctx, st, set, *node, args[1], *port, time.Now())
 		var busy *domain.PortInUseError
 		switch {
+		case errors.Is(err, domain.ErrUnknownNode):
+			return fmt.Errorf("нет ноды %d", *node)
 		case errors.Is(err, domain.ErrUnknownPreset):
 			return fmt.Errorf("нет пресета %q. Пресеты: %s", args[1], presetIDs())
 		case errors.Is(err, domain.ErrBadPort):

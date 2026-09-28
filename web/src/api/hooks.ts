@@ -13,6 +13,7 @@ export const qk = {
   overview: ["overview"] as const,
   traffic: (range: string) => ["traffic", range] as const,
   node: ["node"] as const,
+  nodes: ["nodes"] as const,
   settings: ["settings"] as const,
   sessions: ["sessions"] as const,
 };
@@ -86,6 +87,10 @@ export function useServerTraffic(range: "24h" | "7d" | "30d") {
 
 export function useNode() {
   return useQuery({ queryKey: qk.node, queryFn: () => unwrap(api.GET("/api/v1/node")), refetchInterval: 5_000 });
+}
+
+export function useNodes() {
+  return useQuery({ queryKey: qk.nodes, queryFn: () => unwrap(api.GET("/api/v1/nodes")), refetchInterval: 10_000 });
 }
 
 export function useSettings() {

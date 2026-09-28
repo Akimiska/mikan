@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/auth"
@@ -19,6 +20,7 @@ import (
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 )
 
@@ -26,7 +28,7 @@ import (
 type Panel struct {
 	Handler   http.Handler
 	Settings  *settings.Settings
-	Syncer    *nodesync.Syncer
+	Nodes     *nodesync.Manager
 	server    *server.Server
 	spa       *server.SPA
 	subPage   *server.SPA
@@ -43,10 +45,13 @@ type Options struct {
 	TrustProxy bool
 	Log        *slog.Logger
 	Now        func() time.Time
-	// Node is nil when the panel runs without a node (tests, UI development).
-	Node nodesync.Node
-	// TLS provides the certificate shared with the node and its pin for self-signed setups.
-	TLS func() (*nodeapi.TLSFiles, string, error)
+	// Connect reaches a node; nil when the panel runs without nodes (tests, UI development).
+	Connect nodesync.Connect
+	// QUIC is a node's long-lived self-signed Hysteria2/TUIC certificate and its pin,
+	// which subscription links carry.
+	QUIC func(n db.Node) (*nodeapi.TLSFiles, string, error)
+	// PanelCert is the client certificate remote nodes pin; join keys carry its hash.
+	PanelCert func() (nodetls.Pair, error)
 	// Certs manages the panel's public certificate; nil in development.
 	Certs *acme.Manager
 }
@@ -73,22 +78,13 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		IPLimit: p.ipLimit, UserLimit: p.userLimit, TOTP: auth.NewTOTPGuard(),
 		TrustProxy: o.TrustProxy, Log: o.Log, Now: o.Now, Pool: pool,
 	}
-	if o.Node != nil {
-		tlsFiles := func() (*nodeapi.TLSFiles, error) {
-			f, _, err := o.TLS()
-			return f, err
-		}
-		p.Syncer = nodesync.New(st, set, pool, o.Node, tlsFiles, o.Log, o.Now)
-		changes = p.Syncer
-		deps.Online = p.Syncer.Online
-		deps.Health = p.Syncer.Health
-		deps.Listeners = func() []nodeapi.ListenerStatus { return p.Syncer.Health().Listeners }
-		if v, ok := o.Node.(interface {
-			Validate(context.Context, nodeapi.ValidateRequest) error
-		}); ok {
-			deps.NodeValidate = v.Validate
-		}
+	if o.Connect != nil {
+		p.Nodes = nodesync.NewManager(st, set, pool, o.Connect, o.Log, o.Now)
+		changes = p.Nodes
+		deps.Online = p.Nodes.Online
+		deps.Nodes = p.Nodes
 	}
+	deps.PanelCert = o.PanelCert
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
 	if o.Certs != nil {
@@ -142,11 +138,26 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			}
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing),
-			Endpoint: subs.Endpoint{Host: ep.Host, SNI: domainName, Direct: []string{publicHost, domainName}}}
-		if o.TLS != nil {
-			if _, pin, err := o.TLS(); err == nil {
-				cfg.Endpoint.PinSHA256 = pin
+			Direct: []string{publicHost, domainName}}
+		nodes, err := st.Q.ListNodes(ctx)
+		if err != nil {
+			return subs.Config{}, err
+		}
+		for _, n := range nodes {
+			if n.Enabled == 0 {
+				continue
 			}
+			sn := subs.Node{ID: n.ID, Name: n.Name, Endpoint: subs.Endpoint{Host: ep.Host, SNI: domainName}}
+			if n.Address != "" {
+				sn.Endpoint = subs.Endpoint{Host: domain.NodeHost(n), SNI: n.Domain}
+				cfg.Direct = append(cfg.Direct, n.PublicHost, n.Domain)
+			}
+			if o.QUIC != nil {
+				if _, pin, err := o.QUIC(n); err == nil {
+					sn.Endpoint.PinSHA256 = pin
+				}
+			}
+			cfg.Nodes = append(cfg.Nodes, sn)
 		}
 		return cfg, nil
 	}
@@ -177,8 +188,8 @@ func (p *Panel) ApplyPaths(ctx context.Context) (settings.Paths, error) {
 // Run keeps paths in sync with the DB (the CLI edits them), drives the node syncer and
 // cleans up expired state.
 func (p *Panel) Run(ctx context.Context) {
-	if p.Syncer != nil {
-		go p.Syncer.Run(ctx)
+	if p.Nodes != nil {
+		go p.Nodes.Run(ctx)
 	}
 	go every(ctx, 5*time.Second, func() {
 		if _, err := p.ApplyPaths(ctx); err != nil {

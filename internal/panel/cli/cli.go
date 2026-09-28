@@ -41,7 +41,12 @@ const usage = `mikan — панель управления VPN на ядре mih
   admin backup ФАЙЛ             сделать консистентную копию базы на ходу
   admin inbound list            подключения: имя, пресет, порт
   admin inbound add ПРЕСЕТ [--port ПОРТ]
-                                добавить подключение из пресета со свежими ключами
+                                добавить подключение из пресета со свежими ключами (--node НОДА)
+  admin node list               ноды панели
+  admin node add --name ИМЯ --host IP [--domain Д] [--api-port П]
+                                добавить ноду; печатает ключ для install.sh --node --join
+  admin node key НОДА           новый ключ ноды (старый перестаёт работать)
+  admin node set НОДА [--name] [--host] [--domain] [--enabled]
   health                        проверить, что панель отвечает (healthcheck контейнера)
   openapi                       вывести OpenAPI-спецификацию (для генерации клиента)
   version                       версия
@@ -140,6 +145,8 @@ func adminCmd(ctx context.Context, args []string) error {
 		}
 		fmt.Println("Копия базы:", args[1])
 		return nil
+	case "node":
+		return nodeCmd(ctx, st, cfg.DataDir, args[1:], os.Stdout, os.Stderr)
 	case "inbound":
 		return inboundCmd(ctx, st, set, args[1:], os.Stdout, os.Stderr)
 	case "disable-2fa":

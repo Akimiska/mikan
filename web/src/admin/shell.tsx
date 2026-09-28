@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, LogOut, Server, SlidersHorizontal, Tag, Users } from "lucide-react";
+import { LayoutDashboard, LogOut, Network, Server, SlidersHorizontal, Tag, Users } from "lucide-react";
 import { api, unwrap } from "../api/client";
 import { meQuery, useNode, useOverview } from "../api/hooks";
 import { Logo } from "../components/atmosphere";
@@ -14,6 +14,7 @@ const NAV = [
   { to: "/users", key: "users", icon: Users },
   { to: "/tariffs", key: "tariffs", icon: Tag },
   { to: "/inbounds", key: "inbounds", icon: Server },
+  { to: "/nodes", key: "nodes", icon: Network },
   { to: "/settings", key: "settings", icon: SlidersHorizontal },
 ] as const;
 

@@ -1,0 +1,330 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	"mikan/internal/panel/domain"
+	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/subs"
+)
+
+type NodeInfo struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name" doc:"Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений"`
+	Local       bool       `json:"local" doc:"Своя нода панели"`
+	Address     string     `json:"address" doc:"host:port API ноды; пусто у своей ноды"`
+	Host        string     `json:"host" doc:"Адрес для клиентов"`
+	Domain      string     `json:"domain"`
+	Enabled     bool       `json:"enabled"`
+	Inbounds    int        `json:"inbounds"`
+	Status      string     `json:"status" enum:"ok,error,unknown"`
+	Error       string     `json:"error,omitempty"`
+	Version     string     `json:"version,omitempty"`
+	Listeners   int        `json:"listeners"`
+	ListenersOK int        `json:"listeners_ok"`
+	Conns       int        `json:"conns"`
+	CPUPercent  float64    `json:"cpu_percent"`
+	MemUsed     uint64     `json:"mem_used"`
+	MemTotal    uint64     `json:"mem_total"`
+	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+}
+
+type nodesOutput struct{ Body []NodeInfo }
+type nodeInfoOutput struct{ Body NodeInfo }
+
+type nodeKeyOutput struct {
+	Body struct {
+		Node    NodeInfo `json:"node"`
+		Key     string   `json:"key" doc:"Ключ подключения ноды: показывается один раз"`
+		Command string   `json:"command" doc:"Команда установки на сервере ноды"`
+	}
+}
+
+type createNodeInput struct {
+	Body struct {
+		Name    string `json:"name" maxLength:"200"`
+		Host    string `json:"host" maxLength:"253" doc:"IP или имя сервера ноды"`
+		Domain  string `json:"domain,omitempty" maxLength:"253" doc:"Домен для Hysteria2/TUIC и ссылок (необязательно)"`
+		APIPort int    `json:"api_port,omitempty" minimum:"1" maximum:"65535" doc:"Порт API ноды; по умолчанию случайный"`
+	}
+}
+
+type patchNodeInput struct {
+	ID   int64 `path:"id" minimum:"1"`
+	Body struct {
+		Name    *string `json:"name,omitempty" maxLength:"200"`
+		Host    *string `json:"host,omitempty" maxLength:"253"`
+		Domain  *string `json:"domain,omitempty" maxLength:"253"`
+		Enabled *bool   `json:"enabled,omitempty"`
+	}
+}
+
+type nodeIDInput struct {
+	ID int64 `path:"id" minimum:"1"`
+}
+
+func (h *handlers) registerNodes() {
+	huma.Register(h.api, huma.Operation{OperationID: "list-nodes", Method: http.MethodGet, Path: "/api/v1/nodes", Summary: "Ноды", Tags: []string{"node"}}, h.listNodes)
+	huma.Register(h.api, huma.Operation{OperationID: "create-node", Method: http.MethodPost, Path: "/api/v1/nodes", Summary: "Добавить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusCreated}, h.createNode)
+	huma.Register(h.api, huma.Operation{OperationID: "update-node", Method: http.MethodPatch, Path: "/api/v1/nodes/{id}", Summary: "Изменить ноду", Tags: []string{"node"}}, h.updateNode)
+	huma.Register(h.api, huma.Operation{OperationID: "rekey-node", Method: http.MethodPost, Path: "/api/v1/nodes/{id}/key", Summary: "Выпустить новый ключ ноды (старый перестаёт работать)", Tags: []string{"node"}}, h.rekeyNode)
+	huma.Register(h.api, huma.Operation{OperationID: "delete-node", Method: http.MethodDelete, Path: "/api/v1/nodes/{id}", Summary: "Удалить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusNoContent}, h.deleteNode)
+}
+
+func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {
+	v := NodeInfo{ID: n.ID, Name: n.Name, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
+		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown"}
+	if v.Local {
+		// The panel's own node is reached at the panel's address.
+		ep, _ := h.d.Settings.Endpoint(ctx)
+		v.Host = ep.Host
+		v.Domain, _ = h.d.Settings.String(ctx, settings.KeyDomain)
+	}
+	if h.d.Nodes == nil {
+		return v
+	}
+	hv, ok := h.d.Nodes.Health(n.ID)
+	if !ok || hv.CheckedAt.IsZero() {
+		return v
+	}
+	t := hv.CheckedAt
+	v.CheckedAt = &t
+	if !hv.OK {
+		v.Status, v.Error = "error", hv.Error
+		return v
+	}
+	v.Status, v.Version, v.Conns = "ok", hv.Health.Version, hv.Health.Conns
+	v.CPUPercent, v.MemUsed, v.MemTotal = hv.Health.System.CPUPercent, hv.Health.System.MemUsed, hv.Health.System.MemTotal
+	for _, l := range hv.Listeners {
+		v.Listeners++
+		if l.OK {
+			v.ListenersOK++
+		}
+	}
+	return v
+}
+
+func (h *handlers) listNodes(ctx context.Context, _ *struct{}) (*nodesOutput, error) {
+	nodes, err := h.d.Store.Q.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inbounds, err := h.d.Store.Q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &nodesOutput{Body: make([]NodeInfo, 0, len(nodes))}
+	for _, n := range nodes {
+		out.Body = append(out.Body, h.viewNode(ctx, n, inbounds))
+	}
+	return out, nil
+}
+
+// checkNodeName: a node's name is its country group in Clash apps, so it follows the
+// group rules and must not repeat another node or group.
+func (h *handlers) checkNodeName(ctx context.Context, name string, self int64) error {
+	bad := func(code string) error {
+		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.name", Message: code})
+	}
+	if err := subs.ValidName(name); err != nil {
+		return bad(err.Error())
+	}
+	g, err := h.groups(ctx)
+	if err != nil {
+		return err
+	}
+	for _, x := range []string{g.Main, g.Auto, subs.AliasGroup} {
+		if strings.EqualFold(name, x) {
+			return bad("name_is_group")
+		}
+	}
+	nodes, err := h.d.Store.Q.ListNodes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range nodes {
+		if n.ID != self && strings.EqualFold(n.Name, name) {
+			return bad("name_in_use")
+		}
+	}
+	return nil
+}
+
+func (h *handlers) joinCommand(key string) string {
+	return "sudo bash install.sh --node --join " + key
+}
+
+func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKeyOutput, error) {
+	if h.d.PanelCert == nil {
+		return nil, huma.Error409Conflict("nodes_disabled")
+	}
+	b := in.Body
+	name, host, dom := strings.TrimSpace(b.Name), strings.TrimSpace(b.Host), strings.TrimSpace(b.Domain)
+	if err := h.checkNodeName(ctx, name, 0); err != nil {
+		return nil, err
+	}
+	var details []error
+	if host == "" || !validHost(host) {
+		details = append(details, &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
+	}
+	if !validHost(dom) {
+		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
+	}
+	if len(details) > 0 {
+		return nil, huma.Error422UnprocessableEntity("validation", details...)
+	}
+	panel, err := h.d.PanelCert()
+	if err != nil {
+		return nil, err
+	}
+	n, key, err := domain.AddNode(ctx, h.d.Store, panel, domain.NodeInput{Name: name, Host: host, Domain: dom, APIPort: b.APIPort}, h.d.Now())
+	if err != nil {
+		return nil, err
+	}
+	h.d.Nodes.NodesChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.create", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "address": n.Address})
+	inbounds, err := h.d.Store.Q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &nodeKeyOutput{}
+	out.Body.Node, out.Body.Key, out.Body.Command = h.viewNode(ctx, n, inbounds), key, h.joinCommand(key)
+	return out, nil
+}
+
+func (h *handlers) getNode(ctx context.Context, id int64) (db.Node, error) {
+	n, err := h.d.Store.Q.GetNode(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return n, huma.Error404NotFound("not_found")
+	}
+	return n, err
+}
+
+func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInfoOutput, error) {
+	n, err := h.getNode(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	b := in.Body
+	local := n.Address == ""
+	if b.Name != nil {
+		name := strings.TrimSpace(*b.Name)
+		if err := h.checkNodeName(ctx, name, n.ID); err != nil {
+			return nil, err
+		}
+		n.Name = name
+	}
+	if local && (b.Host != nil || b.Domain != nil) {
+		// The panel's own node follows the panel's address in the settings.
+		return nil, huma.Error422UnprocessableEntity("local_node")
+	}
+	if b.Host != nil {
+		host := strings.TrimSpace(*b.Host)
+		if host == "" || !validHost(host) {
+			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
+		}
+		_, port, err := net.SplitHostPort(n.Address)
+		if err != nil {
+			return nil, err
+		}
+		n.PublicHost, n.Address = host, net.JoinHostPort(host, port)
+	}
+	if b.Domain != nil {
+		dom := strings.TrimSpace(*b.Domain)
+		if !validHost(dom) {
+			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
+		}
+		n.Domain = dom
+	}
+	if b.Enabled != nil {
+		n.Enabled = 0
+		if *b.Enabled {
+			n.Enabled = 1
+		}
+	}
+	n, err = h.d.Store.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain,
+		Enabled: n.Enabled, UpdatedAt: h.d.Now().Unix(), ID: n.ID})
+	if err != nil {
+		return nil, err
+	}
+	if h.d.Nodes != nil {
+		h.d.Nodes.NodesChanged()
+	}
+	h.d.Changes.SlotsChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "enabled": n.Enabled != 0})
+	inbounds, err := h.d.Store.Q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &nodeInfoOutput{Body: h.viewNode(ctx, n, inbounds)}, nil
+}
+
+func (h *handlers) rekeyNode(ctx context.Context, in *nodeIDInput) (*nodeKeyOutput, error) {
+	if h.d.PanelCert == nil {
+		return nil, huma.Error409Conflict("nodes_disabled")
+	}
+	panel, err := h.d.PanelCert()
+	if err != nil {
+		return nil, err
+	}
+	key, err := domain.RekeyNode(ctx, h.d.Store, panel, in.ID, h.d.Now())
+	switch {
+	case errors.Is(err, domain.ErrUnknownNode):
+		return nil, huma.Error404NotFound("not_found")
+	case errors.Is(err, domain.ErrLocalNode):
+		return nil, huma.Error409Conflict("local_node")
+	case err != nil:
+		return nil, err
+	}
+	h.d.Nodes.NodesChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.rekey", "node", strconv.FormatInt(in.ID, 10), nil)
+	n, err := h.getNode(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	inbounds, err := h.d.Store.Q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &nodeKeyOutput{}
+	out.Body.Node, out.Body.Key, out.Body.Command = h.viewNode(ctx, n, inbounds), key, h.joinCommand(key)
+	return out, nil
+}
+
+func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, error) {
+	n, err := h.getNode(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if n.Address == "" {
+		return nil, huma.Error409Conflict("local_node")
+	}
+	if h.d.Nodes != nil {
+		// Best effort: an unreachable node keeps serving until it is reinstalled.
+		if err := h.d.Nodes.Retire(ctx, n.ID); err != nil {
+			h.d.Log.Warn("retire node", "node", n.ID, "err", err)
+		}
+	}
+	if err := h.d.Store.Q.DeleteNode(ctx, n.ID); err != nil {
+		return nil, err
+	}
+	if err := h.d.Store.Q.DeleteNodeStateOf(ctx, strconv.FormatInt(n.ID, 10)); err != nil {
+		return nil, err
+	}
+	if h.d.Nodes != nil {
+		h.d.Nodes.NodesChanged()
+	}
+	h.d.Changes.SlotsChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.delete", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name})
+	return nil, nil
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/auth"
@@ -43,12 +44,22 @@ type Deps struct {
 	Changes   domain.Changes
 	SubURL    func(ctx context.Context, token string) string
 	Online    func() map[string]nodeapi.Online
-	Listeners func() []nodeapi.ListenerStatus
-	Health    func() nodesync.HealthView
 	Cert      func() acme.Status
 	RenewCert func()
-	// NodeValidate runs mihomo's parser on an inbound; nil without a node.
-	NodeValidate func(ctx context.Context, req nodeapi.ValidateRequest) error
+	// Nodes is the live side of the nodes; nil when the panel runs without them.
+	Nodes NodeRuntime
+	// PanelCert is the client certificate remote nodes pin; their join keys carry its hash.
+	PanelCert func() (nodetls.Pair, error)
+}
+
+// NodeRuntime is what the API needs from the running nodes.
+type NodeRuntime interface {
+	Health(id int64) (nodesync.HealthView, bool)
+	// Validate runs mihomo's parser on an inbound on the node that will run it.
+	Validate(ctx context.Context, id int64, req nodeapi.ValidateRequest) error
+	// Retire makes a node drop its listeners and users before it is removed.
+	Retire(ctx context.Context, id int64) error
+	NodesChanged()
 }
 
 type ctxKey int
@@ -119,6 +130,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTargets()
 	h.registerStats()
 	h.registerSettings()
+	h.registerNodes()
 	return noStore(mux), api, nil
 }
 

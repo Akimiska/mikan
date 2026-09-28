@@ -140,3 +140,11 @@ func NodeInbounds(all []db.Inbound, nodeID int64) []db.Inbound {
 	}
 	return out
 }
+
+// NodeHost is the address clients use for a remote node: its domain, else its IP.
+func NodeHost(n db.Node) string {
+	if n.Domain != "" {
+		return n.Domain
+	}
+	return n.PublicHost
+}

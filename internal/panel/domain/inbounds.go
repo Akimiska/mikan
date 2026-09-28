@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -71,10 +72,17 @@ func FreeName(existing []db.Inbound, base string) string {
 	return name
 }
 
-// AddPreset creates an inbound from a preset with fresh keys, for the server CLI; the
-// admin API does the same with its own error mapping and a dry run on the node.
-// An empty port takes the preset's default.
-func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, id, port string, now time.Time) (db.Inbound, error) {
+// AddPreset creates an inbound from a preset with fresh keys on a node, for the server
+// CLI; the admin API does the same with its own error mapping and a dry run on the
+// node. An empty port takes the preset's default.
+func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, nodeID int64, id, port string, now time.Time) (db.Inbound, error) {
+	node, err := st.Q.GetNode(ctx, nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.Inbound{}, ErrUnknownNode
+	}
+	if err != nil {
+		return db.Inbound{}, err
+	}
 	info, ok := presets.Get(id)
 	if !ok || id == presets.Custom {
 		return db.Inbound{}, ErrUnknownPreset
@@ -93,20 +101,24 @@ func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, id,
 	if err != nil {
 		return db.Inbound{}, err
 	}
-	panelPort, _, err := settings.Get[int](ctx, set, settings.KeyPanelPort)
-	if err != nil {
-		return db.Inbound{}, err
+	var opts proto.Options
+	if node.Address == "" {
+		// Only the panel's own node can use the panel as its REALITY target.
+		if opts.SelfStealPort, _, err = settings.Get[int](ctx, set, settings.KeyPanelPort); err != nil {
+			return db.Inbound{}, err
+		}
 	}
-	if err := proto.Validate(t, proto.Options{SelfStealPort: panelPort}); err != nil {
+	if err := proto.Validate(t, opts); err != nil {
 		return db.Inbound{}, fmt.Errorf("preset %s: %w", id, err)
 	}
-	existing, err := st.Q.ListInbounds(ctx)
+	all, err := st.Q.ListInbounds(ctx)
 	if err != nil {
 		return db.Inbound{}, err
 	}
+	existing := NodeInbounds(all, nodeID)
 	if owner, busy := PortOwner(existing, port, t.Network(), 0); busy {
 		return db.Inbound{}, &PortInUseError{Owner: owner.Name}
 	}
-	return st.Q.CreateInbound(ctx, db.CreateInboundParams{Name: FreeName(existing, info.Name), Preset: id, Port: port, Config: config,
+	return st.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: nodeID, Name: FreeName(existing, info.Name), Preset: id, Port: port, Config: config,
 		CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
 }

@@ -1,0 +1,44 @@
+name: mikan-e2e
+
+x-client: &client
+  image: metacubex/mihomo:v1.19.31
+  command: ["-d", "/tmp/mihomo", "-f", "/work/clients/client.yaml"]
+  volumes: ["work:/work:ro"]
+  depends_on: [node, target]
+
+services:
+  node:
+    build: {context: ../.., dockerfile: test/e2e/Dockerfile}
+    command: ["mikan-node"]
+    environment:
+      MIKAN_DATA_DIR: /data
+      MIKAN_NODE_SOCKET: /run/mikan/node.sock
+      MIKAN_DEVICE_RELEASE: 3s
+      # the test target lives on a private docker network
+      MIKAN_ALLOW_PRIVATE: "true"
+    volumes: ["run:/run/mikan", "nodedata:/data"]
+
+  target:
+    build: {context: ../.., dockerfile: test/e2e/Dockerfile}
+    command: ["target"]
+
+  client-a: *client
+  client-b: *client
+
+  driver:
+    image: golang:1.27
+    working_dir: /src
+    command: ["sleep", "infinity"]
+    volumes:
+      - "../..:/src:ro"
+      - "work:/work"
+      - "run:/run/mikan"
+      - "mikan-gomod:/go/pkg/mod"
+      - "mikan-gocache:/root/.cache/go-build"
+
+volumes:
+  run: {}
+  nodedata: {}
+  work: {}
+  mikan-gomod: {external: true}
+  mikan-gocache: {external: true}

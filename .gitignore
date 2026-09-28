@@ -1,0 +1,34 @@
+# build output
+/bin/
+web/dist/
+node_modules/
+
+# runtime data and secrets
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+
+# throwaway keys, configs with keys and raw outputs of spikes; findings stay in RESULT.md
+docs/pipeline/spikes/**/certs/
+docs/pipeline/spikes/**/out/
+docs/pipeline/spikes/**/reality-keypair.txt
+docs/pipeline/spikes/**/*.yaml
+docs/pipeline/spikes/**/results/
+docs/pipeline/spikes/**/pebble-fs/
+docs/pipeline/spikes/**/www/
+docs/pipeline/spikes/**/_src/
+docs/pipeline/spikes/**/go.sum
+
+# editors / OS / local tooling
+.claude/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# release artifacts
+/release/

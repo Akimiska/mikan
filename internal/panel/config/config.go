@@ -1,0 +1,79 @@
+package config
+
+import (
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+	"strconv"
+)
+
+type Config struct {
+	DataDir    string
+	Listen     string
+	NodeSocket string
+	LogLevel   slog.Level
+	TrustProxy bool
+	// Dev serves plain HTTP for UI development; only a loopback address is accepted.
+	Dev bool
+}
+
+func FromEnv() (Config, error) {
+	c := Config{
+		DataDir:    env("MIKAN_DATA_DIR", "/data"),
+		Listen:     env("MIKAN_PANEL_LISTEN", "0.0.0.0:2053"),
+		NodeSocket: env("MIKAN_NODE_SOCKET", "/run/mikan/node.sock"),
+	}
+	if err := c.LogLevel.UnmarshalText([]byte(env("MIKAN_LOG_LEVEL", "info"))); err != nil {
+		return c, fmt.Errorf("MIKAN_LOG_LEVEL: %w", err)
+	}
+	var err error
+	if c.TrustProxy, err = boolEnv("MIKAN_TRUST_PROXY"); err != nil {
+		return c, err
+	}
+	if c.Dev, err = boolEnv("MIKAN_DEV"); err != nil {
+		return c, err
+	}
+	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
+		return c, fmt.Errorf("MIKAN_PANEL_LISTEN: %w", err)
+	}
+	// "off" runs the panel without a node (UI development on a machine without mihomo).
+	if c.NodeSocket == "off" {
+		c.NodeSocket = ""
+	}
+	if c.Dev && !loopback(c.Listen) {
+		return c, fmt.Errorf("MIKAN_DEV=1 allowed only with a loopback MIKAN_PANEL_LISTEN, got %q", c.Listen)
+	}
+	return c, nil
+}
+
+func env(key, def string) string {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return v
+	}
+	return def
+}
+
+func boolEnv(key string) (bool, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return false, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
+	}
+	return b, nil
+}
+
+func loopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}

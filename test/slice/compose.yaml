@@ -1,0 +1,47 @@
+name: mikan-slice
+
+services:
+  node:
+    build: {context: ../.., dockerfile: Dockerfile}
+    image: mikan:slice
+    entrypoint: ["/usr/local/bin/mikan-node"]
+    environment:
+      MIKAN_DATA_DIR: /data/node
+      # the test target lives on a private docker network
+      MIKAN_ALLOW_PRIVATE: "true"
+    volumes: ["data:/data", "run:/run/mikan"]
+
+  panel:
+    image: mikan:slice
+    depends_on: [node]
+    environment:
+      MIKAN_DATA_DIR: /data/panel
+      MIKAN_PANEL_LISTEN: 0.0.0.0:2053
+    volumes: ["data:/data", "run:/run/mikan"]
+
+  target:
+    build: {context: ../.., dockerfile: test/e2e/Dockerfile}
+    command: ["target"]
+
+  client:
+    image: metacubex/mihomo:v1.19.31
+    command: ["-d", "/tmp/mihomo", "-f", "/work/client.yaml"]
+    volumes: ["work:/work:ro"]
+    profiles: ["client"]
+
+  driver:
+    image: golang:1.27
+    working_dir: /src
+    command: ["sleep", "infinity"]
+    volumes:
+      - "../..:/src:ro"
+      - "work:/work"
+      - "mikan-gomod:/go/pkg/mod"
+      - "mikan-gocache:/root/.cache/go-build"
+
+volumes:
+  data: {}
+  run: {}
+  work: {}
+  mikan-gomod: {external: true}
+  mikan-gocache: {external: true}

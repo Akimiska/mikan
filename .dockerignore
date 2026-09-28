@@ -1,0 +1,11 @@
+.git
+**/node_modules
+web/dist
+docs
+bin
+data
+test/e2e/.work
+*.db
+*.db-*
+.env
+.env.*

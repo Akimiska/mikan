@@ -1,0 +1,117 @@
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, unwrap, type Schemas, type User } from "./client";
+
+export const qk = {
+  me: ["me"] as const,
+  users: ["users"] as const,
+  user: (id: number) => ["users", "one", id] as const,
+  userTraffic: (id: number) => ["users", "traffic", id] as const,
+  devices: (id: number) => ["users", "devices", id] as const,
+  tariffs: ["tariffs"] as const,
+  inbounds: ["inbounds"] as const,
+  presets: ["presets"] as const,
+  overview: ["overview"] as const,
+  traffic: (range: string) => ["traffic", range] as const,
+  node: ["node"] as const,
+  settings: ["settings"] as const,
+  sessions: ["sessions"] as const,
+};
+
+export const meQuery = {
+  queryKey: qk.me,
+  queryFn: () => unwrap(api.GET("/api/v1/auth/me")),
+  staleTime: 60_000,
+  retry: false,
+};
+
+export type UsersFilter = { state: "all" | User["state"]; q: string };
+
+export function useUsers(f: UsersFilter) {
+  return useQuery({
+    queryKey: [...qk.users, "list", f],
+    queryFn: () => unwrap(api.GET("/api/v1/users", { params: { query: { state: f.state, q: f.q || undefined, limit: 500 } } })),
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useUser(id: number | undefined) {
+  return useQuery({
+    queryKey: qk.user(id ?? 0),
+    queryFn: () => unwrap(api.GET("/api/v1/users/{id}", { params: { path: { id: id! } } })),
+    enabled: !!id,
+    refetchInterval: 5_000,
+  });
+}
+
+export function useUserTraffic(id: number) {
+  return useQuery({
+    queryKey: qk.userTraffic(id),
+    queryFn: () => unwrap(api.GET("/api/v1/users/{id}/traffic", { params: { path: { id }, query: { range: "30d" } } })),
+  });
+}
+
+export function useDevices(id: number) {
+  return useQuery({
+    queryKey: qk.devices(id),
+    queryFn: () => unwrap(api.GET("/api/v1/users/{id}/devices", { params: { path: { id } } })),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useTariffs() {
+  return useQuery({ queryKey: qk.tariffs, queryFn: () => unwrap(api.GET("/api/v1/tariffs")) });
+}
+
+export function useInbounds() {
+  return useQuery({ queryKey: qk.inbounds, queryFn: () => unwrap(api.GET("/api/v1/inbounds")), refetchInterval: 10_000 });
+}
+
+export function usePresets() {
+  return useQuery({ queryKey: qk.presets, queryFn: () => unwrap(api.GET("/api/v1/presets")), staleTime: Infinity });
+}
+
+export function useOverview() {
+  return useQuery({ queryKey: qk.overview, queryFn: () => unwrap(api.GET("/api/v1/stats/overview")), refetchInterval: 10_000 });
+}
+
+export function useServerTraffic(range: "24h" | "7d" | "30d") {
+  return useQuery({
+    queryKey: qk.traffic(range),
+    queryFn: () => unwrap(api.GET("/api/v1/stats/traffic", { params: { query: { range } } })),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useNode() {
+  return useQuery({ queryKey: qk.node, queryFn: () => unwrap(api.GET("/api/v1/node")), refetchInterval: 5_000 });
+}
+
+export function useSettings() {
+  return useQuery({ queryKey: qk.settings, queryFn: () => unwrap(api.GET("/api/v1/settings")) });
+}
+
+/** Mutations that change a user refresh every user-related view. */
+export function useUserMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: qk.users });
+      void qc.invalidateQueries({ queryKey: qk.overview });
+    },
+  });
+}
+
+export const userActions = {
+  create: (body: Schemas["CreateUserInputBody"]) => unwrap(api.POST("/api/v1/users", { body })),
+  update: ({ id, body }: { id: number; body: Schemas["PatchUserInputBody"] }) =>
+    unwrap(api.PATCH("/api/v1/users/{id}", { params: { path: { id } }, body })),
+  extend: ({ id, days }: { id: number; days: number }) =>
+    unwrap(api.POST("/api/v1/users/{id}/extend", { params: { path: { id } }, body: { days } })),
+  reset: (id: number) => unwrap(api.POST("/api/v1/users/{id}/reset-traffic", { params: { path: { id } } })),
+  reissue: (id: number) => unwrap(api.POST("/api/v1/users/{id}/reissue", { params: { path: { id } } })),
+  remove: (id: number) => unwrap(api.DELETE("/api/v1/users/{id}", { params: { path: { id } } })),
+  bulk: (body: Schemas["BulkInputBody"]) => unwrap(api.POST("/api/v1/users/bulk", { body })),
+};

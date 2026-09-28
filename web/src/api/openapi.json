@@ -1,0 +1,2720 @@
+{
+  "components": {
+    "schemas": {
+      "AdminView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_login_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "totp_enabled": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "totp_enabled"
+        ],
+        "type": "object"
+      },
+      "BulkInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "extend",
+              "reset",
+              "disable",
+              "enable",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "days": {
+            "format": "int64",
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids",
+          "action"
+        ],
+        "type": "object"
+      },
+      "BulkOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "affected": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "affected"
+        ],
+        "type": "object"
+      },
+      "CreateInboundInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "dest": {
+            "description": "host:port для REALITY",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "port": {
+            "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+            "type": "string"
+          },
+          "preset": {
+            "enum": [
+              "vless_reality_vision",
+              "vless_reality_xhttp",
+              "hysteria2",
+              "tuic_v5"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "preset"
+        ],
+        "type": "object"
+      },
+      "CreateUserInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "contact": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "tariff_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "tariff_id"
+        ],
+        "type": "object"
+      },
+      "DeviceView": {
+        "additionalProperties": false,
+        "properties": {
+          "client": {
+            "type": "string"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ip",
+          "client",
+          "first_seen",
+          "last_seen",
+          "online"
+        ],
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "description": "Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id'",
+            "type": "string"
+          },
+          "message": {
+            "description": "Error message text",
+            "type": "string"
+          },
+          "value": {
+            "description": "The value at the given location"
+          }
+        },
+        "type": "object"
+      },
+      "ErrorModel": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "description": "A human-readable explanation specific to this occurrence of the problem.",
+            "examples": [
+              "Property foo is required but is missing."
+            ],
+            "type": "string"
+          },
+          "errors": {
+            "description": "Optional list of individual error details",
+            "items": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            },
+            "type": "array"
+          },
+          "instance": {
+            "description": "A URI reference that identifies the specific occurrence of the problem.",
+            "examples": [
+              "https://example.com/error-log/abc123"
+            ],
+            "format": "uri",
+            "type": "string"
+          },
+          "status": {
+            "description": "HTTP status code",
+            "examples": [
+              400
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "description": "A short, human-readable summary of the problem type. This value should not change between occurrences of the error.",
+            "examples": [
+              "Bad Request"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "default": "about:blank",
+            "description": "A URI reference to human-readable documentation for the error.",
+            "examples": [
+              "https://example.com/errors/example"
+            ],
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ExtendInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "format": "int64",
+            "maximum": 3650,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days"
+        ],
+        "type": "object"
+      },
+      "InboundView": {
+        "additionalProperties": false,
+        "properties": {
+          "conns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dest": {
+            "description": "Сайт для маскировки REALITY",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          },
+          "preset": {
+            "type": "string"
+          },
+          "server_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "preset",
+          "title",
+          "network",
+          "port",
+          "enabled",
+          "status",
+          "conns",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "Info": {
+        "additionalProperties": false,
+        "properties": {
+          "default_name": {
+            "type": "string"
+          },
+          "default_port": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "summary",
+          "network",
+          "default_port",
+          "default_name"
+        ],
+        "type": "object"
+      },
+      "ListUsersOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/UserCounts"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserView"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Сколько подходит под фильтр",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "counts"
+        ],
+        "type": "object"
+      },
+      "ListenerStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "ok"
+        ],
+        "type": "object"
+      },
+      "LoginInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "totp": {
+            "description": "Код из приложения или резервный код",
+            "maxLength": 16,
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "type": "object"
+      },
+      "MeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/AdminView"
+          },
+          "csrf_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "admin",
+          "csrf_token"
+        ],
+        "type": "object"
+      },
+      "NodeView": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "conns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "core": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "listeners": {
+            "items": {
+              "$ref": "#/components/schemas/ListenerStatus"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "system": {
+            "$ref": "#/components/schemas/System"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "version",
+          "core",
+          "conns",
+          "system",
+          "listeners",
+          "checked_at"
+        ],
+        "type": "object"
+      },
+      "OverviewOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expiring_7d": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "online": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slots_assigned": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slots_free": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "top_month": {
+            "items": {
+              "$ref": "#/components/schemas/TopUser"
+            },
+            "type": "array"
+          },
+          "traffic_today": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "traffic_yesterday": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "users_active": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "users_total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "online",
+          "users_total",
+          "users_active",
+          "expiring_7d",
+          "traffic_today",
+          "traffic_yesterday",
+          "top_month",
+          "slots_free",
+          "slots_assigned",
+          "generated_at"
+        ],
+        "type": "object"
+      },
+      "PasswordInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "new": {
+            "description": "Не короче 12 символов",
+            "maxLength": 256,
+            "minLength": 12,
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "new"
+        ],
+        "type": "object"
+      },
+      "PatchInboundInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "dest": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "port": {
+            "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PatchSettingsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "brand": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "domain": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "public_host": {
+            "maxLength": 253,
+            "type": "string"
+          },
+          "quiet_hour_utc": {
+            "format": "int64",
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "support_url": {
+            "description": "https://… или tg://…",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PatchUserInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "contact": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "device_limit": {
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "devices_unlimited": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "inbounds": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "never_expires": {
+            "type": "boolean"
+          },
+          "note": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "tariff_id": {
+            "description": "Применить тариф: лимиты из тарифа, срок — от сегодня",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "traffic_unlimited": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RecoveryOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "recovery_codes": {
+            "description": "Показываются один раз",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "recovery_codes"
+        ],
+        "type": "object"
+      },
+      "ResetPathOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "admin_url"
+        ],
+        "type": "object"
+      },
+      "SessionView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_agent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "current",
+          "ip",
+          "user_agent",
+          "created_at",
+          "last_seen_at"
+        ],
+        "type": "object"
+      },
+      "SettingsView": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_url": {
+            "type": "string"
+          },
+          "brand": {
+            "type": "string"
+          },
+          "certificate": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "panel_port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "public_host": {
+            "type": "string"
+          },
+          "quiet_hour_utc": {
+            "description": "Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sub_base_url": {
+            "type": "string"
+          },
+          "support_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "brand",
+          "support_url",
+          "public_host",
+          "domain",
+          "panel_port",
+          "quiet_hour_utc",
+          "admin_url",
+          "sub_base_url",
+          "certificate"
+        ],
+        "type": "object"
+      },
+      "Status": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "self-signed",
+              "letsencrypt"
+            ],
+            "type": "string"
+          },
+          "not_after": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "identifier",
+          "not_after",
+          "checked_at"
+        ],
+        "type": "object"
+      },
+      "System": {
+        "additionalProperties": false,
+        "properties": {
+          "cpu_percent": {
+            "format": "double",
+            "type": "number"
+          },
+          "mem_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mem_used": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "net_rx_bps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "net_tx_bps": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proc_rss": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cpu_percent",
+          "mem_total",
+          "mem_used",
+          "proc_rss",
+          "net_rx_bps",
+          "net_tx_bps"
+        ],
+        "type": "object"
+      },
+      "TariffBody": {
+        "additionalProperties": false,
+        "properties": {
+          "device_limit": {
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "duration_days": {
+            "format": "int64",
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "price_label": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "reset_strategy": {
+            "default": "none",
+            "enum": [
+              "none",
+              "month_start",
+              "period"
+            ],
+            "type": "string"
+          },
+          "sort": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "duration_days",
+          "reset_strategy"
+        ],
+        "type": "object"
+      },
+      "TariffView": {
+        "additionalProperties": false,
+        "properties": {
+          "device_limit": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "duration_days": {
+            "description": "0 — бессрочно",
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "price_label": {
+            "type": "string"
+          },
+          "reset_strategy": {
+            "enum": [
+              "none",
+              "month_start",
+              "period"
+            ],
+            "type": "string"
+          },
+          "sort": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "description": "Байты; null — без лимита",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "traffic_limit",
+          "duration_days",
+          "device_limit",
+          "reset_strategy",
+          "price_label",
+          "sort"
+        ],
+        "type": "object"
+      },
+      "TopUser": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "TotpCodeInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 16,
+            "minLength": 6,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "TotpDisableInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 16,
+            "minLength": 6,
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "password",
+          "code"
+        ],
+        "type": "object"
+      },
+      "TotpSetupOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "uri"
+        ],
+        "type": "object"
+      },
+      "TrafficOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/TrafficPoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "type": "object"
+      },
+      "TrafficPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "down": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "t": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "up": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t",
+          "up",
+          "down"
+        ],
+        "type": "object"
+      },
+      "UserCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "all": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "disabled": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "expired": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "expiring": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "limited": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "all",
+          "active",
+          "expiring",
+          "limited",
+          "expired",
+          "disabled"
+        ],
+        "type": "object"
+      },
+      "UserView": {
+        "additionalProperties": false,
+        "properties": {
+          "contact": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "device_limit": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "inbounds": {
+            "description": "Разрешённые подключения; пусто — все",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "online_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "online_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reset_strategy": {
+            "enum": [
+              "none",
+              "month_start",
+              "period"
+            ],
+            "type": "string"
+          },
+          "resets_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "active",
+              "expiring",
+              "limited",
+              "expired",
+              "disabled"
+            ],
+            "type": "string"
+          },
+          "sub_url": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tariff_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "total_down": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "total_up": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "description": "Байты за период; null — без лимита",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "used_down": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "used_up": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "contact",
+          "note",
+          "tags",
+          "state",
+          "tariff_id",
+          "traffic_limit",
+          "used_up",
+          "used_down",
+          "total_up",
+          "total_down",
+          "device_limit",
+          "reset_strategy",
+          "resets_at",
+          "expires_at",
+          "inbounds",
+          "sub_url",
+          "online",
+          "online_ips",
+          "online_at",
+          "created_at"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "mikan",
+    "version": "dev"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Вход",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "No Content",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Выход",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Текущий админ",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "operationId": "change-password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Сменить пароль",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "operationId": "list-sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Активные сессии",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/{id}": {
+      "delete": {
+        "operationId": "revoke-session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Завершить сессию",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/totp/disable": {
+      "post": {
+        "operationId": "totp-disable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotpDisableInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Выключить 2FA",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/totp/enable": {
+      "post": {
+        "operationId": "totp-enable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotpCodeInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Включить 2FA",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/totp/setup": {
+      "post": {
+        "operationId": "totp-setup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotpSetupOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Начать настройку 2FA",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/inbounds": {
+      "get": {
+        "operationId": "list-inbounds",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InboundView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Подключения",
+        "tags": [
+          "inbounds"
+        ]
+      },
+      "post": {
+        "operationId": "create-inbound",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInboundInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Добавить подключение из пресета",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/inbounds/{id}": {
+      "delete": {
+        "operationId": "delete-inbound",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить подключение",
+        "tags": [
+          "inbounds"
+        ]
+      },
+      "patch": {
+        "operationId": "update-inbound",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchInboundInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить подключение",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/node": {
+      "get": {
+        "operationId": "node-health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Состояние ноды",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/presets": {
+      "get": {
+        "operationId": "list-presets",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Info"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Доступные пресеты подключений",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "get-settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настройки",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "operationId": "update-settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchSettingsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить настройки",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/certificate/renew": {
+      "post": {
+        "operationId": "renew-certificate",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Запросить сертификат Let's Encrypt сейчас",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/reset-admin-path": {
+      "post": {
+        "operationId": "reset-admin-path",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetPathOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Выдать новую секретную ссылку на панель",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/stats/overview": {
+      "get": {
+        "operationId": "stats-overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Показатели дашборда",
+        "tags": [
+          "stats"
+        ]
+      }
+    },
+    "/api/v1/stats/traffic": {
+      "get": {
+        "operationId": "stats-traffic",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "default": "24h",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Трафик сервера",
+        "tags": [
+          "stats"
+        ]
+      }
+    },
+    "/api/v1/tariffs": {
+      "get": {
+        "operationId": "list-tariffs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TariffView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Тарифы",
+        "tags": [
+          "tariffs"
+        ]
+      },
+      "post": {
+        "operationId": "create-tariff",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TariffBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TariffView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Создать тариф",
+        "tags": [
+          "tariffs"
+        ]
+      }
+    },
+    "/api/v1/tariffs/{id}": {
+      "delete": {
+        "operationId": "archive-tariff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Убрать тариф в архив",
+        "tags": [
+          "tariffs"
+        ]
+      },
+      "put": {
+        "operationId": "update-tariff",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TariffBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TariffView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить тариф",
+        "tags": [
+          "tariffs"
+        ]
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "operationId": "list-users",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "active",
+                "expiring",
+                "limited",
+                "expired",
+                "disabled"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "format": "int64",
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUsersOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Список пользователей",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "operationId": "create-user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Создать пользователя по тарифу",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/bulk": {
+      "post": {
+        "operationId": "bulk-users",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Массовое действие",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}": {
+      "delete": {
+        "operationId": "delete-user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить пользователя",
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "operationId": "get-user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Пользователь",
+        "tags": [
+          "users"
+        ]
+      },
+      "patch": {
+        "operationId": "update-user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить пользователя",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/devices": {
+      "get": {
+        "operationId": "user-devices",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Устройства пользователя",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/extend": {
+      "post": {
+        "operationId": "extend-user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Продлить",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/reissue": {
+      "post": {
+        "operationId": "reissue-user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Перевыпустить ссылку",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/reset-traffic": {
+      "post": {
+        "operationId": "reset-user-traffic",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Сбросить трафик",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/traffic": {
+      "get": {
+        "operationId": "user-traffic",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "default": "7d",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "График трафика пользователя",
+        "tags": [
+          "users"
+        ]
+      }
+    }
+  }
+}

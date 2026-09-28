@@ -1,0 +1,10 @@
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/panel/store/migrations
+    queries: internal/panel/store/queries
+    gen:
+      go:
+        package: db
+        out: internal/panel/store/db
+        emit_empty_slices: true

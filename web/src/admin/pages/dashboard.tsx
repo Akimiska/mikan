@@ -1,0 +1,314 @@
+import { Link } from "@tanstack/react-router";
+import { Plus, ShieldCheck } from "lucide-react";
+import { useMemo, useState } from "react";
+import type { User } from "../../api/client";
+import { useInbounds, useNode, useOverview, userActions, useServerTraffic, useUserMutation, useUsers } from "../../api/hooks";
+import { buckets, TrafficChart, type Range } from "../../components/chart";
+import { useToast } from "../../components/toast";
+import { Avatar, Bar, Button, PageHeader, Pill, Segmented, Skeleton, StatePill } from "../../components/ui";
+import { bits, bytes, dateShort, expiryText, num, uptime } from "../../lib/format";
+
+const WEEKDAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
+const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+
+export function Dashboard() {
+  const now = new Date();
+  const node = useNode();
+  const status = node.data ? (node.data.ok ? "всё работает штатно" : "нода не отвечает") : "проверяем сервер…";
+  return (
+    <>
+      <PageHeader
+        title="Обзор"
+        sub={`${WEEKDAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} · ${status}`}
+        actions={
+          <Link to="/users" search={{ state: "all", q: "", create: true }} className="btn btn-primary">
+            <Plus size={18} aria-hidden />
+            <span className="max-[760px]:hidden">Новый пользователь</span>
+          </Link>
+        }
+      />
+      <Kpis />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
+        <TrafficCard />
+        <ServerCard />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+        <AttentionCard />
+        <TopCard />
+      </div>
+    </>
+  );
+}
+
+function Kpi({ i, label, value, foot }: { i: number; label: string; value: React.ReactNode; foot: React.ReactNode }) {
+  return (
+    <section className="card glass kpi reveal" style={{ "--i": i } as React.CSSProperties}>
+      <div className="kpi-label">{label}</div>
+      <div className="kpi-value num">{value}</div>
+      <div className="kpi-foot">{foot}</div>
+    </section>
+  );
+}
+
+function Kpis() {
+  const o = useOverview();
+  if (!o.data) {
+    return (
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4" aria-busy>
+        {[0, 1, 2, 3].map((i) => (
+          <section key={i} className="card glass kpi">
+            <Skeleton style={{ width: "50%" }} />
+            <Skeleton style={{ width: "40%", height: 28, marginTop: 8 }} />
+          </section>
+        ))}
+      </div>
+    );
+  }
+  const d = o.data;
+  const delta = d.traffic_yesterday > 0 ? Math.round(((d.traffic_today - d.traffic_yesterday) / d.traffic_yesterday) * 100) : null;
+  const [value, unit] = bytes(d.traffic_today).split(" ");
+  return (
+    <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      <Kpi i={0} label="Онлайн сейчас" value={num(d.online)} foot={<span>подключённых пользователей</span>} />
+      <Kpi i={1} label="Активные подписки" value={num(d.users_active)} foot={<span>из {num(d.users_total)}</span>} />
+      <Kpi
+        i={2}
+        label="Трафик сегодня"
+        value={
+          <>
+            {value}
+            <small>{unit}</small>
+          </>
+        }
+        foot={delta === null ? <span>вчера трафика не было</span> : <span className={delta >= 0 ? "text-[var(--leaf-700)]" : ""}>{delta >= 0 ? `на ${delta}% больше, чем вчера` : `на ${-delta}% меньше, чем вчера`}</span>}
+      />
+      <Kpi
+        i={3}
+        label="Истекают за 7 дней"
+        value={num(d.expiring_7d)}
+        foot={
+          d.expiring_7d > 0 ? (
+            <Link to="/users" search={{ state: "expiring", q: "" }} className="link-btn">
+              Показать список
+            </Link>
+          ) : (
+            <span>никто не истекает</span>
+          )
+        }
+      />
+    </div>
+  );
+}
+
+function TrafficCard() {
+  const [range, setRange] = useState<Range>("24h");
+  const t = useServerTraffic(range);
+  const points = useMemo(() => buckets(t.data?.points ?? [], range), [t.data, range]);
+  const totalDown = points.reduce((a, p) => a + p.down, 0);
+  const totalUp = points.reduce((a, p) => a + p.up, 0);
+  return (
+    <section className="card glass reveal" style={{ "--i": 4 } as React.CSSProperties} aria-labelledby="traffic-title">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title" id="traffic-title">
+            Трафик
+          </h2>
+          <div className="mt-1.5 flex gap-4 text-[13px] text-[var(--ink-600)]">
+            <span className="inline-flex items-center gap-2">
+              <i className="h-2 w-2 rounded-full bg-[var(--mikan-500)]" /> Скачано
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <i className="h-2 w-2 rounded-full bg-[var(--lagoon-500)]" /> Отдано
+            </span>
+          </div>
+        </div>
+        <Segmented
+          label="Период"
+          value={range}
+          onChange={setRange}
+          options={[
+            { value: "24h", label: "24 ч" },
+            { value: "7d", label: "7 дней" },
+            { value: "30d", label: "30 дней" },
+          ]}
+        />
+      </div>
+      {t.isPending ? <Skeleton style={{ height: 220, borderRadius: 16 }} /> : <TrafficChart points={points} range={range} />}
+      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-[var(--ink-500)]">
+        <span>
+          Скачано <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalDown)}</b>
+        </span>
+        <span>
+          Отдано <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalUp)}</b>
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function ServerCard() {
+  const node = useNode();
+  const inbounds = useInbounds();
+  const n = node.data;
+  const memPct = n && n.system.mem_total ? (n.system.mem_used / n.system.mem_total) * 100 : 0;
+  return (
+    <section className="card glass reveal" style={{ "--i": 5 } as React.CSSProperties} aria-labelledby="srv-title">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title" id="srv-title">
+            Сервер
+          </h2>
+          <div className="card-sub">{n?.ok ? `${n.core}${n.started_at ? ` · без перезапуска ${uptime(n.started_at)}` : ""}` : "состояние ноды"}</div>
+        </div>
+        {n ? n.ok ? <Pill tone="ok">работает</Pill> : <Pill tone="bad">нет связи</Pill> : null}
+      </div>
+      {n && !n.ok ? (
+        <div className="banner err mb-4" role="alert">
+          Панель не достучалась до ноды. Если VPN у пользователей работает, проверьте контейнер «node»: <span className="mono">mikan logs node</span>
+        </div>
+      ) : null}
+      <div className="mb-4 grid grid-cols-3 gap-2">
+        <div className="metric">
+          <div className="metric-label">CPU</div>
+          <div className="metric-value num">
+            {n ? Math.round(n.system.cpu_percent) : "—"}
+            <small>%</small>
+          </div>
+          <Bar pct={n?.system.cpu_percent ?? 0} className="mt-2" />
+        </div>
+        <div className="metric">
+          <div className="metric-label">Память</div>
+          <div className="metric-value num">
+            {n ? Math.round(memPct) : "—"}
+            <small>%</small>
+          </div>
+          <Bar pct={memPct} className="mt-2" />
+        </div>
+        <div className="metric">
+          <div className="metric-label">Сеть ↓</div>
+          <div className="metric-value num text-[15px]">{n ? bits(n.system.net_rx_bps) : "—"}</div>
+        </div>
+      </div>
+      <div className="row-list border-t border-[var(--hairline)]">
+        {(inbounds.data ?? []).map((l) => (
+          <div key={l.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium">{l.title}</div>
+              <div className="truncate text-xs text-[var(--ink-500)]">
+                {l.port}/{l.network}
+                {l.dest ? ` · маскировка под ${l.dest.replace(/:443$/, "")}` : ""}
+              </div>
+            </div>
+            {!l.enabled ? <Pill tone="off">выключено</Pill> : l.status === "error" ? <Pill tone="bad">ошибка</Pill> : l.status === "ok" ? <Pill tone="ok">ок</Pill> : <Pill tone="off">…</Pill>}
+          </div>
+        ))}
+      </div>
+      <div className="panel-soft mt-3 flex items-start gap-2 p-3 text-xs leading-4 text-[var(--ink-600)]">
+        <ShieldCheck size={16} className="shrink-0 text-[var(--leaf-500)]" aria-hidden />
+        <span>Клиентам закрыт доступ к локальным сетям сервера, исходящая почта (порт 25) заблокирована.</span>
+      </div>
+    </section>
+  );
+}
+
+function AttentionCard() {
+  const expiring = useUsers({ state: "expiring", q: "" });
+  const limited = useUsers({ state: "limited", q: "" });
+  const expired = useUsers({ state: "expired", q: "" });
+  const toast = useToast();
+  const extend = useUserMutation(userActions.extend);
+  const list: User[] = [...(limited.data?.items ?? []), ...(expiring.data?.items ?? []), ...(expired.data?.items ?? [])].slice(0, 5);
+  const loading = expiring.isPending || limited.isPending || expired.isPending;
+  return (
+    <section className="card glass reveal" style={{ "--i": 6 } as React.CSSProperties} aria-labelledby="att-title">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title" id="att-title">
+            Требует внимания
+          </h2>
+          <div className="card-sub">{loading ? "…" : list.length ? "истекают, исчерпали лимит или уже истекли" : "всё в порядке"}</div>
+        </div>
+      </div>
+      {loading ? (
+        <div className="space-y-3">
+          <Skeleton style={{ height: 36 }} />
+          <Skeleton style={{ height: 36 }} />
+        </div>
+      ) : list.length === 0 ? (
+        <p className="py-6 text-center text-[13px] text-[var(--ink-500)]">Ни одной подписки, которая закончится в ближайшую неделю.</p>
+      ) : (
+        <div className="row-list">
+          {list.map((u) => {
+            const exp = expiryText(u.expires_at);
+            return (
+              <div key={u.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-3">
+                <Avatar name={u.name} seed={u.id} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[13px]">
+                    <b className="truncate font-semibold">{u.name}</b>
+                    <StatePill state={u.state} />
+                  </div>
+                  <div className="text-xs text-[var(--ink-500)]">
+                    {u.state === "limited" ? `израсходовано ${bytes(u.used_up + u.used_down)}` : u.expires_at ? `до ${dateShort(u.expires_at)} · ${exp.text}` : ""}
+                  </div>
+                </div>
+                {u.state === "limited" ? (
+                  <Link to="/users" search={{ state: "all", q: "", user: u.id }} className="btn btn-glass btn-sm">
+                    Открыть
+                  </Link>
+                ) : (
+                  <Button
+                    size="sm"
+                    loading={extend.isPending && extend.variables?.id === u.id}
+                    onClick={() =>
+                      extend.mutate(
+                        { id: u.id, days: 30 },
+                        { onSuccess: () => toast.ok(`${u.name}: продлено на 30 дней`), onError: () => toast.error("Не удалось продлить") },
+                      )
+                    }
+                  >
+                    +30 дней
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TopCard() {
+  const o = useOverview();
+  const top = o.data?.top_month ?? [];
+  const max = top[0]?.bytes ?? 1;
+  return (
+    <section className="card glass reveal" style={{ "--i": 7 } as React.CSSProperties} aria-labelledby="top-title">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title" id="top-title">
+            Больше всего трафика
+          </h2>
+          <div className="card-sub">с начала месяца</div>
+        </div>
+      </div>
+      {o.isPending ? (
+        <Skeleton style={{ height: 120 }} />
+      ) : top.length === 0 ? (
+        <p className="py-6 text-center text-[13px] text-[var(--ink-500)]">Статистика появится, когда пользователи начнут подключаться.</p>
+      ) : (
+        top.map((u, i) => (
+          <Link key={u.id} to="/users" search={{ state: "all", q: "", user: u.id }} className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl py-2 hover:bg-[var(--hover)]">
+            <span className="font-display text-xs text-[var(--ink-400)]">{i + 1}</span>
+            <div className="min-w-0">
+              <div className="mb-1.5 truncate text-[13px] font-medium">{u.name}</div>
+              <Bar pct={(u.bytes / max) * 100} className="[&>i]:!bg-[var(--mikan-400)]" />
+            </div>
+            <span className="num min-w-[72px] text-right text-[13px] font-medium">{bytes(u.bytes)}</span>
+          </Link>
+        ))
+      )}
+    </section>
+  );
+}

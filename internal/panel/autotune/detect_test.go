@@ -192,20 +192,20 @@ func TestCutOff(t *testing.T) {
 
 // The node cannot open ports in the host's firewall: the installer opens the pool ahead.
 func TestInstallerOpensThePool(t *testing.T) {
-	raw, err := os.ReadFile("../../../deploy/install.sh")
+	raw, err := os.ReadFile("../../../installer/src/host.rs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := regexp.MustCompile(`for p in ([0-9 ]+); do`).FindSubmatch(raw)
+	m := regexp.MustCompile(`POOL: \[u16; \d+\] = \[([0-9, ]+)\]`).FindSubmatch(raw)
 	if m == nil {
-		t.Fatal("install.sh has no loop over the pool ports")
+		t.Fatal("the installer has no POOL")
 	}
 	var want []string
 	for _, p := range Pool {
 		want = append(want, strconv.Itoa(p))
 	}
-	if got := strings.Fields(string(m[1])); !slices.Equal(got, want) {
-		t.Fatalf("install.sh opens %v, the pool is %v", got, want)
+	if got := strings.Fields(strings.ReplaceAll(string(m[1]), ",", " ")); !slices.Equal(got, want) {
+		t.Fatalf("the installer opens %v, the pool is %v", got, want)
 	}
 }
 

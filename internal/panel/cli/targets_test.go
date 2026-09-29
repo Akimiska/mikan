@@ -62,6 +62,14 @@ func TestTargetsScanAndApply(t *testing.T) {
 		t.Fatalf("table: %v\n%s", err, out)
 	}
 
+	// The installer polls the panel's own domain until its certificate is there.
+	if out, _, err := run("check", "--dest", "127.0.0.1:1", "--sni", "vpn.example.com", "--json"); err != nil || !strings.Contains(out, `"error":"refused"`) {
+		t.Fatalf("check --json: %v %s", err, out)
+	}
+	if _, _, err := run("check", "--dest", "127.0.0.1:1", "--sni", "vpn.example.com"); err == nil || !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("check: %v", err)
+	}
+
 	// The site is checked before anything changes.
 	if _, _, err := run("apply", "--all", "--dest", "127.0.0.1:9", "--sni", "www.example.org"); err == nil || !strings.Contains(err.Error(), "does not suit REALITY: connection refused") {
 		t.Fatalf("a dead site: %v", err)

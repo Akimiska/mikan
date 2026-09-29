@@ -36,6 +36,14 @@ curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install
 
 Меню управления потом открывается командой `mikan`.
 
+Нода для уже работающей панели: страница **Ноды** в панели (или `mikan node add`) выдаёт команду с ключом:
+
+```bash
+curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh | sudo bash -s -- --join КЛЮЧ
+```
+
+Без вопросов, для скриптов: `… | sudo bash -s -- --yes --lang ru --domain vpn.example.com --email you@example.com` (все флаги: `mikan install --help`).
+
 ## Почему mikan
 
 <table>
@@ -168,6 +176,9 @@ flowchart LR
 | `mikan update` | обновить сейчас: сначала бэкап, при сбое откат |
 | `mikan backup` · `restore FILE` | бэкапы в `/opt/mikan/backups` |
 | `mikan node …` · `mikan inbound …` | ноды и протоколы |
+| `mikan targets scan` · `apply` | сайты для маскировки REALITY рядом с сервером |
+| `mikan join КЛЮЧ` | на ноде: взять новый ключ из панели |
+| `mikan restart` | перезапустить контейнеры |
 | `mikan uninstall` | остановить и удалить команду, данные остаются |
 
 ## Обновления

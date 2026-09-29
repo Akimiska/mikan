@@ -53,7 +53,7 @@ type Target struct {
 // round trips are the ones REALITY will see.
 func targetsCmd(ctx context.Context, st *store.Store, set *settings.Settings, cfg config.Config, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("targets needs scan or apply\n\n" + usage)
+		return errors.New("targets needs scan, check or apply\n\n" + usage)
 	}
 	switch args[0] {
 	case "scan":
@@ -77,6 +77,31 @@ func targetsCmd(ctx context.Context, st *store.Store, set *settings.Settings, cf
 			return enc.Encode(res)
 		}
 		printScan(stdout, res)
+		return nil
+	case "check":
+		fs := flag.NewFlagSet("targets check", flag.ContinueOnError)
+		node := fs.Int64("node", 1, "the node that would dial the site (1 is the panel's own)")
+		dest := fs.String("dest", "", "the site as host:port")
+		sni := fs.String("sni", "", "the name clients send (the host of --dest by default)")
+		asJSON := fs.Bool("json", false, "print JSON")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if strings.TrimSpace(*dest) == "" {
+			return errors.New("usage: mikan admin targets check --dest HOST:PORT [--sni NAME] [--node NODE] [--json]")
+		}
+		n, err := st.Q.GetNode(ctx, *node)
+		if err != nil {
+			return fmt.Errorf("no node %d", *node)
+		}
+		r := checkTarget(ctx, cfg, n, strings.TrimSpace(*dest), strings.TrimSpace(*sni))
+		if *asJSON {
+			return json.NewEncoder(stdout).Encode(r)
+		}
+		if !r.OK {
+			return fmt.Errorf("%s does not suit REALITY: %s", r.Dest, targetProblem(r))
+		}
+		fmt.Fprintf(stdout, "%s (%s) suits REALITY: TLS 1.3, HTTP/2, X25519, valid certificate, %d ms\n", r.Dest, r.SNI, r.RTTms)
 		return nil
 	case "apply":
 		fs := flag.NewFlagSet("targets apply", flag.ContinueOnError)

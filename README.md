@@ -30,6 +30,14 @@ curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install
 
 The installer asks for the panel language and an optional domain, checks that the domain points to the server, installs Docker if needed, picks REALITY camouflage sites next to your server and prints your admin link. Run `mikan` again at any time for the management menu.
 
+A node for an existing panel: the panel's **Nodes** page (or `mikan node add`) gives the command with its key:
+
+```bash
+curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh | sudo bash -s -- --join KEY
+```
+
+Without questions, for scripts: `… | sudo bash -s -- --yes --lang en --domain vpn.example.com --email you@example.com` (all flags: `mikan install --help`).
+
 ## Why mikan
 
 <table>
@@ -147,6 +155,9 @@ Run `mikan` for the menu, or use the commands directly:
 | `mikan update` | update now (backup first, automatic rollback) |
 | `mikan backup` · `restore FILE` | backups in `/opt/mikan/backups` |
 | `mikan node …` · `mikan inbound …` | nodes and protocols |
+| `mikan targets scan` · `apply` | REALITY camouflage sites next to the server |
+| `mikan join KEY` | on a node: take a new key from the panel |
+| `mikan restart` | restart the containers |
 | `mikan uninstall` | stop and remove the command, keep the data |
 
 ## Updates

@@ -8,11 +8,15 @@ the signed manifest, and the panel shows the one in its language.
 - The panel has a default language, picked at install: the admin panel and the subscription page open in it until a visitor picks their own, and default names (tariffs, the auto-select group, the bot's menu) are in it. Settings → Default language changes it; "Browser language" keeps the old behaviour.
 - The server's command line (`mikan admin …`) is in English.
 - A node joins with one command that installs everything from the latest release; the Nodes page shows it with the join key.
+- A new installer and server menu in the terminal. First the panel's language, then checks of the server and of the domain's DNS, REALITY sites next to the server, and the admin's login with a QR code. Later runs of `mikan` open a menu: status, updates, logs, access, REALITY sites, nodes, backups.
+- Releases come from GitHub: the image from GitHub Packages, trusted through a signed manifest. Updates back up first and go back when the new version does not start.
 
 ### ru
 - У панели есть язык по умолчанию, его выбирают при установке: админка и страница подписки открываются на нём, пока человек не выбрал свой, и на нём же названия по умолчанию (тарифы, группа автовыбора, меню бота). Меняется в «Настройки → Язык по умолчанию»; «Как в браузере» — прежнее поведение.
 - Серверные команды (`mikan admin …`) — на английском.
 - Нода подключается одной командой, которая ставит всё из последнего релиза; страница «Ноды» показывает её вместе с ключом.
+- Новый установщик и меню сервера в терминале. Сначала язык панели, потом проверки сервера и DNS домена, сайты REALITY рядом с сервером и вход администратора с QR-кодом. Повторный запуск `mikan` открывает меню: состояние, обновления, логи, доступ, сайты REALITY, ноды, бэкапы.
+- Релизы приходят с GitHub: образ из GitHub Packages, доверие через подписанный манифест. Обновление сначала делает бэкап и откатывается, если новая версия не запустилась.
 
 ## 0.3.8
 ### en

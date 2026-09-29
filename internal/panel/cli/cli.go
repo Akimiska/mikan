@@ -51,6 +51,8 @@ Commands:
   admin node set NODE [--name] [--host] [--domain] [--enabled]
   admin targets scan [--node NODE] [--json]
                                 look for REALITY camouflage sites next to a node, fastest first
+  admin targets check --dest HOST:PORT [--sni NAME] [--node NODE] [--json]
+                                check a site as a REALITY camouflage from the node
   admin targets apply --dest HOST:PORT [--sni NAME] (--all | --inbound NAME) [--node NODE]
                                 point REALITY inbounds at a site; it is checked first (--force skips)
   health                        check that the panel answers (container healthcheck)

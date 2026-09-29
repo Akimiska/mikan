@@ -2,11 +2,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleCheck, Pencil, Plus, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Inbound, type Preset, type Schemas } from "../../api/client";
-import { qk, useInbounds, useNodes, usePresets } from "../../api/hooks";
+import { qk, useInbounds, useNodes, usePresets, useSettings } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
+import { ago } from "../../lib/format";
 
 import { nodeLabel } from "./nodes";
 
@@ -133,13 +134,22 @@ export function InboundsPage() {
                 ) : (
                   <Pill tone="off">{t("inbounds.checking")}</Pill>
                 )}
+                {i.shared ? (
+                  <span title={t("inbounds.sharedWarn")}>
+                    <Pill tone="warn">{t("inbounds.sharedKey")}</Pill>
+                  </span>
+                ) : null}
                 {i.dest ? <span className="text-xs text-[var(--ink-500)]">{t("inbounds.maskedAs", { dest: i.dest })}</span> : null}
               </div>
+              {i.apps.length > 0 && i.apps.length < 5 ? (
+                <p className="mt-2 text-xs text-[var(--ink-500)]">{t("inbounds.appsLine", { list: i.apps.map((a) => tMaybe(`inbounds.apps.${a}`) ?? a).join(", ") })}</p>
+              ) : null}
               {i.status === "error" && i.error ? (
                 <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">
                   {listenerError(i.error)}
                 </p>
               ) : null}
+              <AutoInfo i={i} />
               <div className="mt-4 flex gap-2 border-t border-[var(--hairline)] pt-4">
                 <Button size="sm" onClick={() => setEditing(i)}>
                   <Pencil size={16} aria-hidden /> {t("inbounds.configure")}
@@ -165,6 +175,73 @@ export function InboundsPage() {
         onConfirm={() => removing && remove.mutate(removing.id)}
       />
     </>
+  );
+}
+
+/** What the automatic fixes see and last did for a connection. */
+function AutoInfo({ i }: { i: Inbound }) {
+  const a = i.auto;
+  return (
+    <>
+      {i.enabled && a.cut_off ? (
+        <div className="mt-3 flex flex-col items-start gap-1.5" role="status">
+          <Pill tone="warn">{a.reached ? t("inbounds.cutOffOf", { n: a.blocked, total: a.blocked + a.reached }) : t("inbounds.cutOff", { n: a.blocked })}</Pill>
+          {a.stuck ? <span className="text-xs text-[var(--ink-500)]">{t(`inbounds.stuck.${a.stuck}`)}</span> : null}
+        </div>
+      ) : null}
+      {i.enabled && a.target_ok === false ? (
+        <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">
+          {t("inbounds.targetDown", { reason: tMaybe(`inbounds.targetErr.${a.target_error ?? ""}`) ?? a.target_error ?? "" })}
+        </p>
+      ) : null}
+      {a.last ? (
+        <p className="mt-3 text-xs text-[var(--ink-500)]">
+          {t(a.last.kind === "port" ? "inbounds.lastPort" : "inbounds.lastSni", { old: a.last.old, new: a.last.new, ago: ago(a.last.at) })} · {t(`inbounds.reason.${a.last.reason}`)}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** One switch of the automatic fixes; says so when the global switch is off. */
+function AutoSwitch({ title, sub, on, globalOff, onChange }: { title: string; sub: string; on: boolean; globalOff: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2">
+      <div className="min-w-0">
+        <div className="text-[13px] font-medium">{title}</div>
+        <div className={globalOff ? "mt-1 text-xs text-[var(--honey-600)]" : "mt-1 text-xs text-[var(--ink-500)]"}>{globalOff ? t("inbounds.autoOffGlobal") : sub}</div>
+      </div>
+      <Switch checked={on} label={title} onChange={onChange} />
+    </div>
+  );
+}
+
+/** Badges of a preset that not every app or feature works with. */
+function LimitBadges({ clashOnly, shared }: { clashOnly: boolean; shared: boolean }) {
+  if (!clashOnly && !shared) return null;
+  return (
+    <span className="mt-1 flex flex-wrap gap-1.5">
+      {clashOnly ? <Pill tone="off">{t("inbounds.clashOnly")}</Pill> : null}
+      {shared ? <Pill tone="warn">{t("inbounds.sharedKey")}</Pill> : null}
+    </span>
+  );
+}
+
+/** What the admin gives up with the chosen preset, said before it is added. */
+function LimitNotes({ clashOnly, shared }: { clashOnly: boolean; shared: boolean }) {
+  if (!clashOnly && !shared) return null;
+  return (
+    <div className="mb-4 flex flex-col gap-2" role="note">
+      {shared ? (
+        <div className="rounded-2xl border border-[rgba(224,160,33,0.35)] bg-[var(--honey-50)] p-3 text-[13px] text-[var(--ink-700)]">
+          <div className="mb-1 flex items-center gap-2 font-semibold text-[var(--ink-900)]">
+            <TriangleAlert size={16} className="text-[var(--honey-600)]" aria-hidden /> {t("inbounds.sharedWarnTitle")}
+          </div>
+          {t("inbounds.sharedWarn")}
+        </div>
+      ) : null}
+      {clashOnly ? <p className="text-xs text-[var(--ink-500)]">{t("inbounds.clashOnlyNote")}</p> : null}
+    </div>
   );
 }
 
@@ -270,6 +347,7 @@ function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: boolean; on
               <button key={p.id} type="button" role="radio" aria-checked={preset === p.id} className="opt" onClick={() => setPreset(p.id)}>
                 <span className="font-semibold">{presetTitle(p)}</span>
                 <span className="text-xs text-[var(--ink-500)]">{presetSummary(p)}</span>
+                <LimitBadges clashOnly={p.apps === "mihomo"} shared={!!p.shared} />
               </button>
             ))}
           </div>
@@ -282,6 +360,7 @@ function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: boolean; on
         >
           <input id="in-port" className="input max-w-[200px]" inputMode="numeric" placeholder={chosen?.default_port} value={port} onChange={(e) => setPort(e.target.value)} aria-invalid={!!errors.port} />
         </Field>
+        {chosen && !custom ? <LimitNotes clashOnly={chosen.apps === "mihomo"} shared={!!chosen.shared} /> : null}
         {custom ? (
           <Field label={t("inbounds.configLabel")} hint={t("inbounds.configHint")} error={errors.config}>
             <Editor value={config} onChange={editConfig} invalid={!!errors.config} />
@@ -396,7 +475,10 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [sni, setSni] = useState(""); // set when a picked target has an IP dest
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
+  const [autoPort, setAutoPort] = useState(true);
+  const [autoSni, setAutoSni] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const settings = useSettings();
   useEffect(() => {
     if (!inbound) return;
     setTab("main");
@@ -405,6 +487,8 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setSni("");
     setName(inbound.display_name);
     setConfig(inbound.config);
+    setAutoPort(inbound.auto_port);
+    setAutoSni(inbound.auto_sni);
     setErrors({});
     validate.reset();
     // `validate` changes identity on every render; reset only for another inbound.
@@ -417,9 +501,11 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   };
   const save = useMutation({
     mutationFn: (body: Schemas["PatchInboundInputBody"]) => unwrap(api.PATCH("/api/v1/inbounds/{id}", { params: { path: { id: inbound!.id } }, body })),
-    onSuccess: () => {
+    onSuccess: (_, body) => {
       void qc.invalidateQueries({ queryKey: qk.inbounds });
-      toast.ok(t("inbounds.saved"));
+      // The automatic-fix switches change nothing clients get.
+      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni");
+      toast.ok(autoOnly ? t("inbounds.savedAuto") : t("inbounds.saved"));
       onClose();
     },
     onError: (e) => {
@@ -442,6 +528,8 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
       body.dest = dest.trim();
       if (sni) body.server_name = sni;
     }
+    if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
+    if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
     if (Object.keys(body).length === 0) {
       onClose();
       return;
@@ -524,6 +612,13 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
                   ) : null}
                 </>
               ) : null}
+              <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("inbounds.auto")}>
+                <div className="mb-1 text-[13px] font-semibold">{t("inbounds.auto")}</div>
+                <AutoSwitch title={t("inbounds.autoPort")} sub={t("inbounds.autoPortSub")} on={autoPort} globalOff={settings.data?.auto_port === false} onChange={setAutoPort} />
+                {inbound?.dest !== undefined ? (
+                  <AutoSwitch title={t("inbounds.autoSni")} sub={t("inbounds.autoSniSub")} on={autoSni} globalOff={settings.data?.auto_sni === false} onChange={setAutoSni} />
+                ) : null}
+              </div>
             </>
           ) : (
             <Field label={t("inbounds.configLabel")} hint={t("inbounds.configHint")} error={errors.config}>

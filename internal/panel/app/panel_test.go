@@ -63,6 +63,7 @@ func newHarness(t *testing.T) *harness {
 	web := fstest.MapFS{
 		"index.html":      {Data: []byte("<!doctype html><html><head><!-- mikan:base --></head><body></body></html>")},
 		"assets/app-1.js": {Data: []byte("console.log(1)")},
+		"sub.html":        {Data: []byte("<!doctype html><html><head><!-- mikan:base --></head><body>sub</body></html>")},
 	}
 	p, err := NewPanel(st, Options{Version: "test", Web: web, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return h.now }})
 	if err != nil {

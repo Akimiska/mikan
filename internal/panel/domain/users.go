@@ -52,7 +52,8 @@ func CanConnect(state string) bool { return state == StateActive || state == Sta
 func NextReset(u db.User, now time.Time) (time.Time, bool) {
 	switch u.ResetStrategy {
 	case "month_start":
-		return time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC), true
+		// Monthly: on the billing day, or the 1st without one.
+		return nextMonthPeriod(MonthPeriodStart(now, u.BillingDay), u.BillingDay), true
 	case "period":
 		return time.Unix(u.PeriodStart+max(u.PeriodDays, 1)*day, 0).UTC(), true
 	}
@@ -125,8 +126,9 @@ func (s *Users) create(ctx context.Context, in CreateInput) (db.User, error) {
 		u, err = q.CreateUser(ctx, db.CreateUserParams{
 			Name: strings.TrimSpace(in.Name), Contact: strings.TrimSpace(in.Contact), Note: in.Note, Tags: tags,
 			TariffID: sql.NullInt64{Int64: t.ID, Valid: true}, TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit,
-			ResetStrategy: t.ResetStrategy, PeriodDays: 30, PeriodStart: now, ExpiresAt: expiry(now, t.DurationDays),
-			SubToken: secure.Token(24), SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, CreatedAt: now, UpdatedAt: now,
+			ResetStrategy: t.ResetStrategy, PeriodDays: 30, PeriodStart: now,
+			ExpiresAt:  tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay}),
+			BillingDay: t.BillingDay, SubToken: secure.Token(24), SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, CreatedAt: now, UpdatedAt: now,
 		})
 		return err
 	})
@@ -159,9 +161,14 @@ type Patch struct {
 	ClearDeviceLimit    bool
 	ExpiresAt           *time.Time
 	ClearExpiry         bool
+	BillingDay          *int64 // 1–31: terms end on that day of the month
+	ClearBillingDay     bool
 	Inbounds            *[]int64 // empty slice = all inbounds
 	TariffID            *int64   // applies the tariff's limits and restarts the term from now
 }
+
+// ErrBadBillingDay: a billing day is 1–31.
+var ErrBadBillingDay = errors.New("bad_billing_day")
 
 func (s *Users) Update(ctx context.Context, id int64, p Patch) (db.User, error) {
 	var out db.User
@@ -178,7 +185,7 @@ func (s *Users) Update(ctx context.Context, id int64, p Patch) (db.User, error) 
 			Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID,
 			TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, ResetStrategy: u.ResetStrategy,
 			PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart, ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds,
-			UpdatedAt: now, ID: u.ID,
+			BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID,
 		}
 		if p.TariffID != nil {
 			t, err := q.GetTariff(ctx, *p.TariffID)
@@ -189,8 +196,17 @@ func (s *Users) Update(ctx context.Context, id int64, p Patch) (db.User, error) 
 				return err
 			}
 			par.TariffID = sql.NullInt64{Int64: t.ID, Valid: true}
-			par.TrafficLimit, par.DeviceLimit, par.ResetStrategy = t.TrafficLimit, t.DeviceLimit, t.ResetStrategy
-			par.ExpiresAt = expiry(now, t.DurationDays)
+			par.TrafficLimit, par.DeviceLimit, par.ResetStrategy, par.BillingDay = t.TrafficLimit, t.DeviceLimit, t.ResetStrategy, t.BillingDay
+			par.ExpiresAt = tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay})
+		}
+		switch {
+		case p.ClearBillingDay:
+			par.BillingDay = sql.NullInt64{}
+		case p.BillingDay != nil:
+			if !ValidBillingDay(*p.BillingDay) {
+				return ErrBadBillingDay
+			}
+			par.BillingDay = sql.NullInt64{Int64: *p.BillingDay, Valid: true}
 		}
 		if p.Name != nil {
 			par.Name = strings.TrimSpace(*p.Name)
@@ -263,6 +279,35 @@ func (s *Users) Extend(ctx context.Context, id int64, days int64) (db.User, erro
 	return s.Update(ctx, id, Patch{ExpiresAt: &until, Disabled: &enable})
 }
 
+// ExtendMonths adds n months: to the n-th billing day, or without one to the same day of
+// the month (see AddMonths). A term that already ended restarts from now.
+func (s *Users) ExtendMonths(ctx context.Context, id int64, n int) (db.User, error) {
+	u, err := s.Get(ctx, id)
+	if err != nil {
+		return u, err
+	}
+	now := s.now()
+	base := now
+	if u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).After(now) {
+		base = time.Unix(u.ExpiresAt.Int64, 0)
+	}
+	until := AddMonths(base, n, u.BillingDay)
+	enable := false
+	return s.Update(ctx, id, Patch{ExpiresAt: &until, Disabled: &enable})
+}
+
+// ExtendPeriod adds one paid period: a month up to the billing day, or 30 days without one.
+func (s *Users) ExtendPeriod(ctx context.Context, id int64) (db.User, error) {
+	u, err := s.Get(ctx, id)
+	if err != nil {
+		return u, err
+	}
+	if u.BillingDay.Valid {
+		return s.ExtendMonths(ctx, id, 1)
+	}
+	return s.Extend(ctx, id, 30)
+}
+
 func (s *Users) ResetTraffic(ctx context.Context, id int64) (db.User, error) {
 	now := s.now().Unix()
 	if err := s.st.Q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now, UpdatedAt: now, ID: id}); err != nil {
@@ -312,6 +357,10 @@ func (s *Users) reissue(ctx context.Context, id int64) error {
 				return err
 			}
 		}
+		// A new link: every bound device registers again with it.
+		if err := burnDevices(ctx, q, id, now); err != nil {
+			return err
+		}
 		return q.SetUserCredentials(ctx, db.SetUserCredentialsParams{SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, SubToken: secure.Token(24), UpdatedAt: now, ID: id})
 	})
 }
@@ -330,6 +379,9 @@ func (s *Users) Delete(ctx context.Context, id int64) error {
 			if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: u.SlotID.Int64}); err != nil {
 				return err
 			}
+		}
+		if err := burnDevices(ctx, q, id, now); err != nil {
+			return err
 		}
 		return q.DeleteUser(ctx, id)
 	})

@@ -42,6 +42,8 @@ const usage = `mikan — панель управления VPN на ядре mih
   admin inbound list            подключения: имя, пресет, порт
   admin inbound add ПРЕСЕТ [--port ПОРТ]
                                 добавить подключение из пресета со свежими ключами (--node НОДА)
+  admin inbound set ИМЯ --port ПОРТ [--node НОДА]
+                                перенести подключение на другой порт; ключи и маскировка те же
   admin node list               ноды панели
   admin node add --name ИМЯ --host IP [--domain Д] [--api-port П]
                                 добавить ноду; печатает ключ для install.sh --node --join

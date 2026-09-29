@@ -20,6 +20,13 @@ const (
 	KeyGroupMain  = "sub_group_main" // subscription group names, see subs.Groups
 	KeyGroupAuto  = "sub_group_auto"
 	KeyRouting    = "sub_routing" // subs.Routing
+	// Automatic moves (internal/panel/autotune), on unless switched off.
+	KeyAutoPort = "auto_port" // move an inbound whose port is blocked on the way to clients
+	KeyAutoSNI  = "auto_sni"  // replace a REALITY target that stopped working
+	// Devices (domain.Devices): bind subscriptions to devices, on unless switched off;
+	// refuse apps that send no device id instead of seating them together, off by default.
+	KeyDeviceBinding = "device_binding"
+	KeyRequireHWID   = "device_require_hwid"
 )
 
 type Settings struct{ q *db.Queries }
@@ -41,6 +48,23 @@ func Get[T any](ctx context.Context, s *Settings, key string) (v T, ok bool, err
 	return v, true, nil
 }
 
+// GetOver decodes the value stored under key over def: what the stored JSON lacks, such
+// as a field added after it was saved, keeps def's value.
+func GetOver[T any](ctx context.Context, s *Settings, key string, def T) (T, bool, error) {
+	raw, err := s.q.GetSetting(ctx, key)
+	if errors.Is(err, sql.ErrNoRows) {
+		return def, false, nil
+	}
+	if err != nil {
+		return def, false, err
+	}
+	v := def
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return def, false, fmt.Errorf("setting %s: %w", key, err)
+	}
+	return v, true, nil
+}
+
 func Set[T any](ctx context.Context, s *Settings, key string, v T) error {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -52,6 +76,15 @@ func Set[T any](ctx context.Context, s *Settings, key string, v T) error {
 func (s *Settings) String(ctx context.Context, key string) (string, error) {
 	v, _, err := Get[string](ctx, s, key)
 	return v, err
+}
+
+// Bool reads a switch; def when it was never set.
+func (s *Settings) Bool(ctx context.Context, key string, def bool) (bool, error) {
+	v, ok, err := Get[bool](ctx, s, key)
+	if err != nil || !ok {
+		return def, err
+	}
+	return v, nil
 }
 
 type Paths struct {

@@ -1,13 +1,13 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
-import { CalendarPlus, Copy, ExternalLink, Laptop, MoreHorizontal, Power, RefreshCw, RotateCcw, Smartphone, Trash2 } from "lucide-react";
+import { CalendarPlus, Check, Copy, ExternalLink, Laptop, Layers, MoreHorizontal, Power, RefreshCw, RotateCcw, Send, Smartphone, Trash2, Unlink } from "lucide-react";
 import { useEffect, useState } from "react";
-import { errorText, type User } from "../../api/client";
-import { useDevices, useInbounds, userActions, useTariffs, useUser, useUserMutation, useUserTraffic } from "../../api/hooks";
+import { api, errorText, unwrap, type Schemas, type User } from "../../api/client";
+import { onePeriod, useBoundDevices, useDevices, useInbounds, userActions, useSettings, useTariffs, useUser, useUserMutation, useUserTraffic } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Avatar, Button, ErrorState, QR, Ring, Skeleton, StatePill, Switch } from "../../components/ui";
+import { Avatar, Button, ErrorState, Field, QR, Ring, Skeleton, StatePill, Switch } from "../../components/ui";
 import { t } from "../../i18n";
-import { ago, bytes, dateLong, dateShort, days, expiryText, maskIP } from "../../lib/format";
+import { ago, appName, bytes, dateLong, dateShort, days, expiryText, fromInputDate, inputDate, maskIP, months } from "../../lib/format";
 import { tariffSummary } from "./tariffs";
 
 export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }) {
@@ -59,8 +59,8 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
   return (
     <>
       <div className="flex flex-wrap gap-2 py-4">
-        <Button variant="primary" loading={extend.isPending} onClick={() => extend.mutate({ id: u.id, days: 30 }, { onSuccess: (r) => toast.ok(t("userDrawer.extendedUntil", { date: dateShort(r.expires_at!) })), onError: fail })}>
-          <CalendarPlus size={18} aria-hidden /> {t("userDrawer.extend30")}
+        <Button variant="primary" loading={extend.isPending} onClick={() => extend.mutate({ id: u.id, ...onePeriod(u) }, { onSuccess: (r) => toast.ok(t("userDrawer.extendedUntil", { date: dateShort(r.expires_at!) })), onError: fail })}>
+          <CalendarPlus size={18} aria-hidden /> {u.billing_day != null ? t("userDrawer.extendMonth") : t("userDrawer.extend30")}
         </Button>
         <Button loading={reset.isPending} onClick={() => reset.mutate(u.id, { onSuccess: () => toast.ok(t("userDrawer.trafficReset")), onError: fail })}>
           <RotateCcw size={18} aria-hidden /> {t("users.resetTraffic")}
@@ -100,6 +100,7 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
       <TrafficSection u={u} />
       <ExpirySection u={u} />
       <SubscriptionSection u={u} onReissue={() => setConfirm("reissue")} />
+      <TelegramSection u={u} />
       <DevicesSection u={u} />
       <ProtocolsSection u={u} />
       <NoteSection u={u} />
@@ -270,23 +271,86 @@ function ExpirySection({ u }: { u: User }) {
   const extend = useUserMutation(userActions.extend);
   const update = useUserMutation(userActions.update);
   const e = expiryText(u.expires_at);
+  const fail = (x: unknown) => toast.error(errorText(x));
+  // With a billing day a term runs from that day to the same day: extend by months.
+  const chips: { label: string; body: Schemas["ExtendInputBody"] }[] =
+    u.billing_day != null
+      ? [1, 3, 6, 12].map((n) => ({ label: n === 12 ? t("userDrawer.year") : months(n), body: { months: n } }))
+      : [7, 30, 90, 365].map((n) => ({ label: n === 365 ? t("userDrawer.year") : days(n), body: { days: n } }));
   return (
-    <Section title={t("userDrawer.expiry")}>
+    <Section title={t("userDrawer.expiry")} aside={u.billing_day != null ? t("userDrawer.billingAside", { d: u.billing_day }) : undefined}>
       <div className="font-display text-lg font-medium tracking-tight">{u.expires_at ? t("users.until", { date: dateLong(u.expires_at) }) : t("userDrawer.forever")}</div>
       {u.expires_at ? <div className={`exp-days ${e.tone}`}>{e.tone === "bad" ? e.text : t("userDrawer.leftDays", { text: e.text })}</div> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {[7, 30, 90, 365].map((n) => (
-          <button key={n} type="button" className="chip-btn" disabled={extend.isPending} onClick={() => extend.mutate({ id: u.id, days: n }, { onSuccess: () => toast.ok(`+${days(n)}`), onError: (x) => toast.error(errorText(x)) })}>
-            +{n === 365 ? t("userDrawer.year") : days(n)}
+        {chips.map((c) => (
+          <button
+            key={c.label}
+            type="button"
+            className="chip-btn"
+            disabled={extend.isPending}
+            onClick={() => extend.mutate({ id: u.id, ...c.body }, { onSuccess: (r) => toast.ok(t("userDrawer.extendedUntil", { date: dateShort(r.expires_at!) })), onError: fail })}
+          >
+            +{c.label}
           </button>
         ))}
         {u.expires_at ? (
-          <button type="button" className="chip-btn" disabled={update.isPending} onClick={() => update.mutate({ id: u.id, body: { never_expires: true } }, { onSuccess: () => toast.ok(t("userDrawer.nowForever")) })}>
+          <button type="button" className="chip-btn" disabled={update.isPending} onClick={() => update.mutate({ id: u.id, body: { never_expires: true } }, { onSuccess: () => toast.ok(t("userDrawer.nowForever")), onError: fail })}>
             {t("userDrawer.forever")}
           </button>
         ) : null}
       </div>
+      <div className="mt-4 grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+        <BillingDayField u={u} />
+        <ExactDateField u={u} />
+      </div>
     </Section>
+  );
+}
+
+function BillingDayField({ u }: { u: User }) {
+  const toast = useToast();
+  const update = useUserMutation(userActions.update);
+  const set = (d: number) =>
+    update.mutate(
+      { id: u.id, body: { billing_day: d } },
+      { onSuccess: () => toast.ok(d ? t("userDrawer.billingDaySet", { d }) : t("userDrawer.billingDayCleared")), onError: (e) => toast.error(errorText(e)) },
+    );
+  return (
+    <Field label={t("userDrawer.billingDay")} htmlFor={`u-bday-${u.id}`} hint={t("userDrawer.billingDayHint")}>
+      <select id={`u-bday-${u.id}`} className="input" value={u.billing_day ?? 0} disabled={update.isPending} onChange={(e) => set(Number(e.target.value))}>
+        <option value={0}>{t("userDrawer.billingDayNone")}</option>
+        {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+          <option key={d} value={d}>
+            {t("userDrawer.billingDayOption", { d })}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+function ExactDateField({ u }: { u: User }) {
+  const toast = useToast();
+  const update = useUserMutation(userActions.update);
+  const current = u.expires_at ? inputDate(u.expires_at) : "";
+  const [date, setDate] = useState(current);
+  useEffect(() => setDate(current), [current]);
+  const apply = () =>
+    update.mutate(
+      { id: u.id, body: { expires_at: fromInputDate(date, u.expires_at) } },
+      { onSuccess: (r) => toast.ok(t("userDrawer.extendedUntil", { date: dateShort(r.expires_at!) })), onError: (e) => toast.error(errorText(e)) },
+    );
+  return (
+    <Field label={t("userDrawer.exactDate")} htmlFor={`u-date-${u.id}`} hint={t("userDrawer.exactDateHint")}>
+      <div className="flex items-center gap-2">
+        <input id={`u-date-${u.id}`} type="date" className="input min-w-0" value={date} min={inputDate(new Date().toISOString())} onChange={(e) => setDate(e.target.value)} />
+        {date && date !== current ? (
+          <Button variant="primary" className="h-11 w-11 shrink-0 px-0" loading={update.isPending} onClick={apply} aria-label={t("common.save")} title={t("common.save")}>
+            {update.isPending ? null : <Check size={18} aria-hidden />}
+          </Button>
+        ) : null}
+      </div>
+    </Field>
   );
 }
 
@@ -333,6 +397,51 @@ function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () => void 
   );
 }
 
+function TelegramSection({ u }: { u: User }) {
+  const toast = useToast();
+  const unlink = useUserMutation((id: number) => unwrap(api.DELETE("/api/v1/users/{id}/telegram", { params: { path: { id } } })));
+  const [confirm, setConfirm] = useState(false);
+  const tg = u.telegram;
+  return (
+    <Section title={t("userDrawer.telegram")}>
+      {tg ? (
+        <div className="panel-soft flex items-center gap-3 p-3">
+          <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] text-[var(--ink-600)]" aria-hidden>
+            <Send size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-medium">{tg.username ? `@${tg.username}` : tg.name || tg.id}</div>
+            {tg.username && tg.name ? <div className="truncate text-xs text-[var(--ink-500)]">{tg.name}</div> : null}
+          </div>
+          <Button size="sm" variant="danger" onClick={() => setConfirm(true)}>
+            {t("userDrawer.telegramUnlink")}
+          </Button>
+        </div>
+      ) : (
+        <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.telegramNone")}</p>
+      )}
+      <Confirm
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={t("userDrawer.telegramUnlinkTitle")}
+        text={t("userDrawer.telegramUnlinkText")}
+        confirm={t("userDrawer.telegramUnlink")}
+        danger
+        loading={unlink.isPending}
+        onConfirm={() =>
+          unlink.mutate(u.id, {
+            onSuccess: () => {
+              setConfirm(false);
+              toast.ok(t("userDrawer.telegramUnlinked"));
+            },
+            onError: (e) => toast.error(errorText(e)),
+          })
+        }
+      />
+    </Section>
+  );
+}
+
 function DevicesSection({ u }: { u: User }) {
   const devices = useDevices(u.id);
   const toast = useToast();
@@ -342,7 +451,7 @@ function DevicesSection({ u }: { u: User }) {
     update.mutate({ id: u.id, body: n === null ? { devices_unlimited: true } : { device_limit: n } }, { onError: (e) => toast.error(errorText(e)) });
   return (
     <Section title={t("userDrawer.devices")} aside={t("userDrawer.devicesAside", { online: u.online_ips.length, limit: u.device_limit ?? "∞" })}>
-      <div className="mb-3 flex items-center gap-2 text-[13px]">
+      <div className="mb-4 flex items-center gap-2 text-[13px]">
         <span className="text-[var(--ink-600)]">{t("userDrawer.deviceLimit")}</span>
         <div className="seg" role="group" aria-label={t("userDrawer.deviceLimit")}>
           {[1, 2, 3, 5, 10].map((n) => (
@@ -355,7 +464,11 @@ function DevicesSection({ u }: { u: User }) {
           </button>
         </div>
       </div>
-      {list.length === 0 ? (
+      <BoundDevices u={u} />
+      <h4 className="mt-5 mb-2 text-xs font-medium text-[var(--ink-500)]">{t("userDrawer.addresses")}</h4>
+      {devices.isPending ? (
+        <Skeleton style={{ height: 52, borderRadius: 16 }} />
+      ) : list.length === 0 ? (
         <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.noDevices")}</p>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -374,6 +487,93 @@ function DevicesSection({ u }: { u: User }) {
       )}
       <p className="mt-2 text-xs text-[var(--ink-500)]">{t("userDrawer.devicesNote")}</p>
     </Section>
+  );
+}
+
+type BoundDevice = Schemas["BoundDeviceView"];
+
+const desktopOS = /windows|mac|linux|darwin/i;
+
+/** What to call a bound device: its model, else its system, else the app. */
+function deviceName(d: BoundDevice): string {
+  if (!d.hwid) return t("userDrawer.sharedPlace");
+  return d.model || [d.os, d.os_version].filter(Boolean).join(" ") || appName(d.app) || t("userDrawer.device");
+}
+
+/** The line under a device's name: its system (when the name is the model), app and last visit. */
+function deviceMeta(d: BoundDevice): string {
+  const system = d.hwid && d.model ? [d.os, d.os_version].filter(Boolean).join(" ") : "";
+  return [system, appName(d.app)].filter(Boolean).join(" · ");
+}
+
+function BoundDevices({ u }: { u: User }) {
+  const settings = useSettings();
+  const bound = useBoundDevices(u.id);
+  const unbind = useUserMutation(userActions.unbindDevice);
+  const toast = useToast();
+  const [pick, setPick] = useState<BoundDevice | null>(null);
+  const list = bound.data ?? [];
+  if (!settings.data?.device_binding && list.length === 0) return null;
+  return (
+    <>
+      <h4 className="mb-2 flex justify-between gap-2 text-xs font-medium text-[var(--ink-500)]">
+        {t("userDrawer.boundTitle")}
+        {bound.data ? <span className="num">{u.device_limit != null ? t("userDrawer.boundCount", { n: list.length, limit: u.device_limit }) : list.length}</span> : null}
+      </h4>
+      {bound.isPending ? (
+        <Skeleton style={{ height: 52, borderRadius: 16 }} />
+      ) : bound.isError ? (
+        <ErrorState text={errorText(bound.error)} onRetry={() => void bound.refetch()} />
+      ) : list.length === 0 ? (
+        <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.boundEmpty")}</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {list.map((d) => {
+            const meta = deviceMeta(d);
+            return (
+              <li key={d.id} className="panel-soft grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 p-2">
+                <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] text-[var(--ink-600)]" aria-hidden>
+                  {!d.hwid ? <Layers size={18} /> : desktopOS.test(d.os) ? <Laptop size={18} /> : <Smartphone size={18} />}
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium">{deviceName(d)}</div>
+                  <div className="truncate text-xs text-[var(--ink-500)]">
+                    {meta ? `${meta} · ` : ""}
+                    {d.online ? <span className="text-[var(--leaf-700)]">{t("users.onlineNow")}</span> : ago(d.last_seen)}
+                  </div>
+                </div>
+                <button type="button" className="icon-btn" aria-label={t("userDrawer.unbindLabel", { name: deviceName(d) })} title={t("userDrawer.unbind")} onClick={() => setPick(d)}>
+                  <Unlink size={16} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-[var(--ink-500)]">{settings.data?.device_require_hwid ? t("userDrawer.boundNoteStrict") : t("userDrawer.boundNote")}</p>
+      <Confirm
+        open={pick !== null}
+        onOpenChange={(v) => !v && setPick(null)}
+        title={t("userDrawer.unbindTitle", { name: pick ? deviceName(pick) : "" })}
+        text={pick && !pick.hwid ? t("userDrawer.unbindSharedText") : t("userDrawer.unbindText")}
+        confirm={t("userDrawer.unbind")}
+        danger
+        loading={unbind.isPending}
+        onConfirm={() =>
+          pick &&
+          unbind.mutate(
+            { id: u.id, device: pick.id },
+            {
+              onSuccess: () => {
+                toast.ok(t("userDrawer.unbound", { name: deviceName(pick) }));
+                setPick(null);
+              },
+              onError: (e) => toast.error(errorText(e)),
+            },
+          )
+        }
+      />
+    </>
   );
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -77,7 +78,17 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 		}
 	}
 	if h.d.Online != nil {
-		b.Online = len(h.d.Online())
+		// Online counts users: one with several bound devices has several slots online.
+		slots, err := h.userSlots(ctx)
+		if err != nil {
+			return nil, err
+		}
+		online := h.d.Online()
+		for _, names := range slots {
+			if slices.ContainsFunc(names, func(n string) bool { _, ok := online[n]; return ok }) {
+				b.Online++
+			}
+		}
 	}
 	today := now.Unix() / 86400
 	days, err := h.d.Store.Q.TotalTrafficDaily(ctx, today-1)

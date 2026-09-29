@@ -320,7 +320,13 @@ fi
 if [ "$FIREWALL" = 1 ] && command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
   rules=("$PANEL_PORT/tcp" 80/tcp)
   [ "$NODE_ONLY" = 0 ] || rules=("$API_PORT/tcp")
-  for rule in "${rules[@]}" 443/tcp 443/udp 8443/tcp 8443/udp; do ufw allow "$rule" >/dev/null; done
+  for rule in "${rules[@]}" 443/tcp 443/udp; do ufw allow "$rule" >/dev/null; done
+  # HTTPS ports the panel moves a blocked inbound to on its own (autotune.Pool): the node
+  # cannot open them itself.
+  for p in 2053 2083 2087 2096 2443 3443 4443 5443 6443 7443 8443 9443; do
+    ufw allow "$p/tcp" >/dev/null
+    ufw allow "$p/udp" >/dev/null
+  done
   log "Открыл порты в ufw."
 fi
 
@@ -405,10 +411,10 @@ case "${1:-help}" in
   node) shift; admin node "$@" ;;
   inbound)
     shift
-    if [ "${1:-}" != add ]; then admin inbound "$@"; exit; fi
-    # stdout is "port/network"; the message goes to stderr.
+    case "${1:-}" in add | set) ;; *) admin inbound "$@"; exit ;; esac
+    # stdout is "port/network" when the port is on this server; messages go to stderr.
     rule=$(admin inbound "$@")
-    if [ "$(env_get MIKAN_UFW)" != 0 ] && command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+    if [ -n "$rule" ] && [ "$(env_get MIKAN_UFW)" != 0 ] && command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
       ufw allow "${rule/-/:}" >/dev/null && echo "Открыл $rule в ufw."
     fi
     ;;

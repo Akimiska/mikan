@@ -208,9 +208,11 @@ func URIs(p Profile) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	lines := make([]string, len(ps))
-	for i, x := range ps {
-		lines[i] = x.uri
+	lines := make([]string, 0, len(ps))
+	for _, x := range ps {
+		if x.uri != "" { // the mihomo-only types have no share link
+			lines = append(lines, x.uri)
+		}
 	}
 	return strings.Join(lines, "\n"), nil
 }

@@ -324,3 +324,46 @@ func TestRetireStopsTheNode(t *testing.T) {
 		t.Fatal("the retired node's syncer must be gone")
 	}
 }
+
+// A bound device has a slot of its own: it gets the user's rules, its traffic counts for
+// the user, and the device limit sees the user's devices under every slot.
+func TestBoundDeviceSlots(t *testing.T) {
+	s, node, st, users, now := setup(t)
+	ctx := context.Background()
+	tariffs, _ := st.Q.ListTariffs(ctx)
+	u, _ := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	clock := func() time.Time { return *now }
+	devSlot, err := domain.NewDevices(st, domain.NewPool(st, clock), noopChanges{}, clock).Bind(ctx, u, domain.DeviceInfo{HWID: "phone-0123456789"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, _ := st.Q.GetSlot(ctx, u.SlotID.Int64)
+	s.online.Store(&map[string]nodeapi.Online{own.Name: {IPs: []string{"198.51.100.1"}, Conns: 1}, devSlot.Name: {IPs: []string{"203.0.113.7"}, Conns: 1}})
+
+	_, ps, owners, err := s.policies(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]nodeapi.Policy{}
+	for _, p := range ps {
+		by[p.Slot] = p
+	}
+	mine, dev := by[own.Name], by[devSlot.Name]
+	if owners[devSlot.Name] != u.ID || !dev.Allowed || dev.DeviceLimit != mine.DeviceLimit || dev.QuotaRemaining != mine.QuotaRemaining {
+		t.Fatalf("the device's slot gets the user's rules: %+v vs %+v", dev, mine)
+	}
+	if !slices.Equal(dev.OtherIPs, []string{"198.51.100.1"}) || !slices.Equal(mine.OtherIPs, []string{"203.0.113.7"}) {
+		t.Fatalf("each slot counts the user's devices under the other: %v / %v", dev.OtherIPs, mine.OtherIPs)
+	}
+
+	node.batch = nodeapi.Counters{Epoch: "e", Seq: 1, Slots: map[string]nodeapi.Traffic{devSlot.Name: {Down: 500}, own.Name: {Down: 100}}}
+	s.pullCounters(ctx)
+	if got, _ := st.Q.GetUser(ctx, u.ID); got.UsedDown != 600 {
+		t.Fatalf("traffic of all the user's slots adds up: %d", got.UsedDown)
+	}
+}
+
+type noopChanges struct{}
+
+func (noopChanges) PoliciesChanged() {}
+func (noopChanges) SlotsChanged()    {}

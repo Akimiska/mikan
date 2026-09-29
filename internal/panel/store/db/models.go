@@ -29,6 +29,20 @@ type AuditLog struct {
 	Details    sql.NullString
 }
 
+type BoundDevice struct {
+	ID        int64
+	UserID    int64
+	Hwid      string
+	SlotID    int64
+	Os        string
+	OsVersion string
+	Model     string
+	App       string
+	LastIp    string
+	CreatedAt int64
+	LastSeen  int64
+}
+
 type Device struct {
 	UserID    int64
 	Ip        string
@@ -49,6 +63,26 @@ type Inbound struct {
 	UpdatedAt   int64
 	DisplayName string
 	Config      string
+	AutoPort    int64
+	AutoSni     int64
+}
+
+type InboundEvent struct {
+	ID        int64
+	InboundID int64
+	NodeID    int64
+	Kind      string
+	Network   string
+	OldValue  string
+	NewValue  string
+	Reason    string
+	CreatedAt int64
+}
+
+type InboundReach struct {
+	Slot      string
+	InboundID int64
+	At        int64
 }
 
 type Node struct {
@@ -94,6 +128,12 @@ type Slot struct {
 	BurnedAt  sql.NullInt64
 }
 
+type SubFetch struct {
+	UserID    int64
+	Ip        string
+	FetchedAt int64
+}
+
 type Tariff struct {
 	ID            int64
 	Name          string
@@ -105,6 +145,31 @@ type Tariff struct {
 	Sort          int64
 	Archived      int64
 	CreatedAt     int64
+	BillingDay    sql.NullInt64
+}
+
+type TgChat struct {
+	TgID      int64
+	Username  string
+	FirstName string
+	MenuMsgID int64
+	Current   int64
+	Blocked   int64
+	CreatedAt int64
+	UpdatedAt int64
+}
+
+type TgLink struct {
+	UserID    int64
+	TgID      int64
+	CreatedAt int64
+}
+
+type TgNotice struct {
+	UserID int64
+	Kind   string
+	Period int64
+	SentAt int64
 }
 
 type TrafficDaily struct {
@@ -145,4 +210,6 @@ type User struct {
 	OnlineAt      sql.NullInt64
 	CreatedAt     int64
 	UpdatedAt     int64
+	BillingDay    sql.NullInt64
+	UnboundAt     int64
 }

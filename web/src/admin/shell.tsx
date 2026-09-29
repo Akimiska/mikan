@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, LogOut, Network, Server, SlidersHorizontal, Tag, Users } from "lucide-react";
+import * as Menu from "@radix-ui/react-dropdown-menu";
+import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Bot, LayoutDashboard, LogOut, MoreHorizontal, Network, Server, SlidersHorizontal, Tag, Users } from "lucide-react";
 import { api, unwrap } from "../api/client";
 import { meQuery, useNode, useOverview } from "../api/hooks";
 import { Logo } from "../components/atmosphere";
@@ -15,6 +16,7 @@ const NAV = [
   { to: "/tariffs", key: "tariffs", icon: Tag },
   { to: "/inbounds", key: "inbounds", icon: Server },
   { to: "/nodes", key: "nodes", icon: Network },
+  { to: "/telegram", key: "telegram", icon: Bot },
   { to: "/settings", key: "settings", icon: SlidersHorizontal },
 ] as const;
 
@@ -47,15 +49,45 @@ export function Shell() {
           <Outlet />
         </main>
       </div>
-      <nav className="mnav glass" aria-label={t("shell.sections")}>
-        {NAV.map((n) => (
-          <Link key={n.to} to={n.to} activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }}>
-            <n.icon size={20} aria-hidden />
-            <span>{t(`navShort.${n.key}`)}</span>
-          </Link>
-        ))}
-      </nav>
+      <MobileNav />
     </>
+  );
+}
+
+// The phone's bottom bar has room for four sections; the rest sit under "More".
+const MOBILE_MAIN = 4;
+
+function MobileNav() {
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const more = NAV.slice(MOBILE_MAIN);
+  const inMore = more.some((n) => path.endsWith(n.to));
+  return (
+    <nav className="mnav glass" aria-label={t("shell.sections")}>
+      {NAV.slice(0, MOBILE_MAIN).map((n) => (
+        <Link key={n.to} to={n.to} activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }}>
+          <n.icon size={20} aria-hidden />
+          <span>{t(`navShort.${n.key}`)}</span>
+        </Link>
+      ))}
+      <Menu.Root>
+        <Menu.Trigger asChild>
+          <button type="button" className={inMore ? "active" : undefined} aria-label={t("shell.more")}>
+            <MoreHorizontal size={20} aria-hidden />
+            <span>{t("shell.more")}</span>
+          </button>
+        </Menu.Trigger>
+        <Menu.Portal>
+          <Menu.Content className="menu glass-strong" side="top" align="end" sideOffset={12}>
+            {more.map((n) => (
+              <Menu.Item key={n.to} className="menu-item" onSelect={() => void navigate({ to: n.to })} aria-current={path.endsWith(n.to) ? "page" : undefined}>
+                <n.icon size={16} aria-hidden /> {t(`nav.${n.key}`)}
+              </Menu.Item>
+            ))}
+          </Menu.Content>
+        </Menu.Portal>
+      </Menu.Root>
+    </nav>
   );
 }
 

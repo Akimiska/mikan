@@ -43,12 +43,32 @@ export function num(n: number): string {
 
 export const days = (n: number) => t("time.days", { n });
 
+export const months = (n: number) => t("time.months", { n });
+
+/** A tariff's term in months when it runs to a billing day; the server counts 30 days as one. */
+export const termMonths = (durationDays: number) => Math.max(1, Math.floor((durationDays + 15) / 30));
+
 export function dateShort(iso: string): string {
   return df({ day: "numeric", month: "short" }, "short").format(new Date(iso));
 }
 
 export function dateLong(iso: string): string {
   return df({ day: "numeric", month: "long", year: "numeric" }, "long").format(new Date(iso));
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** The local calendar date of iso as an <input type="date"> value. */
+export function inputDate(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** An <input type="date"> value at the local time of day of clock (now without one). */
+export function fromInputDate(date: string, clock?: string | null): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const c = clock ? new Date(clock) : new Date();
+  return new Date(y!, m! - 1, d!, c.getHours(), c.getMinutes(), c.getSeconds()).toISOString();
 }
 
 export function time(iso: string): string {
@@ -87,6 +107,11 @@ export function uptime(iso: string, now = Date.now()): string {
   if (d > 0) return t("time.uptimeDays", { d, h });
   if (h > 0) return t("time.uptimeHours", { h, m });
   return t("time.uptimeMinutes", { m });
+}
+
+/** An app's name and version from its User-Agent: "koala-clash/2.4.0 mihomo/1.19.31" → "koala-clash 2.4.0". */
+export function appName(ua: string): string {
+  return (ua.trim().split(/\s+/)[0] ?? "").replace("/", " ");
 }
 
 /** Keeps the network part of an IP readable and hides the rest in lists. */

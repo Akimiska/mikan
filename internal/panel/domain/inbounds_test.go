@@ -8,6 +8,7 @@ import (
 
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 )
 
 func TestAddPreset(t *testing.T) {
@@ -47,6 +48,71 @@ func TestAddPreset(t *testing.T) {
 	} {
 		if _, err := AddPreset(ctx, st, set, 1, c.id, c.port, now); !errors.Is(err, c.want) {
 			t.Errorf("%s %q: got %v, want %v", c.id, c.port, err, c.want)
+		}
+	}
+}
+
+// Seeded node 1: vless-xhttp 443/tcp, hysteria2 443/udp, tuic 8443/udp, vless-vision 8443/tcp.
+func TestSetInboundPort(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	st, _, _ := setup(t, &now)
+	ctx := context.Background()
+
+	later := now.Add(time.Hour)
+	prev, next, err := SetInboundPort(ctx, st, 1, "vless-xhttp", "2443", later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev.Port != "443" || next.Port != "2443" || next.ID != prev.ID || next.Config != prev.Config || next.Enabled != prev.Enabled || next.UpdatedAt != later.Unix() {
+		t.Fatalf("moved: %+v -> %+v", prev, next)
+	}
+	// TCP and UDP listeners share a port number without conflict.
+	if _, next, err := SetInboundPort(ctx, st, 1, "hysteria2", "2443", later); err != nil || next.Port != "2443" {
+		t.Fatalf("udp next to tcp: %+v %v", next, err)
+	}
+	var busy *PortInUseError
+	if _, _, err := SetInboundPort(ctx, st, 1, "tuic", "2443", later); !errors.As(err, &busy) || busy.Owner != "hysteria2" {
+		t.Fatalf("udp 2443 is taken by hysteria2: %v", err)
+	}
+	if _, _, err := SetInboundPort(ctx, st, 1, "vless-vision", "2443", later); !errors.As(err, &busy) || busy.Owner != "vless-xhttp" {
+		t.Fatalf("tcp 2443 is taken by vless-xhttp: %v", err)
+	}
+
+	// Ports and names are per node: node 2 has its own vless-xhttp.
+	n, err := st.Q.CreateNode(ctx, db.CreateNodeParams{Name: "🇺🇸 США", Address: "203.0.113.7:25305", PublicHost: "203.0.113.7", CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := presets.NewConfig("vless_reality_xhttp", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, err := st.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: n.ID, Name: "vless-xhttp", Preset: "vless_reality_xhttp", Port: "443", Config: config,
+		CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, next, err := SetInboundPort(ctx, st, n.ID, "vless-xhttp", "2443", later); err != nil || next.ID != remote.ID || next.Port != "2443" {
+		t.Fatalf("node 2 inbound: %+v %v", next, err)
+	}
+	local, err := st.Q.GetInbound(ctx, prev.ID)
+	if err != nil || local.Port != "2443" || local.NodeID != 1 {
+		t.Fatalf("node 1 inbound must stay: %+v %v", local, err)
+	}
+
+	for _, c := range []struct {
+		node       int64
+		name, port string
+		want       error
+	}{
+		{1, "nope", "3000", ErrUnknownInbound},
+		{9, "vless-xhttp", "3000", ErrUnknownNode},
+		{1, "vless-xhttp", "0", ErrBadPort},
+		{1, "vless-xhttp", "70000", ErrBadPort},
+		{1, "vless-xhttp", "", ErrBadPort},
+	} {
+		if _, _, err := SetInboundPort(ctx, st, c.node, c.name, c.port, later); !errors.Is(err, c.want) {
+			t.Errorf("node %d %s %q: got %v, want %v", c.node, c.name, c.port, err, c.want)
 		}
 	}
 }

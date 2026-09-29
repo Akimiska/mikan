@@ -1,0 +1,189 @@
+package tgbot
+
+import (
+	"fmt"
+	"html"
+	"strings"
+	"time"
+)
+
+// The bot's own words in both languages. The admin's texts replace the ones marked
+// "admin" when set.
+type words struct {
+	welcome, main, renew, expiring, expired, traffic90, trafficEnd string // admin
+
+	back, yesUnbind, cancel, subscriptions, openPage, support          string
+	subTitle, devicesTitle, connectTitle, switchTitle                  string
+	stateActive, stateExpiring, stateLimited, stateExpired, stateOff   string
+	forever, termUntil, noLimit, trafficOf, trafficNoLimit, resets     string
+	devicesNone, devicesOff, devicesNote, confirmUnbind, unbound, wait string
+	connectText, linked, alreadyLinked, linkExpired, linkInvalid       string
+	linkLimit, movedAway, noSub, sharedPlace, device, justNow          string
+	minAgo, hoursAgo, yesterday, daysAgo                               string
+	months                                                             [12]string
+	commands                                                           string
+	// menuApp is the Mini App button next to the input field. It shares the row with the
+	// field: a long one leaves no room to type on a phone.
+	menuApp string
+}
+
+var ru = words{
+	welcome:    "Это бот {brand}.\n\nЧтобы управлять подпиской, откройте её страницу и нажмите «Открыть в Telegram» — или пришлите сюда ссылку на подписку.",
+	main:       "{brand} · {name}\n\n{state}\n📅 {term}\n📦 {traffic}\n📱 Устройства: {devices}",
+	renew:      "Чтобы продлить подписку, напишите в поддержку — вам подскажут, как оплатить.",
+	expiring:   "⏳ Подписка «{name}» заканчивается {until}: осталось {days}.",
+	expired:    "⛔️ Подписка «{name}» закончилась. Чтобы продлить, напишите в поддержку.",
+	traffic90:  "📦 Израсходовано 90% трафика подписки «{name}»: осталось {left}.",
+	trafficEnd: "📦 Трафик подписки «{name}» на этот период закончился. Обновится {reset}.",
+
+	back: "⬅️ Назад", yesUnbind: "✅ Да, отвязать", cancel: "↩️ Отмена", subscriptions: "🔁 Подписки", openPage: "🌐 Открыть страницу подписки", support: "💬 Поддержка",
+	subTitle: "Подписка «%s»", devicesTitle: "Устройства", connectTitle: "Подключить устройство", switchTitle: "Какую подписку показать?",
+	stateActive: "✅ Работает", stateExpiring: "⏳ Скоро закончится", stateLimited: "📦 Трафик на этот период закончился", stateExpired: "⛔️ Подписка закончилась", stateOff: "⏸ Доступ приостановлен",
+	forever: "бессрочно", termUntil: "до %s — осталось %s", noLimit: "без лимита", trafficOf: "%s из %s", trafficNoLimit: "%s, без лимита", resets: "🔄 Обновится: %s",
+	devicesNone:   "Устройства появятся здесь, когда приложение загрузит подписку.",
+	devicesOff:    "Привязка устройств выключена: одновременно можно подключаться не больше чем с %s адресов.",
+	devicesNote:   "Отвязанное устройство сразу отключается, а место освобождается. Отвязывать можно одно устройство в сутки.",
+	confirmUnbind: "Отвязать «%s»? Оно сразу отключится.",
+	unbound:       "✅ «%s» отвязано.",
+	wait:          "⏳ Следующее устройство можно отвязать %s.",
+	connectText:   "1. Установите приложение: Happ (iPhone, Android), Koala Clash (Windows) или другое со страницы подписки.\n2. Добавьте в него ссылку:\n<code>%s</code>\n\nНа странице подписки — кнопки «Добавить» для всех приложений.",
+	linked:        "✅ Подписка «%s» подключена.",
+	alreadyLinked: "Подписка «%s» уже здесь.",
+	linkExpired:   "Ссылка устарела. Обновите страницу подписки и нажмите «Открыть в Telegram» ещё раз.",
+	linkInvalid:   "Ссылка не подошла. Откройте страницу подписки и нажмите «Открыть в Telegram».",
+	linkLimit:     "К одному аккаунту можно подключить не больше %d подписок.",
+	movedAway:     "Подписка «%s» теперь подключена к другому аккаунту Telegram.",
+	noSub:         "Подписка не найдена.",
+	sharedPlace:   "Приложения без ID устройства", device: "Устройство",
+	justNow: "только что", minAgo: "%d мин назад", hoursAgo: "%d ч назад", yesterday: "вчера", daysAgo: "%s назад",
+	months:   [12]string{"января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"},
+	commands: "Главное меню",
+	menuApp:  "Подписка",
+}
+
+var en = words{
+	welcome:    "This is the {brand} bot.\n\nTo manage your subscription, open its page and tap “Open in Telegram”, or send the subscription link here.",
+	main:       "{brand} · {name}\n\n{state}\n📅 {term}\n📦 {traffic}\n📱 Devices: {devices}",
+	renew:      "To renew your subscription, message support: they will tell you how to pay.",
+	expiring:   "⏳ Subscription “{name}” ends {until}: {days} left.",
+	expired:    "⛔️ Subscription “{name}” has ended. Message support to renew it.",
+	traffic90:  "📦 90% of the traffic of “{name}” is used: {left} left.",
+	trafficEnd: "📦 The traffic of “{name}” for this period is used up. It renews {reset}.",
+
+	back: "⬅️ Back", yesUnbind: "✅ Yes, unbind", cancel: "↩️ Cancel", subscriptions: "🔁 Subscriptions", openPage: "🌐 Open the subscription page", support: "💬 Support",
+	subTitle: "Subscription “%s”", devicesTitle: "Devices", connectTitle: "Connect a device", switchTitle: "Which subscription to show?",
+	stateActive: "✅ Working", stateExpiring: "⏳ Ends soon", stateLimited: "📦 Traffic for this period is used up", stateExpired: "⛔️ The subscription has ended", stateOff: "⏸ Access is paused",
+	forever: "no end date", termUntil: "until %s — %s left", noLimit: "unlimited", trafficOf: "%s of %s", trafficNoLimit: "%s, unlimited", resets: "🔄 Renews: %s",
+	devicesNone:   "Devices appear here once an app loads the subscription.",
+	devicesOff:    "Device binding is off: at most %s addresses can be connected at once.",
+	devicesNote:   "An unbound device is disconnected at once and its place frees up. You can unbind one device a day.",
+	confirmUnbind: "Unbind “%s”? It disconnects at once.",
+	unbound:       "✅ “%s” is unbound.",
+	wait:          "⏳ You can unbind the next device %s.",
+	connectText:   "1. Install an app: Happ (iPhone, Android), Koala Clash (Windows) or another from the subscription page.\n2. Add this link to it:\n<code>%s</code>\n\nThe subscription page has “Add” buttons for every app.",
+	linked:        "✅ Subscription “%s” is connected.",
+	alreadyLinked: "Subscription “%s” is already here.",
+	linkExpired:   "The link has expired. Reload the subscription page and tap “Open in Telegram” again.",
+	linkInvalid:   "The link did not work. Open the subscription page and tap “Open in Telegram”.",
+	linkLimit:     "One account can hold at most %d subscriptions.",
+	movedAway:     "Subscription “%s” is now connected to another Telegram account.",
+	noSub:         "Subscription not found.",
+	sharedPlace:   "Apps without a device ID", device: "Device",
+	justNow: "just now", minAgo: "%d min ago", hoursAgo: "%d h ago", yesterday: "yesterday", daysAgo: "%s ago",
+	months:   [12]string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"},
+	commands: "Main menu",
+	menuApp:  "Subscription",
+}
+
+func wordsFor(lang string) *words {
+	if lang == "en" {
+		return &en
+	}
+	return &ru
+}
+
+// render fills {variables} into an admin's (or built-in) text. The text itself is plain:
+// it is escaped for Telegram's HTML, and so are the values.
+func render(text string, vars map[string]string) string {
+	out := html.EscapeString(text)
+	for k, v := range vars {
+		out = strings.ReplaceAll(out, "{"+k+"}", html.EscapeString(v))
+	}
+	return out
+}
+
+func pick(admin, builtin string) string {
+	if strings.TrimSpace(admin) != "" {
+		return admin
+	}
+	return builtin
+}
+
+func (w *words) date(t time.Time) string {
+	if w == &en {
+		return fmt.Sprintf("%s %d, %d", w.months[t.Month()-1], t.Day(), t.Year())
+	}
+	return fmt.Sprintf("%d %s %d", t.Day(), w.months[t.Month()-1], t.Year())
+}
+
+func (w *words) shortDate(t time.Time) string {
+	if w == &en {
+		return fmt.Sprintf("%s %d", w.months[t.Month()-1][:3], t.Day())
+	}
+	return fmt.Sprintf("%d %s", t.Day(), w.months[t.Month()-1])
+}
+
+func (w *words) days(n int) string {
+	if w == &en {
+		if n == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", n)
+	}
+	switch {
+	case n%10 == 1 && n%100 != 11:
+		return fmt.Sprintf("%d день", n)
+	case n%10 >= 2 && n%10 <= 4 && (n%100 < 10 || n%100 >= 20):
+		return fmt.Sprintf("%d дня", n)
+	}
+	return fmt.Sprintf("%d дней", n)
+}
+
+func (w *words) bytes(n int64) string {
+	units := []string{"Б", "КБ", "МБ", "ГБ", "ТБ"}
+	sep := ","
+	if w == &en {
+		units, sep = []string{"B", "KB", "MB", "GB", "TB"}, "."
+	}
+	v, i := float64(n), 0
+	for v >= 1024 && i < len(units)-1 {
+		v /= 1024
+		i++
+	}
+	s := fmt.Sprintf("%.0f", v)
+	if i > 0 && v < 100 {
+		s = strings.Replace(strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0"), ".", sep, 1)
+	}
+	return s + " " + units[i]
+}
+
+func (w *words) ago(t, now time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return w.justNow
+	case d < time.Hour:
+		return fmt.Sprintf(w.minAgo, int(d/time.Minute))
+	case d < 24*time.Hour:
+		return fmt.Sprintf(w.hoursAgo, int(d/time.Hour))
+	case d < 48*time.Hour:
+		return w.yesterday
+	}
+	return fmt.Sprintf(w.daysAgo, w.days(int(d/(24*time.Hour))))
+}
+
+// DefaultTexts are the built-in texts the admin's empty fields fall back to.
+func DefaultTexts(lang string) Texts {
+	w := wordsFor(lang)
+	return Texts{Welcome: w.welcome, Main: w.main, Renew: w.renew, Expiring: w.expiring, Expired: w.expired, Traffic90: w.traffic90, TrafficEnd: w.trafficEnd}
+}

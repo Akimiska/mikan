@@ -117,6 +117,25 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return r, err
 }
 
+func (c *Client) Activity(ctx context.Context) (Activity, error) {
+	var r Activity
+	err := c.do(ctx, http.MethodGet, "/v1/activity", nil, &r, 10*time.Second)
+	return r, err
+}
+
+func (c *Client) CheckTarget(ctx context.Context, req TargetCheckRequest) (TargetResult, error) {
+	var r TargetResult
+	err := c.do(ctx, http.MethodPost, "/v1/targets/check", req, &r, 20*time.Second)
+	return r, err
+}
+
+// ScanTargets opens ~250 connections on the node; it runs one scan at a time.
+func (c *Client) ScanTargets(ctx context.Context, req TargetScanRequest) (TargetScan, error) {
+	var r TargetScan
+	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, 45*time.Second)
+	return r, err
+}
+
 func (c *Client) Logs(ctx context.Context, since time.Time) ([]LogLine, error) {
 	var r []LogLine
 	err := c.do(ctx, http.MethodGet, "/v1/logs?since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil, &r, 5*time.Second)

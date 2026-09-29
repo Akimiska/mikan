@@ -70,6 +70,17 @@ func listenerFor(in nodeapi.Inbound, slots []nodeapi.Slot, cert proto.Cert, o pr
 	return proto.Listener(t, in.Name, in.Listen, in.Port, slots, cert, o)
 }
 
+// sharedListeners are the inbounds with one key for everyone.
+func sharedListeners(st nodeapi.DesiredState) []string {
+	var out []string
+	for _, in := range st.Inbounds {
+		if t, err := template(in); err == nil && proto.Shared(t.Type()) {
+			out = append(out, in.Name)
+		}
+	}
+	return out
+}
+
 // template reads the inbound's listener template; states saved by mikan ≤ 0.1.2 carry
 // a preset with its settings instead.
 func template(in nodeapi.Inbound) (proto.Template, error) {

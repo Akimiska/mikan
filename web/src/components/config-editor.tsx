@@ -10,18 +10,27 @@ import { useEffect, useRef } from "react";
 // Mirrors the allow list in internal/proto (rules): the server is the authority, this only
 // saves typing.
 const TOP: Record<string, string[]> = {
-  vless: ["ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option"],
+  vless: ["ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option", "decryption"],
   vmess: ["ws-path", "grpc-service-name", "reality-config", "mux-option"],
   trojan: ["ws-path", "grpc-service-name", "reality-config", "mux-option"],
   hysteria2: ["obfs", "obfs-password", "alpn", "up", "down", "ignore-client-bandwidth", "masquerade", "max-idle-time", "cwnd", "udp-mtu", "bbr-profile"],
   tuic: ["congestion-controller", "alpn", "max-idle-time", "authentication-timeout", "max-udp-relay-packet-size", "cwnd", "bbr-profile"],
   anytls: ["padding-scheme"],
+  trusttunnel: ["congestion-controller", "cwnd", "bbr-profile"],
+  shadowquic: ["jls-upstream", "alpn", "quic-versions", "congestion-controller", "up", "down", "max-idle-time", "cwnd", "bbr-profile"],
+  mieru: ["transport"],
+  shadowsocks: ["cipher", "password"],
+  sudoku: ["key", "aead-method", "padding-min", "padding-max", "table-type", "httpmask"],
+  snell: ["psk", "version", "obfs-opts"],
 };
 const NESTED: Record<string, string[]> = {
   "reality-config": ["dest", "private-key", "short-id", "server-names", "max-time-difference", "limit-fallback-upload", "limit-fallback-download"],
   "xhttp-config": ["path", "mode", "host", "x-padding-bytes"],
   mikan: ["flow", "tls", "client"],
   client: ["server", "port", "sni", "fingerprint"],
+  "jls-upstream": ["addr", "sni"],
+  httpmask: ["disable", "mode", "path-root"],
+  "obfs-opts": ["mode", "host"],
 };
 const VALUES: Record<string, string[]> = {
   type: Object.keys(TOP),
@@ -30,6 +39,10 @@ const VALUES: Record<string, string[]> = {
   flow: ["xtls-rprx-vision"],
   obfs: ["salamander"],
   "congestion-controller": ["bbr", "cubic", "new_reno"],
+  cipher: ["2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305"],
+  transport: ["TCP"],
+  "aead-method": ["chacha20-poly1305", "aes-128-gcm"],
+  "table-type": ["prefer_ascii", "prefer_entropy", "up_ascii_down_entropy", "up_entropy_down_ascii"],
   fingerprint: ["chrome", "firefox", "safari", "ios", "edge", "random"],
 };
 

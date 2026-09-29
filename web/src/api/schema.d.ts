@@ -453,6 +453,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Telegram-бот */
+        get: operations["get-telegram"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настроить Telegram-бота */
+        patch: operations["update-telegram"];
+        trace?: never;
+    };
+    "/api/v1/telegram/broadcast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Разослать сообщение всем в боте */
+        post: operations["telegram-broadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -507,6 +542,40 @@ export interface paths {
         patch: operations["update-user"];
         trace?: never;
     };
+    "/api/v1/users/{id}/bound-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Устройства, привязанные к подписке */
+        get: operations["user-bound-devices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/bound-devices/{device}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Отвязать устройство: его ключи сгорают */
+        delete: operations["unbind-device"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}/devices": {
         parameters: {
             query?: never;
@@ -514,7 +583,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Устройства пользователя */
+        /** Адреса, с которых заходил пользователь */
         get: operations["user-devices"];
         put?: never;
         post?: never;
@@ -575,6 +644,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Отвязать подписку от Telegram */
+        delete: operations["unlink-telegram"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}/traffic": {
         parameters: {
             query?: never;
@@ -604,10 +690,72 @@ export interface components {
             totp_enabled: boolean;
             username: string;
         };
+        AutoEvent: {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            kind: "port" | "sni";
+            new: string;
+            old: string;
+            /** @enum {string} */
+            reason: "blocked" | "target_down" | "still_blocked";
+        };
+        AutoView: {
+            /**
+             * Format: int64
+             * @description Сколько таких устройств
+             */
+            blocked: number;
+            /** @description Устройства, которые доходят до других подключений ноды, до этого не доходят */
+            cut_off: boolean;
+            /** @description Последняя автоматическая смена */
+            last?: components["schemas"]["AutoEvent"];
+            /**
+             * Format: int64
+             * @description Сколько из проверяющих все подключения устройств до него дошли
+             */
+            reached: number;
+            /** Format: date-time */
+            since?: string;
+            /**
+             * @description Почему отрезанное подключение остаётся как есть
+             * @enum {string}
+             */
+            stuck?: "off" | "waiting" | "no_port" | "no_target" | "exhausted";
+            target_error?: string;
+            target_ok?: boolean;
+        };
+        BoundDeviceView: {
+            app: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description ID устройства от приложения; пусто — общее место приложений без ID */
+            hwid: string;
+            /** Format: int64 */
+            id: number;
+            last_ip: string;
+            /** Format: date-time */
+            last_seen: string;
+            model: string;
+            online: boolean;
+            os: string;
+            os_version: string;
+        };
+        BroadcastInputBody: {
+            /** @description Обычный текст; {brand} — название сервиса */
+            text: string;
+        };
+        BroadcastOutputBody: {
+            /** Format: int64 */
+            queued: number;
+        };
         BulkInputBody: {
             /** @enum {string} */
             action: "extend" | "reset" | "disable" | "enable" | "delete";
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Для extend; не задано — на один период: до следующего дня оплаты или на 30 дней
+             */
             days?: number;
             ids: number[];
         };
@@ -621,6 +769,23 @@ export interface components {
             /** @description Имя для клиентов; по умолчанию — хост из dest */
             sni?: string;
         };
+        Config: {
+            /** @description Кнопки главного меню по порядку */
+            buttons: components["schemas"]["MenuButton"][];
+            /** @description Удалять сообщения пользователя, чтобы в чате было одно меню */
+            clean_chat: boolean;
+            /**
+             * @description Язык встроенных надписей бота
+             * @enum {string}
+             */
+            lang: "ru" | "en";
+            /** @description Кнопка Mini App со страницей подписки */
+            mini_app: boolean;
+            notify: components["schemas"]["Notify"];
+            /** @description Уведомления с 22:00 до 9:00 МСК приходят без звука */
+            quiet_night: boolean;
+            texts: components["schemas"]["Texts"];
+        };
         CreateInboundInputBody: {
             /** @description Шаблон листенера (YAML) для preset=custom */
             config?: string;
@@ -633,7 +798,7 @@ export interface components {
             node_id?: number;
             port?: string;
             /** @enum {string} */
-            preset: "vless_reality_xhttp" | "hysteria2" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "custom";
+            preset: "vless_reality_xhttp" | "hysteria2" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "vless_reality_xhttp_pq" | "trusttunnel" | "shadowquic" | "mieru" | "shadowsocks_2022" | "sudoku" | "snell" | "custom";
         };
         CreateNodeInputBody: {
             /**
@@ -707,9 +872,21 @@ export interface components {
         };
         ExtendInputBody: {
             /** Format: int64 */
-            days: number;
+            days?: number;
+            /**
+             * Format: int64
+             * @description Месяцами: до дня оплаты или того же числа
+             */
+            months?: number;
         };
         InboundView: {
+            /** @description Приложения, которым подключение попадает в подписку: mihomo, xray, singbox, stash, other */
+            apps: string[];
+            auto: components["schemas"]["AutoView"];
+            /** @description Панель сама переносит подключение на другой порт, если его блокируют (и включено в настройках) */
+            auto_port: boolean;
+            /** @description Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках) */
+            auto_sni: boolean;
             /** @description Шаблон листенера (YAML) */
             config: string;
             /** @description Сайт для маскировки REALITY */
@@ -727,6 +904,8 @@ export interface components {
             port: string;
             preset: string;
             server_names?: string[];
+            /** @description Один ключ на всех: учёт, лимиты и отключение по пользователям не работают */
+            shared?: boolean;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
             /** @description Имя, которое увидит клиент */
@@ -738,11 +917,13 @@ export interface components {
             updated_at: string;
         };
         Info: {
+            apps?: string;
             default: boolean;
             default_name: string;
             default_port: string;
             id: string;
             network: string;
+            shared?: boolean;
             sub_name: string;
             summary: string;
             title: string;
@@ -771,6 +952,20 @@ export interface components {
         MeBody: {
             admin: components["schemas"]["AdminView"];
             csrf_token: string;
+        };
+        MenuButton: {
+            /** @enum {string} */
+            action: "sub" | "devices" | "connect" | "renew" | "support" | "app" | "url" | "page";
+            /** @description Постоянный id кнопки */
+            id: string;
+            label: string;
+            on: boolean;
+            /** @description В одном ряду с предыдущей */
+            row: boolean;
+            /** @description Для action=page: текст страницы */
+            text?: string;
+            /** @description Для action=url: https:// или tg:// */
+            url?: string;
         };
         NodeInfo: {
             /** @description host:port API ноды; пусто у своей ноды */
@@ -827,6 +1022,13 @@ export interface components {
             system: components["schemas"]["System"];
             version: string;
         };
+        Notify: {
+            expire_1d: boolean;
+            expire_3d: boolean;
+            expired: boolean;
+            traffic_100: boolean;
+            traffic_90: boolean;
+        };
         OverviewOutputBody: {
             /** Format: int64 */
             expiring_7d: number;
@@ -854,6 +1056,8 @@ export interface components {
             new: string;
         };
         PatchInboundInputBody: {
+            auto_port?: boolean;
+            auto_sni?: boolean;
             /** @description Шаблон листенера (YAML) */
             config?: string;
             dest?: string;
@@ -871,7 +1075,11 @@ export interface components {
             name?: string;
         };
         PatchSettingsInputBody: {
+            auto_port?: boolean;
+            auto_sni?: boolean;
             brand?: string;
+            device_binding?: boolean;
+            device_require_hwid?: boolean;
             domain?: string;
             public_host?: string;
             /** Format: int64 */
@@ -883,7 +1091,18 @@ export interface components {
             /** @description https://… или tg://… */
             support_url?: string;
         };
+        PatchTelegramInputBody: {
+            config?: components["schemas"]["Config"];
+            enabled?: boolean;
+            /** @description Токен от @BotFather; пустая строка — удалить */
+            token?: string;
+        };
         PatchUserInputBody: {
+            /**
+             * Format: int64
+             * @description День оплаты 1–31; 0 — убрать
+             */
+            billing_day?: number;
             contact?: string;
             /** Format: int64 */
             device_limit?: number;
@@ -952,8 +1171,16 @@ export interface components {
         };
         SettingsView: {
             admin_url: string;
+            /** @description Переносить подключение на другой порт, если клиенты перестали до него доходить */
+            auto_port: boolean;
+            /** @description Менять сайт маскировки REALITY, если он перестал подходить */
+            auto_sni: boolean;
             brand: string;
             certificate: components["schemas"]["Status"];
+            /** @description Привязывать подписку к устройствам: у каждого устройства свои ключи */
+            device_binding: boolean;
+            /** @description Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место) */
+            device_require_hwid: boolean;
             domain: string;
             /** Format: int64 */
             panel_port: number;
@@ -1000,6 +1227,11 @@ export interface components {
             proc_rss: number;
         };
         TariffBody: {
+            /**
+             * Format: int64
+             * @description Срок до этого числа месяца: месяц = от дня оплаты до дня оплаты
+             */
+            billing_day?: number;
             /** Format: int64 */
             device_limit?: number;
             /** Format: int64 */
@@ -1017,6 +1249,11 @@ export interface components {
             traffic_limit?: number;
         };
         TariffView: {
+            /**
+             * Format: int64
+             * @description День месяца, в который заканчивается срок; null — срок в днях
+             */
+            billing_day: number | null;
             /** Format: int64 */
             device_limit: number | null;
             /**
@@ -1037,6 +1274,78 @@ export interface components {
              * @description Байты; null — без лимита
              */
             traffic_limit: number | null;
+        };
+        TelegramBot: {
+            name: string;
+            username: string;
+        };
+        TelegramBroadcast: {
+            /** @description Ещё отправляется */
+            active: boolean;
+            /**
+             * Format: int64
+             * @description Не дошло: бот заблокирован, чат удалён
+             */
+            failed: number;
+            /** Format: int64 */
+            sent: number;
+            /**
+             * Format: int64
+             * @description Unix-время начала
+             */
+            started: number;
+            /** Format: int64 */
+            total: number;
+        };
+        TelegramLink: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            username: string;
+        };
+        TelegramView: {
+            /**
+             * Format: int64
+             * @description Аккаунтов Telegram с подписками
+             */
+            accounts: number;
+            bot?: components["schemas"]["TelegramBot"];
+            /** @description Последняя рассылка с запуска панели */
+            broadcast?: components["schemas"]["TelegramBroadcast"];
+            config: components["schemas"]["Config"];
+            /** @description Встроенные тексты на языке бота: пустое поле берёт их */
+            defaults: components["schemas"]["Texts"];
+            enabled: boolean;
+            /** @description token_invalid, token_revoked, unreachable или ответ Telegram */
+            error?: string;
+            /**
+             * Format: int64
+             * @description Подписок, привязанных к Telegram
+             */
+            linked: number;
+            /** @description Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный */
+            mini_app_url: string;
+            running: boolean;
+            /** @description ID бота из токена */
+            token_hint?: string;
+            /** @description Токен сохранён */
+            token_set: boolean;
+        };
+        Texts: {
+            /** @description Уведомление: подписка закончилась */
+            expired: string;
+            /** @description Уведомление: подписка скоро закончится */
+            expiring: string;
+            /** @description Шапка главного меню */
+            main: string;
+            /** @description Экран «Продлить» */
+            renew: string;
+            /** @description Уведомление: израсходовано 90% трафика */
+            traffic_90: string;
+            /** @description Уведомление: трафик закончился */
+            traffic_end: string;
+            /** @description Для тех, у кого ещё нет подписки в боте */
+            welcome: string;
         };
         TopUser: {
             /** Format: int64 */
@@ -1082,6 +1391,11 @@ export interface components {
             limited: number;
         };
         UserView: {
+            /**
+             * Format: int64
+             * @description День месяца, в который заканчивается срок (1–31); null — продление днями
+             */
+            billing_day: number | null;
             contact: string;
             /** Format: date-time */
             created_at: string;
@@ -1099,7 +1413,10 @@ export interface components {
             /** Format: date-time */
             online_at: string | null;
             online_ips: string[];
-            /** @enum {string} */
+            /**
+             * @description month_start — раз в месяц: в день оплаты, без него 1-го числа
+             * @enum {string}
+             */
             reset_strategy: "none" | "month_start" | "period";
             /** Format: date-time */
             resets_at: string | null;
@@ -1109,6 +1426,8 @@ export interface components {
             tags: string[];
             /** Format: int64 */
             tariff_id: number | null;
+            /** @description Только в карточке пользователя */
+            telegram?: components["schemas"]["TelegramLink"];
             /** Format: int64 */
             total_down: number;
             /** Format: int64 */
@@ -2161,6 +2480,101 @@ export interface operations {
             };
         };
     };
+    "get-telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchTelegramInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-broadcast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BroadcastInputBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BroadcastOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-users": {
         parameters: {
             query?: {
@@ -2356,6 +2770,67 @@ export interface operations {
             };
         };
     };
+    "user-bound-devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundDeviceView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "unbind-device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                device: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "user-devices": {
         parameters: {
             query?: never;
@@ -2472,6 +2947,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserView"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "unlink-telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

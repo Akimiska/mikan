@@ -1,0 +1,215 @@
+// Package tgbot is the panel's Telegram bot for subscription owners: a menu on inline
+// buttons that edits one message in place, linking a subscription to a Telegram account,
+// notifications about the term and traffic, broadcasts, and the Mini App's sign-in.
+package tgbot
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// DefaultAPI is Telegram's Bot API; tests point the bot at a fake one.
+const DefaultAPI = "https://api.telegram.org"
+
+// Client calls the Bot API with one token.
+type Client struct {
+	base  string
+	token string
+	hc    *http.Client
+}
+
+func NewClient(base, token string) *Client {
+	if base == "" {
+		base = DefaultAPI
+	}
+	// Long polling holds a request for up to pollTimeout; the client waits a bit longer.
+	return &Client{base: strings.TrimRight(base, "/"), token: token, hc: &http.Client{Timeout: pollTimeout + 15*time.Second}}
+}
+
+// APIError is Telegram's refusal. Code 403 means the user blocked the bot; 429 carries
+// RetryAfter.
+type APIError struct {
+	Code        int
+	Description string
+	RetryAfter  time.Duration
+}
+
+func (e *APIError) Error() string { return fmt.Sprintf("telegram %d: %s", e.Code, e.Description) }
+
+// ErrUnreachable: the Bot API did not answer.
+var ErrUnreachable = errors.New("telegram unreachable")
+
+func (c *Client) call(ctx context.Context, method string, in, out any) error {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/"+method, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// The error text would carry the URL, and the URL the token.
+		return ErrUnreachable
+	}
+	defer resp.Body.Close()
+	var r struct {
+		OK          bool            `json:"ok"`
+		Result      json.RawMessage `json:"result"`
+		ErrorCode   int             `json:"error_code"`
+		Description string          `json:"description"`
+		Parameters  struct {
+			RetryAfter int `json:"retry_after"`
+		} `json:"parameters"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return ErrUnreachable
+	}
+	if !r.OK {
+		return &APIError{Code: r.ErrorCode, Description: r.Description, RetryAfter: time.Duration(r.Parameters.RetryAfter) * time.Second}
+	}
+	if out != nil {
+		return json.Unmarshal(r.Result, out)
+	}
+	return nil
+}
+
+// User is a Telegram account.
+type User struct {
+	ID           int64  `json:"id"`
+	IsBot        bool   `json:"is_bot"`
+	FirstName    string `json:"first_name"`
+	Username     string `json:"username"`
+	LanguageCode string `json:"language_code"`
+}
+
+type Chat struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"`
+}
+
+type Message struct {
+	MessageID int64  `json:"message_id"`
+	From      *User  `json:"from"`
+	Chat      Chat   `json:"chat"`
+	Text      string `json:"text"`
+}
+
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    User     `json:"from"`
+	Message *Message `json:"message"`
+	Data    string   `json:"data"`
+}
+
+type Update struct {
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
+}
+
+// Button is an inline keyboard button: one of callback data, a link or the Mini App.
+type Button struct {
+	Text         string  `json:"text"`
+	CallbackData string  `json:"callback_data,omitempty"`
+	URL          string  `json:"url,omitempty"`
+	WebApp       *WebApp `json:"web_app,omitempty"`
+}
+
+type WebApp struct {
+	URL string `json:"url"`
+}
+
+type Keyboard struct {
+	InlineKeyboard [][]Button `json:"inline_keyboard"`
+}
+
+// Me is getMe: the token's bot.
+func (c *Client) Me(ctx context.Context) (User, error) {
+	var u User
+	err := c.call(ctx, "getMe", struct{}{}, &u)
+	return u, err
+}
+
+// pollTimeout: how long getUpdates waits for news.
+const pollTimeout = 50 * time.Second
+
+func (c *Client) Updates(ctx context.Context, offset int64) ([]Update, error) {
+	var ups []Update
+	err := c.call(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": int(pollTimeout / time.Second),
+		"allowed_updates": []string{"message", "callback_query"}}, &ups)
+	return ups, err
+}
+
+// Send posts an HTML message; kb may be nil. A silent one arrives without a sound.
+func (c *Client) Send(ctx context.Context, chat int64, text string, kb *Keyboard, silent bool) (Message, error) {
+	var m Message
+	in := map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	if silent {
+		in["disable_notification"] = true
+	}
+	if kb != nil {
+		in["reply_markup"] = kb
+	}
+	err := c.call(ctx, "sendMessage", in, &m)
+	return m, err
+}
+
+// Edit replaces a message's text and buttons. An edit to the same content is not an error.
+func (c *Client) Edit(ctx context.Context, chat, msg int64, text string, kb *Keyboard) error {
+	in := map[string]any{"chat_id": chat, "message_id": msg, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	if kb != nil {
+		in["reply_markup"] = kb
+	}
+	err := c.call(ctx, "editMessageText", in, nil)
+	var ae *APIError
+	if errors.As(err, &ae) && strings.Contains(ae.Description, "message is not modified") {
+		return nil
+	}
+	return err
+}
+
+func (c *Client) Delete(ctx context.Context, chat, msg int64) error {
+	return c.call(ctx, "deleteMessage", map[string]any{"chat_id": chat, "message_id": msg}, nil)
+}
+
+// Answer stops the spinner on a pressed button; text, when set, pops up briefly.
+func (c *Client) Answer(ctx context.Context, id, text string) error {
+	in := map[string]any{"callback_query_id": id}
+	if text != "" {
+		in["text"] = text
+	}
+	return c.call(ctx, "answerCallbackQuery", in, nil)
+}
+
+// DropWebhook switches the bot to polling: a webhook left by another service would make
+// every getUpdates fail.
+func (c *Client) DropWebhook(ctx context.Context) error {
+	return c.call(ctx, "deleteWebhook", map[string]any{"drop_pending_updates": false}, nil)
+}
+
+// SetCommands shows /start in the command menu.
+func (c *Client) SetCommands(ctx context.Context, desc string) error {
+	return c.call(ctx, "setMyCommands", map[string]any{"commands": []map[string]string{{"command": "start", "description": desc}}}, nil)
+}
+
+// SetMenuButton puts the Mini App next to the input field of every private chat (url
+// empty: back to the command list).
+func (c *Client) SetMenuButton(ctx context.Context, text, url string) error {
+	btn := map[string]any{"type": "commands"}
+	if url != "" {
+		btn = map[string]any{"type": "web_app", "text": text, "web_app": map[string]string{"url": url}}
+	}
+	return c.call(ctx, "setChatMenuButton", map[string]any{"menu_button": btn}, nil)
+}

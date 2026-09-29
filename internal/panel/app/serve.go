@@ -19,6 +19,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
+	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/config"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
@@ -57,7 +58,8 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	holder := &tlscert.Holder{}
 	holder.Set(self)
 
-	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, Log: logger, Now: time.Now}
+	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, Log: logger, Now: time.Now,
+		Autotune: autotune.DefaultOptions().Scaled(cfg.AutotuneScale), TelegramAPI: cfg.TelegramAPI}
 	nodesDir := filepath.Join(tlsDir, "nodes")
 	// The local node shares the panel's self-signed certificate; each remote node gets
 	// its own for its address, pinned in links the same way.

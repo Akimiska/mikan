@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -148,6 +150,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 
 	e.Reg.SetSlots(st.Slots)
 	e.Reg.SetPolicies(st.Epoch, st.Policies)
+	e.Reg.SetShared(sharedListeners(st))
 
 	recreated := changedInbounds(e.applied, st)
 	e.errsMu.Lock()
@@ -205,6 +208,22 @@ func (e *Engine) Validate(req nodeapi.ValidateRequest) error {
 	}
 	_, err = listener.ParseListener(l)
 	return err
+}
+
+// TargetAllowed says whether the node may test dest as a REALITY target for the panel:
+// public sites, the panel's own port next to it (self-steal), anything in test setups.
+func (e *Engine) TargetAllowed(dest string) bool {
+	host, port, err := net.SplitHostPort(dest)
+	if err != nil || host == "" {
+		return false
+	}
+	if e.allowPrivate || proto.PublicHost(host) {
+		return true
+	}
+	e.mu.Lock()
+	self := e.applied.SelfStealPort
+	e.mu.Unlock()
+	return self > 0 && (host == "127.0.0.1" || host == "localhost") && port == strconv.Itoa(self)
 }
 
 func (e *Engine) SetPolicies(req nodeapi.PoliciesRequest) {

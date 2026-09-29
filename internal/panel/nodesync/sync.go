@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -222,7 +223,9 @@ func (s *Syncer) pushPolicies(ctx context.Context, force bool) {
 }
 
 // policies are the same slots on every node; what differs is the counter position the
-// quota refers to, the inbounds that exist here and the devices seen elsewhere.
+// quota refers to, the inbounds that exist here and the devices seen elsewhere. A user
+// has the own slot and one per bound device: all of them get the user's rules, and the
+// device limit counts the user's devices under all of them.
 func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Policy, slotUser map[string]int64, err error) {
 	q := s.m.st.Q
 	epoch, seq, err := s.countersPos(ctx)
@@ -233,7 +236,7 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 	if err != nil {
 		return "", nil, nil, err
 	}
-	slots, err := q.ListSlots(ctx)
+	owners, err := q.ListSlotUsers(ctx)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -241,9 +244,11 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 	if err != nil {
 		return "", nil, nil, err
 	}
-	slotName := make(map[int64]string, len(slots))
-	for _, sl := range slots {
-		slotName[sl.ID] = sl.Name
+	slotUser = make(map[string]int64, len(owners))
+	slotsOf := map[int64][]string{}
+	for _, o := range owners {
+		slotUser[o.SlotName] = o.UserID
+		slotsOf[o.UserID] = append(slotsOf[o.UserID], o.SlotName)
 	}
 	here := map[int64]string{}
 	for _, in := range inbounds {
@@ -251,36 +256,39 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 			here[in.ID] = in.Name
 		}
 	}
-	others := s.m.otherIPs(s.id)
+	others := s.m.otherIPs(s.id, slotUser)
 	now := s.m.now()
-	slotUser = map[string]int64{}
 	for _, u := range users {
-		if !u.SlotID.Valid {
-			continue
+		names := slotsOf[u.ID]
+		sort.Strings(names)
+		for _, name := range names {
+			out = append(out, userPolicy(u, name, seq, now, here, others[name]))
 		}
-		name := slotName[u.SlotID.Int64]
-		slotUser[name] = u.ID
-		p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(domain.State(u, now)), QuotaRemaining: -1, BaseSeq: seq, OtherIPs: others[name]}
-		if u.DeviceLimit.Valid {
-			p.DeviceLimit = int(u.DeviceLimit.Int64)
-		}
-		if u.TrafficLimit.Valid {
-			p.QuotaRemaining = max(0, u.TrafficLimit.Int64-u.UsedUp-u.UsedDown)
-		}
-		if allowed := domain.DecodeInbounds(u.Inbounds); len(allowed) > 0 {
-			for _, id := range allowed {
-				if n, ok := here[id]; ok {
-					p.Inbounds = append(p.Inbounds, n)
-				}
-			}
-			// An empty list means "all": a user limited to other nodes' inbounds gets none here.
-			if len(p.Inbounds) == 0 {
-				p.Allowed = false
-			}
-		}
-		out = append(out, p)
 	}
 	return epoch, out, slotUser, nil
+}
+
+// userPolicy is the user's rules for one of the user's slots.
+func userPolicy(u db.User, name string, seq int64, now time.Time, here map[int64]string, otherIPs []string) nodeapi.Policy {
+	p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(domain.State(u, now)), QuotaRemaining: -1, BaseSeq: seq, OtherIPs: otherIPs}
+	if u.DeviceLimit.Valid {
+		p.DeviceLimit = int(u.DeviceLimit.Int64)
+	}
+	if u.TrafficLimit.Valid {
+		p.QuotaRemaining = max(0, u.TrafficLimit.Int64-u.UsedUp-u.UsedDown)
+	}
+	if allowed := domain.DecodeInbounds(u.Inbounds); len(allowed) > 0 {
+		for _, id := range allowed {
+			if n, ok := here[id]; ok {
+				p.Inbounds = append(p.Inbounds, n)
+			}
+		}
+		// An empty list means "all": a user limited to other nodes' inbounds gets none here.
+		if len(p.Inbounds) == 0 {
+			p.Allowed = false
+		}
+	}
+	return p
 }
 
 func (s *Syncer) pullCounters(ctx context.Context) {

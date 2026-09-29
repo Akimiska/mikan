@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +18,9 @@ import (
 )
 
 var (
-	ErrUnknownPreset = errors.New("unknown_preset")
-	ErrBadPort       = errors.New("bad_port")
+	ErrUnknownPreset  = errors.New("unknown_preset")
+	ErrUnknownInbound = errors.New("unknown_inbound")
+	ErrBadPort        = errors.New("bad_port")
 )
 
 // PortInUseError names the enabled inbound that already listens on the port.
@@ -121,4 +123,35 @@ func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, nod
 	}
 	return st.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: nodeID, Name: FreeName(existing, info.Name), Preset: id, Port: port, Config: config,
 		CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
+}
+
+// SetInboundPort moves a node's inbound, found by name, to another port for the server
+// CLI; the admin API does the same in its update handler. Keys and the REALITY target
+// stay, so clients only need to refresh the subscription. It returns the inbound before
+// and after the move.
+func SetInboundPort(ctx context.Context, st *store.Store, nodeID int64, name, port string, now time.Time) (db.Inbound, db.Inbound, error) {
+	if _, err := st.Q.GetNode(ctx, nodeID); errors.Is(err, sql.ErrNoRows) {
+		return db.Inbound{}, db.Inbound{}, ErrUnknownNode
+	} else if err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	}
+	if !ValidPort(port) {
+		return db.Inbound{}, db.Inbound{}, ErrBadPort
+	}
+	all, err := st.Q.ListInbounds(ctx)
+	if err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	}
+	existing := NodeInbounds(all, nodeID)
+	i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
+	if i < 0 {
+		return db.Inbound{}, db.Inbound{}, ErrUnknownInbound
+	}
+	prev := existing[i]
+	if owner, busy := PortOwner(existing, port, InboundNetwork(prev), prev.ID); busy && prev.Enabled != 0 {
+		return db.Inbound{}, db.Inbound{}, &PortInUseError{Owner: owner.Name}
+	}
+	next, err := st.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: prev.Enabled, Config: prev.Config, DisplayName: prev.DisplayName,
+		UpdatedAt: now.Unix(), ID: prev.ID})
+	return prev, next, err
 }

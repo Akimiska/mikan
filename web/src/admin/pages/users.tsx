@@ -326,7 +326,7 @@ function BulkBar({ selected, clear }: { selected: Set<number>; clear: () => void
   const n = ids.length;
   const run = (action: BulkAction) =>
     bulk.mutate(
-      { ids, action, days: action === "extend" ? 30 : undefined },
+      { ids, action },
       {
         onSuccess: (r) => {
           toast.ok(t(`users.bulkDone.${action}`, { n: r.affected }));
@@ -350,9 +350,9 @@ function BulkBar({ selected, clear }: { selected: Set<number>; clear: () => void
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
           >
             <span className="num mr-2 font-semibold whitespace-nowrap">{t("users.selected", { n })}</span>
-            <Button size="sm" loading={bulk.isPending && bulk.variables?.action === "extend"} onClick={() => run("extend")}>
+            <Button size="sm" loading={bulk.isPending && bulk.variables?.action === "extend"} onClick={() => run("extend")} title={t("users.extendPeriodHint")}>
               <CalendarPlus size={16} aria-hidden />
-              <span className="max-sm:hidden">{t("dashboard.plus30")}</span>
+              <span className="max-sm:hidden">{t("users.extendPeriod")}</span>
             </Button>
             <Button size="sm" onClick={() => run("reset")}>
               <RotateCcw size={16} aria-hidden />

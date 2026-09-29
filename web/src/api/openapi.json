@@ -26,6 +26,174 @@
         ],
         "type": "object"
       },
+      "AutoEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "port",
+              "sni"
+            ],
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "blocked",
+              "target_down",
+              "still_blocked"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "old",
+          "new",
+          "reason",
+          "at"
+        ],
+        "type": "object"
+      },
+      "AutoView": {
+        "additionalProperties": false,
+        "properties": {
+          "blocked": {
+            "description": "Сколько таких устройств",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cut_off": {
+            "description": "Устройства, которые доходят до других подключений ноды, до этого не доходят",
+            "type": "boolean"
+          },
+          "last": {
+            "$ref": "#/components/schemas/AutoEvent",
+            "description": "Последняя автоматическая смена"
+          },
+          "reached": {
+            "description": "Сколько из проверяющих все подключения устройств до него дошли",
+            "format": "int64",
+            "type": "integer"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "stuck": {
+            "description": "Почему отрезанное подключение остаётся как есть",
+            "enum": [
+              "off",
+              "waiting",
+              "no_port",
+              "no_target",
+              "exhausted"
+            ],
+            "type": "string"
+          },
+          "target_error": {
+            "type": "string"
+          },
+          "target_ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cut_off",
+          "blocked",
+          "reached"
+        ],
+        "type": "object"
+      },
+      "BoundDeviceView": {
+        "additionalProperties": false,
+        "properties": {
+          "app": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "hwid": {
+            "description": "ID устройства от приложения; пусто — общее место приложений без ID",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_ip": {
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "os": {
+            "type": "string"
+          },
+          "os_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "hwid",
+          "os",
+          "os_version",
+          "model",
+          "app",
+          "last_ip",
+          "online",
+          "created_at",
+          "last_seen"
+        ],
+        "type": "object"
+      },
+      "BroadcastInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "description": "Обычный текст; {brand} — название сервиса",
+            "maxLength": 3500,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "BroadcastOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "queued": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "type": "object"
+      },
       "BulkInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -40,6 +208,7 @@
             "type": "string"
           },
           "days": {
+            "description": "Для extend; не задано — на один период: до следующего дня оплаты или на 30 дней",
             "format": "int64",
             "maximum": 3650,
             "minimum": 0,
@@ -93,6 +262,54 @@
         ],
         "type": "object"
       },
+      "Config": {
+        "additionalProperties": false,
+        "properties": {
+          "buttons": {
+            "description": "Кнопки главного меню по порядку",
+            "items": {
+              "$ref": "#/components/schemas/MenuButton"
+            },
+            "type": "array"
+          },
+          "clean_chat": {
+            "description": "Удалять сообщения пользователя, чтобы в чате было одно меню",
+            "type": "boolean"
+          },
+          "lang": {
+            "description": "Язык встроенных надписей бота",
+            "enum": [
+              "ru",
+              "en"
+            ],
+            "type": "string"
+          },
+          "mini_app": {
+            "description": "Кнопка Mini App со страницей подписки",
+            "type": "boolean"
+          },
+          "notify": {
+            "$ref": "#/components/schemas/Notify"
+          },
+          "quiet_night": {
+            "description": "Уведомления с 22:00 до 9:00 МСК приходят без звука",
+            "type": "boolean"
+          },
+          "texts": {
+            "$ref": "#/components/schemas/Texts"
+          }
+        },
+        "required": [
+          "lang",
+          "buttons",
+          "texts",
+          "notify",
+          "mini_app",
+          "clean_chat",
+          "quiet_night"
+        ],
+        "type": "object"
+      },
       "CreateInboundInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -125,6 +342,13 @@
               "vless_reality_grpc",
               "trojan_reality",
               "anytls",
+              "vless_reality_xhttp_pq",
+              "trusttunnel",
+              "shadowquic",
+              "mieru",
+              "shadowsocks_2022",
+              "sudoku",
+              "snell",
               "custom"
             ],
             "type": "string"
@@ -306,18 +530,40 @@
           "days": {
             "format": "int64",
             "maximum": 3650,
-            "minimum": 1,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "months": {
+            "description": "Месяцами: до дня оплаты или того же числа",
+            "format": "int64",
+            "maximum": 36,
+            "minimum": 0,
             "type": "integer"
           }
         },
-        "required": [
-          "days"
-        ],
         "type": "object"
       },
       "InboundView": {
         "additionalProperties": false,
         "properties": {
+          "apps": {
+            "description": "Приложения, которым подключение попадает в подписку: mihomo, xray, singbox, stash, other",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "auto": {
+            "$ref": "#/components/schemas/AutoView"
+          },
+          "auto_port": {
+            "description": "Панель сама переносит подключение на другой порт, если его блокируют (и включено в настройках)",
+            "type": "boolean"
+          },
+          "auto_sni": {
+            "description": "Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)",
+            "type": "boolean"
+          },
           "config": {
             "description": "Шаблон листенера (YAML)",
             "type": "string"
@@ -362,6 +608,10 @@
             },
             "type": "array"
           },
+          "shared": {
+            "description": "Один ключ на всех: учёт, лимиты и отключение по пользователям не работают",
+            "type": "boolean"
+          },
           "status": {
             "enum": [
               "ok",
@@ -400,13 +650,20 @@
           "sub_name",
           "config",
           "status",
-          "updated_at"
+          "updated_at",
+          "apps",
+          "auto_port",
+          "auto_sni",
+          "auto"
         ],
         "type": "object"
       },
       "Info": {
         "additionalProperties": false,
         "properties": {
+          "apps": {
+            "type": "string"
+          },
           "default": {
             "type": "boolean"
           },
@@ -421,6 +678,9 @@
           },
           "network": {
             "type": "string"
+          },
+          "shared": {
+            "type": "boolean"
           },
           "sub_name": {
             "type": "string"
@@ -530,6 +790,54 @@
         "required": [
           "admin",
           "csrf_token"
+        ],
+        "type": "object"
+      },
+      "MenuButton": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "sub",
+              "devices",
+              "connect",
+              "renew",
+              "support",
+              "app",
+              "url",
+              "page"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Постоянный id кнопки",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "on": {
+            "type": "boolean"
+          },
+          "row": {
+            "description": "В одном ряду с предыдущей",
+            "type": "boolean"
+          },
+          "text": {
+            "description": "Для action=page: текст страницы",
+            "type": "string"
+          },
+          "url": {
+            "description": "Для action=url: https:// или tg://",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "label",
+          "on",
+          "row"
         ],
         "type": "object"
       },
@@ -700,6 +1008,34 @@
         ],
         "type": "object"
       },
+      "Notify": {
+        "additionalProperties": false,
+        "properties": {
+          "expire_1d": {
+            "type": "boolean"
+          },
+          "expire_3d": {
+            "type": "boolean"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "traffic_100": {
+            "type": "boolean"
+          },
+          "traffic_90": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expire_3d",
+          "expire_1d",
+          "expired",
+          "traffic_90",
+          "traffic_100"
+        ],
+        "type": "object"
+      },
       "OverviewOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -784,6 +1120,12 @@
       "PatchInboundInputBody": {
         "additionalProperties": false,
         "properties": {
+          "auto_port": {
+            "type": "boolean"
+          },
+          "auto_sni": {
+            "type": "boolean"
+          },
           "config": {
             "description": "Шаблон листенера (YAML)",
             "maxLength": 65536,
@@ -837,9 +1179,21 @@
       "PatchSettingsInputBody": {
         "additionalProperties": false,
         "properties": {
+          "auto_port": {
+            "type": "boolean"
+          },
+          "auto_sni": {
+            "type": "boolean"
+          },
           "brand": {
             "maxLength": 40,
             "type": "string"
+          },
+          "device_binding": {
+            "type": "boolean"
+          },
+          "device_require_hwid": {
+            "type": "boolean"
           },
           "domain": {
             "maxLength": 253,
@@ -878,9 +1232,33 @@
         },
         "type": "object"
       },
+      "PatchTelegramInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/Config"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "token": {
+            "description": "Токен от @BotFather; пустая строка — удалить",
+            "maxLength": 100,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "PatchUserInputBody": {
         "additionalProperties": false,
         "properties": {
+          "billing_day": {
+            "description": "День оплаты 1–31; 0 — убрать",
+            "format": "int64",
+            "maximum": 31,
+            "minimum": 0,
+            "type": "integer"
+          },
           "contact": {
             "maxLength": 100,
             "type": "string"
@@ -1100,11 +1478,27 @@
           "admin_url": {
             "type": "string"
           },
+          "auto_port": {
+            "description": "Переносить подключение на другой порт, если клиенты перестали до него доходить",
+            "type": "boolean"
+          },
+          "auto_sni": {
+            "description": "Менять сайт маскировки REALITY, если он перестал подходить",
+            "type": "boolean"
+          },
           "brand": {
             "type": "string"
           },
           "certificate": {
             "$ref": "#/components/schemas/Status"
+          },
+          "device_binding": {
+            "description": "Привязывать подписку к устройствам: у каждого устройства свои ключи",
+            "type": "boolean"
+          },
+          "device_require_hwid": {
+            "description": "Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место)",
+            "type": "boolean"
           },
           "domain": {
             "type": "string"
@@ -1156,6 +1550,10 @@
           "sub_group_main",
           "sub_group_auto",
           "sub_routing",
+          "auto_port",
+          "auto_sni",
+          "device_binding",
+          "device_require_hwid",
           "certificate"
         ],
         "type": "object"
@@ -1239,6 +1637,13 @@
       "TariffBody": {
         "additionalProperties": false,
         "properties": {
+          "billing_day": {
+            "description": "Срок до этого числа месяца: месяц = от дня оплаты до дня оплаты",
+            "format": "int64",
+            "maximum": 31,
+            "minimum": 1,
+            "type": "integer"
+          },
           "device_limit": {
             "format": "int64",
             "maximum": 100,
@@ -1289,6 +1694,14 @@
       "TariffView": {
         "additionalProperties": false,
         "properties": {
+          "billing_day": {
+            "description": "День месяца, в который заканчивается срок; null — срок в днях",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "device_limit": {
             "format": "int64",
             "type": [
@@ -1339,8 +1752,186 @@
           "duration_days",
           "device_limit",
           "reset_strategy",
+          "billing_day",
           "price_label",
           "sort"
+        ],
+        "type": "object"
+      },
+      "TelegramBot": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TelegramBroadcast": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "Ещё отправляется",
+            "type": "boolean"
+          },
+          "failed": {
+            "description": "Не дошло: бот заблокирован, чат удалён",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sent": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "started": {
+            "description": "Unix-время начала",
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "sent",
+          "failed",
+          "started",
+          "active"
+        ],
+        "type": "object"
+      },
+      "TelegramLink": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TelegramView": {
+        "additionalProperties": false,
+        "properties": {
+          "accounts": {
+            "description": "Аккаунтов Telegram с подписками",
+            "format": "int64",
+            "type": "integer"
+          },
+          "bot": {
+            "$ref": "#/components/schemas/TelegramBot"
+          },
+          "broadcast": {
+            "$ref": "#/components/schemas/TelegramBroadcast",
+            "description": "Последняя рассылка с запуска панели"
+          },
+          "config": {
+            "$ref": "#/components/schemas/Config"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/Texts",
+            "description": "Встроенные тексты на языке бота: пустое поле берёт их"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "description": "token_invalid, token_revoked, unreachable или ответ Telegram",
+            "type": "string"
+          },
+          "linked": {
+            "description": "Подписок, привязанных к Telegram",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mini_app_url": {
+            "description": "Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный",
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "token_hint": {
+            "description": "ID бота из токена",
+            "type": "string"
+          },
+          "token_set": {
+            "description": "Токен сохранён",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "token_set",
+          "running",
+          "config",
+          "defaults",
+          "mini_app_url",
+          "linked",
+          "accounts"
+        ],
+        "type": "object"
+      },
+      "Texts": {
+        "additionalProperties": false,
+        "properties": {
+          "expired": {
+            "description": "Уведомление: подписка закончилась",
+            "type": "string"
+          },
+          "expiring": {
+            "description": "Уведомление: подписка скоро закончится",
+            "type": "string"
+          },
+          "main": {
+            "description": "Шапка главного меню",
+            "type": "string"
+          },
+          "renew": {
+            "description": "Экран «Продлить»",
+            "type": "string"
+          },
+          "traffic_90": {
+            "description": "Уведомление: израсходовано 90% трафика",
+            "type": "string"
+          },
+          "traffic_end": {
+            "description": "Уведомление: трафик закончился",
+            "type": "string"
+          },
+          "welcome": {
+            "description": "Для тех, у кого ещё нет подписки в боте",
+            "type": "string"
+          }
+        },
+        "required": [
+          "welcome",
+          "main",
+          "renew",
+          "expiring",
+          "expired",
+          "traffic_90",
+          "traffic_end"
         ],
         "type": "object"
       },
@@ -1495,6 +2086,14 @@
       "UserView": {
         "additionalProperties": false,
         "properties": {
+          "billing_day": {
+            "description": "День месяца, в который заканчивается срок (1–31); null — продление днями",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "contact": {
             "type": "string"
           },
@@ -1551,6 +2150,7 @@
             "type": "array"
           },
           "reset_strategy": {
+            "description": "month_start — раз в месяц: в день оплаты, без него 1-го числа",
             "enum": [
               "none",
               "month_start",
@@ -1590,6 +2190,10 @@
               "integer",
               "null"
             ]
+          },
+          "telegram": {
+            "$ref": "#/components/schemas/TelegramLink",
+            "description": "Только в карточке пользователя"
           },
           "total_down": {
             "format": "int64",
@@ -1633,6 +2237,7 @@
           "reset_strategy",
           "resets_at",
           "expires_at",
+          "billing_day",
           "inbounds",
           "sub_url",
           "online",
@@ -2942,6 +3547,117 @@
         ]
       }
     },
+    "/api/v1/telegram": {
+      "get": {
+        "operationId": "get-telegram",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Telegram-бот",
+        "tags": [
+          "telegram"
+        ]
+      },
+      "patch": {
+        "operationId": "update-telegram",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchTelegramInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настроить Telegram-бота",
+        "tags": [
+          "telegram"
+        ]
+      }
+    },
+    "/api/v1/telegram/broadcast": {
+      "post": {
+        "operationId": "telegram-broadcast",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BroadcastInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BroadcastOutputBody"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Разослать сообщение всем в боте",
+        "tags": [
+          "telegram"
+        ]
+      }
+    },
     "/api/v1/users": {
       "get": {
         "operationId": "list-users",
@@ -3232,6 +3948,98 @@
         ]
       }
     },
+    "/api/v1/users/{id}/bound-devices": {
+      "get": {
+        "operationId": "user-bound-devices",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BoundDeviceView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Устройства, привязанные к подписке",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/bound-devices/{device}": {
+      "delete": {
+        "operationId": "unbind-device",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "device",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отвязать устройство: его ключи сгорают",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/v1/users/{id}/devices": {
       "get": {
         "operationId": "user-devices",
@@ -3272,7 +4080,7 @@
             "description": "Error"
           }
         },
-        "summary": "Устройства пользователя",
+        "summary": "Адреса, с которых заходил пользователь",
         "tags": [
           "users"
         ]
@@ -3414,6 +4222,42 @@
         "summary": "Сбросить трафик",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/telegram": {
+      "delete": {
+        "operationId": "unlink-telegram",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отвязать подписку от Telegram",
+        "tags": [
+          "telegram"
         ]
       }
     },

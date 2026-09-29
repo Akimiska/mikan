@@ -107,11 +107,14 @@ func (c *clientBuilder) security() error {
 		sni = c.in.SNI
 	}
 	typ := c.t.Type()
-	if typ == "vless" || typ == "vmess" || typ == "trojan" || typ == "anytls" {
+	switch typ {
+	case "vless", "vmess", "trojan", "anytls":
 		c.y["tls"] = true
 		c.y["client-fingerprint"] = c.fingerprint()
 		c.q.Set("security", "tls")
 		c.q.Set("fp", c.fingerprint())
+	case "trusttunnel": // always TLS, no switch for it
+		c.y["client-fingerprint"] = c.fingerprint()
 	}
 	if typ == "hysteria2" || typ == "tuic" {
 		delete(c.y, "tls")
@@ -121,8 +124,9 @@ func (c *clientBuilder) security() error {
 		c.q.Set("sni", sni)
 	}
 	if c.in.PinSHA256 != "" {
-		// A self-signed certificate is pinned; links without a pin field fall back to
-		// insecure mode, which is the only way to carry such a certificate there.
+		// A self-signed certificate is pinned. Links carry the pin where the app reads
+		// one — Hysteria2's pinSHA256, Xray's pcs (pinnedPeerCertSha256) — next to the
+		// insecure flag they need to accept a certificate without a CA at all.
 		c.y["fingerprint"] = c.in.PinSHA256
 		c.y["skip-cert-verify"] = false
 		switch typ {
@@ -130,10 +134,11 @@ func (c *clientBuilder) security() error {
 			c.q.Set("insecure", "1")
 			c.q.Set("pinSHA256", c.in.PinSHA256)
 		case "tuic":
-			c.q.Set("allow_insecure", "1")
+			c.q.Set("allow_insecure", "1") // the TUIC link scheme has no pin
 		default:
 			c.q.Set("allowInsecure", "1")
 			c.q.Set("insecure", "1")
+			c.q.Set("pcs", c.in.PinSHA256)
 		}
 	}
 	return nil
@@ -182,6 +187,14 @@ func (c *clientBuilder) finish() (Client, error) {
 	case "vless":
 		c.y["uuid"] = s.UUID
 		c.q.Set("encryption", "none")
+		if c.t.hasEncryption() {
+			enc, err := ClientEncryption(c.t.str("decryption"))
+			if err != nil {
+				return Client{}, err
+			}
+			c.y["encryption"] = enc
+			c.q.Set("encryption", enc)
+		}
 		if c.ext.Flow != "" {
 			c.y["flow"] = c.ext.Flow
 			c.q.Set("flow", c.ext.Flow)
@@ -191,7 +204,7 @@ func (c *clientBuilder) finish() (Client, error) {
 		c.y["uuid"], c.y["alterId"], c.y["cipher"] = s.UUID, 0, "auto"
 		link := map[string]string{"v": "2", "ps": c.in.Name, "add": c.host, "port": strconv.Itoa(c.port), "id": s.UUID, "aid": "0", "scy": "auto",
 			"net": c.q.Get("type"), "type": "none", "path": c.q.Get("path"), "tls": c.q.Get("security"), "sni": c.q.Get("sni"), "fp": c.q.Get("fp"),
-			"pbk": c.q.Get("pbk"), "sid": c.q.Get("sid")}
+			"pbk": c.q.Get("pbk"), "sid": c.q.Get("sid"), "pcs": c.q.Get("pcs")}
 		if link["net"] == "grpc" {
 			link["path"] = c.q.Get("serviceName")
 		}
@@ -235,6 +248,9 @@ func (c *clientBuilder) finish() (Client, error) {
 		c.q.Del("security")
 		c.q.Del("fp")
 		return Client{c.y, "anytls://" + url.PathEscape(s.Secret) + "@" + c.addr() + "/?" + c.q.Encode() + "#" + name}, nil
+	}
+	if cl, ok := c.finishExtra(); ok {
+		return cl, nil
 	}
 	return Client{}, fail("config_type", "type")
 }

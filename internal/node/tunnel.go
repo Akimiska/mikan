@@ -32,7 +32,7 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 		return
 	}
 	ip := m.SrcIP.Unmap().String()
-	s := t.reg.admit(m.InUser, m.InName, ip, true)
+	s := t.reg.admit(userOf(conn, m), m.InName, ip, true)
 	if s == nil {
 		_ = conn.Close()
 		return
@@ -58,6 +58,17 @@ func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
 }
 
 func (t *Tunnel) NatTable() C.NatTable { return t.inner.NatTable() }
+
+// userOf is who opened the connection. mihomo 1.19.31 leaves metadata.InUser empty for
+// Mieru (fixed upstream later); the Mieru connection itself still knows the user.
+func userOf(conn net.Conn, m *C.Metadata) string {
+	if m.InUser == "" && m.Type == C.MIERU {
+		if u, ok := conn.(interface{ UserName() string }); ok {
+			return u.UserName()
+		}
+	}
+	return m.InUser
+}
 
 // countingConn: Read from the client is upload, Write to the client is download.
 // UnwrapReader/UnwrapWriter must return []N.CountFunc (an alias of sing's type), so that

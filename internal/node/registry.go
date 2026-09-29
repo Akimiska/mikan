@@ -17,7 +17,8 @@ type Registry struct {
 	mu      sync.RWMutex
 	byKey   map[string]*slot // slot name and uuid → slot
 	byName  map[string]*slot
-	retired []*slot // removed slots whose counters are not cut yet
+	shared  map[string]*slot // listeners with one key for everyone, by listener name
+	retired []*slot          // removed slots whose counters are not cut yet
 	now     func() time.Time
 	release time.Duration
 
@@ -43,6 +44,7 @@ type slot struct {
 	otherIPs    map[string]bool // the slot's devices on other nodes of the panel
 	conns       map[*countingConn]struct{}
 	ips         map[string]*ipUse
+	seen        map[seenKey]time.Time // last admitted connection per device and inbound
 }
 
 type ipUse struct {
@@ -50,12 +52,17 @@ type ipUse struct {
 	lastSeen time.Time
 }
 
+type seenKey struct{ ip, inbound string }
+
+// activityKeep bounds how far back Activity reports; the panel looks at the last minutes.
+const activityKeep = time.Hour
+
 func NewRegistry(epoch string, seq int64, release time.Duration, now func() time.Time) *Registry {
 	return &Registry{byKey: map[string]*slot{}, byName: map[string]*slot{}, epoch: epoch, seq: seq, release: release, now: now}
 }
 
 func newSlot(name, uuid string) *slot {
-	s := &slot{name: name, uuid: uuid, conns: map[*countingConn]struct{}{}, ips: map[string]*ipUse{}}
+	s := &slot{name: name, uuid: uuid, conns: map[*countingConn]struct{}{}, ips: map[string]*ipUse{}, seen: map[seenKey]time.Time{}}
 	s.blocked.Store(true) // no policy yet → deny
 	return s
 }
@@ -173,10 +180,38 @@ func (r *Registry) lookup(key string) *slot {
 	return r.byKey[key]
 }
 
+// SetShared names the listeners whose clients carry no user: one key for everyone
+// (Shadowsocks-2022, Sudoku, Snell). Their connections go through without a policy or
+// limits; the traffic is counted to the listener, which no user owns.
+func (r *Registry) SetShared(names []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	next := make(map[string]*slot, len(names))
+	for _, n := range names {
+		s := r.shared[n]
+		if s == nil {
+			s = newSlot("~"+n, "")
+			s.allowed = true
+			s.blocked.Store(false)
+		}
+		next[n] = s
+	}
+	r.shared = next
+}
+
+func (r *Registry) sharedSlot(inName string) *slot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.shared[inName]
+}
+
 // admit checks policy and the device limit. For TCP it reserves an open-connection
 // slot on the source IP; release it with slot.closeConn.
 func (r *Registry) admit(user, inName, ip string, tcp bool) *slot {
 	s := r.lookup(user)
+	if user == "" {
+		s = r.sharedSlot(inName)
+	}
 	if s == nil || s.blocked.Load() {
 		return nil
 	}
@@ -204,7 +239,54 @@ func (r *Registry) admit(user, inName, ip string, tcp bool) *slot {
 	if tcp {
 		u.open++
 	}
+	s.seen[seenKey{ip, inName}] = now
+	if len(s.seen) > 256 {
+		// Activity prunes too, but a panel that never asks must not grow it forever.
+		for k, t := range s.seen {
+			if now.Sub(t) > activityKeep {
+				delete(s.seen, k)
+			}
+		}
+	}
 	return s
+}
+
+// Activity reports, per device, when each inbound last let it in. The panel compares
+// inbounds: a device that keeps reaching the node's other inbounds but not one of them is
+// cut off from that one on the way (a port blocked by DPI), not idle.
+func (r *Registry) Activity() nodeapi.Activity {
+	r.mu.RLock()
+	slots := values(r.byName)
+	r.mu.RUnlock()
+	cutoff := r.now().Add(-activityKeep)
+	type device struct{ slot, ip string }
+	byDevice := map[device]*nodeapi.ClientActivity{}
+	for _, s := range slots {
+		s.mu.Lock()
+		for k, t := range s.seen {
+			if t.Before(cutoff) {
+				delete(s.seen, k)
+				continue
+			}
+			dk := device{s.name, k.ip}
+			c := byDevice[dk]
+			if c == nil {
+				c = &nodeapi.ClientActivity{Slot: s.name, IP: k.ip, Seen: map[string]int64{}}
+				byDevice[dk] = c
+			}
+			c.Seen[k.inbound] = t.Unix()
+		}
+		s.mu.Unlock()
+	}
+	out := nodeapi.Activity{Clients: make([]nodeapi.ClientActivity, 0, len(byDevice))}
+	for _, c := range byDevice {
+		out.Clients = append(out.Clients, *c)
+	}
+	sort.Slice(out.Clients, func(i, j int) bool {
+		a, b := out.Clients[i], out.Clients[j]
+		return a.Slot < b.Slot || a.Slot == b.Slot && a.IP < b.IP
+	})
+	return out
 }
 
 func (s *slot) addConn(c *countingConn) {

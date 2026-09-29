@@ -16,6 +16,10 @@ type Config struct {
 	TrustProxy bool
 	// Dev serves plain HTTP for UI development; only a loopback address is accepted.
 	Dev bool
+	// AutotuneScale shortens the automatic moves' timings (tests: 0.01); 1 in production.
+	AutotuneScale float64
+	// TelegramAPI is the Bot API the bot talks to; a fake one in tests.
+	TelegramAPI string
 }
 
 func FromEnv() (Config, error) {
@@ -36,6 +40,13 @@ func FromEnv() (Config, error) {
 	}
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return c, fmt.Errorf("MIKAN_PANEL_LISTEN: %w", err)
+	}
+	c.TelegramAPI = os.Getenv("MIKAN_TG_API")
+	c.AutotuneScale = 1
+	if v := os.Getenv("MIKAN_AUTOTUNE_SCALE"); v != "" {
+		if c.AutotuneScale, err = strconv.ParseFloat(v, 64); err != nil || c.AutotuneScale <= 0 || c.AutotuneScale > 1 {
+			return c, fmt.Errorf("MIKAN_AUTOTUNE_SCALE: want a number in (0, 1], got %q", v)
+		}
 	}
 	// "off" runs the panel without a node (UI development on a machine without mihomo).
 	if c.NodeSocket == "off" {

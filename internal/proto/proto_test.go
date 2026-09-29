@@ -2,9 +2,11 @@ package proto
 
 import (
 	"crypto/ecdh"
+	"crypto/mlkem"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -109,6 +111,123 @@ func TestPresetsConvertAndRender(t *testing.T) {
 	}
 }
 
+// REALITY listeners bound the client's clock skew, so a recorded ClientHello cannot be
+// replayed later to see the REALITY certificate; a template's own value wins.
+func TestRealityReplayWindow(t *testing.T) {
+	priv, _ := realityKey(t)
+	src := "type: vless\nreality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
+	// Numbers from YAML come as float64, the default as int64; mihomo takes both.
+	window := func(src string) string {
+		l, err := Listener(mustParse(t, src), "n", "", "443", slots, Cert{}, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("%.0f", toFloat(l["reality-config"].(map[string]any)["max-time-difference"]))
+	}
+	if got := window(src); got != "7200000000" {
+		t.Fatalf("default window: %s (mihomo reads microseconds: 2 h = 7200000000)", got)
+	}
+	if got := window(src + "  max-time-difference: 60000000\n"); got != "60000000" {
+		t.Fatalf("the template's own window: %s", got)
+	}
+	// The template itself stays as the admin wrote it.
+	tpl := mustParse(t, src)
+	if _, err := Listener(tpl, "n", "", "443", slots, Cert{}, Options{}); err != nil || tpl.section("reality-config")["max-time-difference"] != nil {
+		t.Fatalf("the stored template changed: %v", tpl)
+	}
+}
+
+// VLESS Encryption: the listener keeps the private keys, clients get the public halves
+// with a full handshake (1rtt), in both subscription formats.
+func TestVLESSEncryption(t *testing.T) {
+	priv, _ := realityKey(t)
+	x := make([]byte, 32)
+	_, _ = rand.Read(x)
+	xk, _ := ecdh.X25519().NewPrivateKey(x)
+	seed := make([]byte, mlkem.SeedSize)
+	_, _ = rand.Read(seed)
+	dk, _ := mlkem.NewDecapsulationKey768(seed)
+	b64 := base64.RawURLEncoding.EncodeToString
+
+	got, err := ClientEncryption("mlkem768x25519plus.xorpub.300-600s.100-500.50-100." + b64(x) + "." + b64(seed))
+	want := "mlkem768x25519plus.xorpub.1rtt.100-500.50-100." + b64(xk.PublicKey().Bytes()) + "." + b64(dk.EncapsulationKey().Bytes())
+	if err != nil || got != want {
+		t.Fatalf("client encryption:\n got %s (%v)\nwant %s", got, err, want)
+	}
+	for _, bad := range []string{
+		"mlkem768x25519plus.native.600s",                // no key
+		"aes.native.600s." + b64(x),                     // other method
+		"mlkem768x25519plus.plain.600s." + b64(x),       // unknown mode
+		"mlkem768x25519plus.native.10m." + b64(x),       // ticket is seconds
+		"mlkem768x25519plus.native.600s." + b64(x[:31]), // short key
+	} {
+		if _, err := ClientEncryption(bad); code(err) != "vless_decryption" {
+			t.Errorf("%s: %v", bad, err)
+		}
+	}
+
+	src := "type: vless\nxhttp-config: {path: /p, mode: stream-one}\ndecryption: mlkem768x25519plus.native.600s." + b64(x) +
+		"\nreality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
+	tpl := mustParse(t, src)
+	l, err := Listener(tpl, "n", "", "2096", slots, Cert{}, Options{})
+	if err != nil || l["decryption"] != "mlkem768x25519plus.native.600s."+b64(x) {
+		t.Fatalf("listener keeps the decryption: %v %v", err, l["decryption"])
+	}
+	c, err := ClientConfig(tpl, ClientInput{Name: "PQ", Host: "203.0.113.7", Port: 2096, Slot: slots[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := "mlkem768x25519plus.native.1rtt." + b64(xk.PublicKey().Bytes())
+	u, _ := url.Parse(c.URI)
+	if c.Mihomo["encryption"] != enc || u.Query().Get("encryption") != enc || strings.Contains(c.URI, b64(x)) {
+		t.Fatalf("client: %v\n%s", c.Mihomo["encryption"], c.URI)
+	}
+	if code(Validate(mustParse(t, "type: vless\ndecryption: nope\n"+src[strings.Index(src, "reality-config"):]), Options{})) != "vless_decryption" {
+		t.Fatal("a broken decryption must be refused")
+	}
+	if code(Validate(mustParse(t, "type: trojan\ndecryption: none\nmikan: {tls: node}\n"), Options{})) != "config_key" {
+		t.Fatal("decryption is VLESS only")
+	}
+}
+
+func toFloat(v any) float64 {
+	switch n := v.(type) {
+	case int64:
+		return float64(n)
+	case int:
+		return float64(n)
+	case float64:
+		return n
+	}
+	return -1
+}
+
+// A self-signed node certificate is pinned in links too: Xray apps read pcs, Hysteria2
+// apps pinSHA256. TUIC links have no pin field.
+func TestSelfSignedLinksCarryThePin(t *testing.T) {
+	in := ClientInput{Name: "X", Host: "203.0.113.7", Port: 2083, PinSHA256: "ab12", Slot: slots[0]}
+	for src, want := range map[string]string{
+		"type: trojan\nmikan: {tls: node}\n":             "pcs=ab12",
+		"type: anytls\n":                                 "pcs=ab12",
+		"type: vless\nws-path: /v\nmikan: {tls: node}\n": "pcs=ab12",
+		"type: hysteria2\n":                              "pinSHA256=ab12",
+		"type: vmess\nws-path: /m\nmikan: {tls: node}\n": `"pcs":"ab12"`,
+	} {
+		c, err := ClientConfig(mustParse(t, src), in)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		link := c.URI
+		if strings.HasPrefix(link, "vmess://") {
+			raw, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, "vmess://"))
+			link = string(raw)
+		}
+		if !strings.Contains(link, want) || c.Mihomo["fingerprint"] != "ab12" {
+			t.Errorf("%s: %s lacks %s (mihomo %v)", src, link, want, c.Mihomo["fingerprint"])
+		}
+	}
+}
+
 func TestValidateRefusesDangerousTemplates(t *testing.T) {
 	priv, _ := realityKey(t)
 	reality := "reality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
@@ -125,7 +244,8 @@ func TestValidateRefusesDangerousTemplates(t *testing.T) {
 		"realm":                 {"type: hysteria2\nrealm-opts: {enable: true}\n", "config_key"},
 		"vision over xhttp":     {"type: vless\n" + reality + "xhttp-config: {path: /x}\nmikan: {flow: xtls-rprx-vision}\n", "config_flow"},
 		"xhttp auto":            {"type: vless\n" + reality + "xhttp-config: {path: /x, mode: auto}\n", "config_xhttp_mode"},
-		"shadowsocks":           {"type: shadowsocks\npassword: x\n", "config_type"},
+		"shadowsocks pre-2022":  {"type: shadowsocks\npassword: x\n", "ss_cipher"},
+		"unencrypted socks":     {"type: socks\n", "config_type"},
 		"unknown mikan key":     {"type: tuic\nmikan: {evil: 1}\n", "config_key"},
 		"bad short id":          {strings.Replace("type: vless\n"+reality, "[a1b2]", "[xyz]", 1), "reality_sid"},
 		"obfs without password": {"type: hysteria2\nobfs: salamander\n", "config_obfs"},

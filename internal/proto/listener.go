@@ -19,6 +19,12 @@ type Cert struct {
 	CertPath, KeyPath string
 }
 
+// RealityMaxTimeDiff bounds how far a REALITY client's clock may be from the server's,
+// in microseconds as mihomo reads it (2 h, like Hiddify). Without it a recorded
+// ClientHello replays forever: the reply then shows the REALITY certificate instead of
+// the target's, and the server is exposed. A template may set its own value.
+const RealityMaxTimeDiff = int64(2 * 60 * 60 * 1_000_000)
+
 // Listener renders the mihomo listener: the template minus mikan's section, plus name,
 // port, listen address, users and, where the protocol needs it, the node certificate.
 func Listener(t Template, name, listen, port string, slots []Slot, cert Cert, o Options) (map[string]any, error) {
@@ -36,8 +42,16 @@ func Listener(t Template, name, listen, port string, slots []Slot, cert Cert, o 
 	if listen == "" {
 		listen = "0.0.0.0"
 	}
+	if rc, ok := l["reality-config"].(map[string]any); ok {
+		if _, set := rc["max-time-difference"]; !set {
+			rc["max-time-difference"] = RealityMaxTimeDiff
+		}
+	}
 	l["name"], l["port"], l["listen"] = name, port, listen
-	l["users"] = users(t.Type(), slots, ext)
+	if !r.shared {
+		l["users"] = users(t.Type(), slots, ext)
+	}
+	listenerExtra(t, l)
 	if r.cert || ext.TLS == "node" {
 		if cert.CertPath == "" {
 			return nil, errors.New("no node certificate for " + t.Type())
@@ -68,7 +82,7 @@ func users(typ string, slots []Slot, ext Ext) any {
 			out = append(out, map[string]any{"username": s.Name, "uuid": s.UUID, "alterId": 0})
 		}
 		return out
-	case "trojan":
+	case "trojan", "trusttunnel", "shadowquic":
 		out := make([]map[string]any, 0, len(slots))
 		for _, s := range slots {
 			out = append(out, map[string]any{"username": s.Name, "password": s.Secret})
@@ -80,7 +94,7 @@ func users(typ string, slots []Slot, ext Ext) any {
 			m[s.UUID] = s.Secret
 		}
 		return m
-	default: // hysteria2, anytls
+	default: // hysteria2, anytls, mieru
 		m := make(map[string]string, len(slots))
 		for _, s := range slots {
 			m[s.Name] = s.Secret

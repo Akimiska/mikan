@@ -17,6 +17,8 @@ services:
     environment:
       MIKAN_DATA_DIR: /data/panel
       MIKAN_PANEL_LISTEN: 0.0.0.0:2053
+      # The automatic moves' windows in seconds instead of half hours.
+      MIKAN_AUTOTUNE_SCALE: "0.01"
     volumes: ["data:/data", "run:/run/mikan"]
 
   # A remote node: the panel reaches it over mTLS by the name it was added with.
@@ -41,6 +43,17 @@ services:
     command: ["-d", "/tmp/mihomo", "-f", "/work/client.yaml"]
     volumes: ["work:/work:ro"]
     profiles: ["client"]
+
+  # Plays the client's ISP: inside the client's network namespace it drops the client's
+  # packets to the node's 443/tcp, like the DPI that blocks one port of a server.
+  blocker:
+    image: alpine:3
+    network_mode: "service:client"
+    cap_add: [NET_ADMIN]
+    entrypoint: ["sh", "-c"]
+    command:
+      - apk add -q iptables >/dev/null && iptables -I OUTPUT -p tcp -d "$$(getent hosts node | cut -d' ' -f1)" --dport 443 -j REJECT --reject-with tcp-reset && echo "client → node:443/tcp dropped"
+    profiles: ["blocker"]
 
   driver:
     image: golang:1.27

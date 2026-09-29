@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/nodeapi"
 	"mikan/internal/panel/settings"
 	"mikan/internal/proto"
 	"mikan/internal/scan"
@@ -85,7 +86,6 @@ func (h *handlers) scanTargets(ctx context.Context, in *scanTargetsInput) (*scan
 	}
 	local := node.Address == ""
 	if !local {
-		// The scan still runs from the panel: RTTs are the panel's, the checks are the same.
 		publicHost, domain = node.PublicHost, ""
 	}
 	ip := publicHost
@@ -96,22 +96,31 @@ func (h *handlers) scanTargets(ctx context.Context, in *scanTargetsInput) (*scan
 		}
 		ip = addrs[0].String()
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	out := &scanTargetsOutput{}
 	out.Body.IP = ip
 	// Self-steal: the SNI is the server's own domain and matches its IP, the target is the
 	// panel with its Let's Encrypt certificate.
 	if local && domain != "" && h.d.Cert != nil && h.d.Cert().Kind == "letsencrypt" {
-		r := scan.Check(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(h.panelPort(ctx))), domain)
+		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		r := scan.Check(cctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(h.panelPort(ctx))), domain)
+		cancel()
 		out.Body.SelfSteal = &r
 	}
-	results, scanned, err := scan.Neighbors(ctx, ip, 12)
-	if err != nil && ctx.Err() == nil {
-		return nil, huma.Error422UnprocessableEntity("scan_no_ip")
+	// The node scans its own network, so RTTs are what REALITY will see. A node older than
+	// 0.3 cannot: then the panel scans for it.
+	var fromNode bool
+	if h.d.Nodes != nil {
+		if r, err := h.d.Nodes.ScanTargets(ctx, node.ID, nodeapi.TargetScanRequest{IP: ip, Limit: 12}); err == nil {
+			out.Body.Scanned, out.Body.Results, fromNode = r.Scanned, r.Results, true
+		}
 	}
-	out.Body.Scanned = scanned
-	out.Body.Results = results
+	if !fromNode {
+		sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if out.Body.Results, out.Body.Scanned, err = scan.Neighbors(sctx, ip, 12); err != nil && sctx.Err() == nil {
+			return nil, huma.Error422UnprocessableEntity("scan_no_ip")
+		}
+	}
 	if out.Body.Results == nil {
 		out.Body.Results = []scan.Result{}
 	}

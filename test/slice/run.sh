@@ -26,11 +26,36 @@ if [ "$status" = 0 ]; then
   sleep 3
   docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver verify || status=$?
 fi
+# Devices: the client also gets a device's own keys, then the admin unbinds the device.
+if [ "$status" = 0 ]; then
+  docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver devices || status=$?
+fi
+if [ "$status" = 0 ]; then
+  docker compose --profile client restart client
+  sleep 3
+  docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver devices-check || status=$?
+fi
+# Automatic moves: the client's 443/tcp to the node is dropped; the panel must move XHTTP.
+if [ "$status" = 0 ]; then
+  docker compose --profile client --profile blocker run --rm blocker || status=$?
+fi
+if [ "$status" = 0 ]; then
+  docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver autotune || status=$?
+fi
+if [ "$status" = 0 ]; then
+  # The client restarts on the new profile; its 443/tcp stays dropped.
+  docker compose --profile client restart client
+  docker compose --profile client --profile blocker run --rm blocker || status=$?
+  sleep 2
+fi
+if [ "$status" = 0 ]; then
+  docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver autotune-check || status=$?
+fi
 if [ "$status" != 0 ]; then
   docker compose --profile node2 logs --tail 60 panel node node2
   docker compose --profile client logs --tail 30 client
 fi
 if [ "${KEEP:-0}" != 1 ]; then
-  docker compose --profile client --profile node2 down -v --remove-orphans
+  docker compose --profile client --profile node2 --profile blocker down -v --remove-orphans
 fi
 exit "$status"

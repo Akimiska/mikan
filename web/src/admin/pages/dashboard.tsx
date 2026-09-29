@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Plus, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { User } from "../../api/client";
-import { useInbounds, useNode, useOverview, userActions, useServerTraffic, useUserMutation, useUsers } from "../../api/hooks";
+import { onePeriod, useInbounds, useNode, useOverview, userActions, useServerTraffic, useUserMutation, useUsers } from "../../api/hooks";
 import { buckets, TrafficChart, type Range } from "../../components/chart";
 import { useToast } from "../../components/toast";
 import { Avatar, Bar, Button, PageHeader, Pill, Segmented, Skeleton, StatePill } from "../../components/ui";
@@ -274,12 +274,12 @@ function AttentionCard() {
                     loading={extend.isPending && extend.variables?.id === u.id}
                     onClick={() =>
                       extend.mutate(
-                        { id: u.id, days: 30 },
-                        { onSuccess: () => toast.ok(t("dashboard.extended", { name: u.name })), onError: () => toast.error(t("dashboard.extendFailed")) },
+                        { id: u.id, ...onePeriod(u) },
+                        { onSuccess: (r) => toast.ok(t("dashboard.extended", { name: u.name, date: dateShort(r.expires_at!) })), onError: () => toast.error(t("dashboard.extendFailed")) },
                       )
                     }
                   >
-                    {t("dashboard.plus30")}
+                    {u.billing_day != null ? t("dashboard.plusMonth") : t("dashboard.plus30")}
                   </Button>
                 )}
               </div>

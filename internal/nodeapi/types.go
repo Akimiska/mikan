@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"mikan/internal/proto"
+	"mikan/internal/scan"
 )
 
 const (
@@ -121,6 +122,40 @@ type ListenerStatus struct {
 	Name  string `json:"name"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+}
+
+// Activity tells the panel which inbounds each device reached lately. A device that
+// keeps reaching the node's other inbounds but never one of them is cut off from that
+// one on the way, e.g. its port is blocked by DPI.
+type Activity struct {
+	Clients []ClientActivity `json:"clients"`
+}
+
+type ClientActivity struct {
+	Slot string           `json:"slot"`
+	IP   string           `json:"ip"`
+	Seen map[string]int64 `json:"seen"` // inbound name → unix time of the last admitted connection
+}
+
+// TargetCheckRequest asks the node to test a REALITY target from its own network: the
+// node is the one that dials it for every client handshake.
+type TargetCheckRequest struct {
+	Dest string `json:"dest"`
+	SNI  string `json:"sni,omitempty"`
+}
+
+// TargetScanRequest asks the node for REALITY targets in the /24 around IP, its public
+// address.
+type TargetScanRequest struct {
+	IP    string `json:"ip"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type TargetResult = scan.Result
+
+type TargetScan struct {
+	Scanned int            `json:"scanned"`
+	Results []TargetResult `json:"results"`
 }
 
 type ApplyResult struct {

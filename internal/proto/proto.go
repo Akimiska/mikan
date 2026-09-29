@@ -61,19 +61,28 @@ type rule struct {
 	network string   // tcp | udp
 	cert    bool     // always runs on the node certificate
 	secured bool     // needs reality-config or mikan.tls: node
+	shared  bool     // one key for everyone: no per-user accounting or limits (see extra.go)
 }
 
-// Only listener types that authenticate every user are supported: the node counts
-// traffic and enforces limits per user.
+// Listener types that authenticate every user: the node counts traffic and enforces
+// limits per user. The shared ones are the exception the admin opts into.
 var rules = map[string]rule{
-	"vless":  {keys: []string{"ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option"}, network: "tcp", secured: true},
+	"vless":  {keys: []string{"ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option", "decryption"}, network: "tcp", secured: true},
 	"vmess":  {keys: []string{"ws-path", "grpc-service-name", "reality-config", "mux-option"}, network: "tcp", secured: true},
 	"trojan": {keys: []string{"ws-path", "grpc-service-name", "reality-config", "mux-option"}, network: "tcp", secured: true},
 	"hysteria2": {keys: []string{"obfs", "obfs-password", "obfs-min-packet-size", "obfs-max-packet-size", "max-idle-time", "alpn", "up", "down",
 		"ignore-client-bandwidth", "masquerade", "cwnd", "bbr-profile", "udp-mtu", "initial-stream-receive-window", "max-stream-receive-window",
 		"initial-connection-receive-window", "max-connection-receive-window"}, network: "udp", cert: true},
-	"tuic":   {keys: []string{"congestion-controller", "max-idle-time", "authentication-timeout", "alpn", "max-udp-relay-packet-size", "cwnd", "bbr-profile"}, network: "udp", cert: true},
-	"anytls": {keys: []string{"padding-scheme"}, network: "tcp", cert: true},
+	"tuic":        {keys: []string{"congestion-controller", "max-idle-time", "authentication-timeout", "alpn", "max-udp-relay-packet-size", "cwnd", "bbr-profile"}, network: "udp", cert: true},
+	"anytls":      {keys: []string{"padding-scheme"}, network: "tcp", cert: true},
+	"trusttunnel": {keys: []string{"congestion-controller", "cwnd", "bbr-profile"}, network: "tcp", cert: true},
+	"shadowquic": {keys: []string{"jls-upstream", "alpn", "quic-versions", "congestion-controller", "up", "down", "ignore-client-bandwidth",
+		"max-idle-time", "cwnd", "bbr-profile", "max-datagram-frame-size", "recv-window-conn", "recv-window", "disable-mtu-discovery"}, network: "udp"},
+	"mieru":       {keys: []string{"transport"}, network: "tcp"},
+	"shadowsocks": {keys: []string{"cipher", "password"}, network: "tcp", shared: true},
+	"sudoku": {keys: []string{"key", "aead-method", "padding-min", "padding-max", "table-type", "handshake-timeout", "enable-pure-downlink", "httpmask"},
+		network: "tcp", shared: true},
+	"snell": {keys: []string{"psk", "version", "obfs-opts"}, network: "tcp", shared: true},
 }
 
 // managed keys are set by the node; the rest of the forbidden list would let a template
@@ -250,10 +259,20 @@ func Validate(t Template, o Options) error {
 			return fail("config_obfs", "obfs")
 		}
 	}
+	if _, set := t["decryption"]; set {
+		if _, isString := t["decryption"].(string); !isString {
+			return fail("vless_decryption", "decryption")
+		}
+		if t.hasEncryption() {
+			if _, err := parseDecryption(t.str("decryption")); err != nil {
+				return err
+			}
+		}
+	}
 	if o := ext.Client; o.Port < 0 || o.Port > 65535 {
 		return fail("config_key", extKey+".client.port")
 	}
-	return nil
+	return validateExtra(t, o)
 }
 
 // transport is what a client dials over the secured channel.

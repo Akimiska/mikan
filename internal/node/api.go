@@ -1,15 +1,20 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/scan"
 )
+
+var scanning sync.Mutex
 
 // Handler exposes the Node API. It is served on a unix socket only; the socket file
 // permissions are the access control.
@@ -70,6 +75,49 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Health())
+	})
+	mux.HandleFunc("GET /v1/activity", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, e.Reg.Activity())
+	})
+	mux.HandleFunc("POST /v1/targets/check", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.TargetCheckRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		if !e.TargetAllowed(req.Dest) {
+			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_target", Message: "dest must be a public host:port"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		writeJSON(w, http.StatusOK, scan.Check(ctx, req.Dest, req.SNI))
+	})
+	mux.HandleFunc("POST /v1/targets/scan", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.TargetScanRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		// ~250 connections per scan: one at a time.
+		if !scanning.TryLock() {
+			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: "scan_busy", Message: "a scan is running"})
+			return
+		}
+		defer scanning.Unlock()
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		limit := req.Limit
+		if limit <= 0 || limit > 32 {
+			limit = 12
+		}
+		res, scanned, err := scan.Neighbors(ctx, req.IP, limit)
+		if err != nil && ctx.Err() == nil {
+			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_request", Message: err.Error()})
+			return
+		}
+		if res == nil {
+			res = []scan.Result{}
+		}
+		writeJSON(w, http.StatusOK, nodeapi.TargetScan{Scanned: scanned, Results: res})
 	})
 	mux.HandleFunc("GET /v1/logs", func(w http.ResponseWriter, r *http.Request) {
 		var since time.Time

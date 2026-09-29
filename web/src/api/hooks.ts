@@ -7,6 +7,7 @@ export const qk = {
   user: (id: number) => ["users", "one", id] as const,
   userTraffic: (id: number) => ["users", "traffic", id] as const,
   devices: (id: number) => ["users", "devices", id] as const,
+  boundDevices: (id: number) => ["users", "bound", id] as const,
   tariffs: ["tariffs"] as const,
   inbounds: ["inbounds"] as const,
   presets: ["presets"] as const,
@@ -16,6 +17,7 @@ export const qk = {
   nodes: ["nodes"] as const,
   settings: ["settings"] as const,
   sessions: ["sessions"] as const,
+  telegram: ["telegram"] as const,
 };
 
 export const meQuery = {
@@ -56,6 +58,15 @@ export function useDevices(id: number) {
   return useQuery({
     queryKey: qk.devices(id),
     queryFn: () => unwrap(api.GET("/api/v1/users/{id}/devices", { params: { path: { id } } })),
+    refetchInterval: 10_000,
+  });
+}
+
+/** Devices bound to the subscription (each with keys of its own). */
+export function useBoundDevices(id: number) {
+  return useQuery({
+    queryKey: qk.boundDevices(id),
+    queryFn: () => unwrap(api.GET("/api/v1/users/{id}/bound-devices", { params: { path: { id } } })),
     refetchInterval: 10_000,
   });
 }
@@ -113,10 +124,14 @@ export const userActions = {
   create: (body: Schemas["CreateUserInputBody"]) => unwrap(api.POST("/api/v1/users", { body })),
   update: ({ id, body }: { id: number; body: Schemas["PatchUserInputBody"] }) =>
     unwrap(api.PATCH("/api/v1/users/{id}", { params: { path: { id } }, body })),
-  extend: ({ id, days }: { id: number; days: number }) =>
-    unwrap(api.POST("/api/v1/users/{id}/extend", { params: { path: { id } }, body: { days } })),
+  extend: ({ id, ...body }: { id: number } & Schemas["ExtendInputBody"]) => unwrap(api.POST("/api/v1/users/{id}/extend", { params: { path: { id } }, body })),
   reset: (id: number) => unwrap(api.POST("/api/v1/users/{id}/reset-traffic", { params: { path: { id } } })),
   reissue: (id: number) => unwrap(api.POST("/api/v1/users/{id}/reissue", { params: { path: { id } } })),
   remove: (id: number) => unwrap(api.DELETE("/api/v1/users/{id}", { params: { path: { id } } })),
   bulk: (body: Schemas["BulkInputBody"]) => unwrap(api.POST("/api/v1/users/bulk", { body })),
+  unbindDevice: ({ id, device }: { id: number; device: number }) =>
+    unwrap(api.DELETE("/api/v1/users/{id}/bound-devices/{device}", { params: { path: { id, device } } })),
 };
+
+/** One paid period: a month up to the billing day, or 30 days without one. */
+export const onePeriod = (u: Pick<User, "billing_day">): Schemas["ExtendInputBody"] => (u.billing_day != null ? { months: 1 } : { days: 30 });

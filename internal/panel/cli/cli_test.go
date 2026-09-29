@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/db"
 )
 
 // The host script opens the new inbound's port in ufw from stdout, so it must be bare.
@@ -38,6 +40,51 @@ func TestInboundAddPrintsPortForHostScript(t *testing.T) {
 	out.Reset()
 	if err := inboundCmd(ctx, st, set, []string{"list"}, &out, &errOut); err != nil || !strings.Contains(out.String(), "2083/tcp") {
 		t.Fatalf("list: %v %q", err, out.String())
+	}
+}
+
+// A moved inbound's port goes to stdout for ufw on this server only; a remote node's port
+// is opened on that node's server, so the panel's host script must not open it here.
+func TestInboundSetPrintsPortOnlyForOwnNode(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now()
+	if err := domain.Seed(ctx, st, now); err != nil {
+		t.Fatal(err)
+	}
+	set := settings.New(st.Q)
+	var out, errOut bytes.Buffer
+	if err := inboundCmd(ctx, st, set, []string{"set", "vless-xhttp", "--port", "2443"}, &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "2443/tcp\n" || !strings.Contains(errOut.String(), "443 → 2443/tcp") {
+		t.Fatalf("own node: stdout %q, stderr %q", out.String(), errOut.String())
+	}
+
+	n, err := st.Q.CreateNode(ctx, db.CreateNodeParams{Name: "🇺🇸 США", Address: "203.0.113.7:25305", PublicHost: "203.0.113.7", CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := strconv.FormatInt(n.ID, 10)
+	for _, args := range [][]string{
+		{"add", "hysteria2", "--node", node, "--port", "2443"},
+		{"set", "hysteria2", "--node", node, "--port", "3443"},
+	} {
+		out.Reset()
+		errOut.Reset()
+		if err := inboundCmd(ctx, st, set, args, &out, &errOut); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if out.Len() != 0 || !strings.Contains(errOut.String(), "ufw allow "+args[len(args)-1]+"/udp") {
+			t.Fatalf("%v: remote node must not print a rule for this server: stdout %q, stderr %q", args, out.String(), errOut.String())
+		}
+	}
+	if err := inboundCmd(ctx, st, set, []string{"set", "nope", "--port", "3000"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("unknown inbound: %v", err)
 	}
 }
 

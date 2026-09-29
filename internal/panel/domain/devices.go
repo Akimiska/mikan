@@ -1,0 +1,235 @@
+package domain
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"regexp"
+	"strings"
+	"time"
+
+	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/db"
+)
+
+// Devices binds a subscription to the devices that use it, against resale: a device
+// that sends its hardware id (x-hwid, sent by Happ, Koala Clash, INCY, v2RayTun,
+// FlClashX…) gets keys of its own, so it can be unbound — and cut off — alone. Apps
+// without an id share the user's own keys as one device. The user's device limit is
+// the number of places.
+type Devices struct {
+	st      *store.Store
+	pool    *Pool
+	changes Changes
+	now     func() time.Time
+}
+
+// DeviceInfo is what a client tells about itself when it fetches the subscription.
+type DeviceInfo struct {
+	HWID, OS, OSVersion, Model, App, IP string
+}
+
+var hwidRe = regexp.MustCompile(`^[a-zA-Z0-9=-]{10,64}$`)
+
+// ValidHWID follows Remnawave's rule, which the apps are built for.
+func ValidHWID(s string) bool { return hwidRe.MatchString(s) }
+
+// UnbindCooldown: the subscriber unbinds at most one device a day; otherwise a reseller
+// would let buyers in one after another.
+const UnbindCooldown = 24 * time.Hour
+
+var (
+	ErrDeviceLimit    = errors.New("device_limit")    // the user's places are taken
+	ErrNoHWID         = errors.New("no_hwid")         // the app sends no device id and one is required
+	ErrUnbindCooldown = errors.New("unbind_cooldown") // the subscriber unbound a device less than a day ago
+)
+
+func NewDevices(st *store.Store, pool *Pool, changes Changes, now func() time.Time) *Devices {
+	return &Devices{st: st, pool: pool, changes: changes, now: now}
+}
+
+// clip keeps what a client reports short and printable.
+func clip(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(s))
+	if len([]rune(s)) > n {
+		s = string([]rune(s)[:n])
+	}
+	return s
+}
+
+// Bind returns the slot whose keys a device fetching the subscription gets. A new
+// device takes a free place: its own slot with an id, the user's slot without one.
+func (d *Devices) Bind(ctx context.Context, u db.User, in DeviceInfo, requireHWID bool) (db.Slot, error) {
+	hwid := in.HWID
+	if !ValidHWID(hwid) {
+		hwid = ""
+	}
+	if hwid == "" && requireHWID {
+		return db.Slot{}, ErrNoHWID
+	}
+	slot, created, err := d.bind(ctx, u, hwid, in)
+	if errors.Is(err, ErrNoSlots) {
+		if err := d.pool.Refill(ctx, RefillBatch); err != nil {
+			return db.Slot{}, err
+		}
+		d.changes.SlotsChanged()
+		slot, created, err = d.bind(ctx, u, hwid, in)
+	}
+	if err != nil {
+		return db.Slot{}, err
+	}
+	if created && hwid != "" {
+		d.changes.PoliciesChanged() // the new slot is allowed from now on
+	}
+	return slot, nil
+}
+
+func (d *Devices) bind(ctx context.Context, u db.User, hwid string, in DeviceInfo) (slot db.Slot, created bool, err error) {
+	now := d.now().Unix()
+	os, osv, model, app, ip := clip(in.OS, 40), clip(in.OSVersion, 40), clip(in.Model, 60), clip(in.App, 120), clip(in.IP, 45)
+	err = d.st.Tx(ctx, func(q *db.Queries) error {
+		dev, err := q.GetBoundDevice(ctx, db.GetBoundDeviceParams{UserID: u.ID, Hwid: hwid})
+		if err == nil {
+			// Apps do not send every header every time: keep what is known.
+			keep := func(v, old string) string {
+				if v == "" {
+					return old
+				}
+				return v
+			}
+			if err := q.TouchBoundDevice(ctx, db.TouchBoundDeviceParams{Os: keep(os, dev.Os), OsVersion: keep(osv, dev.OsVersion), Model: keep(model, dev.Model),
+				App: keep(app, dev.App), LastIp: keep(ip, dev.LastIp), LastSeen: now, ID: dev.ID}); err != nil {
+				return err
+			}
+			slot, err = q.GetSlot(ctx, dev.SlotID)
+			return err
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		n, err := q.CountBoundDevices(ctx, u.ID)
+		if err != nil {
+			return err
+		}
+		if u.DeviceLimit.Valid && n >= u.DeviceLimit.Int64 {
+			return ErrDeviceLimit
+		}
+		if hwid == "" {
+			if !u.SlotID.Valid {
+				return errors.New("user has no slot")
+			}
+			slot, err = q.GetSlot(ctx, u.SlotID.Int64)
+		} else {
+			slot, err = q.TakeFreeSlot(ctx)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNoSlots
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := q.CreateBoundDevice(ctx, db.CreateBoundDeviceParams{UserID: u.ID, Hwid: hwid, SlotID: slot.ID, Os: os, OsVersion: osv, Model: model,
+			App: app, LastIp: ip, CreatedAt: now, LastSeen: now}); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	return slot, created, err
+}
+
+// Unbind frees a device's place and cuts it off: its own slot burns (the node drops it
+// at once). The shared place of apps without an id is the user's own slot: it is replaced
+// with a fresh one, the subscription link stays. The subscriber may do this once a day.
+func (d *Devices) Unbind(ctx context.Context, userID, deviceID int64, bySubscriber bool) error {
+	err := d.unbind(ctx, userID, deviceID, bySubscriber)
+	if errors.Is(err, ErrNoSlots) {
+		if err := d.pool.Refill(ctx, RefillBatch); err != nil {
+			return err
+		}
+		d.changes.SlotsChanged()
+		err = d.unbind(ctx, userID, deviceID, bySubscriber)
+	}
+	if err == nil {
+		d.changes.PoliciesChanged()
+	}
+	return err
+}
+
+func (d *Devices) unbind(ctx context.Context, userID, deviceID int64, bySubscriber bool) error {
+	now := d.now()
+	return d.st.Tx(ctx, func(q *db.Queries) error {
+		u, err := q.GetUser(ctx, userID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		dev, err := q.GetBoundDeviceByID(ctx, db.GetBoundDeviceByIDParams{ID: deviceID, UserID: userID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if bySubscriber && now.Sub(time.Unix(u.UnboundAt, 0)) < UnbindCooldown {
+			return ErrUnbindCooldown
+		}
+		if dev.Hwid == "" {
+			fresh, err := q.TakeFreeSlot(ctx)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNoSlots
+			}
+			if err != nil {
+				return err
+			}
+			if err := q.SetUserSlot(ctx, db.SetUserSlotParams{SlotID: sql.NullInt64{Int64: fresh.ID, Valid: true}, UpdatedAt: now.Unix(), ID: userID}); err != nil {
+				return err
+			}
+		}
+		if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, ID: dev.SlotID}); err != nil {
+			return err
+		}
+		if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
+			return err
+		}
+		if bySubscriber {
+			return q.SetUserUnboundAt(ctx, db.SetUserUnboundAtParams{UnboundAt: now.Unix(), ID: userID})
+		}
+		return nil
+	})
+}
+
+// NextUnbind is when the subscriber may unbind a device again (zero: now).
+func NextUnbind(u db.User, now time.Time) time.Time {
+	next := time.Unix(u.UnboundAt, 0).Add(UnbindCooldown)
+	if u.UnboundAt == 0 || !next.After(now) {
+		return time.Time{}
+	}
+	return next.UTC()
+}
+
+// burnDevices burns the slots of a user's devices with ids and forgets all devices:
+// the user is reissued or deleted. The shared place uses the user's own slot, which the
+// caller handles.
+func burnDevices(ctx context.Context, q *db.Queries, userID, now int64) error {
+	devs, err := q.ListBoundDevices(ctx, userID)
+	if err != nil {
+		return err
+	}
+	for _, dev := range devs {
+		if dev.Hwid == "" {
+			continue
+		}
+		if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: dev.SlotID}); err != nil {
+			return err
+		}
+	}
+	return q.DeleteBoundDevicesOf(ctx, userID)
+}

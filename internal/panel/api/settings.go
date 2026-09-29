@@ -16,32 +16,41 @@ import (
 )
 
 type SettingsView struct {
-	Brand        string      `json:"brand"`
-	SupportURL   string      `json:"support_url"`
-	PublicHost   string      `json:"public_host"`
-	Domain       string      `json:"domain"`
-	PanelPort    int         `json:"panel_port"`
-	QuietHourUTC int         `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
-	AdminURL     string      `json:"admin_url"`
-	SubBaseURL   string      `json:"sub_base_url"`
-	SubGroupMain string      `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
-	SubGroupAuto string      `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
-	SubRouting   string      `json:"sub_routing" enum:"ru_direct,all" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN"`
-	Certificate  acme.Status `json:"certificate"`
+	Brand        string `json:"brand"`
+	SupportURL   string `json:"support_url"`
+	PublicHost   string `json:"public_host"`
+	Domain       string `json:"domain"`
+	PanelPort    int    `json:"panel_port"`
+	QuietHourUTC int    `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
+	AdminURL     string `json:"admin_url"`
+	SubBaseURL   string `json:"sub_base_url"`
+	SubGroupMain string `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
+	SubGroupAuto string `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
+	SubRouting   string `json:"sub_routing" enum:"ru_direct,all" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN"`
+	AutoPort     bool   `json:"auto_port" doc:"Переносить подключение на другой порт, если клиенты перестали до него доходить"`
+	AutoSNI      bool   `json:"auto_sni" doc:"Менять сайт маскировки REALITY, если он перестал подходить"`
+	// Devices: see domain.Devices.
+	DeviceBinding bool        `json:"device_binding" doc:"Привязывать подписку к устройствам: у каждого устройства свои ключи"`
+	RequireHWID   bool        `json:"device_require_hwid" doc:"Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место)"`
+	Certificate   acme.Status `json:"certificate"`
 }
 
 type settingsOutput struct{ Body SettingsView }
 
 type patchSettingsInput struct {
 	Body struct {
-		Brand        *string `json:"brand,omitempty" maxLength:"40"`
-		SupportURL   *string `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
-		PublicHost   *string `json:"public_host,omitempty" maxLength:"253"`
-		Domain       *string `json:"domain,omitempty" maxLength:"253"`
-		QuietHourUTC *int    `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
-		SubGroupMain *string `json:"sub_group_main,omitempty" maxLength:"200"`
-		SubGroupAuto *string `json:"sub_group_auto,omitempty" maxLength:"200"`
-		SubRouting   *string `json:"sub_routing,omitempty" enum:"ru_direct,all"`
+		Brand         *string `json:"brand,omitempty" maxLength:"40"`
+		SupportURL    *string `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+		PublicHost    *string `json:"public_host,omitempty" maxLength:"253"`
+		Domain        *string `json:"domain,omitempty" maxLength:"253"`
+		QuietHourUTC  *int    `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
+		SubGroupMain  *string `json:"sub_group_main,omitempty" maxLength:"200"`
+		SubGroupAuto  *string `json:"sub_group_auto,omitempty" maxLength:"200"`
+		SubRouting    *string `json:"sub_routing,omitempty" enum:"ru_direct,all"`
+		AutoPort      *bool   `json:"auto_port,omitempty"`
+		AutoSNI       *bool   `json:"auto_sni,omitempty"`
+		DeviceBinding *bool   `json:"device_binding,omitempty"`
+		RequireHWID   *bool   `json:"device_require_hwid,omitempty"`
 	}
 }
 
@@ -96,6 +105,18 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 		return v, err
 	}
 	if v.QuietHourUTC, _, err = settings.Get[int](ctx, h.d.Settings, "quiet_hour_utc"); err != nil {
+		return v, err
+	}
+	if v.AutoPort, err = h.d.Settings.Bool(ctx, settings.KeyAutoPort, true); err != nil {
+		return v, err
+	}
+	if v.AutoSNI, err = h.d.Settings.Bool(ctx, settings.KeyAutoSNI, true); err != nil {
+		return v, err
+	}
+	if v.DeviceBinding, err = h.d.Settings.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
+		return v, err
+	}
+	if v.RequireHWID, err = h.d.Settings.Bool(ctx, settings.KeyRequireHWID, false); err != nil {
 		return v, err
 	}
 	if v.Brand == "" {
@@ -193,6 +214,14 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if b.QuietHourUTC != nil {
 		if err := settings.Set(ctx, h.d.Settings, "quiet_hour_utc", *b.QuietHourUTC); err != nil {
 			return nil, err
+		}
+	}
+	for key, v := range map[string]*bool{settings.KeyAutoPort: b.AutoPort, settings.KeyAutoSNI: b.AutoSNI,
+		settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID} {
+		if v != nil {
+			if err := settings.Set(ctx, h.d.Settings, key, *v); err != nil {
+				return nil, err
+			}
 		}
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "settings.update", "", "", nil)

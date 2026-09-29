@@ -15,6 +15,7 @@ import (
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/auth"
+	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/server"
@@ -22,6 +23,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/tgbot"
 )
 
 // Panel is the fully wired HTTP side of the panel, without the listener.
@@ -29,6 +31,8 @@ type Panel struct {
 	Handler   http.Handler
 	Settings  *settings.Settings
 	Nodes     *nodesync.Manager
+	Tuner     *autotune.Tuner // nil without nodes
+	Telegram  *tgbot.Bot
 	server    *server.Server
 	spa       *server.SPA
 	subPage   *server.SPA
@@ -54,6 +58,10 @@ type Options struct {
 	PanelCert func() (nodetls.Pair, error)
 	// Certs manages the panel's public certificate; nil in development.
 	Certs *acme.Manager
+	// Autotune are the automatic moves' timings; zero means autotune.DefaultOptions.
+	Autotune autotune.Options
+	// TelegramAPI is the Bot API; "" is Telegram's.
+	TelegramAPI string
 }
 
 type noChanges struct{}
@@ -83,14 +91,21 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		changes = p.Nodes
 		deps.Online = p.Nodes.Online
 		deps.Nodes = p.Nodes
+		tune := o.Autotune
+		if tune == (autotune.Options{}) {
+			tune = autotune.DefaultOptions()
+		}
+		p.Tuner = autotune.New(st, set, p.Nodes, p.Nodes, o.Log, o.Now, tune)
+		deps.Tuner = p.Tuner
 	}
 	deps.PanelCert = o.PanelCert
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
+	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
 	}
-	deps.SubURL = func(ctx context.Context, token string) string {
+	subBase := func(ctx context.Context) string {
 		ep, err := set.Endpoint(ctx)
 		if err != nil || ep.Host == "" {
 			return ""
@@ -99,8 +114,18 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return ""
 		}
-		return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + paths.Sub + "/" + token
+		return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + paths.Sub
 	}
+	deps.SubURL = func(ctx context.Context, token string) string {
+		if base := subBase(ctx); base != "" {
+			return base + "/" + token
+		}
+		return ""
+	}
+	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now,
+		// Telegram apps refuse a Mini App on a self-signed certificate.
+		MiniApp: func() bool { return o.Certs != nil && o.Certs.Status().Kind == "letsencrypt" }})
+	deps.Telegram = p.Telegram
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err
@@ -139,6 +164,12 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing),
 			Direct: []string{publicHost, domainName}}
+		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
+			return subs.Config{}, err
+		}
+		if cfg.RequireHWID, err = set.Bool(ctx, settings.KeyRequireHWID, false); err != nil {
+			return subs.Config{}, err
+		}
 		nodes, err := st.Q.ListNodes(ctx)
 		if err != nil {
 			return subs.Config{}, err
@@ -161,7 +192,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return cfg, nil
 	}
-	subHandler := subs.NewHandler(st, subCfg, subPageHandler, o.Now)
+	subHandler := subs.NewHandler(st, subCfg, subPageHandler, o.Now, deps.Devices, o.TrustProxy)
+	subHandler.SetTelegram(p.Telegram)
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)
@@ -191,6 +223,10 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.Nodes != nil {
 		go p.Nodes.Run(ctx)
 	}
+	if p.Tuner != nil {
+		go p.Tuner.Run(ctx)
+	}
+	go p.Telegram.Run(ctx)
 	go every(ctx, 5*time.Second, func() {
 		if _, err := p.ApplyPaths(ctx); err != nil {
 			p.log.Error("reload paths", "err", err)

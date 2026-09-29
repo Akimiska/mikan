@@ -37,6 +37,32 @@ type InboundView struct {
 	Status      string    `json:"status" enum:"ok,error,unknown"`
 	Error       string    `json:"error,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	Apps        []string  `json:"apps" doc:"Приложения, которым подключение попадает в подписку: mihomo, xray, singbox, stash, other"`
+	Shared      bool      `json:"shared,omitempty" doc:"Один ключ на всех: учёт, лимиты и отключение по пользователям не работают"`
+	AutoPort    bool      `json:"auto_port" doc:"Панель сама переносит подключение на другой порт, если его блокируют (и включено в настройках)"`
+	AutoSNI     bool      `json:"auto_sni" doc:"Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)"`
+	Auto        AutoView  `json:"auto"`
+}
+
+// AutoView is what the automatic moves see and last did for an inbound.
+type AutoView struct {
+	CutOff  bool       `json:"cut_off" doc:"Устройства, которые доходят до других подключений ноды, до этого не доходят"`
+	Blocked int        `json:"blocked" doc:"Сколько таких устройств"`
+	Reached int        `json:"reached" doc:"Сколько из проверяющих все подключения устройств до него дошли"`
+	Since   *time.Time `json:"since,omitempty"`
+	Stuck   string     `json:"stuck,omitempty" enum:"off,waiting,no_port,no_target,exhausted" doc:"Почему отрезанное подключение остаётся как есть"`
+	// The REALITY target's last check, absent before the first one.
+	TargetOK    *bool      `json:"target_ok,omitempty"`
+	TargetError string     `json:"target_error,omitempty"`
+	Last        *AutoEvent `json:"last,omitempty" doc:"Последняя автоматическая смена"`
+}
+
+type AutoEvent struct {
+	Kind   string    `json:"kind" enum:"port,sni"`
+	Old    string    `json:"old"`
+	New    string    `json:"new"`
+	Reason string    `json:"reason" enum:"blocked,target_down,still_blocked"`
+	At     time.Time `json:"at"`
 }
 
 type inboundsOutput struct{ Body []InboundView }
@@ -44,7 +70,7 @@ type inboundOutput struct{ Body InboundView }
 
 type createInboundInput struct {
 	Body struct {
-		Preset string `json:"preset" enum:"vless_reality_xhttp,hysteria2,tuic_v5,vless_reality_vision,vless_reality_grpc,trojan_reality,anytls,custom"`
+		Preset string `json:"preset" enum:"vless_reality_xhttp,hysteria2,tuic_v5,vless_reality_vision,vless_reality_grpc,trojan_reality,anytls,vless_reality_xhttp_pq,trusttunnel,shadowquic,mieru,shadowsocks_2022,sudoku,snell,custom"`
 		NodeID int64  `json:"node_id,omitempty" minimum:"1" doc:"Нода; по умолчанию — своя нода панели"`
 		Port   string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$"`
 		Dest   string `json:"dest,omitempty" maxLength:"255" doc:"host:port для REALITY"`
@@ -61,6 +87,8 @@ type patchInboundInput struct {
 		ServerName  *string `json:"server_name,omitempty" maxLength:"253" doc:"SNI для клиентов, если dest — IP (цель из подбора соседей)"`
 		DisplayName *string `json:"display_name,omitempty" maxLength:"200" doc:"Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию"`
 		Config      *string `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
+		AutoPort    *bool   `json:"auto_port,omitempty"`
+		AutoSNI     *bool   `json:"auto_sni,omitempty"`
 	}
 }
 
@@ -94,12 +122,47 @@ func (h *handlers) listPresets(context.Context, *struct{}) (*presetsOutput, erro
 	return &presetsOutput{Body: presets.All}, nil
 }
 
-func (h *handlers) viewInbound(in db.Inbound) InboundView {
+// lastAuto maps inbound ids to their latest automatic change.
+func (h *handlers) lastAuto(ctx context.Context) (map[int64]db.InboundEvent, error) {
+	rows, err := h.d.Store.Q.LastInboundEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]db.InboundEvent, len(rows))
+	for _, e := range rows {
+		out[e.InboundID] = e
+	}
+	return out, nil
+}
+
+func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) InboundView {
 	info, _ := presets.Get(in.Preset)
 	v := InboundView{ID: in.ID, NodeID: in.NodeID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
-		DisplayName: in.DisplayName, SubName: subs.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: time.Unix(in.UpdatedAt, 0).UTC()}
+		DisplayName: in.DisplayName, SubName: subs.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: time.Unix(in.UpdatedAt, 0).UTC(),
+		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0}
+	if e, ok := last[in.ID]; ok {
+		v.Auto.Last = &AutoEvent{Kind: e.Kind, Old: e.OldValue, New: e.NewValue, Reason: e.Reason, At: time.Unix(e.CreatedAt, 0).UTC()}
+	}
+	if h.d.Tuner != nil {
+		if s, ok := h.d.Tuner.Status(in.ID); ok {
+			v.Auto.CutOff, v.Auto.Blocked, v.Auto.Reached, v.Auto.Stuck = s.CutOff, s.Blocked, s.Reached, s.Stuck
+			if s.CutOff {
+				since := s.Since.UTC()
+				v.Auto.Since = &since
+			}
+			if !s.TargetAt.IsZero() {
+				ok := s.TargetOK
+				v.Auto.TargetOK, v.Auto.TargetError = &ok, s.TargetError
+			}
+		}
+	}
+	v.Apps = []string{}
 	if t, err := proto.Parse(in.Config); err == nil {
 		v.Type, v.Network = t.Type(), t.Network()
+		v.Shared = proto.Shared(t.Type())
+		for _, f := range subs.AppsFor(proto.NeedsOf(t)) {
+			v.Apps = append(v.Apps, string(f))
+		}
 		v.Dest, v.ServerNames = presets.Dest(t)
 		if in.Preset == presets.Custom {
 			v.Title = t.Type()
@@ -124,9 +187,13 @@ func (h *handlers) listInbounds(ctx context.Context, _ *struct{}) (*inboundsOutp
 	if err != nil {
 		return nil, err
 	}
+	last, err := h.lastAuto(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := &inboundsOutput{Body: make([]InboundView, 0, len(rows))}
 	for _, in := range rows {
-		out.Body = append(out.Body, h.viewInbound(in))
+		out.Body = append(out.Body, h.viewInbound(in, last))
 	}
 	return out, nil
 }
@@ -235,7 +302,14 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	}
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.create", "inbound", name, map[string]any{"preset": info.ID, "type": t.Type(), "port": port})
-	return &inboundOutput{Body: h.viewInbound(row)}, nil
+	return &inboundOutput{Body: h.viewInbound(row, nil)}, nil
+}
+
+func flag(on bool) int64 {
+	if on {
+		return 1
+	}
+	return 0
 }
 
 func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*inboundOutput, error) {
@@ -247,6 +321,30 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		return nil, err
 	}
 	b := in.Body
+	autoPort, autoSNI := row.AutoPort, row.AutoSni
+	if b.AutoPort != nil {
+		autoPort = flag(*b.AutoPort)
+	}
+	if b.AutoSNI != nil {
+		autoSNI = flag(*b.AutoSNI)
+	}
+	autoChanged := autoPort != row.AutoPort || autoSNI != row.AutoSni
+	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.DisplayName == nil {
+		// Only the automatic-move switches: clients get nothing new, so updated_at stays
+		// and the block detector keeps trusting their profiles.
+		if autoChanged {
+			if err := h.d.Store.Q.SetInboundAuto(ctx, db.SetInboundAutoParams{AutoPort: autoPort, AutoSni: autoSNI, ID: row.ID}); err != nil {
+				return nil, err
+			}
+			h.audit(ctx, sessionOf(ctx).AdminID, "inbound.auto", "inbound", row.Name, map[string]any{"auto_port": autoPort != 0, "auto_sni": autoSNI != 0})
+		}
+		row.AutoPort, row.AutoSni = autoPort, autoSNI
+		last, err := h.lastAuto(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &inboundOutput{Body: h.viewInbound(row, last)}, nil
+	}
 	port, enabled, config, display := row.Port, row.Enabled, row.Config, row.DisplayName
 	if b.Port != nil {
 		if !domain.ValidPort(*b.Port) {
@@ -323,13 +421,30 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 			return nil, huma.Error422UnprocessableEntity("bad_name", &huma.ErrorDetail{Location: "body.display_name", Message: code})
 		}
 	}
-	row, err = h.d.Store.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: enabled, Config: config, DisplayName: display, UpdatedAt: h.d.Now().Unix(), ID: in.ID})
+	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		var err error
+		if row, err = q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: enabled, Config: config, DisplayName: display, UpdatedAt: h.d.Now().Unix(), ID: in.ID}); err != nil {
+			return err
+		}
+		if autoChanged {
+			if err := q.SetInboundAuto(ctx, db.SetInboundAutoParams{AutoPort: autoPort, AutoSni: autoSNI, ID: row.ID}); err != nil {
+				return err
+			}
+			row.AutoPort, row.AutoSni = autoPort, autoSNI
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil})
-	return &inboundOutput{Body: h.viewInbound(row)}, nil
+	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil,
+		"auto_port": row.AutoPort != 0, "auto_sni": row.AutoSni != 0})
+	last, err := h.lastAuto(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &inboundOutput{Body: h.viewInbound(row, last)}, nil
 }
 
 // detailCode pulls the first error code out of a huma error built by checkConfig.

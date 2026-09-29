@@ -8,13 +8,13 @@ SELECT * FROM tariffs WHERE id = ?;
 SELECT count(*) FROM tariffs;
 
 -- name: CreateTariff :one
-INSERT INTO tariffs (name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tariffs (name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, created_at, billing_day)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateTariff :one
 UPDATE tariffs
-SET name = ?, traffic_limit = ?, duration_days = ?, device_limit = ?, reset_strategy = ?, price_label = ?, sort = ?
+SET name = ?, traffic_limit = ?, duration_days = ?, device_limit = ?, reset_strategy = ?, price_label = ?, sort = ?, billing_day = ?
 WHERE id = ?
 RETURNING *;
 
@@ -39,7 +39,8 @@ RETURNING *;
 UPDATE slots SET state = 'burned', burned_at = ? WHERE id = ?;
 
 -- name: DeleteBurnedSlots :exec
-DELETE FROM slots WHERE state = 'burned' AND id NOT IN (SELECT slot_id FROM users WHERE slot_id IS NOT NULL);
+DELETE FROM slots WHERE state = 'burned' AND id NOT IN (SELECT slot_id FROM users WHERE slot_id IS NOT NULL)
+  AND id NOT IN (SELECT slot_id FROM bound_devices);
 
 -- name: ListSlots :many
 SELECT * FROM slots ORDER BY id;
@@ -48,12 +49,15 @@ SELECT * FROM slots ORDER BY id;
 SELECT * FROM slots WHERE id = ?;
 
 -- name: ListSlotUsers :many
-SELECT s.name AS slot_name, u.id AS user_id FROM slots s JOIN users u ON u.slot_id = s.id;
+-- Every slot that works for a user: the own one and those of bound devices.
+SELECT s.name AS slot_name, u.id AS user_id FROM slots s JOIN users u ON u.slot_id = s.id
+UNION
+SELECT s.name AS slot_name, d.user_id AS user_id FROM slots s JOIN bound_devices d ON d.slot_id = s.id;
 
 -- name: CreateUser :one
 INSERT INTO users (name, contact, note, tags, status, tariff_id, traffic_limit, device_limit, reset_strategy,
-                   period_days, period_start, expires_at, inbounds, sub_token, slot_id, created_at, updated_at)
-VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                   period_days, period_start, expires_at, inbounds, sub_token, slot_id, created_at, updated_at, billing_day)
+VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetUser :one
@@ -68,7 +72,7 @@ SELECT * FROM users ORDER BY id DESC;
 -- name: UpdateUser :one
 UPDATE users
 SET name = ?, contact = ?, note = ?, tags = ?, status = ?, tariff_id = ?, traffic_limit = ?, device_limit = ?,
-    reset_strategy = ?, period_days = ?, period_start = ?, expires_at = ?, inbounds = ?, updated_at = ?
+    reset_strategy = ?, period_days = ?, period_start = ?, expires_at = ?, inbounds = ?, updated_at = ?, billing_day = ?
 WHERE id = ?
 RETURNING *;
 

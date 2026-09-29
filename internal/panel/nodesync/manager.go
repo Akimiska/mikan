@@ -141,23 +141,38 @@ func (m *Manager) Online() map[string]nodeapi.Online {
 	return out
 }
 
-// otherIPs returns, per slot, the devices online on nodes other than id.
-func (m *Manager) otherIPs(id int64) map[string][]string {
-	out := map[string][]string{}
+// otherIPs returns, per slot of node id, the user's devices online anywhere else: on the
+// other nodes, and under the user's other slots (bound devices) on any node. owner maps
+// every slot to its user.
+func (m *Manager) otherIPs(id int64, owner map[string]int64) map[string][]string {
+	type place struct {
+		node int64
+		slot string
+	}
+	byUser := map[int64]map[string][]place{} // user → ip → where it is online
 	for _, s := range m.Syncers() {
-		if s.id == id {
-			continue
-		}
 		for slot, on := range s.Online() {
+			uid, ok := owner[slot]
+			if !ok {
+				continue
+			}
+			if byUser[uid] == nil {
+				byUser[uid] = map[string][]place{}
+			}
 			for _, ip := range on.IPs {
-				if !slices.Contains(out[slot], ip) {
-					out[slot] = append(out[slot], ip)
-				}
+				byUser[uid][ip] = append(byUser[uid][ip], place{s.id, slot})
 			}
 		}
 	}
-	for _, ips := range out {
-		slices.Sort(ips)
+	out := map[string][]string{}
+	for slot, uid := range owner {
+		for ip, where := range byUser[uid] {
+			if len(where) == 1 && where[0] == (place{id, slot}) {
+				continue // only this very slot here: the node counts it itself
+			}
+			out[slot] = append(out[slot], ip)
+		}
+		slices.Sort(out[slot])
 	}
 	return out
 }
@@ -245,17 +260,61 @@ func (m *Manager) Health(id int64) (HealthView, bool) {
 
 // Validate runs mihomo's parser on an inbound on the node that will run it.
 func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRequest) error {
-	s, ok := m.Syncer(id)
-	if !ok {
-		return nodeapi.ErrUnavailable
-	}
-	v, ok := s.node.(interface {
+	v, err := clientOf[interface {
 		Validate(context.Context, nodeapi.ValidateRequest) error
-	})
-	if !ok {
-		return nodeapi.ErrUnavailable
+	}](m, id)
+	if err != nil {
+		return err
 	}
 	return v.Validate(ctx, req)
+}
+
+// Activity reports which inbounds of a node each device reached lately.
+func (m *Manager) Activity(ctx context.Context, id int64) (nodeapi.Activity, error) {
+	c, err := clientOf[interface {
+		Activity(context.Context) (nodeapi.Activity, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.Activity{}, err
+	}
+	return c.Activity(ctx)
+}
+
+// CheckTarget tests a REALITY target from the node that dials it.
+func (m *Manager) CheckTarget(ctx context.Context, id int64, req nodeapi.TargetCheckRequest) (nodeapi.TargetResult, error) {
+	c, err := clientOf[interface {
+		CheckTarget(context.Context, nodeapi.TargetCheckRequest) (nodeapi.TargetResult, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.TargetResult{}, err
+	}
+	return c.CheckTarget(ctx, req)
+}
+
+// ScanTargets looks for REALITY targets next to a node, from the node itself.
+func (m *Manager) ScanTargets(ctx context.Context, id int64, req nodeapi.TargetScanRequest) (nodeapi.TargetScan, error) {
+	c, err := clientOf[interface {
+		ScanTargets(context.Context, nodeapi.TargetScanRequest) (nodeapi.TargetScan, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.TargetScan{}, err
+	}
+	return c.ScanTargets(ctx, req)
+}
+
+// clientOf returns a node's client as T: methods beyond Node are optional, and tests
+// stand in for nodes with fakes that have only some of them.
+func clientOf[T any](m *Manager, id int64) (T, error) {
+	var zero T
+	s, ok := m.Syncer(id)
+	if !ok {
+		return zero, nodeapi.ErrUnavailable
+	}
+	c, ok := s.node.(T)
+	if !ok {
+		return zero, nodeapi.ErrUnavailable
+	}
+	return c, nil
 }
 
 // Retire tells a node being removed from the panel to drop its listeners and users.
@@ -288,15 +347,13 @@ func (m *Manager) maintain(ctx context.Context) {
 		m.log.Error("record devices", "err", err)
 	}
 	m.reconcile(ctx)
-	syncers := m.Syncers()
-	for _, s := range syncers {
+	for _, s := range m.Syncers() {
 		// Reconcile: picks up changes made outside the API (server CLI, restore) and pushes
 		// policies, whose key changes by time alone when a user crosses expires_at.
 		s.SlotsChanged()
-		if len(syncers) > 1 {
-			// Each node only sees its own traffic: refresh the quota left after the others.
-			s.PoliciesChanged()
-		}
+		// A user's quota and devices span nodes and bound devices (a slot each), while each
+		// node counts per slot: refresh the quota left and the devices seen elsewhere.
+		s.PoliciesChanged()
 	}
 }
 
@@ -305,12 +362,13 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Unix()
 	changed := false
 	for _, u := range users {
 		start := u.PeriodStart
 		switch u.ResetStrategy {
 		case "month_start":
+			// Monthly on the billing day, or the 1st without one.
+			monthStart := domain.MonthPeriodStart(now, u.BillingDay).Unix()
 			if start >= monthStart {
 				continue
 			}

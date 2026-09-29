@@ -19,12 +19,14 @@ import (
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/auth"
+	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgbot"
 )
 
 type Deps struct {
@@ -40,6 +42,7 @@ type Deps struct {
 	Now        func() time.Time
 
 	Users     *domain.Users
+	Devices   *domain.Devices
 	Pool      *domain.Pool
 	Changes   domain.Changes
 	SubURL    func(ctx context.Context, token string) string
@@ -50,6 +53,12 @@ type Deps struct {
 	Nodes NodeRuntime
 	// PanelCert is the client certificate remote nodes pin; their join keys carry its hash.
 	PanelCert func() (nodetls.Pair, error)
+	// Tuner reports what the automatic moves see; nil when the panel runs without nodes.
+	Tuner interface {
+		Status(inboundID int64) (autotune.Status, bool)
+	}
+	// Telegram is the subscription owners' bot.
+	Telegram *tgbot.Bot
 }
 
 // NodeRuntime is what the API needs from the running nodes.
@@ -60,6 +69,8 @@ type NodeRuntime interface {
 	// Retire makes a node drop its listeners and users before it is removed.
 	Retire(ctx context.Context, id int64) error
 	NodesChanged()
+	// ScanTargets looks for REALITY targets from the node itself (its RTTs, its routes).
+	ScanTargets(ctx context.Context, id int64, req nodeapi.TargetScanRequest) (nodeapi.TargetScan, error)
 }
 
 type ctxKey int
@@ -130,6 +141,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTargets()
 	h.registerStats()
 	h.registerSettings()
+	h.registerTelegram()
 	h.registerNodes()
 	return noStore(mux), api, nil
 }

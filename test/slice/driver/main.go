@@ -1,8 +1,14 @@
 // driver runs the vertical slice against a real panel and node:
 //
-//	nodes:   add a remote node through the API and hand its join key to the node2 container
-//	prepare: log in, create a user by tariff, turn its subscription into a client config
-//	verify:  push traffic through every protocol of both nodes and check the accounting
+//	nodes:          add a remote node through the API and hand its join key to the node2 container
+//	prepare:        log in, create a user by tariff, turn its subscription into a client config
+//	verify:         push traffic through every protocol of both nodes and check the accounting
+//	devices:        a device that sends its id gets keys of its own; the client gets them too
+//	devices-check:  the device's keys work on both nodes and count to the user; unbound, they
+//	                stop at once; extra devices get the stub
+//	autotune:       with the node's 443/tcp dropped for the client (the blocker container), keep
+//	                checking every proxy like a url-test group until the panel moves XHTTP
+//	autotune-check: the client on the new profile gets through XHTTP again
 package main
 
 import (
@@ -17,9 +23,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -34,16 +42,26 @@ const (
 // protos: the four default inbounds of a fresh install, then the ones prepare adds through
 // the API the way an admin would (the last local one as an own template from the editor),
 // then two default inbounds of the remote node, named with its flag in the subscription.
-var protos = []struct{ name, proxy string }{
-	{"vision", "VLESS Vision"}, {"xhttp", "VLESS XHTTP"}, {"hy2", "Hysteria2"}, {"tuic", "TUIC"},
-	{"grpc", "VLESS gRPC"}, {"trojan", "Trojan"}, {"anytls", "AnyTLS"}, {"custom-vmess", "Custom"},
-	{"us-xhttp", "🇺🇸 VLESS XHTTP"}, {"us-hy2", "🇺🇸 Hysteria2"},
+// Shared ones have one key for everyone: they work, but no user is charged for them.
+var protos = []struct {
+	name, proxy string
+	shared      bool
+}{
+	{"vision", "VLESS Vision", false}, {"xhttp", "VLESS XHTTP", false}, {"hy2", "Hysteria2", false}, {"tuic", "TUIC", false},
+	{"grpc", "VLESS gRPC", false}, {"trojan", "Trojan", false}, {"anytls", "AnyTLS", false}, {"pq", "VLESS PQ", false},
+	{"trusttunnel", "TrustTunnel", false}, {"shadowquic", "ShadowQUIC", false}, {"mieru", "Mieru", false},
+	{"ss", "Shadowsocks", true}, {"sudoku", "Sudoku", true}, {"snell", "Snell", true},
+	{"custom-vmess", "Custom", false},
+	{"us-xhttp", "🇺🇸 VLESS XHTTP", false}, {"us-hy2", "🇺🇸 Hysteria2", false},
 }
 
 // localProtos run on the panel's own node; a new node gets remoteInbounds defaults.
 const (
-	localProtos    = 8
+	localProtos    = 15
 	remoteInbounds = 4
+	// clashOnly: local inbounds only Clash apps get (TrustTunnel, ShadowQUIC, Mieru,
+	// Sudoku, Snell); they have no share link.
+	clashOnly = 5
 )
 
 type panel struct {
@@ -122,6 +140,14 @@ func main() {
 		prepare()
 	case "verify":
 		verify()
+	case "devices":
+		devices()
+	case "devices-check":
+		devicesCheck()
+	case "autotune":
+		autotune()
+	case "autotune-check":
+		autotuneCheck()
 	}
 }
 
@@ -132,19 +158,27 @@ func prepare() {
 		{"preset": "vless_reality_grpc"},
 		{"preset": "trojan_reality"},
 		{"preset": "anytls"},
-		{"preset": "custom", "port": "2096", "config": "type: vmess\nws-path: /vm\nmikan:\n  tls: node\n"},
+		{"preset": "vless_reality_xhttp_pq"},
+		{"preset": "trusttunnel"},
+		{"preset": "shadowquic"},
+		{"preset": "mieru"},
+		{"preset": "shadowsocks_2022"},
+		{"preset": "sudoku"},
+		{"preset": "snell"},
+		{"preset": "custom", "port": "2097", "config": "type: vmess\nws-path: /vm\nmikan:\n  tls: node\n"},
 	} {
 		p.call("POST", "/api/v1/inbounds", in, nil)
 	}
 	// An own template that mihomo cannot run is refused before it reaches the node.
-	if code := p.try("POST", "/api/v1/inbounds", map[string]any{"preset": "custom", "port": "2097", "config": "type: vless\nws-path: /plain\n"}); code != 422 {
+	if code := p.try("POST", "/api/v1/inbounds", map[string]any{"preset": "custom", "port": "2098", "config": "type: vless\nws-path: /plain\n"}); code != 422 {
 		log.Fatalf("an unencrypted vless template must be refused, got %d", code)
 	}
 	waitNode(p, localProtos)
 	waitRemote(p)
 	// GEOSITE/GEOIP rules of the default routing would make the client download geodata
-	// from GitHub on start; the slice checks the tunnel, not the geodata.
-	p.call("PATCH", "/api/v1/settings", map[string]any{"sub_routing": "all"}, nil)
+	// from GitHub on start; the slice checks the tunnel, not the geodata. The automatic
+	// moves run on test timings here: off until the autotune phase blocks a port on purpose.
+	p.call("PATCH", "/api/v1/settings", map[string]any{"sub_routing": "all", "auto_port": false, "auto_sni": false}, nil)
 	var tariffs []struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
@@ -164,15 +198,33 @@ func prepare() {
 	}
 	token := u.SubURL[strings.LastIndex(u.SubURL, "/")+1:]
 
-	// URI format for Happ-like clients: one link per inbound.
-	links := fetchSub(token, "Happ/3.4.1")
+	// Links for apps that read them: every inbound of both nodes with a share-link format.
+	links := fetchSub(token, "Shadowrocket/2592")
 	decoded, err := base64.StdEncoding.DecodeString(string(links))
-	// Every inbound of both nodes has a link; only some of the remote ones are downloaded through.
-	if err != nil || strings.Count(string(decoded), "\n") != localProtos+remoteInbounds-1 {
+	if err != nil || strings.Count(string(decoded), "\n") != localProtos-clashOnly+remoteInbounds-1 {
 		log.Fatalf("uri subscription: %v %q", err, decoded)
 	}
+	// Happ is on Xray: no TUIC or AnyTLS for it, the rest as for everyone.
+	raw, _ := base64.StdEncoding.DecodeString(string(fetchSub(token, "Happ/3.4.1")))
+	happ := string(raw)
+	if strings.Contains(happ, "tuic://") || strings.Contains(happ, "anytls://") || !strings.Contains(happ, "ss://") ||
+		strings.Count(happ, "\n") != localProtos-clashOnly-2+remoteInbounds-1-1 {
+		log.Fatalf("Happ gets only what Xray speaks: %q", happ)
+	}
 
-	// mihomo profile: expose one mixed port per proxy so the verify phase can pick a protocol.
+	writeClient(token, nil)
+	for name, v := range map[string]string{"user": strconv.FormatInt(u.ID, 10), "token": token} {
+		if err := os.WriteFile("/work/"+name, []byte(v), 0o644); err != nil {
+			log.Fatal(err)
+		}
+	}
+	log.Print("client config written from the subscription")
+}
+
+// writeClient turns the user's mihomo profile into the client's config, with one mixed
+// port per proxy so a phase can pick a protocol. A device's own profile adds its proxies
+// under devicePrefix, reachable on 12001… in devProtos order.
+func writeClient(token string, device map[string]any) {
 	var cfg map[string]any
 	if err := json.Unmarshal(fetchSub(token, "mihomo/1.19.31"), &cfg); err != nil {
 		log.Fatalf("clash subscription is not JSON/YAML: %v", err)
@@ -180,19 +232,28 @@ func prepare() {
 	cfg["allow-lan"] = true
 	cfg["bind-address"] = "*"
 	delete(cfg, "dns")
-	var listeners []map[string]any
+	// in-direct: requests from the client's own address, as its app fetches the profile.
+	listeners := []map[string]any{{"name": "in-direct", "type": "mixed", "listen": "0.0.0.0", "port": directPort, "proxy": "DIRECT"}}
 	for i, pr := range protos {
 		listeners = append(listeners, map[string]any{"name": "in-" + pr.name, "type": "mixed", "listen": "0.0.0.0", "port": 11001 + i, "proxy": pr.proxy})
+	}
+	if device != nil {
+		proxies, _ := cfg["proxies"].([]any)
+		for _, px := range device["proxies"].([]any) {
+			m := px.(map[string]any)
+			m["name"] = devicePrefix + m["name"].(string)
+			proxies = append(proxies, m)
+		}
+		cfg["proxies"] = proxies
+		for i, pr := range devProtos {
+			listeners = append(listeners, map[string]any{"name": "dev-" + pr.name, "type": "mixed", "listen": "0.0.0.0", "port": 12001 + i, "proxy": devicePrefix + pr.proxy})
+		}
 	}
 	cfg["listeners"] = listeners
 	raw, _ := json.MarshalIndent(cfg, "", "  ")
 	if err := os.WriteFile("/work/client.yaml", raw, 0o644); err != nil {
 		log.Fatal(err)
 	}
-	if err := os.WriteFile("/work/user", []byte(strconv.FormatInt(u.ID, 10)), 0o644); err != nil {
-		log.Fatal(err)
-	}
-	log.Print("client config written from the subscription")
 }
 
 func waitNode(p *panel, want int) {
@@ -219,8 +280,19 @@ func waitNode(p *panel, want int) {
 	log.Fatal("node did not come up with healthy listeners")
 }
 
-func fetchSub(token, ua string) []byte {
-	hc := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+// directPort is the client's mixed port without a proxy behind it.
+const directPort = 11000
+
+func fetchSub(token, ua string) []byte { return fetchSubVia(token, ua, "") }
+
+// fetchSubVia fetches the subscription through a client's SOCKS port ("" = from here):
+// the panel records the device that took the profile by its address.
+func fetchSubVia(token, ua, socks string) []byte {
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	if socks != "" {
+		tr.Proxy = http.ProxyURL(&url.URL{Scheme: "socks5", Host: socks})
+	}
+	hc := &http.Client{Timeout: 10 * time.Second, Transport: tr}
 	req, _ := http.NewRequest("GET", subPrefix+token, nil)
 	req.Header.Set("User-Agent", ua)
 	resp, err := hc.Do(req)
@@ -264,13 +336,16 @@ func verify() {
 	p.call("GET", "/api/v1/users/"+strconv.FormatInt(id, 10), nil, &before)
 
 	const each = 16 * mib
+	var want int64
 	for i, pr := range protos {
 		if _, err := download(11001+i, each); err != nil {
 			log.Fatalf("%s: download through the subscription config failed: %v", pr.name, err)
 		}
 		log.Printf("%s: 16 MiB downloaded", pr.name)
+		if !pr.shared {
+			want += each
+		}
 	}
-	want := int64(len(protos) * each)
 	var after user
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
@@ -302,6 +377,219 @@ func verify() {
 	}
 	log.Print("re-enabled user works again")
 	log.Print("SLICE OK")
+}
+
+// The device of the devices phases: its proxies go into the client under devicePrefix;
+// devProtos are checked through it — two local protocols and one of the remote node.
+const (
+	devicePrefix = "📱 "
+	deviceHWID   = "slice-phone-00000001"
+)
+
+var devProtos = []struct{ name, proxy string }{
+	{"vision", "VLESS Vision"}, {"hy2", "Hysteria2"}, {"us-xhttp", "🇺🇸 VLESS XHTTP"},
+}
+
+// fetchDevice fetches the subscription as a device that sends its id.
+func fetchDevice(token, hwid string) (*http.Response, []byte) {
+	hc := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	req, _ := http.NewRequest("GET", subPrefix+token, nil)
+	req.Header.Set("User-Agent", "mihomo/1.19.31")
+	req.Header.Set("X-Hwid", hwid)
+	req.Header.Set("X-Device-Os", "Android")
+	req.Header.Set("X-Device-Model", "Slice "+hwid[6:12])
+	resp, err := hc.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		log.Fatalf("subscription for %s: %d", hwid, resp.StatusCode)
+	}
+	return resp, raw
+}
+
+// proxyField is a field of the named proxy in a clash profile.
+func proxyField(profile map[string]any, name, field string) string {
+	for _, px := range profile["proxies"].([]any) {
+		if m := px.(map[string]any); m["name"] == name {
+			v, _ := m[field].(string)
+			return v
+		}
+	}
+	return ""
+}
+
+// devices: a device with an id gets keys of its own, not the user's shared ones.
+func devices() {
+	raw, _ := os.ReadFile("/work/token")
+	token := string(raw)
+	var shared, own map[string]any
+	if err := json.Unmarshal(fetchSub(token, "mihomo/1.19.31"), &shared); err != nil {
+		log.Fatal(err)
+	}
+	_, body := fetchDevice(token, deviceHWID)
+	if err := json.Unmarshal(body, &own); err != nil {
+		log.Fatalf("device profile: %v", err)
+	}
+	a, b := proxyField(shared, "VLESS Vision", "uuid"), proxyField(own, "VLESS Vision", "uuid")
+	if a == "" || b == "" || a == b {
+		log.Fatalf("the device must get keys of its own: shared %q, device %q", a, b)
+	}
+	if _, again := fetchDevice(token, deviceHWID); !bytes.Contains(again, []byte(b)) {
+		log.Fatal("the device must keep its keys on the next fetch")
+	}
+	writeClient(token, own)
+	log.Print("the device got keys of its own; client config written with them")
+}
+
+// devicesCheck: the device's keys work on both nodes and its traffic counts to the user;
+// unbound by the admin, they stop at once while the shared keys keep working. Extra
+// devices get the stub once the places are taken.
+func devicesCheck() {
+	p := login()
+	raw, _ := os.ReadFile("/work/user")
+	id := string(raw)
+	var before, after user
+	p.call("GET", "/api/v1/users/"+id, nil, &before)
+	const each = 4 * mib
+	for i, pr := range devProtos {
+		if _, err := download(12001+i, each); err != nil {
+			log.Fatalf("device %s: %v", pr.name, err)
+		}
+	}
+	want := int64(len(devProtos) * each)
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		p.call("GET", "/api/v1/users/"+id, nil, &after)
+		if after.UsedDown-before.UsedDown >= want {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if got := after.UsedDown - before.UsedDown; float64(got) < float64(want)*0.99 || float64(got) > float64(want)*1.01 {
+		log.Fatalf("the device's traffic must count to the user: %d, expected %d", got, want)
+	}
+	log.Printf("the device's keys work on both nodes, %d bytes counted to the user", want)
+
+	var bound []struct {
+		ID   int64  `json:"id"`
+		HWID string `json:"hwid"`
+	}
+	p.call("GET", "/api/v1/users/"+id+"/bound-devices", nil, &bound)
+	var dev int64
+	for _, d := range bound {
+		if d.HWID == deviceHWID {
+			dev = d.ID
+		}
+	}
+	if dev == 0 || len(bound) != 2 {
+		log.Fatalf("bound devices: %+v (the shared place and the phone)", bound)
+	}
+	p.call("DELETE", "/api/v1/users/"+id+"/bound-devices/"+strconv.FormatInt(dev, 10), nil, nil)
+	time.Sleep(1500 * time.Millisecond)
+	for i, pr := range devProtos {
+		if _, err := download(12001+i, mib); err == nil {
+			log.Fatalf("the unbound device still gets through %s", pr.name)
+		}
+	}
+	if _, err := download(11001, mib); err != nil {
+		log.Fatalf("the shared keys must keep working: %v", err)
+	}
+	log.Print("the unbound device is cut off on both nodes, the shared keys work")
+
+	token, _ := os.ReadFile("/work/token")
+	for _, hwid := range []string{"slice-tablet-0000002", "slice-laptop-0000003"} {
+		if resp, _ := fetchDevice(string(token), hwid); resp.Header.Get("X-Hwid-Max-Devices-Reached") != "" {
+			log.Fatalf("%s must get a free place", hwid)
+		}
+	}
+	resp, body := fetchDevice(string(token), "slice-extra-00000004")
+	if resp.Header.Get("X-Hwid-Max-Devices-Reached") != "true" || !bytes.Contains(body, []byte(`"port":1`)) {
+		log.Fatalf("a device over the limit gets the stub: %v %.200s", resp.Header, body)
+	}
+	log.Print("a device over the limit gets the stub")
+	log.Print("DEVICES OK")
+}
+
+// xhttpPort is the client's mixed port of the local VLESS XHTTP (protos[1]).
+const xhttpPort = 11002
+
+// autotune: the blocker container drops the client's packets to the node's 443/tcp, where
+// the local XHTTP listens, like an ISP's DPI. The client keeps checking every local proxy
+// the way a Clash url-test group does; the panel must move XHTTP on its own. The phase
+// then writes the new profile for the client.
+func autotune() {
+	p := login()
+	p.call("PATCH", "/api/v1/settings", map[string]any{"auto_port": true}, nil)
+	raw, _ := os.ReadFile("/work/token")
+	token := string(raw)
+	// The client takes its profile from its own address: now the detector trusts it.
+	fetchSubVia(token, "mihomo/1.19.31", net.JoinHostPort("client", strconv.Itoa(directPort)))
+	if _, err := download(xhttpPort, 64<<10); err == nil {
+		log.Fatal("the blocker did not cut XHTTP off")
+	}
+	start := time.Now()
+	for time.Since(start) < 150*time.Second {
+		var wg sync.WaitGroup
+		for i := range localProtos {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _ = download(11001+i, 16<<10)
+			}()
+		}
+		wg.Wait()
+		var ins []struct {
+			Name   string `json:"name"`
+			NodeID int64  `json:"node_id"`
+			Port   string `json:"port"`
+			Auto   struct {
+				CutOff bool `json:"cut_off"`
+				Last   *struct {
+					Kind   string `json:"kind"`
+					Old    string `json:"old"`
+					New    string `json:"new"`
+					Reason string `json:"reason"`
+				} `json:"last"`
+			} `json:"auto"`
+		}
+		p.call("GET", "/api/v1/inbounds", nil, &ins)
+		for _, in := range ins {
+			if in.NodeID != 1 || in.Name != "vless-xhttp" || in.Port == "443" {
+				continue
+			}
+			l := in.Auto.Last
+			if l == nil || l.Kind != "port" || l.Old != "443" || l.New != in.Port || l.Reason != "blocked" {
+				log.Fatalf("XHTTP moved to %s without a matching event: %+v", in.Port, l)
+			}
+			log.Printf("the panel moved the blocked XHTTP 443 → %s after %s", in.Port, time.Since(start).Round(time.Second))
+			for _, other := range ins {
+				if other.NodeID == 1 && other.Name != "vless-xhttp" && other.Auto.Last != nil {
+					log.Fatalf("%s was moved too, but only XHTTP was blocked", other.Name)
+				}
+			}
+			writeClient(token, nil)
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+	log.Fatal("the panel did not move the blocked inbound")
+}
+
+// autotuneCheck: the client runs the new profile; 443/tcp is still dropped for it.
+func autotuneCheck() {
+	var err error
+	for range 10 {
+		if _, err = download(xhttpPort, mib); err == nil {
+			log.Print("XHTTP works again on its new port")
+			log.Print("AUTOTUNE OK")
+			return
+		}
+		time.Sleep(time.Second)
+	}
+	log.Fatalf("XHTTP on its new port: %v", err)
 }
 
 // addNode registers the node2 container the way an admin adds a remote node and passes

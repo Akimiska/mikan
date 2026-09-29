@@ -6,7 +6,7 @@ import { meQuery, qk, useInbounds, useSettings } from "../../api/hooks";
 import { LangSwitch } from "../../components/lang";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Button, ErrorState, Field, PageHeader, Pill, QR, Skeleton } from "../../components/ui";
+import { Button, ErrorState, Field, PageHeader, Pill, QR, Skeleton, Switch } from "../../components/ui";
 import { getLocale, t, tMaybe } from "../../i18n";
 import { ago } from "../../lib/format";
 
@@ -23,11 +23,13 @@ export function SettingsPage() {
         </section>
       ) : (
         <div className="grid items-start gap-4 xl:grid-cols-2">
-          <div className="flex flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-4">
             <ServerCard s={settings.data} />
             <SubscriptionCard s={settings.data} />
+            <AutoCard s={settings.data} />
+            <DevicesCard s={settings.data} />
           </div>
-          <div className="flex flex-col gap-4">
+          <div className="flex min-w-0 flex-col gap-4">
             <AccessCard s={settings.data} />
             <CertificateCard s={settings.data} />
             <PasswordCard />
@@ -164,6 +166,68 @@ function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
           {t("common.save")}
         </Button>
       </form>
+    </section>
+  );
+}
+
+/** Global switches of the automatic fixes; each connection can opt out in its settings. */
+function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const rows = [
+    { key: "auto_port", title: t("settings.autoPort"), sub: t("settings.autoPortSub"), on: s.auto_port },
+    { key: "auto_sni", title: t("settings.autoSni"), sub: t("settings.autoSniSub"), on: s.auto_sni },
+  ] as const;
+  return (
+    <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.auto")}</h2>
+          <div className="card-sub">{t("settings.autoSub")}</div>
+        </div>
+      </div>
+      <ul className="row-list">
+        {rows.map((r) => (
+          <li key={r.key} className="flex items-start justify-between gap-4 py-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium">{r.title}</div>
+              <div className="mt-1 text-xs text-[var(--ink-500)]">{r.sub}</div>
+            </div>
+            <Switch checked={r.on} label={r.title} disabled={save.isPending} onChange={(v) => save.mutate({ [r.key]: v })} />
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.autoNote")}</p>
+    </section>
+  );
+}
+
+function DevicesCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  return (
+    <section className="card glass reveal" style={{ "--i": 3 } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.devices")}</h2>
+          <div className="card-sub">{t("settings.devicesSub")}</div>
+        </div>
+      </div>
+      <ul className="row-list">
+        <li className="flex items-start justify-between gap-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium">{t("settings.binding")}</div>
+            <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.bindingSub")}</div>
+          </div>
+          <Switch checked={s.device_binding} label={t("settings.binding")} disabled={save.isPending} onChange={(v) => save.mutate({ device_binding: v })} />
+        </li>
+        <li className="flex items-start justify-between gap-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium">{t("settings.requireHwid")}</div>
+            <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.requireHwidSub")}</div>
+          </div>
+          <Switch checked={s.device_require_hwid} label={t("settings.requireHwid")} disabled={save.isPending || !s.device_binding} onChange={(v) => save.mutate({ device_require_hwid: v })} />
+        </li>
+      </ul>
+      <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.devicesNote")}</p>
     </section>
   );
 }

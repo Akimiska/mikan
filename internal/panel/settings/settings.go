@@ -31,6 +31,9 @@ const (
 	// page open in it until a visitor picks one, and new names (tariffs, the auto group, the
 	// bot's menu) are written in it. "auto" or unset: the visitor's browser decides.
 	KeyDefaultLang = "default_lang"
+	// KeyAutoUpdate lets the host updater install new releases on its own, once a day;
+	// off by default (internal/panel/updates).
+	KeyAutoUpdate = "auto_update"
 )
 
 // ValidLang says whether s is a language of the panel.

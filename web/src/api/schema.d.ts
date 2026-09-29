@@ -488,6 +488,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Обновления */
+        get: operations["get-updates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Включить или выключить автообновление */
+        patch: operations["update-updates"];
+        trace?: never;
+    };
+    "/api/v1/updates/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Проверить обновления сейчас */
+        post: operations["check-updates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/updates/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Обновить сейчас: заявка серверу */
+        post: operations["request-update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -879,6 +931,15 @@ export interface components {
              */
             months?: number;
         };
+        HostStatus: {
+            /** @description RFC 3339 */
+            at: string;
+            error: string;
+            from: string;
+            /** @enum {string} */
+            state: "running" | "ok" | "failed";
+            version: string;
+        };
         InboundView: {
             /** @description Приложения, которым подключение попадает в подписку: mihomo, xray, singbox, stash, other */
             apps: string[];
@@ -1098,6 +1159,9 @@ export interface components {
             enabled?: boolean;
             /** @description Токен от @BotFather; пустая строка — удалить */
             token?: string;
+        };
+        PatchUpdatesInputBody: {
+            auto?: boolean;
         };
         PatchUserInputBody: {
             /**
@@ -1382,6 +1446,35 @@ export interface components {
             t: string;
             /** Format: int64 */
             up: number;
+        };
+        UpdatesView: {
+            /** @description Сервер сам ставит новые релизы раз в сутки, ночью */
+            auto: boolean;
+            /** @description Вышла версия новее этой */
+            available: boolean;
+            /**
+             * Format: int64
+             * @description Unix-время последней проверки; 0 — ещё не проверяли
+             */
+            checked_at: number;
+            current: string;
+            /** @description Почему последняя проверка не удалась; no_release — релизов ещё нет */
+            error: string;
+            /** @description Как прошло последнее обновление на сервере */
+            host?: components["schemas"]["HostStatus"];
+            /** @description Последний релиз; пусто, пока проверки не было */
+            latest: string;
+            /** @description Что изменилось: markdown по языкам, en и ru */
+            notes: {
+                [key: string]: string;
+            };
+            /** @description Когда вышел последний релиз, RFC 3339 */
+            published: string;
+            /**
+             * Format: int64
+             * @description Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял
+             */
+            requested_at: number;
         };
         UserCounts: {
             /** Format: int64 */
@@ -2569,6 +2662,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BroadcastOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchUpdatesInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "check-updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "request-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesView"];
                 };
             };
             /** @description Error */

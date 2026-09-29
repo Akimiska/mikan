@@ -39,7 +39,7 @@ type harness struct {
 	p      *Panel
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, with ...func(*Options)) *harness {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, t.TempDir())
@@ -66,7 +66,11 @@ func newHarness(t *testing.T) *harness {
 		"assets/app-1.js": {Data: []byte("console.log(1)")},
 		"sub.html":        {Data: []byte("<!doctype html><html><head><!-- mikan:base --></head><body>sub</body></html>")},
 	}
-	p, err := NewPanel(st, Options{Version: "test", Web: web, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return h.now }})
+	opts := Options{Version: "test", Web: web, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return h.now }}
+	for _, f := range with {
+		f(&opts)
+	}
+	p, err := NewPanel(st, opts)
 	if err != nil {
 		t.Fatal(err)
 	}

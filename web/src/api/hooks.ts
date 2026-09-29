@@ -18,6 +18,7 @@ export const qk = {
   settings: ["settings"] as const,
   sessions: ["sessions"] as const,
   telegram: ["telegram"] as const,
+  updates: ["updates"] as const,
 };
 
 export const meQuery = {
@@ -106,6 +107,17 @@ export function useNodes() {
 
 export function useSettings() {
   return useQuery({ queryKey: qk.settings, queryFn: () => unwrap(api.GET("/api/v1/settings")) });
+}
+
+/** Followed every few seconds while the server updates, hourly otherwise. */
+export function useUpdates() {
+  return useQuery({
+    queryKey: qk.updates,
+    queryFn: () => unwrap(api.GET("/api/v1/updates")),
+    refetchInterval: (q) => (q.state.data?.requested_at || q.state.data?.host?.state === "running" ? 5_000 : 3_600_000),
+    retry: (n) => n < 30,
+    retryDelay: 3_000,
+  });
 }
 
 /** Mutations that change a user refresh every user-related view. */

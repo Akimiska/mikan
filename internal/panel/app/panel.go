@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -24,6 +25,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/updates"
 )
 
 // Panel is the fully wired HTTP side of the panel, without the listener.
@@ -33,6 +35,7 @@ type Panel struct {
 	Nodes     *nodesync.Manager
 	Tuner     *autotune.Tuner // nil without nodes
 	Telegram  *tgbot.Bot
+	Updates   *updates.Checker
 	server    *server.Server
 	spa       *server.SPA
 	subPage   *server.SPA
@@ -62,6 +65,10 @@ type Options struct {
 	Autotune autotune.Options
 	// TelegramAPI is the Bot API; "" is Telegram's.
 	TelegramAPI string
+	// DataDir is where the host updater and the panel meet (update/); "" turns that off.
+	DataDir string
+	// Releases fetches the newest release; nil never checks.
+	Releases updates.Source
 }
 
 type noChanges struct{}
@@ -126,6 +133,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Status().Kind == "letsencrypt" }})
 	deps.Telegram = p.Telegram
+	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
+	deps.Updates = p.Updates
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err
@@ -237,6 +246,13 @@ func (p *Panel) Run(ctx context.Context) {
 		go p.Tuner.Run(ctx)
 	}
 	go p.Telegram.Run(ctx)
+	// The host reads the switch from a file; the setting is what the admin chose.
+	if auto, err := p.Settings.Bool(ctx, settings.KeyAutoUpdate, false); err == nil {
+		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {
+			p.log.Error("update policy", "err", err)
+		}
+	}
+	go p.Updates.Run(ctx)
 	go every(ctx, 5*time.Second, func() {
 		if _, err := p.Apply(ctx); err != nil {
 			p.log.Error("reload settings", "err", err)

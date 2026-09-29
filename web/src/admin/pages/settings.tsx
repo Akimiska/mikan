@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, LogOut, ShieldCheck } from "lucide-react";
+import clsx from "clsx";
+import { Copy, KeyRound, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { meQuery, qk, useInbounds, useSettings } from "../../api/hooks";
+import { meQuery, qk, useInbounds, useSettings, useUpdates } from "../../api/hooks";
 import { LangSwitch } from "../../components/lang";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
@@ -31,6 +32,7 @@ export function SettingsPage() {
             <DevicesCard s={settings.data} />
           </div>
           <div className="flex min-w-0 flex-col gap-4">
+            <UpdatesCard />
             <AccessCard s={settings.data} />
             <CertificateCard s={settings.data} />
             <PasswordCard />
@@ -266,6 +268,119 @@ function DevicesCard({ s }: { s: Schemas["SettingsView"] }) {
         </li>
       </ul>
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.devicesNote")}</p>
+    </section>
+  );
+}
+
+/** The release the panel runs, the newest one and the host updater's last run. */
+function UpdatesCard() {
+  const u = useUpdates();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(false);
+  const put = (d: Schemas["UpdatesView"]) => qc.setQueryData(qk.updates, d);
+  const fail = (e: unknown) => toast.error(errorText(e));
+  const check = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/updates/check")), onSuccess: put, onError: fail });
+  const auto = useMutation({
+    mutationFn: (v: boolean) => unwrap(api.PATCH("/api/v1/updates", { body: { auto: v } })),
+    onSuccess: (d) => {
+      put(d);
+      toast.ok(t("settings.saved"));
+    },
+    onError: fail,
+  });
+  const request = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/updates/request")),
+    onSuccess: (d) => {
+      put(d);
+      setConfirm(false);
+    },
+    onError: fail,
+  });
+  if (u.isPending) return <Skeleton style={{ height: 180, borderRadius: 20 }} />;
+  if (u.isError) {
+    return (
+      <section className="card glass">
+        <ErrorState text={errorText(u.error)} onRetry={() => void u.refetch()} />
+      </section>
+    );
+  }
+  const v = u.data;
+  const notes = v.notes[getLocale()] || v.notes.en || "";
+  const running = v.host?.state === "running";
+  const waiting = v.requested_at > 0 || running;
+  const stale = v.requested_at > 0 && !running && Date.now() / 1000 - v.requested_at > 120;
+  const lastAt = v.host?.at ? ago(v.host.at) : "";
+  return (
+    <section id="updates" className="card glass reveal">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.updates")}</h2>
+          <div className="card-sub">{t("settings.updatesSub")}</div>
+        </div>
+        <Button size="sm" loading={check.isPending} onClick={() => check.mutate()}>
+          <RefreshCw size={16} aria-hidden /> {t("settings.updatesCheck")}
+        </Button>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="font-semibold">mikan {v.current}</span>
+        {v.available ? (
+          <Pill tone="warn">{t("settings.updatesOut", { v: v.latest })}</Pill>
+        ) : v.latest ? (
+          <Pill tone="ok">{t("settings.updatesLatest")}</Pill>
+        ) : (
+          <Pill tone="off">{v.error === "no_release" ? t("settings.updatesNoRelease") : v.checked_at ? t("settings.updatesUnknown") : t("settings.updatesNever")}</Pill>
+        )}
+        {v.checked_at > 0 ? <span className="text-xs text-[var(--ink-500)]">{t("settings.updatesChecked", { ago: ago(new Date(v.checked_at * 1000).toISOString()) })}</span> : null}
+      </div>
+      {v.error && v.error !== "no_release" ? <p className="mt-2 text-xs text-[var(--berry-600)]">{t("settings.updatesError", { e: v.error })}</p> : null}
+      {v.available && notes ? (
+        <div className="panel-soft mt-4 p-3">
+          <div className="mb-2 text-xs font-semibold text-[var(--ink-500)]">{t("settings.updatesChanges", { v: v.latest })}</div>
+          <ul className="notes">
+            {notes
+              .split("\n")
+              .filter((l) => l.trim())
+              .map((l, i) => (
+                <li key={i}>{l.replace(/^[-*]\s*/, "")}</li>
+              ))}
+          </ul>
+        </div>
+      ) : null}
+      {v.available || waiting ? (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button variant="primary" loading={request.isPending || (waiting && !stale)} disabled={waiting} onClick={() => setConfirm(true)}>
+            {waiting ? t("settings.updatesWaiting") : t("settings.updatesNow", { v: v.latest })}
+          </Button>
+        </div>
+      ) : null}
+      {waiting && !stale ? <p className="mt-2 text-xs text-[var(--ink-500)]">{t("settings.updatesWaitingText")}</p> : null}
+      {stale ? <p className="mt-2 text-xs text-[var(--honey-600)]">{t("settings.updatesStale")}</p> : null}
+      {v.host && !waiting ? (
+        <p className={clsx("mt-3 text-xs", v.host.state === "failed" ? "text-[var(--berry-600)]" : "text-[var(--ink-500)]")}>
+          {v.host.state === "failed"
+            ? t("settings.updatesLastFailed", { v: v.host.version || v.latest, from: v.host.from, e: v.host.error.split("\n")[0] ?? "" })
+            : t("settings.updatesLastOk", { v: v.host.version, from: v.host.from, ago: lastAt })}
+        </p>
+      ) : null}
+      <ul className="row-list mt-3">
+        <li className="flex items-start justify-between gap-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium">{t("settings.updatesAuto")}</div>
+            <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.updatesAutoSub")}</div>
+          </div>
+          <Switch checked={v.auto} label={t("settings.updatesAuto")} disabled={auto.isPending} onChange={(on) => auto.mutate(on)} />
+        </li>
+      </ul>
+      <Confirm
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={t("settings.updatesConfirmTitle", { v: v.latest })}
+        text={t("settings.updatesConfirmText")}
+        confirm={t("settings.updatesConfirm")}
+        loading={request.isPending}
+        onConfirm={() => request.mutate()}
+      />
     </section>
   );
 }

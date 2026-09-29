@@ -115,6 +115,20 @@ export function appName(ua: string): string {
 }
 
 /** Keeps the network part of an IP readable and hides the rest in lists. */
+/** The host of a REALITY dest ("host:port") is an IP: clients then need a site name (SNI) of their own. */
+export function destIsIP(dest: string): boolean {
+  const host = dest
+    .trim()
+    .replace(/:\d*$/, "")
+    .replace(/^\[(.*)\]$/, "$1");
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":");
+}
+
+/** The site an inbound looks like from outside: the name clients send, not the IP the node relays probes to. */
+export function maskedAs(i: { dest?: string; server_names?: string[] }): string {
+  return i.server_names?.[0] || (i.dest ?? "").replace(/:443$/, "");
+}
+
 export function maskIP(ip: string): string {
   if (ip.includes(":")) return ip.split(":").slice(0, 3).join(":") + ":…";
   const p = ip.split(".");

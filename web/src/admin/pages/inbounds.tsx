@@ -7,7 +7,7 @@ import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
-import { ago } from "../../lib/format";
+import { ago, destIsIP, maskedAs } from "../../lib/format";
 
 import { nodeLabel } from "./nodes";
 
@@ -139,7 +139,7 @@ export function InboundsPage() {
                     <Pill tone="warn">{t("inbounds.sharedKey")}</Pill>
                   </span>
                 ) : null}
-                {i.dest ? <span className="text-xs text-[var(--ink-500)]">{t("inbounds.maskedAs", { dest: i.dest })}</span> : null}
+                {i.dest ? <span className="text-xs text-[var(--ink-500)]">{t("inbounds.maskedAs", { dest: maskedAs(i) })}</span> : null}
               </div>
               {i.apps.length > 0 && i.apps.length < 5 ? (
                 <p className="mt-2 text-xs text-[var(--ink-500)]">{t("inbounds.appsLine", { list: i.apps.map((a) => tMaybe(`inbounds.apps.${a}`) ?? a).join(", ") })}</p>
@@ -402,14 +402,21 @@ function TargetBadges({ r }: { r: Target }) {
 }
 
 /** Check the camouflage site or pick one next to the server (and the self-steal option). */
-function TargetPicker({ dest, nodeId, onPick }: { dest: string; nodeId: number; onPick: (dest: string, sni: string) => void }) {
-  const check = useMutation({ mutationFn: (d: string) => unwrap(api.POST("/api/v1/inbounds/check-target", { body: { dest: d } })) });
+function TargetPicker({ dest, sni, nodeId, onPick }: { dest: string; sni: string; nodeId: number; onPick: (dest: string, sni: string) => void }) {
+  // An IP dest is checked with the site name clients send: a TLS handshake needs one.
+  const name = destIsIP(dest) ? sni.trim() : "";
+  const check = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/inbounds/check-target", { body: { dest: dest.trim(), ...(name ? { sni: name } : {}) } })),
+  });
+  const resetCheck = check.reset;
+  // A result is about what was checked; an edit makes it stale.
+  useEffect(() => resetCheck(), [dest, sni, resetCheck]);
   const scan = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/inbounds/scan-targets", { params: { query: { node_id: nodeId } } })) });
   const candidates = scan.data ? [...(scan.data.self_steal?.ok ? [scan.data.self_steal] : []), ...scan.data.results] : [];
   return (
     <div className="-mt-2 mb-4">
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" loading={check.isPending} disabled={!dest.trim()} onClick={() => check.mutate(dest.trim())}>
+        <Button size="sm" loading={check.isPending} disabled={!dest.trim() || (destIsIP(dest) && !name)} onClick={() => check.mutate()}>
           {t("inbounds.targetCheck")}
         </Button>
         <Button size="sm" loading={scan.isPending} onClick={() => scan.mutate()}>
@@ -472,7 +479,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [tab, setTab] = useState<"main" | "config">("main");
   const [port, setPort] = useState("");
   const [dest, setDest] = useState("");
-  const [sni, setSni] = useState(""); // set when a picked target has an IP dest
+  const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
   const [autoPort, setAutoPort] = useState(true);
@@ -484,7 +491,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setTab("main");
     setPort(inbound.port);
     setDest(inbound.dest ?? "");
-    setSni("");
+    setSni(inbound.server_names?.[0] ?? "");
     setName(inbound.display_name);
     setConfig(inbound.config);
     setAutoPort(inbound.auto_port);
@@ -524,9 +531,16 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     if (name.trim() !== inbound?.display_name) body.display_name = name.trim();
     // The config tab rewrites the whole template; the dest field is a shortcut into it.
     if (configChanged) body.config = config;
-    else if (inbound?.dest !== undefined && (dest !== inbound.dest || sni)) {
-      body.dest = dest.trim();
-      if (sni) body.server_name = sni;
+    else if (inbound?.dest !== undefined) {
+      const ip = destIsIP(dest);
+      if (dest.trim() !== inbound.dest || (ip && sni.trim() !== (inbound.server_names?.[0] ?? ""))) {
+        if (ip && !sni.trim()) {
+          setErrors({ server_name: t("inbounds.sniRequired") });
+          return;
+        }
+        body.dest = dest.trim();
+        if (ip) body.server_name = sni.trim();
+      }
     }
     if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
@@ -584,25 +598,41 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
                     label={t("inbounds.dest")}
                     htmlFor="ed-dest"
                     error={errors.dest}
-                    hint={configChanged ? t("inbounds.destLocked") : sni ? t("inbounds.targetSni", { sni }) : t("inbounds.destHint")}
+                    hint={configChanged ? t("inbounds.destLocked") : destIsIP(dest) ? t("inbounds.destHintIP") : t("inbounds.destHint")}
                   >
                     <input
                       id="ed-dest"
                       className="input mono"
                       value={dest}
-                      onChange={(e) => {
-                        setDest(e.target.value);
-                        setSni("");
-                      }}
+                      onChange={(e) => setDest(e.target.value)}
                       placeholder="www.microsoft.com:443"
                       aria-invalid={!!errors.dest}
                       spellCheck={false}
                       disabled={configChanged}
                     />
                   </Field>
+                  {destIsIP(dest) ? (
+                    <Field label={t("inbounds.sniLabel")} htmlFor="ed-sni" error={errors.server_name} hint={t("inbounds.sniHint")}>
+                      <input
+                        id="ed-sni"
+                        className="input mono"
+                        value={sni}
+                        onChange={(e) => {
+                          setSni(e.target.value);
+                          setErrors(({ server_name: _, ...rest }) => rest);
+                        }}
+                        placeholder="example.com"
+                        aria-invalid={!!errors.server_name}
+                        spellCheck={false}
+                        autoComplete="off"
+                        disabled={configChanged}
+                      />
+                    </Field>
+                  ) : null}
                   {!configChanged ? (
                     <TargetPicker
                       dest={dest}
+                      sni={sni}
                       nodeId={inbound.node_id}
                       onPick={(d, s) => {
                         setDest(d);

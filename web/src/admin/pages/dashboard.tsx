@@ -7,7 +7,7 @@ import { buckets, TrafficChart, type Range } from "../../components/chart";
 import { useToast } from "../../components/toast";
 import { Avatar, Bar, Button, PageHeader, Pill, Segmented, Skeleton, StatePill } from "../../components/ui";
 import { getLocale, t } from "../../i18n";
-import { bits, bytes, dateShort, expiryText, num, uptime } from "../../lib/format";
+import { bits, bytes, dateShort, expiryText, maskedAs, num, uptime } from "../../lib/format";
 
 export function Dashboard() {
   const node = useNode();
@@ -200,7 +200,7 @@ function ServerCard() {
               <div className="text-[13px] font-medium">{l.sub_name}</div>
               <div className="truncate text-xs text-[var(--ink-500)]">
                 {l.port}/{l.network}
-                {l.dest ? ` · ${t("inbounds.maskedAs", { dest: l.dest.replace(/:443$/, "") })}` : ""}
+                {l.dest ? ` · ${t("inbounds.maskedAs", { dest: maskedAs(l) })}` : ""}
               </div>
             </div>
             {!l.enabled ? (

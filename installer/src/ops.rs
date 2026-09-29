@@ -256,6 +256,19 @@ fn report(install: &Install, state: &str, version: &str, from: &str, error: &str
 /// Updates to the latest release (or target) and rolls back when the new version does
 /// not start; then updates this command too.
 pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64)) -> Result<()> {
+    let mut reported = false;
+    let r = update_to(a, say, progress, &mut reported);
+    // The admin pressed Update and waits: a failure before the update began (no network,
+    // no release) still reaches the panel.
+    if let (Err(e), true, false) = (&r, a.requested, reported)
+        && let Ok(install) = Install::load()
+    {
+        report(&install, "failed", "", &install.version(), &format!("{e:#}"));
+    }
+    r
+}
+
+fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64), reported: &mut bool) -> Result<()> {
     let mut install = Install::load()?;
     if a.requested {
         match fs::remove_file(format!("{UPDATE_DIR}/request")) {
@@ -296,6 +309,7 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
             }
             say(&format!("Updating mikan {current} → {}", m.version));
             report(&install, "running", &m.version, &current, "");
+            *reported = true;
             docker::pull(&m.reference(), &mut *progress)?;
             let reference = m.reference();
             let v = m.version.clone();

@@ -1,0 +1,86 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"mikan/internal/release"
+)
+
+// The admin sees a new release, switches automatic updates for the host updater and asks
+// it to update now; the panel itself never touches Docker.
+func TestUpdatesForTheHost(t *testing.T) {
+	dir := t.TempDir()
+	latest := "0.0.1"
+	h := newHarness(t, func(o *Options) {
+		o.DataDir = dir
+		o.Releases = func(context.Context) (release.Manifest, error) {
+			return release.Manifest{Version: latest, Published: time.Unix(1_800_000_000, 0), Image: "ghcr.io/miroshka000/mikan",
+				Digest: "sha256:" + strings.Repeat("a", 64), Notes: map[string]string{"en": "- faster", "ru": "- быстрее"}}, nil
+		}
+	})
+	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("login: %d", resp.StatusCode)
+	}
+	csrf := map[string]string{"X-CSRF-Token": h.csrf}
+	api := "/" + adminPath + "/api/v1/updates"
+	type view struct {
+		Current     string            `json:"current"`
+		Latest      string            `json:"latest"`
+		Available   bool              `json:"available"`
+		Auto        bool              `json:"auto"`
+		Notes       map[string]string `json:"notes"`
+		RequestedAt int64             `json:"requested_at"`
+		Host        *struct {
+			State string `json:"state"`
+		} `json:"host"`
+	}
+	read := func(resp *http.Response, body []byte) view {
+		t.Helper()
+		var v view
+		if resp.StatusCode/100 != 2 || json.Unmarshal(body, &v) != nil {
+			t.Fatalf("updates: %d %s", resp.StatusCode, body)
+		}
+		return v
+	}
+	if v := read(h.do(http.MethodGet, api, nil, nil)); v.Current != "test" || v.Latest != "" || v.Available || v.Auto {
+		t.Fatalf("before a check: %+v", v)
+	}
+	// A development build ("test") is older than any release.
+	if v := read(h.do(http.MethodPost, api+"/check", nil, csrf)); v.Latest != "0.0.1" || !v.Available || v.Notes["ru"] != "- быстрее" {
+		t.Fatalf("after a check: %+v", v)
+	}
+	if v := read(h.do(http.MethodPatch, api, map[string]any{"auto": true}, csrf)); !v.Auto {
+		t.Fatalf("auto: %+v", v)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "update", "policy.json")); string(b) != `{"auto":true}` {
+		t.Fatalf("the host reads the switch from policy.json: %s", b)
+	}
+	if v := read(h.do(http.MethodPost, api+"/request", nil, csrf)); v.RequestedAt == 0 {
+		t.Fatalf("request: %+v", v)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "update", "request")); err != nil {
+		t.Fatalf("the host's path unit waits for the request file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "update", "status.json"), []byte(`{"state":"ok","version":"0.0.1","from":"test"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if v := read(h.do(http.MethodGet, api, nil, nil)); v.Host == nil || v.Host.State != "ok" {
+		t.Fatalf("the host's report: %+v", v)
+	}
+	// Nothing newer: no request.
+	latest = "dev"
+	read(h.do(http.MethodPost, api+"/check", nil, csrf))
+	if resp, body := h.do(http.MethodPost, api+"/request", nil, csrf); resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "update_none") {
+		t.Fatalf("no update to request: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := h.do(http.MethodPost, api+"/request", nil, nil); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("without CSRF: %d", resp.StatusCode)
+	}
+}

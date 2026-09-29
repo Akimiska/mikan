@@ -10,6 +10,7 @@ the signed manifest, and the panel shows the one in its language.
 - A node joins with one command that installs everything from the latest release; the Nodes page shows it with the join key.
 - A new installer and server menu in the terminal. First the panel's language, then checks of the server and of the domain's DNS, REALITY sites next to the server, and the admin's login with a QR code. Later runs of `mikan` open a menu: status, updates, logs, access, REALITY sites, nodes, backups.
 - Releases come from GitHub: the image from GitHub Packages, trusted through a signed manifest. Updates back up first and go back when the new version does not start.
+- The panel looks for a new release once a day and shows what changed. Settings → Updates installs it with a button or turns on automatic updates at night; a badge in the sidebar tells when one is out.
 
 ### ru
 - У панели есть язык по умолчанию, его выбирают при установке: админка и страница подписки открываются на нём, пока человек не выбрал свой, и на нём же названия по умолчанию (тарифы, группа автовыбора, меню бота). Меняется в «Настройки → Язык по умолчанию»; «Как в браузере» — прежнее поведение.
@@ -17,6 +18,7 @@ the signed manifest, and the panel shows the one in its language.
 - Нода подключается одной командой, которая ставит всё из последнего релиза; страница «Ноды» показывает её вместе с ключом.
 - Новый установщик и меню сервера в терминале. Сначала язык панели, потом проверки сервера и DNS домена, сайты REALITY рядом с сервером и вход администратора с QR-кодом. Повторный запуск `mikan` открывает меню: состояние, обновления, логи, доступ, сайты REALITY, ноды, бэкапы.
 - Релизы приходят с GitHub: образ из GitHub Packages, доверие через подписанный манифест. Обновление сначала делает бэкап и откатывается, если новая версия не запустилась.
+- Панель раз в сутки проверяет новые релизы и показывает, что изменилось. «Настройки → Обновления» ставят релиз по кнопке или включают автообновление ночью; значок в боковой панели подскажет, когда вышла новая версия.
 
 ## 0.3.8
 ### en

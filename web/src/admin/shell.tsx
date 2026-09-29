@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Bot, LayoutDashboard, LogOut, MoreHorizontal, Network, Server, SlidersHorizontal, Tag, Users } from "lucide-react";
+import { ArrowUpCircle, Bot, LayoutDashboard, LogOut, MoreHorizontal, Network, Server, SlidersHorizontal, Tag, Users } from "lucide-react";
 import { api, unwrap } from "../api/client";
-import { meQuery, useNode, useOverview } from "../api/hooks";
+import { meQuery, useNode, useOverview, useUpdates } from "../api/hooks";
 import { Logo } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
 import { Avatar, Bar, Pill } from "../components/ui";
@@ -40,6 +40,7 @@ export function Shell() {
             ))}
           </nav>
           <div className="side-foot">
+            <UpdateChip />
             <NodeCard />
             <AdminRow />
             <LangSwitch className="self-start" />
@@ -88,6 +89,18 @@ function MobileNav() {
         </Menu.Portal>
       </Menu.Root>
     </nav>
+  );
+}
+
+/** A new release: the way to the settings' Updates card. */
+function UpdateChip() {
+  const u = useUpdates();
+  if (!u.data?.available) return null;
+  return (
+    <Link to="/settings" hash="updates" className="update-chip" title={t("shell.updateHint")}>
+      <ArrowUpCircle size={16} aria-hidden />
+      <span className="truncate">{t("shell.update", { v: u.data.latest })}</span>
+    </Link>
   );
 }
 

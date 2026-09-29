@@ -27,6 +27,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/updates"
 )
 
 type Deps struct {
@@ -59,6 +60,8 @@ type Deps struct {
 	}
 	// Telegram is the subscription owners' bot.
 	Telegram *tgbot.Bot
+	// Updates knows the newest release and talks to the host updater; nil in tests.
+	Updates *updates.Checker
 }
 
 // NodeRuntime is what the API needs from the running nodes.
@@ -142,6 +145,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerStats()
 	h.registerSettings()
 	h.registerTelegram()
+	h.registerUpdates()
 	h.registerNodes()
 	return noStore(mux), api, nil
 }

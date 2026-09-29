@@ -254,6 +254,10 @@
   .opt:hover { background: #fff; }
   .opt[aria-checked="true"] { border-color: var(--ink-900); background: #fff; box-shadow: var(--shadow-sm); }
   .opt:disabled { cursor: progress; }
+  .update-chip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px; font-size: 13px; font-weight: 500; color: var(--mikan-700); background: rgba(240, 122, 46, 0.1); border: 1px solid rgba(240, 122, 46, 0.3); transition: background-color 0.2s, border-color 0.2s; }
+  .update-chip:hover { background: rgba(240, 122, 46, 0.16); border-color: rgba(240, 122, 46, 0.5); }
+  .notes { display: flex; flex-direction: column; gap: 4px; padding-left: 16px; list-style: disc; font-size: 13px; }
+  .notes li::marker { color: var(--mikan-500); }
   .opt:disabled:not([aria-checked="true"]) { opacity: 0.55; }
   .switch { position: relative; width: 40px; height: 24px; border-radius: 999px; background: var(--ink-200); transition: background-color 0.2s; flex: none; }
   .switch[data-state="checked"] { background: var(--ink-900); }

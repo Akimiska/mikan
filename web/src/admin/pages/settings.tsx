@@ -7,7 +7,7 @@ import { LangSwitch } from "../../components/lang";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, ErrorState, Field, PageHeader, Pill, QR, Skeleton, Switch } from "../../components/ui";
-import { getLocale, t, tMaybe } from "../../i18n";
+import { getLocale, LOCALES, t, tMaybe } from "../../i18n";
 import { ago } from "../../lib/format";
 
 export function SettingsPage() {
@@ -26,6 +26,7 @@ export function SettingsPage() {
           <div className="flex min-w-0 flex-col gap-4">
             <ServerCard s={settings.data} />
             <SubscriptionCard s={settings.data} />
+            <LanguageCard s={settings.data} />
             <AutoCard s={settings.data} />
             <DevicesCard s={settings.data} />
           </div>
@@ -170,6 +171,43 @@ function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   );
 }
 
+/** What visitors get until they pick a language; the header's switch is this browser's own. */
+function LanguageCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const options = [
+    { id: "auto", label: t("settings.langAuto") },
+    ...LOCALES.map((l) => ({ id: l.id, label: l.label, lang: l.id })),
+  ] as const;
+  const current = (save.isPending && save.variables.default_lang) || s.default_lang;
+  return (
+    <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.lang")}</h2>
+          <div className="card-sub">{t("settings.langSub")}</div>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t("settings.lang")} aria-busy={save.isPending}>
+        {options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={current === o.id}
+            className="opt"
+            lang={"lang" in o ? o.lang : undefined}
+            disabled={save.isPending}
+            onClick={() => o.id !== s.default_lang && save.mutate({ default_lang: o.id })}
+          >
+            <span className="font-semibold">{o.label}</span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.langNote")}</p>
+    </section>
+  );
+}
+
 /** Global switches of the automatic fixes; each connection can opt out in its settings. */
 function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
@@ -178,7 +216,7 @@ function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
     { key: "auto_sni", title: t("settings.autoSni"), sub: t("settings.autoSniSub"), on: s.auto_sni },
   ] as const;
   return (
-    <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+    <section className="card glass reveal" style={{ "--i": 3 } as React.CSSProperties}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("settings.auto")}</h2>
@@ -204,7 +242,7 @@ function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
 function DevicesCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   return (
-    <section className="card glass reveal" style={{ "--i": 3 } as React.CSSProperties}>
+    <section className="card glass reveal" style={{ "--i": 4 } as React.CSSProperties}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("settings.devices")}</h2>

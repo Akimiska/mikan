@@ -21,6 +21,7 @@ var (
 	ErrUnknownPreset  = errors.New("unknown_preset")
 	ErrUnknownInbound = errors.New("unknown_inbound")
 	ErrBadPort        = errors.New("bad_port")
+	ErrNoReality      = errors.New("no_reality")
 )
 
 // PortInUseError names the enabled inbound that already listens on the port.
@@ -40,6 +41,51 @@ func ValidPort(spec string) bool {
 	}
 	b, err := strconv.Atoi(hi)
 	return err == nil && b > a && b <= 65535
+}
+
+// SetInboundTarget points a REALITY inbound of a node at another camouflage site: dest is
+// host:port, sni the name clients send ("" = the host of dest). Only the panel's own node
+// may use the panel's HTTPS (127.0.0.1:<panel port>, self-steal). The running panel
+// pushes the change to the node on its next reconcile.
+func SetInboundTarget(ctx context.Context, st *store.Store, nodeID int64, name, dest, sni string, now time.Time) (db.Inbound, db.Inbound, error) {
+	n, err := st.Q.GetNode(ctx, nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.Inbound{}, db.Inbound{}, ErrUnknownNode
+	} else if err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	}
+	all, err := st.Q.ListInbounds(ctx)
+	if err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	}
+	existing := NodeInbounds(all, nodeID)
+	i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
+	if i < 0 {
+		return db.Inbound{}, db.Inbound{}, ErrUnknownInbound
+	}
+	prev := existing[i]
+	t, err := proto.Parse(prev.Config)
+	if err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	}
+	if old, _ := presets.Dest(t); old == "" {
+		return db.Inbound{}, db.Inbound{}, ErrNoReality
+	}
+	if err := presets.SetDest(t, dest, sni); err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	}
+	var opts proto.Options
+	if n.Address == "" {
+		if opts.SelfStealPort, _, err = settings.Get[int](ctx, settings.New(st.Q), settings.KeyPanelPort); err != nil {
+			return db.Inbound{}, db.Inbound{}, err
+		}
+	}
+	if err := proto.Validate(t, opts); err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	}
+	next, err := st.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: prev.Port, Enabled: prev.Enabled, Config: proto.Marshal(t), DisplayName: prev.DisplayName,
+		UpdatedAt: now.Unix(), ID: prev.ID})
+	return prev, next, err
 }
 
 // InboundNetwork is the network the inbound's port is bound on: "tcp" or "udp".

@@ -102,7 +102,11 @@ func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 			v.Broadcast = &TelegramBroadcast{Total: p.Total, Sent: p.Sent, Failed: p.Failed, Started: p.Started.Unix(), Active: p.Active()}
 		}
 	} else {
-		v.Config = tgbot.Default("ru")
+		lang, err := h.d.Settings.Lang(ctx)
+		if err != nil {
+			return v, err
+		}
+		v.Config = tgbot.Default(lang)
 	}
 	v.Defaults = tgbot.DefaultTexts(v.Config.Lang)
 	if v.Linked, err = h.d.Store.Q.CountTgLinks(ctx); err != nil {

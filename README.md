@@ -1,0 +1,173 @@
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-en-dark.svg">
+  <img alt="mikan — VPN panel on the mihomo core" src=".github/assets/banner-en-light.svg" width="100%">
+</picture>
+
+<br>
+
+**A fast, beautiful VPN panel on the [mihomo](https://github.com/MetaCubeX/mihomo) core — one command to install, nothing to babysit.**
+
+[![Release](https://img.shields.io/github/v/release/Miroshka000/mikan?color=f07a2e&label=release&style=flat-square)](https://github.com/Miroshka000/mikan/releases)
+[![Image](https://img.shields.io/badge/ghcr.io-miroshka000%2Fmikan-2b8c9e?style=flat-square&logo=docker&logoColor=white)](https://github.com/Miroshka000/mikan/pkgs/container/mikan)
+[![License](https://img.shields.io/badge/license-GPL--3.0-2f9e6b?style=flat-square)](LICENSE)
+[![mihomo](https://img.shields.io/badge/core-mihomo%201.19.31-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+
+**English** · [Русский](README.ru.md)
+
+</div>
+
+---
+
+## Install
+
+On a fresh Ubuntu 22.04+ or Debian 12+ server (amd64 or arm64):
+
+```bash
+curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh | sudo bash
+```
+
+The installer asks for the panel language and an optional domain, checks that the domain points to the server, installs Docker if needed, picks REALITY camouflage sites next to your server and prints your admin link. Run `mikan` again at any time for the management menu.
+
+## Why mikan
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🛡️ Survives blocking on its own
+mikan watches whether real clients still reach each protocol. When a port gets blocked on the way, it moves the protocol to a free HTTPS port; when a REALITY camouflage site stops working, it picks a new one next to your server.
+
+</td>
+<td width="50%" valign="top">
+
+### 📱 Every app gets what it can use
+Subscriptions detect the app — Happ, v2RayTun, Koala Clash, Clash Verge, FlClash, Hiddify, Shadowrocket and more — and hand it only the protocols it actually supports. No more “it doesn't work for me”.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📊 Byte-exact accounting
+mihomo is embedded as a library, so traffic is counted per user on every connection — not sampled. Plans by time and gigabytes, billing days, device limits and device binding against key sharing.
+
+</td>
+<td valign="top">
+
+### 🤖 Telegram bot and Mini App built in
+Subscribers check their plan, devices and connection guides in a bot you set up in the panel, open the subscription page as a Telegram Mini App and get notified before it expires. Broadcasts respect Telegram's limits.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🪶 Light as a mandarin
+Go and SQLite, two small containers. On a working server with clients: **~14 MB RAM** for the panel, **~40 MB** for the VPN core, **<1% CPU**.
+
+</td>
+<td valign="top">
+
+### 🔒 Locked down by default
+Secret admin link on a random port, HTTPS with Let's Encrypt (even for a bare IP), argon2id, TOTP 2FA, CSRF protection, strict CSP, audit log. Containers run non-root, read-only, with all capabilities dropped.
+
+</td>
+</tr>
+</table>
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><img src=".github/assets/screens/en/dashboard.webp" alt="Overview"></td>
+<td width="50%"><img src=".github/assets/screens/en/users.webp" alt="Users"></td>
+</tr>
+<tr>
+<td><img src=".github/assets/screens/en/inbounds.webp" alt="Protocols"></td>
+<td><img src=".github/assets/screens/en/telegram.webp" alt="Telegram bot"></td>
+</tr>
+</table>
+
+<p align="center">
+<img src=".github/assets/screens/en/phone-subscription.webp" alt="Subscription page" width="260">
+&nbsp;&nbsp;
+<img src=".github/assets/screens/en/phone-dashboard.webp" alt="Overview on a phone" width="260">
+</p>
+
+## Protocols
+
+Fifteen protocols, each a preset with keys generated for you. The subscription gives every app only what it runs:
+
+| Protocol | Clash apps<br><sub>mihomo core</sub> | Xray apps<br><sub>Happ, v2RayTun</sub> | sing-box apps<br><sub>Hiddify, Karing</sub> |
+|---|:---:|:---:|:---:|
+| VLESS · REALITY · Vision | ✅ | ✅ | ✅ |
+| VLESS · REALITY · XHTTP | ✅ | ✅ | — |
+| VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
+| VLESS PQ (post-quantum encryption) | ✅ | ✅ | — |
+| Trojan · REALITY | ✅ | ✅ | ✅ |
+| Hysteria2 | ✅ | ✅ | ✅ |
+| TUIC v5 | ✅ | — | ✅ |
+| AnyTLS | ✅ | — | ✅ |
+| TrustTunnel | ✅ | — | — |
+| ShadowQUIC | ✅ | — | — |
+| Mieru | ✅ | — | — |
+| Shadowsocks-2022 ¹ | ✅ | ✅ | ✅ |
+| Sudoku ¹ | ✅ | — | — |
+| Snell ¹ | ✅ | — | — |
+| VMess (custom config) | ✅ | ✅ | ✅ |
+
+<sub>¹ One key for all users in mihomo: no per-user accounting or limits on these. Newer protocols are sent to Clash apps only when their core is new enough.</sub>
+
+## How it works
+
+```mermaid
+flowchart LR
+    A[Browser] -- HTTPS, secret link --> P[mikan panel<br>users · plans · subscriptions]
+    P -- unix socket / pinned TLS --> N1[mikan node<br>mihomo inside]
+    P -- pinned TLS --> N2[remote node]
+    C[VPN apps] -- REALITY · QUIC · … --> N1
+    C --> N2
+    C -. subscription .-> P
+```
+
+The panel and the node are two processes from one image. Update or restart the panel — VPN keeps running. Add remote nodes with a join key from the **Nodes** page.
+
+## Managing the server
+
+Run `mikan` for the menu, or use the commands directly:
+
+| Command | What it does |
+|---|---|
+| `mikan status` | containers, versions, health, available update |
+| `mikan logs [panel\|node]` | live logs |
+| `mikan url` | admin link |
+| `mikan reset-password` · `reset-path` · `disable-2fa` | regain access |
+| `mikan update` | update now (backup first, automatic rollback) |
+| `mikan backup` · `restore FILE` | backups in `/opt/mikan/backups` |
+| `mikan node …` · `mikan inbound …` | nodes and protocols |
+| `mikan uninstall` | stop and remove the command, keep the data |
+
+## Updates
+
+The panel checks for a new release once a day and shows what changed. Turn on **auto-update** in settings, or press **Update** — the host updater pulls the image from GitHub Packages, backs up, restarts and rolls back if the new version does not come up healthy. Every release manifest is signed.
+
+## Building from source
+
+```bash
+docker buildx build -t mikan:dev .            # panel + node image
+cd web && pnpm install && pnpm dev            # admin UI with hot reload
+go test ./...                                 # Go 1.27
+cd installer && cargo test                    # the installer (Rust)
+```
+
+Development happens on the `dev` branch; pull requests into `main` are built and tested, releases are published from tags.
+
+## License
+
+mikan is free software under the [GNU GPL v3](LICENSE). It embeds [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0). Fonts: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
+
+<div align="center">
+<sub>Made with 🍊</sub>
+</div>

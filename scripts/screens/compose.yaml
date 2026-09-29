@@ -1,0 +1,24 @@
+# A demo panel with its node for the README screenshots (scripts/screens/shoot.mjs).
+# Only the panel's port leaves Docker, on 127.0.0.1; the node's VPN ports stay inside.
+name: mikan-screens
+
+services:
+  node:
+    image: ${MIKAN_IMAGE:-mikan:dev}
+    entrypoint: ["/usr/local/bin/mikan-node"]
+    environment:
+      MIKAN_DATA_DIR: /data/node
+    volumes: ["data:/data", "run:/run/mikan"]
+
+  panel:
+    image: ${MIKAN_IMAGE:-mikan:dev}
+    depends_on: [node]
+    environment:
+      MIKAN_DATA_DIR: /data/panel
+      MIKAN_PANEL_LISTEN: 0.0.0.0:2053
+    ports: ["127.0.0.1:2090:2053"]
+    volumes: ["data:/data", "run:/run/mikan"]
+
+volumes:
+  data: {}
+  run: {}

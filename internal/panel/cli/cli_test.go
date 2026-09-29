@@ -105,3 +105,30 @@ func TestURLStdoutParsesInHostScript(t *testing.T) {
 		t.Fatalf("the login still shows in the terminal: %q", errOut.String())
 	}
 }
+
+// The installer bootstraps the panel in the language picked first; the panel then opens
+// in it and names its defaults in it.
+func TestBootstrapStoresDefaultLang(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	set := settings.New(st.Q)
+	args := []string{"--public-host", "203.0.113.10", "--port", "21355", "--password-stdin"}
+	pw := strings.NewReader("correct-horse-battery\n")
+	var out bytes.Buffer
+	if err := bootstrap(ctx, st, set, append(args, "--lang", "de"), pw, &out); err == nil || !strings.Contains(err.Error(), "--lang") {
+		t.Fatalf("an unknown language: %v", err)
+	}
+	if err := bootstrap(ctx, st, set, append(args, "--lang", "en"), pw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if lang, err := set.Lang(ctx); err != nil || lang != "en" {
+		t.Fatalf("default language %q %v", lang, err)
+	}
+	if !strings.Contains(out.String(), "https://203.0.113.10:21355/") || strings.Contains(out.String(), "correct-horse-battery") {
+		t.Fatalf("output: %q", out.String())
+	}
+}

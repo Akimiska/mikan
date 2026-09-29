@@ -1,9 +1,13 @@
 # build output
 /bin/
+/dist/
 web/dist/
+installer/target/
 node_modules/
 
-# runtime data and secrets
+# runtime data and secrets (the release signing key never enters the repo)
+*.pem
+release-signing*
 /data/
 *.db
 *.db-shm

@@ -14,7 +14,9 @@ import (
 )
 
 // baseMarker is replaced with <base href="/<prefix>/"> so the bundle (built with
-// relative asset URLs) works under a secret path chosen at install time.
+// relative asset URLs) works under a secret path chosen at install time, and with the
+// panel's default language, <meta name="mikan-lang">, which the page opens in until the
+// visitor picks one.
 const baseMarker = "<!-- mikan:base -->"
 
 // SPA serves a Vite build: hashed files under /assets are cached forever, any other
@@ -23,6 +25,7 @@ type SPA struct {
 	files  fs.FS
 	entry  []byte
 	prefix atomic.Pointer[string]
+	lang   atomic.Pointer[string]
 }
 
 func NewSPA(files fs.FS, entryName string) (*SPA, error) {
@@ -36,10 +39,14 @@ func NewSPA(files fs.FS, entryName string) (*SPA, error) {
 	s := &SPA{files: files, entry: entry}
 	empty := ""
 	s.prefix.Store(&empty)
+	s.lang.Store(&empty)
 	return s, nil
 }
 
 func (s *SPA) SetPrefix(p string) { s.prefix.Store(&p) }
+
+// SetLang sets the default language, "ru" or "en"; "" leaves it to the browser.
+func (s *SPA) SetLang(l string) { s.lang.Store(&l) }
 
 func (s *SPA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -52,8 +59,11 @@ func (s *SPA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveFile(w, r, name)
 		return
 	}
-	base := "/" + *s.prefix.Load() + "/"
-	page := bytes.Replace(s.entry, []byte(baseMarker), []byte(`<base href="`+html.EscapeString(base)+`">`), 1)
+	head := `<base href="` + html.EscapeString("/"+*s.prefix.Load()+"/") + `">`
+	if l := *s.lang.Load(); l != "" {
+		head += `<meta name="mikan-lang" content="` + html.EscapeString(l) + `">`
+	}
+	page := bytes.Replace(s.entry, []byte(baseMarker), []byte(head), 1)
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")

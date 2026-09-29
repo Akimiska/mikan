@@ -22,7 +22,7 @@ import (
 // the change to the node on its next reconcile, within 30 seconds.
 func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("укажите list, add или set\n\n" + usage)
+		return errors.New("inbound needs list, add or set\n\n" + usage)
 	}
 	switch args[0] {
 	case "list":
@@ -31,22 +31,22 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 			return err
 		}
 		tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "НОДА\tИМЯ\tПРЕСЕТ\tПОРТ\tВКЛЮЧЕНО")
+		fmt.Fprintln(tw, "NODE\tNAME\tPRESET\tPORT\tENABLED")
 		for _, in := range inbounds {
-			on := "да"
+			on := "yes"
 			if in.Enabled == 0 {
-				on = "нет"
+				on = "no"
 			}
 			fmt.Fprintf(tw, "%d\t%s\t%s\t%s/%s\t%s\n", in.NodeID, in.Name, in.Preset, in.Port, domain.InboundNetwork(in), on)
 		}
 		return tw.Flush()
 	case "add":
 		if len(args) < 2 || strings.HasPrefix(args[1], "-") {
-			return errors.New("укажите пресет: mikan admin inbound add ПРЕСЕТ [--port ПОРТ] [--node НОДА]\nПресеты: " + presetIDs())
+			return errors.New("name a preset: mikan admin inbound add PRESET [--port PORT] [--node NODE]\nPresets: " + presetIDs())
 		}
 		fs := flag.NewFlagSet("inbound add", flag.ContinueOnError)
-		port := fs.String("port", "", "порт или диапазон (по умолчанию — порт пресета)")
-		node := fs.Int64("node", 1, "нода (1 — своя нода панели, см. mikan admin node list)")
+		port := fs.String("port", "", "port or range (the preset's port by default)")
+		node := fs.Int64("node", 1, "node (1 is the panel's own, see mikan admin node list)")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
@@ -54,54 +54,54 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 		var busy *domain.PortInUseError
 		switch {
 		case errors.Is(err, domain.ErrUnknownNode):
-			return fmt.Errorf("нет ноды %d", *node)
+			return fmt.Errorf("no node %d", *node)
 		case errors.Is(err, domain.ErrUnknownPreset):
-			return fmt.Errorf("нет пресета %q. Пресеты: %s", args[1], presetIDs())
+			return fmt.Errorf("no preset %q. Presets: %s", args[1], presetIDs())
 		case errors.Is(err, domain.ErrBadPort):
-			return fmt.Errorf("неверный порт %q", *port)
+			return fmt.Errorf("bad port %q", *port)
 		case errors.As(err, &busy):
-			return fmt.Errorf("порт уже занят подключением %s, укажите другой: --port", busy.Owner)
+			return fmt.Errorf("the port is taken by inbound %s, choose another: --port", busy.Owner)
 		case err != nil:
 			return err
 		}
 		_ = audit.Write(ctx, st.Q, time.Now(), audit.Entry{Action: "cli.inbound_create", TargetType: "inbound", TargetID: row.Name,
 			Details: map[string]any{"preset": row.Preset, "port": row.Port}})
-		fmt.Fprintf(stderr, "Добавлено подключение %s на %s/%s. Нода получит его в течение 30 секунд.\n", row.Name, row.Port, domain.InboundNetwork(row))
+		fmt.Fprintf(stderr, "Inbound %s added on %s/%s. The node gets it within 30 seconds.\n", row.Name, row.Port, domain.InboundNetwork(row))
 		return openPort(ctx, st, row, stdout, stderr)
 	case "set":
 		if len(args) < 2 || strings.HasPrefix(args[1], "-") {
-			return errors.New("укажите подключение: mikan admin inbound set ИМЯ --port ПОРТ [--node НОДА]\nИмена: mikan admin inbound list")
+			return errors.New("name an inbound: mikan admin inbound set NAME --port PORT [--node NODE]\nNames: mikan admin inbound list")
 		}
 		fs := flag.NewFlagSet("inbound set", flag.ContinueOnError)
-		port := fs.String("port", "", "новый порт или диапазон")
-		node := fs.Int64("node", 1, "нода подключения (см. mikan admin inbound list)")
+		port := fs.String("port", "", "new port or range")
+		node := fs.Int64("node", 1, "the inbound's node (see mikan admin inbound list)")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
 		if *port == "" {
-			return errors.New("укажите новый порт: --port")
+			return errors.New("--port is required")
 		}
 		prev, row, err := domain.SetInboundPort(ctx, st, *node, args[1], *port, time.Now())
 		var busy *domain.PortInUseError
 		switch {
 		case errors.Is(err, domain.ErrUnknownNode):
-			return fmt.Errorf("нет ноды %d", *node)
+			return fmt.Errorf("no node %d", *node)
 		case errors.Is(err, domain.ErrUnknownInbound):
-			return fmt.Errorf("на ноде %d нет подключения %q: mikan admin inbound list", *node, args[1])
+			return fmt.Errorf("node %d has no inbound %q: see mikan admin inbound list", *node, args[1])
 		case errors.Is(err, domain.ErrBadPort):
-			return fmt.Errorf("неверный порт %q", *port)
+			return fmt.Errorf("bad port %q", *port)
 		case errors.As(err, &busy):
-			return fmt.Errorf("порт уже занят подключением %s, укажите другой", busy.Owner)
+			return fmt.Errorf("the port is taken by inbound %s, choose another", busy.Owner)
 		case err != nil:
 			return err
 		}
 		_ = audit.Write(ctx, st.Q, time.Now(), audit.Entry{Action: "cli.inbound_update", TargetType: "inbound", TargetID: row.Name,
 			Details: map[string]any{"node": row.NodeID, "port": row.Port, "old_port": prev.Port}})
-		fmt.Fprintf(stderr, "Подключение %s: порт %s → %s/%s. Нода получит изменение в течение 30 секунд, клиентам нужно обновить подписку.\n",
+		fmt.Fprintf(stderr, "Inbound %s: port %s → %s/%s. The node gets the change within 30 seconds; clients need to refresh their subscription.\n",
 			row.Name, prev.Port, row.Port, domain.InboundNetwork(row))
 		return openPort(ctx, st, row, stdout, stderr)
 	default:
-		return fmt.Errorf("неизвестная подкоманда inbound %q\n\n%s", args[0], usage)
+		return fmt.Errorf("unknown inbound subcommand %q\n\n%s", args[0], usage)
 	}
 }
 
@@ -114,7 +114,7 @@ func openPort(ctx context.Context, st *store.Store, in db.Inbound, stdout, stder
 	}
 	rule := in.Port + "/" + domain.InboundNetwork(in)
 	if n.Address != "" {
-		fmt.Fprintf(stderr, "Откройте порт на сервере ноды %s: ufw allow %s\n", n.PublicHost, strings.Replace(rule, "-", ":", 1))
+		fmt.Fprintf(stderr, "Open the port on the node's server %s: ufw allow %s\n", n.PublicHost, strings.Replace(rule, "-", ":", 1))
 		return nil
 	}
 	fmt.Fprintln(stdout, rule)

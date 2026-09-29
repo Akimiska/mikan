@@ -9,6 +9,7 @@ import (
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 )
 
 func TestAddPreset(t *testing.T) {
@@ -113,6 +114,65 @@ func TestSetInboundPort(t *testing.T) {
 	} {
 		if _, _, err := SetInboundPort(ctx, st, c.node, c.name, c.port, later); !errors.Is(err, c.want) {
 			t.Errorf("node %d %s %q: got %v, want %v", c.node, c.name, c.port, err, c.want)
+		}
+	}
+}
+
+// The installer and the admin point REALITY inbounds at a site next to the server; the
+// panel's own HTTPS (self-steal) is for the panel's own node only.
+func TestSetInboundTarget(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	st, _, _ := setup(t, &now)
+	ctx := context.Background()
+	if err := settings.Set(ctx, settings.New(st.Q), settings.KeyPanelPort, 21355); err != nil {
+		t.Fatal(err)
+	}
+	later := now.Add(time.Hour)
+	prev, next, err := SetInboundTarget(ctx, st, 1, "vless-xhttp", "203.0.113.20:443", "www.example.org", later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl, _ := proto.Parse(next.Config)
+	dest, names := presets.Dest(tpl)
+	if dest != "203.0.113.20:443" || len(names) != 1 || names[0] != "www.example.org" || next.UpdatedAt != later.Unix() || next.Port != prev.Port {
+		t.Fatalf("retargeted: %s %v %+v", dest, names, next)
+	}
+	// The keys stay: clients keep working after they refresh the subscription.
+	old, _ := proto.Parse(prev.Config)
+	if old["reality-config"].(map[string]any)["private-key"] != tpl["reality-config"].(map[string]any)["private-key"] {
+		t.Fatal("the REALITY key changed")
+	}
+	if _, _, err := SetInboundTarget(ctx, st, 1, "vless-vision", "127.0.0.1:21355", "vpn.example.com", later); err != nil {
+		t.Fatalf("self-steal on the panel's node: %v", err)
+	}
+
+	n, err := st.Q.CreateNode(ctx, db.CreateNodeParams{Name: "🇺🇸 США", Address: "203.0.113.7:25305", PublicHost: "203.0.113.7", CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, _ := presets.NewConfig("trojan_reality", "")
+	if _, err := st.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: n.ID, Name: "trojan", Preset: "trojan_reality", Port: "2087", Config: config,
+		CreatedAt: now.Unix(), UpdatedAt: now.Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	var pe *proto.Error
+	if _, _, err := SetInboundTarget(ctx, st, n.ID, "trojan", "127.0.0.1:21355", "vpn.example.com", later); !errors.As(err, &pe) {
+		t.Fatalf("a remote node cannot borrow the panel's HTTPS: %v", err)
+	}
+	if _, _, err := SetInboundTarget(ctx, st, 1, "vless-xhttp", "203.0.113.20:443", "", later); !errors.As(err, &pe) || pe.Code != "reality_sni" {
+		t.Fatalf("an IP target needs the site's name: %v", err)
+	}
+	for _, c := range []struct {
+		node int64
+		name string
+		want error
+	}{
+		{1, "hysteria2", ErrNoReality},
+		{1, "nope", ErrUnknownInbound},
+		{9, "vless-xhttp", ErrUnknownNode},
+	} {
+		if _, _, err := SetInboundTarget(ctx, st, c.node, c.name, "www.example.org:443", "", later); !errors.Is(err, c.want) {
+			t.Errorf("node %d %s: got %v, want %v", c.node, c.name, err, c.want)
 		}
 	}
 }

@@ -27,7 +27,14 @@ const (
 	// refuse apps that send no device id instead of seating them together, off by default.
 	KeyDeviceBinding = "device_binding"
 	KeyRequireHWID   = "device_require_hwid"
+	// KeyDefaultLang is the language chosen at install: the admin panel and the subscription
+	// page open in it until a visitor picks one, and new names (tariffs, the auto group, the
+	// bot's menu) are written in it. "auto" or unset: the visitor's browser decides.
+	KeyDefaultLang = "default_lang"
 )
+
+// ValidLang says whether s is a language of the panel.
+func ValidLang(s string) bool { return s == "ru" || s == "en" }
 
 type Settings struct{ q *db.Queries }
 
@@ -83,6 +90,15 @@ func (s *Settings) Bool(ctx context.Context, key string, def bool) (bool, error)
 	v, ok, err := Get[bool](ctx, s, key)
 	if err != nil || !ok {
 		return def, err
+	}
+	return v, nil
+}
+
+// Lang is the default language, "ru" or "en"; "" when the browser decides.
+func (s *Settings) Lang(ctx context.Context) (string, error) {
+	v, err := s.String(ctx, KeyDefaultLang)
+	if err != nil || !ValidLang(v) {
+		return "", err
 	}
 	return v, nil
 }

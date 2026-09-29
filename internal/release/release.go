@@ -25,6 +25,12 @@ const PublicKey = "Z3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8="
 // Repo is where releases are published.
 const Repo = "Miroshka000/mikan"
 
+// InstallCommand installs mikan from the latest release; run on the server.
+const InstallCommand = "curl -fsSL https://github.com/" + Repo + "/releases/latest/download/install.sh | sudo bash"
+
+// JoinCommand installs a node of an existing panel with the join key the panel issued.
+func JoinCommand(key string) string { return InstallCommand + " -s -- --join " + key }
+
 // LatestURL is the manifest of the newest release; its signature is LatestURL + ".sig".
 const LatestURL = "https://github.com/" + Repo + "/releases/latest/download/manifest.json"
 

@@ -319,7 +319,6 @@ function KeyDrawer({ joined, onClose }: { joined: Joined | null; onClose: () => 
         <ol className="mb-4 list-decimal space-y-2 pl-5 text-[13px]">
           <li>{t("nodes.keyStep1")}</li>
           <li>{t("nodes.keyStep2")}</li>
-          <li>{t("nodes.keyStep3")}</li>
         </ol>
         <div className="link-field">
           <span className="mono break-all text-xs">{joined?.command}</span>

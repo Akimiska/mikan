@@ -1189,6 +1189,14 @@
             "maxLength": 40,
             "type": "string"
           },
+          "default_lang": {
+            "enum": [
+              "auto",
+              "ru",
+              "en"
+            ],
+            "type": "string"
+          },
           "device_binding": {
             "type": "boolean"
           },
@@ -1492,6 +1500,15 @@
           "certificate": {
             "$ref": "#/components/schemas/Status"
           },
+          "default_lang": {
+            "description": "Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота",
+            "enum": [
+              "auto",
+              "ru",
+              "en"
+            ],
+            "type": "string"
+          },
           "device_binding": {
             "description": "Привязывать подписку к устройствам: у каждого устройства свои ключи",
             "type": "boolean"
@@ -1554,6 +1571,7 @@
           "auto_sni",
           "device_binding",
           "device_require_hwid",
+          "default_lang",
           "certificate"
         ],
         "type": "object"

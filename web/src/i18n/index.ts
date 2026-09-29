@@ -22,13 +22,17 @@ const STORAGE = "mikan.lang";
 let locale: Locale = detect();
 const listeners = new Set<() => void>();
 
+/** The visitor's own choice, then the panel's default language (the server puts it in
+ * the page, see server/spa.go), then the browser's. */
 function detect(): Locale {
   try {
     const saved = localStorage.getItem(STORAGE);
     if (saved === "ru" || saved === "en") return saved;
   } catch {
-    // storage may be blocked; fall back to the browser language
+    // storage may be blocked; fall back to the panel's language
   }
+  const panel = document.querySelector<HTMLMetaElement>('meta[name="mikan-lang"]')?.content;
+  if (panel === "ru" || panel === "en") return panel;
   return navigator.languages.some((l) => l.toLowerCase().startsWith("ru")) ? "ru" : "en";
 }
 

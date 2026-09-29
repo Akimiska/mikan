@@ -32,6 +32,7 @@ type SettingsView struct {
 	// Devices: see domain.Devices.
 	DeviceBinding bool        `json:"device_binding" doc:"Привязывать подписку к устройствам: у каждого устройства свои ключи"`
 	RequireHWID   bool        `json:"device_require_hwid" doc:"Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место)"`
+	DefaultLang   string      `json:"default_lang" enum:"auto,ru,en" doc:"Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота"`
 	Certificate   acme.Status `json:"certificate"`
 }
 
@@ -51,6 +52,7 @@ type patchSettingsInput struct {
 		AutoSNI       *bool   `json:"auto_sni,omitempty"`
 		DeviceBinding *bool   `json:"device_binding,omitempty"`
 		RequireHWID   *bool   `json:"device_require_hwid,omitempty"`
+		DefaultLang   *string `json:"default_lang,omitempty" enum:"auto,ru,en"`
 	}
 }
 
@@ -92,14 +94,16 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	get(settings.KeyGroupAuto, &v.SubGroupAuto)
 	get(settings.KeyRouting, &v.SubRouting)
 	v.SubRouting = string(subs.ParseRouting(v.SubRouting))
-	if v.SubGroupMain == "" {
-		v.SubGroupMain = subs.DefaultMainGroup
-	}
-	if v.SubGroupAuto == "" {
-		v.SubGroupAuto = subs.DefaultAutoGroup
-	}
 	if err != nil {
 		return v, err
+	}
+	if v.DefaultLang, err = h.d.Settings.Lang(ctx); err != nil {
+		return v, err
+	}
+	g := subs.Groups{Main: v.SubGroupMain, Auto: v.SubGroupAuto}.WithDefaults(v.DefaultLang)
+	v.SubGroupMain, v.SubGroupAuto = g.Main, g.Auto
+	if v.DefaultLang == "" {
+		v.DefaultLang = "auto"
 	}
 	if v.PanelPort, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeyPanelPort); err != nil {
 		return v, err
@@ -206,7 +210,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		return settings.Set(ctx, h.d.Settings, key, strings.TrimSpace(*v))
 	}
 	for key, v := range map[string]*string{"brand": b.Brand, "support_url": b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
-		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting} {
+		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyDefaultLang: b.DefaultLang} {
 		if err := set(key, v); err != nil {
 			return nil, err
 		}
@@ -242,13 +246,11 @@ func (h *handlers) groups(ctx context.Context) (subs.Groups, error) {
 	if g.Auto, err = h.d.Settings.String(ctx, settings.KeyGroupAuto); err != nil {
 		return g, err
 	}
-	if g.Main == "" {
-		g.Main = subs.DefaultMainGroup
+	lang, err := h.d.Settings.Lang(ctx)
+	if err != nil {
+		return g, err
 	}
-	if g.Auto == "" {
-		g.Auto = subs.DefaultAutoGroup
-	}
-	return g, nil
+	return g.WithDefaults(lang), nil
 }
 
 // checkGroups: a profile with a group named like a proxy, a built-in policy or the

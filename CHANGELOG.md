@@ -3,6 +3,17 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.3.9
+### en
+- The panel has a default language, picked at install: the admin panel and the subscription page open in it until a visitor picks their own, and default names (tariffs, the auto-select group, the bot's menu) are in it. Settings → Default language changes it; "Browser language" keeps the old behaviour.
+- The server's command line (`mikan admin …`) is in English.
+- A node joins with one command that installs everything from the latest release; the Nodes page shows it with the join key.
+
+### ru
+- У панели есть язык по умолчанию, его выбирают при установке: админка и страница подписки открываются на нём, пока человек не выбрал свой, и на нём же названия по умолчанию (тарифы, группа автовыбора, меню бота). Меняется в «Настройки → Язык по умолчанию»; «Как в браузере» — прежнее поведение.
+- Серверные команды (`mikan admin …`) — на английском.
+- Нода подключается одной командой, которая ставит всё из последнего релиза; страница «Ноды» показывает её вместе с ключом.
+
 ## 0.3.8
 ### en
 - The Telegram tab of the admin panel animates like the others: cards rise in turn, the unsaved-changes bar slides in and out, menu buttons slide to their new place.

@@ -154,6 +154,10 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return subs.Config{}, err
 		}
+		lang, err := set.Lang(ctx)
+		if err != nil {
+			return subs.Config{}, err
+		}
 		var domainName, publicHost, routing string
 		var groups subs.Groups
 		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto,
@@ -163,7 +167,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			}
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing),
-			Direct: []string{publicHost, domainName}}
+			Direct: []string{publicHost, domainName}, Lang: lang}
 		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
 			return subs.Config{}, err
 		}
@@ -203,22 +207,28 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	return p, nil
 }
 
-// ApplyPaths loads the secret paths from settings into the router.
-func (p *Panel) ApplyPaths(ctx context.Context) (settings.Paths, error) {
+// Apply loads the secret paths into the router and the default language into the pages.
+func (p *Panel) Apply(ctx context.Context) (settings.Paths, error) {
 	paths, err := p.Settings.Paths(ctx)
+	if err != nil {
+		return paths, err
+	}
+	lang, err := p.Settings.Lang(ctx)
 	if err != nil {
 		return paths, err
 	}
 	p.server.SetPaths(paths)
 	p.spa.SetPrefix(paths.Admin)
+	p.spa.SetLang(lang)
 	if p.subPage != nil {
 		p.subPage.SetPrefix(paths.Sub)
+		p.subPage.SetLang(lang)
 	}
 	return paths, nil
 }
 
-// Run keeps paths in sync with the DB (the CLI edits them), drives the node syncer and
-// cleans up expired state.
+// Run keeps paths and the language in sync with the DB (the CLI and the settings page
+// edit them), drives the node syncer and cleans up expired state.
 func (p *Panel) Run(ctx context.Context) {
 	if p.Nodes != nil {
 		go p.Nodes.Run(ctx)
@@ -228,8 +238,8 @@ func (p *Panel) Run(ctx context.Context) {
 	}
 	go p.Telegram.Run(ctx)
 	go every(ctx, 5*time.Second, func() {
-		if _, err := p.ApplyPaths(ctx); err != nil {
-			p.log.Error("reload paths", "err", err)
+		if _, err := p.Apply(ctx); err != nil {
+			p.log.Error("reload settings", "err", err)
 		}
 	})
 	every(ctx, 10*time.Minute, func() {

@@ -143,15 +143,16 @@ func (b *Bot) Run(ctx context.Context) {
 	}
 }
 
-// Config is the admin's setup, or the default one.
+// Config is the admin's setup, or the default one in the panel's default language.
 func (b *Bot) Config(ctx context.Context) Config {
+	lang, _ := b.d.Settings.Lang(ctx)
 	// A setup saved before an option existed gets that option's default. A saved menu
 	// replaces the default one whole.
-	def := Default("ru")
+	def := Default(lang)
 	def.Buttons = nil
 	cfg, ok, err := settings.GetOver(ctx, b.d.Settings, KeyConfig, def)
 	if err != nil || !ok {
-		return Default("ru")
+		return Default(lang)
 	}
 	_ = cfg.Validate()
 	return cfg

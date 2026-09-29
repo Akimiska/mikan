@@ -35,6 +35,9 @@ type Config struct {
 	// RequireHWID refuses apps that send none instead of seating them together.
 	Binding     bool
 	RequireHWID bool
+	// Lang is the panel's default language, "" when unset: default group names and the
+	// notices in place of servers are in it.
+	Lang string
 }
 
 // Binder hands devices their keys (domain.Devices).
@@ -174,7 +177,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = h.st.Q.RecordSubFetch(r.Context(), db.RecordSubFetchParams{UserID: u.ID, Ip: h.clientIP(r), FetchedAt: h.now().Unix()})
 	switch format {
 	case "clash":
-		body, err := Mihomo(prof, cfg.Groups, cfg.Routing)
+		body, err := Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -428,15 +431,22 @@ func sameOrigin(r *http.Request) bool {
 // stub answers a device that gets no keys: one placeholder server named after the reason,
 // so the app shows it where the servers would be, and the headers Happ-like apps read.
 func (h *Handler) stub(w http.ResponseWriter, u db.User, cfg Config, format string, reason error) {
+	en := cfg.Lang == "en"
 	name := "⛔ Все места для устройств заняты — откройте ссылку подписки в браузере"
+	if en {
+		name = "⛔ All device places are taken — open the subscription link in a browser"
+	}
 	if errors.Is(reason, domain.ErrNoHWID) {
 		name = "⛔ Приложение не сообщает ID устройства — поставьте Happ, Koala Clash или INCY"
+		if en {
+			name = "⛔ The app does not send a device ID — install Happ, Koala Clash or INCY"
+		}
 		w.Header().Set("X-Hwid-Not-Supported", "true")
 	} else {
 		w.Header().Set("X-Hwid-Max-Devices-Reached", "true")
 	}
 	if format == "clash" {
-		main := cfg.Groups.withDefaults().Main
+		main := cfg.Groups.WithDefaults(cfg.Lang).Main
 		// JSON is YAML: the same as the real profile (see Mihomo).
 		body, _ := json.Marshal(map[string]any{
 			"proxies":      []map[string]any{{"name": name, "type": "socks5", "server": "127.0.0.1", "port": 1}},

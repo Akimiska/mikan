@@ -55,7 +55,7 @@ type Notify struct {
 // Built-in actions, each at most once in the menu.
 var builtins = []string{"sub", "devices", "connect", "renew", "support", "app"}
 
-// Default is the menu of a fresh bot.
+// Default is the menu of a fresh bot in lang, "en" or else Russian.
 func Default(lang string) Config {
 	if lang != "en" {
 		lang = "ru"

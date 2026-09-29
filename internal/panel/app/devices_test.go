@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -65,6 +66,20 @@ func TestDeviceBindingOverHTTP(t *testing.T) {
 	resp, links := fetch("fourth-0123456789")
 	if resp.Header.Get("X-Hwid-Max-Devices-Reached") != "true" || !strings.Contains(links, "127.0.0.1:1") || strings.Count(links, "://") != 1 {
 		t.Fatalf("a fourth device gets the stub: %v %q", resp.Header, links)
+	}
+	// The stub's name is the notice the app shows; it is in the panel's language.
+	notice := func(links string) string {
+		name, _ := url.PathUnescape(links[strings.LastIndex(links, "#")+1:])
+		return name
+	}
+	if n := notice(links); !strings.HasPrefix(n, "⛔ Все места") {
+		t.Fatalf("notice without a language: %q", n)
+	}
+	if err := settings.Set(ctx, set, settings.KeyDefaultLang, "en"); err != nil {
+		t.Fatal(err)
+	}
+	if _, links := fetch("fourth-0123456789"); !strings.HasPrefix(notice(links), "⛔ All device places are taken") {
+		t.Fatalf("notice in English: %q", notice(links))
 	}
 
 	resp, body := h.do(http.MethodGet, sub+"/info", nil, nil)

@@ -36,16 +36,12 @@ type Node struct {
 // Groups are the proxy-group names Clash-family apps show; the admin can rename them.
 type Groups struct {
 	Main string // selector, "VPN" by default
-	Auto string // url-test, "Авто" by default
+	Auto string // url-test, "Авто" by default, "Auto" on a panel in English
 }
 
-const (
-	DefaultMainGroup = "VPN"
-	DefaultAutoGroup = "Авто"
-	// AliasGroup is the name Clash apps assume for the main group in the rules they
-	// inject themselves (Koala Clash per-app routing: "PROCESS-NAME,app.exe,PROXY").
-	AliasGroup = "PROXY"
-)
+// AliasGroup is the name Clash apps assume for the main group in the rules they inject
+// themselves (Koala Clash per-app routing: "PROCESS-NAME,app.exe,PROXY").
+const AliasGroup = "PROXY"
 
 // Routing is how Clash-family apps split traffic between the tunnel and the direct path.
 type Routing string
@@ -77,12 +73,17 @@ var geoxURL = map[string]string{
 	"asn":     "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb",
 }
 
-func (g Groups) withDefaults() Groups {
+// WithDefaults fills in the names the admin left empty, in the panel's default language
+// ("en", Russian otherwise).
+func (g Groups) WithDefaults(lang string) Groups {
 	if g.Main == "" {
-		g.Main = DefaultMainGroup
+		g.Main = "VPN"
 	}
 	if g.Auto == "" {
-		g.Auto = DefaultAutoGroup
+		g.Auto = "Авто"
+		if lang == "en" {
+			g.Auto = "Auto"
+		}
 	}
 	return g
 }
@@ -223,7 +224,7 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	g = g.withDefaults()
+	g = g.WithDefaults("")
 	proxies := make([]map[string]any, len(ps))
 	names := make([]string, len(ps))
 	for i, x := range ps {

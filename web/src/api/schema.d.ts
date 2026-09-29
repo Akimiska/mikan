@@ -1078,6 +1078,8 @@ export interface components {
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
+            /** @enum {string} */
+            default_lang?: "auto" | "ru" | "en";
             device_binding?: boolean;
             device_require_hwid?: boolean;
             domain?: string;
@@ -1177,6 +1179,11 @@ export interface components {
             auto_sni: boolean;
             brand: string;
             certificate: components["schemas"]["Status"];
+            /**
+             * @description Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота
+             * @enum {string}
+             */
+            default_lang: "auto" | "ru" | "en";
             /** @description Привязывать подписку к устройствам: у каждого устройства свои ключи */
             device_binding: boolean;
             /** @description Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место) */

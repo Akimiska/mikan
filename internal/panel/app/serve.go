@@ -108,7 +108,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	if err != nil {
 		return err
 	}
-	paths, err := p.ApplyPaths(ctx)
+	paths, err := p.Apply(ctx)
 	if err != nil {
 		return err
 	}

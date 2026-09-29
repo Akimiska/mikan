@@ -16,6 +16,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
+	"mikan/internal/release"
 )
 
 type NodeInfo struct {
@@ -160,10 +161,6 @@ func (h *handlers) checkNodeName(ctx context.Context, name string, self int64) e
 	return nil
 }
 
-func (h *handlers) joinCommand(key string) string {
-	return "sudo bash install.sh --node --join " + key
-}
-
 func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKeyOutput, error) {
 	if h.d.PanelCert == nil {
 		return nil, huma.Error409Conflict("nodes_disabled")
@@ -198,7 +195,7 @@ func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKe
 		return nil, err
 	}
 	out := &nodeKeyOutput{}
-	out.Body.Node, out.Body.Key, out.Body.Command = h.viewNode(ctx, n, inbounds), key, h.joinCommand(key)
+	out.Body.Node, out.Body.Key, out.Body.Command = h.viewNode(ctx, n, inbounds), key, release.JoinCommand(key)
 	return out, nil
 }
 
@@ -297,7 +294,7 @@ func (h *handlers) rekeyNode(ctx context.Context, in *nodeIDInput) (*nodeKeyOutp
 		return nil, err
 	}
 	out := &nodeKeyOutput{}
-	out.Body.Node, out.Body.Key, out.Body.Command = h.viewNode(ctx, n, inbounds), key, h.joinCommand(key)
+	out.Body.Node, out.Body.Key, out.Body.Command = h.viewNode(ctx, n, inbounds), key, release.JoinCommand(key)
 	return out, nil
 }
 

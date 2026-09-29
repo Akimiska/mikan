@@ -4,8 +4,9 @@
 #   curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh | sudo bash
 #
 # Downloads the installer for this server's architecture from the latest release, checks
-# it against the release manifest and starts it. The installer checks the manifest's
-# signature itself before it pulls anything else.
+# it against the release manifest and starts it with the arguments given after "-s --":
+# "... | sudo bash -s -- --join KEY" installs a node of an existing panel. The installer
+# checks the manifest's signature itself before it pulls anything else.
 set -eu
 
 REPO="Miroshka000/mikan"
@@ -35,8 +36,9 @@ got=$(sha256sum "$tmp/mikan" | cut -d' ' -f1)
 [ -n "$want" ] && [ "$want" = "$got" ] || fail "the installer does not match the release manifest"
 
 install -m 755 "$tmp/mikan" /usr/local/bin/mikan
-# The installer is interactive; curl | bash leaves stdin on the script.
-if [ -t 0 ]; then
-  exec /usr/local/bin/mikan install
+# The installer is interactive; curl | bash leaves stdin on the script, so it reads the
+# terminal. Without one (a script over ssh) it runs on its flags alone.
+if [ -t 0 ] || ! (exec </dev/tty) 2>/dev/null; then
+  exec /usr/local/bin/mikan install "$@"
 fi
-exec /usr/local/bin/mikan install </dev/tty
+exec /usr/local/bin/mikan install "$@" </dev/tty

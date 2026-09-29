@@ -36,6 +36,7 @@ type harness struct {
 	client *http.Client
 	csrf   string
 	now    time.Time
+	p      *Panel
 }
 
 func newHarness(t *testing.T) *harness {
@@ -69,9 +70,10 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.ApplyPaths(ctx); err != nil {
+	if _, err := p.Apply(ctx); err != nil {
 		t.Fatal(err)
 	}
+	h.p = p
 	h.ts = httptest.NewTLSServer(p.Handler)
 	t.Cleanup(h.ts.Close)
 	jar, _ := cookiejar.New(nil)
@@ -172,6 +174,38 @@ func TestAdminPathServesSPAWithBase(t *testing.T) {
 	resp, _ = h.do(http.MethodGet, "/"+adminPath+"/assets/missing.js", nil, nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("missing asset: %d", resp.StatusCode)
+	}
+}
+
+// The language chosen at install opens the admin panel and the subscription page for
+// visitors who have not picked one; without it the browser decides.
+func TestDefaultLangReachesPages(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	pages := []string{"/" + adminPath + "/", "/" + subPath + "/tg"}
+	check := func(want string) {
+		t.Helper()
+		for _, path := range pages {
+			resp, body := h.do(http.MethodGet, path, nil, nil)
+			if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "mikan-lang") != (want != "") ||
+				want != "" && !strings.Contains(string(body), `<meta name="mikan-lang" content="`+want+`">`) {
+				t.Fatalf("%s with %q: %d %s", path, want, resp.StatusCode, body)
+			}
+		}
+	}
+	check("")
+	set := settings.New(h.st.Q)
+	for _, lang := range []string{"en", "auto"} {
+		if err := settings.Set(ctx, set, settings.KeyDefaultLang, lang); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.p.Apply(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if lang == "auto" {
+			lang = ""
+		}
+		check(lang)
 	}
 }
 

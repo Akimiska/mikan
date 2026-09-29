@@ -29,29 +29,29 @@ import (
 	"mikan/internal/panel/store/db"
 )
 
-const usage = `mikan — панель управления VPN на ядре mihomo
+const usage = `mikan — VPN panel on the mihomo core
 
-Команды:
-  serve                         запустить панель
-  admin bootstrap [флаги]       первичная настройка: админ, пути, адрес
-  admin url                     показать ссылку на панель
-  admin reset-password          сменить пароль админа (все сессии завершаются)
-  admin reset-path              выдать новую секретную ссылку на панель
-  admin disable-2fa             выключить 2FA у админа
-  admin backup ФАЙЛ             сделать консистентную копию базы на ходу
-  admin inbound list            подключения: имя, пресет, порт
-  admin inbound add ПРЕСЕТ [--port ПОРТ]
-                                добавить подключение из пресета со свежими ключами (--node НОДА)
-  admin inbound set ИМЯ --port ПОРТ [--node НОДА]
-                                перенести подключение на другой порт; ключи и маскировка те же
-  admin node list               ноды панели
-  admin node add --name ИМЯ --host IP [--domain Д] [--api-port П]
-                                добавить ноду; печатает ключ для install.sh --node --join
-  admin node key НОДА           новый ключ ноды (старый перестаёт работать)
-  admin node set НОДА [--name] [--host] [--domain] [--enabled]
-  health                        проверить, что панель отвечает (healthcheck контейнера)
-  openapi                       вывести OpenAPI-спецификацию (для генерации клиента)
-  version                       версия
+Commands:
+  serve                         run the panel
+  admin bootstrap [flags]       first setup: admin, secret paths, address, language
+  admin url                     print the panel's link
+  admin reset-password          set a new admin password (ends all sessions)
+  admin reset-path              give the panel a new secret link
+  admin disable-2fa             turn off the admin's 2FA
+  admin backup FILE             write a consistent copy of the database while the panel runs
+  admin inbound list            inbounds: node, name, preset, port
+  admin inbound add PRESET [--port PORT] [--node NODE]
+                                add an inbound from a preset with fresh keys
+  admin inbound set NAME --port PORT [--node NODE]
+                                move an inbound to another port; keys and camouflage stay
+  admin node list               the panel's nodes
+  admin node add --name NAME --host IP [--domain DOMAIN] [--api-port PORT]
+                                add a node; prints its join key
+  admin node key NODE           issue a new join key (the old one stops working)
+  admin node set NODE [--name] [--host] [--domain] [--enabled]
+  health                        check that the panel answers (container healthcheck)
+  openapi                       print the OpenAPI spec (for the API client generator)
+  version                       print the version
 `
 
 func Run(ctx context.Context, args []string, version string, web fs.FS) error {
@@ -88,13 +88,13 @@ func Run(ctx context.Context, args []string, version string, web fs.FS) error {
 		fmt.Print(usage)
 		return nil
 	default:
-		return fmt.Errorf("неизвестная команда %q\n\n%s", args[0], usage)
+		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
 }
 
 func adminCmd(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("укажите подкоманду admin\n\n" + usage)
+		return errors.New("admin needs a subcommand\n\n" + usage)
 	}
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -108,7 +108,7 @@ func adminCmd(ctx context.Context, args []string) error {
 	set := settings.New(st.Q)
 	switch args[0] {
 	case "bootstrap":
-		return bootstrap(ctx, st, set, args[1:])
+		return bootstrap(ctx, st, set, args[1:], os.Stdin, os.Stdout)
 	case "url":
 		u, err := panelURL(ctx, set)
 		if err != nil {
@@ -131,12 +131,12 @@ func adminCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println("Новая ссылка (старая перестанет работать в течение 5 секунд):")
+		fmt.Println("New link (the old one stops working within 5 seconds):")
 		fmt.Println(u)
 		return nil
 	case "backup":
 		if len(args) < 2 {
-			return errors.New("укажите файл: mikan admin backup /data/backup.db")
+			return errors.New("name the file: mikan admin backup /data/backup.db")
 		}
 		// VACUUM INTO writes a consistent copy while the panel keeps running.
 		if _, err := st.DB.ExecContext(ctx, "VACUUM INTO ?", args[1]); err != nil {
@@ -145,7 +145,7 @@ func adminCmd(ctx context.Context, args []string) error {
 		if err := os.Chmod(args[1], 0o600); err != nil {
 			return err
 		}
-		fmt.Println("Копия базы:", args[1])
+		fmt.Println("Database copied to", args[1])
 		return nil
 	case "node":
 		return nodeCmd(ctx, st, cfg.DataDir, args[1:], os.Stdout, os.Stderr)
@@ -153,7 +153,7 @@ func adminCmd(ctx context.Context, args []string) error {
 		return inboundCmd(ctx, st, set, args[1:], os.Stdout, os.Stderr)
 	case "disable-2fa":
 		fs := flag.NewFlagSet("disable-2fa", flag.ContinueOnError)
-		username := fs.String("username", "", "логин админа (можно не указывать, если админ один)")
+		username := fs.String("username", "", "admin login (may be left out when there is one admin)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -165,35 +165,39 @@ func adminCmd(ctx context.Context, args []string) error {
 			return err
 		}
 		_ = audit.Write(ctx, st.Q, time.Now(), audit.Entry{Action: "cli.disable_2fa", TargetType: "admin", TargetID: a.Username})
-		fmt.Printf("2FA для %s выключена.\n", a.Username)
+		fmt.Printf("2FA is off for %s.\n", a.Username)
 		return nil
 	default:
-		return fmt.Errorf("неизвестная подкоманда admin %q\n\n%s", args[0], usage)
+		return fmt.Errorf("unknown admin subcommand %q\n\n%s", args[0], usage)
 	}
 }
 
-func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, args []string) error {
+func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
-	username := fs.String("username", "", "логин админа (по умолчанию — случайный)")
-	host := fs.String("public-host", "", "публичный IP или домен сервера (обязательно)")
-	port := fs.Int("port", 0, "порт панели (обязательно)")
-	domain := fs.String("domain", "", "домен для сертификата Let's Encrypt (необязательно)")
-	email := fs.String("email", "", "email для Let's Encrypt (необязательно)")
-	adminPath := fs.String("admin-path", "", "секретный путь панели (по умолчанию — случайный)")
-	subPath := fs.String("sub-path", "", "путь подписок (по умолчанию — случайный)")
-	passwordStdin := fs.Bool("password-stdin", false, "прочитать пароль из stdin вместо генерации")
+	username := fs.String("username", "", "admin login (random by default)")
+	host := fs.String("public-host", "", "public IP or domain of the server (required)")
+	port := fs.Int("port", 0, "panel port (required)")
+	domain := fs.String("domain", "", "domain for a Let's Encrypt certificate (optional)")
+	email := fs.String("email", "", "email for Let's Encrypt (optional)")
+	adminPath := fs.String("admin-path", "", "secret path of the panel (random by default)")
+	subPath := fs.String("sub-path", "", "path of subscription links (random by default)")
+	lang := fs.String("lang", "", "default language, en or ru (by default the visitor's browser decides)")
+	passwordStdin := fs.Bool("password-stdin", false, "read the password from stdin instead of generating one")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *host == "" || *port <= 0 || *port > 65535 {
-		return errors.New("нужны --public-host и --port")
+		return errors.New("--public-host and --port are required")
+	}
+	if *lang != "" && !settings.ValidLang(*lang) {
+		return fmt.Errorf("--lang: want en or ru, got %q", *lang)
 	}
 	if n, err := st.Q.CountAdmins(ctx); err != nil {
 		return err
 	} else if n > 0 {
-		return errors.New("панель уже инициализирована; для нового пароля — `mikan admin reset-password`")
+		return errors.New("the panel is already set up; for a new password run `mikan admin reset-password`")
 	}
-	password, generated, err := readOrGeneratePassword(*passwordStdin, os.Stdin)
+	password, generated, err := readOrGeneratePassword(*passwordStdin, stdin)
 	if err != nil {
 		return err
 	}
@@ -225,11 +229,15 @@ func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, arg
 		if _, err := q.CreateAdmin(ctx, db.CreateAdminParams{Username: name, PasswordHash: hash, CreatedAt: time.Now().Unix()}); err != nil {
 			return err
 		}
-		for k, v := range map[string]any{
+		values := map[string]any{
 			settings.KeyAdminPath: *adminPath, settings.KeySubPath: *subPath,
 			settings.KeyPublicHost: *host, settings.KeyPanelPort: *port,
 			settings.KeyDomain: *domain, settings.KeyACMEEmail: *email,
-		} {
+		}
+		if *lang != "" {
+			values[settings.KeyDefaultLang] = *lang
+		}
+		for k, v := range values {
 			if err := settings.Set(ctx, txSet, k, v); err != nil {
 				return err
 			}
@@ -243,19 +251,19 @@ func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, arg
 	if err != nil {
 		return err
 	}
-	fmt.Println("Панель готова.")
-	fmt.Println("  Адрес:  " + u)
-	fmt.Println("  Логин:  " + name)
+	fmt.Fprintln(stdout, "The panel is ready.")
+	fmt.Fprintln(stdout, "  URL:      "+u)
+	fmt.Fprintln(stdout, "  Login:    "+name)
 	if generated {
-		fmt.Println("  Пароль: " + password + "   ← показывается один раз, сохраните его")
+		fmt.Fprintln(stdout, "  Password: "+password+"   ← shown once, save it")
 	}
 	return nil
 }
 
 func resetPassword(ctx context.Context, st *store.Store, args []string) error {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
-	username := fs.String("username", "", "логин админа (можно не указывать, если админ один)")
-	passwordStdin := fs.Bool("password-stdin", false, "прочитать пароль из stdin вместо генерации")
+	username := fs.String("username", "", "admin login (may be left out when there is one admin)")
+	passwordStdin := fs.Bool("password-stdin", false, "read the password from stdin instead of generating one")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -283,9 +291,9 @@ func resetPassword(ctx context.Context, st *store.Store, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Пароль для %s изменён, все сессии завершены.\n", a.Username)
+	fmt.Printf("The password of %s is changed, all sessions are ended.\n", a.Username)
 	if generated {
-		fmt.Println("Новый пароль: " + password + "   ← показывается один раз")
+		fmt.Println("New password: " + password + "   ← shown once")
 	}
 	return nil
 }
@@ -331,7 +339,7 @@ func readOrGeneratePassword(fromStdin bool, r io.Reader) (string, bool, error) {
 	}
 	pw := strings.TrimRight(line, "\r\n")
 	if len(pw) < 12 {
-		return "", false, errors.New("пароль должен быть не короче 12 символов")
+		return "", false, errors.New("the password must be at least 12 characters long")
 	}
 	return pw, false, nil
 }
@@ -342,7 +350,7 @@ func readOrGeneratePassword(fromStdin bool, r io.Reader) (string, bool, error) {
 func printURL(stdout, stderr io.Writer, url, login string) {
 	fmt.Fprintln(stdout, url)
 	if login != "" {
-		fmt.Fprintln(stderr, "Логин: "+login)
+		fmt.Fprintln(stderr, "Login: "+login)
 	}
 }
 
@@ -352,7 +360,7 @@ func findAdmin(ctx context.Context, st *store.Store, username string) (db.Admin,
 	if username != "" {
 		a, err := st.Q.GetAdminByUsername(ctx, strings.ToLower(strings.TrimSpace(username)))
 		if errors.Is(err, sql.ErrNoRows) {
-			return a, fmt.Errorf("админ %q не найден", username)
+			return a, fmt.Errorf("no admin %q", username)
 		}
 		return a, err
 	}
@@ -362,20 +370,20 @@ func findAdmin(ctx context.Context, st *store.Store, username string) (db.Admin,
 	}
 	switch len(admins) {
 	case 0:
-		return db.Admin{}, errors.New("админов нет: панель не инициализирована")
+		return db.Admin{}, errors.New("no admins: the panel is not set up")
 	case 1:
 		return admins[0], nil
 	}
-	return db.Admin{}, errors.New("админов несколько, укажите --username")
+	return db.Admin{}, errors.New("there are several admins: pass --username")
 }
 
 func validLogin(s string) error {
 	if len(s) < 3 || len(s) > 32 {
-		return errors.New("длина логина — от 3 до 32 символов")
+		return errors.New("a login is 3 to 32 characters long")
 	}
 	for _, r := range s {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
-			return errors.New("логин — только a-z, 0-9, точка, дефис и подчёркивание")
+			return errors.New("a login may have only a-z, 0-9, dots, dashes and underscores")
 		}
 	}
 	return nil
@@ -383,11 +391,11 @@ func validLogin(s string) error {
 
 func validPathSegment(s string, minLen int) error {
 	if len(s) < minLen || len(s) > 64 {
-		return fmt.Errorf("длина должна быть от %d до 64 символов", minLen)
+		return fmt.Errorf("must be %d to 64 characters long", minLen)
 	}
 	for _, r := range s {
 		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
-			return errors.New("допустимы только латинские буквы, цифры, - и _")
+			return errors.New("may have only Latin letters, digits, - and _")
 		}
 	}
 	return nil
@@ -403,7 +411,7 @@ func panelURL(ctx context.Context, set *settings.Settings) (string, error) {
 		return "", err
 	}
 	if ep.Host == "" || p.Admin == "" {
-		return "", errors.New("панель не инициализирована: выполните `mikan admin bootstrap`")
+		return "", errors.New("the panel is not set up: run `mikan admin bootstrap`")
 	}
 	return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + p.Admin + "/", nil
 }

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, ArrowUp, Bot, Link2, Plus, Send, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
@@ -84,17 +85,27 @@ export function TelegramPage() {
           </div>
         </div>
       )}
-      {dirty ? (
-        <div className="bulk-bar glass-strong" role="region" aria-label={t("telegram.unsaved")}>
-          <span className="text-[13px] font-medium">{t("telegram.unsaved")}</span>
-          <Button variant="ghost" size="sm" onClick={() => saved && setDraft(structuredClone(saved))}>
-            {t("telegram.discard")}
-          </Button>
-          <Button variant="primary" size="sm" loading={patch.isPending} onClick={save}>
-            {t("common.save")}
-          </Button>
-        </div>
-      ) : null}
+      <AnimatePresence>
+        {dirty ? (
+          <motion.div
+            className="bulk-bar glass-strong"
+            role="region"
+            aria-label={t("telegram.unsaved")}
+            initial={{ opacity: 0, y: 24, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: 24, x: "-50%" }}
+            transition={{ type: "spring", stiffness: 420, damping: 32 }}
+          >
+            <span className="text-[13px] font-medium">{t("telegram.unsaved")}</span>
+            <Button variant="ghost" size="sm" onClick={() => saved && setDraft(structuredClone(saved))}>
+              {t("telegram.discard")}
+            </Button>
+            <Button variant="primary" size="sm" loading={patch.isPending} onClick={save}>
+              {t("common.save")}
+            </Button>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </>
   );
 }
@@ -106,6 +117,11 @@ function statusOf(v: View): { tone: "ok" | "warn" | "bad" | "off"; text: string 
   if (!v.error) return { tone: "off", text: t("telegram.starting") };
   return { tone: "bad", text: t("telegram.stopped") };
 }
+
+// Cards rise in turn, as on the other tabs.
+const rise = (i: number) => ({ className: "card glass reveal", style: { "--i": i } as React.CSSProperties });
+// Menu buttons slide to their new place when moved, shown or hidden.
+const slide = { type: "spring", stiffness: 520, damping: 40 } as const;
 
 function ConnectCard({ v }: { v: View }) {
   const patch = usePatchTelegram();
@@ -135,13 +151,15 @@ function ConnectCard({ v }: { v: View }) {
   const st = statusOf(v);
   const showForm = !v.token_set || editing;
   return (
-    <section className="card glass">
+    <section {...rise(0)}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("telegram.connect")}</h2>
           <div className="card-sub">{t("telegram.connectSub")}</div>
         </div>
-        {v.token_set ? <Switch checked={v.enabled} label={t("telegram.enabled")} disabled={patch.isPending} onChange={(on) => patch.mutate({ enabled: on }, { onError: (e) => toast.error(errorText(e)) })} /> : null}
+        {v.token_set ? (
+          <Switch checked={v.enabled} label={t("telegram.enabled")} disabled={patch.isPending} onChange={(on) => patch.mutate({ enabled: on }, { onError: (e) => toast.error(errorText(e)) })} />
+        ) : null}
       </div>
       {v.token_set && v.bot ? (
         <div className="panel-soft flex items-center gap-3 p-3">
@@ -237,8 +255,9 @@ function MenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) =>
     void n;
   };
   const custom = (b: MenuButton) => !ACTIONS.includes(b.action as (typeof ACTIONS)[number]);
+  const reduce = useReducedMotion();
   return (
-    <section className="card glass">
+    <section {...rise(1)}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("telegram.menu")}</h2>
@@ -246,37 +265,47 @@ function MenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) =>
         </div>
       </div>
       <ul className="flex flex-col gap-2">
-        {draft.buttons.map((b, i) => (
-          <li key={b.id + i} className="panel-soft p-3">
-            <div className="flex items-center gap-2">
-              <Switch checked={b.on} label={t("telegram.showButton", { name: b.label })} onChange={(on) => set(i, { on })} />
-              <input className="input h-10 min-w-0 flex-1" value={b.label} maxLength={40} onChange={(e) => set(i, { label: e.target.value })} aria-label={t("telegram.buttonLabel")} />
-              <button type="button" className="icon-btn" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t("telegram.moveUp")}>
-                <ArrowUp size={16} />
-              </button>
-              <button type="button" className="icon-btn" disabled={i === draft.buttons.length - 1} onClick={() => move(i, 1)} aria-label={t("telegram.moveDown")}>
-                <ArrowDown size={16} />
-              </button>
-              {custom(b) ? (
-                <button type="button" className="icon-btn" onClick={() => setDraft({ ...draft, buttons: draft.buttons.filter((_, j) => j !== i) })} aria-label={t("telegram.deleteButton", { name: b.label })}>
-                  <Trash2 size={16} />
+        <AnimatePresence initial={false}>
+          {draft.buttons.map((b, i) => (
+            <motion.li
+              key={b.id}
+              className="panel-soft p-3"
+              layout={!reduce}
+              initial={reduce ? false : { opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+              transition={slide}
+            >
+              <div className="flex items-center gap-2">
+                <Switch checked={b.on} label={t("telegram.showButton", { name: b.label })} onChange={(on) => set(i, { on })} />
+                <input className="input h-10 min-w-0 flex-1" value={b.label} maxLength={40} onChange={(e) => set(i, { label: e.target.value })} aria-label={t("telegram.buttonLabel")} />
+                <button type="button" className="icon-btn" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t("telegram.moveUp")}>
+                  <ArrowUp size={16} />
                 </button>
+                <button type="button" className="icon-btn" disabled={i === draft.buttons.length - 1} onClick={() => move(i, 1)} aria-label={t("telegram.moveDown")}>
+                  <ArrowDown size={16} />
+                </button>
+                {custom(b) ? (
+                  <button type="button" className="icon-btn" onClick={() => setDraft({ ...draft, buttons: draft.buttons.filter((_, j) => j !== i) })} aria-label={t("telegram.deleteButton", { name: b.label })}>
+                    <Trash2 size={16} />
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--ink-500)]">
+                <span>{actionLabel(b.action)}</span>
+                {i > 0 ? (
+                  <label className="flex items-center gap-1.5">
+                    <input type="checkbox" className="check" checked={b.row} onChange={(e) => set(i, { row: e.target.checked })} /> {t("telegram.sameRow")}
+                  </label>
+                ) : null}
+              </div>
+              {b.action === "url" ? <input className="input mono mt-2" value={b.url ?? ""} onChange={(e) => set(i, { url: e.target.value })} placeholder="https://… / tg://…" aria-label={t("telegram.buttonUrl")} /> : null}
+              {b.action === "page" ? (
+                <textarea className="input mt-2" value={b.text ?? ""} maxLength={3000} onChange={(e) => set(i, { text: e.target.value })} placeholder={t("telegram.pagePlaceholder")} aria-label={t("telegram.pageText")} />
               ) : null}
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--ink-500)]">
-              <span>{actionLabel(b.action)}</span>
-              {i > 0 ? (
-                <label className="flex items-center gap-1.5">
-                  <input type="checkbox" className="check" checked={b.row} onChange={(e) => set(i, { row: e.target.checked })} /> {t("telegram.sameRow")}
-                </label>
-              ) : null}
-            </div>
-            {b.action === "url" ? <input className="input mono mt-2" value={b.url ?? ""} onChange={(e) => set(i, { url: e.target.value })} placeholder="https://… / tg://…" aria-label={t("telegram.buttonUrl")} /> : null}
-            {b.action === "page" ? (
-              <textarea className="input mt-2" value={b.text ?? ""} maxLength={3000} onChange={(e) => set(i, { text: e.target.value })} placeholder={t("telegram.pagePlaceholder")} aria-label={t("telegram.pageText")} />
-            ) : null}
-          </li>
-        ))}
+            </motion.li>
+          ))}
+        </AnimatePresence>
       </ul>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className="chip-btn" onClick={() => add("url")} disabled={draft.buttons.length >= 20}>
@@ -304,7 +333,7 @@ const TEXTS: { key: TextKey; label: string }[] = [
 
 function TextsCard({ draft, setDraft, defaults }: { draft: Config; setDraft: (c: Config) => void; defaults: Schemas["Texts"] }) {
   return (
-    <section className="card glass">
+    <section {...rise(2)}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("telegram.texts")}</h2>
@@ -345,7 +374,7 @@ function OptionsCard({ draft, setDraft, v }: { draft: Config; setDraft: (c: Conf
     </li>
   );
   return (
-    <section className="card glass">
+    <section {...rise(3)}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("telegram.options")}</h2>
@@ -380,7 +409,7 @@ function BroadcastCard({ v }: { v: View }) {
   const busy = !!v.broadcast?.active;
   const ready = v.running && v.accounts > 0 && !busy;
   return (
-    <section className="card glass">
+    <section {...rise(4)}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("telegram.broadcast")}</h2>
@@ -455,15 +484,16 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
     [brand],
   );
   const text = (draft.texts.main || v.defaults.main).replace(/\{(\w+)\}/g, (m, k: string) => sample[k] ?? m);
-  const rows: string[][] = [];
+  const reduce = useReducedMotion();
+  const rows: MenuButton[][] = [];
   for (const b of draft.buttons) {
     if (!b.on || (b.action === "support" && !support) || (b.action === "app" && !(draft.mini_app && v.mini_app_url))) continue;
     const last = rows[rows.length - 1];
-    if (b.row && last && last.length < 3) last.push(b.label);
-    else rows.push([b.label]);
+    if (b.row && last && last.length < 3) last.push(b);
+    else rows.push([b]);
   }
   return (
-    <section className="card glass" aria-label={t("telegram.preview")}>
+    <section {...rise(1)} aria-label={t("telegram.preview")}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("telegram.preview")}</h2>
@@ -472,17 +502,29 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
       </div>
       <div className="tg-chat">
         <div className="tg-bubble">{text}</div>
-        <div className="tg-keyboard">
-          {rows.map((r, i) => (
-            <div key={i} className="tg-row">
-              {r.map((label, j) => (
-                <span key={j} className="tg-btn">
-                  {label}
-                </span>
-              ))}
-            </div>
-          ))}
-        </div>
+        <motion.div className="tg-keyboard" layout={!reduce} transition={slide}>
+          <AnimatePresence initial={false} mode="popLayout">
+            {rows.map((r) => (
+              <motion.div key={r[0]!.id} className="tg-row" layout={!reduce} transition={slide}>
+                <AnimatePresence initial={false} mode="popLayout">
+                  {r.map((b) => (
+                    <motion.span
+                      key={b.id}
+                      className="tg-btn"
+                      layout={!reduce}
+                      initial={reduce ? false : { opacity: 0, scale: 0.85 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.85 }}
+                      transition={slide}
+                    >
+                      {b.label}
+                    </motion.span>
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </motion.div>
       </div>
       {!v.mini_app_url && draft.buttons.some((b) => b.action === "app" && b.on) ? (
         <p className="mt-3 flex items-start gap-2 text-xs text-[var(--ink-500)]">

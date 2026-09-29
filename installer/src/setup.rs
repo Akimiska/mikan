@@ -471,13 +471,17 @@ pub fn summary(o: &Outcome) -> String {
     }
 }
 
-/// `mikan install`: the TUI in a terminal, the plain mode with --yes or without one.
+/// `mikan install`: the TUI in a terminal, the plain mode with --yes or without one. On
+/// an installed server it opens the menu, or with --yes updates: the one-line install
+/// is also how a server of 0.3.8 and before moves to this installer.
 pub fn install(opts: Options) -> Result<()> {
     if Path::new(DIR).join(".env").exists() {
         if crate::tui::interactive() && !opts.yes {
             return crate::tui::menu();
         }
-        bail!("mikan is already installed in {DIR}: run `mikan` for the menu or `mikan update`");
+        println!("mikan is already installed in {DIR}: updating it.");
+        let args = crate::ops::UpdateArgs { target: opts.image_tar.or(opts.image), ..Default::default() };
+        return crate::ops::update(&args, &mut |l| println!("{l}"), &mut |_| {});
     }
     if crate::tui::interactive() && !opts.yes {
         return crate::tui::wizard(opts);

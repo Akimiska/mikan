@@ -79,25 +79,15 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	}
 	opts.PanelCert = func() (nodetls.Pair, error) { return nodetls.LoadOrCreate(nodesDir, time.Now()) }
 	opts.Connect = func(n db.Node) (nodesync.Target, error) {
+		c, err := NodeClient(cfg, n)
+		if err != nil {
+			return nodesync.Target{}, err
+		}
 		quic := func() (*nodeapi.TLSFiles, error) {
 			f, _, err := opts.QUIC(n)
 			return f, err
 		}
-		if n.Address == "" {
-			if cfg.NodeSocket == "" {
-				return nodesync.Target{}, nodesync.ErrNoNode
-			}
-			return nodesync.Target{Node: nodeapi.NewUnixClient(cfg.NodeSocket), TLS: quic, Local: true}, nil
-		}
-		panel, err := opts.PanelCert()
-		if err != nil {
-			return nodesync.Target{}, err
-		}
-		tc, err := nodetls.ClientConfig(panel, n.CertSha256)
-		if err != nil {
-			return nodesync.Target{}, err
-		}
-		return nodesync.Target{Node: nodeapi.NewTLSClient(n.Address, tc), TLS: quic}, nil
+		return nodesync.Target{Node: c, TLS: quic, Local: n.Address == ""}, nil
 	}
 	var certs *acme.Manager
 	if !cfg.Dev {
@@ -150,6 +140,27 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(shutdownCtx)
+}
+
+// NodeClient reaches a node's API as the running panel does: the local node over its
+// socket, a remote one over TLS with the panel's client certificate and the node's pin.
+// The CLI uses it too, from inside the panel's container.
+func NodeClient(cfg config.Config, n db.Node) (*nodeapi.Client, error) {
+	if n.Address == "" {
+		if cfg.NodeSocket == "" {
+			return nil, nodesync.ErrNoNode
+		}
+		return nodeapi.NewUnixClient(cfg.NodeSocket), nil
+	}
+	panel, err := nodetls.LoadOrCreate(filepath.Join(cfg.DataDir, "tls", "nodes"), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	tc, err := nodetls.ClientConfig(panel, n.CertSha256)
+	if err != nil {
+		return nil, err
+	}
+	return nodeapi.NewTLSClient(n.Address, tc), nil
 }
 
 // Internet scanners produce a constant stream of failed TLS handshakes; they are not actionable.

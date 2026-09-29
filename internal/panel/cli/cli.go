@@ -49,6 +49,10 @@ Commands:
                                 add a node; prints its join key
   admin node key NODE           issue a new join key (the old one stops working)
   admin node set NODE [--name] [--host] [--domain] [--enabled]
+  admin targets scan [--node NODE] [--json]
+                                look for REALITY camouflage sites next to a node, fastest first
+  admin targets apply --dest HOST:PORT [--sni NAME] (--all | --inbound NAME) [--node NODE]
+                                point REALITY inbounds at a site; it is checked first (--force skips)
   health                        check that the panel answers (container healthcheck)
   openapi                       print the OpenAPI spec (for the API client generator)
   version                       print the version
@@ -151,6 +155,8 @@ func adminCmd(ctx context.Context, args []string) error {
 		return nodeCmd(ctx, st, cfg.DataDir, args[1:], os.Stdout, os.Stderr)
 	case "inbound":
 		return inboundCmd(ctx, st, set, args[1:], os.Stdout, os.Stderr)
+	case "targets":
+		return targetsCmd(ctx, st, set, cfg, args[1:], os.Stdout, os.Stderr)
 	case "disable-2fa":
 		fs := flag.NewFlagSet("disable-2fa", flag.ContinueOnError)
 		username := fs.String("username", "", "admin login (may be left out when there is one admin)")

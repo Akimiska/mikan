@@ -19,7 +19,7 @@ type Warp = Schemas["WarpView"];
 export function useWarp(nodeId: number | null, enabled = true) {
   return useQuery({
     queryKey: qk.warp(nodeId ?? 0),
-    queryFn: () => unwrap(api.GET("/api/v1/nodes/{id}/warp", { params: { path: { id: nodeId! } } })),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/nodes/{id}/warp", { params: { path: { id: nodeId! } }, signal })),
     enabled: enabled && nodeId != null,
   });
 }

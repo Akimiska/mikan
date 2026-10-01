@@ -26,7 +26,7 @@ const TAB_ICONS = { connect: PlugZap, menu: LayoutList, notify: Bell, broadcast:
 function useTelegram() {
   return useQuery({
     queryKey: qk.telegram,
-    queryFn: () => unwrap(api.GET("/api/v1/telegram")),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram", { signal })),
     // A broadcast in progress moves every second; otherwise little changes.
     refetchInterval: (q) => (q.state.data?.broadcast?.active ? 2_000 : 10_000),
   });

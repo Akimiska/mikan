@@ -288,7 +288,7 @@ export function TwoFactorCard() {
 export function SessionsCard() {
   const qc = useQueryClient();
   const toast = useToast();
-  const sessions = useQuery({ queryKey: qk.sessions, queryFn: () => unwrap(api.GET("/api/v1/auth/sessions")) });
+  const sessions = useQuery({ queryKey: qk.sessions, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/auth/sessions", { signal })) });
   const revoke = useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/auth/sessions/{id}", { params: { path: { id } } })),
     onSuccess: () => {

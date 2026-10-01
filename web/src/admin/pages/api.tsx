@@ -39,7 +39,7 @@ const expiries = [0, 30, 90, 365] as const;
 function KeysCard() {
   const qc = useQueryClient();
   const toast = useToast();
-  const keys = useQuery({ queryKey: qk.apiKeys, queryFn: () => unwrap(api.GET("/api/v1/api-keys")) });
+  const keys = useQuery({ queryKey: qk.apiKeys, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/api-keys", { signal })) });
   const [adding, setAdding] = useState(false);
   const [made, setMade] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<APIKey | null>(null);

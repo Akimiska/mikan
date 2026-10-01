@@ -20,7 +20,7 @@ type Route = "direct" | "warp" | "node";
 export function CascadeDrawer({ node, onClose }: { node: { id: number; name: string } | null; onClose: () => void }) {
   const cascade = useQuery({
     queryKey: qk.cascade(node?.id ?? 0),
-    queryFn: () => unwrap(api.GET("/api/v1/nodes/{id}/cascade", { params: { path: { id: node!.id } } })),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/nodes/{id}/cascade", { params: { path: { id: node!.id } }, signal })),
     enabled: !!node,
   });
   return (

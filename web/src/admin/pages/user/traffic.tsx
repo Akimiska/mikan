@@ -119,7 +119,7 @@ export function TrafficSection({ u }: { u: User }) {
 export function PoolsSection({ u }: { u: User }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const pools = useQuery({ queryKey: qk.userPools(u.id), queryFn: () => unwrap(api.GET("/api/v1/users/{id}/pools", { params: { path: { id: u.id } } })) });
+  const pools = useQuery({ queryKey: qk.userPools(u.id), queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/pools", { params: { path: { id: u.id } }, signal })) });
   const [edit, setEdit] = useState<Record<number, string> | null>(null);
   const save = useMutation({
     mutationFn: (limits: Record<number, string>) =>

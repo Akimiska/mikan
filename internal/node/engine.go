@@ -25,6 +25,7 @@ import (
 	mlog "github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
 
+	"mikan/internal/fsutil"
 	"mikan/internal/nodeapi"
 	"mikan/internal/proto"
 )
@@ -165,10 +166,10 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	var cert proto.Cert
 	if st.TLS != nil && st.TLS.CertPEM != "" {
 		cert = proto.Cert{CertPath: filepath.Join(e.home, "tls", "node.crt"), KeyPath: filepath.Join(e.home, "tls", "node.key")}
-		if err := writeFileAtomic(cert.CertPath, []byte(st.TLS.CertPEM), 0o600); err != nil {
+		if err := fsutil.WriteFileAtomic(cert.CertPath, []byte(st.TLS.CertPEM), 0o600); err != nil {
 			return nodeapi.ApplyResult{}, err
 		}
-		if err := writeFileAtomic(cert.KeyPath, []byte(st.TLS.KeyPEM), 0o600); err != nil {
+		if err := fsutil.WriteFileAtomic(cert.KeyPath, []byte(st.TLS.KeyPEM), 0o600); err != nil {
 			return nodeapi.ApplyResult{}, err
 		}
 	}
@@ -322,7 +323,7 @@ func (e *Engine) PersistCounters() error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(e.dataDir, countersFile), raw, 0o600)
+	return fsutil.WriteFileAtomic(filepath.Join(e.dataDir, countersFile), raw, 0o600)
 }
 
 func (e *Engine) saveState(st nodeapi.DesiredState) error {
@@ -330,7 +331,7 @@ func (e *Engine) saveState(st nodeapi.DesiredState) error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(e.dataDir, stateFile), raw, 0o600)
+	return fsutil.WriteFileAtomic(filepath.Join(e.dataDir, stateFile), raw, 0o600)
 }
 
 // pumpLogs forwards mihomo's log stream: warnings and errors go to our logger and the
@@ -457,30 +458,6 @@ func loadCounters(path string) (counterState, error) {
 		return counterState{}, fmt.Errorf("%s: %w", countersFile, err)
 	}
 	return cs, nil
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }
 
 // Probe checks the internet through one outbound of the running config, at most once a

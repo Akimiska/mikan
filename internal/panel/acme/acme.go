@@ -19,7 +19,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +30,7 @@ import (
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/registration"
 
+	"mikan/internal/fsutil"
 	"mikan/internal/hostname"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/tlscert"
@@ -194,7 +194,7 @@ func (m *Manager) ensure(ctx context.Context) {
 		st.Error = "no_public_host"
 		return
 	}
-	if cert, err := m.load(); err == nil && covers(cert.Leaf, id) {
+	if cert, err := m.load(); err == nil && tlscert.Covers(cert.Leaf, id) {
 		if !m.needsRenewal(cert.Leaf) {
 			m.holder.Set(cert)
 			st.Kind, st.NotAfter = "letsencrypt", cert.Leaf.NotAfter
@@ -274,10 +274,10 @@ func (m *Manager) obtain(ctx context.Context, id string) (*tls.Certificate, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := writeFile(filepath.Join(m.dir, "cert.pem"), res.Certificate); err != nil {
+	if err := fsutil.WriteFileAtomic(filepath.Join(m.dir, "cert.pem"), res.Certificate, 0o600); err != nil {
 		return nil, err
 	}
-	if err := writeFile(filepath.Join(m.dir, "key.pem"), res.PrivateKey); err != nil {
+	if err := fsutil.WriteFileAtomic(filepath.Join(m.dir, "key.pem"), res.PrivateKey, 0o600); err != nil {
 		return nil, err
 	}
 	return m.load()
@@ -323,22 +323,7 @@ func (m *Manager) accountKey() (crypto.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	return k, writeFile(path, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
-}
-
-func writeFile(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-func covers(leaf *x509.Certificate, id string) bool {
-	if ip := net.ParseIP(id); ip != nil {
-		return slices.ContainsFunc(leaf.IPAddresses, ip.Equal)
-	}
-	return slices.Contains(leaf.DNSNames, id)
+	return k, fsutil.WriteFileAtomic(path, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0o600)
 }
 
 // isPrivate reports identifiers Let's Encrypt can never validate: private and loopback

@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/fsutil"
 	"mikan/internal/release"
 )
 
@@ -213,9 +214,5 @@ func (c *Checker) write(name string, data []byte) error {
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return err
 	}
-	tmp := filepath.Join(c.dir, "."+name+".tmp")
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(c.dir, name))
+	return fsutil.WriteFileAtomic(filepath.Join(c.dir, name), data, 0o644)
 }

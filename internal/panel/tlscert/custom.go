@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mikan/internal/fsutil"
 )
 
 // The admin's own certificate, instead of Let's Encrypt or the self-signed one (GitHub
@@ -186,18 +188,10 @@ func SaveCustom(dir string, c *tls.Certificate) error {
 		return err
 	}
 	// The key first: a new chain next to an old key would not load.
-	if err := writeAtomic(filepath.Join(dir, customKey), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})); err != nil {
+	if err := fsutil.WriteFileAtomic(filepath.Join(dir, customKey), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, customCert), chain.Bytes())
-}
-
-func writeAtomic(path string, data []byte) error {
-	tmp := path + ".new"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsutil.WriteFileAtomic(filepath.Join(dir, customCert), chain.Bytes(), 0o600)
 }
 
 // LoadCustom reads the certificate SaveCustom wrote; fs.ErrNotExist when there is none.

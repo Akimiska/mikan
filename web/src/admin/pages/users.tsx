@@ -278,7 +278,7 @@ const UserCard = memo(function UserCard({ u, tariff }: { u: User; tariff?: Tarif
   useLocale();
   const e = expiryText(u.expires_at);
   return (
-    <Link from="/users" to="/users" search={(s) => ({ ...s, user: u.id, create: undefined })} className="panel-soft grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 p-3 text-left">
+    <Link from="/users" to="/users" search={(s) => ({ ...s, user: u.id, create: undefined })} className="panel-soft cv-auto grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 p-3 text-left">
       <Avatar name={u.name} seed={u.id} />
       <div className="min-w-0">
         <div className="truncate font-medium">

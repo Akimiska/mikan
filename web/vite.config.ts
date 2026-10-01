@@ -29,10 +29,29 @@ function subDictionaries(): Plugin {
   };
 }
 
+/**
+ * Preloads the text font's faces: the browser finds them only after the CSS is parsed, and
+ * until then (a phone on a slow network) the page is shown in the system font and then
+ * jumps. Vite does not rewrite the hashed names in a hand-written <link>, so they are
+ * taken from the finished bundle.
+ */
+function preloadFonts(files: string[]): Plugin {
+  return {
+    name: "mikan-preload-fonts",
+    transformIndexHtml: {
+      order: "post",
+      handler: (_html, ctx) =>
+        Object.keys(ctx.bundle ?? {})
+          .filter((f) => files.some((n) => f.includes(n)))
+          .map((f) => ({ tag: "link", attrs: { rel: "preload", as: "font", type: "font/woff2", crossorigin: "", href: `./${f}` }, injectTo: "head" as const })),
+    },
+  };
+}
+
 export default defineConfig({
   // Relative asset URLs: the Go server injects <base href="/<secret>/"> at runtime.
   base: "./",
-  plugins: [react(), tailwindcss(), subDictionaries()],
+  plugins: [react(), tailwindcss(), subDictionaries(), preloadFonts(["onest-latin-wght", "onest-cyrillic-wght"])],
   build: {
     outDir: "dist",
     emptyOutDir: true,

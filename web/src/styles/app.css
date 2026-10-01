@@ -194,6 +194,7 @@
   .utable tbody tr:hover td { background: rgba(255, 255, 255, 0.55); }
   .utable tbody tr.sel td { background: var(--mikan-50); }
   .utable tbody tr:has(.row-link:focus-visible) td { background: rgba(255, 255, 255, 0.55); }
+  .cv-auto { content-visibility: auto; contain-intrinsic-size: auto 128px; }
   .row-link { color: inherit; }
   .row-link:hover { text-decoration: underline; text-underline-offset: 3px; }
   .utable td:first-child { border-radius: 12px 0 0 12px; }

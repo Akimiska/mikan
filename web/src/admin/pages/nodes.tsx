@@ -51,7 +51,9 @@ export function NodesPage() {
       setRemoving(null);
     },
     onSettled: refresh,
-    onError: (e) => toast.error(errorText(e)),
+    // A node still in use names what goes through it: all of it, not just the first.
+    onError: (e) =>
+      toast.error(e instanceof ApiError && e.status === 409 && e.detail === "node_in_use" ? `${t("errors.api.node_in_use")} ${e.messages.join("; ")}` : errorText(e)),
   });
 
   return (

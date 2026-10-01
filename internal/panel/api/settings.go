@@ -10,7 +10,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/hostname"
 	"mikan/internal/panel/acme"
+	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
@@ -97,8 +99,8 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 			*dst, _, err = settings.Get[string](ctx, h.d.Settings, key)
 		}
 	}
-	get("brand", &v.Brand)
-	get("support_url", &v.SupportURL)
+	get(settings.KeyBrand, &v.Brand)
+	get(settings.KeySupportURL, &v.SupportURL)
 	get(settings.KeyPublicHost, &v.PublicHost)
 	get(settings.KeyDomain, &v.Domain)
 	get(settings.KeyGroupMain, &v.SubGroupMain)
@@ -131,19 +133,19 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if v.SubPort > 0 && h.d.SubPortError != nil {
 		v.SubPortError = h.d.SubPortError()
 	}
-	if v.QuietHourUTC, _, err = settings.Get[int](ctx, h.d.Settings, "quiet_hour_utc"); err != nil {
+	if v.QuietHourUTC, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeyQuietHour); err != nil {
 		return v, err
 	}
-	if v.AutoPort, err = h.d.Settings.Bool(ctx, settings.KeyAutoPort, true); err != nil {
+	if v.AutoPort, err = h.d.Settings.On(ctx, settings.AutoPort); err != nil {
 		return v, err
 	}
-	if v.AutoSNI, err = h.d.Settings.Bool(ctx, settings.KeyAutoSNI, true); err != nil {
+	if v.AutoSNI, err = h.d.Settings.On(ctx, settings.AutoSNI); err != nil {
 		return v, err
 	}
-	if v.DeviceBinding, err = h.d.Settings.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
+	if v.DeviceBinding, err = h.d.Settings.On(ctx, settings.DeviceBinding); err != nil {
 		return v, err
 	}
-	if v.RequireHWID, err = h.d.Settings.Bool(ctx, settings.KeyRequireHWID, false); err != nil {
+	if v.RequireHWID, err = h.d.Settings.On(ctx, settings.RequireHWID); err != nil {
 		return v, err
 	}
 	if v.Brand == "" {
@@ -180,33 +182,13 @@ func (h *handlers) getSettings(ctx context.Context, _ *struct{}) (*settingsOutpu
 	return &settingsOutput{Body: v}, nil
 }
 
-func validHost(s string) bool {
-	if s == "" {
-		return true
-	}
-	if net.ParseIP(s) != nil {
-		return true
-	}
-	for _, label := range strings.Split(s, ".") {
-		if label == "" || len(label) > 63 {
-			return false
-		}
-		for _, r := range label {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
-				return false
-			}
-		}
-	}
-	return strings.Contains(s, ".")
-}
-
 func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (*settingsOutput, error) {
 	b := in.Body
 	var details []error
-	if b.PublicHost != nil && (*b.PublicHost == "" || !validHost(*b.PublicHost)) {
+	if b.PublicHost != nil && !hostname.Valid(*b.PublicHost) {
 		details = append(details, &huma.ErrorDetail{Location: "body.public_host", Message: "public_host_invalid"})
 	}
-	if b.Domain != nil && !validHost(*b.Domain) {
+	if b.Domain != nil && *b.Domain != "" && !hostname.Valid(*b.Domain) {
 		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 	}
 	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {
@@ -259,6 +241,29 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			details = append(details, d)
 		}
 	}
+	// The domain must lead to this server: checked when it or the server's address changes,
+	// after the cheap checks, since it asks public DNS.
+	if (b.Domain != nil || b.PublicHost != nil) && len(details) == 0 {
+		cur, err := h.d.Settings.String(ctx, settings.KeyDomain)
+		if err != nil {
+			return nil, err
+		}
+		dom := cur
+		if b.Domain != nil {
+			dom = strings.TrimSpace(*b.Domain)
+		}
+		if dom != "" && (dom != cur || b.PublicHost != nil) {
+			host := ""
+			if b.PublicHost != nil {
+				host = strings.TrimSpace(*b.PublicHost)
+			} else if host, err = h.d.Settings.String(ctx, settings.KeyPublicHost); err != nil {
+				return nil, err
+			}
+			if d := h.domainHere(ctx, "body.domain", dom, dnscheck.Own(host)); d != nil {
+				details = append(details, d)
+			}
+		}
+	}
 	if len(details) > 0 {
 		return nil, huma.Error422UnprocessableEntity("validation", details...)
 	}
@@ -289,14 +294,14 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			return nil, err
 		}
 	}
-	for key, v := range map[string]*string{"brand": b.Brand, "support_url": b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
+	for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
 		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
 		if err := set(key, v); err != nil {
 			return nil, err
 		}
 	}
 	if b.QuietHourUTC != nil {
-		if err := settings.Set(ctx, h.d.Settings, "quiet_hour_utc", *b.QuietHourUTC); err != nil {
+		if err := settings.Set(ctx, h.d.Settings, settings.KeyQuietHour, *b.QuietHourUTC); err != nil {
 			return nil, err
 		}
 	}
@@ -336,31 +341,27 @@ func (h *handlers) checkSubPort(ctx context.Context, port int) (*huma.ErrorDetai
 	if subPortReserved[port] {
 		return bad("sub_port_reserved", port)
 	}
-	panelPort, _, err := settings.Get[int](ctx, h.d.Settings, settings.KeyPanelPort)
-	if err != nil {
-		return nil, err
-	}
-	if port == panelPort {
-		return bad("sub_port_panel", port)
-	}
 	nodes, err := h.d.Store.Q.ListNodes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	all, err := h.d.Store.Q.ListInbounds(ctx)
-	if err != nil {
-		return nil, err
-	}
-	p := strconv.Itoa(port)
 	for _, n := range nodes {
 		if n.Address != "" {
 			continue
 		}
-		if owner, busy := domain.PortOwner(domain.NodeInbounds(all, n.ID), p, "tcp", 0); busy {
-			return bad("sub_port_inbound", owner.Name)
+		ports, err := domain.NodePorts(ctx, h.d.Store.Q, n)
+		if err != nil {
+			return nil, err
 		}
-		if h.relayPortBusy(ctx, n.ID, p, "tcp") {
+		owner, busy := ports.Busy(strconv.Itoa(port), "tcp", domain.PortHolder{Kind: domain.PortSub})
+		switch {
+		case !busy:
+		case owner.Kind == domain.PortPanel:
+			return bad("sub_port_panel", port)
+		case owner.Kind == domain.PortRelay:
 			return bad("sub_port_relay", port)
+		default:
+			return bad("sub_port_inbound", owner.Name)
 		}
 	}
 	return nil, nil
@@ -404,7 +405,7 @@ func (h *handlers) checkGroups(ctx context.Context, g subs.Groups) []error {
 	}
 	if inbounds, err := h.d.Store.Q.ListInbounds(ctx); err == nil {
 		for _, in := range inbounds {
-			name := subs.ProxyName(in)
+			name := domain.ProxyName(in)
 			if strings.EqualFold(name, g.Main) {
 				bad("sub_group_main", "group_is_proxy", in.Name)
 			}

@@ -143,13 +143,19 @@ func targetsCmd(ctx context.Context, st *store.Store, set *settings.Settings, cf
 			}
 			fmt.Fprintf(stderr, "%s (%s): TLS 1.3, HTTP/2, X25519, valid certificate, %d ms.\n", *dest, r.SNI, r.RTTms)
 		}
+		ins := domain.NewInbounds(st, nil, time.Now)
 		for _, name := range names {
-			prev, next, err := domain.SetInboundTarget(ctx, st, n.ID, name, *dest, *sni, time.Now())
+			// The keys stay: clients keep working once they refresh the subscription.
+			var prev, next db.Inbound
+			in, err := ins.Find(ctx, n.ID, name)
+			if err == nil {
+				prev, next, err = ins.Update(ctx, in.ID, domain.InboundPatch{Dest: dest, ServerName: sni})
+			}
 			var pe *proto.Error
 			switch {
 			case errors.Is(err, domain.ErrUnknownInbound):
 				return fmt.Errorf("node %d has no inbound %q: see mikan admin inbound list", n.ID, name)
-			case errors.Is(err, domain.ErrNoReality):
+			case errors.As(err, &pe) && pe.Code == "dest_no_reality":
 				return fmt.Errorf("inbound %s has no REALITY camouflage", name)
 			case errors.As(err, &pe):
 				return fmt.Errorf("%s: %s", name, targetError(pe))

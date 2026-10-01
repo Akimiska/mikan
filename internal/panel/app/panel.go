@@ -14,10 +14,12 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
+	"mikan/internal/panel/addons"
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/server"
@@ -40,6 +42,7 @@ type Panel struct {
 	Telegram  *tgbot.Bot
 	Billing   *billing.Service
 	Updates   *updates.Checker
+	Addons    *addons.Manager
 	server    *server.Server
 	spa       *server.SPA
 	subPage   *server.SPA
@@ -83,6 +86,10 @@ type Options struct {
 	YooKassaAPI, CryptoBotAPI string
 	// WarpAPI is Cloudflare's WARP client API; "" is the real one.
 	WarpAPI string
+	// AddonsCatalog is the marketplace's signed catalog; "" is the real one.
+	AddonsCatalog string
+	// DNS checks new domains against public DNS; nil leaves them unchecked.
+	DNS *dnscheck.Checker
 }
 
 type noChanges struct{}
@@ -123,7 +130,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.SubPort, deps.SubPortError = o.SubPort, o.SubPortError
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
+	// The nodes try a new listener before it is saved, when the panel runs them.
+	var dryRun domain.DryRun
+	if p.Nodes != nil {
+		dryRun = p.Nodes
+	}
+	deps.Inbounds = domain.NewInbounds(st, dryRun, o.Now)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
+	deps.Packages = domain.NewPackages(st, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
 		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom
@@ -146,8 +160,12 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return ""
 	}
+	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
+	deps.Addons = p.Addons
+	deps.DNS = o.DNS
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
-		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks})
+		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks,
+		Addons: deps.Addons, SubBase: subBase})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
@@ -179,14 +197,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return subs.Config{}, err
 		}
-		brand, _, err := settings.Get[string](ctx, set, "brand")
+		brand, _, err := settings.Get[string](ctx, set, settings.KeyBrand)
 		if err != nil {
 			return subs.Config{}, err
 		}
 		if brand == "" {
 			brand = "VPN"
 		}
-		support, _, err := settings.Get[string](ctx, set, "support_url")
+		support, _, err := settings.Get[string](ctx, set, settings.KeySupportURL)
 		if err != nil {
 			return subs.Config{}, err
 		}
@@ -204,10 +222,10 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing), Fingerprint: fingerprint,
 			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang))}
-		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
+		if cfg.Binding, err = set.On(ctx, settings.DeviceBinding); err != nil {
 			return subs.Config{}, err
 		}
-		if cfg.RequireHWID, err = set.Bool(ctx, settings.KeyRequireHWID, false); err != nil {
+		if cfg.RequireHWID, err = set.On(ctx, settings.RequireHWID); err != nil {
 			return subs.Config{}, err
 		}
 		nodes, err := st.Q.ListNodes(ctx)
@@ -279,7 +297,7 @@ func (p *Panel) Run(ctx context.Context) {
 	go p.Telegram.Run(ctx)
 	go p.Billing.Run(ctx)
 	// The host reads the switch from a file; the setting is what the admin chose.
-	if auto, err := p.Settings.Bool(ctx, settings.KeyAutoUpdate, false); err == nil {
+	if auto, err := p.Settings.On(ctx, settings.AutoUpdate); err == nil {
 		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {
 			p.log.Error("update policy", "err", err)
 		}

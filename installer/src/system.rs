@@ -212,6 +212,14 @@ pub fn ufw_active() -> bool {
 pub const VPN_PORTS: [(u16, Proto); 4] = [(443, Proto::Tcp), (443, Proto::Udp), (8443, Proto::Tcp), (8443, Proto::Udp)];
 
 /// The checks before an install; node is an install of a node for another panel.
+const DOCKER: &str = "Docker";
+
+/// The Docker check when Docker is there but cannot run mikan (no compose v2): replacing
+/// it removes packages, so the admin is asked first.
+pub fn docker_to_replace(checks: &[Check]) -> Option<&Check> {
+    checks.iter().find(|c| c.label == DOCKER && c.level == Level::Warn)
+}
+
 pub fn checks(node: bool) -> Vec<Check> {
     let mut out = Vec::new();
     out.push(if is_root() {
@@ -264,9 +272,9 @@ pub fn checks(node: bool) -> Vec<Check> {
         });
     }
     out.push(match crate::docker::version() {
-        Some(v) if crate::docker::compose_ok() => Check::new("Docker", Level::Ok, format!("{v} with compose")),
-        Some(v) => Check::new("Docker", Level::Error, format!("{v} without compose v2: update Docker")),
-        None => Check::new("Docker", Level::Ok, "not installed: the installer sets it up (get.docker.com)"),
+        Some(v) if crate::docker::compose_ok() => Check::new(DOCKER, Level::Ok, format!("{v} with compose")),
+        Some(v) => Check::new(DOCKER, Level::Warn, format!("{v} without compose v2: replace it from get.docker.com? You are asked first")),
+        None => Check::new(DOCKER, Level::Ok, "not installed: the installer sets it up (get.docker.com)"),
     });
     if let Some(who) = dpkg_holder() {
         out.push(Check::new("Packages", Level::Warn, format!("busy, {who}: the installer waits for it")));

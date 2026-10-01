@@ -33,6 +33,9 @@ const (
 	KeySecret  = "tg_secret" // signs the link codes
 )
 
+// Enabled switches the bot on; off until the admin connects it.
+var Enabled = settings.Switch{Key: KeyEnabled}
+
 // MaxLinks: subscriptions one Telegram account may hold.
 const MaxLinks = 5
 
@@ -124,7 +127,7 @@ func (b *Bot) Run(ctx context.Context) {
 			stop()
 			stop = nil
 		}
-		on, _ := b.d.Settings.Bool(ctx, KeyEnabled, false)
+		on, _ := b.d.Settings.On(ctx, Enabled)
 		token, _ := b.d.Settings.String(ctx, KeyToken)
 		if !on || token == "" {
 			b.setStatus(func(s *Status) { *s = Status{} })
@@ -495,9 +498,15 @@ func labelOf(cfg Config, action, def string) string {
 
 // CheckToken asks Telegram whose token this is, the way the bot goes there.
 func (b *Bot) CheckToken(ctx context.Context, token string) (User, error) {
+	return b.CheckTokenVia(ctx, token, b.Route(ctx))
+}
+
+// CheckTokenVia asks Telegram whose token this is, through route: a route and a token
+// changed together are checked as they will run.
+func (b *Bot) CheckTokenVia(ctx context.Context, token string, route Route) (User, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	rt, err := b.transport(b.Route(ctx))
+	rt, err := b.transport(route)
 	if err != nil {
 		return User{}, err
 	}

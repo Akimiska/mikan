@@ -15,9 +15,27 @@ import (
 
 // Callback data of the shop: b buy a new subscription, tn:<tariff> its tariff, pn:<tariff>:<p>
 // pay for it; r renew the shown one, t:<tariff>, py:<tariff>:<p>. <p> is s (Stars),
-// y (YooKassa) or c (CryptoBot).
+// y (YooKassa), c (CryptoBot) or a-<id> (a marketplace adapter).
 
 var providerCodes = map[string]string{"s": billing.Stars, "y": billing.YooKassa, "c": billing.CryptoBot}
+
+// providerOf is the provider a button's code names.
+func providerOf(code string) (string, bool) {
+	if p, ok := providerCodes[code]; ok {
+		return p, true
+	}
+	id, ok := strings.CutPrefix(code, "a-")
+	if !ok || billing.AddonID(billing.AddonPrefix+id) == "" {
+		return "", false
+	}
+	return billing.AddonPrefix + id, true
+}
+
+// addonName names adapters on the buttons in the bot's language.
+func (b *Bot) addonName(ctx context.Context) func(id string) string {
+	lang := b.lang(ctx)
+	return func(id string) string { return b.d.Billing.AddonName(ctx, id, lang) }
+}
 
 // offers lists what the chat can buy; nil without payments.
 func (b *Bot) offers(ctx context.Context) ([]billing.Offer, billing.Available) {
@@ -92,17 +110,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, id int64, prefix string,
 			continue
 		}
 		text := "<b>" + html.EscapeString(o.Tariff.Name) + "</b>\n" + html.EscapeString(billing.Describe(o.Tariff, b.lang(ctx))) + "\n\n" + w.payHow
-		arg := strconv.FormatInt(id, 10) + ":"
-		rows := [][]Button{}
-		if o.Stars > 0 {
-			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payStars, w.price(o.Stars, "XTR")), CallbackData: prefix + ":" + arg + "s"}})
-		}
-		if o.Rub > 0 && av.YooKassa {
-			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCard, w.price(o.Rub, "RUB")), CallbackData: prefix + ":" + arg + "y"}})
-		}
-		if o.Rub > 0 && av.CryptoBot {
-			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCrypto, w.price(o.Rub, "RUB")), CallbackData: prefix + ":" + arg + "c"}})
-		}
+		rows := w.payButtons(prefix+":"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av, b.addonName(ctx))
 		return text, &Keyboard{append(rows, back)}
 	}
 	return html.EscapeString(w.notForSale), &Keyboard{[][]Button{back}}
@@ -113,7 +121,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, id int64, prefix string,
 func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg string, back []Button) (string, *Keyboard) {
 	idStr, code, _ := strings.Cut(arg, ":")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
-	provider, ok := providerCodes[code]
+	provider, ok := providerOf(code)
 	if !ok || b.d.Billing == nil {
 		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
 	}
@@ -199,8 +207,8 @@ func (b *Bot) BotURL(context.Context) string {
 	return "https://t.me/" + st.Bot.Username
 }
 
-// Paid implements billing.Telegram: the buyer learns the subscription is ready, with the
-// link for a new one, and gets a fresh menu that shows it.
+// Paid implements billing.Telegram: the buyer learns the subscription is ready (with the
+// link for a new one) or the traffic package is added, and gets a fresh menu that shows it.
 func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	out := b.out.Load()
 	if out == nil {
@@ -208,9 +216,12 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	}
 	w := wordsFor(b.lang(ctx))
 	var text string
-	if created {
+	switch {
+	case p.Kind == billing.KindPackage:
+		text = fmt.Sprintf(w.paidPackage, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+	case created:
 		text = fmt.Sprintf(w.paidNew, html.EscapeString(u.Name), html.EscapeString(p.TariffName), html.EscapeString(b.subURL(ctx, u)))
-	} else {
+	default:
 		until := w.forever
 		if u.ExpiresAt.Valid {
 			until = w.date(time.Unix(u.ExpiresAt.Int64, 0).UTC())

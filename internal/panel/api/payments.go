@@ -56,8 +56,8 @@ type patchPaymentSettingsInput struct {
 
 type PaymentView struct {
 	ID         int64      `json:"id"`
-	Provider   string     `json:"provider" enum:"stars,yookassa,cryptobot"`
-	Kind       string     `json:"kind" enum:"new,renew"`
+	Provider   string     `json:"provider" doc:"stars, yookassa, cryptobot или addon:<id> — адаптер маркетплейса"`
+	Kind       string     `json:"kind" enum:"new,renew,package" doc:"package — пакет трафика: tariff_name — название пакета"`
 	Status     string     `json:"status" enum:"pending,paid,applied,expired,failed,refunded"`
 	TgID       int64      `json:"tg_id"`
 	TgUsername string     `json:"tg_username,omitempty"`
@@ -82,7 +82,7 @@ type PaymentTotal struct {
 
 type listPaymentsInput struct {
 	Status   string `query:"status" enum:"pending,paid,applied,expired,failed,refunded,"`
-	Provider string `query:"provider" enum:"stars,yookassa,cryptobot,"`
+	Provider string `query:"provider" pattern:"^(stars|yookassa|cryptobot|addon:[a-z0-9][a-z0-9-]{0,31})?$"`
 	UserID   int64  `query:"user_id" minimum:"0"`
 	Before   int64  `query:"before" minimum:"0" doc:"id последнего платежа предыдущей страницы"`
 	Limit    int64  `query:"limit" minimum:"1" maximum:"200" default:"50"`
@@ -106,7 +106,10 @@ func (h *handlers) registerPayments() {
 }
 
 func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, error) {
-	c := h.d.Billing.Config(ctx)
+	c, err := h.d.Billing.LoadConfig(ctx)
+	if err != nil {
+		return PaymentSettingsView{}, err
+	}
 	v := PaymentSettingsView{Enabled: c.Enabled, Stars: c.Stars, YooKassa: c.YooKassa, YooKassaShopID: c.ShopID, CryptoBot: c.CryptoBot, CryptoBotTestnet: c.Testnet, AllowNew: c.AllowNew, RenewResetsTraffic: c.RenewResetsTraffic}
 	ykSecret, err := h.d.Settings.String(ctx, billing.KeyYooKassaSecret)
 	if err != nil {
@@ -142,7 +145,10 @@ var shopIDPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
 
 func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSettingsInput) (*paymentSettingsOutput, error) {
 	b := in.Body
-	c := h.d.Billing.Config(ctx)
+	c, err := h.d.Billing.LoadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.YooKassa: b.YooKassa, &c.CryptoBot: b.CryptoBot, &c.Testnet: b.CryptoBotTestnet, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic} {
 		if v != nil {
 			*dst = *v

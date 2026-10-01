@@ -382,10 +382,8 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 		default:
 			continue
 		}
-		if err := m.st.Q.ResetUserPools(ctx, u.ID); err != nil {
-			return err
-		}
-		if err := m.st.Q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: start, UpdatedAt: now.Unix(), ID: u.ID}); err != nil {
+		err := m.st.Tx(ctx, func(q *db.Queries) error { return domain.StartPeriod(ctx, q, u.ID, start, now) })
+		if err != nil {
 			return err
 		}
 		changed = true
@@ -402,7 +400,7 @@ func (m *Manager) maintainPool(ctx context.Context, now time.Time) {
 		m.log.Error("pool stats", "err", err)
 		return
 	}
-	quietHour, _, err := settings.Get[int](ctx, m.set, "quiet_hour_utc")
+	quietHour, _, err := settings.Get[int](ctx, m.set, settings.KeyQuietHour)
 	if err != nil {
 		m.log.Error("quiet hour", "err", err)
 	}

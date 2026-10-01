@@ -23,6 +23,7 @@ import (
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/config"
+	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/settings"
@@ -64,7 +65,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 
 	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, Log: logger, Now: time.Now,
 		Autotune: autotune.DefaultOptions().Scaled(cfg.AutotuneScale), TelegramAPI: cfg.TelegramAPI,
-		DataDir: cfg.DataDir, Releases: updates.Fetch(release.LatestURL)}
+		DataDir: cfg.DataDir, Releases: updates.Fetch(release.LatestURL), DNS: dnscheck.New()}
 	nodesDir := filepath.Join(tlsDir, "nodes")
 	nodeCerts := tlscert.NewNodeStore(filepath.Join(tlsDir, "custom-nodes"), time.Now)
 	opts.NodeCerts = nodeCerts

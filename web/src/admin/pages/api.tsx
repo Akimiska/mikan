@@ -19,7 +19,7 @@ type Scope = APIKey["scope"];
 export function ApiPage() {
   return (
     <>
-      <Link to="/settings" className="mb-2 inline-flex items-center gap-1 rounded-lg text-[13px] font-medium text-[var(--ink-500)] hover:text-[var(--ink-900)]">
+      <Link to="/settings" search={{ tab: "security" }} className="mb-2 inline-flex items-center gap-1 rounded-lg text-[13px] font-medium text-[var(--ink-500)] hover:text-[var(--ink-900)]">
         <ChevronLeft size={16} aria-hidden /> {t("apiPage.back")}
       </Link>
       <PageHeader title={t("apiPage.title")} sub={t("apiPage.subtitle")} />

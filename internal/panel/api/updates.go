@@ -48,7 +48,7 @@ func (h *handlers) registerUpdates() {
 func (h *handlers) updatesView(ctx context.Context) (UpdatesView, error) {
 	v := UpdatesView{Current: h.d.Version, Notes: map[string]string{}}
 	var err error
-	if v.Auto, err = h.d.Settings.Bool(ctx, settings.KeyAutoUpdate, false); err != nil {
+	if v.Auto, err = h.d.Settings.On(ctx, settings.AutoUpdate); err != nil {
 		return v, err
 	}
 	u := h.d.Updates

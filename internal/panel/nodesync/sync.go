@@ -149,7 +149,7 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 			s.log.Error("inbound config", "inbound", in.Name, "err", err)
 			continue
 		}
-		ni := nodeapi.Inbound{Name: in.Name, Port: in.Port, Config: t.JSON()}
+		ni := nodeapi.Inbound{Name: in.Name, Listen: in.Listen, Port: in.Port, Config: t.JSON()}
 		if in.PoolID.Valid {
 			ni.Pool = strconv.FormatInt(in.PoolID.Int64, 10)
 		}
@@ -270,16 +270,20 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 		}
 	}
 	others := s.m.otherIPs(s.id, slotUser)
-	pools, err := userPoolQuotas(ctx, q)
+	now := s.m.now()
+	grants, err := domain.LoadGrantsLeft(ctx, q, now)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	now := s.m.now()
+	pools, err := userPoolQuotas(ctx, q, grants)
+	if err != nil {
+		return "", nil, nil, err
+	}
 	for _, u := range users {
 		names := slotsOf[u.ID]
 		sort.Strings(names)
 		for _, name := range names {
-			p := userPolicy(u, name, seq, now, here, others[name])
+			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, others[name])
 			p.Pools = pools[u.ID]
 			out = append(out, p)
 		}
@@ -287,17 +291,16 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 	return epoch, out, slotUser, nil
 }
 
-// userPolicy is the user's rules for one of the user's slots.
-func userPolicy(u db.User, name string, seq int64, now time.Time, here map[int64]string, otherIPs []string) nodeapi.Policy {
+// userPolicy is the user's rules for one of the user's slots; grants is what is left of
+// the user's main grants, added to the quota.
+func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here map[int64]string, otherIPs []string) nodeapi.Policy {
 	// A user whose main traffic ran out still gets in: the node turns away the inbounds
 	// outside every pool (QuotaRemaining 0) and keeps the pools that have traffic left.
-	state := domain.State(u, now)
-	p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(state) || state == domain.StateLimited, QuotaRemaining: -1, BaseSeq: seq, OtherIPs: otherIPs}
+	state := domain.State(u, grants, now)
+	p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(state) || state == domain.StateLimited, BaseSeq: seq, OtherIPs: otherIPs,
+		QuotaRemaining: domain.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants)}
 	if u.DeviceLimit.Valid {
 		p.DeviceLimit = int(u.DeviceLimit.Int64)
-	}
-	if u.TrafficLimit.Valid {
-		p.QuotaRemaining = max(0, u.TrafficLimit.Int64-u.UsedUp-u.UsedDown)
 	}
 	if allowed := domain.DecodeInbounds(u.Inbounds); len(allowed) > 0 {
 		for _, id := range allowed {
@@ -349,7 +352,9 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			if err := q.AddUserTraffic(ctx, db.AddUserTrafficParams{Up: t.Up, Down: t.Down, ID: uid}); err != nil {
+			// Traffic past the base quota is taken from the grants here, on the batch's
+			// transaction: a batch delivered again is skipped above, grants included.
+			if err := domain.CountUserTraffic(ctx, q, uid, t.Up, t.Down, now); err != nil {
 				return err
 			}
 			if err := q.AddTrafficHourly(ctx, db.AddTrafficHourlyParams{UserID: uid, Hour: hour, Up: t.Up, Down: t.Down}); err != nil {
@@ -387,7 +392,7 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 				if err := q.AddUserTotalTraffic(ctx, db.AddUserTotalTrafficParams{Up: t.Up, Down: t.Down, ID: uid}); err != nil {
 					return err
 				}
-				if err := q.AddUserPoolTraffic(ctx, db.AddUserPoolTrafficParams{UserID: uid, PoolID: id, UsedUp: t.Up, UsedDown: t.Down}); err != nil {
+				if err := domain.CountPoolTraffic(ctx, q, uid, id, t.Up, t.Down, now); err != nil {
 					return err
 				}
 				if err := q.AddTrafficHourly(ctx, db.AddTrafficHourlyParams{UserID: uid, Hour: hour, Up: t.Up, Down: t.Down}); err != nil {
@@ -677,8 +682,9 @@ func (m *Manager) Tunnel(ctx context.Context, id int64, addr string) (net.Conn, 
 	return c.Tunnel(ctx, addr)
 }
 
-// userPoolQuotas are the users' pool quotas with a limit: what is left of each.
-func userPoolQuotas(ctx context.Context, q *db.Queries) (map[int64][]nodeapi.PoolQuota, error) {
+// userPoolQuotas are the users' pool quotas with a limit: what is left of each, with the
+// pool's grants.
+func userPoolQuotas(ctx context.Context, q *db.Queries, grants domain.GrantsLeft) (map[int64][]nodeapi.PoolQuota, error) {
 	rows, err := q.ListAllUserPools(ctx)
 	if err != nil {
 		return nil, err
@@ -688,7 +694,8 @@ func userPoolQuotas(ctx context.Context, q *db.Queries) (map[int64][]nodeapi.Poo
 		if !p.TrafficLimit.Valid {
 			continue
 		}
-		out[p.UserID] = append(out[p.UserID], nodeapi.PoolQuota{Pool: strconv.FormatInt(p.PoolID, 10), Remaining: max(0, p.TrafficLimit.Int64-p.UsedUp-p.UsedDown)})
+		left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(p.UserID, p.PoolID))
+		out[p.UserID] = append(out[p.UserID], nodeapi.PoolQuota{Pool: strconv.FormatInt(p.PoolID, 10), Remaining: left})
 	}
 	return out, nil
 }

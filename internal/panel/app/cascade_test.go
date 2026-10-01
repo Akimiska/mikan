@@ -91,7 +91,7 @@ func TestCascadeOverHTTP(t *testing.T) {
 	bIns, _ := h.st.Q.ListInbounds(ctx)
 	for _, in := range bIns {
 		if in.NodeID == b.ID && domain.InboundNetwork(in) == "tcp" {
-			if resp, body := h.do(http.MethodPatch, api+"/inbounds/"+id(in.ID), map[string]any{"port": bv.Relay.Port}, csrf); resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "relay") {
+			if resp, body := h.do(http.MethodPatch, api+"/inbounds/"+id(in.ID), map[string]any{"port": bv.Relay.Port}, csrf); resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "port_relay") {
 				t.Fatalf("relay port: %d %s", resp.StatusCode, body)
 			}
 			break

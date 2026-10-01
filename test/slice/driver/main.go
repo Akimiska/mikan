@@ -163,7 +163,8 @@ func prepare() {
 	p := login()
 	waitNode(p, 4)
 	for _, in := range []map[string]any{
-		{"preset": "vless_reality_grpc"},
+		// Its default port, 2053, is the panel's here, and the panel's node shares its host.
+		{"preset": "vless_reality_grpc", "port": "3053"},
 		{"preset": "trojan_reality"},
 		{"preset": "anytls"},
 		{"preset": "vless_reality_xhttp_pq"},
@@ -201,7 +202,7 @@ func prepare() {
 	var u user
 	p.call("POST", "/api/v1/users", map[string]any{"name": "Slice User", "tariff_id": tariffID}, &u)
 	log.Printf("created user %d, subscription %s", u.ID, u.SubURL)
-	if !strings.HasPrefix(u.SubURL, "https://node:2053/slicesub0000/") {
+	if !strings.HasPrefix(u.SubURL, "https://node.test:2053/slicesub0000/") {
 		log.Fatalf("unexpected sub_url %q", u.SubURL)
 	}
 	token := u.SubURL[strings.LastIndex(u.SubURL, "/")+1:]

@@ -1,19 +1,21 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Copy, Undo2 } from "lucide-react";
+import { Undo2 } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, usePaymentSettings } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
-import { t } from "../../i18n";
+import { t, tMaybe } from "../../i18n";
 import { dateShort, money, num, time } from "../../lib/format";
+import { AddonsCard, addonName, useAddons, Webhook } from "./payment-addons";
 
 type Settings = Schemas["PaymentSettingsView"];
 type Payment = Schemas["PaymentView"];
 type Status = Payment["status"];
 type Provider = Payment["provider"];
+type Addons = Schemas["AddonsView"];
 
 const STATUS_TONE: Record<Status, "ok" | "warn" | "bad" | "off"> = {
   applied: "ok",
@@ -24,32 +26,55 @@ const STATUS_TONE: Record<Status, "ok" | "warn" | "bad" | "off"> = {
   refunded: "bad",
 };
 const STATUSES: Status[] = ["applied", "paid", "pending", "failed", "expired", "refunded"];
-const PROVIDERS: Provider[] = ["stars", "yookassa", "cryptobot"];
+const BUILT_IN: Provider[] = ["stars", "yookassa", "cryptobot"];
+
+/** Why a payment failed or waits, in words when the code is known; a provider's own code as is. */
+function paymentError(code: string): string {
+  return tMaybe(`errors.api.${code}`) ?? code;
+}
+
+/** A payment's provider as the admin knows it; adapters by their own name. */
+function providerName(p: Provider, addons: Addons | undefined): string {
+  return p.startsWith("addon:") ? addonName(p.slice("addon:".length), addons) : t(`payments.providers.${p}` as "payments.providers.stars");
+}
 
 export function PaymentsPage() {
   const settings = usePaymentSettings();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const sell = useMutation({
+    mutationFn: () => unwrap(api.PATCH("/api/v1/payments/settings", { body: { enabled: true } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.paymentSettings, v);
+      toast.ok(t("settings.salesOnToast"));
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
   return (
     <>
       <PageHeader title={t("payments.title")} sub={t("payments.subtitle")} />
       {settings.data && !settings.data.enabled ? (
         <div className="banner warn mb-4 flex-wrap" role="status">
           <span className="min-w-0 flex-1">{t("payments.salesOff")}</span>
-          <Link to="/settings" className="btn btn-glass btn-sm">
-            {t("payments.openSettings")}
-          </Link>
+          <Button size="sm" variant="primary" loading={sell.isPending} onClick={() => sell.mutate()}>
+            {t("payments.sellNow")}
+          </Button>
         </div>
       ) : null}
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <History />
-        {settings.isPending ? (
-          <Skeleton style={{ height: 420, borderRadius: 20 }} />
-        ) : settings.isError ? (
-          <section className="card glass">
-            <ErrorState text={errorText(settings.error)} onRetry={() => void settings.refetch()} />
-          </section>
-        ) : (
-          <SettingsCard s={settings.data} />
-        )}
+        <div className="flex min-w-0 flex-col gap-4">
+          {settings.isPending ? (
+            <Skeleton style={{ height: 420, borderRadius: 20 }} />
+          ) : settings.isError ? (
+            <section className="card glass">
+              <ErrorState text={errorText(settings.error)} onRetry={() => void settings.refetch()} />
+            </section>
+          ) : (
+            <SettingsCard s={settings.data} />
+          )}
+          <AddonsCard selling={!!settings.data?.enabled} />
+        </div>
       </div>
     </>
   );
@@ -61,6 +86,8 @@ function History() {
   const [status, setStatus] = useState<Status | "">("");
   const [provider, setProvider] = useState<Provider | "">("");
   const [refund, setRefund] = useState<Payment | null>(null);
+  const addons = useAddons().data;
+  const providers = [...BUILT_IN, ...(addons?.installed.map((a) => `addon:${a.id}`) ?? [])];
   const list = useInfiniteQuery({
     queryKey: [...qk.payments, status, provider],
     initialPageParam: 0,
@@ -101,9 +128,9 @@ function History() {
         </select>
         <select className="input max-w-[200px]" value={provider} onChange={(e) => setProvider(e.target.value as Provider | "")} aria-label={t("payments.provider")}>
           <option value="">{t("payments.allProviders")}</option>
-          {PROVIDERS.map((p) => (
+          {providers.map((p) => (
             <option key={p} value={p}>
-              {t(`payments.providers.${p}`)}
+              {providerName(p, addons)}
             </option>
           ))}
         </select>
@@ -122,7 +149,7 @@ function History() {
         <>
           <ul className="row-list" aria-busy={list.isFetching}>
             {items.map((p) => (
-              <PaymentRow key={p.id} p={p} onRefund={() => setRefund(p)} />
+              <PaymentRow key={p.id} p={p} provider={providerName(p.provider, addons)} onRefund={() => setRefund(p)} />
             ))}
           </ul>
           {list.hasNextPage ? (
@@ -146,7 +173,7 @@ function History() {
   );
 }
 
-function PaymentRow({ p, onRefund }: { p: Payment; onRefund: () => void }) {
+function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; onRefund: () => void }) {
   const buyer = p.tg_username ? `@${p.tg_username}` : `tg ${p.tg_id}`;
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
@@ -157,7 +184,7 @@ function PaymentRow({ p, onRefund }: { p: Payment; onRefund: () => void }) {
           <Pill tone={STATUS_TONE[p.status]}>{t(`payments.statuses.${p.status}`)}</Pill>
         </div>
         <div className="mt-1 text-xs text-[var(--ink-500)]">
-          {dateShort(p.created_at)} {time(p.created_at)} · {t(`payments.providers.${p.provider}`)} · {p.kind === "new" ? t("payments.kindNew") : t("payments.kindRenew")} · {buyer}
+          {dateShort(p.created_at)} {time(p.created_at)} · {provider} · {p.kind === "new" ? t("payments.kindNew") : p.kind === "package" ? t("payments.kindPackage") : t("payments.kindRenew")} · {buyer}
           {p.user_id != null ? (
             <>
               {" → "}
@@ -167,7 +194,9 @@ function PaymentRow({ p, onRefund }: { p: Payment; onRefund: () => void }) {
             </>
           ) : null}
         </div>
-        {p.error ? <div className="mt-1 text-xs text-[var(--berry-600)]">{t("payments.notApplied", { error: p.error })}</div> : null}
+        {p.error ? (
+          <div className="mt-1 text-xs text-[var(--berry-600)]">{t(p.status === "failed" ? "payments.invoiceFailed" : "payments.notApplied", { error: paymentError(p.error) })}</div>
+        ) : null}
       </div>
       {p.provider === "stars" && p.status === "applied" ? (
         <Button size="sm" variant="ghost" onClick={onRefund}>
@@ -224,7 +253,7 @@ function SettingsCard({ s }: { s: Settings }) {
         {(s.available.stars || s.available.yookassa || s.available.cryptobot) && s.on_sale === 0 ? (
           <div className="banner warn mb-4 flex-wrap" role="status">
             <span className="min-w-0 flex-1">{t("payments.nothingOnSale")}</span>
-            <Link to="/tariffs" className="btn btn-glass btn-sm">
+            <Link to="/tariffs" search={{ tab: "tariffs" }} className="btn btn-glass btn-sm">
               {t("payments.openTariffs")}
             </Link>
           </div>
@@ -315,30 +344,6 @@ function Provider({ title, sub, on, onChange, live, selling, offline, error, chi
         <Switch checked={on} onChange={onChange} label={title} />
       </div>
       {on ? children : null}
-    </div>
-  );
-}
-
-function Webhook({ label, url }: { label: string; url: string }) {
-  const toast = useToast();
-  if (!url) return <p className="text-xs text-[var(--ink-500)]">{t("payments.webhookNoHost")}</p>;
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.ok(t("payments.webhookCopied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
-  return (
-    <div>
-      <div className="mb-1 text-xs text-[var(--ink-500)]">{label}</div>
-      <div className="link-field">
-        <span className="mono">{url}</span>
-        <button type="button" className="icon-btn" onClick={() => void copy()} aria-label={t("payments.copyWebhook")}>
-          <Copy size={18} />
-        </button>
-      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 )
 
@@ -15,8 +16,9 @@ type notice struct {
 	text   string
 }
 
-// due are the notices a subscription has earned now.
-func due(u db.User, now time.Time, n Notify) []notice {
+// due are the notices a subscription has earned now; grants is what is left of its main
+// traffic packages: traffic runs out only when they do too.
+func due(u db.User, grants int64, now time.Time, n Notify) []notice {
 	if u.Status == "disabled" {
 		return nil
 	}
@@ -36,9 +38,9 @@ func due(u db.User, now time.Time, n Notify) []notice {
 	if u.TrafficLimit.Valid && u.TrafficLimit.Int64 > 0 {
 		used := u.UsedUp + u.UsedDown
 		switch {
-		case used >= u.TrafficLimit.Int64 && n.Traffic100:
+		case domain.TrafficLeft(u.TrafficLimit, used, grants) == 0 && n.Traffic100:
 			out = append(out, notice{kind: "traffic_100", period: u.PeriodStart})
-		case used*10 >= u.TrafficLimit.Int64*9 && n.Traffic90:
+		case grants <= 0 && used*10 >= u.TrafficLimit.Int64*9 && n.Traffic90:
 			out = append(out, notice{kind: "traffic_90", period: u.PeriodStart})
 		}
 	}
@@ -76,7 +78,11 @@ func (b *Bot) Notify(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		for _, n := range due(u, now, cfg.Notify) {
+		grants, err := domain.UserGrantsLeft(ctx, b.d.Store.Q, u.ID, now)
+		if err != nil {
+			continue
+		}
+		for _, n := range due(u, grants.Main(u.ID), now, cfg.Notify) {
 			added, err := b.d.Store.Q.AddTgNotice(ctx, db.AddTgNoticeParams{UserID: u.ID, Kind: n.kind, Period: n.period, SentAt: now.Unix()})
 			if err != nil || added == 0 {
 				continue

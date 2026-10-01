@@ -81,6 +81,7 @@ type Inbound struct {
 	Outbound    string
 	ExitNodeID  sql.NullInt64
 	PoolID      sql.NullInt64
+	Listen      string
 }
 
 type InboundEvent struct {
@@ -154,7 +155,8 @@ type Payment struct {
 	TgID       int64
 	Kind       string
 	UserID     sql.NullInt64
-	TariffID   int64
+	TariffID   sql.NullInt64
+	PackageID  sql.NullInt64
 	TariffName string
 	Amount     int64
 	Currency   string
@@ -259,11 +261,41 @@ type TrafficDaily struct {
 	Down   int64
 }
 
+type TrafficGrant struct {
+	ID        int64
+	UserID    int64
+	PoolID    sql.NullInt64
+	Bytes     int64
+	Remaining int64
+	Lifetime  string
+	ExpiresAt sql.NullInt64
+	Source    string
+	PaymentID sql.NullInt64
+	PackageID sql.NullInt64
+	Note      string
+	CreatedAt int64
+}
+
 type TrafficHourly struct {
 	UserID int64
 	Hour   int64
 	Up     int64
 	Down   int64
+}
+
+type TrafficPackage struct {
+	ID         int64
+	Name       string
+	Bytes      int64
+	PoolID     sql.NullInt64
+	Lifetime   string
+	Days       int64
+	PriceStars sql.NullInt64
+	PriceRub   sql.NullInt64
+	OnSale     int64
+	Sort       int64
+	Archived   int64
+	CreatedAt  int64
 }
 
 type TrafficPool struct {

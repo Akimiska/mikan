@@ -2,6 +2,7 @@
 //! server's shell. Without a command it opens the installer on a fresh server and the
 //! menu on an installed one; every menu action is a command too.
 
+mod addon;
 mod docker;
 mod envfile;
 mod host;
@@ -90,6 +91,9 @@ enum Cmd {
     },
     /// Update to the latest release; goes back when the new version does not start
     Update(ops::UpdateArgs),
+    /// Payment adapters of the marketplace: list, install, remove
+    #[command(subcommand)]
+    Addon(AddonCmd),
     /// Node: take a new join key from the panel's Nodes page
     Join { key: String },
     /// Restart the containers
@@ -100,6 +104,18 @@ enum Cmd {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AddonCmd {
+    /// What runs here and what the marketplace offers
+    List,
+    /// Install an adapter, or update it to the marketplace's build
+    Install { id: String },
+    /// Stop and remove an adapter; the panel keeps its settings and payments
+    Remove { id: String },
+    /// Do what the panel asked for (the update request unit runs this)
+    Apply,
 }
 
 #[derive(Subcommand)]
@@ -157,6 +173,7 @@ fn main() -> ExitCode {
             }
         }
         Some(Cmd::Update(a)) => ops::update(&a, &mut |l| println!("{l}"), &mut progress_line()),
+        Some(Cmd::Addon(c)) => addon_cmd(c),
         Some(Cmd::Join { key }) => ops::join(&key),
         Some(Cmd::Restart) => ops::restart(),
         Some(Cmd::Uninstall { yes }) => {
@@ -173,6 +190,19 @@ fn main() -> ExitCode {
             eprintln!("mikan: {e:#}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn addon_cmd(c: AddonCmd) -> anyhow::Result<()> {
+    let install = ops::Install::load()?;
+    install.panel_only()?;
+    let panel = install.version();
+    let mut say = |l: &str| println!("{l}");
+    match c {
+        AddonCmd::List => addon::list(&panel),
+        AddonCmd::Install { id } => addon::install(&id, &panel, &mut say),
+        AddonCmd::Remove { id } => addon::remove(&id, &mut say),
+        AddonCmd::Apply => addon::apply(&panel, &mut say),
     }
 }
 

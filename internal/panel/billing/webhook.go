@@ -12,13 +12,19 @@ import (
 	"mikan/internal/panel/secure"
 )
 
-// Webhook serves the providers' notifications at <sub path>/pay/<provider>/<token>.
-// The token keeps strangers from even reaching the checks; each provider then has its
-// own: YooKassa by source address and a second look at the payment through its API,
-// CryptoBot by the HMAC signature and its API.
+// Webhook serves the providers' notifications at <sub path>/pay/<provider>/<token>, and
+// at <sub path>/pay/addon/<id>/<token> for the adapters. The token keeps strangers from
+// even reaching the checks; each provider then has its own: YooKassa by source address and
+// a second look at the payment through its API, CryptoBot by the HMAC signature and its
+// API, an adapter by what its provider offers and a second look through the adapter.
 func (s *Service) Webhook() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		provider, token, ok := strings.Cut(strings.Trim(r.URL.Path, "/"), "/")
+		addon := ""
+		if provider == "addon" {
+			addon, token, ok = strings.Cut(token, "/")
+			ok = ok && AddonID(AddonPrefix+addon) != ""
+		}
 		want, err := s.WebhookToken(r.Context())
 		if r.Method != http.MethodPost || !ok || err != nil || !secure.Equal(token, want) {
 			http.NotFound(w, r)
@@ -32,6 +38,10 @@ func (s *Service) Webhook() http.Handler {
 		// The provider's call is answered now; checking with its API may take a while
 		// and the provider retries on a slow answer.
 		ctx := context.WithoutCancel(r.Context())
+		if addon != "" {
+			s.addonWebhook(ctx, w, r, addon, body)
+			return
+		}
 		switch provider {
 		case YooKassa:
 			if !fromYooKassa(s.clientIP(r)) {

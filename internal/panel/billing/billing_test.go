@@ -378,7 +378,7 @@ func TestInvoiceRefusals(t *testing.T) {
 	// One account cannot open invoices without end.
 	for tariff := range maxPerHour + 1 {
 		_, err := e.st.Q.CreatePayment(ctx, db.CreatePaymentParams{Provider: Stars, Payload: "p" + strconv.Itoa(tariff), TgID: 321, Kind: "new",
-			TariffID: e.sale.ID, TariffName: "x", Amount: 1, Currency: "XTR", CreatedAt: e.now.Unix()})
+			TariffID: sql.NullInt64{Int64: e.sale.ID, Valid: true}, TariffName: "x", Amount: 1, Currency: "XTR", CreatedAt: e.now.Unix()})
 		must(t, err)
 	}
 	if _, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 321, TariffID: e.sale.ID, Provider: YooKassa}); !errors.Is(err, ErrTooMany) && !errors.Is(err, ErrProviderOff) {

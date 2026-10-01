@@ -71,12 +71,18 @@ func (h *handlers) registerWarp() {
 	huma.Register(h.api, huma.Operation{OperationID: "delete-node-warp", Method: http.MethodDelete, Path: "/api/v1/nodes/{id}/warp", Summary: "Удалить WARP ноды", Tags: tags, DefaultStatus: http.StatusNoContent}, h.deleteWarp)
 }
 
-func warpCode(err error) string {
+// warpDetail is Cloudflare's or a config's refusal at location, with Cloudflare's HTTP
+// status when it refused.
+func warpDetail(location string, err error) *huma.ErrorDetail {
 	var we *warp.Error
-	if errors.As(err, &we) {
-		return we.Code
+	if !errors.As(err, &we) {
+		return &huma.ErrorDetail{Location: location, Message: "warp_failed"}
 	}
-	return "warp_failed"
+	d := &huma.ErrorDetail{Location: location, Message: we.Code}
+	if we.Status != 0 {
+		d.Value = we.Status
+	}
+	return d
 }
 
 func (h *handlers) warpView(ctx context.Context, nodeID int64, check bool) (WarpView, error) {
@@ -158,11 +164,11 @@ func (h *handlers) registerNodeWarp(ctx context.Context, in *warpRegisterInput) 
 	}
 	a, err := h.d.Warp.Register(ctx, strings.TrimSpace(in.Body.License))
 	if err != nil {
-		loc := "body"
-		if strings.HasPrefix(warpCode(err), "warp_license") {
-			loc = "body.license"
+		d := warpDetail("body", err)
+		if strings.HasPrefix(d.Message, "warp_license") {
+			d.Location = "body.license"
 		}
-		return nil, huma.Error422UnprocessableEntity("warp", &huma.ErrorDetail{Location: loc, Message: warpCode(err)})
+		return nil, huma.Error422UnprocessableEntity("warp", d)
 	}
 	return h.saveWarp(ctx, in.ID, "register", a)
 }
@@ -173,7 +179,7 @@ func (h *handlers) importNodeWarp(ctx context.Context, in *warpImportInput) (*wa
 	}
 	a, err := warp.ParseConf(in.Body.Config)
 	if err != nil {
-		return nil, huma.Error422UnprocessableEntity("warp", &huma.ErrorDetail{Location: "body.config", Message: warpCode(err)})
+		return nil, huma.Error422UnprocessableEntity("warp", warpDetail("body.config", err))
 	}
 	return h.saveWarp(ctx, in.ID, "import", a)
 }
@@ -205,7 +211,7 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 	if b.License != nil {
 		plus, err := h.d.Warp.SetLicense(ctx, w.AccountID, w.AccountToken, strings.TrimSpace(*b.License))
 		if err != nil {
-			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.license", Message: warpCode(err)})
+			return nil, huma.Error422UnprocessableEntity("validation", warpDetail("body.license", err))
 		}
 		if err := h.d.Store.Q.SetNodeWarpPlus(ctx, db.SetNodeWarpPlusParams{Plus: flag(plus), UpdatedAt: h.d.Now().Unix(), NodeID: in.ID}); err != nil {
 			return nil, err

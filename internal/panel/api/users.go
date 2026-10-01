@@ -32,6 +32,7 @@ type UserView struct {
 	State         string        `json:"state" enum:"active,expiring,limited,expired,disabled"`
 	TariffID      *int64        `json:"tariff_id"`
 	TrafficLimit  *int64        `json:"traffic_limit" doc:"Байты за период; null — без лимита"`
+	TrafficExtra  int64         `json:"traffic_extra" doc:"Байты, оставшиеся в пакетах трафика основного лимита: тратятся после лимита тарифа"`
 	UsedUp        int64         `json:"used_up"`
 	UsedDown      int64         `json:"used_down"`
 	TotalUp       int64         `json:"total_up"`
@@ -64,12 +65,12 @@ func ptrTime(v int64, ok bool) *time.Time {
 	return &t
 }
 
-func (h *handlers) viewUser(ctx context.Context, u db.User, slots map[int64][]string) UserView {
+func (h *handlers) viewUser(ctx context.Context, u db.User, slots map[int64][]string, grants domain.GrantsLeft) UserView {
 	now := h.d.Now()
 	v := UserView{
 		ID: u.ID, Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: domain.DecodeTags(u.Tags),
-		State: domain.State(u, now), TariffID: ptrInt(u.TariffID.Int64, u.TariffID.Valid),
-		TrafficLimit: ptrInt(u.TrafficLimit.Int64, u.TrafficLimit.Valid), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
+		State: domain.State(u, grants.Main(u.ID), now), TariffID: ptrInt(u.TariffID.Int64, u.TariffID.Valid),
+		TrafficLimit: ptrInt(u.TrafficLimit.Int64, u.TrafficLimit.Valid), TrafficExtra: grants.Main(u.ID), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
 		TotalUp: u.TotalUp, TotalDown: u.TotalDown, DeviceLimit: ptrInt(u.DeviceLimit.Int64, u.DeviceLimit.Valid),
 		ResetStrategy: u.ResetStrategy, ExpiresAt: ptrTime(u.ExpiresAt.Int64, u.ExpiresAt.Valid),
 		BillingDay: ptrInt(u.BillingDay.Int64, u.BillingDay.Valid),
@@ -256,6 +257,10 @@ func mapDomainErr(err error) error {
 	case errors.Is(err, domain.ErrBadBillingDay):
 		return huma.Error422UnprocessableEntity("bad_billing_day", &huma.ErrorDetail{Location: "body.billing_day", Message: "bad_billing_day"})
 	}
+	var fe *domain.FieldError
+	if errors.As(err, &fe) {
+		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body." + fe.Field, Message: fe.Code})
+	}
 	return err
 }
 
@@ -269,11 +274,15 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 		return nil, err
 	}
 	now := h.d.Now()
+	grants, err := domain.LoadGrantsLeft(ctx, h.d.Store.Q, now)
+	if err != nil {
+		return nil, err
+	}
 	q := strings.ToLower(strings.TrimSpace(in.Query))
 	out := &listUsersOutput{}
 	var matched []db.User
 	for _, u := range users {
-		st := domain.State(u, now)
+		st := domain.State(u, grants.Main(u.ID), now)
 		c := &out.Body.Counts
 		c.All++
 		switch st {
@@ -302,7 +311,7 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 	out.Body.Items = []UserView{}
 	if in.Offset < len(matched) {
 		for _, u := range matched[in.Offset:end] {
-			out.Body.Items = append(out.Body.Items, h.viewUser(ctx, u, names))
+			out.Body.Items = append(out.Body.Items, h.viewUser(ctx, u, names, grants))
 		}
 	}
 	return out, nil
@@ -316,7 +325,11 @@ func (h *handlers) userResult(ctx context.Context, u db.User, err error) (*userO
 	if err != nil {
 		return nil, err
 	}
-	return &userOutput{Body: h.viewUser(ctx, u, names)}, nil
+	grants, err := domain.UserGrantsLeft(ctx, h.d.Store.Q, u.ID, h.d.Now())
+	if err != nil {
+		return nil, err
+	}
+	return &userOutput{Body: h.viewUser(ctx, u, names, grants)}, nil
 }
 
 func (h *handlers) createUser(ctx context.Context, in *createUserInput) (*userOutput, error) {

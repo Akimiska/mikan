@@ -6,11 +6,11 @@ import { Dashboard } from "./pages/dashboard";
 import { InboundsPage } from "./pages/inbounds";
 import { LoginPage } from "./pages/login";
 import { NodesPage } from "./pages/nodes";
-import { SettingsPage } from "./pages/settings";
-import { TariffsPage } from "./pages/tariffs";
+import { SETTINGS_TABS, SettingsPage, type SettingsSearch } from "./pages/settings";
+import { TARIFF_TABS, TariffsPage, type TariffsSearch } from "./pages/tariffs";
 import { ApiPage } from "./pages/api";
 import { PaymentsPage } from "./pages/payments";
-import { TelegramPage } from "./pages/telegram";
+import { TELEGRAM_TABS, TelegramPage, type TelegramSearch } from "./pages/telegram";
 import { UsersPage, type UsersSearch } from "./pages/users";
 import { Shell } from "./shell";
 
@@ -55,11 +55,32 @@ export function createAppRouter(queryClient: QueryClient) {
       create: s.create === true || s.create === "true" ? true : undefined,
     }),
   });
-  const tariffs = createRoute({ getParentRoute: () => app, path: "/tariffs", component: TariffsPage });
+  const tariffs = createRoute({
+    getParentRoute: () => app,
+    path: "/tariffs",
+    component: TariffsPage,
+    validateSearch: (s: Record<string, unknown>): TariffsSearch => ({
+      tab: TARIFF_TABS.includes(s.tab as TariffsSearch["tab"]) ? (s.tab as TariffsSearch["tab"]) : "tariffs",
+    }),
+  });
   const inbounds = createRoute({ getParentRoute: () => app, path: "/inbounds", component: InboundsPage });
   const nodes = createRoute({ getParentRoute: () => app, path: "/nodes", component: NodesPage });
-  const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: SettingsPage });
-  const telegram = createRoute({ getParentRoute: () => app, path: "/telegram", component: TelegramPage });
+  const settings = createRoute({
+    getParentRoute: () => app,
+    path: "/settings",
+    component: SettingsPage,
+    validateSearch: (s: Record<string, unknown>): SettingsSearch => ({
+      tab: SETTINGS_TABS.includes(s.tab as SettingsSearch["tab"]) ? (s.tab as SettingsSearch["tab"]) : "general",
+    }),
+  });
+  const telegram = createRoute({
+    getParentRoute: () => app,
+    path: "/telegram",
+    component: TelegramPage,
+    validateSearch: (s: Record<string, unknown>): TelegramSearch => ({
+      tab: TELEGRAM_TABS.includes(s.tab as TelegramSearch["tab"]) ? (s.tab as TelegramSearch["tab"]) : "connect",
+    }),
+  });
   const payments = createRoute({ getParentRoute: () => app, path: "/payments", component: PaymentsPage });
   const apiDocs = createRoute({ getParentRoute: () => app, path: "/settings/api", component: ApiPage });
   // The API section lived in the sidebar until 0.4.2: old links land on its new place.

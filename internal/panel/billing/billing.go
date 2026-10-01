@@ -18,10 +18,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
@@ -94,6 +96,10 @@ type Deps struct {
 	// TrustProxy reads the client's IP from X-Forwarded-For (the YooKassa IP check).
 	TrustProxy bool
 	MaxLinks   int64 // subscriptions one Telegram account may hold
+	// Addons are the marketplace's payment adapters; nil: none.
+	Addons *addons.Manager
+	// SubBase is https://host:port/<sub path>, where the webhooks are; "" without an address.
+	SubBase func(ctx context.Context) string
 }
 
 type Service struct {
@@ -146,14 +152,31 @@ var (
 	ErrNotRefunable = errors.New("not_refundable")
 )
 
-func (s *Service) Config(ctx context.Context) Config {
+// LoadConfig reads the payment settings. A read error is returned, never replaced by the
+// defaults: settings changed on top of those and saved would switch selling off and
+// forget the providers.
+func (s *Service) LoadConfig(ctx context.Context) (Config, error) {
 	// Payment settings saved before the switch existed (0.4.0, 0.4.1) come from panels that
 	// set up selling: they keep selling. A panel that never saved them starts with it off.
 	saved := DefaultConfig
 	saved.Enabled = true
 	c, found, err := settings.GetOver(ctx, s.d.Settings, KeyConfig, saved)
-	if err != nil || !found {
-		return DefaultConfig
+	switch {
+	case err != nil:
+		return DefaultConfig, err
+	case !found:
+		return DefaultConfig, nil
+	}
+	return c, nil
+}
+
+// Config is what decides what is on offer. When the settings cannot be read nothing is:
+// selling fails closed until the store answers again.
+func (s *Service) Config(ctx context.Context) Config {
+	c, err := s.LoadConfig(ctx)
+	if err != nil {
+		s.d.Log.Warn("billing: payment settings unreadable, selling paused", "err", err)
+		c.Enabled = false
 	}
 	return c
 }
@@ -172,9 +195,27 @@ func (s *Service) secrets(ctx context.Context) Secrets {
 // on, configured and, for Stars, with the bot running.
 type Available struct {
 	Stars, YooKassa, CryptoBot bool
+	// Addons are the adapters that take rubles now, by id.
+	Addons []string
 }
 
-func (a Available) Any() bool { return a.Stars || a.YooKassa || a.CryptoBot }
+func (a Available) Any() bool { return a.Stars || a.Rub() }
+
+// Rub: some provider takes rubles.
+func (a Available) Rub() bool { return a.YooKassa || a.CryptoBot || len(a.Addons) > 0 }
+
+func (a Available) has(provider string) bool {
+	switch provider {
+	case Stars:
+		return a.Stars
+	case YooKassa:
+		return a.YooKassa
+	case CryptoBot:
+		return a.CryptoBot
+	}
+	id := AddonID(provider)
+	return id != "" && slices.Contains(a.Addons, id)
+}
 
 func (s *Service) Available(ctx context.Context) Available {
 	c, sec := s.Config(ctx), s.secrets(ctx)
@@ -186,6 +227,7 @@ func (s *Service) Available(ctx context.Context) Available {
 		Stars:     c.Stars && tg != nil && tg.BotURL(ctx) != "",
 		YooKassa:  c.YooKassa && c.ShopID != "" && sec.YooKassaSecret != "",
 		CryptoBot: c.CryptoBot && sec.CryptoBotToken != "",
+		Addons:    s.availableAddons(ctx),
 	}
 }
 
@@ -209,12 +251,7 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 	var out []Offer
 	for _, t := range ts {
 		o := Offer{Tariff: t}
-		if av.Stars && t.PriceStars.Valid {
-			o.Stars = t.PriceStars.Int64
-		}
-		if (av.YooKassa || av.CryptoBot) && t.PriceRub.Valid {
-			o.Rub = t.PriceRub.Int64
-		}
+		o.Stars, o.Rub = av.prices(t.PriceStars, t.PriceRub)
 		if o.Stars > 0 || o.Rub > 0 {
 			out = append(out, o)
 		}
@@ -241,15 +278,8 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 	if err != nil {
 		return db.Payment{}, err
 	}
-	av := s.Available(ctx)
-	var amount int64
-	var currency string
-	switch {
-	case req.Provider == Stars && av.Stars && t.PriceStars.Valid:
-		amount, currency = t.PriceStars.Int64, "XTR"
-	case (req.Provider == YooKassa && av.YooKassa || req.Provider == CryptoBot && av.CryptoBot) && t.PriceRub.Valid:
-		amount, currency = t.PriceRub.Int64, "RUB"
-	default:
+	amount, currency, ok := s.Available(ctx).price(req.Provider, t.PriceStars, t.PriceRub)
+	if !ok {
 		return db.Payment{}, ErrProviderOff
 	}
 	kind := "renew"
@@ -269,7 +299,8 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 	}
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: req.UserID != 0}
-	if p, err := q.FindOpenPayment(ctx, db.FindOpenPaymentParams{TgID: req.TgID, TariffID: t.ID, Provider: req.Provider, Kind: kind,
+	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
+	if p, err := q.FindOpenPayment(ctx, db.FindOpenPaymentParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: kind,
 		UserID: sql.NullInt64{Int64: req.UserID, Valid: true}, Since: now.Add(-invoiceReuse).Unix()}); err == nil && p.Amount == amount {
 		return p, nil
 	}
@@ -279,11 +310,42 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 		return db.Payment{}, ErrTooMany
 	}
 	p, err := q.CreatePayment(ctx, db.CreatePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID, Kind: kind, UserID: userID,
-		TariffID: t.ID, TariffName: t.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+		TariffID: tariffID, TariffName: t.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
 	if err != nil {
 		return db.Payment{}, err
 	}
-	ext, url, err := s.openInvoice(ctx, p, t)
+	lang, _ := s.d.Settings.Lang(ctx)
+	return s.openPayment(ctx, p, t.Name, Describe(t, lang))
+}
+
+// prices are the prices of an item the available providers take: 0 where none does.
+func (av Available) prices(stars, rub sql.NullInt64) (inStars, inRub int64) {
+	if av.Stars && stars.Valid {
+		inStars = stars.Int64
+	}
+	if av.Rub() && rub.Valid {
+		inRub = rub.Int64
+	}
+	return inStars, inRub
+}
+
+// price is what a buyer pays with provider for an item with these prices: Stars for
+// Stars, rubles for the others; ok false when the provider cannot take it now.
+func (av Available) price(provider string, stars, rub sql.NullInt64) (amount int64, currency string, ok bool) {
+	switch {
+	case provider == Stars && av.Stars && stars.Valid:
+		return stars.Int64, "XTR", true
+	case provider != Stars && av.has(provider) && rub.Valid:
+		return rub.Int64, "RUB", true
+	}
+	return 0, "", false
+}
+
+// openPayment opens the provider's invoice for a payment just made and returns it with the
+// URL to pay at; a provider that fails marks the payment failed.
+func (s *Service) openPayment(ctx context.Context, p db.Payment, title, desc string) (db.Payment, error) {
+	q := s.d.Store.Q
+	ext, url, err := s.openInvoice(ctx, p, title, desc)
 	if err != nil {
 		_, _ = q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: "failed", ID: p.ID, OldStatus: "pending"})
 		_ = q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: errCode(err), ID: p.ID})
@@ -313,10 +375,7 @@ func (s *Service) recentInvoices(ctx context.Context, tgID int64, now time.Time)
 
 // openInvoice asks the provider for the invoice: its id (none for Stars until paid) and
 // the URL the buyer pays at.
-func (s *Service) openInvoice(ctx context.Context, p db.Payment, t db.Tariff) (sql.NullString, string, error) {
-	title := t.Name
-	lang, _ := s.d.Settings.Lang(ctx)
-	desc := Describe(t, lang)
+func (s *Service) openInvoice(ctx context.Context, p db.Payment, title, desc string) (sql.NullString, string, error) {
 	switch p.Provider {
 	case Stars:
 		tg := s.telegram()
@@ -342,6 +401,9 @@ func (s *Service) openInvoice(ctx context.Context, p db.Payment, t db.Tariff) (s
 		}
 		id, url, err := cb.create(ctx, p.Payload, p.Amount, title+" — "+desc, back)
 		return sql.NullString{String: id, Valid: id != ""}, url, err
+	}
+	if AddonID(p.Provider) != "" {
+		return s.openAddonInvoice(ctx, p, title+" — "+desc)
 	}
 	return sql.NullString{}, "", ErrProviderOff
 }
@@ -387,7 +449,10 @@ func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency
 	if err != nil || p.Provider != Stars || p.Status != "pending" || p.TgID != tgID || p.Currency != currency || p.Amount != amount {
 		return ErrBadPayment
 	}
-	t, err := s.d.Store.Q.GetTariff(ctx, p.TariffID)
+	if p.Kind == KindPackage {
+		return s.packageOnSale(ctx, p)
+	}
+	t, err := s.d.Store.Q.GetTariff(ctx, p.TariffID.Int64)
 	if err != nil || t.Archived != 0 || t.OnSale == 0 {
 		return ErrNotForSale
 	}
@@ -426,7 +491,13 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		created bool
 		done    bool
 	)
-	reset := s.Config(ctx).RenewResetsTraffic
+	// A payment is applied with the settings as they are; unreadable, it waits for the
+	// next attempt rather than guessing.
+	cfg, err := s.LoadConfig(ctx)
+	if err != nil {
+		return err
+	}
+	reset := cfg.RenewResetsTraffic
 	run := func(q *db.Queries) error {
 		var err error
 		if pay, err = q.GetPayment(ctx, id); err != nil {
@@ -436,11 +507,17 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			done = true
 			return nil
 		}
+		if pay.Kind == KindPackage {
+			if u, err = s.applyPackage(ctx, q, pay); err != nil {
+				return err
+			}
+			return markApplied(ctx, q, id, u.ID, s.d.Now())
+		}
 		var userID int64
 		if pay.Kind == "renew" && pay.UserID.Valid {
 			userID = pay.UserID.Int64
 		}
-		if u, created, err = s.d.Users.Purchase(ctx, q, userID, pay.TariffID, buyerName(ctx, q, pay.TgID), reset); err != nil {
+		if u, created, err = s.d.Users.Purchase(ctx, q, userID, pay.TariffID.Int64, buyerName(ctx, q, pay.TgID), reset); err != nil {
 			return err
 		}
 		if created {
@@ -449,14 +526,9 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			}
 			_ = q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: pay.TgID})
 		}
-		n, err := q.MarkPaymentApplied(ctx, db.MarkPaymentAppliedParams{UserID: sql.NullInt64{Int64: u.ID, Valid: true},
-			AppliedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}, ID: id})
-		if err == nil && n != 1 {
-			err = errors.New("payment changed while applying")
-		}
-		return err
+		return markApplied(ctx, q, id, u.ID, s.d.Now())
 	}
-	err := s.d.Store.Tx(ctx, run)
+	err = s.d.Store.Tx(ctx, run)
 	if errors.Is(err, domain.ErrNoSlots) {
 		if err = s.d.Users.RefillSlots(ctx); err == nil {
 			err = s.d.Store.Tx(ctx, run)
@@ -478,6 +550,17 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		tg.Paid(ctx, pay, u, created)
 	}
 	return nil
+}
+
+// markApplied moves a paid payment to applied on the transaction that applied it: the
+// paid→applied step happens once, so a payment never applies twice.
+func markApplied(ctx context.Context, q *db.Queries, id, userID int64, now time.Time) error {
+	n, err := q.MarkPaymentApplied(ctx, db.MarkPaymentAppliedParams{UserID: sql.NullInt64{Int64: userID, Valid: true},
+		AppliedAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, ID: id})
+	if err == nil && n != 1 {
+		err = errors.New("payment changed while applying")
+	}
+	return err
 }
 
 // buyerName names a subscription bought by a Telegram account: its @username, its name,
@@ -551,6 +634,8 @@ func (s *Service) Reconcile(ctx context.Context) {
 			_ = s.checkYooKassa(ctx, p.ExternalID.String)
 		case p.Provider == CryptoBot && p.ExternalID.Valid:
 			_ = s.checkCryptoBot(ctx, p.ExternalID.String)
+		case AddonID(p.Provider) != "" && p.ExternalID.Valid:
+			_ = s.checkAddon(ctx, p.Provider, p.ExternalID.String)
 		}
 	}
 	if _, err := q.ExpirePayments(ctx, now.Add(-pendingTTL).Unix()); err != nil {
@@ -571,9 +656,14 @@ func (s *Service) WebhookToken(ctx context.Context) (string, error) {
 // errCode keeps provider errors short and free of secrets for the payments list.
 func errCode(err error) string {
 	var pe *providerError
+	var ae *addons.Error
 	switch {
 	case errors.As(err, &pe):
 		return pe.Code
+	case errors.As(err, &ae):
+		return ae.Code
+	case errors.Is(err, addons.ErrUnreachable), errors.Is(err, addons.ErrNotInstalled):
+		return "addon_unreachable"
 	case errors.Is(err, domain.ErrNoSlots):
 		return "no_slots"
 	case errors.Is(err, context.DeadlineExceeded):

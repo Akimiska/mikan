@@ -26,6 +26,7 @@ use crate::system::{self, Check, Level, Proto};
 enum Page {
     Lang,
     Checks,
+    Docker,
     Address,
     Domain,
     Email,
@@ -176,8 +177,13 @@ impl Wizard {
         pages.iter().position(|p| *p == page).map(|i| (i + 1, pages.len()))
     }
 
+    fn after_checks(&self) -> Page {
+        if self.node() { Page::Confirm } else { Page::Address }
+    }
+
     fn back(&mut self) {
         self.page = match self.page {
+            Page::Docker => Page::Checks,
             Page::Checks if !self.node() && !self.plan_lang_given => Page::Lang,
             Page::Address => Page::Checks,
             Page::Domain => Page::Address,
@@ -202,11 +208,16 @@ impl Wizard {
                 self.page = Page::Checks;
                 self.start_checks();
             }
-            Page::Checks => match self.checks.done().map(|c| c.iter().any(|c| c.level == Level::Error)) {
-                Some(true) => self.start_checks(),
-                Some(false) => self.page = if self.node() { Page::Confirm } else { Page::Address },
+            Page::Checks => match self.checks.done() {
+                Some(c) if c.iter().any(|c| c.level == Level::Error) => self.start_checks(),
+                Some(c) if system::docker_to_replace(c).is_some() && !self.plan.replace_docker => self.page = Page::Docker,
+                Some(_) => self.page = self.after_checks(),
                 None => {}
             },
+            Page::Docker => {
+                self.plan.replace_docker = true;
+                self.page = self.after_checks();
+            }
             Page::Address => {
                 let h = self.host.text();
                 let ok = h.parse::<Ipv4Addr>().is_ok() || net::valid_domain(&h);
@@ -469,7 +480,7 @@ impl Screen for Wizard {
         match (self.page, k.code) {
             (Page::Lang, KeyCode::Up | KeyCode::Char('k')) => self.lang = self.lang.saturating_sub(1),
             (Page::Lang, KeyCode::Down | KeyCode::Char('j')) => self.lang = (self.lang + 1).min(LANGS.len() - 1),
-            (Page::Lang | Page::Checks | Page::Confirm, KeyCode::Char('q')) => return true,
+            (Page::Lang | Page::Checks | Page::Docker | Page::Confirm, KeyCode::Char('q')) => return true,
             (Page::Checks, KeyCode::Char('r')) if !self.checks.running() => self.start_checks(),
             (Page::Options, KeyCode::Up | KeyCode::BackTab) => self.focus = self.focus.saturating_sub(1),
             (Page::Options, KeyCode::Down | KeyCode::Tab) => self.focus = (self.focus + 1).min(2),
@@ -498,6 +509,7 @@ impl Screen for Wizard {
         match self.page {
             Page::Lang => self.draw_lang(f),
             Page::Checks => self.draw_checks(f),
+            Page::Docker => self.draw_docker(f),
             Page::Address => self.draw_address(f),
             Page::Domain => self.draw_domain(f),
             Page::Email => self.draw_email(f),
@@ -567,6 +579,26 @@ impl Wizard {
             }
         }
         Self::page(f, self.card("Server check", lead, keys), lines);
+    }
+
+    /// Replacing Docker removes packages: asked, never assumed.
+    fn draw_docker(&self, f: &mut Frame) {
+        let keys = [("enter", "replace"), ("esc", "back"), ("q", "quit")];
+        let lead = "mikan runs with Docker compose v2, and the Docker on this server has none: it is the one from the system's packages.";
+        let w = Card::body_width(f.area());
+        let found =
+            self.checks.done().and_then(|c| system::docker_to_replace(c)).map(|c| c.detail.split(' ').next().unwrap_or("").to_owned());
+        let mut lines = vec![field("Found", format!("Docker {}", found.unwrap_or_default())), Line::from("")];
+        for text in [
+            "The installer removes it (docker.io, containerd, runc and the old compose) and installs the current Docker from get.docker.com.",
+            "Images, volumes and containers stay in /var/lib/docker and run again on the new Docker; running containers restart once.",
+            "Say no (esc) to keep it: then install Docker with compose v2 yourself and run the installer again.",
+        ] {
+            lines.extend(wrap(text, w).into_iter().map(|l| Line::from(dim(l))));
+            lines.push(Line::from(""));
+        }
+        lines.pop();
+        Self::page(f, self.card("Replace Docker?", lead, &keys), lines);
     }
 
     fn draw_address(&self, f: &mut Frame) {
@@ -701,6 +733,9 @@ impl Wizard {
             _ => "the latest signed release from GitHub".into(),
         };
         lines.push(field("Image", image));
+        if p.replace_docker {
+            lines.push(field("Docker", "replace the system's one from get.docker.com"));
+        }
         lines.push(Line::from(""));
         lines.push(Line::from(dim("Docker is installed if missing; mikan goes to /opt/mikan.")));
         Self::page(f, self.card("Ready to install", "Nothing has changed on the server yet.", &keys), lines);

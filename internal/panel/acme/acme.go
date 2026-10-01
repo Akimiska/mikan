@@ -31,6 +31,7 @@ import (
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/registration"
 
+	"mikan/internal/hostname"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/tlscert"
 )
@@ -188,7 +189,7 @@ func (m *Manager) ensure(ctx context.Context) {
 		// What the admin set up and lost says more than why the fallback is what it is.
 		defer func() { st.Error = why }()
 	}
-	if id == "" || id == "localhost" || isPrivate(id) {
+	if isPrivate(id) {
 		m.useFallback()
 		st.Error = "no_public_host"
 		return
@@ -250,9 +251,11 @@ func (m *Manager) obtain(ctx context.Context, id string) (*tls.Certificate, erro
 	}
 	email, _ := m.set.String(ctx, settings.KeyACMEEmail)
 	u := &user{email: email, key: key}
+	req, noCN := order(id)
 	cfg := lego.NewConfig(u)
 	cfg.CADirURL = m.directory
 	cfg.Certificate.KeyType = certcrypto.EC256
+	cfg.Certificate.DisableCommonName = noCN
 	client, err := lego.NewClient(cfg)
 	if err != nil {
 		return nil, err
@@ -267,10 +270,6 @@ func (m *Manager) obtain(ctx context.Context, id string) (*tls.Certificate, erro
 			return nil, fmt.Errorf("register: %w", err)
 		}
 	}
-	req := certificate.ObtainRequest{Domains: []string{id}, Bundle: true}
-	if net.ParseIP(id) != nil {
-		req.Profile = "shortlived" // Let's Encrypt issues IP certificates only with this profile
-	}
 	res, err := client.Certificate.Obtain(req)
 	if err != nil {
 		return nil, err
@@ -282,6 +281,18 @@ func (m *Manager) obtain(ctx context.Context, id string) (*tls.Certificate, erro
 		return nil, err
 	}
 	return m.load()
+}
+
+// order is what Let's Encrypt is asked for. It issues an IP certificate only with the
+// shortlived profile and only with the IP in the SAN: an IP in the Common Name is refused
+// as badCSR, so the CSR goes without one. A domain keeps its Common Name.
+func order(id string) (req certificate.ObtainRequest, noCommonName bool) {
+	req = certificate.ObtainRequest{Domains: []string{id}, Bundle: true}
+	if net.ParseIP(id) != nil {
+		req.Profile = "shortlived"
+		return req, true
+	}
+	return req, false
 }
 
 func (m *Manager) load() (*tls.Certificate, error) {
@@ -331,11 +342,11 @@ func covers(leaf *x509.Certificate, id string) bool {
 }
 
 // isPrivate reports identifiers Let's Encrypt can never validate: private and loopback
-// IPs, and single-label names such as docker service names in test setups.
+// IPs, and what is not a DNS name, such as docker service names in test setups.
 func isPrivate(id string) bool {
 	ip := net.ParseIP(id)
 	if ip == nil {
-		return !strings.Contains(id, ".")
+		return !hostname.Name(id) || hostname.Reserved(id)
 	}
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }

@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+
+	"mikan/internal/hostname"
 )
 
 // ClientInput is what a subscription knows about one user and the node.
@@ -62,10 +64,44 @@ func SetFingerprint(t Template, fp string) error {
 	if fp != "" && !ValidFingerprint(fp) {
 		return fail("config_fingerprint", extKey+".client.fingerprint")
 	}
+	setClient(t, "fingerprint", fp)
+	return nil
+}
+
+// ClientSNI says whether clients of t send a TLS name the admin may change: the node
+// certificate's protocols. A REALITY client sends the target's name, which the node
+// checks against server-names, so another name would not get through.
+func ClientSNI(t Template) bool {
+	return t.section("reality-config") == nil && (rules[t.Type()].cert || t.Ext().TLS == "node")
+}
+
+// SetClientEndpoint writes where clients connect when it is not the node itself, e.g. a
+// TCP proxy (nginx stream, HAProxy) in front of an inbound on 127.0.0.1. An empty server
+// or SNI, or port 0, removes that override: the node's address, the inbound's port and
+// the usual TLS name apply again.
+func SetClientEndpoint(t Template, server string, port int, sni string) error {
+	switch {
+	case server != "" && !hostname.Valid(server):
+		return fail("config_client_server", extKey+".client.server")
+	case port < 0 || port > 65535:
+		return fail("config_client_port", extKey+".client.port")
+	case sni != "" && (!hostname.Name(sni) || !ClientSNI(t)):
+		return fail("config_client_sni", extKey+".client.sni")
+	}
+	setClient(t, "server", server)
+	setClient(t, "port", port)
+	setClient(t, "sni", sni)
+	return nil
+}
+
+// setClient writes one key of mikan.client; an empty value removes it, and with it the
+// sections it leaves empty.
+func setClient(t Template, key string, v any) {
+	unset := v == "" || v == 0
 	ext, _ := t[extKey].(map[string]any)
 	if ext == nil {
-		if fp == "" {
-			return nil
+		if unset {
+			return
 		}
 		ext = map[string]any{}
 		t[extKey] = ext
@@ -74,10 +110,10 @@ func SetFingerprint(t Template, fp string) error {
 	if client == nil {
 		client = map[string]any{}
 	}
-	if fp == "" {
-		delete(client, "fingerprint")
+	if unset {
+		delete(client, key)
 	} else {
-		client["fingerprint"] = fp
+		client[key] = v
 	}
 	switch {
 	case len(client) > 0:
@@ -88,7 +124,6 @@ func SetFingerprint(t Template, fp string) error {
 	if len(ext) == 0 {
 		delete(t, extKey)
 	}
-	return nil
 }
 
 // Client is one proxy in both subscription formats.
@@ -294,7 +329,8 @@ func (c *clientBuilder) finish() (Client, error) {
 		if alpn := strings1(c.t["alpn"]); len(alpn) > 0 {
 			c.y["alpn"] = alpn
 		}
-		if c.in.PortSpec != "" && c.in.PortSpec != strconv.Itoa(c.in.Port) {
+		// A port of the inbound's own (a proxy in front) replaces the node's hopping range.
+		if c.in.PortSpec != "" && c.in.PortSpec != strconv.Itoa(c.in.Port) && c.port == c.in.Port {
 			c.y["ports"] = c.in.PortSpec
 			c.q.Set("mport", c.in.PortSpec)
 		}

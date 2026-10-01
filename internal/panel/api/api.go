@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -87,6 +88,9 @@ type Deps struct {
 	Updates *updates.Checker
 	// Addons are the marketplace's payment adapters; nil in tests.
 	Addons *addons.Manager
+	// Resolve looks a name up for what the panel dials on the admin's word (a REALITY
+	// target); nil asks the system's resolver.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// DNS checks that a domain leads to the panel's or the node's server; nil: unchecked
 	// (tests, development).
 	DNS *dnscheck.Checker

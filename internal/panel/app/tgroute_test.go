@@ -47,13 +47,18 @@ func TestTelegramRouteOverHTTP(t *testing.T) {
 		route map[string]any
 		code  string
 	}{
-		"no scheme":     {map[string]any{"mode": "proxy", "proxy": "203.0.113.5:1080"}, "tg_proxy_invalid"},
-		"socks4":        {map[string]any{"mode": "proxy", "proxy": "socks4://203.0.113.5:1080"}, "tg_proxy_invalid"},
-		"no proxy yet":  {map[string]any{"mode": "proxy"}, "tg_proxy_invalid"},
-		"no such node":  {map[string]any{"mode": "node", "node_id": 999}, "tg_route_node"},
-		"dead proxy":    {map[string]any{"mode": "proxy", "proxy": "http://" + dead}, "tg_route_unreachable"},
-		"unknown mode":  {map[string]any{"mode": "vpn"}, "mode"},
-		"proxy too big": {map[string]any{"mode": "proxy", "proxy": "http://" + strings.Repeat("a", 600) + ":80"}, "proxy"},
+		"no scheme":    {map[string]any{"mode": "proxy", "proxy": "203.0.113.5:1080"}, "tg_proxy_invalid"},
+		"socks4":       {map[string]any{"mode": "proxy", "proxy": "socks4://203.0.113.5:1080"}, "tg_proxy_invalid"},
+		"no proxy yet": {map[string]any{"mode": "proxy"}, "tg_proxy_invalid"},
+		"no such node": {map[string]any{"mode": "node", "node_id": 999}, "tg_route_node"},
+		"dead proxy":   {map[string]any{"mode": "proxy", "proxy": "http://" + dead}, "tg_route_unreachable"},
+		// A proxy next to the panel is an explicit address; a name must not lead to the host itself.
+		"name to loopback":   {map[string]any{"mode": "proxy", "proxy": "socks5://127.0.0.1.nip.io:1080"}, "tg_proxy_private"},
+		"name to metadata":   {map[string]any{"mode": "proxy", "proxy": "socks5://metadata.attacker.example:1080"}, "tg_proxy_private"},
+		"metadata literal":   {map[string]any{"mode": "proxy", "proxy": "http://169.254.169.254:80"}, "tg_proxy_private"},
+		"unspecified listen": {map[string]any{"mode": "proxy", "proxy": "http://0.0.0.0:80"}, "tg_proxy_private"},
+		"unknown mode":       {map[string]any{"mode": "vpn"}, "mode"},
+		"proxy too big":      {map[string]any{"mode": "proxy", "proxy": "http://" + strings.Repeat("a", 600) + ":80"}, "proxy"},
 	} {
 		resp, body := h.do(http.MethodPatch, api, map[string]any{"route": c.route}, csrf)
 		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), c.code) {

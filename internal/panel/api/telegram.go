@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/tgbot"
 )
@@ -258,6 +262,35 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 	return &telegramOutput{Body: v}, nil
 }
 
+// proxyHostOK: where the bot may connect as its proxy. A proxy next to the panel (an
+// address on this host or the LAN) is the admin's explicit choice, so a literal address is
+// fine; a name that leads to this host itself or to the metadata address is not: it is how
+// an internal service is reached through a harmless-looking name. The name is looked up
+// here, and a name that cannot be is let through, the check made on route is the real one.
+func (h *handlers) proxyHostOK(ctx context.Context, host string) bool {
+	inside := func(a netip.Addr) bool {
+		a = a.Unmap()
+		return a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() || a.IsMulticast()
+	}
+	if a, err := netip.ParseAddr(host); err == nil {
+		return !(a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() || a.IsMulticast())
+	}
+	if strings.EqualFold(strings.TrimSuffix(host, "."), "localhost") {
+		return true
+	}
+	resolve := h.d.Resolve
+	if resolve == nil {
+		resolve = domain.SystemResolve
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	addrs, err := resolve(ctx, host)
+	if err != nil {
+		return true
+	}
+	return !slices.ContainsFunc(addrs, inside)
+}
+
 // nextRoute checks a route change; nothing is saved here.
 func (h *handlers) nextRoute(ctx context.Context, r tgbot.Route, mode string, nodeID int64, proxy *string, details map[string]any) (tgbot.Route, error) {
 	r.Mode = mode
@@ -274,8 +307,12 @@ func (h *handlers) nextRoute(ctx context.Context, r tgbot.Route, mode string, no
 		if proxy != nil {
 			r.Proxy = strings.TrimSpace(*proxy)
 		}
-		if _, err := tgbot.ParseProxy(r.Proxy); err != nil {
+		u, err := tgbot.ParseProxy(r.Proxy)
+		if err != nil {
 			return r, tgFieldErr("route", "tg_proxy_invalid")
+		}
+		if !h.proxyHostOK(ctx, u.Hostname()) {
+			return r, tgFieldErr("route", "tg_proxy_private")
 		}
 		details["route"], details["proxy"] = mode, tgbot.ProxyHost(r.Proxy)
 	default:

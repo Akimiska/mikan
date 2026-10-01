@@ -94,7 +94,7 @@ func targetsCmd(ctx context.Context, st *store.Store, set *settings.Settings, cf
 		if err != nil {
 			return fmt.Errorf("no node %d", *node)
 		}
-		r := checkTarget(ctx, cfg, n, strings.TrimSpace(*dest), strings.TrimSpace(*sni))
+		r := checkTarget(ctx, cfg, n, strings.TrimSpace(*dest), strings.TrimSpace(*sni), panelPort(ctx, set))
 		if *asJSON {
 			return json.NewEncoder(stdout).Encode(r)
 		}
@@ -137,7 +137,7 @@ func targetsCmd(ctx context.Context, st *store.Store, set *settings.Settings, cf
 			}
 		}
 		if !*force {
-			r := checkTarget(ctx, cfg, n, *dest, *sni)
+			r := checkTarget(ctx, cfg, n, *dest, *sni, panelPort(ctx, set))
 			if !r.OK {
 				return fmt.Errorf("%s does not suit REALITY: %s; --force applies it anyway", *dest, targetProblem(r))
 			}
@@ -201,7 +201,7 @@ func scanTargets(ctx context.Context, st *store.Store, set *settings.Settings, c
 		if err != nil {
 			return res, err
 		}
-		r := checkTarget(ctx, cfg, n, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), domainName)
+		r := checkTarget(ctx, cfg, n, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), domainName, port)
 		res.SelfSteal = &r
 	}
 	if c, err := app.NodeClient(cfg, n); err == nil {
@@ -216,7 +216,7 @@ func scanTargets(ctx context.Context, st *store.Store, set *settings.Settings, c
 	// A node older than 0.3 or out of reach: the panel scans from its own network.
 	sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	found, scanned, err := scan.Neighbors(sctx, res.IP, 12)
+	found, scanned, err := scan.Neighbors(sctx, res.IP, 12, scan.Options{Any: true})
 	if err != nil && sctx.Err() == nil {
 		return res, err
 	}
@@ -229,7 +229,7 @@ func scanTargets(ctx context.Context, st *store.Store, set *settings.Settings, c
 
 // checkTarget tests a site from the node that would dial it, or from here when the node
 // cannot tell.
-func checkTarget(ctx context.Context, cfg config.Config, n db.Node, dest, sni string) scan.Result {
+func checkTarget(ctx context.Context, cfg config.Config, n db.Node, dest, sni string, selfPort int) scan.Result {
 	if c, err := app.NodeClient(cfg, n); err == nil {
 		if r, err := c.CheckTarget(ctx, nodeapi.TargetCheckRequest{Dest: dest, SNI: sni}); err == nil {
 			return r
@@ -237,7 +237,13 @@ func checkTarget(ctx context.Context, cfg config.Config, n db.Node, dest, sni st
 	}
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return scan.Check(cctx, dest, sni)
+	return scan.Check(cctx, dest, sni, scan.Options{LoopbackPort: selfPort})
+}
+
+// panelPort is the panel's own port: the one loopback address a target check may use.
+func panelPort(ctx context.Context, set *settings.Settings) int {
+	p, _, _ := settings.Get[int](ctx, set, settings.KeyPanelPort)
+	return p
 }
 
 // ipv4 is the address whose /24 is scanned.
@@ -288,6 +294,7 @@ func targetOf(in db.Inbound) Target {
 var checkErrors = map[string]string{
 	"timeout": "no answer", "refused": "connection refused", "no_tls13": "no TLS 1.3", "dns": "the name does not resolve",
 	"sni_required": "an IP needs --sni", "bad_dest": "want host:port", "handshake": "the TLS handshake failed",
+	"private": "an internal address: only public sites suit",
 }
 
 // targetProblem says why a site does not suit REALITY.

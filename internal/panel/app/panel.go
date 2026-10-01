@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -94,6 +95,9 @@ type Options struct {
 	AddonsCatalog string
 	// DNS checks new domains against public DNS; nil leaves them unchecked.
 	DNS *dnscheck.Checker
+	// Resolve looks up the names the panel is told to dial (REALITY targets); nil is the
+	// system's resolver, tests set their own.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type noChanges struct{}
@@ -140,6 +144,13 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		dryRun = p.Nodes
 	}
 	deps.Inbounds = domain.NewInbounds(st, dryRun, o.Now)
+	// A REALITY target given by name is looked up when it is saved: the node dials it past the
+	// rules that fence its users in.
+	deps.Resolve = o.Resolve
+	if deps.Resolve == nil {
+		deps.Resolve = domain.SystemResolve
+	}
+	deps.Inbounds.SetResolver(deps.Resolve)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
 	p.st, p.devices = st, deps.Devices
 	deps.Packages = domain.NewPackages(st, o.Now)

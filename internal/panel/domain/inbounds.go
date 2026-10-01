@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -64,9 +65,10 @@ type DryRun interface {
 // field leaves the inbound as it was. Audit entries and change notices stay with the
 // callers.
 type Inbounds struct {
-	st  *store.Store
-	dry DryRun
-	now func() time.Time
+	st      *store.Store
+	dry     DryRun
+	now     func() time.Time
+	resolve func(ctx context.Context, host string) ([]netip.Addr, error) // nil: names are not looked up
 }
 
 // NewInbounds: dry nil skips the nodes' own check, for callers that do not talk to the
@@ -413,10 +415,55 @@ func (s *Inbounds) CheckTemplate(ctx context.Context, node db.Node, config, port
 	if fp := t.Ext().Client.Fingerprint; fp != "" && !proto.ValidFingerprint(fp) {
 		return nil, &proto.Error{Code: "config_fingerprint", Field: "mikan.client.fingerprint", Detail: fp}
 	}
+	if err := s.checkDestResolves(ctx, t); err != nil {
+		return nil, err
+	}
 	if err := s.dryRun(ctx, node, t, port, selfSteal); err != nil {
 		return nil, err
 	}
 	return t, nil
+}
+
+// SystemResolve looks a name up with the system's resolver: its IPv4 addresses.
+func SystemResolve(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
+}
+
+// SetResolver makes a REALITY target given by name be looked up when it is saved; without
+// one (tests) names are taken as they are.
+func (s *Inbounds) SetResolver(resolve func(ctx context.Context, host string) ([]netip.Addr, error)) {
+	s.resolve = resolve
+}
+
+// checkDestResolves refuses a REALITY target whose name leads to this host or its
+// network: proto.Validate reads the text, and every DNS name looks public. The node dials
+// the target for every probe of the port, past the rules that fence its users in, so such
+// a name would publish an internal service to the internet. A name that cannot be looked
+// up is let through: the node looks it up where it dials.
+func (s *Inbounds) checkDestResolves(ctx context.Context, t proto.Template) error {
+	if s.resolve == nil {
+		return nil
+	}
+	dest, _ := presets.Dest(t)
+	host, _, err := net.SplitHostPort(dest)
+	if err != nil || host == "" {
+		return nil
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return nil // a literal address: proto.Validate has judged it
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	addrs, err := s.resolve(ctx, host)
+	if err != nil {
+		return nil
+	}
+	for _, a := range addrs {
+		if !proto.PublicAddr(a) {
+			return &proto.Error{Code: "reality_dest_private", Field: "reality-config.dest", Detail: host}
+		}
+	}
+	return nil
 }
 
 // tryOnNode runs a saved template through the node's mihomo on another port.

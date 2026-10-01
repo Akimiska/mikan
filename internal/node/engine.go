@@ -27,6 +27,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/proto"
+	"mikan/internal/scan"
 )
 
 const (
@@ -285,6 +286,15 @@ func (e *Engine) TargetAllowed(dest string) bool {
 	self := e.applied.SelfStealPort
 	e.mu.Unlock()
 	return self > 0 && (host == "127.0.0.1" || host == "localhost") && port == strconv.Itoa(self)
+}
+
+// TargetOptions is where the node connects when it tests a target: the internet, and the
+// panel's own port on loopback. A name that leads anywhere else is refused after it is
+// resolved (TargetAllowed only reads the text).
+func (e *Engine) TargetOptions() scan.Options {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return scan.Options{Any: e.allowPrivate, LoopbackPort: e.applied.SelfStealPort}
 }
 
 func (e *Engine) SetPolicies(req nodeapi.PoliciesRequest) {

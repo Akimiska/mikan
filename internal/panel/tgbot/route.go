@@ -86,11 +86,24 @@ func ProxyHost(raw string) string {
 	return ""
 }
 
-// Route is how the bot reaches Telegram now.
-func (b *Bot) Route(ctx context.Context) Route {
+// LoadRoute is the saved route. A read error is returned, not hidden: a change built
+// on a fallback and saved would lose the admin's proxy.
+func (b *Bot) LoadRoute(ctx context.Context) (Route, error) {
 	r, _, err := settings.Get[Route](ctx, b.d.Settings, KeyRoute)
-	if err != nil || r.Mode == "" {
+	if err != nil {
+		return Route{}, err
+	}
+	if r.Mode == "" {
 		r.Mode = RouteDirect
+	}
+	return r, nil
+}
+
+// Route is how the bot reaches Telegram now; straight when the setting cannot be read.
+func (b *Bot) Route(ctx context.Context) Route {
+	r, err := b.LoadRoute(ctx)
+	if err != nil {
+		return Route{Mode: RouteDirect}
 	}
 	return r
 }

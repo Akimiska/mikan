@@ -146,14 +146,31 @@ var (
 	ErrNotRefunable = errors.New("not_refundable")
 )
 
-func (s *Service) Config(ctx context.Context) Config {
+// LoadConfig reads the payment settings. A read error is returned, never replaced by the
+// defaults: settings changed on top of those and saved would switch selling off and
+// forget the providers.
+func (s *Service) LoadConfig(ctx context.Context) (Config, error) {
 	// Payment settings saved before the switch existed (0.4.0, 0.4.1) come from panels that
 	// set up selling: they keep selling. A panel that never saved them starts with it off.
 	saved := DefaultConfig
 	saved.Enabled = true
 	c, found, err := settings.GetOver(ctx, s.d.Settings, KeyConfig, saved)
-	if err != nil || !found {
-		return DefaultConfig
+	switch {
+	case err != nil:
+		return DefaultConfig, err
+	case !found:
+		return DefaultConfig, nil
+	}
+	return c, nil
+}
+
+// Config is what decides what is on offer. When the settings cannot be read nothing is:
+// selling fails closed until the store answers again.
+func (s *Service) Config(ctx context.Context) Config {
+	c, err := s.LoadConfig(ctx)
+	if err != nil {
+		s.d.Log.Warn("billing: payment settings unreadable, selling paused", "err", err)
+		c.Enabled = false
 	}
 	return c
 }
@@ -426,7 +443,13 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		created bool
 		done    bool
 	)
-	reset := s.Config(ctx).RenewResetsTraffic
+	// A payment is applied with the settings as they are; unreadable, it waits for the
+	// next attempt rather than guessing.
+	cfg, err := s.LoadConfig(ctx)
+	if err != nil {
+		return err
+	}
+	reset := cfg.RenewResetsTraffic
 	run := func(q *db.Queries) error {
 		var err error
 		if pay, err = q.GetPayment(ctx, id); err != nil {
@@ -456,7 +479,7 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		}
 		return err
 	}
-	err := s.d.Store.Tx(ctx, run)
+	err = s.d.Store.Tx(ctx, run)
 	if errors.Is(err, domain.ErrNoSlots) {
 		if err = s.d.Users.RefillSlots(ctx); err == nil {
 			err = s.d.Store.Tx(ctx, run)

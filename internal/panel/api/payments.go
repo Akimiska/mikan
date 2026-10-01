@@ -106,7 +106,10 @@ func (h *handlers) registerPayments() {
 }
 
 func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, error) {
-	c := h.d.Billing.Config(ctx)
+	c, err := h.d.Billing.LoadConfig(ctx)
+	if err != nil {
+		return PaymentSettingsView{}, err
+	}
 	v := PaymentSettingsView{Enabled: c.Enabled, Stars: c.Stars, YooKassa: c.YooKassa, YooKassaShopID: c.ShopID, CryptoBot: c.CryptoBot, CryptoBotTestnet: c.Testnet, AllowNew: c.AllowNew, RenewResetsTraffic: c.RenewResetsTraffic}
 	ykSecret, err := h.d.Settings.String(ctx, billing.KeyYooKassaSecret)
 	if err != nil {
@@ -142,7 +145,10 @@ var shopIDPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
 
 func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSettingsInput) (*paymentSettingsOutput, error) {
 	b := in.Body
-	c := h.d.Billing.Config(ctx)
+	c, err := h.d.Billing.LoadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.YooKassa: b.YooKassa, &c.CryptoBot: b.CryptoBot, &c.Testnet: b.CryptoBotTestnet, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic} {
 		if v != nil {
 			*dst = *v

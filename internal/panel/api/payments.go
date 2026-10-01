@@ -31,6 +31,7 @@ type PaymentSettingsView struct {
 		YooKassa  bool `json:"yookassa"`
 		CryptoBot bool `json:"cryptobot"`
 	} `json:"available" doc:"Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"`
+	OnSale           int    `json:"on_sale" doc:"Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату"`
 	WebhookYooKassa  string `json:"webhook_yookassa" doc:"Адрес для HTTP-уведомлений в личном кабинете ЮKassa"`
 	WebhookCryptoBot string `json:"webhook_cryptobot" doc:"Адрес вебхуков в настройках приложения @CryptoBot"`
 }
@@ -116,6 +117,11 @@ func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, er
 	v.YooKassaSecretSet, v.CryptoBotTokenSet = ykSecret != "", cbToken != ""
 	av := h.d.Billing.Available(ctx)
 	v.Available.Stars, v.Available.YooKassa, v.Available.CryptoBot = av.Stars, av.YooKassa, av.CryptoBot
+	offers, _, err := h.d.Billing.Offers(ctx)
+	if err != nil {
+		return v, err
+	}
+	v.OnSale = len(offers)
 	if h.d.SubBase != nil {
 		v.WebhookYooKassa, v.WebhookCryptoBot = h.d.Billing.WebhookURLs(ctx, h.d.SubBase(ctx))
 	}

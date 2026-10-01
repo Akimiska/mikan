@@ -99,15 +99,21 @@ func TestPaymentsOverHTTP(t *testing.T) {
 			t.Fatalf("%s: %d %s", name, resp.StatusCode, body)
 		}
 	}
+	// The only tariff on sale has a ruble price: with rubles not taken yet the bot sells nothing,
+	// and the Payments page says so.
+	if resp, body := h.do(http.MethodGet, api+"/payments/settings", nil, nil); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"on_sale":0`) {
+		t.Fatalf("nothing on sale: %d %s", resp.StatusCode, body)
+	}
 	resp, body := h.do(http.MethodPatch, api+"/payments/settings", map[string]any{"yookassa": true, "yookassa_shop_id": ykShop, "yookassa_secret": ykSecret}, csrf)
 	var ps struct {
 		SecretSet bool   `json:"yookassa_secret_set"`
+		OnSale    int    `json:"on_sale"`
 		Webhook   string `json:"webhook_yookassa"`
 		Available struct {
 			YooKassa bool `json:"yookassa"`
 		} `json:"available"`
 	}
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &ps) != nil || !ps.SecretSet || !ps.Available.YooKassa || strings.Contains(string(body), ykSecret) ||
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &ps) != nil || !ps.SecretSet || !ps.Available.YooKassa || ps.OnSale != 1 || strings.Contains(string(body), ykSecret) ||
 		!strings.HasPrefix(ps.Webhook, "https://203.0.113.10:21355/"+subPath+"/pay/yookassa/") {
 		t.Fatalf("settings: %d %s", resp.StatusCode, body)
 	}

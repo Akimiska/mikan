@@ -213,6 +213,14 @@ function SettingsCard({ s }: { s: Settings }) {
           </div>
         </div>
         {save.error && !Object.keys(errors).length ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        {(s.available.stars || s.available.yookassa || s.available.cryptobot) && s.on_sale === 0 ? (
+          <div className="banner warn mb-4 flex-wrap" role="status">
+            <span className="min-w-0 flex-1">{t("payments.nothingOnSale")}</span>
+            <Link to="/tariffs" className="btn btn-glass btn-sm">
+              {t("payments.openTariffs")}
+            </Link>
+          </div>
+        ) : null}
 
         <Provider title={t("payments.providers.stars")} sub={t("payments.starsSub")} on={form.stars} onChange={set("stars")} live={s.available.stars} offline={form.stars && !s.available.stars ? t("payments.starsBotOff") : ""} />
 

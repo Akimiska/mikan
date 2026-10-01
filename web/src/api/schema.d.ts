@@ -1549,6 +1549,11 @@ export interface components {
             cryptobot: boolean;
             cryptobot_testnet: boolean;
             cryptobot_token_set: boolean;
+            /**
+             * Format: int64
+             * @description Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату
+             */
+            on_sale: number;
             /** @description Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок */
             renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */

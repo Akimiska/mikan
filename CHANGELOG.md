@@ -6,9 +6,11 @@ the signed manifest, and the panel shows the one in its language.
 ## 0.4.2
 ### en
 - API moved from the sidebar to Settings → API (old /api-docs links lead there). The page has "Download OpenAPI": openapi.json with this panel's address already in it, ready for Postman, Insomnia, Swagger UI and client generators.
+- Payments warns when the bot has nothing to sell: no plan is on sale with a price for a method that takes payments, so people would only be told to message support. A button leads to Plans.
 
 ### ru
 - Раздел API переехал из бокового меню в «Настройки → API» (старые ссылки /api-docs ведут туда). На странице есть «Скачать OpenAPI»: openapi.json с уже прописанным адресом этой панели — для Postman, Insomnia, Swagger UI и генераторов клиентов.
+- «Платежи» предупреждают, когда боту нечего продавать: нет тарифа «В продаже» с ценой для способа, который принимает оплату, — люди увидят только «напишите в поддержку». Кнопка ведёт в «Тарифы».
 
 ## 0.4.1
 ### en

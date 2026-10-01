@@ -1741,6 +1741,11 @@
           "cryptobot_token_set": {
             "type": "boolean"
           },
+          "on_sale": {
+            "description": "Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату",
+            "format": "int64",
+            "type": "integer"
+          },
           "renew_resets_traffic": {
             "description": "Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок",
             "type": "boolean"
@@ -1779,6 +1784,7 @@
           "allow_new",
           "renew_resets_traffic",
           "available",
+          "on_sale",
           "webhook_yookassa",
           "webhook_cryptobot"
         ],

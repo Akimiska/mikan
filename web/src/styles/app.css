@@ -252,6 +252,9 @@
   .input { height: 44px; padding: 0 12px; border-radius: var(--r-md); border: 1px solid var(--hairline); background: rgba(255, 255, 255, 0.8); outline: 0; width: 100%; transition: border-color 0.2s, box-shadow 0.2s; }
   .input:focus { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }
   .input[aria-invalid="true"] { border-color: var(--berry-600); }
+  .input-unit { position: relative; display: block; }
+  .input-unit .input { padding-right: 40px; text-align: right; }
+  .input-unit span { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--ink-500); pointer-events: none; }
   textarea.input { height: auto; min-height: 80px; padding: 12px; resize: vertical; line-height: 20px; }
   .rules-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); border-radius: var(--r-md); border: 1px solid var(--hairline); background: rgba(255, 255, 255, 0.8); overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s; }
   .rules-editor:focus-within { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }

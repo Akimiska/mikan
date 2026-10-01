@@ -236,7 +236,7 @@ function SettingsCard({ s }: { s: Settings }) {
         {(s.available.stars || s.available.yookassa || s.available.cryptobot) && s.on_sale === 0 ? (
           <div className="banner warn mb-4 flex-wrap" role="status">
             <span className="min-w-0 flex-1">{t("payments.nothingOnSale")}</span>
-            <Link to="/tariffs" className="btn btn-glass btn-sm">
+            <Link to="/tariffs" search={{ tab: "tariffs" }} className="btn btn-glass btn-sm">
               {t("payments.openTariffs")}
             </Link>
           </div>

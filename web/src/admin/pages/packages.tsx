@@ -47,7 +47,7 @@ export function PackagesCard() {
   });
 
   return (
-    <section className="card glass reveal mb-4">
+    <section className="card glass reveal">
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("packages.title")}</h2>

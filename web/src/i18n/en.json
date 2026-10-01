@@ -538,7 +538,13 @@
     "priceRub": "Price in rubles",
     "priceRubHint": "For YooKassa and CryptoBot (it converts to the coin picked).",
     "errStars": "A whole number from 1 to 10,000",
-    "errRub": "From 1 to 1,000,000 ₽"
+    "errRub": "From 1 to 1,000,000 ₽",
+    "tabs": {
+      "tariffs": "Plans",
+      "pools": "Traffic pools",
+      "packages": "Traffic packages"
+    },
+    "sections": "Plan sections"
   },
   "presets": {
     "vless_reality_xhttp": "Main one for Russia: looks like plain HTTPS and keeps few connections",
@@ -1386,7 +1392,7 @@
     "title": "Traffic pools",
     "sub": "A separate limit for some protocols: say, a WL node at 100 GB a month while the rest stay unlimited. A pool's traffic does not use the main limit.",
     "none": "No pools yet — all traffic counts to the main limit.",
-    "empty": "No protocols in the pool yet",
+    "empty": "No protocols: pick the pool in a protocol's settings",
     "name": "Pool name",
     "placeholder": "Such as WL",
     "add": "Add pool",
@@ -1395,7 +1401,7 @@
     "rename": "Rename {name}",
     "delete": "Delete {name}",
     "deleteTitle": "Delete pool “{name}”?",
-    "deleteText": "Its protocols go back to the main traffic; the pool's limits in plans and users are dropped.",
+    "deleteText": "Its protocols go back to the main traffic, the pool's limits in plans and users are dropped, and traffic packages for the pool are deleted with what is left of them.",
     "hint": "A protocol joins a pool in its own settings: “Traffic pool”. The pool's limit is set in the plan and per user.",
     "inbound": "Traffic pool",
     "inboundHint": "This protocol's traffic counts to the pool with its own limit, not to the main one. When the pool runs out, only it stops.",
@@ -1407,7 +1413,16 @@
     "errLimit": "A limit is a positive number of GB, or empty",
     "editLimits": "Change limits",
     "userSaved": "Pool limits saved",
-    "exhausted": "Used up: the pool's protocols are off until the reset"
+    "exhausted": "Used up: the pool's protocols are off until the reset",
+    "emptyTitle": "No pools yet",
+    "protocols": "Protocols:",
+    "limits": "Limits in plans:",
+    "noLimits": "unlimited in every plan",
+    "new": "New pool",
+    "edit": "Traffic pool",
+    "drawerMeta": "A limit of its own for some protocols",
+    "nameHint": "Subscribers see it in the bot and on the subscription page.",
+    "renamed": "Pool renamed"
   },
   "cert": {
     "panelTitle": "Own panel certificate",

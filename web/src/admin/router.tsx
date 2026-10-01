@@ -7,7 +7,7 @@ import { InboundsPage } from "./pages/inbounds";
 import { LoginPage } from "./pages/login";
 import { NodesPage } from "./pages/nodes";
 import { SETTINGS_TABS, SettingsPage, type SettingsSearch } from "./pages/settings";
-import { TariffsPage } from "./pages/tariffs";
+import { TARIFF_TABS, TariffsPage, type TariffsSearch } from "./pages/tariffs";
 import { ApiPage } from "./pages/api";
 import { PaymentsPage } from "./pages/payments";
 import { TELEGRAM_TABS, TelegramPage, type TelegramSearch } from "./pages/telegram";
@@ -55,7 +55,14 @@ export function createAppRouter(queryClient: QueryClient) {
       create: s.create === true || s.create === "true" ? true : undefined,
     }),
   });
-  const tariffs = createRoute({ getParentRoute: () => app, path: "/tariffs", component: TariffsPage });
+  const tariffs = createRoute({
+    getParentRoute: () => app,
+    path: "/tariffs",
+    component: TariffsPage,
+    validateSearch: (s: Record<string, unknown>): TariffsSearch => ({
+      tab: TARIFF_TABS.includes(s.tab as TariffsSearch["tab"]) ? (s.tab as TariffsSearch["tab"]) : "tariffs",
+    }),
+  });
   const inbounds = createRoute({ getParentRoute: () => app, path: "/inbounds", component: InboundsPage });
   const nodes = createRoute({ getParentRoute: () => app, path: "/nodes", component: NodesPage });
   const settings = createRoute({

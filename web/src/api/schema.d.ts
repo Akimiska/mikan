@@ -1152,7 +1152,7 @@ export interface components {
             node_id?: number;
             port?: string;
             /** @enum {string} */
-            preset: "vless_reality_xhttp" | "hysteria2" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "vless_reality_xhttp_pq" | "trusttunnel" | "shadowquic" | "mieru" | "shadowsocks_2022" | "sudoku" | "snell" | "custom";
+            preset: "vless_reality_xhttp" | "hysteria2" | "hysteria2_gecko" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "vless_reality_xhttp_pq" | "trusttunnel" | "shadowquic" | "mieru" | "shadowsocks_2022" | "sudoku" | "snell" | "custom";
         };
         CreateNodeInputBody: {
             /**
@@ -1271,6 +1271,8 @@ export interface components {
             network: string;
             /** Format: int64 */
             node_id: number;
+            /** @description Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет */
+            obfs?: string;
             /**
              * @description Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)
              * @enum {string}
@@ -1451,6 +1453,11 @@ export interface components {
             exit_node_id?: number;
             /** @description Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек */
             fingerprint?: string;
+            /**
+             * @description Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат
+             * @enum {string}
+             */
+            obfs?: "salamander" | "gecko";
             /**
              * @description Выход в интернет: напрямую, через WARP ноды или через другую ноду
              * @enum {string}

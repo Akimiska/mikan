@@ -138,7 +138,7 @@
       "config_xhttp_mode": "mode: stream-one, stream-up or packet-up (auto hangs in mihomo)",
       "config_path": "The path must start with /",
       "config_masquerade": "masquerade must be https:// to a public site",
-      "config_obfs": "obfs needs obfs: salamander and obfs-password",
+      "config_obfs": "obfs is salamander or gecko, with an obfs-password",
       "config_fingerprint": "Fingerprint «{value}» is not supported: chrome, firefox, safari, ios, android, edge, 360, qq, random or randomized",
       "fingerprint_no_tls": "This protocol has no TLS fingerprint",
       "reality_dest": "dest must be host:port",
@@ -219,7 +219,8 @@
       "sub_port_relay": "The port is taken by the cascade: other nodes' traffic goes through it",
       "sub_port_busy": "Port {value} is taken by another program on the server",
       "sub_port_unavailable": "The subscription port cannot be changed now",
-      "port_sub": "The panel serves subscriptions on this port: pick another, or change the subscription port in Settings"
+      "port_sub": "The panel serves subscriptions on this port: pick another, or change the subscription port in Settings",
+      "config_obfs_sizes": "Packet sizes are for gecko only: 256 to 2048 bytes, the minimum no larger than the maximum"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -504,6 +505,7 @@
   "presets": {
     "vless_reality_xhttp": "Main one for Russia: looks like plain HTTPS and keeps few connections",
     "hysteria2": "Fast on poor links, runs over UDP",
+    "hysteria2_gecko": "Hysteria2 whose handshake is cut into pieces of random size, against DPI that tells QUIC by packet sizes. mihomo apps on core 1.19.26+ only; the rest get plain Hysteria2",
     "tuic_v5": "A QUIC alternative, also over UDP",
     "vless_reality_vision": "For old clients without XHTTP. Gets frozen quickly on 443 in Russia",
     "vless_reality_grpc": "HTTP/2 with multiplexing: few connections, a different traffic pattern",
@@ -647,7 +649,10 @@
     "outboundNode": "Via a node",
     "outboundNodeHint": "Cascade: clients connect to this node, and the traffic leaves the internet through the chosen one — sites see its IP. When that node is down the traffic does not go direct.",
     "exitNode": "Exit node",
-    "exitPick": "Pick a node"
+    "exitPick": "Pick a node",
+    "obfs": "Obfuscation",
+    "obfsHint": "Every app with Hysteria2 knows Salamander. Gecko also cuts the handshake into pieces of random size, against DPI that tells QUIC by packet sizes.",
+    "obfsGeckoHint": "Only apps on mihomo core 1.19.26+ that say so (Koala Clash 1.4+ and others) get Gecko. The rest do not get this protocol, so keep a plain Hysteria2 next to it."
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",

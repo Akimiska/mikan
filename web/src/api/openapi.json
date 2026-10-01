@@ -592,6 +592,7 @@
             "enum": [
               "vless_reality_xhttp",
               "hysteria2",
+              "hysteria2_gecko",
               "tuic_v5",
               "vless_reality_vision",
               "vless_reality_grpc",
@@ -893,6 +894,10 @@
           "node_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "obfs": {
+            "description": "Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет",
+            "type": "string"
           },
           "outbound": {
             "description": "Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)",
@@ -1465,6 +1470,14 @@
           "fingerprint": {
             "description": "Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек",
             "maxLength": 32,
+            "type": "string"
+          },
+          "obfs": {
+            "description": "Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат",
+            "enum": [
+              "salamander",
+              "gecko"
+            ],
             "type": "string"
           },
           "outbound": {

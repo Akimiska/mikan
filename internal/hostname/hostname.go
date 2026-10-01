@@ -30,5 +30,20 @@ func Name(s string) bool {
 	return strings.ContainsFunc(labels[len(labels)-1], func(r rune) bool { return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' })
 }
 
+// reserved are the special-use zones no public certificate is issued for (RFC 2606,
+// RFC 6761, RFC 6762 and the private-use names in wide use).
+var reserved = []string{"test", "example", "invalid", "localhost", "local", "internal", "lan", "home.arpa"}
+
+// Reserved says whether a Name lies in a special-use zone: valid, but never public.
+func Reserved(name string) bool {
+	n := strings.ToLower(name)
+	for _, z := range reserved {
+		if n == z || strings.HasSuffix(n, "."+z) {
+			return true
+		}
+	}
+	return false
+}
+
 // Valid accepts an IP address or a Name.
 func Valid(s string) bool { return net.ParseIP(s) != nil || Name(s) }

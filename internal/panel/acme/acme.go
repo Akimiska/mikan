@@ -346,7 +346,7 @@ func covers(leaf *x509.Certificate, id string) bool {
 func isPrivate(id string) bool {
 	ip := net.ParseIP(id)
 	if ip == nil {
-		return !hostname.Name(id)
+		return !hostname.Name(id) || hostname.Reserved(id)
 	}
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }

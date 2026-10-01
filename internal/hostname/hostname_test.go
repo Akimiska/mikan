@@ -51,3 +51,13 @@ func TestLength(t *testing.T) {
 		}
 	}
 }
+
+// Special-use zones are valid names that never get a public certificate.
+func TestReserved(t *testing.T) {
+	for name, want := range map[string]bool{"node.test": true, "a.b.EXAMPLE": true, "router.lan": true, "nas.home.arpa": true, "localhost": true,
+		"vpn.example.com": false, "contest.ru": false, "latest.io": false} {
+		if Reserved(name) != want {
+			t.Errorf("Reserved(%q) = %v", name, !want)
+		}
+	}
+}

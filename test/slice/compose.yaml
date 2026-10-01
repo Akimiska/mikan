@@ -13,7 +13,7 @@ services:
     # The panel takes a public host only as an IP or a full domain name.
     networks:
       default:
-        aliases: [node.slice]
+        aliases: [node.test]
 
   panel:
     image: mikan:slice

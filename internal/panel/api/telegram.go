@@ -15,6 +15,7 @@ import (
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgbot"
 )
 
@@ -225,32 +226,41 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 		return nil, tgFieldErr("enabled", "tg_no_token")
 	}
 
-	if b.Route != nil {
-		if err := settings.Set(ctx, h.d.Settings, tgbot.KeyRoute, route); err != nil {
-			return nil, err
-		}
-	}
-	if b.Token != nil {
-		if err := settings.Set(ctx, h.d.Settings, tgbot.KeyToken, token); err != nil {
-			return nil, err
-		}
-		if bot != nil {
-			if err := settings.Set(ctx, h.d.Settings, tgbot.KeyBot, *bot); err != nil {
-				return nil, err
+	// One transaction: a token saved without the route that reaches it, or a route without
+	// the switch that turns the bot on, is a bot that does not start.
+	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		set := settings.New(q)
+		if b.Route != nil {
+			if err := settings.Set(ctx, set, tgbot.KeyRoute, route); err != nil {
+				return err
 			}
-		} else if err := settings.Set(ctx, h.d.Settings, tgbot.KeyEnabled, false); err != nil {
-			return nil, err
 		}
-	}
-	if b.Config != nil {
-		if err := settings.Set(ctx, h.d.Settings, tgbot.KeyConfig, *b.Config); err != nil {
-			return nil, err
+		if b.Token != nil {
+			if err := settings.Set(ctx, set, tgbot.KeyToken, token); err != nil {
+				return err
+			}
+			if bot != nil {
+				if err := settings.Set(ctx, set, tgbot.KeyBot, *bot); err != nil {
+					return err
+				}
+			} else if err := settings.Set(ctx, set, tgbot.KeyEnabled, false); err != nil {
+				return err
+			}
 		}
+		if b.Config != nil {
+			if err := settings.Set(ctx, set, tgbot.KeyConfig, *b.Config); err != nil {
+				return err
+			}
+		}
+		if b.Enabled != nil {
+			return settings.Set(ctx, set, tgbot.KeyEnabled, *b.Enabled)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if b.Enabled != nil {
-		if err := settings.Set(ctx, h.d.Settings, tgbot.KeyEnabled, *b.Enabled); err != nil {
-			return nil, err
-		}
 		details["enabled"] = *b.Enabled
 	}
 	h.d.Telegram.Reload()

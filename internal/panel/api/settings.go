@@ -16,6 +16,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/proto"
 )
@@ -278,51 +279,70 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if len(details) > 0 {
 		return nil, huma.Error422UnprocessableEntity("validation", details...)
 	}
-	// The port opens before anything is saved: one that cannot be had changes nothing.
+	// The port opens first: one that cannot be had changes nothing. If the settings then
+	// fail to save, the port is put back, so the server does not listen on one nobody saved.
+	var oldPort int
 	if b.SubPort != nil {
 		if h.d.SubPort == nil {
 			return nil, huma.Error503ServiceUnavailable("sub_port_unavailable")
 		}
+		var err error
+		if oldPort, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeySubPort); err != nil {
+			return nil, err
+		}
 		if err := h.d.SubPort(*b.SubPort); err != nil {
 			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.sub_port", Message: "sub_port_busy", Value: *b.SubPort})
 		}
-		if err := settings.Set(ctx, h.d.Settings, settings.KeySubPort, *b.SubPort); err != nil {
-			return nil, err
-		}
-		// The bot's Mini App button points at the subscription page.
-		if h.d.Telegram != nil {
-			h.d.Telegram.Reload()
-		}
 	}
-	set := func(key string, v *string) error {
-		if v == nil {
-			return nil
-		}
-		return settings.Set(ctx, h.d.Settings, key, strings.TrimSpace(*v))
-	}
-	if b.SubRules != nil {
-		if err := settings.Set(ctx, h.d.Settings, settings.KeyRules, strings.TrimRight(*b.SubRules, " \n\r\t")); err != nil {
-			return nil, err
-		}
-	}
-	for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
-		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
-		if err := set(key, v); err != nil {
-			return nil, err
-		}
-	}
-	if b.QuietHourUTC != nil {
-		if err := settings.Set(ctx, h.d.Settings, settings.KeyQuietHour, *b.QuietHourUTC); err != nil {
-			return nil, err
-		}
-	}
-	for key, v := range map[string]*bool{settings.KeyAutoPort: b.AutoPort, settings.KeyAutoSNI: b.AutoSNI,
-		settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID} {
-		if v != nil {
-			if err := settings.Set(ctx, h.d.Settings, key, *v); err != nil {
-				return nil, err
+	// Every setting of the request is written in one transaction: a failure in the middle
+	// leaves the settings as they were, not half changed.
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		set := settings.New(q)
+		if b.SubPort != nil {
+			if err := settings.Set(ctx, set, settings.KeySubPort, *b.SubPort); err != nil {
+				return err
 			}
 		}
+		if b.SubRules != nil {
+			if err := settings.Set(ctx, set, settings.KeyRules, strings.TrimRight(*b.SubRules, " \n\r\t")); err != nil {
+				return err
+			}
+		}
+		for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
+			settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
+			if v == nil {
+				continue
+			}
+			if err := settings.Set(ctx, set, key, strings.TrimSpace(*v)); err != nil {
+				return err
+			}
+		}
+		if b.QuietHourUTC != nil {
+			if err := settings.Set(ctx, set, settings.KeyQuietHour, *b.QuietHourUTC); err != nil {
+				return err
+			}
+		}
+		for key, v := range map[string]*bool{settings.KeyAutoPort: b.AutoPort, settings.KeyAutoSNI: b.AutoSNI,
+			settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID} {
+			if v != nil {
+				if err := settings.Set(ctx, set, key, *v); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if b.SubPort != nil {
+			if rerr := h.d.SubPort(oldPort); rerr != nil {
+				h.d.Log.Warn("sub port not put back", "port", oldPort, "err", rerr)
+			}
+		}
+		return nil, err
+	}
+	// The bot's Mini App button points at the subscription page.
+	if b.SubPort != nil && h.d.Telegram != nil {
+		h.d.Telegram.Reload()
 	}
 	var auditDetails map[string]any
 	if b.SubPort != nil {

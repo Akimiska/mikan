@@ -1,3 +1,10 @@
+> **⚙️ Форк [Miroshka000/mikan](https://github.com/Miroshka000/mikan) для AoiVPN.**
+> Внутренний форк сервиса AoiVPN. Оригинал — канонический проект, вся заслуга ему (GPL-3.0 — см. [LICENSE](LICENSE)).
+> Отличия здесь: lean-CI только для образа (`.github/workflows/aoi-image.yml` → `ghcr.io/akimiska/mikan`, amd64) — деплоим свою сборку через `docker compose` с пином `MIKAN_IMAGE` на тег. Правила роутинга настраиваются через штатную настройку mikan `sub_rules` — **без правок исходников**. Деплой — через `MIKAN_IMAGE`, **не** через upstream `install.sh`.
+> Всё ниже — документация оригинала и описывает исходный способ установки одной командой.
+
+---
+
 <div align="center">
 
 <picture>

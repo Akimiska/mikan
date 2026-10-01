@@ -1,3 +1,10 @@
+> **⚙️ AoiVPN fork of [Miroshka000/mikan](https://github.com/Miroshka000/mikan).**
+> Internal fork used by the AoiVPN service. Upstream is the canonical project and gets all the credit (GPL-3.0 — see [LICENSE](LICENSE)).
+> What differs here: a lean image-only CI (`.github/workflows/aoi-image.yml` → `ghcr.io/akimiska/mikan`, amd64) so we deploy our own build via `docker compose` with `MIKAN_IMAGE` pinned to a tag. Routing/rules are customized through mikan's own `sub_rules` setting — **no source changes**. Deploy by setting `MIKAN_IMAGE`, **not** via the upstream `install.sh`.
+> Everything below is upstream's documentation and describes the original one-command install flow.
+
+---
+
 <div align="center">
 
 <picture>

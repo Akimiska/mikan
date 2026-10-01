@@ -12,10 +12,12 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/hostname"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/tgbot"
 	"mikan/internal/release"
 )
 
@@ -175,10 +177,10 @@ func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKe
 		return nil, err
 	}
 	var details []error
-	if host == "" || !validHost(host) {
+	if !hostname.Valid(host) {
 		details = append(details, &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
 	}
-	if !validHost(dom) {
+	if dom != "" && !hostname.Valid(dom) {
 		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 	}
 	if len(details) == 0 {
@@ -236,7 +238,7 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 	}
 	if b.Host != nil {
 		host := strings.TrimSpace(*b.Host)
-		if host == "" || !validHost(host) {
+		if !hostname.Valid(host) {
 			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
 		}
 		_, port, err := net.SplitHostPort(n.Address)
@@ -247,7 +249,7 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 	}
 	if b.Domain != nil {
 		dom := strings.TrimSpace(*b.Domain)
-		if !validHost(dom) {
+		if dom != "" && !hostname.Valid(dom) {
 			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 		}
 		n.Domain = dom
@@ -322,6 +324,63 @@ func (h *handlers) rekeyNode(ctx context.Context, in *nodeIDInput) (*nodeKeyOutp
 	return out, nil
 }
 
+// nodeUnused refuses to delete a node something still goes through: a cascade would
+// quietly go straight out, the bot would lose its way to Telegram. The details list
+// what to switch first.
+func (h *handlers) nodeUnused(ctx context.Context, q *db.Queries, id int64) error {
+	uses, err := domain.ExitUsesOf(ctx, q, id)
+	if err != nil {
+		return err
+	}
+	set := settings.New(q)
+	route, _, err := settings.Get[tgbot.Route](ctx, set, tgbot.KeyRoute)
+	if err != nil {
+		return err
+	}
+	panelHost, err := set.String(ctx, settings.KeyPublicHost)
+	if err != nil {
+		return err
+	}
+	nodes, err := q.ListNodes(ctx)
+	if err != nil {
+		return err
+	}
+	// A node shows by its name, else by its address: the panel's own node by the panel's.
+	labels := map[int64]string{}
+	for _, n := range nodes {
+		switch {
+		case n.Name != "":
+			labels[n.ID] = n.Name
+		case n.PublicHost != "":
+			labels[n.ID] = n.PublicHost
+		default:
+			labels[n.ID] = panelHost
+		}
+	}
+	var details []error
+	if len(uses.Inbounds) > 0 {
+		var list []string
+		for _, in := range uses.Inbounds {
+			list = append(list, in.Name+" ("+labels[in.NodeID]+")")
+		}
+		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_inbounds", Value: strings.Join(list, ", ")})
+	}
+	if len(uses.Relays) > 0 {
+		var list []string
+		for _, src := range uses.Relays {
+			list = append(list, labels[src])
+		}
+		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_relays", Value: strings.Join(list, ", ")})
+	}
+	if route.Mode == tgbot.RouteNode && route.NodeID == id {
+		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_telegram"})
+	}
+	if len(details) > 0 {
+		return huma.Error409Conflict("node_in_use", details...)
+	}
+	return nil
+}
+
 func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, error) {
 	n, err := h.getNode(ctx, in.ID)
 	if err != nil {
@@ -330,10 +389,16 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 	if n.Address == "" {
 		return nil, huma.Error409Conflict("local_node")
 	}
-	if err := h.d.Store.Q.DeleteNode(ctx, n.ID); err != nil {
-		return nil, err
-	}
-	if err := h.d.Store.Q.DeleteNodeStateOf(ctx, strconv.FormatInt(n.ID, 10)); err != nil {
+	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if err := h.nodeUnused(ctx, q, n.ID); err != nil {
+			return err
+		}
+		if err := q.DeleteNode(ctx, n.ID); err != nil {
+			return err
+		}
+		return q.DeleteNodeStateOf(ctx, strconv.FormatInt(n.ID, 10))
+	})
+	if err != nil {
 		return nil, err
 	}
 	if h.d.Nodes != nil {

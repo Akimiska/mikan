@@ -26,19 +26,18 @@ func TestInboundAddPrintsPortForHostScript(t *testing.T) {
 	if err := domain.Seed(ctx, st, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	set := settings.New(st.Q)
 	var out, errOut bytes.Buffer
-	if err := inboundCmd(ctx, st, set, []string{"add", "anytls"}, &out, &errOut); err != nil {
+	if err := inboundCmd(ctx, st, []string{"add", "anytls"}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "2083/tcp\n" {
 		t.Fatalf("stdout must be port/network, got %q", out.String())
 	}
-	if err := inboundCmd(ctx, st, set, []string{"add", "anytls"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "anytls") {
+	if err := inboundCmd(ctx, st, []string{"add", "anytls"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "anytls") {
 		t.Fatalf("a taken port must name the owner: %v", err)
 	}
 	out.Reset()
-	if err := inboundCmd(ctx, st, set, []string{"list"}, &out, &errOut); err != nil || !strings.Contains(out.String(), "2083/tcp") {
+	if err := inboundCmd(ctx, st, []string{"list"}, &out, &errOut); err != nil || !strings.Contains(out.String(), "2083/tcp") {
 		t.Fatalf("list: %v %q", err, out.String())
 	}
 }
@@ -56,9 +55,8 @@ func TestInboundSetPrintsPortOnlyForOwnNode(t *testing.T) {
 	if err := domain.Seed(ctx, st, now); err != nil {
 		t.Fatal(err)
 	}
-	set := settings.New(st.Q)
 	var out, errOut bytes.Buffer
-	if err := inboundCmd(ctx, st, set, []string{"set", "vless-xhttp", "--port", "2443"}, &out, &errOut); err != nil {
+	if err := inboundCmd(ctx, st, []string{"set", "vless-xhttp", "--port", "2443"}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "2443/tcp\n" || !strings.Contains(errOut.String(), "443 → 2443/tcp") {
@@ -76,14 +74,14 @@ func TestInboundSetPrintsPortOnlyForOwnNode(t *testing.T) {
 	} {
 		out.Reset()
 		errOut.Reset()
-		if err := inboundCmd(ctx, st, set, args, &out, &errOut); err != nil {
+		if err := inboundCmd(ctx, st, args, &out, &errOut); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
 		if out.Len() != 0 || !strings.Contains(errOut.String(), "ufw allow "+args[len(args)-1]+"/udp") {
 			t.Fatalf("%v: remote node must not print a rule for this server: stdout %q, stderr %q", args, out.String(), errOut.String())
 		}
 	}
-	if err := inboundCmd(ctx, st, set, []string{"set", "nope", "--port", "3000"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "nope") {
+	if err := inboundCmd(ctx, st, []string{"set", "nope", "--port", "3000"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("unknown inbound: %v", err)
 	}
 }
@@ -130,5 +128,70 @@ func TestBootstrapStoresDefaultLang(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "https://203.0.113.10:21355/") || strings.Contains(out.String(), "correct-horse-battery") {
 		t.Fatalf("output: %q", out.String())
+	}
+}
+
+// The shell takes the same hosts as the admin panel (internal/hostname): bootstrap, node
+// add and node set alike.
+func TestHostsAreChecked(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := domain.Seed(ctx, st, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	set := settings.New(st.Q)
+	var out, errOut bytes.Buffer
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--public-host", "vpn example.com", "--port", "21355"}, "--public-host"},
+		{[]string{"--public-host", "203.0.113.10", "--port", "21355", "--domain", "-vpn.example.com"}, "--domain"},
+	} {
+		if err := bootstrap(ctx, st, set, append(c.args, "--password-stdin"), strings.NewReader("correct-horse-battery\n"), &out); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("bootstrap %v: %v", c.args, err)
+		}
+	}
+	data := t.TempDir()
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"add", "--name", "B", "--host", "198.51.100.20/24"}, "--host"},
+		{[]string{"add", "--name", "B", "--host", "198.51.100.20", "--domain", "b"}, "--domain"},
+	} {
+		if err := nodeCmd(ctx, st, data, c.args, &out, &errOut); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("node %v: %v", c.args, err)
+		}
+	}
+	if err := nodeCmd(ctx, st, data, []string{"add", "--name", "B", "--host", "198.51.100.20", "--api-port", "40000", "--domain", "b.example.com"}, &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := st.Q.ListNodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := nodes[len(nodes)-1]
+	id := strconv.FormatInt(b.ID, 10)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"set", id, "--host", "b..example.com"}, "--host"},
+		{[]string{"set", id, "--domain", "b.example.123"}, "--domain"},
+	} {
+		if err := nodeCmd(ctx, st, data, c.args, &out, &errOut); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("node %v: %v", c.args, err)
+		}
+	}
+	if err := nodeCmd(ctx, st, data, []string{"set", id, "--host", " 198.51.100.21 "}, &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.Q.GetNode(ctx, b.ID); err != nil || n.PublicHost != "198.51.100.21" || n.Address != "198.51.100.21:40000" {
+		t.Fatalf("moved: %+v %v", n, err)
 	}
 }

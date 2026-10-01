@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/netip"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -79,14 +78,15 @@ type Status struct {
 
 // Tuner detects blocked inbounds and moves them. Step is not reentrant: Run calls it.
 type Tuner struct {
-	st      *store.Store
-	set     *settings.Settings
-	nodes   Nodes
-	changes domain.Changes
-	log     *slog.Logger
-	now     func() time.Time
-	o       Options
-	pick    func(n int) int // index of the port to move to; random unless a test fixes it
+	st       *store.Store
+	inbounds *domain.Inbounds // moves ports by the admin's rules, without a dry run on the node
+	set      *settings.Settings
+	nodes    Nodes
+	changes  domain.Changes
+	log      *slog.Logger
+	now      func() time.Time
+	o        Options
+	pick     func(n int) int // index of the port to move to; random unless a test fixes it
 
 	mu    sync.Mutex
 	state map[int64]*state // by inbound id
@@ -102,7 +102,7 @@ type state struct {
 }
 
 func New(st *store.Store, set *settings.Settings, nodes Nodes, changes domain.Changes, log *slog.Logger, now func() time.Time, o Options) *Tuner {
-	return &Tuner{st: st, set: set, nodes: nodes, changes: changes, log: log, now: now, o: o, pick: rand.IntN,
+	return &Tuner{st: st, inbounds: domain.NewInbounds(st, nil, now), set: set, nodes: nodes, changes: changes, log: log, now: now, o: o, pick: rand.IntN,
 		state: map[int64]*state{}, failed: map[string]time.Time{}}
 }
 
@@ -143,7 +143,6 @@ type world struct {
 	ownNames     map[string]bool // the panel's and nodes' own names: never a REALITY target
 	panelHost    string
 	panelPort    int
-	subPort      int // 0: none
 	eventsWindow time.Duration
 }
 
@@ -290,9 +289,6 @@ func (t *Tuner) load(ctx context.Context) (*world, error) {
 	own(panelDomain)
 	own(w.panelHost)
 	if w.panelPort, _, err = settings.Get[int](ctx, t.set, settings.KeyPanelPort); err != nil {
-		return nil, err
-	}
-	if w.subPort, _, err = settings.Get[int](ctx, t.set, settings.KeySubPort); err != nil {
 		return nil, err
 	}
 	return w, nil
@@ -480,18 +476,10 @@ func (t *Tuner) remedy(ctx context.Context, w *world, n db.Node, x db.Inbound) {
 
 func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound, reason string) {
 	network := domain.InboundNetwork(x)
-	reserved := map[string]bool{"22": true}
-	if n.Address == "" {
-		reserved[strconv.Itoa(w.panelPort)] = true
-		if w.subPort > 0 && network == "tcp" {
-			reserved[strconv.Itoa(w.subPort)] = true
-		}
-	} else if _, p, err := net.SplitHostPort(n.Address); err == nil {
-		reserved[p] = true
-	}
-	// A cascade relay holds its TCP port on the node.
-	if r, err := t.st.Q.GetNodeRelay(ctx, n.ID); err == nil && network == "tcp" {
-		reserved[r.Port] = true
+	ports, err := domain.NodePorts(ctx, t.st.Q, n)
+	if err != nil {
+		t.log.Error("autotune: node ports", "node", n.ID, "err", err)
+		return
 	}
 	abandoned := map[string]bool{x.Port: true}
 	for _, e := range w.events {
@@ -499,12 +487,13 @@ func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound,
 			abandoned[e.OldValue] = true
 		}
 	}
-	free := FreePorts(w.inbounds[n.ID], network, reserved, abandoned)
+	free := FreePorts(ports, network, abandoned)
 	if len(free) == 0 {
 		t.setStuck(x.ID, "no_port")
 		return
 	}
-	prev, next, err := domain.SetInboundPort(ctx, t.st, n.ID, x.Name, free[t.pick(len(free))], w.now)
+	port := free[t.pick(len(free))]
+	prev, next, err := t.inbounds.Update(ctx, x.ID, domain.InboundPatch{Port: &port})
 	if err != nil {
 		t.log.Error("autotune: move port", "node", n.ID, "inbound", x.Name, "err", err)
 		return

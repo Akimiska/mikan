@@ -7,7 +7,7 @@ import { qk, usePaymentSettings } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
-import { t } from "../../i18n";
+import { t, tMaybe } from "../../i18n";
 import { dateShort, money, num, time } from "../../lib/format";
 import { AddonsCard, addonName, useAddons, Webhook } from "./payment-addons";
 
@@ -27,6 +27,11 @@ const STATUS_TONE: Record<Status, "ok" | "warn" | "bad" | "off"> = {
 };
 const STATUSES: Status[] = ["applied", "paid", "pending", "failed", "expired", "refunded"];
 const BUILT_IN: Provider[] = ["stars", "yookassa", "cryptobot"];
+
+/** Why a payment failed or waits, in words when the code is known; a provider's own code as is. */
+function paymentError(code: string): string {
+  return tMaybe(`errors.api.${code}`) ?? code;
+}
 
 /** A payment's provider as the admin knows it; adapters by their own name. */
 function providerName(p: Provider, addons: Addons | undefined): string {
@@ -189,7 +194,9 @@ function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; o
             </>
           ) : null}
         </div>
-        {p.error ? <div className="mt-1 text-xs text-[var(--berry-600)]">{t("payments.notApplied", { error: p.error })}</div> : null}
+        {p.error ? (
+          <div className="mt-1 text-xs text-[var(--berry-600)]">{t(p.status === "failed" ? "payments.invoiceFailed" : "payments.notApplied", { error: paymentError(p.error) })}</div>
+        ) : null}
       </div>
       {p.provider === "stars" && p.status === "applied" ? (
         <Button size="sm" variant="ghost" onClick={onRefund}>

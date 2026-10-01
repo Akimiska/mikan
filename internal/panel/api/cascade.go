@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,9 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/nodeapi"
-	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/domain"
-	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 )
 
@@ -64,9 +61,12 @@ func (h *handlers) registerCascade() {
 	huma.Register(h.api, huma.Operation{OperationID: "update-node-cascade", Method: http.MethodPatch, Path: "/api/v1/nodes/{id}/cascade", Summary: "Куда нода выпускает трафик других нод", Tags: tags}, h.patchCascade)
 }
 
+// cascadeRefusals are the domain's refusals of an exit the API reports by their own code.
+var cascadeRefusals = []error{domain.ErrExitSelf, domain.ErrExitCycle, domain.ErrExitOff, domain.ErrNoPort}
+
 // cascadeError maps the domain's refusals to the API's codes.
 func cascadeError(err error, field string) error {
-	for _, e := range []error{domain.ErrExitSelf, domain.ErrExitCycle, domain.ErrExitOff, domain.ErrNoPort} {
+	for _, e := range cascadeRefusals {
 		if errors.Is(err, e) {
 			return huma.Error422UnprocessableEntity("cascade", &huma.ErrorDetail{Location: "body." + field, Message: e.Error()})
 		}
@@ -75,54 +75,6 @@ func cascadeError(err error, field string) error {
 		return huma.Error422UnprocessableEntity("cascade", &huma.ErrorDetail{Location: "body." + field, Message: "exit_not_found"})
 	}
 	return err
-}
-
-// relayReserved are ports a relay on node n must not take: SSH, the panel's own port and
-// its subscription port on its node, the node API's port on a remote one.
-func (h *handlers) relayReserved(ctx context.Context, n db.Node) (map[string]bool, error) {
-	reserved := map[string]bool{"22": true}
-	if n.Address == "" {
-		p, _, err := settings.Get[int](ctx, h.d.Settings, settings.KeyPanelPort)
-		if err != nil {
-			return nil, err
-		}
-		reserved[strconv.Itoa(p)] = true
-		if sp, _, err := settings.Get[int](ctx, h.d.Settings, settings.KeySubPort); err != nil {
-			return nil, err
-		} else if sp > 0 {
-			reserved[strconv.Itoa(sp)] = true
-		}
-	} else if _, p, err := net.SplitHostPort(n.Address); err == nil {
-		reserved[p] = true
-	}
-	return reserved, nil
-}
-
-// useExit lets node src leave through node exit: the chain is checked, exit gets its
-// relay and src a key there. It runs on the caller's transaction.
-func (h *handlers) useExit(ctx context.Context, q *db.Queries, src, exit int64) error {
-	if err := domain.CheckExit(ctx, q, src, exit); err != nil {
-		return err
-	}
-	x, err := q.GetNode(ctx, exit)
-	if err != nil {
-		return err
-	}
-	reserved, err := h.relayReserved(ctx, x)
-	if err != nil {
-		return err
-	}
-	if _, err := domain.EnsureRelay(ctx, q, exit, autotune.Pool, reserved, h.d.Now()); err != nil {
-		return err
-	}
-	_, err = domain.RelayUser(ctx, q, exit, src)
-	return err
-}
-
-// relayPortBusy says whether port on node is the relay's.
-func (h *handlers) relayPortBusy(ctx context.Context, nodeID int64, port, network string) bool {
-	r, err := h.d.Store.Q.GetNodeRelay(ctx, nodeID)
-	return err == nil && network == "tcp" && r.Port == port
 }
 
 func (h *handlers) getCascade(ctx context.Context, in *nodeIDInput) (*cascadeOutput, error) {
@@ -208,11 +160,7 @@ func (h *handlers) patchCascade(ctx context.Context, in *cascadePatchInput) (*ca
 		if err != nil {
 			return err
 		}
-		reserved, err := h.relayReserved(ctx, n)
-		if err != nil {
-			return err
-		}
-		if _, err := domain.EnsureRelay(ctx, q, in.ID, autotune.Pool, reserved, h.d.Now()); err != nil {
+		if _, err := domain.EnsureRelay(ctx, q, n, h.d.Now()); err != nil {
 			return err
 		}
 		outbound, exit := b.Outbound, sql.NullInt64{}
@@ -220,7 +168,7 @@ func (h *handlers) patchCascade(ctx context.Context, in *cascadePatchInput) (*ca
 			if b.ExitNodeID == 0 {
 				return domain.ErrNotFound
 			}
-			if err := h.useExit(ctx, q, in.ID, b.ExitNodeID); err != nil {
+			if err := domain.UseExit(ctx, q, in.ID, b.ExitNodeID, h.d.Now()); err != nil {
 				return err
 			}
 			outbound, exit = "direct", sql.NullInt64{Int64: b.ExitNodeID, Valid: true}

@@ -8,7 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
+
+	"mikan/internal/hostname"
 )
 
 // ClientInput is what a subscription knows about one user and the node.
@@ -80,35 +81,17 @@ func ClientSNI(t Template) bool {
 // the usual TLS name apply again.
 func SetClientEndpoint(t Template, server string, port int, sni string) error {
 	switch {
-	case server != "" && !ValidHost(server):
+	case server != "" && !hostname.Valid(server):
 		return fail("config_client_server", extKey+".client.server")
 	case port < 0 || port > 65535:
 		return fail("config_client_port", extKey+".client.port")
-	case sni != "" && (!ValidHost(sni) || net.ParseIP(sni) != nil || !ClientSNI(t)):
+	case sni != "" && (!hostname.Name(sni) || !ClientSNI(t)):
 		return fail("config_client_sni", extKey+".client.sni")
 	}
 	setClient(t, "server", server)
 	setClient(t, "port", port)
 	setClient(t, "sni", sni)
 	return nil
-}
-
-// ValidHost accepts an IP address or a DNS name of at least two labels.
-func ValidHost(s string) bool {
-	if net.ParseIP(s) != nil {
-		return true
-	}
-	for _, label := range strings.Split(s, ".") {
-		if label == "" || len(label) > 63 {
-			return false
-		}
-		for _, r := range label {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
-				return false
-			}
-		}
-	}
-	return strings.Contains(s, ".")
 }
 
 // setClient writes one key of mikan.client; an empty value removes it, and with it the

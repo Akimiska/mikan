@@ -170,7 +170,7 @@ func TestMaintainAppliesChangesMadeOutsideTheAPI(t *testing.T) {
 	if len(node.applied) != base {
 		t.Fatalf("an unchanged state was applied again: %d → %d", base, len(node.applied))
 	}
-	if _, err := domain.AddPreset(ctx, st, settings.New(st.Q), LocalNode, "trojan_reality", "", time.Now()); err != nil {
+	if _, err := domain.NewInbounds(st, nil, time.Now).Create(ctx, domain.NewInbound{NodeID: LocalNode, Preset: "trojan_reality"}); err != nil {
 		t.Fatal(err)
 	}
 	reconcile()

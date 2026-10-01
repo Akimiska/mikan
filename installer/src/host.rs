@@ -177,12 +177,12 @@ fn systemctl(args: &[&str]) -> Result<()> {
 mod tests {
     use super::*;
 
-    // The panel moves a blocked inbound to a port of this pool; the installer must have
-    // opened them all.
+    // The panel moves a blocked inbound and puts a cascade relay on a port of this pool;
+    // the installer must have opened them all.
     #[test]
     fn pool_matches_the_panel() {
-        let go = fs::read_to_string("../internal/panel/autotune/detect.go").unwrap();
-        let start = go.find("var Pool = []int{").expect("autotune.Pool") + "var Pool = []int{".len();
+        let go = fs::read_to_string("../internal/panel/domain/ports.go").unwrap();
+        let start = go.find("var PortPool = []int{").expect("domain.PortPool") + "var PortPool = []int{".len();
         let list = &go[start..start + go[start..].find('}').unwrap()];
         let pool: Vec<u16> = list.split(',').map(|p| p.trim().parse().unwrap()).collect();
         assert_eq!(pool, POOL);

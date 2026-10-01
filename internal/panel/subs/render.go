@@ -12,7 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"mikan/internal/panel/presets"
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/proto"
 )
@@ -116,15 +116,6 @@ func ValidName(s string) error {
 	return nil
 }
 
-// ProxyName is the name an inbound gets in subscriptions.
-func ProxyName(in db.Inbound) string {
-	if in.DisplayName != "" {
-		return in.DisplayName
-	}
-	info, _ := presets.Get(in.Preset)
-	return info.SubName
-}
-
 type Profile struct {
 	Slot     db.Slot
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
@@ -175,7 +166,7 @@ func build(p Profile) ([]proxy, error) {
 				// Saved configs are validated; one broken inbound must not empty the subscription.
 				continue
 			}
-			base := ProxyName(in)
+			base := domain.ProxyName(in)
 			// A name the admin typed is used as is; preset names get the node's flag.
 			if prefix := NodePrefix(n.Name); multi && in.DisplayName == "" && prefix != "" {
 				base = prefix + " " + base

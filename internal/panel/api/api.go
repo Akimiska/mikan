@@ -48,6 +48,7 @@ type Deps struct {
 	Now        func() time.Time
 
 	Users     *domain.Users
+	Inbounds  *domain.Inbounds
 	Devices   *domain.Devices
 	Packages  *domain.Packages
 	Pool      *domain.Pool

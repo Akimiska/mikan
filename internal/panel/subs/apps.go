@@ -48,7 +48,10 @@ func (v Version) AtLeast(o Version) bool {
 }
 
 var (
-	mihomoVersion = regexp.MustCompile(`(?:mihomo|clash[.-]?meta)/v?(\d+)\.(\d+)\.(\d+)`)
+	// `core/X.Y.Z` added for the AoiVPN fork (FlClashX): its UA is
+	// "AoiVPN/vX FlClash X/vX core/1.19.31 Platform/…" — the mihomo core
+	// version rides on `core/`, so detect it to serve the full protocol set.
+	mihomoVersion = regexp.MustCompile(`(?:mihomo|clash[.-]?meta|core)/v?(\d+)\.(\d+)\.(\d+)`)
 	koalaVersion  = regexp.MustCompile(`koala-clash/v?(\d+)\.(\d+)\.(\d+)`)
 )
 

@@ -32,13 +32,15 @@ var (
 )
 
 // State derives what the user can do right now; limited and expired are never stored.
-func State(u db.User, now time.Time) string {
+// grants is what is left of the user's active main grants (GrantsLeft.Main): a user past
+// the base quota with grants left is not limited.
+func State(u db.User, grants int64, now time.Time) string {
 	switch {
 	case u.Status == "disabled":
 		return StateDisabled
 	case u.ExpiresAt.Valid && now.Unix() >= u.ExpiresAt.Int64:
 		return StateExpired
-	case u.TrafficLimit.Valid && u.UsedUp+u.UsedDown >= u.TrafficLimit.Int64:
+	case TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants) == 0:
 		return StateLimited
 	case u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).Sub(now) <= expiringWindow:
 		return StateExpiring
@@ -191,10 +193,7 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, userID, tariffID in
 	if !resetTraffic {
 		return u, false, nil
 	}
-	if err := q.ResetUserPools(ctx, u.ID); err != nil {
-		return u, false, err
-	}
-	if err := q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now.Unix(), UpdatedAt: now.Unix(), ID: u.ID}); err != nil {
+	if err := StartPeriod(ctx, q, u.ID, now.Unix(), now); err != nil {
 		return u, false, err
 	}
 	u, err = q.GetUser(ctx, u.ID)
@@ -389,13 +388,11 @@ func (s *Users) ExtendPeriod(ctx context.Context, id int64) (db.User, error) {
 	return s.Extend(ctx, id, 30)
 }
 
+// ResetTraffic starts a new traffic period now (see StartPeriod).
 func (s *Users) ResetTraffic(ctx context.Context, id int64) (db.User, error) {
-	now := s.now().Unix()
+	now := s.now()
 	err := s.st.Tx(ctx, func(q *db.Queries) error {
-		if err := q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now, UpdatedAt: now, ID: id}); err != nil {
-			return err
-		}
-		return q.ResetUserPools(ctx, id)
+		return StartPeriod(ctx, q, id, now.Unix(), now)
 	})
 	if err != nil {
 		return db.User{}, err

@@ -204,4 +204,41 @@ func TestPaymentsOverHTTP(t *testing.T) {
 	if resp, _ := h.do(http.MethodPost, api+"/payments/"+strconv.FormatInt(hist.Items[0].ID, 10)+"/refund", nil, csrf); resp.StatusCode != http.StatusConflict {
 		t.Fatalf("refund of a card payment: %d", resp.StatusCode)
 	}
+
+	// A traffic package in the Mini App for the subscription just bought, paid by card.
+	pay1, _ := h.st.Q.GetPayment(ctx, hist.Items[0].ID)
+	mine, _ := h.st.Q.GetUser(ctx, pay1.UserID.Int64)
+	var pk struct {
+		ID int64 `json:"id"`
+	}
+	resp, body = h.do(http.MethodPost, api+"/packages", map[string]any{"name": "+50 ГБ", "bytes": 50 << 30, "lifetime": "used", "price_rub": 7900, "on_sale": true}, csrf)
+	if resp.StatusCode != http.StatusCreated || json.Unmarshal(body, &pk) != nil {
+		t.Fatalf("package: %d %s", resp.StatusCode, body)
+	}
+	resp, body = h.do(http.MethodPost, shop, map[string]any{"init_data": initData(tgToken, 555, h.now)}, same)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"packages":[]`) {
+		t.Fatalf("packages without a subscription chosen: %d %s", resp.StatusCode, body)
+	}
+	resp, body = h.do(http.MethodPost, shop, map[string]any{"init_data": initData(tgToken, 555, h.now), "token": mine.SubToken}, same)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"packages":[{"id":`+strconv.FormatInt(pk.ID, 10)) || !strings.Contains(string(body), `"rub":7900`) {
+		t.Fatalf("packages: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := h.do(http.MethodPost, pay, map[string]any{"init_data": initData(tgToken, 555, h.now), "package_id": pk.ID, "provider": "yookassa", "token": other.SubToken}, same); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a package for someone else's subscription: %d", resp.StatusCode)
+	}
+	resp, body = h.do(http.MethodPost, pay, map[string]any{"init_data": initData(tgToken, 555, h.now), "package_id": pk.ID, "provider": "yookassa", "token": mine.SubToken}, same)
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &inv) != nil || inv.URL != "https://yoomoney.ru/checkout/yk-2" {
+		t.Fatalf("package pay: %d %s", resp.StatusCode, body)
+	}
+	yk.mu.Lock()
+	yk.pays["yk-2"]["status"], yk.pays["yk-2"]["paid"] = "succeeded", true
+	yk.mu.Unlock()
+	h.p.Billing.Reconcile(ctx)
+	h.p.Billing.Reconcile(ctx)
+	if gs, _ := h.st.Q.ListUserGrants(ctx, mine.ID); len(gs) != 1 || gs[0].Bytes != 50<<30 {
+		t.Fatalf("grants after the card payment: %+v", gs)
+	}
+	if _, body := h.do(http.MethodGet, api+"/payments?status=applied", nil, nil); !strings.Contains(string(body), `"kind":"package"`) {
+		t.Fatalf("history: %s", body)
+	}
 }

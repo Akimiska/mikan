@@ -92,17 +92,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, id int64, prefix string,
 			continue
 		}
 		text := "<b>" + html.EscapeString(o.Tariff.Name) + "</b>\n" + html.EscapeString(billing.Describe(o.Tariff, b.lang(ctx))) + "\n\n" + w.payHow
-		arg := strconv.FormatInt(id, 10) + ":"
-		rows := [][]Button{}
-		if o.Stars > 0 {
-			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payStars, w.price(o.Stars, "XTR")), CallbackData: prefix + ":" + arg + "s"}})
-		}
-		if o.Rub > 0 && av.YooKassa {
-			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCard, w.price(o.Rub, "RUB")), CallbackData: prefix + ":" + arg + "y"}})
-		}
-		if o.Rub > 0 && av.CryptoBot {
-			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCrypto, w.price(o.Rub, "RUB")), CallbackData: prefix + ":" + arg + "c"}})
-		}
+		rows := w.payButtons(prefix+":"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av)
 		return text, &Keyboard{append(rows, back)}
 	}
 	return html.EscapeString(w.notForSale), &Keyboard{[][]Button{back}}
@@ -199,8 +189,8 @@ func (b *Bot) BotURL(context.Context) string {
 	return "https://t.me/" + st.Bot.Username
 }
 
-// Paid implements billing.Telegram: the buyer learns the subscription is ready, with the
-// link for a new one, and gets a fresh menu that shows it.
+// Paid implements billing.Telegram: the buyer learns the subscription is ready (with the
+// link for a new one) or the traffic package is added, and gets a fresh menu that shows it.
 func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	out := b.out.Load()
 	if out == nil {
@@ -208,9 +198,12 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	}
 	w := wordsFor(b.lang(ctx))
 	var text string
-	if created {
+	switch {
+	case p.Kind == billing.KindPackage:
+		text = fmt.Sprintf(w.paidPackage, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+	case created:
 		text = fmt.Sprintf(w.paidNew, html.EscapeString(u.Name), html.EscapeString(p.TariffName), html.EscapeString(b.subURL(ctx, u)))
-	} else {
+	default:
 		until := w.forever
 		if u.ExpiresAt.Valid {
 			until = w.date(time.Unix(u.ExpiresAt.Int64, 0).UTC())

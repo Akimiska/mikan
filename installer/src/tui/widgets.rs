@@ -185,6 +185,14 @@ impl Input {
         self.value.trim().to_owned()
     }
 
+    /// Takes pasted text: its first line, without control characters. Pasted as keys, the
+    /// line break would act as Enter and press Next.
+    pub fn paste(&mut self, text: &str) {
+        for c in text.lines().next().unwrap_or_default().chars().filter(|c| !c.is_control()) {
+            self.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+
     /// Takes an editing key; false when the key is not for the field.
     pub fn key(&mut self, k: KeyEvent) -> bool {
         let at = |s: &str, i: usize| s.char_indices().nth(i).map_or(s.len(), |(b, _)| b);

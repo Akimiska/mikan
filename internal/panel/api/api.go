@@ -105,6 +105,16 @@ func Config(version string) huma.Config {
 	cfg.OpenAPIPath = ""
 	cfg.SchemasPath = ""
 	cfg.CreateHooks = nil
+	cfg.Info.Description = "REST API панели mikan. Все пути — под секретным адресом админки: https://<панель>/<секретный путь>/api/v1/…\n\n" +
+		"Скрипты и интеграции авторизуются ключом API (Настройки → Ключи API): заголовок `Authorization: Bearer mk_…`. " +
+		"Ключ «чтение» выполняет только GET, «полный» — всё, кроме входа, сессий и самих ключей.\n\n" +
+		"Админка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n" +
+		"Ошибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю."
+	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
+		"apiKey":  {Type: "http", Scheme: "bearer", Description: "Ключ API: Authorization: Bearer mk_…"},
+		"session": {Type: "apiKey", In: "cookie", Name: auth.CookieName, Description: "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах"},
+	}
+	cfg.Security = []map[string][]string{{"apiKey": {}}, {"session": {}}}
 	return cfg
 }
 
@@ -147,6 +157,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()
+	h.registerAPIKeys()
 	return noStore(mux), api, nil
 }
 
@@ -167,6 +178,10 @@ func (h *handlers) middleware(ctx huma.Context, next func(huma.Context)) {
 	}
 	if public, _ := op.Metadata["public"].(bool); public {
 		next(ctx)
+		return
+	}
+	if ctx.Header("Authorization") != "" {
+		h.bearer(ctx, next, mutating)
 		return
 	}
 	ck, err := huma.ReadCookie(ctx, auth.CookieName)
@@ -236,6 +251,18 @@ func sessionOf(ctx context.Context) db.Session {
 }
 
 func (h *handlers) audit(ctx context.Context, adminID int64, action, targetType, targetID string, details any) {
+	// What an API key did says which key: the admin may hand keys to several scripts.
+	if k, ok := apiKeyOf(ctx); ok {
+		m := map[string]any{"api_key": k.Prefix}
+		if d, isMap := details.(map[string]any); isMap {
+			for key, v := range d {
+				m[key] = v
+			}
+		} else if details != nil {
+			m["details"] = details
+		}
+		details = m
+	}
 	err := audit.Write(ctx, h.d.Store.Q, h.d.Now(), audit.Entry{
 		AdminID: adminID, Action: action, TargetType: targetType, TargetID: targetID,
 		IP: clientOf(ctx).IP, Details: details,

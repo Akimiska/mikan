@@ -18,6 +18,19 @@ type Admin struct {
 	LastLoginAt   sql.NullInt64
 }
 
+type ApiKey struct {
+	ID         int64
+	AdminID    int64
+	Name       string
+	Prefix     string
+	Hash       string
+	Scope      string
+	CreatedAt  int64
+	ExpiresAt  sql.NullInt64
+	LastUsedAt sql.NullInt64
+	LastIp     string
+}
+
 type AuditLog struct {
 	ID         int64
 	Ts         int64

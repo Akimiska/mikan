@@ -6,9 +6,11 @@ the signed manifest, and the panel shows the one in its language.
 ## 0.4.0
 ### en
 - Pick the TLS fingerprint clients send: Settings → Subscription sets the default for all protocols, and a protocol's settings can choose its own (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ or a random one). Links (`fp=`) and Clash profiles (`client-fingerprint`) follow the choice; Hysteria2 and TUIC have no such fingerprint.
+- API keys and an API reference: the new API page makes keys for scripts and integrations (`Authorization: Bearer`, read-only or full access, an optional expiry, revocable) and lists every method with its parameters, responses, curl examples and a "Try it" button for GET requests.
 
 ### ru
 - Выбор TLS-отпечатка клиентов: в «Настройки → Подписка» — общий для всех протоколов, в настройках протокола — свой (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ или случайный). Ссылки (`fp=`) и Clash-профили (`client-fingerprint`) берут выбранный; у Hysteria2 и TUIC такого отпечатка нет.
+- Ключи API и справочник: в новом разделе «API» создаются ключи для скриптов и интеграций (`Authorization: Bearer`, только чтение или полный доступ, срок по желанию, отзыв), а все методы описаны с параметрами, ответами, примерами curl и кнопкой «Выполнить» для GET-запросов.
 
 ## 0.3.9
 ### en

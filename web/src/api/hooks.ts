@@ -19,6 +19,7 @@ export const qk = {
   sessions: ["sessions"] as const,
   telegram: ["telegram"] as const,
   updates: ["updates"] as const,
+  apiKeys: ["api-keys"] as const,
 };
 
 export const meQuery = {

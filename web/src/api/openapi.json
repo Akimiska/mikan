@@ -1,6 +1,52 @@
 {
   "components": {
     "schemas": {
+      "APIKeyView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_ip": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "description": "Первые символы ключа, чтобы отличать ключи",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "read",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scope",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "AdminView": {
         "additionalProperties": false,
         "properties": {
@@ -307,6 +353,87 @@
           "mini_app",
           "clean_chat",
           "quiet_night"
+        ],
+        "type": "object"
+      },
+      "CreateAPIKeyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expire_days": {
+            "description": "Срок в днях; 0 — пока не отзовут",
+            "format": "int64",
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "scope": {
+            "description": "read — только GET-запросы, full — всё, кроме входа, сессий и ключей",
+            "enum": [
+              "read",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "CreateAPIKeyOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "description": "Сам ключ: показывается один раз",
+            "type": "string"
+          },
+          "last_ip": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "description": "Первые символы ключа, чтобы отличать ключи",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "read",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "id",
+          "name",
+          "prefix",
+          "scope",
+          "created_at"
         ],
         "type": "object"
       },
@@ -2448,14 +2575,137 @@
         ],
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "description": "Ключ API: Authorization: Bearer mk_…",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "session": {
+        "description": "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах",
+        "in": "cookie",
+        "name": "__Host-mikan",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
+    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → Ключи API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET, «полный» — всё, кроме входа, сессий и самих ключей.\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.",
     "title": "mikan",
     "version": "dev"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/api-keys": {
+      "get": {
+        "operationId": "list-api-keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/APIKeyView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Ключи API",
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "post": {
+        "operationId": "create-api-key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAPIKeyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAPIKeyOutputBody"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Создать ключ API",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{id}": {
+      "delete": {
+        "operationId": "delete-api-key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отозвать ключ API",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login",
@@ -2498,6 +2748,9 @@
             "description": "Error"
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Вход",
         "tags": [
           "auth"
@@ -4613,5 +4866,13 @@
         ]
       }
     }
-  }
+  },
+  "security": [
+    {
+      "apiKey": []
+    },
+    {
+      "session": []
+    }
+  ]
 }

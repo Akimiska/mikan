@@ -5,7 +5,8 @@ import { api, ApiError, errorText, unwrap, type Inbound, type Schemas } from "..
 import { qk, useNodes, usePools, usePresets, useSettings } from "../../../api/hooks";
 import { Drawer } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
-import { Button, Field, Segmented, Switch } from "../../../components/ui";
+import { Button, Field, Segmented } from "../../../components/ui";
+import { Switch } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
 import { fingerprintLabel, validFingerprint } from "../../../lib/fingerprints";

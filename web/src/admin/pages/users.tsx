@@ -12,12 +12,9 @@ import { Avatar, Bar, Button, EmptyState, PageHeader, Skeleton, StatePill } from
 import { t, useLocale } from "../../i18n";
 import { bytes, dateShort, expiryText, num } from "../../lib/format";
 import { useMediaQuery } from "../../lib/media";
+import { USER_STATES } from "../search";
 import { CreateUserDrawer } from "./user-create";
 import { UserDrawer } from "./user-drawer";
-
-export type UsersSearch = { state: "all" | User["state"]; q: string; user?: number; create?: true };
-
-const FILTERS: UsersSearch["state"][] = ["all", "active", "expiring", "limited", "expired", "disabled"];
 
 export function UsersPage() {
   const search = useSearch({ from: "/_app/users" });
@@ -80,7 +77,7 @@ export function UsersPage() {
       />
       <div className="reveal flex flex-col items-stretch justify-between gap-3 lg:flex-row lg:items-center">
         <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 lg:pb-0" role="group" aria-label={t("users.filter")}>
-          {FILTERS.map((f) => (
+          {USER_STATES.map((f) => (
             <button
               key={f}
               type="button"

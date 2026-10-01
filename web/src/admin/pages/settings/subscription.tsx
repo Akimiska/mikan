@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { ApiError, type Schemas } from "../../../api/client";
 import { useInbounds, useNodes } from "../../../api/hooks";
-import { Button, Field, Pill, Switch } from "../../../components/ui";
+import { Button, Field, Pill } from "../../../components/ui";
+import { Switch } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { FingerprintSelect } from "../../../components/fingerprint-select";

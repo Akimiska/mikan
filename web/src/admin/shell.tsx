@@ -7,7 +7,7 @@ import { meQuery, useNode, useOverview, usePaymentSettings, useUpdates } from ".
 import { Logo } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
 import { Avatar, Bar, Pill } from "../components/ui";
-import { t } from "../i18n";
+import { t, useLocale } from "../i18n";
 import { num, uptime } from "../lib/format";
 
 const NAV = [
@@ -28,6 +28,7 @@ function useNav() {
 }
 
 export function Shell() {
+  useLocale(); // the sidebar and the bar read their texts at render time
   const nav = useNav();
   const overview = useOverview();
   return (

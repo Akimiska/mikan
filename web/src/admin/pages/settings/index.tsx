@@ -6,14 +6,11 @@ import { QueryBoundary } from "../../../components/query";
 import { Columns, Tabs } from "../../../components/tabs";
 import { PageHeader, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
+import { SETTINGS_TABS } from "../../search";
 import { AutoCard, LanguageCard, SalesCard, ServerCard, UpdatesCard } from "./general";
 import { ClashRulesCard } from "./rules";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
 import { DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
-
-export const SETTINGS_TABS = ["general", "subscription", "rules", "security"] as const;
-type SettingsTab = (typeof SETTINGS_TABS)[number];
-export type SettingsSearch = { tab: SettingsTab };
 
 const ICONS = { general: Globe, subscription: Link2, rules: ListFilter, security: ShieldCheck } as const;
 

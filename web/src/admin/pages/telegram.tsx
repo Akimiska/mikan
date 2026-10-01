@@ -6,12 +6,14 @@ import { useMemo, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes, useSettings } from "../../api/hooks";
 import { useDraft } from "../../lib/draft";
+import { TELEGRAM_TABS } from "../search";
 import { ago, num } from "../../lib/format";
 import { Confirm } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { Columns, Tabs } from "../../components/tabs";
 import { useToast } from "../../components/toast";
-import { Bar, Button, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
+import { Bar, Button, Field, PageHeader, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Switch } from "../../components/switch";
 import { t, tMaybe, useLocale } from "../../i18n";
 
 type View = Schemas["TelegramView"];
@@ -19,8 +21,6 @@ type Config = Schemas["Config"];
 type MenuButton = Schemas["MenuButton"];
 type TextKey = keyof Schemas["Texts"];
 
-export const TELEGRAM_TABS = ["connect", "menu", "notify", "broadcast"] as const;
-export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };
 const TAB_ICONS = { connect: PlugZap, menu: LayoutList, notify: Bell, broadcast: Megaphone } as const;
 
 function useTelegram() {

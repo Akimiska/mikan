@@ -1,7 +1,5 @@
 @import "tailwindcss";
-@import "@fontsource-variable/onest";
-@import "@fontsource-variable/unbounded";
-@import "@fontsource-variable/jetbrains-mono";
+@import "./fonts.css";
 
 :root {
   --font-display-stack: "Unbounded Variable", "Onest Variable", system-ui, sans-serif;

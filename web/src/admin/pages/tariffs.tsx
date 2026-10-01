@@ -8,9 +8,11 @@ import { Confirm, Drawer } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { Tabs } from "../../components/tabs";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
+import { Button, EmptyState, Field, PageHeader, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Switch } from "../../components/switch";
 import { t } from "../../i18n";
 import { bytes, days, GiB, months, rubles, termMonths } from "../../lib/format";
+import { TARIFF_TABS } from "../search";
 import { PackagesCard } from "./packages";
 import { PoolLimitsField, PoolsCard } from "./pools";
 
@@ -35,8 +37,6 @@ export function tariffSummary(tr: Tariff): string {
   return parts.join(" · ");
 }
 
-export const TARIFF_TABS = ["tariffs", "pools", "packages"] as const;
-export type TariffsSearch = { tab: (typeof TARIFF_TABS)[number] };
 const TAB_ICONS = { tariffs: Tag, pools: Layers, packages: Package } as const;
 
 /** A tariff's pool limits by pool name: "WL 100 GB"; pools without a limit are left out. */

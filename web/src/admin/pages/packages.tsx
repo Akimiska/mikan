@@ -9,7 +9,8 @@ import { qk, usePackages, usePaymentSettings, usePools } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Button, Field, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
+import { Button, Field, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Switch } from "../../components/switch";
 import { t } from "../../i18n";
 import { bytes, days as daysText, GiB, rubles } from "../../lib/format";
 

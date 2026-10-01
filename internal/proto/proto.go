@@ -145,6 +145,31 @@ func normalize(v any) any {
 	return v
 }
 
+// Clone is a deep copy: the maps and lists of a template are its own.
+func (t Template) Clone() Template {
+	return Template(deepCopy(map[string]any(t)).(map[string]any))
+}
+
+func deepCopy(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		m := make(map[string]any, len(x))
+		for k, e := range x {
+			m[k] = deepCopy(e)
+		}
+		return m
+	case []any:
+		l := make([]any, len(x))
+		for i, e := range x {
+			l[i] = deepCopy(e)
+		}
+		return l
+	case []string:
+		return append([]string(nil), x...)
+	}
+	return v
+}
+
 func (t Template) Type() string {
 	s, _ := t["type"].(string)
 	return s

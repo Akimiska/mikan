@@ -116,7 +116,14 @@ func ValidName(s string) error {
 	return nil
 }
 
+// ErrNoProxies: nothing of the profile is left for the app, or for any app.
+var ErrNoProxies = errors.New("no proxies")
+
 type Profile struct {
+	// Skip, when set, hears of an inbound that is left out because it cannot be rendered
+	// (a port that is no number, a template that no longer parses): one broken inbound must
+	// not empty or fail the subscription of everyone.
+	Skip     func(in db.Inbound, err error)
 	Slot     db.Slot
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
 	Nodes    []Node       // enabled nodes in display order; inbounds of other nodes are skipped
@@ -159,11 +166,13 @@ func build(p Profile) ([]proxy, error) {
 			}
 			port, err := firstPort(in.Port)
 			if err != nil {
-				return nil, err
+				p.skip(in, err)
+				continue
 			}
-			t, err := proto.Parse(in.Config)
+			t, err := parseTemplate(in.Config)
 			if err != nil {
 				// Saved configs are validated; one broken inbound must not empty the subscription.
+				p.skip(in, err)
 				continue
 			}
 			base := domain.ProxyName(in)
@@ -179,6 +188,7 @@ func build(p Profile) ([]proxy, error) {
 			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: in.Port,
 				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot})
 			if err != nil {
+				p.skip(in, err)
 				continue
 			}
 			used[name] = true
@@ -186,6 +196,12 @@ func build(p Profile) ([]proxy, error) {
 		}
 	}
 	return out, nil
+}
+
+func (p Profile) skip(in db.Inbound, err error) {
+	if p.Skip != nil {
+		p.Skip(in, err)
+	}
 }
 
 func firstPort(spec string) (int, error) {
@@ -210,6 +226,9 @@ func URIs(p Profile) (string, error) {
 			lines = append(lines, x.uri)
 		}
 	}
+	if len(lines) == 0 {
+		return "", ErrNoProxies
+	}
 	return strings.Join(lines, "\n"), nil
 }
 
@@ -218,6 +237,10 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 	ps, err := build(p)
 	if err != nil {
 		return nil, err
+	}
+	if len(ps) == 0 {
+		// Groups with no proxies in them are a profile mihomo may refuse whole.
+		return nil, ErrNoProxies
 	}
 	g = g.WithDefaults("")
 	proxies := make([]map[string]any, len(ps))

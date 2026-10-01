@@ -5,6 +5,7 @@ the signed manifest, and the panel shows the one in its language.
 
 ## 0.4.2
 ### en
+- ARM servers (Raspberry Pi 4 and other arm64 machines) install again: the arm64 image carried x86-64 binaries and stopped with "exec format error". The image build now fails if a binary does not match its architecture. A Raspberry Pi needs a 64-bit OS.
 - API moved from the sidebar to Settings → API (old /api-docs links lead there). The page has "Download OpenAPI": openapi.json with this panel's address already in it, ready for Postman, Insomnia, Swagger UI and client generators.
 - Payments warns when the bot has nothing to sell: no plan is on sale with a price for a method that takes payments, so people would only be told to message support. A button leads to Plans.
 - Selling subscriptions has its own switch in Settings. Off, the bot and the Mini App sell nothing, Payments leaves the menu and plans hide their prices; invoices opened before are still applied. New panels start with it off; panels that already set up payments keep selling.
@@ -14,6 +15,7 @@ the signed manifest, and the panel shows the one in its language.
 - Clash rules of your own: Settings → Clash rules takes one rule per line (DOMAIN-SUFFIX, GEOSITE, IP-CIDR, PROCESS-NAME and more, to DIRECT, REJECT, PROXY or a subscription group). They go before the routing mode in every Clash profile; the panel's and the nodes' addresses still go direct. Each line is checked on save and a mistake names its line, so a typo never breaks clients' profiles; the rule types an older mihomo core lacks reach only apps that name a core with them. Example rules are one click away.
 
 ### ru
+- Установка на ARM-серверах (Raspberry Pi 4 и другие arm64) снова работает: в arm64-образе лежали бинарники для x86-64, и установка падала с «exec format error». Теперь сборка образа падает, если бинарник не под его архитектуру. Raspberry Pi нужна 64-битная ОС.
 - Раздел API переехал из бокового меню в «Настройки → API» (старые ссылки /api-docs ведут туда). На странице есть «Скачать OpenAPI»: openapi.json с уже прописанным адресом этой панели — для Postman, Insomnia, Swagger UI и генераторов клиентов.
 - «Платежи» предупреждают, когда боту нечего продавать: нет тарифа «В продаже» с ценой для способа, который принимает оплату, — люди увидят только «напишите в поддержку». Кнопка ведёт в «Тарифы».
 - У продажи подписок свой переключатель в «Настройках». Выключено — бот и Mini App ничего не продают, «Платежи» пропадают из меню, а тарифы прячут цены; счета, открытые раньше, всё равно засчитываются. На новых панелях продажи выключены; панели, где оплату уже настроили, продолжают продавать.

@@ -1477,6 +1477,7 @@ export interface components {
             cryptobot_testnet?: boolean;
             /** @description Пусто — удалить токен */
             cryptobot_token?: string;
+            enabled?: boolean;
             renew_resets_traffic?: boolean;
             stars?: boolean;
             yookassa?: boolean;
@@ -1549,6 +1550,8 @@ export interface components {
             cryptobot: boolean;
             cryptobot_testnet: boolean;
             cryptobot_token_set: boolean;
+            /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
+            enabled: boolean;
             /**
              * Format: int64
              * @description Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату

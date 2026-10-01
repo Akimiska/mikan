@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { ChevronRight, Copy, KeyRound, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { meQuery, qk, useInbounds, useSettings, useUpdates } from "../../api/hooks";
+import { meQuery, qk, useInbounds, usePaymentSettings, useSettings, useUpdates } from "../../api/hooks";
 import { LangSwitch } from "../../components/lang";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
@@ -32,6 +32,7 @@ export function SettingsPage() {
             <LanguageCard s={settings.data} />
             <AutoCard s={settings.data} />
             <DevicesCard s={settings.data} />
+            <SalesCard />
             <ApiCard />
           </div>
           <div className="flex min-w-0 flex-col gap-4">
@@ -244,6 +245,48 @@ function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
         ))}
       </ul>
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.autoNote")}</p>
+    </section>
+  );
+}
+
+// The switch for selling at all. Off, Payments leaves the menu; the page stays reachable
+// from here for the history.
+function SalesCard() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const ps = usePaymentSettings();
+  const save = useMutation({
+    mutationFn: (enabled: boolean) => unwrap(api.PATCH("/api/v1/payments/settings", { body: { enabled } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.paymentSettings, v);
+      toast.ok(v.enabled ? t("settings.salesOnToast") : t("settings.salesOffToast"));
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  const on = ps.data?.enabled === true;
+  return (
+    <section className="card glass reveal" style={{ "--i": 5 } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.sales")}</h2>
+          <div className="card-sub">{t("settings.salesSub")}</div>
+        </div>
+        {ps.isPending ? (
+          <Skeleton style={{ width: 40, height: 24, borderRadius: 12 }} />
+        ) : ps.isError ? null : (
+          <Switch checked={on} label={t("settings.sales")} disabled={save.isPending} onChange={(v) => save.mutate(v)} />
+        )}
+      </div>
+      {ps.isError ? (
+        <ErrorState text={errorText(ps.error)} onRetry={() => void ps.refetch()} />
+      ) : ps.data ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="min-w-0 flex-1 text-xs text-[var(--ink-500)]">{on ? t("settings.salesOnNote") : t("settings.salesOffNote")}</p>
+          <Link to="/payments" className="btn btn-glass btn-sm">
+            {t("settings.openPayments")} <ChevronRight size={16} aria-hidden />
+          </Link>
+        </div>
+      ) : null}
     </section>
   );
 }

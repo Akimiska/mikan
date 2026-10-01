@@ -1532,6 +1532,9 @@
             "maxLength": 200,
             "type": "string"
           },
+          "enabled": {
+            "type": "boolean"
+          },
           "renew_resets_traffic": {
             "type": "boolean"
           },
@@ -1741,6 +1744,10 @@
           "cryptobot_token_set": {
             "type": "boolean"
           },
+          "enabled": {
+            "description": "Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются",
+            "type": "boolean"
+          },
           "on_sale": {
             "description": "Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату",
             "format": "int64",
@@ -1774,6 +1781,7 @@
           }
         },
         "required": [
+          "enabled",
           "stars",
           "yookassa",
           "yookassa_shop_id",

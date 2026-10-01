@@ -7,10 +7,12 @@ the signed manifest, and the panel shows the one in its language.
 ### en
 - API moved from the sidebar to Settings → API (old /api-docs links lead there). The page has "Download OpenAPI": openapi.json with this panel's address already in it, ready for Postman, Insomnia, Swagger UI and client generators.
 - Payments warns when the bot has nothing to sell: no plan is on sale with a price for a method that takes payments, so people would only be told to message support. A button leads to Plans.
+- Selling subscriptions has its own switch in Settings. Off, the bot and the Mini App sell nothing, Payments leaves the menu and plans hide their prices; invoices opened before are still applied. New panels start with it off; panels that already set up payments keep selling.
 
 ### ru
 - Раздел API переехал из бокового меню в «Настройки → API» (старые ссылки /api-docs ведут туда). На странице есть «Скачать OpenAPI»: openapi.json с уже прописанным адресом этой панели — для Postman, Insomnia, Swagger UI и генераторов клиентов.
 - «Платежи» предупреждают, когда боту нечего продавать: нет тарифа «В продаже» с ценой для способа, который принимает оплату, — люди увидят только «напишите в поддержку». Кнопка ведёт в «Тарифы».
+- У продажи подписок свой переключатель в «Настройках». Выключено — бот и Mini App ничего не продают, «Платежи» пропадают из меню, а тарифы прячут цены; счета, открытые раньше, всё равно засчитываются. На новых панелях продажи выключены; панели, где оплату уже настроили, продолжают продавать.
 
 ## 0.4.1
 ### en

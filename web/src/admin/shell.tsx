@@ -3,7 +3,7 @@ import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowUpCircle, Bot, LayoutDashboard, LogOut, MoreHorizontal, Network, Server, SlidersHorizontal, Tag, Users, Wallet } from "lucide-react";
 import { api, unwrap } from "../api/client";
-import { meQuery, useNode, useOverview, useUpdates } from "../api/hooks";
+import { meQuery, useNode, useOverview, usePaymentSettings, useUpdates } from "../api/hooks";
 import { Logo } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
 import { Avatar, Bar, Pill } from "../components/ui";
@@ -21,7 +21,14 @@ const NAV = [
   { to: "/settings", key: "settings", icon: SlidersHorizontal },
 ] as const;
 
+// Payments shows in the menu only while selling is on; the page stays reachable from Settings.
+function useNav() {
+  const payments = usePaymentSettings();
+  return NAV.filter((n) => n.to !== "/payments" || payments.data?.enabled === true);
+}
+
 export function Shell() {
+  const nav = useNav();
   const overview = useOverview();
   return (
     <>
@@ -32,7 +39,7 @@ export function Shell() {
             <span className="brand-name">mikan</span>
           </div>
           <nav className="nav" aria-label={t("shell.sections")}>
-            {NAV.map((n) => (
+            {nav.map((n) => (
               <Link key={n.to} to={n.to} className="nav-item" activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }} title={t(`nav.${n.key}`)}>
                 <n.icon size={18} aria-hidden />
                 <span className="nav-label">{t(`nav.${n.key}`)}</span>
@@ -62,11 +69,12 @@ const MOBILE_MAIN = 4;
 function MobileNav() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const more = NAV.slice(MOBILE_MAIN);
+  const nav = useNav();
+  const more = nav.slice(MOBILE_MAIN);
   const inMore = more.some((n) => path.endsWith(n.to));
   return (
     <nav className="mnav glass" aria-label={t("shell.sections")}>
-      {NAV.slice(0, MOBILE_MAIN).map((n) => (
+      {nav.slice(0, MOBILE_MAIN).map((n) => (
         <Link key={n.to} to={n.to} activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }}>
           <n.icon size={20} aria-hidden />
           <span>{t(`navShort.${n.key}`)}</span>

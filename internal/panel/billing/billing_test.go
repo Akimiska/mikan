@@ -185,7 +185,7 @@ func newEnv(t *testing.T) *env {
 		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})), Now: clock,
 		YooKassaAPI: ykSrv.URL, CryptoBotAPI: cbSrv.URL, CryptoBotTestAPI: cbSrv.URL})
 	e.s.SetTelegram(e.tg)
-	must(t, settings.Set(ctx, set, KeyConfig, Config{Stars: true, YooKassa: true, ShopID: shopID, CryptoBot: true, AllowNew: true, RenewResetsTraffic: true}))
+	must(t, settings.Set(ctx, set, KeyConfig, Config{Enabled: true, Stars: true, YooKassa: true, ShopID: shopID, CryptoBot: true, AllowNew: true, RenewResetsTraffic: true}))
 	must(t, settings.Set(ctx, set, KeyYooKassaSecret, ykSecret))
 	must(t, settings.Set(ctx, set, KeyCryptoBotToken, cbToken))
 	ts, _ := e.st.Q.ListTariffs(ctx)
@@ -359,14 +359,14 @@ func TestInvoiceRefusals(t *testing.T) {
 	if _, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: "paypal"}); !errors.Is(err, ErrProviderOff) {
 		t.Fatalf("unknown provider: %v", err)
 	}
-	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Stars: true, AllowNew: false}))
+	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Enabled: true, Stars: true, AllowNew: false}))
 	if _, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: YooKassa}); !errors.Is(err, ErrProviderOff) {
 		t.Fatalf("yookassa off: %v", err)
 	}
 	if _, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars}); !errors.Is(err, ErrNewOff) {
 		t.Fatalf("new buyers off: %v", err)
 	}
-	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Stars: true, AllowNew: true}))
+	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Enabled: true, Stars: true, AllowNew: true}))
 	for i := range 5 {
 		u, err := e.s.d.Users.Create(ctx, domain.CreateInput{Name: "x" + strconv.Itoa(i), TariffID: e.sale.ID})
 		must(t, err)
@@ -509,7 +509,7 @@ func TestMoney(t *testing.T) {
 func TestRenewalKeepsTraffic(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Stars: true, AllowNew: true, RenewResetsTraffic: false}))
+	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Enabled: true, Stars: true, AllowNew: true, RenewResetsTraffic: false}))
 	clock := func() time.Time { return e.now }
 	u, err := domain.NewUsers(e.st, domain.NewPool(e.st, clock), noChanges{}, clock).Create(ctx, domain.CreateInput{Name: "a", TariffID: e.sale.ID})
 	must(t, err)
@@ -544,5 +544,46 @@ func TestYooKassaErrorCode(t *testing.T) {
 	_, _, err := yooKassa{base: srv.URL, shopID: "1", secret: "s", hc: srv.Client()}.create(context.Background(), "p", 100, "x", "")
 	if errCode(err) != "yookassa_invalid_request:receipt" {
 		t.Fatalf("code: %q", errCode(err))
+	}
+}
+
+// Selling off: nothing on offer and no new invoices, but an invoice opened before still
+// turns into the subscription once it is paid — nobody pays for nothing.
+func TestSalesOff(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	p := e.invoice(555, 0, Stars)
+	c := e.s.Config(ctx)
+	c.Enabled = false
+	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, c))
+
+	if o, av, err := e.s.Offers(ctx); err != nil || len(o) != 0 || av.Any() {
+		t.Fatalf("offers with selling off: %v %+v %v", o, av, err)
+	}
+	for _, prov := range []string{Stars, YooKassa, CryptoBot} {
+		if _, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 556, TariffID: e.sale.ID, Provider: prov}); !errors.Is(err, ErrProviderOff) {
+			t.Fatalf("invoice %s with selling off: %v", prov, err)
+		}
+	}
+	must(t, e.s.PreCheckout(ctx, 555, p.Payload, "XTR", 150))
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-off", "XTR", 150))
+	if got := e.payment(p.ID); got.Status != "applied" || !got.UserID.Valid {
+		t.Fatalf("an invoice opened before selling went off: %+v", got)
+	}
+}
+
+// Payment settings saved before the switch existed keep selling; a panel that never saved
+// them starts with selling off.
+func TestSalesDefault(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	_, err := e.st.DB.ExecContext(ctx, "DELETE FROM settings WHERE key = ?", KeyConfig)
+	must(t, err)
+	if e.s.Config(ctx).Enabled || e.s.Available(ctx).Any() {
+		t.Fatal("selling on in a panel that never set it up")
+	}
+	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, map[string]any{"stars": true, "allow_new": true}))
+	if c := e.s.Config(ctx); !c.Enabled || !c.Stars {
+		t.Fatalf("settings from 0.4.1 lost selling: %+v", c)
 	}
 }

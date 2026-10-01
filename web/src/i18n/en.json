@@ -759,7 +759,14 @@
     "fpOwnBad": "Lowercase letters, digits and _ only, up to 32 characters",
     "api": "API",
     "apiSub": "Keys for scripts and integrations, and a reference of every panel method.",
-    "apiOpen": "Open"
+    "apiOpen": "Open",
+    "sales": "Selling subscriptions",
+    "salesSub": "Plans are sold in the bot and the Mini App: Telegram Stars, YooKassa, CryptoBot.",
+    "salesOnNote": "Payment methods, plan prices and the history are in Payments.",
+    "salesOffNote": "Off: the bot and the Mini App sell nothing and Payments leaves the menu. Invoices opened before are still applied.",
+    "openPayments": "Payments",
+    "salesOnToast": "Selling is on",
+    "salesOffToast": "Selling is off"
   },
   "sub": {
     "loadFailed": "Could not load the subscription",
@@ -1155,7 +1162,9 @@
     "resetTrafficOn": "A paid renewal starts a new period: the used traffic goes back to zero.",
     "resetTrafficOff": "A paid renewal only adds time: the traffic counter runs on as before.",
     "nothingOnSale": "The bot sells nothing yet: no plan is on sale with a price for a method that takes payments. Instead of buying, people are told to message support.",
-    "openTariffs": "Open plans"
+    "openTariffs": "Open plans",
+    "salesOff": "Selling subscriptions is off: the bot and the Mini App sell nothing. Turn it on in Settings.",
+    "openSettings": "Open Settings"
   },
   "warp": {
     "title": "WARP",

@@ -225,6 +225,8 @@
       "sub_port_busy": "Port {value} is taken by another program on the server",
       "sub_port_unavailable": "The subscription port cannot be changed now",
       "port_sub": "The panel serves subscriptions on this port: pick another, or change the subscription port in Settings",
+      "port_panel": "The panel itself listens on this port: pick another one",
+      "port_node_api": "The node takes the panel's commands on this port: pick another one",
       "config_obfs_sizes": "Packet sizes are for gecko only: 256 to 2048 bytes, the minimum no larger than the maximum",
       "rule_format": "Line {value}: TYPE,VALUE,TARGET separated by commas",
       "rule_type": "Line {value}: this rule type is not supported",

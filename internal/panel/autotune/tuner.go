@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/netip"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -143,7 +142,6 @@ type world struct {
 	ownNames     map[string]bool // the panel's and nodes' own names: never a REALITY target
 	panelHost    string
 	panelPort    int
-	subPort      int // 0: none
 	eventsWindow time.Duration
 }
 
@@ -290,9 +288,6 @@ func (t *Tuner) load(ctx context.Context) (*world, error) {
 	own(panelDomain)
 	own(w.panelHost)
 	if w.panelPort, _, err = settings.Get[int](ctx, t.set, settings.KeyPanelPort); err != nil {
-		return nil, err
-	}
-	if w.subPort, _, err = settings.Get[int](ctx, t.set, settings.KeySubPort); err != nil {
 		return nil, err
 	}
 	return w, nil
@@ -480,18 +475,10 @@ func (t *Tuner) remedy(ctx context.Context, w *world, n db.Node, x db.Inbound) {
 
 func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound, reason string) {
 	network := domain.InboundNetwork(x)
-	reserved := map[string]bool{"22": true}
-	if n.Address == "" {
-		reserved[strconv.Itoa(w.panelPort)] = true
-		if w.subPort > 0 && network == "tcp" {
-			reserved[strconv.Itoa(w.subPort)] = true
-		}
-	} else if _, p, err := net.SplitHostPort(n.Address); err == nil {
-		reserved[p] = true
-	}
-	// A cascade relay holds its TCP port on the node.
-	if r, err := t.st.Q.GetNodeRelay(ctx, n.ID); err == nil && network == "tcp" {
-		reserved[r.Port] = true
+	ports, err := domain.NodePorts(ctx, t.st.Q, n)
+	if err != nil {
+		t.log.Error("autotune: node ports", "node", n.ID, "err", err)
+		return
 	}
 	abandoned := map[string]bool{x.Port: true}
 	for _, e := range w.events {
@@ -499,7 +486,7 @@ func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound,
 			abandoned[e.OldValue] = true
 		}
 	}
-	free := FreePorts(w.inbounds[n.ID], network, reserved, abandoned)
+	free := FreePorts(ports, network, abandoned)
 	if len(free) == 0 {
 		t.setStuck(x.ID, "no_port")
 		return

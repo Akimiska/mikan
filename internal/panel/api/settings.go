@@ -319,31 +319,27 @@ func (h *handlers) checkSubPort(ctx context.Context, port int) (*huma.ErrorDetai
 	if subPortReserved[port] {
 		return bad("sub_port_reserved", port)
 	}
-	panelPort, _, err := settings.Get[int](ctx, h.d.Settings, settings.KeyPanelPort)
-	if err != nil {
-		return nil, err
-	}
-	if port == panelPort {
-		return bad("sub_port_panel", port)
-	}
 	nodes, err := h.d.Store.Q.ListNodes(ctx)
 	if err != nil {
 		return nil, err
 	}
-	all, err := h.d.Store.Q.ListInbounds(ctx)
-	if err != nil {
-		return nil, err
-	}
-	p := strconv.Itoa(port)
 	for _, n := range nodes {
 		if n.Address != "" {
 			continue
 		}
-		if owner, busy := domain.PortOwner(domain.NodeInbounds(all, n.ID), p, "tcp", 0); busy {
-			return bad("sub_port_inbound", owner.Name)
+		ports, err := domain.NodePorts(ctx, h.d.Store.Q, n)
+		if err != nil {
+			return nil, err
 		}
-		if h.relayPortBusy(ctx, n.ID, p, "tcp") {
+		owner, busy := ports.Busy(strconv.Itoa(port), "tcp", domain.PortHolder{Kind: domain.PortSub})
+		switch {
+		case !busy:
+		case owner.Kind == domain.PortPanel:
+			return bad("sub_port_panel", port)
+		case owner.Kind == domain.PortRelay:
 			return bad("sub_port_relay", port)
+		default:
+			return bad("sub_port_inbound", owner.Name)
 		}
 	}
 	return nil, nil

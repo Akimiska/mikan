@@ -330,35 +330,50 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	if err != nil {
 		return nil, err
 	}
-	all, err := h.d.Store.Q.ListInbounds(ctx)
-	if err != nil {
-		return nil, err
-	}
-	existing := domain.NodeInbounds(all, node.ID)
 	base := info.Name
 	if info.ID == presets.Custom {
 		base = t.Type()
 	}
-	if h.relayPortBusy(ctx, node.ID, port, t.Network()) {
-		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
-	}
-	if taken, err := domain.SubPortTaken(ctx, h.d.Settings, node, port, t.Network()); err != nil {
-		return nil, err
-	} else if taken {
-		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_sub"})
-	}
-	if owner, busy := domain.PortOwner(existing, port, t.Network(), 0); busy {
-		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})
-	}
-	name := domain.FreeName(existing, base)
-	now := h.d.Now().Unix()
-	row, err := h.d.Store.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: name, Preset: info.ID, Port: port, Config: config, CreatedAt: now, UpdatedAt: now})
+	var row db.Inbound
+	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if err := domain.CheckPort(ctx, q, node, port, t.Network(), domain.PortHolder{}); err != nil {
+			return portError(err)
+		}
+		all, err := q.ListInbounds(ctx)
+		if err != nil {
+			return err
+		}
+		now := h.d.Now().Unix()
+		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: domain.FreeName(domain.NodeInbounds(all, node.ID), base), Preset: info.ID, Port: port,
+			Config: config, CreatedAt: now, UpdatedAt: now})
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
 	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.create", "inbound", name, map[string]any{"preset": info.ID, "type": t.Type(), "port": port})
+	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.create", "inbound", row.Name, map[string]any{"preset": info.ID, "type": t.Type(), "port": port})
 	return &inboundOutput{Body: h.viewInbound(row, nil)}, nil
+}
+
+// portError is how the API reports a port something else holds; other errors pass
+// through.
+func portError(err error) error {
+	var busy *domain.PortInUseError
+	if !errors.As(err, &busy) {
+		return err
+	}
+	switch busy.Kind {
+	case domain.PortRelay:
+		return huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
+	case domain.PortSub:
+		return huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_sub"})
+	case domain.PortPanel:
+		return huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_panel"})
+	case domain.PortNodeAPI:
+		return huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_node_api"})
+	}
+	return huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: busy.Name})
 }
 
 func flag(on bool) int64 {
@@ -377,6 +392,8 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		return nil, err
 	}
 	b := in.Body
+	// Every field is checked before anything is written, and everything is written in
+	// one transaction: a request refused on any field leaves the inbound as it was.
 	listen := row.Listen
 	if b.Listen != nil {
 		if listen, err = domain.ParseListen(*b.Listen); err != nil {
@@ -396,179 +413,176 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		}
 		autoPort = 0
 	}
-	// The way out is the node's business: clients get nothing new either.
-	// The traffic pool changes only how the node counts: clients get nothing new.
+	moved := listen != row.Listen
+	nodeSide := moved || autoPort != row.AutoPort || autoSNI != row.AutoSni
+	// The traffic pool changes only how the node counts, the way out is the node's
+	// business: clients get nothing new from either.
+	pool := row.PoolID
 	if b.PoolID != nil {
-		pool := sql.NullInt64{Int64: *b.PoolID, Valid: *b.PoolID != 0}
-		if pool.Valid {
-			if _, err := h.d.Store.Q.GetTrafficPool(ctx, pool.Int64); errors.Is(err, sql.ErrNoRows) {
-				return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pool_id", Message: "pool_not_found"})
-			} else if err != nil {
-				return nil, err
-			}
-		}
-		if err := h.d.Store.Q.SetInboundPool(ctx, db.SetInboundPoolParams{PoolID: pool, ID: row.ID}); err != nil {
-			return nil, err
-		}
-		row.PoolID = pool
-		h.d.Changes.SlotsChanged()
-		h.d.Changes.PoliciesChanged()
-		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.pool", "inbound", row.Name, map[string]any{"pool_id": pool.Int64})
+		pool = sql.NullInt64{Int64: *b.PoolID, Valid: *b.PoolID != 0}
 	}
+	outbound, exit := row.Outbound, row.ExitNodeID
 	if b.Outbound != nil {
-		outbound, exit := *b.Outbound, sql.NullInt64{}
-		err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
-			if outbound == "node" {
-				if b.ExitNodeID == nil {
-					return domain.ErrNotFound
-				}
-				if err := h.useExit(ctx, q, row.NodeID, *b.ExitNodeID); err != nil {
-					return err
-				}
-				outbound, exit = "direct", sql.NullInt64{Int64: *b.ExitNodeID, Valid: true}
+		outbound, exit = *b.Outbound, sql.NullInt64{}
+		if outbound == "node" {
+			if b.ExitNodeID == nil {
+				return nil, cascadeError(domain.ErrNotFound, "exit_node_id")
 			}
-			return q.SetInboundExit(ctx, db.SetInboundExitParams{ExitNodeID: exit, Outbound: outbound, ID: row.ID})
-		})
-		if err != nil {
-			return nil, cascadeError(err, "exit_node_id")
+			outbound, exit = "direct", sql.NullInt64{Int64: *b.ExitNodeID, Valid: true}
 		}
-		row.Outbound, row.ExitNodeID = outbound, exit
-		h.d.Changes.SlotsChanged()
-		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.outbound", "inbound", row.Name, map[string]any{"outbound": *b.Outbound, "exit_node_id": exit.Int64})
 	}
-	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.Fingerprint == nil && b.Obfs == nil && b.DisplayName == nil && b.Client == nil {
-		// Only the listen address and the automatic-move switches: clients get nothing
-		// new, so updated_at stays and the block detector keeps trusting their profiles.
-		if listen != row.Listen || autoPort != row.AutoPort || autoSNI != row.AutoSni {
-			moved := listen != row.Listen
-			if err := h.d.Store.Tx(ctx, func(q *db.Queries) error { return saveNodeSide(ctx, q, &row, listen, autoPort, autoSNI) }); err != nil {
+	// What clients see bumps updated_at. Without it the block detector keeps trusting the
+	// profiles clients have.
+	client := b.Port != nil || b.Enabled != nil || b.Config != nil || b.Dest != nil || b.Fingerprint != nil || b.Obfs != nil || b.DisplayName != nil || b.Client != nil
+	port, enabled, config, display := row.Port, row.Enabled, row.Config, row.DisplayName
+	var node db.Node
+	var network string
+	if client {
+		if b.Port != nil {
+			if !domain.ValidPort(*b.Port) {
+				return nil, huma.Error422UnprocessableEntity("bad_port", &huma.ErrorDetail{Location: "body.port", Message: "bad_port"})
+			}
+			port = *b.Port
+		}
+		if b.Enabled != nil {
+			enabled = flag(*b.Enabled)
+		}
+		if b.Config != nil {
+			config = *b.Config
+		}
+		if b.Dest != nil {
+			sni := ""
+			if b.ServerName != nil {
+				sni = strings.TrimSpace(*b.ServerName)
+			}
+			if config, err = editConfig(config, "body.dest", "bad_dest", func(t proto.Template) error {
+				return presets.SetDest(t, strings.TrimSpace(*b.Dest), sni)
+			}); err != nil {
 				return nil, err
 			}
-			if moved {
-				h.d.Changes.SlotsChanged()
-			}
-			h.audit(ctx, sessionOf(ctx).AdminID, "inbound.auto", "inbound", row.Name, map[string]any{"listen": row.Listen, "auto_port": row.AutoPort != 0, "auto_sni": row.AutoSni != 0})
 		}
-		last, err := h.lastAuto(ctx)
+		if b.Fingerprint != nil {
+			if config, err = editConfig(config, "body.fingerprint", "bad_fingerprint", func(t proto.Template) error {
+				if !proto.UsesFingerprint(t) {
+					return &proto.Error{Code: "fingerprint_no_tls", Field: "mikan.client.fingerprint"}
+				}
+				return proto.SetFingerprint(t, strings.TrimSpace(*b.Fingerprint))
+			}); err != nil {
+				return nil, err
+			}
+		}
+		if b.Obfs != nil {
+			if config, err = editConfig(config, "body.obfs", "bad_obfs", func(t proto.Template) error {
+				return proto.SetObfs(t, *b.Obfs, secure.Token(24))
+			}); err != nil {
+				return nil, err
+			}
+		}
+		if c := b.Client; c != nil {
+			if config, err = editConfig(config, "body.client", "bad_client", func(t proto.Template) error {
+				return proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI))
+			}); err != nil {
+				return nil, err
+			}
+		}
+		if b.DisplayName != nil {
+			display = strings.TrimSpace(*b.DisplayName)
+			if display != "" {
+				if code := h.checkSubName(ctx, display); code != "" {
+					return nil, huma.Error422UnprocessableEntity("bad_name", &huma.ErrorDetail{Location: "body.display_name", Message: code})
+				}
+			}
+		}
+		if node, err = h.nodeOf(ctx, row.NodeID); err != nil {
+			return nil, err
+		}
+		t, err := h.checkConfig(ctx, node, config, port)
 		if err != nil {
-			return nil, err
-		}
-		return &inboundOutput{Body: h.viewInbound(row, last)}, nil
-	}
-	port, enabled, config, display := row.Port, row.Enabled, row.Config, row.DisplayName
-	if b.Port != nil {
-		if !domain.ValidPort(*b.Port) {
-			return nil, huma.Error422UnprocessableEntity("bad_port", &huma.ErrorDetail{Location: "body.port", Message: "bad_port"})
-		}
-		port = *b.Port
-	}
-	if b.Enabled != nil {
-		enabled = 0
-		if *b.Enabled {
-			enabled = 1
-		}
-	}
-	if b.Config != nil {
-		config = *b.Config
-	}
-	if b.Dest != nil {
-		sni := ""
-		if b.ServerName != nil {
-			sni = strings.TrimSpace(*b.ServerName)
-		}
-		if config, err = editConfig(config, "body.dest", "bad_dest", func(t proto.Template) error {
-			return presets.SetDest(t, strings.TrimSpace(*b.Dest), sni)
-		}); err != nil {
-			return nil, err
-		}
-	}
-	if b.Fingerprint != nil {
-		if config, err = editConfig(config, "body.fingerprint", "bad_fingerprint", func(t proto.Template) error {
-			if !proto.UsesFingerprint(t) {
-				return &proto.Error{Code: "fingerprint_no_tls", Field: "mikan.client.fingerprint"}
+			if b.Dest != nil {
+				// The simple form edits dest only; report the error on that field.
+				var he huma.StatusError
+				if errors.As(err, &he) {
+					return nil, huma.Error422UnprocessableEntity("bad_dest", &huma.ErrorDetail{Location: "body.dest", Message: detailCode(err)})
+				}
 			}
-			return proto.SetFingerprint(t, strings.TrimSpace(*b.Fingerprint))
-		}); err != nil {
 			return nil, err
 		}
-	}
-	if b.Obfs != nil {
-		if config, err = editConfig(config, "body.obfs", "bad_obfs", func(t proto.Template) error {
-			return proto.SetObfs(t, *b.Obfs, secure.Token(24))
-		}); err != nil {
-			return nil, err
-		}
-	}
-	if c := b.Client; c != nil {
-		if config, err = editConfig(config, "body.client", "bad_client", func(t proto.Template) error {
-			return proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI))
-		}); err != nil {
-			return nil, err
-		}
-	}
-	if b.DisplayName != nil {
-		display = strings.TrimSpace(*b.DisplayName)
-	}
-	node, err := h.nodeOf(ctx, row.NodeID)
-	if err != nil {
-		return nil, err
-	}
-	t, err := h.checkConfig(ctx, node, config, port)
-	if err != nil {
-		if b.Dest != nil {
-			// The simple form edits dest only; report the error on that field.
-			var he huma.StatusError
-			if errors.As(err, &he) {
-				return nil, huma.Error422UnprocessableEntity("bad_dest", &huma.ErrorDetail{Location: "body.dest", Message: detailCode(err)})
-			}
-		}
-		return nil, err
-	}
-	all, err := h.d.Store.Q.ListInbounds(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// Ports and names are per node: other nodes' links get their own flag prefix.
-	existing := domain.NodeInbounds(all, row.NodeID)
-	next := row
-	next.DisplayName = display
-	if enabled != 0 && h.relayPortBusy(ctx, row.NodeID, port, t.Network()) {
-		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
-	}
-	if taken, err := domain.SubPortTaken(ctx, h.d.Settings, node, port, t.Network()); err != nil {
-		return nil, err
-	} else if taken && enabled != 0 {
-		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_sub"})
-	}
-	if owner, busy := domain.PortOwner(existing, port, t.Network(), row.ID); busy && enabled != 0 {
-		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})
-	}
-	for _, e := range existing {
-		if e.ID == row.ID {
-			continue
-		}
-		if b.DisplayName != nil && strings.EqualFold(subs.ProxyName(e), subs.ProxyName(next)) {
-			return nil, huma.Error409Conflict("name_in_use", &huma.ErrorDetail{Location: "body.display_name", Message: "name_in_use", Value: e.Name})
-		}
-	}
-	if b.DisplayName != nil && display != "" {
-		if code := h.checkSubName(ctx, display); code != "" {
-			return nil, huma.Error422UnprocessableEntity("bad_name", &huma.ErrorDetail{Location: "body.display_name", Message: code})
-		}
+		network = t.Network()
 	}
 	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
-		var err error
-		if row, err = q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: enabled, Config: config, DisplayName: display, UpdatedAt: h.d.Now().Unix(), ID: in.ID}); err != nil {
-			return err
+		// What the rest of the panel holds is checked on the transaction that writes.
+		if client && enabled != 0 {
+			if err := domain.CheckPort(ctx, q, node, port, network, domain.InboundHolder(row)); err != nil {
+				return portError(err)
+			}
+		}
+		if b.DisplayName != nil {
+			all, err := q.ListInbounds(ctx)
+			if err != nil {
+				return err
+			}
+			// Names are per node: other nodes' links get their own flag prefix.
+			next := row
+			next.DisplayName = display
+			for _, e := range domain.NodeInbounds(all, row.NodeID) {
+				if e.ID != row.ID && strings.EqualFold(subs.ProxyName(e), subs.ProxyName(next)) {
+					return huma.Error409Conflict("name_in_use", &huma.ErrorDetail{Location: "body.display_name", Message: "name_in_use", Value: e.Name})
+				}
+			}
+		}
+		if b.PoolID != nil && pool.Valid {
+			if _, err := q.GetTrafficPool(ctx, pool.Int64); errors.Is(err, sql.ErrNoRows) {
+				return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pool_id", Message: "pool_not_found"})
+			} else if err != nil {
+				return err
+			}
+		}
+		// The exit's chain is checked, and its relay made, before the inbound changes.
+		if b.Outbound != nil && exit.Valid {
+			if err := h.useExit(ctx, q, row.NodeID, exit.Int64); err != nil {
+				return cascadeError(err, "exit_node_id")
+			}
+		}
+		if b.PoolID != nil {
+			if err := q.SetInboundPool(ctx, db.SetInboundPoolParams{PoolID: pool, ID: row.ID}); err != nil {
+				return err
+			}
+		}
+		if b.Outbound != nil {
+			if err := q.SetInboundExit(ctx, db.SetInboundExitParams{ExitNodeID: exit, Outbound: outbound, ID: row.ID}); err != nil {
+				return err
+			}
+		}
+		row.PoolID, row.Outbound, row.ExitNodeID = pool, outbound, exit
+		if client {
+			var err error
+			if row, err = q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: enabled, Config: config, DisplayName: display, UpdatedAt: h.d.Now().Unix(), ID: row.ID}); err != nil {
+				return err
+			}
 		}
 		return saveNodeSide(ctx, q, &row, listen, autoPort, autoSNI)
 	})
 	if err != nil {
 		return nil, err
 	}
-	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil || b.Fingerprint != nil || b.Obfs != nil || b.Client != nil,
-		"listen": row.Listen, "auto_port": row.AutoPort != 0, "auto_sni": row.AutoSni != 0})
+	admin := sessionOf(ctx).AdminID
+	if b.PoolID != nil {
+		h.d.Changes.PoliciesChanged()
+		h.audit(ctx, admin, "inbound.pool", "inbound", row.Name, map[string]any{"pool_id": pool.Int64})
+	}
+	if b.Outbound != nil {
+		h.audit(ctx, admin, "inbound.outbound", "inbound", row.Name, map[string]any{"outbound": *b.Outbound, "exit_node_id": exit.Int64})
+	}
+	switch {
+	case client:
+		h.audit(ctx, admin, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil || b.Fingerprint != nil || b.Obfs != nil || b.Client != nil,
+			"listen": row.Listen, "auto_port": row.AutoPort != 0, "auto_sni": row.AutoSni != 0})
+	case nodeSide:
+		h.audit(ctx, admin, "inbound.auto", "inbound", row.Name, map[string]any{"listen": row.Listen, "auto_port": row.AutoPort != 0, "auto_sni": row.AutoSni != 0})
+	}
+	if client || moved || b.PoolID != nil || b.Outbound != nil {
+		h.d.Changes.SlotsChanged()
+	}
 	last, err := h.lastAuto(ctx)
 	if err != nil {
 		return nil, err

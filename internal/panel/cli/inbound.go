@@ -60,9 +60,7 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 		case errors.Is(err, domain.ErrBadPort):
 			return fmt.Errorf("bad port %q", *port)
 		case errors.As(err, &busy):
-			return fmt.Errorf("the port is taken by inbound %s, choose another: --port", busy.Owner)
-		case errors.Is(err, domain.ErrSubPort):
-			return errors.New("the panel serves subscriptions on this port, choose another: --port")
+			return fmt.Errorf("%s, choose another: --port", portHolder(busy.PortHolder))
 		case err != nil:
 			return err
 		}
@@ -93,9 +91,7 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 		case errors.Is(err, domain.ErrBadPort):
 			return fmt.Errorf("bad port %q", *port)
 		case errors.As(err, &busy):
-			return fmt.Errorf("the port is taken by inbound %s, choose another", busy.Owner)
-		case errors.Is(err, domain.ErrSubPort):
-			return errors.New("the panel serves subscriptions on this port, choose another")
+			return fmt.Errorf("%s, choose another", portHolder(busy.PortHolder))
 		case err != nil:
 			return err
 		}
@@ -107,6 +103,21 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 	default:
 		return fmt.Errorf("unknown inbound subcommand %q\n\n%s", args[0], usage)
 	}
+}
+
+// portHolder says what holds a port the admin asked for.
+func portHolder(h domain.PortHolder) string {
+	switch h.Kind {
+	case domain.PortRelay:
+		return "the cascade relay of the node listens on this port"
+	case domain.PortSub:
+		return "the panel serves subscriptions on this port"
+	case domain.PortPanel:
+		return "the panel itself listens on this port"
+	case domain.PortNodeAPI:
+		return "the node API listens on this port"
+	}
+	return "the port is taken by inbound " + h.Name
 }
 
 // openPort prints "port/network" on stdout for the server script, which opens it in ufw.

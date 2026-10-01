@@ -26,23 +26,10 @@ var (
 	ErrBadListen      = errors.New("bad_listen")
 )
 
-// PortInUseError names the enabled inbound that already listens on the port.
-type PortInUseError struct{ Owner string }
-
-func (e *PortInUseError) Error() string { return "port_in_use: " + e.Owner }
-
 // ValidPort accepts a port ("443") or a Hysteria2 hopping range ("20000-30000").
 func ValidPort(spec string) bool {
-	lo, hi, isRange := strings.Cut(spec, "-")
-	a, err := strconv.Atoi(lo)
-	if err != nil || a < 1 || a > 65535 {
-		return false
-	}
-	if !isRange {
-		return true
-	}
-	b, err := strconv.Atoi(hi)
-	return err == nil && b > a && b <= 65535
+	_, _, ok := parsePort(spec)
+	return ok
 }
 
 // ParseListen reads the address an inbound listens on: "" (or 0.0.0.0, ::) for every
@@ -122,32 +109,6 @@ func InboundNetwork(in db.Inbound) string {
 	return info.Network
 }
 
-// ErrSubPort: the panel serves subscriptions on this TCP port of its own server.
-var ErrSubPort = errors.New("port_sub")
-
-// SubPortTaken: an inbound of node on port over network would take the subscription
-// port. Only the panel's own node shares the panel's server, and only over TCP.
-func SubPortTaken(ctx context.Context, set *settings.Settings, node db.Node, port, network string) (bool, error) {
-	if node.Address != "" || network != "tcp" {
-		return false, nil
-	}
-	p, _, err := settings.Get[int](ctx, set, settings.KeySubPort)
-	if err != nil {
-		return false, err
-	}
-	return p > 0 && strconv.Itoa(p) == port, nil
-}
-
-// PortOwner returns the enabled inbound other than skipID that listens on port over network.
-func PortOwner(existing []db.Inbound, port, network string, skipID int64) (db.Inbound, bool) {
-	for _, e := range existing {
-		if e.ID != skipID && e.Enabled != 0 && e.Port == port && InboundNetwork(e) == network {
-			return e, true
-		}
-	}
-	return db.Inbound{}, false
-}
-
 // FreeName returns base, or base-2, base-3… when an inbound already has that name.
 func FreeName(existing []db.Inbound, base string) string {
 	taken := map[string]bool{}
@@ -200,21 +161,20 @@ func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, nod
 	if err := proto.Validate(t, opts); err != nil {
 		return db.Inbound{}, fmt.Errorf("preset %s: %w", id, err)
 	}
-	all, err := st.Q.ListInbounds(ctx)
-	if err != nil {
-		return db.Inbound{}, err
-	}
-	existing := NodeInbounds(all, nodeID)
-	if owner, busy := PortOwner(existing, port, t.Network(), 0); busy {
-		return db.Inbound{}, &PortInUseError{Owner: owner.Name}
-	}
-	if taken, err := SubPortTaken(ctx, set, node, port, t.Network()); err != nil {
-		return db.Inbound{}, err
-	} else if taken {
-		return db.Inbound{}, ErrSubPort
-	}
-	return st.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: nodeID, Name: FreeName(existing, info.Name), Preset: id, Port: port, Config: config,
-		CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
+	var row db.Inbound
+	err = st.Tx(ctx, func(q *db.Queries) error {
+		if err := CheckPort(ctx, q, node, port, t.Network(), PortHolder{}); err != nil {
+			return err
+		}
+		all, err := q.ListInbounds(ctx)
+		if err != nil {
+			return err
+		}
+		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: nodeID, Name: FreeName(NodeInbounds(all, nodeID), info.Name), Preset: id, Port: port,
+			Config: config, CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
+		return err
+	})
+	return row, err
 }
 
 // SetInboundPort moves a node's inbound, found by name, to another port for the server
@@ -231,28 +191,30 @@ func SetInboundPort(ctx context.Context, st *store.Store, nodeID int64, name, po
 	if !ValidPort(port) {
 		return db.Inbound{}, db.Inbound{}, ErrBadPort
 	}
-	all, err := st.Q.ListInbounds(ctx)
+	var prev, next db.Inbound
+	err = st.Tx(ctx, func(q *db.Queries) error {
+		all, err := q.ListInbounds(ctx)
+		if err != nil {
+			return err
+		}
+		existing := NodeInbounds(all, nodeID)
+		i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
+		if i < 0 {
+			return ErrUnknownInbound
+		}
+		prev = existing[i]
+		// A disabled inbound holds no port: it is checked when it comes back on.
+		if prev.Enabled != 0 {
+			if err := CheckPort(ctx, q, node, port, InboundNetwork(prev), InboundHolder(prev)); err != nil {
+				return err
+			}
+		}
+		next, err = q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: prev.Enabled, Config: prev.Config, DisplayName: prev.DisplayName,
+			UpdatedAt: now.Unix(), ID: prev.ID})
+		return err
+	})
 	if err != nil {
 		return db.Inbound{}, db.Inbound{}, err
 	}
-	existing := NodeInbounds(all, nodeID)
-	i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
-	if i < 0 {
-		return db.Inbound{}, db.Inbound{}, ErrUnknownInbound
-	}
-	prev := existing[i]
-	if owner, busy := PortOwner(existing, port, InboundNetwork(prev), prev.ID); busy && prev.Enabled != 0 {
-		return db.Inbound{}, db.Inbound{}, &PortInUseError{Owner: owner.Name}
-	}
-	if r, err := st.Q.GetNodeRelay(ctx, nodeID); err == nil && r.Port == port && InboundNetwork(prev) == "tcp" && prev.Enabled != 0 {
-		return db.Inbound{}, db.Inbound{}, &PortInUseError{Owner: "relay"}
-	}
-	if taken, err := SubPortTaken(ctx, settings.New(st.Q), node, port, InboundNetwork(prev)); err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	} else if taken && prev.Enabled != 0 {
-		return db.Inbound{}, db.Inbound{}, ErrSubPort
-	}
-	next, err := st.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: prev.Enabled, Config: prev.Config, DisplayName: prev.DisplayName,
-		UpdatedAt: now.Unix(), ID: prev.ID})
-	return prev, next, err
+	return prev, next, nil
 }

@@ -27,7 +27,7 @@ func TestAddPreset(t *testing.T) {
 		t.Fatalf("inbound: %+v", in)
 	}
 	var busy *PortInUseError
-	if _, err := AddPreset(ctx, st, set, 1, "trojan_reality", "", now); !errors.As(err, &busy) || busy.Owner != info.Name {
+	if _, err := AddPreset(ctx, st, set, 1, "trojan_reality", "", now); !errors.As(err, &busy) || busy.Name != info.Name {
 		t.Fatalf("the preset's port is taken now: %v", err)
 	}
 	second, err := AddPreset(ctx, st, set, 1, "trojan_reality", "20000", now)
@@ -72,10 +72,10 @@ func TestSetInboundPort(t *testing.T) {
 		t.Fatalf("udp next to tcp: %+v %v", next, err)
 	}
 	var busy *PortInUseError
-	if _, _, err := SetInboundPort(ctx, st, 1, "tuic", "2443", later); !errors.As(err, &busy) || busy.Owner != "hysteria2" {
+	if _, _, err := SetInboundPort(ctx, st, 1, "tuic", "2443", later); !errors.As(err, &busy) || busy.Name != "hysteria2" {
 		t.Fatalf("udp 2443 is taken by hysteria2: %v", err)
 	}
-	if _, _, err := SetInboundPort(ctx, st, 1, "vless-vision", "2443", later); !errors.As(err, &busy) || busy.Owner != "vless-xhttp" {
+	if _, _, err := SetInboundPort(ctx, st, 1, "vless-vision", "2443", later); !errors.As(err, &busy) || busy.Name != "vless-xhttp" {
 		t.Fatalf("tcp 2443 is taken by vless-xhttp: %v", err)
 	}
 
@@ -208,7 +208,7 @@ func TestPortTakenOnAnotherAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	var busy *PortInUseError
-	if _, _, err := SetInboundPort(ctx, st, 1, "vless-vision", "444", now); !errors.As(err, &busy) || busy.Owner != "vless-xhttp" {
+	if _, _, err := SetInboundPort(ctx, st, 1, "vless-vision", "444", now); !errors.As(err, &busy) || busy.Name != "vless-xhttp" {
 		t.Fatalf("tcp 444 is taken by vless-xhttp on 127.0.0.1: %v", err)
 	}
 }

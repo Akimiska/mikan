@@ -11,7 +11,6 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
-	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -42,7 +41,11 @@ func TestCascadeChain(t *testing.T) {
 		if err := domain.CheckExit(ctx, q, src, exit); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := domain.EnsureRelay(ctx, q, exit, autotune.Pool, map[string]bool{"22": true}, time.Now()); err != nil {
+		x, err := q.GetNode(ctx, exit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := domain.EnsureRelay(ctx, q, x, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := domain.RelayUser(ctx, q, exit, src); err != nil {

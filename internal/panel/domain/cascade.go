@@ -63,42 +63,30 @@ func CheckExit(ctx context.Context, q *db.Queries, from, to int64) error {
 }
 
 // EnsureRelay gives node its relay listener when it has none: a free TCP port, the
-// pool's first (installers open those in the firewall), else a high one.
-func EnsureRelay(ctx context.Context, q *db.Queries, nodeID int64, pool []int, reserved map[string]bool, now time.Time) (db.NodeRelay, error) {
-	if r, err := q.GetNodeRelay(ctx, nodeID); err == nil {
+// first free one of PortPool (installers open those in the firewall), else a high one.
+func EnsureRelay(ctx context.Context, q *db.Queries, node db.Node, now time.Time) (db.NodeRelay, error) {
+	if r, err := q.GetNodeRelay(ctx, node.ID); err == nil {
 		return r, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return db.NodeRelay{}, err
 	}
-	all, err := q.ListInbounds(ctx)
+	ports, err := NodePorts(ctx, q, node)
 	if err != nil {
 		return db.NodeRelay{}, err
 	}
-	ins := NodeInbounds(all, nodeID)
-	free := func(port string) bool {
-		if reserved[port] {
-			return false
-		}
-		for _, in := range ins {
-			if in.Port == port && InboundNetwork(in) == "tcp" {
-				return false
-			}
-		}
-		return true
-	}
-	port := ""
-	for _, p := range pool {
-		if s := strconv.Itoa(p); free(s) {
-			port = s
+	port := 0
+	for _, p := range PortPool {
+		if ports.Free(p, "tcp") {
+			port = p
 			break
 		}
 	}
-	for i := 0; port == "" && i < 64; i++ {
-		if s := strconv.Itoa(30000 + rand.IntN(30000)); free(s) {
-			port = s
+	for i := 0; port == 0 && i < 64; i++ {
+		if p := 30000 + rand.IntN(30000); ports.Free(p, "tcp") {
+			port = p
 		}
 	}
-	if port == "" {
+	if port == 0 {
 		return db.NodeRelay{}, ErrNoPort
 	}
 	reality, err := presets.NewReality(presets.DefaultDest)
@@ -109,7 +97,7 @@ func EnsureRelay(ctx context.Context, q *db.Queries, nodeID int64, pool []int, r
 	if err := proto.Validate(t, proto.Options{}); err != nil {
 		return db.NodeRelay{}, err
 	}
-	return q.CreateNodeRelay(ctx, db.CreateNodeRelayParams{NodeID: nodeID, Port: port, Config: proto.Marshal(t), CreatedAt: now.Unix()})
+	return q.CreateNodeRelay(ctx, db.CreateNodeRelayParams{NodeID: node.ID, Port: strconv.Itoa(port), Config: proto.Marshal(t), CreatedAt: now.Unix()})
 }
 
 // RelayUser is the key node src uses at exit's relay, made on first use.

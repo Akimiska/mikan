@@ -1323,9 +1323,9 @@
     "resetTrafficOff": "A paid renewal only adds time: the traffic counter runs on as before.",
     "nothingOnSale": "The bot sells nothing yet: no plan is on sale with a price for a method that takes payments. Instead of buying, people are told to message support.",
     "openTariffs": "Open plans",
-    "salesOff": "Selling subscriptions is off: the bot and the Mini App sell nothing. Turn it on in Settings.",
-    "openSettings": "Open Settings",
-    "kindPackage": "traffic package"
+    "salesOff": "Selling is off: the bot and the Mini App sell nothing. Payment methods can be set up beforehand.",
+    "kindPackage": "traffic package",
+    "sellNow": "Start selling"
   },
   "warp": {
     "title": "WARP",

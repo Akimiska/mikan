@@ -35,15 +35,25 @@ function providerName(p: Provider, addons: Addons | undefined): string {
 
 export function PaymentsPage() {
   const settings = usePaymentSettings();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const sell = useMutation({
+    mutationFn: () => unwrap(api.PATCH("/api/v1/payments/settings", { body: { enabled: true } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.paymentSettings, v);
+      toast.ok(t("settings.salesOnToast"));
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
   return (
     <>
       <PageHeader title={t("payments.title")} sub={t("payments.subtitle")} />
       {settings.data && !settings.data.enabled ? (
         <div className="banner warn mb-4 flex-wrap" role="status">
           <span className="min-w-0 flex-1">{t("payments.salesOff")}</span>
-          <Link to="/settings" search={{ tab: "general" }} className="btn btn-glass btn-sm">
-            {t("payments.openSettings")}
-          </Link>
+          <Button size="sm" variant="primary" loading={sell.isPending} onClick={() => sell.mutate()}>
+            {t("payments.sellNow")}
+          </Button>
         </div>
       ) : null}
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">

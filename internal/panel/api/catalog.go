@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 )
 
@@ -103,7 +104,7 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 		var err error
 		t, err = q.CreateTariff(ctx, db.CreateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
 			DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
-			Sort: b.Sort, CreatedAt: h.d.Now().Unix(), BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: flag(b.OnSale)})
+			Sort: b.Sort, CreatedAt: h.d.Now().Unix(), BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: domain.Flag(b.OnSale)})
 		if err != nil || b.Pools == nil {
 			return err
 		}
@@ -126,7 +127,7 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 		var err error
 		t, err = q.UpdateTariff(ctx, db.UpdateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
 			DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
-			Sort: b.Sort, BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: flag(b.OnSale), ID: in.ID})
+			Sort: b.Sort, BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: domain.Flag(b.OnSale), ID: in.ID})
 		if err != nil || b.Pools == nil {
 			return err
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/warp"
 )
@@ -169,7 +170,7 @@ func (h *handlers) saveWarp(ctx context.Context, nodeID int64, source string, a 
 	}
 	err := h.d.Store.Q.SaveNodeWarp(ctx, db.SaveNodeWarpParams{NodeID: nodeID, Source: source, PrivateKey: a.PrivateKey, PeerPublicKey: a.PeerPublicKey,
 		Endpoint: a.Endpoint, Ipv4: a.IPv4, Ipv6: a.IPv6, Reserved: base64.StdEncoding.EncodeToString(a.Reserved), Mtu: mtu,
-		AccountID: a.ID, AccountToken: a.Token, Plus: flag(a.Plus), Routes: routes, CreatedAt: now, UpdatedAt: now})
+		AccountID: a.ID, AccountToken: a.Token, Plus: domain.Flag(a.Plus), Routes: routes, CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +220,7 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 	b := in.Body
 	enabled, routes := w.Enabled, w.Routes
 	if b.Enabled != nil {
-		enabled = flag(*b.Enabled)
+		enabled = domain.Flag(*b.Enabled)
 		if enabled == 0 && w.Enabled != 0 {
 			if err := h.warpUnused(ctx, in.ID); err != nil {
 				return nil, err
@@ -242,7 +243,7 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 		if err != nil {
 			return nil, huma.Error422UnprocessableEntity("validation", warpDetail("body.license", err))
 		}
-		if err := h.d.Store.Q.SetNodeWarpPlus(ctx, db.SetNodeWarpPlusParams{Plus: flag(plus), UpdatedAt: h.d.Now().Unix(), NodeID: in.ID}); err != nil {
+		if err := h.d.Store.Q.SetNodeWarpPlus(ctx, db.SetNodeWarpPlusParams{Plus: domain.Flag(plus), UpdatedAt: h.d.Now().Unix(), NodeID: in.ID}); err != nil {
 			return nil, err
 		}
 	}

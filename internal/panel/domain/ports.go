@@ -95,11 +95,11 @@ func NodePorts(ctx context.Context, q *db.Queries, node db.Node) (PortMap, error
 	case !errors.Is(err, sql.ErrNoRows):
 		return PortMap{}, err
 	}
-	all, err := q.ListInbounds(ctx)
+	inbounds, err := q.ListNodeInbounds(ctx, node.ID)
 	if err != nil {
 		return PortMap{}, err
 	}
-	for _, in := range NodeInbounds(all, node.ID) {
+	for _, in := range inbounds {
 		m.add(InboundHolder(in), in.Port, InboundNetwork(in), in.Enabled == 0)
 	}
 	return m, nil

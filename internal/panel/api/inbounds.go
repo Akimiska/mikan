@@ -270,13 +270,6 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	return &inboundOutput{Body: v}, nil
 }
 
-func flag(on bool) int64 {
-	if on {
-		return 1
-	}
-	return 0
-}
-
 func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*inboundOutput, error) {
 	b := in.Body
 	// How a name may look is the subscription's rule; that it is free, the domain's.

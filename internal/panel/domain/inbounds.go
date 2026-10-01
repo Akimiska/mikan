@@ -161,12 +161,12 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 		if err := CheckPort(ctx, q, node, port, t.Network(), PortHolder{}); err != nil {
 			return err
 		}
-		all, err := q.ListInbounds(ctx)
+		existing, err := q.ListNodeInbounds(ctx, node.ID)
 		if err != nil {
 			return err
 		}
 		now := s.now().Unix()
-		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: FreeName(NodeInbounds(all, node.ID), base), Preset: info.ID, Port: port,
+		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: FreeName(existing, base), Preset: info.ID, Port: port,
 			Config: config, CreatedAt: now, UpdatedAt: now})
 		return err
 	})
@@ -205,10 +205,10 @@ func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		}
 	}
 	if p.AutoPort != nil {
-		next.AutoPort = flag(*p.AutoPort)
+		next.AutoPort = Flag(*p.AutoPort)
 	}
 	if p.AutoSNI != nil {
-		next.AutoSni = flag(*p.AutoSNI)
+		next.AutoSni = Flag(*p.AutoSNI)
 	}
 	if ListenPinsPort(next.Listen) {
 		if p.AutoPort != nil && *p.AutoPort {
@@ -235,7 +235,7 @@ func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		next.Port = *p.Port
 	}
 	if p.Enabled != nil {
-		next.Enabled = flag(*p.Enabled)
+		next.Enabled = Flag(*p.Enabled)
 	}
 	if p.Config != nil {
 		next.Config = *p.Config
@@ -286,12 +286,12 @@ func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, 
 			}
 		}
 		if p.DisplayName != nil {
-			all, err := q.ListInbounds(ctx)
+			// Names are per node: other nodes' links get their own flag prefix.
+			siblings, err := q.ListNodeInbounds(ctx, prev.NodeID)
 			if err != nil {
 				return err
 			}
-			// Names are per node: other nodes' links get their own flag prefix.
-			for _, e := range NodeInbounds(all, prev.NodeID) {
+			for _, e := range siblings {
 				if e.ID != prev.ID && strings.EqualFold(ProxyName(e), ProxyName(next)) {
 					return &NameInUseError{Owner: e.Name}
 				}
@@ -505,11 +505,10 @@ func (s *Inbounds) Find(ctx context.Context, nodeID int64, name string) (db.Inbo
 	if _, err := s.node(ctx, nodeID); err != nil {
 		return db.Inbound{}, err
 	}
-	all, err := s.st.Q.ListInbounds(ctx)
+	existing, err := s.st.Q.ListNodeInbounds(ctx, nodeID)
 	if err != nil {
 		return db.Inbound{}, err
 	}
-	existing := NodeInbounds(all, nodeID)
 	i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
 	if i < 0 {
 		return db.Inbound{}, ErrUnknownInbound

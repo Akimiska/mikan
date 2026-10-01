@@ -266,12 +266,12 @@ func ipv4(ctx context.Context, host string) (string, error) {
 
 // realityTargets lists the node's inbounds that have a REALITY camouflage.
 func realityTargets(ctx context.Context, st *store.Store, nodeID int64) ([]Target, error) {
-	all, err := st.Q.ListInbounds(ctx)
+	inbounds, err := st.Q.ListNodeInbounds(ctx, nodeID)
 	if err != nil {
 		return nil, err
 	}
 	out := []Target{}
-	for _, in := range domain.NodeInbounds(all, nodeID) {
+	for _, in := range inbounds {
 		if t := targetOf(in); t.Dest != "" {
 			out = append(out, t)
 		}

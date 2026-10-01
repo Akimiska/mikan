@@ -11,7 +11,8 @@ import (
 	"path/filepath"
 
 	"github.com/pressly/goose/v3"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"mikan/internal/panel/store/db"
 )
@@ -89,4 +90,14 @@ func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// IsUnique says whether err is a UNIQUE (or primary key) constraint violation, so that
+// callers need not match the text of the driver's message.
+func IsUnique(err error) bool {
+	var se *sqlite.Error
+	if !errors.As(err, &se) {
+		return false
+	}
+	return se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE || se.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
 }

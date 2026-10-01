@@ -218,6 +218,7 @@
       "warp_not_configured": "The node has no WARP yet",
       "exit_self": "A node cannot be its own exit",
       "exit_cycle": "That would be a loop: that node already sends its traffic through this one",
+      "exit_too_long": "The chain of nodes would be too long: at most 8 hops",
       "exit_off": "That node is off",
       "exit_not_found": "Pick the exit node",
       "relay_no_port": "The exit node has no free port for the relay",

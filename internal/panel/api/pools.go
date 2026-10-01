@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -105,7 +106,7 @@ func (h *handlers) listPools(ctx context.Context, _ *struct{}) (*poolsOutput, er
 }
 
 func poolNameError(err error) error {
-	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
+	if store.IsUnique(err) {
 		return huma.Error409Conflict("pool_name_taken", &huma.ErrorDetail{Location: "body.name", Message: "pool_name_taken"})
 	}
 	return err

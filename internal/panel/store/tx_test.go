@@ -62,3 +62,26 @@ func TestTxReturnsFnsError(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A duplicate is told by the driver's code, not by the words of its message.
+func TestIsUnique(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})
+	if !IsUnique(err) {
+		t.Fatalf("a duplicate pool name: %v", err)
+	}
+	if IsUnique(nil) || IsUnique(errors.New("UNIQUE constraint failed: made up")) {
+		t.Fatal("something that is not a constraint violation was taken for one")
+	}
+	if _, err := st.DB.ExecContext(ctx, "INSERT INTO traffic_packages (name, bytes, lifetime, created_at) VALUES ('p', 0, 'used', 1)"); err == nil || IsUnique(err) {
+		t.Fatalf("a CHECK violation is not a duplicate: %v", err)
+	}
+}

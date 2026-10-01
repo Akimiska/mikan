@@ -62,7 +62,7 @@ func (h *handlers) registerCascade() {
 }
 
 // cascadeRefusals are the domain's refusals of an exit the API reports by their own code.
-var cascadeRefusals = []error{domain.ErrExitSelf, domain.ErrExitCycle, domain.ErrExitOff, domain.ErrNoPort}
+var cascadeRefusals = []error{domain.ErrExitSelf, domain.ErrExitCycle, domain.ErrExitLong, domain.ErrExitOff, domain.ErrNoPort}
 
 // cascadeError maps the domain's refusals to the API's codes.
 func cascadeError(err error, field string) error {

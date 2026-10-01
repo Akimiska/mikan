@@ -29,6 +29,8 @@ export class ApiError extends Error {
   fields: Record<string, string>;
   /** The value the API sent with a field's error, such as the line of a bad rule. */
   values: Record<string, unknown>;
+  /** Every detail's text in the API's order, several per field too (what a node is used by). */
+  messages: string[];
   retryAfter: number;
 
   constructor(status: number, body: unknown, retryAfter = 0) {
@@ -39,11 +41,14 @@ export class ApiError extends Error {
     this.retryAfter = retryAfter;
     this.fields = {};
     this.values = {};
+    this.messages = [];
     // The API sends codes ("port_in_use") with an optional value; texts live in i18n.
     for (const e of b.errors ?? []) {
+      const text = apiMessage(e.message ?? "", e.value);
+      this.messages.push(text);
       if (!e.location) continue;
       const field = e.location.replace(/^body\./, "");
-      this.fields[field] = apiMessage(e.message ?? "", e.value);
+      this.fields[field] = text;
       this.values[field] = e.value;
     }
   }

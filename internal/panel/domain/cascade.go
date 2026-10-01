@@ -117,6 +117,38 @@ func UseExit(ctx context.Context, q *db.Queries, src, exit int64, now time.Time)
 	return err
 }
 
+// ExitUse is what leaves the internet through a node: inbounds of other nodes, enabled
+// or not, and nodes whose relay goes on through it. Deleting the node would quietly send
+// their traffic straight out.
+type ExitUse struct {
+	Inbounds []db.Inbound
+	Relays   []int64 // the nodes whose relay leaves through it
+}
+
+// ExitUsesOf lists what leaves through node id.
+func ExitUsesOf(ctx context.Context, q *db.Queries, id int64) (ExitUse, error) {
+	var u ExitUse
+	ins, err := q.ListInbounds(ctx)
+	if err != nil {
+		return u, err
+	}
+	for _, in := range ins {
+		if in.ExitNodeID.Valid && in.ExitNodeID.Int64 == id {
+			u.Inbounds = append(u.Inbounds, in)
+		}
+	}
+	relays, err := q.ListNodeRelays(ctx)
+	if err != nil {
+		return u, err
+	}
+	for _, r := range relays {
+		if r.ExitNodeID.Valid && r.ExitNodeID.Int64 == id {
+			u.Relays = append(u.Relays, r.NodeID)
+		}
+	}
+	return u, nil
+}
+
 // RelayUser is the key node src uses at exit's relay, made on first use.
 func RelayUser(ctx context.Context, q *db.Queries, exit, src int64) (string, error) {
 	id, err := q.GetRelayUser(ctx, db.GetRelayUserParams{ExitNodeID: exit, SrcNodeID: src})

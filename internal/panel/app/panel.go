@@ -103,7 +103,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	set := settings.New(st.Q)
 	p := &Panel{
 		Settings:  set,
-		sessions:  auth.NewSessions(st.Q, o.Now),
+		sessions:  auth.NewSessions(st.Q, o.Now, o.Log),
 		ipLimit:   auth.NewLimiter(10, 10*time.Minute, 15*time.Minute, 24*time.Hour),
 		userLimit: auth.NewLimiter(30, 10*time.Minute, 15*time.Minute, 24*time.Hour),
 		now:       o.Now,
@@ -156,12 +156,6 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			return ""
 		}
 		return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + paths.Sub
-	}
-	deps.SubURL = func(ctx context.Context, token string) string {
-		if base := subBase(ctx); base != "" {
-			return base + "/" + token
-		}
-		return ""
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	deps.Addons = p.Addons

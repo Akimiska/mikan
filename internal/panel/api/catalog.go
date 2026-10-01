@@ -143,8 +143,12 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 }
 
 func (h *handlers) archiveTariff(ctx context.Context, in *userIDInput) (*struct{}, error) {
-	if err := h.d.Store.Q.ArchiveTariff(ctx, in.ID); err != nil {
+	n, err := h.d.Store.Q.ArchiveTariff(ctx, in.ID)
+	if err != nil {
 		return nil, err
+	}
+	if n == 0 {
+		return nil, huma.Error404NotFound("not_found")
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.archive", "tariff", strconv.FormatInt(in.ID, 10), nil)
 	return nil, nil

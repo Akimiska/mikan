@@ -217,21 +217,6 @@ func (q *Queries) ListDeviceSlots(ctx context.Context) ([]ListDeviceSlotsRow, er
 	return items, nil
 }
 
-const setUserBillingDay = `-- name: SetUserBillingDay :exec
-UPDATE users SET billing_day = ?, updated_at = ? WHERE id = ?
-`
-
-type SetUserBillingDayParams struct {
-	BillingDay sql.NullInt64
-	UpdatedAt  int64
-	ID         int64
-}
-
-func (q *Queries) SetUserBillingDay(ctx context.Context, arg SetUserBillingDayParams) error {
-	_, err := q.db.ExecContext(ctx, setUserBillingDay, arg.BillingDay, arg.UpdatedAt, arg.ID)
-	return err
-}
-
 const setUserSlot = `-- name: SetUserSlot :exec
 UPDATE users SET slot_id = ?, updated_at = ? WHERE id = ?
 `

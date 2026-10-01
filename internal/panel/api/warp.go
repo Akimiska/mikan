@@ -65,8 +65,8 @@ type warpPatchInput struct {
 func (h *handlers) registerWarp() {
 	tags := []string{"node"}
 	huma.Register(h.api, huma.Operation{OperationID: "get-node-warp", Method: http.MethodGet, Path: "/api/v1/nodes/{id}/warp", Summary: "WARP ноды", Tags: tags}, h.getWarp)
-	huma.Register(h.api, huma.Operation{OperationID: "register-node-warp", Method: http.MethodPost, Path: "/api/v1/nodes/{id}/warp/register", Summary: "Зарегистрировать WARP для ноды в Cloudflare", Tags: tags}, h.registerNodeWarp)
-	huma.Register(h.api, huma.Operation{OperationID: "import-node-warp", Method: http.MethodPost, Path: "/api/v1/nodes/{id}/warp/import", Summary: "Загрузить свой WireGuard-конфиг WARP", Tags: tags}, h.importNodeWarp)
+	huma.Register(h.api, huma.Operation{OperationID: "register-node-warp", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/warp/register", Summary: "Зарегистрировать WARP для ноды в Cloudflare", Tags: tags}, h.registerNodeWarp)
+	huma.Register(h.api, huma.Operation{OperationID: "import-node-warp", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/warp/import", Summary: "Загрузить свой WireGuard-конфиг WARP", Tags: tags}, h.importNodeWarp)
 	huma.Register(h.api, huma.Operation{OperationID: "update-node-warp", Method: http.MethodPatch, Path: "/api/v1/nodes/{id}/warp", Summary: "Включить WARP, списки доменов, ключ WARP+", Tags: tags}, h.patchWarp)
 	huma.Register(h.api, huma.Operation{OperationID: "delete-node-warp", Method: http.MethodDelete, Path: "/api/v1/nodes/{id}/warp", Summary: "Удалить WARP ноды", Tags: tags, DefaultStatus: http.StatusNoContent}, h.deleteWarp)
 }
@@ -85,6 +85,36 @@ func warpDetail(location string, err error) *huma.ErrorDetail {
 	return d
 }
 
+// warpUsers are the names of the node's inbounds that send all their traffic through WARP.
+func (h *handlers) warpUsers(ctx context.Context, nodeID int64) ([]string, error) {
+	ins, err := h.d.Store.Q.ListNodeInbounds(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, in := range ins {
+		if in.Outbound == "warp" {
+			names = append(names, in.Name)
+		}
+	}
+	return names, nil
+}
+
+// warpUnused refuses to take WARP away from a node while inbounds go out through it:
+// without it they would leave directly, from the node's own address, which is what the
+// admin put them behind WARP to avoid. The same rule keeps a cascade from going direct
+// when its exit is gone (node_in_use).
+func (h *handlers) warpUnused(ctx context.Context, nodeID int64) error {
+	names, err := h.warpUsers(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if len(names) > 0 {
+		return huma.Error409Conflict("warp_in_use", &huma.ErrorDetail{Location: "path.id", Message: "warp_in_use_inbounds", Value: strings.Join(names, ", ")})
+	}
+	return nil
+}
+
 func (h *handlers) warpView(ctx context.Context, nodeID int64, check bool) (WarpView, error) {
 	v := WarpView{Routes: []string{}, Inbounds: []string{}}
 	w, err := h.d.Store.Q.GetNodeWarp(ctx, nodeID)
@@ -97,14 +127,8 @@ func (h *handlers) warpView(ctx context.Context, nodeID int64, check bool) (Warp
 	v.Configured, v.Enabled, v.Source, v.Plus = true, w.Enabled != 0, w.Source, w.Plus != 0
 	v.Endpoint, v.IPv4, v.IPv6 = w.Endpoint, w.Ipv4, w.Ipv6
 	_ = json.Unmarshal([]byte(w.Routes), &v.Routes)
-	ins, err := h.d.Store.Q.ListInbounds(ctx)
-	if err != nil {
+	if v.Inbounds, err = h.warpUsers(ctx, nodeID); err != nil {
 		return v, err
-	}
-	for _, in := range ins {
-		if in.NodeID == nodeID && in.Outbound == "warp" {
-			v.Inbounds = append(v.Inbounds, in.Name)
-		}
 	}
 	if check && v.Enabled && h.d.Nodes != nil {
 		if s, err := h.d.Nodes.Warp(ctx, nodeID); err == nil && s.Configured {
@@ -196,6 +220,11 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 	enabled, routes := w.Enabled, w.Routes
 	if b.Enabled != nil {
 		enabled = flag(*b.Enabled)
+		if enabled == 0 && w.Enabled != 0 {
+			if err := h.warpUnused(ctx, in.ID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if b.Routes != nil {
 		rs, bad := warp.ParseRoutes(*b.Routes)
@@ -230,8 +259,15 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 }
 
 func (h *handlers) deleteWarp(ctx context.Context, in *nodeIDInput) (*struct{}, error) {
-	if err := h.d.Store.Q.DeleteNodeWarp(ctx, in.ID); err != nil {
+	if err := h.warpUnused(ctx, in.ID); err != nil {
 		return nil, err
+	}
+	n, err := h.d.Store.Q.DeleteNodeWarp(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, huma.Error404NotFound("not_found")
 	}
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.warp.delete", "node", strconv.FormatInt(in.ID, 10), nil)

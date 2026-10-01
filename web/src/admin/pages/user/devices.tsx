@@ -41,9 +41,9 @@ export function DevicesSection({ u }: { u: User }) {
         <ul className="flex flex-col gap-2">
           {list.slice(0, 8).map((d) => (
             <li key={d.ip} className="panel-soft grid grid-cols-[36px_minmax(0,1fr)] items-center gap-3 p-2">
-              <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] text-[var(--ink-600)]">{d.client.toLowerCase().includes("windows") ? <Laptop size={18} /> : <Smartphone size={18} />}</span>
+              <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] text-[var(--ink-600)]"><Smartphone size={18} /></span>
               <div className="min-w-0">
-                <div className="text-[13px] font-medium">{d.client || t("userDrawer.device")}</div>
+                <div className="text-[13px] font-medium">{t("userDrawer.device")}</div>
                 <div className="text-xs text-[var(--ink-500)]">
                   <span className="mono">{maskIP(d.ip)}</span> · {d.online ? <span className="text-[var(--leaf-700)]">{t("users.onlineNow")}</span> : ago(d.last_seen)}
                 </div>

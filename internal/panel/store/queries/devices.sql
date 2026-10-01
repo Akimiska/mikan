@@ -31,9 +31,6 @@ UPDATE users SET slot_id = ?, updated_at = ? WHERE id = ?;
 -- name: SetUserUnboundAt :exec
 UPDATE users SET unbound_at = ? WHERE id = ?;
 
--- name: SetUserBillingDay :exec
-UPDATE users SET billing_day = ?, updated_at = ? WHERE id = ?;
-
 -- name: ListDeviceSlots :many
 -- Slots of bound devices with an id: keys of their own, profile fetches of their own.
 SELECT s.name AS slot_name, d.user_id, d.last_seen FROM bound_devices d JOIN slots s ON s.id = d.slot_id WHERE d.hwid != '';

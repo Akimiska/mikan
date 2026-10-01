@@ -279,102 +279,107 @@ var ErrBadBillingDay = errors.New("bad_billing_day")
 
 func (s *Users) Update(ctx context.Context, id int64, p Patch) (db.User, error) {
 	var out db.User
-	err := s.st.Tx(ctx, func(q *db.Queries) error {
-		u, err := q.GetUser(ctx, id)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		now := s.now().Unix()
-		par := db.UpdateUserParams{
-			Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID,
-			TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, ResetStrategy: u.ResetStrategy,
-			PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart, ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds,
-			BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID,
-		}
-		if p.TariffID != nil {
-			t, err := q.GetTariff(ctx, *p.TariffID)
-			if errors.Is(err, sql.ErrNoRows) || (err == nil && t.Archived != 0) {
-				return fmt.Errorf("tariff %d: %w", *p.TariffID, ErrNotFound)
-			}
-			if err != nil {
-				return err
-			}
-			par.TariffID = sql.NullInt64{Int64: t.ID, Valid: true}
-			par.TrafficLimit, par.DeviceLimit, par.ResetStrategy, par.BillingDay = t.TrafficLimit, t.DeviceLimit, t.ResetStrategy, t.BillingDay
-			par.ExpiresAt = tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay})
-			if err := ApplyTariffPools(ctx, q, u.ID, t.ID); err != nil {
-				return err
-			}
-		}
-		switch {
-		case p.ClearBillingDay:
-			par.BillingDay = sql.NullInt64{}
-		case p.BillingDay != nil:
-			if !ValidBillingDay(*p.BillingDay) {
-				return ErrBadBillingDay
-			}
-			par.BillingDay = sql.NullInt64{Int64: *p.BillingDay, Valid: true}
-		}
-		if p.Name != nil {
-			par.Name = strings.TrimSpace(*p.Name)
-		}
-		if p.Contact != nil {
-			par.Contact = strings.TrimSpace(*p.Contact)
-		}
-		if p.Note != nil {
-			par.Note = *p.Note
-		}
-		if p.Tags != nil {
-			if par.Tags, err = encodeTags(*p.Tags); err != nil {
-				return err
-			}
-		}
-		if p.Disabled != nil {
-			par.Status = "active"
-			if *p.Disabled {
-				par.Status = "disabled"
-			}
-		}
-		switch {
-		case p.ClearTrafficLimit:
-			par.TrafficLimit = sql.NullInt64{}
-		case p.TrafficLimit != nil:
-			par.TrafficLimit = sql.NullInt64{Int64: *p.TrafficLimit, Valid: true}
-		}
-		switch {
-		case p.ClearDeviceLimit:
-			par.DeviceLimit = sql.NullInt64{}
-		case p.DeviceLimit != nil:
-			par.DeviceLimit = sql.NullInt64{Int64: *p.DeviceLimit, Valid: true}
-		}
-		switch {
-		case p.ClearExpiry:
-			par.ExpiresAt = sql.NullInt64{}
-		case p.ExpiresAt != nil:
-			par.ExpiresAt = sql.NullInt64{Int64: p.ExpiresAt.Unix(), Valid: true}
-		}
-		if p.Extend != nil {
-			par.ExpiresAt = sql.NullInt64{Int64: p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay).Unix(), Valid: true}
-			par.Status = "active"
-		}
-		if p.Inbounds != nil {
-			if len(*p.Inbounds) == 0 {
-				par.Inbounds = sql.NullString{}
-			} else {
-				raw, _ := json.Marshal(*p.Inbounds)
-				par.Inbounds = sql.NullString{String: string(raw), Valid: true}
-			}
-		}
-		out, err = q.UpdateUser(ctx, par)
+	err := s.st.Tx(ctx, func(q *db.Queries) (err error) {
+		out, err = s.updateOn(ctx, q, id, p)
 		return err
 	})
 	if err == nil {
 		s.changes.PoliciesChanged()
 	}
 	return out, err
+}
+
+// updateOn applies a patch on q's transaction; the caller tells the nodes.
+func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) (db.User, error) {
+	u, err := q.GetUser(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.User{}, ErrNotFound
+	}
+	if err != nil {
+		return db.User{}, err
+	}
+	now := s.now().Unix()
+	par := db.UpdateUserParams{
+		Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID,
+		TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, ResetStrategy: u.ResetStrategy,
+		PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart, ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds,
+		BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID,
+	}
+	if p.TariffID != nil {
+		t, err := q.GetTariff(ctx, *p.TariffID)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && t.Archived != 0) {
+			return db.User{}, fmt.Errorf("tariff %d: %w", *p.TariffID, ErrNotFound)
+		}
+		if err != nil {
+			return db.User{}, err
+		}
+		par.TariffID = sql.NullInt64{Int64: t.ID, Valid: true}
+		par.TrafficLimit, par.DeviceLimit, par.ResetStrategy, par.BillingDay = t.TrafficLimit, t.DeviceLimit, t.ResetStrategy, t.BillingDay
+		par.ExpiresAt = tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay})
+		if err := ApplyTariffPools(ctx, q, u.ID, t.ID); err != nil {
+			return db.User{}, err
+		}
+	}
+	switch {
+	case p.ClearBillingDay:
+		par.BillingDay = sql.NullInt64{}
+	case p.BillingDay != nil:
+		if !ValidBillingDay(*p.BillingDay) {
+			return db.User{}, ErrBadBillingDay
+		}
+		par.BillingDay = sql.NullInt64{Int64: *p.BillingDay, Valid: true}
+	}
+	if p.Name != nil {
+		par.Name = strings.TrimSpace(*p.Name)
+	}
+	if p.Contact != nil {
+		par.Contact = strings.TrimSpace(*p.Contact)
+	}
+	if p.Note != nil {
+		par.Note = *p.Note
+	}
+	if p.Tags != nil {
+		if par.Tags, err = encodeTags(*p.Tags); err != nil {
+			return db.User{}, err
+		}
+	}
+	if p.Disabled != nil {
+		par.Status = "active"
+		if *p.Disabled {
+			par.Status = "disabled"
+		}
+	}
+	switch {
+	case p.ClearTrafficLimit:
+		par.TrafficLimit = sql.NullInt64{}
+	case p.TrafficLimit != nil:
+		par.TrafficLimit = sql.NullInt64{Int64: *p.TrafficLimit, Valid: true}
+	}
+	switch {
+	case p.ClearDeviceLimit:
+		par.DeviceLimit = sql.NullInt64{}
+	case p.DeviceLimit != nil:
+		par.DeviceLimit = sql.NullInt64{Int64: *p.DeviceLimit, Valid: true}
+	}
+	switch {
+	case p.ClearExpiry:
+		par.ExpiresAt = sql.NullInt64{}
+	case p.ExpiresAt != nil:
+		par.ExpiresAt = sql.NullInt64{Int64: p.ExpiresAt.Unix(), Valid: true}
+	}
+	if p.Extend != nil {
+		par.ExpiresAt = sql.NullInt64{Int64: p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay).Unix(), Valid: true}
+		par.Status = "active"
+	}
+	if p.Inbounds != nil {
+		if len(*p.Inbounds) == 0 {
+			par.Inbounds = sql.NullString{}
+		} else {
+			raw, _ := json.Marshal(*p.Inbounds)
+			par.Inbounds = sql.NullString{String: string(raw), Valid: true}
+		}
+	}
+	return q.UpdateUser(ctx, par)
 }
 
 // Extend adds days to the current expiry, or to now if the term already ended.
@@ -396,15 +401,22 @@ func (s *Users) ExtendPeriod(ctx context.Context, id int64) (db.User, error) {
 
 // ResetTraffic starts a new traffic period now (see StartPeriod).
 func (s *Users) ResetTraffic(ctx context.Context, id int64) (db.User, error) {
-	now := s.now()
-	err := s.st.Tx(ctx, func(q *db.Queries) error {
-		return StartPeriod(ctx, q, id, now.Unix(), now)
-	})
+	err := s.st.Tx(ctx, func(q *db.Queries) error { return s.resetOn(ctx, q, id) })
 	if err != nil {
 		return db.User{}, err
 	}
 	s.changes.PoliciesChanged()
 	return s.Get(ctx, id)
+}
+
+func (s *Users) resetOn(ctx context.Context, q *db.Queries, id int64) error {
+	if _, err := q.GetUser(ctx, id); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	now := s.now()
+	return StartPeriod(ctx, q, id, now.Unix(), now)
 }
 
 // Reissue gives the user a new slot and subscription token. The old credentials stop
@@ -456,29 +468,88 @@ func (s *Users) reissue(ctx context.Context, id int64) error {
 }
 
 func (s *Users) Delete(ctx context.Context, id int64) error {
-	now := s.now().Unix()
-	err := s.st.Tx(ctx, func(q *db.Queries) error {
-		u, err := q.GetUser(ctx, id)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		if u.SlotID.Valid {
-			if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: u.SlotID.Int64}); err != nil {
-				return err
-			}
-		}
-		if err := burnDevices(ctx, q, id, now); err != nil {
-			return err
-		}
-		return q.DeleteUser(ctx, id)
-	})
+	err := s.st.Tx(ctx, func(q *db.Queries) error { return s.deleteOn(ctx, q, id) })
 	if err == nil {
 		s.changes.PoliciesChanged()
 	}
 	return err
+}
+
+func (s *Users) deleteOn(ctx context.Context, q *db.Queries, id int64) error {
+	now := s.now().Unix()
+	u, err := q.GetUser(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if u.SlotID.Valid {
+		if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: u.SlotID.Int64}); err != nil {
+			return err
+		}
+	}
+	if err := burnDevices(ctx, q, id, now); err != nil {
+		return err
+	}
+	return q.DeleteUser(ctx, id)
+}
+
+// Bulk actions of the admin's list.
+const (
+	BulkExtend  = "extend"
+	BulkReset   = "reset"
+	BulkDisable = "disable"
+	BulkEnable  = "enable"
+	BulkDelete  = "delete"
+)
+
+// Bulk does one action to every user of ids in one transaction: all of them, or, if one
+// fails, none (half a list applied, and no record of it, was what a loop of single
+// changes left behind). A user that is gone is skipped; a user listed twice is done once.
+// days is for BulkExtend (0: one paid period). It returns how many users changed.
+func (s *Users) Bulk(ctx context.Context, ids []int64, action string, days int64) (int, error) {
+	done := 0
+	err := s.st.Tx(ctx, func(q *db.Queries) error {
+		done = 0
+		seen := make(map[int64]bool, len(ids))
+		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			var err error
+			switch action {
+			case BulkExtend:
+				ext := Extension{Days: days, Period: days <= 0}
+				_, err = s.updateOn(ctx, q, id, Patch{Extend: &ext})
+			case BulkReset:
+				err = s.resetOn(ctx, q, id)
+			case BulkDisable, BulkEnable:
+				off := action == BulkDisable
+				_, err = s.updateOn(ctx, q, id, Patch{Disabled: &off})
+			case BulkDelete:
+				err = s.deleteOn(ctx, q, id)
+			default:
+				return fmt.Errorf("bulk action %q", action)
+			}
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			done++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	if done > 0 {
+		s.changes.PoliciesChanged()
+	}
+	return done, nil
 }
 
 func encodeTags(tags []string) (string, error) {

@@ -61,7 +61,6 @@ type Device struct {
 	Ip        string
 	FirstSeen int64
 	LastSeen  int64
-	Client    string
 }
 
 type Inbound struct {

@@ -451,7 +451,7 @@ function SubPage() {
 
 function Shell({ brand, children }: { brand?: string; children: React.ReactNode }) {
   return (
-    <main className="mx-auto flex max-w-[440px] flex-col gap-3 px-4 pt-6 pb-10">
+    <main className="calm-glass mx-auto flex max-w-[440px] flex-col gap-3 px-4 pt-[calc(24px+env(safe-area-inset-top))] pb-[calc(40px+env(safe-area-inset-bottom))]">
       <div className="flex items-center gap-2 px-1 pb-1">
         <span className="font-display grid h-7 w-7 place-items-center rounded-[9px] bg-[var(--ink-900)] text-[13px] font-semibold text-white">{(brand ?? "V")[0]}</span>
         <span className="font-display text-[15px] font-semibold tracking-tight">{brand ?? ""}</span>
@@ -466,7 +466,7 @@ function Shell({ brand, children }: { brand?: string; children: React.ReactNode 
 void initI18n(subDicts).then(() =>
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <Atmosphere />
+      <Atmosphere calm />
       <SubPage />
     </StrictMode>,
   ),

@@ -20,20 +20,23 @@ import (
 )
 
 type InboundView struct {
-	ID          int64     `json:"id"`
-	NodeID      int64     `json:"node_id"`
-	Name        string    `json:"name"`
-	Preset      string    `json:"preset"`
-	Title       string    `json:"title"`
-	Type        string    `json:"type" doc:"Тип листенера mihomo"`
-	Network     string    `json:"network"`
-	Port        string    `json:"port"`
-	Enabled     bool      `json:"enabled"`
-	DisplayName string    `json:"display_name" doc:"Своё имя в подписке; пусто — имя по умолчанию"`
-	SubName     string    `json:"sub_name" doc:"Имя, которое увидит клиент"`
-	Config      string    `json:"config" doc:"Шаблон листенера (YAML)"`
-	Dest        string    `json:"dest,omitempty" doc:"Сайт для маскировки REALITY"`
-	ServerNames []string  `json:"server_names,omitempty"`
+	ID          int64    `json:"id"`
+	NodeID      int64    `json:"node_id"`
+	Name        string   `json:"name"`
+	Preset      string   `json:"preset"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type" doc:"Тип листенера mihomo"`
+	Network     string   `json:"network"`
+	Port        string   `json:"port"`
+	Enabled     bool     `json:"enabled"`
+	DisplayName string   `json:"display_name" doc:"Своё имя в подписке; пусто — имя по умолчанию"`
+	SubName     string   `json:"sub_name" doc:"Имя, которое увидит клиент"`
+	Config      string   `json:"config" doc:"Шаблон листенера (YAML)"`
+	Dest        string   `json:"dest,omitempty" doc:"Сайт для маскировки REALITY"`
+	ServerNames []string `json:"server_names,omitempty"`
+	// Fingerprint is the inbound's own uTLS profile, "" for the panel's default; absent when
+	// its clients do not dial through uTLS (QUIC protocols, shared keys).
+	Fingerprint *string   `json:"fingerprint,omitempty" doc:"Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек"`
 	Status      string    `json:"status" enum:"ok,error,unknown"`
 	Error       string    `json:"error,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -42,6 +45,7 @@ type InboundView struct {
 	AutoPort    bool      `json:"auto_port" doc:"Панель сама переносит подключение на другой порт, если его блокируют (и включено в настройках)"`
 	AutoSNI     bool      `json:"auto_sni" doc:"Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)"`
 	Auto        AutoView  `json:"auto"`
+	Outbound    string    `json:"outbound" enum:"direct,warp" doc:"Выход в интернет: напрямую с сервера или через WARP ноды"`
 }
 
 // AutoView is what the automatic moves see and last did for an inbound.
@@ -85,10 +89,12 @@ type patchInboundInput struct {
 		Enabled     *bool   `json:"enabled,omitempty"`
 		Dest        *string `json:"dest,omitempty" maxLength:"255"`
 		ServerName  *string `json:"server_name,omitempty" maxLength:"253" doc:"SNI для клиентов, если dest — IP (цель из подбора соседей)"`
+		Fingerprint *string `json:"fingerprint,omitempty" maxLength:"16" doc:"Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек"`
 		DisplayName *string `json:"display_name,omitempty" maxLength:"200" doc:"Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию"`
 		Config      *string `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
 		AutoPort    *bool   `json:"auto_port,omitempty"`
 		AutoSNI     *bool   `json:"auto_sni,omitempty"`
+		Outbound    *string `json:"outbound,omitempty" enum:"direct,warp" doc:"Выход в интернет: напрямую или через WARP ноды"`
 	}
 }
 
@@ -139,7 +145,7 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 	info, _ := presets.Get(in.Preset)
 	v := InboundView{ID: in.ID, NodeID: in.NodeID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
 		DisplayName: in.DisplayName, SubName: subs.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: time.Unix(in.UpdatedAt, 0).UTC(),
-		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0}
+		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0, Outbound: in.Outbound}
 	if e, ok := last[in.ID]; ok {
 		v.Auto.Last = &AutoEvent{Kind: e.Kind, Old: e.OldValue, New: e.NewValue, Reason: e.Reason, At: time.Unix(e.CreatedAt, 0).UTC()}
 	}
@@ -164,6 +170,10 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 			v.Apps = append(v.Apps, string(f))
 		}
 		v.Dest, v.ServerNames = presets.Dest(t)
+		if proto.UsesFingerprint(t) {
+			fp := t.Ext().Client.Fingerprint
+			v.Fingerprint = &fp
+		}
 		if in.Preset == presets.Custom {
 			v.Title = t.Type()
 		}
@@ -211,6 +221,10 @@ func (h *handlers) checkConfig(ctx context.Context, node db.Node, config, port s
 			}
 		}
 		err = proto.Validate(t, proto.Options{SelfStealPort: panelPort})
+		// Checked here, not in proto.Validate: nodes keep applying templates saved before.
+		if fp := t.Ext().Client.Fingerprint; err == nil && fp != "" && !proto.ValidFingerprint(fp) {
+			err = &proto.Error{Code: "config_fingerprint", Field: "mikan.client.fingerprint", Detail: fp}
+		}
 		if err == nil && h.d.Nodes != nil {
 			err = h.d.Nodes.Validate(ctx, node.ID, nodeapi.ValidateRequest{Inbound: nodeapi.Inbound{Name: "validate", Port: port, Config: t.JSON()}, SelfStealPort: panelPort})
 			// The node validates again on apply; when it is down, saving still works.
@@ -329,7 +343,16 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		autoSNI = flag(*b.AutoSNI)
 	}
 	autoChanged := autoPort != row.AutoPort || autoSNI != row.AutoSni
-	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.DisplayName == nil {
+	// The way out is the node's business: clients get nothing new either.
+	if b.Outbound != nil && *b.Outbound != row.Outbound {
+		if err := h.d.Store.Q.SetInboundOutbound(ctx, db.SetInboundOutboundParams{Outbound: *b.Outbound, ID: row.ID}); err != nil {
+			return nil, err
+		}
+		row.Outbound = *b.Outbound
+		h.d.Changes.SlotsChanged()
+		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.outbound", "inbound", row.Name, map[string]any{"outbound": row.Outbound})
+	}
+	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.Fingerprint == nil && b.DisplayName == nil {
 		// Only the automatic-move switches: clients get nothing new, so updated_at stays
 		// and the block detector keeps trusting their profiles.
 		if autoChanged {
@@ -373,6 +396,23 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		var pe *proto.Error
 		if errors.As(err, &pe) {
 			return nil, huma.Error422UnprocessableEntity("bad_dest", &huma.ErrorDetail{Location: "body.dest", Message: pe.Code})
+		}
+		if err != nil {
+			return nil, err
+		}
+		config = proto.Marshal(t)
+	}
+	if b.Fingerprint != nil {
+		t, err := proto.Parse(config)
+		if err == nil && !proto.UsesFingerprint(t) {
+			err = &proto.Error{Code: "fingerprint_no_tls", Field: "mikan.client.fingerprint"}
+		}
+		if err == nil {
+			err = proto.SetFingerprint(t, strings.TrimSpace(*b.Fingerprint))
+		}
+		var pe *proto.Error
+		if errors.As(err, &pe) {
+			return nil, huma.Error422UnprocessableEntity("bad_fingerprint", &huma.ErrorDetail{Location: "body.fingerprint", Message: pe.Code})
 		}
 		if err != nil {
 			return nil, err
@@ -438,7 +478,7 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		return nil, err
 	}
 	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil,
+	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil || b.Fingerprint != nil,
 		"auto_port": row.AutoPort != 0, "auto_sni": row.AutoSni != 0})
 	last, err := h.lastAuto(ctx)
 	if err != nil {

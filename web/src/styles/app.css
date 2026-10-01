@@ -287,6 +287,28 @@
   .banner.warn { background: var(--honey-50); color: var(--honey-600); border: 1px solid rgba(168, 111, 8, 0.2); }
 
   .reveal { animation: rise 0.6s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 45ms); }
+
+  /* API reference */
+  .method { display: inline-flex; align-items: center; justify-content: center; min-width: 56px; height: 24px; padding: 0 8px; border-radius: 8px; font: 600 11px/1 var(--font-mono-stack); letter-spacing: 0.02em; }
+  .method.get { background: var(--leaf-50); color: var(--leaf-700); }
+  .method.post { background: var(--mikan-50); color: var(--mikan-700); }
+  .method.patch, .method.put { background: var(--lagoon-50); color: var(--lagoon-500); }
+  .method.delete { background: var(--berry-50); color: var(--berry-600); }
+  .api-op { border-radius: 16px; border: 1px solid var(--hairline); background: rgba(255, 255, 255, 0.55); transition: background-color 0.2s, box-shadow 0.2s; }
+  .api-op[open] { background: #fff; box-shadow: var(--shadow-sm); }
+  .api-op > summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; cursor: pointer; list-style: none; border-radius: 16px; }
+  .api-op > summary::-webkit-details-marker { display: none; }
+  .api-op > summary:hover { background: var(--hover); }
+  .api-op > summary:focus-visible { outline: 2px solid var(--mikan-500); outline-offset: 2px; }
+  .api-op-body { padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 16px; }
+  .api-h { font-size: 12px; font-weight: 600; color: var(--ink-500); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+  .schema { font-size: 12px; }
+  .schema-row { display: grid; grid-template-columns: minmax(120px, 0.4fr) minmax(0, 1fr); gap: 12px; padding: 8px 0; border-top: 1px solid var(--hairline); }
+  .schema-row:first-child { border-top: none; }
+  .schema-nest { margin-top: 4px; padding-left: 12px; border-left: 2px solid var(--hairline); }
+  .code-block { position: relative; border-radius: 12px; background: var(--ink-900); color: #e7e9ed; padding: 12px 48px 12px 12px; font: 12px/1.6 var(--font-mono-stack); white-space: pre-wrap; word-break: break-all; max-height: 360px; overflow: auto; }
+  .code-block .icon-btn { position: absolute; top: 4px; right: 4px; color: #e7e9ed; }
+  .code-block .icon-btn:hover { background: rgba(255, 255, 255, 0.1); }
 }
 
 @keyframes drift-a { to { transform: translate3d(5vw, 4vw, 0) scale(1.08); } }

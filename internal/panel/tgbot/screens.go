@@ -22,6 +22,21 @@ import (
 func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice string) (string, *Keyboard) {
 	w := wordsFor(cfg.Lang)
 	list, u, ok := b.subs(ctx, chat)
+	cmd, arg, _ := strings.Cut(data, ":")
+	// Buying a new subscription works with or without one.
+	if b.canBuyNew(ctx) {
+		home := []Button{{Text: w.back, CallbackData: "m"}}
+		switch cmd {
+		case "b":
+			return b.shopList(ctx, w, w.buyTitle, "tn", notice, home)
+		case "tn":
+			id, _ := strconv.ParseInt(arg, 10, 64)
+			return b.shopTariff(ctx, w, id, "pn", []Button{{Text: w.back, CallbackData: "b"}})
+		case "pn":
+			id, _, _ := strings.Cut(arg, ":")
+			return b.shopInvoice(ctx, w, chat, 0, arg, []Button{{Text: w.back, CallbackData: "tn:" + id}})
+		}
+	}
 	if !ok {
 		return b.welcome(ctx, cfg, w, notice)
 	}
@@ -34,8 +49,13 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		}
 		return s
 	}
-	cmd, arg, _ := strings.Cut(data, ":")
 	switch cmd {
+	case "t":
+		id, _ := strconv.ParseInt(arg, 10, 64)
+		return b.shopTariff(ctx, w, id, "py", []Button{{Text: w.back, CallbackData: "r"}})
+	case "py":
+		id, _, _ := strings.Cut(arg, ":")
+		return b.shopInvoice(ctx, w, chat, u.ID, arg, []Button{{Text: w.back, CallbackData: "t:" + id}})
 	case "s":
 		lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.subTitle, u.Name)) + "</b>", html.EscapeString(vars["state"]), "",
 			"📅 " + html.EscapeString(vars["term"]), "📦 " + html.EscapeString(vars["traffic"])}
@@ -55,6 +75,14 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		}
 		return withNotice(text), &Keyboard{append(rows, back)}
 	case "r":
+		if offers, _ := b.offers(ctx); len(offers) > 0 {
+			text, kb := b.shopList(ctx, w, fmt.Sprintf(w.renewTitle, u.Name), "t", notice, nil)
+			if sup := b.supportURL(ctx); sup != "" {
+				kb.InlineKeyboard = append(kb.InlineKeyboard, []Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
+			}
+			kb.InlineKeyboard = append(kb.InlineKeyboard, back)
+			return text, kb
+		}
 		rows := [][]Button{}
 		if sup := b.supportURL(ctx); sup != "" {
 			rows = append(rows, []Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
@@ -87,6 +115,9 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, notice string) 
 		text = html.EscapeString(notice) + "\n\n" + text
 	}
 	var rows [][]Button
+	if b.canBuyNew(ctx) {
+		rows = append(rows, []Button{{Text: w.buy, CallbackData: "b"}})
+	}
 	if sup := b.supportURL(ctx); sup != "" {
 		rows = append(rows, []Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
 	}

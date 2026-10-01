@@ -1,0 +1,227 @@
+package tgbot
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"html"
+	"strconv"
+	"strings"
+	"time"
+
+	"mikan/internal/panel/billing"
+	"mikan/internal/panel/store/db"
+)
+
+// Callback data of the shop: b buy a new subscription, tn:<tariff> its tariff, pn:<tariff>:<p>
+// pay for it; r renew the shown one, t:<tariff>, py:<tariff>:<p>. <p> is s (Stars),
+// y (YooKassa) or c (CryptoBot).
+
+var providerCodes = map[string]string{"s": billing.Stars, "y": billing.YooKassa, "c": billing.CryptoBot}
+
+// offers lists what the chat can buy; nil without payments.
+func (b *Bot) offers(ctx context.Context) ([]billing.Offer, billing.Available) {
+	if b.d.Billing == nil {
+		return nil, billing.Available{}
+	}
+	o, av, err := b.d.Billing.Offers(ctx)
+	if err != nil {
+		b.d.Log.Warn("telegram: offers", "err", err)
+		return nil, av
+	}
+	return o, av
+}
+
+// canBuyNew: people without a subscription may buy one here.
+func (b *Bot) canBuyNew(ctx context.Context) bool {
+	if b.d.Billing == nil || !b.d.Billing.Config(ctx).AllowNew {
+		return false
+	}
+	o, _ := b.offers(ctx)
+	return len(o) > 0
+}
+
+// price: "⭐ 150" or "199 ₽" / "199,50 ₽".
+func (w *words) price(amount int64, currency string) string {
+	if currency == "XTR" {
+		return "⭐ " + strconv.FormatInt(amount, 10)
+	}
+	s := strconv.FormatInt(amount/100, 10)
+	if k := amount % 100; k != 0 {
+		sep := ","
+		if w == &en {
+			sep = "."
+		}
+		s += fmt.Sprintf("%s%02d", sep, k)
+	}
+	return s + " ₽"
+}
+
+// shopList: the tariffs on sale as buttons; prefix is "t" (renew) or "tn" (new).
+func (b *Bot) shopList(ctx context.Context, w *words, title, prefix, notice string, back []Button) (string, *Keyboard) {
+	offers, _ := b.offers(ctx)
+	lang := b.lang(ctx)
+	lines := []string{"<b>" + html.EscapeString(title) + "</b>", ""}
+	if notice != "" {
+		lines = append([]string{html.EscapeString(notice), ""}, lines...)
+	}
+	rows := [][]Button{}
+	for _, o := range offers {
+		lines = append(lines, "• <b>"+html.EscapeString(o.Tariff.Name)+"</b> — "+html.EscapeString(billing.Describe(o.Tariff, lang)))
+		rows = append(rows, []Button{{Text: o.Tariff.Name + " · " + w.cheapest(o), CallbackData: prefix + ":" + strconv.FormatInt(o.Tariff.ID, 10)}})
+	}
+	if len(offers) == 0 {
+		lines = append(lines, html.EscapeString(w.payUnavailable))
+	}
+	return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
+}
+
+// cheapest is the price a list shows: rubles when sold for them, else Stars.
+func (w *words) cheapest(o billing.Offer) string {
+	if o.Rub > 0 {
+		return w.price(o.Rub, "RUB")
+	}
+	return w.price(o.Stars, "XTR")
+}
+
+// shopTariff: one tariff and a button per way to pay; prefix "py" (renew) or "pn" (new).
+func (b *Bot) shopTariff(ctx context.Context, w *words, id int64, prefix string, back []Button) (string, *Keyboard) {
+	offers, av := b.offers(ctx)
+	for _, o := range offers {
+		if o.Tariff.ID != id {
+			continue
+		}
+		text := "<b>" + html.EscapeString(o.Tariff.Name) + "</b>\n" + html.EscapeString(billing.Describe(o.Tariff, b.lang(ctx))) + "\n\n" + w.payHow
+		arg := strconv.FormatInt(id, 10) + ":"
+		rows := [][]Button{}
+		if o.Stars > 0 {
+			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payStars, w.price(o.Stars, "XTR")), CallbackData: prefix + ":" + arg + "s"}})
+		}
+		if o.Rub > 0 && av.YooKassa {
+			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCard, w.price(o.Rub, "RUB")), CallbackData: prefix + ":" + arg + "y"}})
+		}
+		if o.Rub > 0 && av.CryptoBot {
+			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCrypto, w.price(o.Rub, "RUB")), CallbackData: prefix + ":" + arg + "c"}})
+		}
+		return text, &Keyboard{append(rows, back)}
+	}
+	return html.EscapeString(w.notForSale), &Keyboard{[][]Button{back}}
+}
+
+// shopInvoice opens the invoice and shows its pay button. It runs when the chat's screen
+// is drawn, off the update loop: the provider may take seconds to answer.
+func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg string, back []Button) (string, *Keyboard) {
+	idStr, code, _ := strings.Cut(arg, ":")
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+	provider, ok := providerCodes[code]
+	if !ok || b.d.Billing == nil {
+		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
+	}
+	p, err := b.d.Billing.Invoice(ctx, billing.InvoiceRequest{TgID: chat, UserID: userID, TariffID: id, Provider: provider})
+	if err != nil {
+		return html.EscapeString(w.payError(err)), &Keyboard{[][]Button{back}}
+	}
+	done := w.payNew
+	if userID != 0 {
+		done = w.payRenew
+	}
+	text := fmt.Sprintf(w.invoice, html.EscapeString(p.TariffName), html.EscapeString(w.price(p.Amount, p.Currency)), done)
+	return text, &Keyboard{[][]Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
+}
+
+func (w *words) payError(err error) string {
+	switch {
+	case errors.Is(err, billing.ErrNotForSale):
+		return w.notForSale
+	case errors.Is(err, billing.ErrTooMany):
+		return w.tooManyInvoices
+	case errors.Is(err, billing.ErrTooManySubs):
+		return fmt.Sprintf(w.linkLimit, MaxLinks)
+	case errors.Is(err, billing.ErrNotYours):
+		return w.noSub
+	}
+	return w.payUnavailable
+}
+
+func (b *Bot) lang(ctx context.Context) string { return b.Config(ctx).Lang }
+
+// preCheckout answers Telegram's last question before a Stars payment; it has ten seconds.
+func (b *Bot) preCheckout(ctx context.Context, c *Client, q *PreCheckoutQuery) {
+	if b.d.Billing == nil {
+		_ = c.AnswerPreCheckout(ctx, q.ID, false, wordsFor(b.lang(ctx)).payUnavailable)
+		return
+	}
+	err := b.d.Billing.PreCheckout(ctx, q.From.ID, q.InvoicePayload, q.Currency, q.TotalAmount)
+	reason := ""
+	if err != nil {
+		reason = wordsFor(b.lang(ctx)).payStale
+	}
+	if err := c.AnswerPreCheckout(ctx, q.ID, err == nil, reason); err != nil {
+		b.d.Log.Warn("telegram: pre-checkout answer", "err", errText(err))
+	}
+}
+
+// starsPaid takes Telegram's successful_payment: the billing applies it and calls Paid.
+func (b *Bot) starsPaid(ctx context.Context, m *Message) {
+	sp := m.SuccessfulPayment
+	if b.d.Billing == nil || m.From == nil {
+		return
+	}
+	if err := b.d.Billing.StarsPaid(ctx, m.From.ID, sp.InvoicePayload, sp.ChargeID, sp.Currency, sp.TotalAmount); err != nil {
+		b.d.Log.Error("telegram: stars payment", "err", err)
+	}
+}
+
+// InvoiceLink implements billing.Telegram.
+func (b *Bot) InvoiceLink(ctx context.Context, title, description, payload string, stars int64) (string, error) {
+	c := b.client.Load()
+	if c == nil {
+		return "", ErrOff
+	}
+	return c.InvoiceLink(ctx, title, description, payload, stars)
+}
+
+// RefundStars implements billing.Telegram.
+func (b *Bot) RefundStars(ctx context.Context, tgID int64, chargeID string) error {
+	c := b.client.Load()
+	if c == nil {
+		return ErrOff
+	}
+	return c.RefundStars(ctx, tgID, chargeID)
+}
+
+// BotURL implements billing.Telegram.
+func (b *Bot) BotURL(context.Context) string {
+	st := b.Status()
+	if !st.Running || st.Bot.Username == "" {
+		return ""
+	}
+	return "https://t.me/" + st.Bot.Username
+}
+
+// Paid implements billing.Telegram: the buyer learns the subscription is ready, with the
+// link for a new one, and gets a fresh menu that shows it.
+func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
+	out := b.out.Load()
+	if out == nil {
+		return
+	}
+	w := wordsFor(b.lang(ctx))
+	var text string
+	if created {
+		text = fmt.Sprintf(w.paidNew, html.EscapeString(u.Name), html.EscapeString(p.TariffName), html.EscapeString(b.subURL(ctx, u)))
+	} else {
+		until := w.forever
+		if u.ExpiresAt.Valid {
+			until = w.date(time.Unix(u.ExpiresAt.Int64, 0).UTC())
+		}
+		text = fmt.Sprintf(w.paidRenew, html.EscapeString(u.Name), html.EscapeString(until))
+	}
+	chat := p.TgID
+	_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: chat})
+	out.Notice(chat, func(ctx context.Context, c *Client) error {
+		_, err := c.Send(ctx, chat, text, nil, false)
+		return err
+	}, nil)
+	b.freshMenu(out, chat, "")
+}

@@ -25,13 +25,27 @@ var privateRules = []string{
 	"IP-CIDR6,fe80::/10,REJECT",
 }
 
-func rules(allowPrivate bool) []string {
+func rules(st nodeapi.DesiredState, allowPrivate bool) []string {
 	var r []string
 	if !allowPrivate {
 		r = append(r, privateRules...)
 	}
 	// Outbound SMTP from a shared VPN IP gets the address blacklisted within hours.
-	return append(r, "DST-PORT,25,REJECT", "MATCH,DIRECT")
+	r = append(r, "DST-PORT,25,REJECT")
+	r = append(r, warpRules(st)...)
+	return append(r, "MATCH,DIRECT")
+}
+
+// outbounds are the proxies besides DIRECT: WARP when the state has it.
+func outbounds(st nodeapi.DesiredState) ([]any, error) {
+	if st.Warp == nil {
+		return []any{}, nil
+	}
+	p, err := warpProxyConfig(st.Warp)
+	if err != nil {
+		return nil, err
+	}
+	return []any{p}, nil
 }
 
 // buildConfig renders the mihomo config as JSON, which mihomo's YAML parser accepts.
@@ -46,6 +60,10 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) ([
 		}
 		listeners = append(listeners, l)
 	}
+	proxies, err := outbounds(st)
+	if err != nil {
+		return nil, err
+	}
 	cfg := map[string]any{
 		"mode":              "rule",
 		"log-level":         "warning",
@@ -55,8 +73,8 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) ([
 		"find-process-mode": "off",
 		"profile":           map[string]any{"store-selected": false, "store-fake-ip": false},
 		"dns":               map[string]any{"enable": false},
-		"proxies":           []any{},
-		"rules":             rules(allowPrivate),
+		"proxies":           proxies,
+		"rules":             rules(st, allowPrivate),
 		"listeners":         listeners,
 	}
 	return json.Marshal(cfg)

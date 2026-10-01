@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/store"
@@ -31,6 +32,8 @@ type Config struct {
 	Direct     []string // the panel's and nodes' hosts: kept out of the tunnel
 	Groups     Groups
 	Routing    Routing
+	// Fingerprint is the default uTLS profile for inbounds that set none.
+	Fingerprint string
 	// Binding gives every device that sends its id keys of its own (domain.Devices);
 	// RequireHWID refuses apps that send none instead of seating them together.
 	Binding     bool
@@ -54,18 +57,22 @@ type Handler struct {
 	devices Binder
 	// trustProxy takes the client's IP from X-Forwarded-For (a reverse proxy in front).
 	trustProxy bool
-	tg         Telegram // nil: no bot
+	tg         Telegram         // nil: no bot
+	shop       *billing.Service // nil: nothing on sale
 }
 
 // Telegram is the bot's part in subscriptions: the page's "Open in Telegram" link and the
 // Mini App's sign-in.
 type Telegram interface {
 	LinkURL(ctx context.Context, userID int64) string
-	MiniAppUser(ctx context.Context, initData string) ([]db.User, error)
+	MiniAppUser(ctx context.Context, initData string) (int64, []db.User, error)
 }
 
 // SetTelegram plugs in the bot.
 func (h *Handler) SetTelegram(tg Telegram) { h.tg = tg }
+
+// SetShop takes payments: the providers' webhooks under /pay/ and the Mini App's shop.
+func (h *Handler) SetShop(s *billing.Service) { h.shop = s }
 
 func NewHandler(st *store.Store, cfg func(ctx context.Context) (Config, error), page http.Handler, now func() time.Time, devices Binder, trustProxy bool) *Handler {
 	return &Handler{st: st, cfg: cfg, page: page, now: now, devices: devices, trustProxy: trustProxy}
@@ -104,6 +111,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token, rest, _ := strings.Cut(p, "/")
 	if token == "tg" && h.tg != nil {
 		h.miniApp(w, r, rest)
+		return
+	}
+	if token == "pay" && h.shop != nil {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/" + rest
+		h.shop.Webhook().ServeHTTP(w, r2)
 		return
 	}
 	unbind := unbindPath.FindStringSubmatch(rest)
@@ -213,7 +226,7 @@ func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
+		_, users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
@@ -232,9 +245,88 @@ func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
 			out.Subs = append(out.Subs, sub{Token: u.SubToken, Name: u.Name})
 		}
 		_ = json.NewEncoder(w).Encode(out)
+	case r.Method == http.MethodPost && (rest == "shop" || rest == "pay") && sameOrigin(r) && h.shop != nil:
+		h.miniAppShop(w, r, rest)
 	default:
 		server.NotFound(w)
 	}
+}
+
+// miniAppShop: "shop" lists what the Telegram account can buy, "pay" opens an invoice
+// for a new subscription (token "") or one of the account's own.
+func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest string) {
+	var in struct {
+		InitData string `json:"init_data"`
+		TariffID int64  `json:"tariff_id"`
+		Provider string `json:"provider"`
+		Token    string `json:"token"`
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	fail := func(status int, code string) {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
+	}
+	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil {
+		fail(http.StatusBadRequest, "bad_request")
+		return
+	}
+	tgID, users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
+	if err != nil {
+		fail(http.StatusUnauthorized, "init_data")
+		return
+	}
+	ctx := r.Context()
+	if rest == "shop" {
+		offers, av, err := h.shop.Offers(ctx)
+		if err != nil {
+			fail(http.StatusInternalServerError, "internal")
+			return
+		}
+		cfg, _ := h.cfg(ctx)
+		type offer struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Stars       int64  `json:"stars,omitempty"`
+			Rub         int64  `json:"rub,omitempty"`
+		}
+		out := struct {
+			AllowNew  bool            `json:"allow_new"`
+			Providers map[string]bool `json:"providers"`
+			Offers    []offer         `json:"offers"`
+		}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{},
+			Providers: map[string]bool{billing.Stars: av.Stars, billing.YooKassa: av.YooKassa, billing.CryptoBot: av.CryptoBot}}
+		for _, o := range offers {
+			out.Offers = append(out.Offers, offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.Describe(o.Tariff, cfg.Lang), Stars: o.Stars, Rub: o.Rub})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+		return
+	}
+	var userID int64
+	if in.Token != "" {
+		for _, u := range users {
+			if u.SubToken == in.Token {
+				userID = u.ID
+			}
+		}
+		if userID == 0 {
+			fail(http.StatusForbidden, billing.ErrNotYours.Error())
+			return
+		}
+	}
+	p, err := h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: in.Provider})
+	if err != nil {
+		code := billing.ErrProviderOff.Error()
+		for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours} {
+			if errors.Is(err, e) {
+				code = e.Error()
+			}
+		}
+		fail(http.StatusConflict, code)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"url": p.PayUrl, "provider": p.Provider})
 }
 
 // forApp keeps the inbounds the app can use. Inbounds with one key for everyone go only
@@ -269,7 +361,7 @@ func (h *Handler) slotFor(r *http.Request, u db.User, cfg Config) (db.Slot, erro
 
 // profile lists what the user may use; slot is whose keys go in (zero for the page).
 func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Slot) (Profile, error) {
-	prof := Profile{Nodes: cfg.Nodes, Direct: cfg.Direct, Slot: slot}
+	prof := Profile{Nodes: cfg.Nodes, Direct: cfg.Direct, Slot: slot, Fingerprint: cfg.Fingerprint}
 	all, err := h.st.Q.ListInbounds(ctx)
 	if err != nil {
 		return prof, err

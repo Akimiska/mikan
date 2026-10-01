@@ -3,6 +3,19 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.4.0
+### en
+- Pick the TLS fingerprint clients send: Settings → Subscription sets the default for all protocols, and a protocol's settings can choose its own (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ or a random one). Links (`fp=`) and Clash profiles (`client-fingerprint`) follow the choice; Hysteria2 and TUIC have no such fingerprint.
+- API keys and an API reference: the new API page makes keys for scripts and integrations (`Authorization: Bearer`, read-only or full access, an optional expiry, revocable) and lists every method with its parameters, responses, curl examples and a "Try it" button for GET requests.
+- Selling subscriptions: mark a plan "On sale" with a price in Telegram Stars and/or rubles, turn payment methods on in the new Payments section (Telegram Stars needs only the bot; YooKassa for cards and SBP; CryptoBot for crypto), and people buy or renew in the bot and the Mini App. The panel creates or renews the subscription as soon as the provider confirms the payment and the bot sends the link. A renewal adds the plan's term after the current one and, unless switched off in Payments, starts a new traffic period. Payments has the history and Stars refunds.
+- Cloudflare WARP as a way out for chosen protocols (#4): Nodes → WARP registers a free account in one click (a WARP+ key is optional) or takes your own WireGuard config. A protocol's settings pick "Way out: WARP", and a list of domains and networks goes through WARP for every protocol of the node; the rest goes direct. When WARP is down its traffic does not fall back to the server's own address. The node shows the address sites see through WARP.
+
+### ru
+- Выбор TLS-отпечатка клиентов: в «Настройки → Подписка» — общий для всех протоколов, в настройках протокола — свой (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ или случайный). Ссылки (`fp=`) и Clash-профили (`client-fingerprint`) берут выбранный; у Hysteria2 и TUIC такого отпечатка нет.
+- Ключи API и справочник: в новом разделе «API» создаются ключи для скриптов и интеграций (`Authorization: Bearer`, только чтение или полный доступ, срок по желанию, отзыв), а все методы описаны с параметрами, ответами, примерами curl и кнопкой «Выполнить» для GET-запросов.
+- Продажа подписок: отметьте тариф «В продаже» с ценой в Telegram Stars и/или рублях, включите способы оплаты в новом разделе «Платежи» (Telegram Stars — нужен только бот; ЮKassa — карты и СБП; CryptoBot — криптовалюта), и люди покупают и продлевают подписку в боте и Mini App. Панель создаёт или продлевает подписку, как только провайдер подтвердил оплату, а бот присылает ссылку. Продление добавляет срок тарифа после текущего и, если не выключено в «Платежах», начинает новый период трафика. В «Платежах» — история и возврат Stars.
+- Cloudflare WARP как выход для выбранных подключений (#4): «Ноды → WARP» регистрирует бесплатный аккаунт в один клик (ключ WARP+ — по желанию) или принимает свой WireGuard-конфиг. В настройках подключения выбирается «Выход в интернет: WARP», а список доменов и сетей идёт через WARP у всех подключений ноды; остальное — напрямую. Если WARP недоступен, его трафик не уходит с адреса сервера. Нода показывает адрес, который видят сайты через WARP.
+
 ## 0.3.9
 ### en
 - The panel has a default language, picked at install: the admin panel and the subscription page open in it until a visitor picks their own, and default names (tariffs, the auto-select group, the bot's menu) are in it. Settings → Default language changes it; "Browser language" keeps the old behaviour.

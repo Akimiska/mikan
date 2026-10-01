@@ -18,6 +18,19 @@ type Admin struct {
 	LastLoginAt   sql.NullInt64
 }
 
+type ApiKey struct {
+	ID         int64
+	AdminID    int64
+	Name       string
+	Prefix     string
+	Hash       string
+	Scope      string
+	CreatedAt  int64
+	ExpiresAt  sql.NullInt64
+	LastUsedAt sql.NullInt64
+	LastIp     string
+}
+
 type AuditLog struct {
 	ID         int64
 	Ts         int64
@@ -65,6 +78,7 @@ type Inbound struct {
 	Config      string
 	AutoPort    int64
 	AutoSni     int64
+	Outbound    string
 }
 
 type InboundEvent struct {
@@ -100,6 +114,46 @@ type Node struct {
 type NodeState struct {
 	Key   string
 	Value string
+}
+
+type NodeWarp struct {
+	NodeID        int64
+	Enabled       int64
+	Source        string
+	PrivateKey    string
+	PeerPublicKey string
+	Endpoint      string
+	Ipv4          string
+	Ipv6          string
+	Reserved      string
+	Mtu           int64
+	AccountID     string
+	AccountToken  string
+	Plus          int64
+	Routes        string
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
+type Payment struct {
+	ID         int64
+	Provider   string
+	Payload    string
+	ExternalID sql.NullString
+	TgID       int64
+	Kind       string
+	UserID     sql.NullInt64
+	TariffID   int64
+	TariffName string
+	Amount     int64
+	Currency   string
+	Status     string
+	Error      string
+	PayUrl     string
+	CreatedAt  int64
+	PaidAt     sql.NullInt64
+	AppliedAt  sql.NullInt64
+	RefundedAt sql.NullInt64
 }
 
 type Session struct {
@@ -146,6 +200,9 @@ type Tariff struct {
 	Archived      int64
 	CreatedAt     int64
 	BillingDay    sql.NullInt64
+	PriceStars    sql.NullInt64
+	PriceRub      sql.NullInt64
+	OnSale        int64
 }
 
 type TgChat struct {

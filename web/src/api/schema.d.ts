@@ -4,6 +4,41 @@
  */
 
 export interface paths {
+    "/api/v1/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ключи API */
+        get: operations["list-api-keys"];
+        put?: never;
+        /** Создать ключ API */
+        post: operations["create-api-key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/api-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Отозвать ключ API */
+        delete: operations["delete-api-key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -308,6 +343,111 @@ export interface paths {
         put?: never;
         /** Выпустить новый ключ ноды (старый перестаёт работать) */
         post: operations["rekey-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** WARP ноды */
+        get: operations["get-node-warp"];
+        put?: never;
+        post?: never;
+        /** Удалить WARP ноды */
+        delete: operations["delete-node-warp"];
+        options?: never;
+        head?: never;
+        /** Включить WARP, списки доменов, ключ WARP+ */
+        patch: operations["update-node-warp"];
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/warp/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Загрузить свой WireGuard-конфиг WARP */
+        post: operations["import-node-warp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/warp/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Зарегистрировать WARP для ноды в Cloudflare */
+        post: operations["register-node-warp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** История платежей */
+        get: operations["list-payments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Настройки оплаты */
+        get: operations["get-payment-settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Изменить настройки оплаты */
+        patch: operations["update-payment-settings"];
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Вернуть Stars покупателю */
+        post: operations["refund-payment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -734,6 +874,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        APIKeyView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: int64 */
+            id: number;
+            last_ip?: string;
+            /** Format: date-time */
+            last_used_at?: string;
+            name: string;
+            /** @description Первые символы ключа, чтобы отличать ключи */
+            prefix: string;
+            /** @enum {string} */
+            scope: "read" | "full";
+        };
         AdminView: {
             /** Format: int64 */
             id: number;
@@ -837,6 +993,37 @@ export interface components {
             /** @description Уведомления с 22:00 до 9:00 МСК приходят без звука */
             quiet_night: boolean;
             texts: components["schemas"]["Texts"];
+        };
+        CreateAPIKeyInputBody: {
+            /**
+             * Format: int64
+             * @description Срок в днях; 0 — пока не отзовут
+             */
+            expire_days?: number;
+            name: string;
+            /**
+             * @description read — только GET-запросы, full — всё, кроме входа, сессий и ключей
+             * @enum {string}
+             */
+            scope: "read" | "full";
+        };
+        CreateAPIKeyOutputBody: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Сам ключ: показывается один раз */
+            key: string;
+            last_ip?: string;
+            /** Format: date-time */
+            last_used_at?: string;
+            name: string;
+            /** @description Первые символы ключа, чтобы отличать ключи */
+            prefix: string;
+            /** @enum {string} */
+            scope: "read" | "full";
         };
         CreateInboundInputBody: {
             /** @description Шаблон листенера (YAML) для preset=custom */
@@ -956,12 +1143,19 @@ export interface components {
             display_name: string;
             enabled: boolean;
             error?: string;
+            /** @description Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек */
+            fingerprint?: string;
             /** Format: int64 */
             id: number;
             name: string;
             network: string;
             /** Format: int64 */
             node_id: number;
+            /**
+             * @description Выход в интернет: напрямую с сервера или через WARP ноды
+             * @enum {string}
+             */
+            outbound: "direct" | "warp";
             port: string;
             preset: string;
             server_names?: string[];
@@ -1125,6 +1319,13 @@ export interface components {
             /** @description Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию */
             display_name?: string;
             enabled?: boolean;
+            /** @description Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек */
+            fingerprint?: string;
+            /**
+             * @description Выход в интернет: напрямую или через WARP ноды
+             * @enum {string}
+             */
+            outbound?: "direct" | "warp";
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
@@ -1135,10 +1336,25 @@ export interface components {
             host?: string;
             name?: string;
         };
+        PatchPaymentSettingsInputBody: {
+            allow_new?: boolean;
+            cryptobot?: boolean;
+            cryptobot_testnet?: boolean;
+            /** @description Пусто — удалить токен */
+            cryptobot_token?: string;
+            renew_resets_traffic?: boolean;
+            stars?: boolean;
+            yookassa?: boolean;
+            /** @description Пусто — удалить ключ */
+            yookassa_secret?: string;
+            yookassa_shop_id?: string;
+        };
         PatchSettingsInputBody: {
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
+            /** @enum {string} */
+            client_fingerprint?: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
             /** @enum {string} */
             default_lang?: "auto" | "ru" | "en";
             device_binding?: boolean;
@@ -1189,6 +1405,81 @@ export interface components {
             /** Format: int64 */
             traffic_limit?: number;
             traffic_unlimited?: boolean;
+        };
+        PaymentSettingsView: {
+            /** @description Новые люди могут купить подписку в боте; иначе — только продление */
+            allow_new: boolean;
+            /** @description Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен */
+            available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
+            cryptobot: boolean;
+            cryptobot_testnet: boolean;
+            cryptobot_token_set: boolean;
+            /** @description Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок */
+            renew_resets_traffic: boolean;
+            /** @description Telegram Stars: нужен только запущенный бот */
+            stars: boolean;
+            /** @description Адрес вебхуков в настройках приложения @CryptoBot */
+            webhook_cryptobot: string;
+            /** @description Адрес для HTTP-уведомлений в личном кабинете ЮKassa */
+            webhook_yookassa: string;
+            yookassa: boolean;
+            /** @description Секретный ключ сохранён; сам ключ API не отдаёт */
+            yookassa_secret_set: boolean;
+            yookassa_shop_id: string;
+        };
+        PaymentSettingsViewAvailableStruct: {
+            cryptobot: boolean;
+            stars: boolean;
+            yookassa: boolean;
+        };
+        PaymentTotal: {
+            /** Format: int64 */
+            count: number;
+            /** @enum {string} */
+            currency: "XTR" | "RUB";
+            /** Format: int64 */
+            total: number;
+        };
+        PaymentView: {
+            /**
+             * Format: int64
+             * @description Stars или копейки
+             */
+            amount: number;
+            /** Format: date-time */
+            applied_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @enum {string} */
+            currency: "XTR" | "RUB";
+            /** @description Почему оплаченный платёж ещё не применён */
+            error?: string;
+            /** @description Номер платежа у провайдера */
+            external_id?: string;
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            kind: "new" | "renew";
+            /** Format: date-time */
+            paid_at?: string;
+            /** @enum {string} */
+            provider: "stars" | "yookassa" | "cryptobot";
+            /** Format: date-time */
+            refunded_at?: string;
+            /** @enum {string} */
+            status: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded";
+            tariff_name: string;
+            /** Format: int64 */
+            tg_id: number;
+            tg_username?: string;
+            /** Format: int64 */
+            user_id?: number;
+            user_name?: string;
+        };
+        PaymentsOutputBody: {
+            items: components["schemas"]["PaymentView"][];
+            /** @description Применённые платежи за 30 дней */
+            totals: components["schemas"]["PaymentTotal"][];
         };
         RecoveryOutputBody: {
             /** @description Показываются один раз */
@@ -1243,6 +1534,11 @@ export interface components {
             auto_sni: boolean;
             brand: string;
             certificate: components["schemas"]["Status"];
+            /**
+             * @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой
+             * @enum {string}
+             */
+            client_fingerprint: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
             /**
              * @description Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота
              * @enum {string}
@@ -1308,7 +1604,19 @@ export interface components {
             /** Format: int64 */
             duration_days: number;
             name: string;
+            /** @description Продавать в боте и Mini App; нужна хотя бы одна цена */
+            on_sale?: boolean;
             price_label?: string;
+            /**
+             * Format: int64
+             * @description Цена в копейках: 19900 — 199 ₽
+             */
+            price_rub?: number;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars
+             */
+            price_stars?: number;
             /**
              * @default none
              * @enum {string}
@@ -1335,7 +1643,19 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+            /** @description Продаётся в боте и Mini App */
+            on_sale: boolean;
             price_label: string;
+            /**
+             * Format: int64
+             * @description Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars; null — не продаётся за Stars
+             */
+            price_stars: number | null;
             /** @enum {string} */
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
@@ -1552,6 +1872,49 @@ export interface components {
             network: string;
             type: string;
         };
+        WarpImportInputBody: {
+            /** @description WireGuard-конфиг WARP: wgcf, warp-plus или экспорт приложения */
+            config: string;
+        };
+        WarpPatchInputBody: {
+            enabled?: boolean;
+            /** @description Ключ WARP+ для зарегистрированного аккаунта */
+            license?: string;
+            /** @description Домены (example.com — вместе с поддоменами) и сети (104.16.0.0/13) */
+            routes?: string[];
+        };
+        WarpRegisterInputBody: {
+            /** @description Ключ WARP+ (необязательно) */
+            license?: string;
+        };
+        WarpView: {
+            configured: boolean;
+            enabled: boolean;
+            endpoint?: string;
+            /** @description Подключения ноды, у которых весь трафик идёт через WARP */
+            inbounds: string[];
+            ipv4?: string;
+            ipv6?: string;
+            /** @description Аккаунт WARP+ */
+            plus: boolean;
+            /** @description Домены и сети, которые идут через WARP у всех подключений ноды */
+            routes: string[];
+            /** @enum {string} */
+            source?: "register" | "import" | "";
+            /** @description Последняя проверка выхода через WARP с ноды; нет — нода недоступна */
+            status?: components["schemas"]["WarpViewStatusStruct"];
+        };
+        WarpViewStatusStruct: {
+            /** Format: date-time */
+            checked_at: string;
+            colo?: string;
+            error?: string;
+            /** @description Адрес, который видят сайты */
+            ip?: string;
+            ok: boolean;
+            /** @description on | plus | off — как отвечает Cloudflare */
+            warp?: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1561,6 +1924,97 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "list-api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAPIKeyInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateAPIKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -2234,6 +2688,300 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarpPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarpImportInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "register-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarpRegisterInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-payments": {
+        parameters: {
+            query?: {
+                status?: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded" | "";
+                provider?: "stars" | "yookassa" | "cryptobot" | "";
+                user_id?: number;
+                /** @description id последнего платежа предыдущей страницы */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-payment-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-payment-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchPaymentSettingsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "refund-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentView"];
                 };
             };
             /** @description Error */

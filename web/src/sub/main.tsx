@@ -8,6 +8,7 @@ import { LangSwitch } from "../components/lang";
 import { Button, Pill, QR, Ring, Skeleton } from "../components/ui";
 import { t, useLocale } from "../i18n";
 import { ago, appName, bytes, dateLong, dateShort, days, daysUntil, time } from "../lib/format";
+import { loadShop, Shop, type ShopData } from "./shop";
 
 type Info = {
   name: string;
@@ -37,6 +38,8 @@ type Platform = "ios" | "android" | "windows" | "macos";
 const pageURL = location.origin + location.pathname.replace(/\/$/, "");
 const tgMode = /\/tg$/.test(pageURL);
 const subRoot = pageURL.replace(/\/tg$/, "");
+// Telegram's launch data after the #: the Mini App's sign-in.
+const initData = new URLSearchParams(location.hash.slice(1)).get("tgWebAppData") ?? "";
 
 type TelegramProxy = { postEvent?: (type: string, data: string) => void };
 
@@ -112,6 +115,7 @@ function SubPage() {
   const [copied, setCopied] = useState(false);
   const [subURL, setSubURL] = useState(tgMode ? "" : pageURL);
   const [tg, setTg] = useState<{ state: "loading" | "none" | "failed" | "ok"; subs: TgSub[] }>({ state: tgMode ? "loading" : "ok", subs: [] });
+  const [shop, setShop] = useState<ShopData | null>(null);
 
   const load = (url = subURL) =>
     fetch(url + "/info", { cache: "no-store" })
@@ -122,11 +126,7 @@ function SubPage() {
       });
 
   // The Mini App signs in with the launch data Telegram puts after the #.
-  useEffect(() => {
-    if (!tgMode) return;
-    tgEvent("web_app_ready");
-    tgEvent("web_app_expand");
-    const initData = new URLSearchParams(location.hash.slice(1)).get("tgWebAppData") ?? "";
+  const session = () =>
     fetch(subRoot + "/tg/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ init_data: initData }), cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d: { subs: TgSub[] }) => {
@@ -135,10 +135,64 @@ function SubPage() {
           return;
         }
         setTg({ state: "ok", subs: d.subs });
-        setSubURL(subRoot + "/" + d.subs[0]!.token);
+        // A new subscription bought here shows at once; the one on screen stays otherwise.
+        setSubURL((cur) => (cur && d.subs.some((s) => cur.endsWith("/" + s.token)) ? cur : subRoot + "/" + d.subs[0]!.token));
       })
       .catch(() => setTg({ state: "failed", subs: [] }));
+  const refresh = () => {
+    void session();
+    if (subURL) void load(subURL).catch(() => undefined);
+  };
+  useEffect(() => {
+    if (!tgMode) return;
+    tgEvent("web_app_ready");
+    tgEvent("web_app_expand");
+    void session();
+    loadShop(subRoot, initData)
+      .then(setShop)
+      .catch(() => setShop(null));
   }, []);
+
+  // Telegram tells the Mini App when its payment sheet closes; a paid one is applied by
+  // the panel within seconds.
+  useEffect(() => {
+    if (!tgMode) return;
+    let timer = 0;
+    const onEvent = (type: string, data: unknown) => {
+      if (type === "invoice_closed" && (data as { status?: string } | null)?.status === "paid") {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(refresh, 2000);
+      }
+    };
+    const w = window as Window & { Telegram?: { WebView?: { receiveEvent?: (type: string, data: unknown) => void } } };
+    w.Telegram ??= {};
+    w.Telegram.WebView ??= {};
+    const prev = w.Telegram.WebView.receiveEvent;
+    w.Telegram.WebView.receiveEvent = (type, data) => {
+      prev?.(type, data);
+      onEvent(type, data);
+    };
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== "https://web.telegram.org" || typeof e.data !== "string") return;
+      try {
+        const m = JSON.parse(e.data) as { eventType?: string; eventData?: unknown };
+        if (m.eventType) onEvent(m.eventType, m.eventData);
+      } catch {
+        // not Telegram's
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.clearTimeout(timer);
+      if (w.Telegram?.WebView) w.Telegram.WebView.receiveEvent = prev;
+    };
+  }, [subURL]);
+
+  const shopFor = (token: string, title: string) =>
+    shop && shop.offers.length > 0 ? (
+      <Shop data={shop} subRoot={subRoot} initData={initData} token={token} title={title} openInvoice={(slug) => tgEvent("web_app_open_invoice", { slug })} openLink={openOutside} onRefresh={refresh} />
+    ) : null;
 
   useEffect(() => {
     if (subURL) load(subURL).catch(() => setFailed(true));
@@ -164,6 +218,17 @@ function SubPage() {
     }
   };
 
+  if (tg.state === "none" && shop?.allow_new && shop.offers.length > 0) {
+    return (
+      <Shell>
+        <section className="glass rounded-3xl p-6 text-center">
+          <h1 className="font-display text-xl font-medium">{t("sub.tgNoSubTitle")}</h1>
+          <p className="mt-2 text-[13px] text-[var(--ink-500)]">{t("sub.tgNoSubText")}</p>
+        </section>
+        {shopFor("", t("sub.shopNew"))}
+      </Shell>
+    );
+  }
   if (tg.state === "none" || tg.state === "failed") {
     return (
       <Shell>
@@ -230,12 +295,14 @@ function SubPage() {
           <span>{info.expires_at ? t("sub.until", { date: dateLong(info.expires_at) }) : t("sub.forever")}</span>
           {d !== null && d >= 0 ? <Pill tone={tone}>{days(d)}</Pill> : null}
         </div>
-        {(info.state === "expired" || info.state === "limited" || info.state === "disabled") && info.support_url ? (
+        {(info.state === "expired" || info.state === "limited" || info.state === "disabled") && info.support_url && !(tgMode && shop?.offers.length) ? (
           <a className="btn btn-primary btn-block mt-4" href={info.support_url} target="_blank" rel="noreferrer noopener" {...outside(info.support_url)}>
             {t("sub.renew")}
           </a>
         ) : null}
       </motion.section>
+
+      {tgMode ? shopFor(subURL.slice(subURL.lastIndexOf("/") + 1), t("sub.shop")) : null}
 
       <section className="glass grid grid-cols-[104px_1fr] items-center gap-4 rounded-3xl p-4">
         <Ring size={104} pct={info.limit != null ? pct : 100} label={leftValue} sub={left != null ? t("sub.left", { unit: leftUnit ?? "" }) : t("users.unlimited")} />

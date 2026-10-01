@@ -1,6 +1,52 @@
 {
   "components": {
     "schemas": {
+      "APIKeyView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_ip": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "description": "Первые символы ключа, чтобы отличать ключи",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "read",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scope",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "AdminView": {
         "additionalProperties": false,
         "properties": {
@@ -310,6 +356,87 @@
         ],
         "type": "object"
       },
+      "CreateAPIKeyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "expire_days": {
+            "description": "Срок в днях; 0 — пока не отзовут",
+            "format": "int64",
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "scope": {
+            "description": "read — только GET-запросы, full — всё, кроме входа, сессий и ключей",
+            "enum": [
+              "read",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "CreateAPIKeyOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "description": "Сам ключ: показывается один раз",
+            "type": "string"
+          },
+          "last_ip": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "description": "Первые символы ключа, чтобы отличать ключи",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "read",
+              "full"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "id",
+          "name",
+          "prefix",
+          "scope",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "CreateInboundInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -616,6 +743,10 @@
           "error": {
             "type": "string"
           },
+          "fingerprint": {
+            "description": "Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек",
+            "type": "string"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -629,6 +760,14 @@
           "node_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "outbound": {
+            "description": "Выход в интернет: напрямую с сервера или через WARP ноды",
+            "enum": [
+              "direct",
+              "warp"
+            ],
+            "type": "string"
           },
           "port": {
             "type": "string"
@@ -688,7 +827,8 @@
           "apps",
           "auto_port",
           "auto_sni",
-          "auto"
+          "auto",
+          "outbound"
         ],
         "type": "object"
       },
@@ -1177,6 +1317,19 @@
           "enabled": {
             "type": "boolean"
           },
+          "fingerprint": {
+            "description": "Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек",
+            "maxLength": 16,
+            "type": "string"
+          },
+          "outbound": {
+            "description": "Выход в интернет: напрямую или через WARP ноды",
+            "enum": [
+              "direct",
+              "warp"
+            ],
+            "type": "string"
+          },
           "port": {
             "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
             "type": "string"
@@ -1210,6 +1363,44 @@
         },
         "type": "object"
       },
+      "PatchPaymentSettingsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_new": {
+            "type": "boolean"
+          },
+          "cryptobot": {
+            "type": "boolean"
+          },
+          "cryptobot_testnet": {
+            "type": "boolean"
+          },
+          "cryptobot_token": {
+            "description": "Пусто — удалить токен",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "renew_resets_traffic": {
+            "type": "boolean"
+          },
+          "stars": {
+            "type": "boolean"
+          },
+          "yookassa": {
+            "type": "boolean"
+          },
+          "yookassa_secret": {
+            "description": "Пусто — удалить ключ",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "yookassa_shop_id": {
+            "maxLength": 20,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "PatchSettingsInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1221,6 +1412,21 @@
           },
           "brand": {
             "maxLength": 40,
+            "type": "string"
+          },
+          "client_fingerprint": {
+            "enum": [
+              "chrome",
+              "firefox",
+              "safari",
+              "ios",
+              "android",
+              "edge",
+              "360",
+              "qq",
+              "random",
+              "randomized"
+            ],
             "type": "string"
           },
           "default_lang": {
@@ -1371,6 +1577,238 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "PaymentSettingsView": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_new": {
+            "description": "Новые люди могут купить подписку в боте; иначе — только продление",
+            "type": "boolean"
+          },
+          "available": {
+            "$ref": "#/components/schemas/PaymentSettingsViewAvailableStruct",
+            "description": "Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"
+          },
+          "cryptobot": {
+            "type": "boolean"
+          },
+          "cryptobot_testnet": {
+            "type": "boolean"
+          },
+          "cryptobot_token_set": {
+            "type": "boolean"
+          },
+          "renew_resets_traffic": {
+            "description": "Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок",
+            "type": "boolean"
+          },
+          "stars": {
+            "description": "Telegram Stars: нужен только запущенный бот",
+            "type": "boolean"
+          },
+          "webhook_cryptobot": {
+            "description": "Адрес вебхуков в настройках приложения @CryptoBot",
+            "type": "string"
+          },
+          "webhook_yookassa": {
+            "description": "Адрес для HTTP-уведомлений в личном кабинете ЮKassa",
+            "type": "string"
+          },
+          "yookassa": {
+            "type": "boolean"
+          },
+          "yookassa_secret_set": {
+            "description": "Секретный ключ сохранён; сам ключ API не отдаёт",
+            "type": "boolean"
+          },
+          "yookassa_shop_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "stars",
+          "yookassa",
+          "yookassa_shop_id",
+          "yookassa_secret_set",
+          "cryptobot",
+          "cryptobot_testnet",
+          "cryptobot_token_set",
+          "allow_new",
+          "renew_resets_traffic",
+          "available",
+          "webhook_yookassa",
+          "webhook_cryptobot"
+        ],
+        "type": "object"
+      },
+      "PaymentSettingsViewAvailableStruct": {
+        "additionalProperties": false,
+        "properties": {
+          "cryptobot": {
+            "type": "boolean"
+          },
+          "stars": {
+            "type": "boolean"
+          },
+          "yookassa": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "stars",
+          "yookassa",
+          "cryptobot"
+        ],
+        "type": "object"
+      },
+      "PaymentTotal": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "currency": {
+            "enum": [
+              "XTR",
+              "RUB"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "currency",
+          "count",
+          "total"
+        ],
+        "type": "object"
+      },
+      "PaymentView": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "Stars или копейки",
+            "format": "int64",
+            "type": "integer"
+          },
+          "applied_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "enum": [
+              "XTR",
+              "RUB"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "description": "Почему оплаченный платёж ещё не применён",
+            "type": "string"
+          },
+          "external_id": {
+            "description": "Номер платежа у провайдера",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "new",
+              "renew"
+            ],
+            "type": "string"
+          },
+          "paid_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "stars",
+              "yookassa",
+              "cryptobot"
+            ],
+            "type": "string"
+          },
+          "refunded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "paid",
+              "applied",
+              "expired",
+              "failed",
+              "refunded"
+            ],
+            "type": "string"
+          },
+          "tariff_name": {
+            "type": "string"
+          },
+          "tg_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tg_username": {
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "user_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "kind",
+          "status",
+          "tg_id",
+          "tariff_name",
+          "amount",
+          "currency",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PaymentsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentView"
+            },
+            "type": "array"
+          },
+          "totals": {
+            "description": "Применённые платежи за 30 дней",
+            "items": {
+              "$ref": "#/components/schemas/PaymentTotal"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "totals"
+        ],
         "type": "object"
       },
       "RecoveryOutputBody": {
@@ -1543,6 +1981,22 @@
           "certificate": {
             "$ref": "#/components/schemas/Status"
           },
+          "client_fingerprint": {
+            "description": "Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой",
+            "enum": [
+              "chrome",
+              "firefox",
+              "safari",
+              "ios",
+              "android",
+              "edge",
+              "360",
+              "qq",
+              "random",
+              "randomized"
+            ],
+            "type": "string"
+          },
           "default_lang": {
             "description": "Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота",
             "enum": [
@@ -1610,6 +2064,7 @@
           "sub_group_main",
           "sub_group_auto",
           "sub_routing",
+          "client_fingerprint",
           "auto_port",
           "auto_sni",
           "device_binding",
@@ -1722,9 +2177,27 @@
             "minLength": 1,
             "type": "string"
           },
+          "on_sale": {
+            "description": "Продавать в боте и Mini App; нужна хотя бы одна цена",
+            "type": "boolean"
+          },
           "price_label": {
             "maxLength": 40,
             "type": "string"
+          },
+          "price_rub": {
+            "description": "Цена в копейках: 19900 — 199 ₽",
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "price_stars": {
+            "description": "Цена в Telegram Stars",
+            "format": "int64",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
           },
           "reset_strategy": {
             "default": "none",
@@ -1782,8 +2255,28 @@
           "name": {
             "type": "string"
           },
+          "on_sale": {
+            "description": "Продаётся в боте и Mini App",
+            "type": "boolean"
+          },
           "price_label": {
             "type": "string"
+          },
+          "price_rub": {
+            "description": "Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "price_stars": {
+            "description": "Цена в Telegram Stars; null — не продаётся за Stars",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "reset_strategy": {
             "enum": [
@@ -1815,6 +2308,9 @@
           "reset_strategy",
           "billing_day",
           "price_label",
+          "price_stars",
+          "price_rub",
+          "on_sale",
           "sort"
         ],
         "type": "object"
@@ -2406,15 +2902,275 @@
           "network"
         ],
         "type": "object"
+      },
+      "WarpImportInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "description": "WireGuard-конфиг WARP: wgcf, warp-plus или экспорт приложения",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "config"
+        ],
+        "type": "object"
+      },
+      "WarpPatchInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "license": {
+            "description": "Ключ WARP+ для зарегистрированного аккаунта",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "routes": {
+            "description": "Домены (example.com — вместе с поддоменами) и сети (104.16.0.0/13)",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "WarpRegisterInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "license": {
+            "description": "Ключ WARP+ (необязательно)",
+            "maxLength": 40,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WarpView": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "inbounds": {
+            "description": "Подключения ноды, у которых весь трафик идёт через WARP",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ipv4": {
+            "type": "string"
+          },
+          "ipv6": {
+            "type": "string"
+          },
+          "plus": {
+            "description": "Аккаунт WARP+",
+            "type": "boolean"
+          },
+          "routes": {
+            "description": "Домены и сети, которые идут через WARP у всех подключений ноды",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "register",
+              "import",
+              ""
+            ],
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WarpViewStatusStruct",
+            "description": "Последняя проверка выхода через WARP с ноды; нет — нода недоступна"
+          }
+        },
+        "required": [
+          "configured",
+          "enabled",
+          "plus",
+          "routes",
+          "inbounds"
+        ],
+        "type": "object"
+      },
+      "WarpViewStatusStruct": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "colo": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес, который видят сайты",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "warp": {
+            "description": "on | plus | off — как отвечает Cloudflare",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "checked_at"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "description": "Ключ API: Authorization: Bearer mk_…",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "session": {
+        "description": "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах",
+        "in": "cookie",
+        "name": "__Host-mikan",
+        "type": "apiKey"
       }
     }
   },
   "info": {
+    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → Ключи API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET, «полный» — всё, кроме входа, сессий и самих ключей.\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.",
     "title": "mikan",
     "version": "dev"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/api-keys": {
+      "get": {
+        "operationId": "list-api-keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/APIKeyView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Ключи API",
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "post": {
+        "operationId": "create-api-key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAPIKeyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateAPIKeyOutputBody"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Создать ключ API",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{id}": {
+      "delete": {
+        "operationId": "delete-api-key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отозвать ключ API",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login",
@@ -2457,6 +3213,9 @@
             "description": "Error"
           }
         },
+        "security": [
+          {}
+        ],
         "summary": "Вход",
         "tags": [
           "auth"
@@ -3270,6 +4029,454 @@
         "tags": [
           "node"
         ]
+      }
+    },
+    "/api/v1/nodes/{id}/warp": {
+      "delete": {
+        "operationId": "delete-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить WARP ноды",
+        "tags": [
+          "node"
+        ]
+      },
+      "get": {
+        "operationId": "get-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "WARP ноды",
+        "tags": [
+          "node"
+        ]
+      },
+      "patch": {
+        "operationId": "update-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WarpPatchInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Включить WARP, списки доменов, ключ WARP+",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/warp/import": {
+      "post": {
+        "operationId": "import-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WarpImportInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Загрузить свой WireGuard-конфиг WARP",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/warp/register": {
+      "post": {
+        "operationId": "register-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WarpRegisterInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Зарегистрировать WARP для ноды в Cloudflare",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/payments": {
+      "get": {
+        "operationId": "list-payments",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "pending",
+                "paid",
+                "applied",
+                "expired",
+                "failed",
+                "refunded",
+                ""
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "enum": [
+                "stars",
+                "yookassa",
+                "cryptobot",
+                ""
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "user_id",
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "id последнего платежа предыдущей страницы",
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "id последнего платежа предыдущей страницы",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "История платежей",
+        "tags": [
+          "payments"
+        ]
+      }
+    },
+    "/api/v1/payments/settings": {
+      "get": {
+        "operationId": "get-payment-settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentSettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настройки оплаты",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      },
+      "patch": {
+        "operationId": "update-payment-settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchPaymentSettingsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentSettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить настройки оплаты",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/payments/{id}/refund": {
+      "post": {
+        "operationId": "refund-payment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Вернуть Stars покупателю",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/presets": {
@@ -4572,5 +5779,13 @@
         ]
       }
     }
-  }
+  },
+  "security": [
+    {
+      "apiKey": []
+    },
+    {
+      "session": []
+    }
+  ]
 }

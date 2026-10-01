@@ -130,6 +130,8 @@ type Profile struct {
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
 	Nodes    []Node       // enabled nodes in display order; inbounds of other nodes are skipped
 	Direct   []string     // hosts that bypass the tunnel: the panel and every node
+	// Fingerprint is the panel's default uTLS profile (proto.ClientInput.Fingerprint).
+	Fingerprint string
 }
 
 type proxy struct {
@@ -182,7 +184,7 @@ func build(p Profile) ([]proxy, error) {
 				name = base + " " + strconv.Itoa(i)
 			}
 			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: in.Port,
-				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Slot: slot})
+				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot})
 			if err != nil {
 				continue
 			}

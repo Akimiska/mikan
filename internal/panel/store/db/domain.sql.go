@@ -141,7 +141,7 @@ func (q *Queries) CountTariffs(ctx context.Context) (int64, error) {
 const createInbound = `-- name: CreateInbound :one
 INSERT INTO inbounds (node_id, name, preset, port, enabled, settings, config, created_at, updated_at)
 VALUES (?, ?, ?, ?, 1, '{}', ?, ?, ?)
-RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni
+RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound
 `
 
 type CreateInboundParams struct {
@@ -179,14 +179,15 @@ func (q *Queries) CreateInbound(ctx context.Context, arg CreateInboundParams) (I
 		&i.Config,
 		&i.AutoPort,
 		&i.AutoSni,
+		&i.Outbound,
 	)
 	return i, err
 }
 
 const createTariff = `-- name: CreateTariff :one
-INSERT INTO tariffs (name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, created_at, billing_day)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day
+INSERT INTO tariffs (name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, created_at, billing_day, price_stars, price_rub, on_sale)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale
 `
 
 type CreateTariffParams struct {
@@ -199,6 +200,9 @@ type CreateTariffParams struct {
 	Sort          int64
 	CreatedAt     int64
 	BillingDay    sql.NullInt64
+	PriceStars    sql.NullInt64
+	PriceRub      sql.NullInt64
+	OnSale        int64
 }
 
 func (q *Queries) CreateTariff(ctx context.Context, arg CreateTariffParams) (Tariff, error) {
@@ -212,6 +216,9 @@ func (q *Queries) CreateTariff(ctx context.Context, arg CreateTariffParams) (Tar
 		arg.Sort,
 		arg.CreatedAt,
 		arg.BillingDay,
+		arg.PriceStars,
+		arg.PriceRub,
+		arg.OnSale,
 	)
 	var i Tariff
 	err := row.Scan(
@@ -226,6 +233,9 @@ func (q *Queries) CreateTariff(ctx context.Context, arg CreateTariffParams) (Tar
 		&i.Archived,
 		&i.CreatedAt,
 		&i.BillingDay,
+		&i.PriceStars,
+		&i.PriceRub,
+		&i.OnSale,
 	)
 	return i, err
 }
@@ -344,7 +354,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
 }
 
 const getInbound = `-- name: GetInbound :one
-SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni FROM inbounds WHERE id = ?
+SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound FROM inbounds WHERE id = ?
 `
 
 func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
@@ -364,6 +374,7 @@ func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
 		&i.Config,
 		&i.AutoPort,
 		&i.AutoSni,
+		&i.Outbound,
 	)
 	return i, err
 }
@@ -399,7 +410,7 @@ func (q *Queries) GetSlot(ctx context.Context, id int64) (Slot, error) {
 }
 
 const getTariff = `-- name: GetTariff :one
-SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day FROM tariffs WHERE id = ?
+SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale FROM tariffs WHERE id = ?
 `
 
 func (q *Queries) GetTariff(ctx context.Context, id int64) (Tariff, error) {
@@ -417,6 +428,9 @@ func (q *Queries) GetTariff(ctx context.Context, id int64) (Tariff, error) {
 		&i.Archived,
 		&i.CreatedAt,
 		&i.BillingDay,
+		&i.PriceStars,
+		&i.PriceRub,
+		&i.OnSale,
 	)
 	return i, err
 }
@@ -517,7 +531,7 @@ func (q *Queries) InsertSlot(ctx context.Context, arg InsertSlotParams) error {
 }
 
 const listInbounds = `-- name: ListInbounds :many
-SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni FROM inbounds ORDER BY id
+SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound FROM inbounds ORDER BY id
 `
 
 func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
@@ -543,6 +557,7 @@ func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
 			&i.Config,
 			&i.AutoPort,
 			&i.AutoSni,
+			&i.Outbound,
 		); err != nil {
 			return nil, err
 		}
@@ -628,7 +643,7 @@ func (q *Queries) ListSlots(ctx context.Context) ([]Slot, error) {
 }
 
 const listTariffs = `-- name: ListTariffs :many
-SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day FROM tariffs WHERE archived = 0 ORDER BY sort, id
+SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale FROM tariffs WHERE archived = 0 ORDER BY sort, id
 `
 
 func (q *Queries) ListTariffs(ctx context.Context) ([]Tariff, error) {
@@ -652,6 +667,9 @@ func (q *Queries) ListTariffs(ctx context.Context) ([]Tariff, error) {
 			&i.Archived,
 			&i.CreatedAt,
 			&i.BillingDay,
+			&i.PriceStars,
+			&i.PriceRub,
+			&i.OnSale,
 		); err != nil {
 			return nil, err
 		}
@@ -1006,7 +1024,7 @@ func (q *Queries) TotalTrafficHourly(ctx context.Context, hour int64) ([]TotalTr
 }
 
 const updateInbound = `-- name: UpdateInbound :one
-UPDATE inbounds SET port = ?, enabled = ?, config = ?, display_name = ?, updated_at = ? WHERE id = ? RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni
+UPDATE inbounds SET port = ?, enabled = ?, config = ?, display_name = ?, updated_at = ? WHERE id = ? RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound
 `
 
 type UpdateInboundParams struct {
@@ -1042,15 +1060,17 @@ func (q *Queries) UpdateInbound(ctx context.Context, arg UpdateInboundParams) (I
 		&i.Config,
 		&i.AutoPort,
 		&i.AutoSni,
+		&i.Outbound,
 	)
 	return i, err
 }
 
 const updateTariff = `-- name: UpdateTariff :one
 UPDATE tariffs
-SET name = ?, traffic_limit = ?, duration_days = ?, device_limit = ?, reset_strategy = ?, price_label = ?, sort = ?, billing_day = ?
+SET name = ?, traffic_limit = ?, duration_days = ?, device_limit = ?, reset_strategy = ?, price_label = ?, sort = ?, billing_day = ?,
+    price_stars = ?, price_rub = ?, on_sale = ?
 WHERE id = ?
-RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day
+RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale
 `
 
 type UpdateTariffParams struct {
@@ -1062,6 +1082,9 @@ type UpdateTariffParams struct {
 	PriceLabel    string
 	Sort          int64
 	BillingDay    sql.NullInt64
+	PriceStars    sql.NullInt64
+	PriceRub      sql.NullInt64
+	OnSale        int64
 	ID            int64
 }
 
@@ -1075,6 +1098,9 @@ func (q *Queries) UpdateTariff(ctx context.Context, arg UpdateTariffParams) (Tar
 		arg.PriceLabel,
 		arg.Sort,
 		arg.BillingDay,
+		arg.PriceStars,
+		arg.PriceRub,
+		arg.OnSale,
 		arg.ID,
 	)
 	var i Tariff
@@ -1090,6 +1116,9 @@ func (q *Queries) UpdateTariff(ctx context.Context, arg UpdateTariffParams) (Tar
 		&i.Archived,
 		&i.CreatedAt,
 		&i.BillingDay,
+		&i.PriceStars,
+		&i.PriceRub,
+		&i.OnSale,
 	)
 	return i, err
 }

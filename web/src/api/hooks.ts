@@ -19,6 +19,10 @@ export const qk = {
   sessions: ["sessions"] as const,
   telegram: ["telegram"] as const,
   updates: ["updates"] as const,
+  apiKeys: ["api-keys"] as const,
+  payments: ["payments"] as const,
+  paymentSettings: ["payment-settings"] as const,
+  warp: (node: number) => ["warp", node] as const,
 };
 
 export const meQuery = {

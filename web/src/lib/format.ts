@@ -134,3 +134,14 @@ export function maskIP(ip: string): string {
   const p = ip.split(".");
   return p.length === 4 ? `${p[0]}.${p[1]}.•••.•••` : ip;
 }
+
+/** Kopecks as rubles: 19900 → "199 ₽", 19950 → "199,50 ₽". */
+export function rubles(kopecks: number): string {
+  const f = new Intl.NumberFormat(getLocale(), { minimumFractionDigits: kopecks % 100 ? 2 : 0, maximumFractionDigits: 2 });
+  return `${f.format(kopecks / 100)} ₽`;
+}
+
+/** A payment's sum: Stars or kopecks. */
+export function money(amount: number, currency: string): string {
+  return currency === "XTR" ? `⭐ ${num(amount)}` : rubles(amount);
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 )
 
@@ -16,7 +17,67 @@ type ClientInput struct {
 	PortSpec  string // "443" or a range for Hysteria2 port hopping
 	SNI       string // TLS name for node-certificate protocols; empty on IP-only installs
 	PinSHA256 string // hex SHA-256 of the node certificate when it is self-signed
-	Slot      Slot
+	// Fingerprint is the panel's default uTLS profile for templates that set none; empty
+	// or unknown means DefaultFingerprint.
+	Fingerprint string
+	Slot        Slot
+}
+
+// Fingerprints are the uTLS profiles that mihomo (component/tls/utls.go, v1.19.31), Xray
+// and sing-box all accept, so a share link and a Clash profile mimic the same browser.
+// mihomo also knows chrome120, firefox120, safari16 and deprecated ones Xray refuses.
+var Fingerprints = []string{"chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"}
+
+// DefaultFingerprint is what clients get when neither the inbound nor the panel picks one.
+const DefaultFingerprint = "chrome"
+
+// ValidFingerprint says whether s is one of Fingerprints.
+func ValidFingerprint(s string) bool { return slices.Contains(Fingerprints, s) }
+
+// UsesFingerprint says whether clients of t dial through uTLS, so a fingerprint applies.
+func UsesFingerprint(t Template) bool {
+	switch t.Type() {
+	case "vless", "vmess", "trojan": // REALITY or the node certificate, never plain
+		return t.section("reality-config") != nil || t.Ext().TLS == "node"
+	case "anytls", "trusttunnel":
+		return true
+	}
+	return false
+}
+
+// SetFingerprint writes the inbound's own fingerprint into mikan.client; "" removes it,
+// so the panel's default applies again.
+func SetFingerprint(t Template, fp string) error {
+	if fp != "" && !ValidFingerprint(fp) {
+		return fail("config_fingerprint", extKey+".client.fingerprint")
+	}
+	ext, _ := t[extKey].(map[string]any)
+	if ext == nil {
+		if fp == "" {
+			return nil
+		}
+		ext = map[string]any{}
+		t[extKey] = ext
+	}
+	client, _ := ext["client"].(map[string]any)
+	if client == nil {
+		client = map[string]any{}
+	}
+	if fp == "" {
+		delete(client, "fingerprint")
+	} else {
+		client["fingerprint"] = fp
+	}
+	switch {
+	case len(client) > 0:
+		ext["client"] = client
+	default:
+		delete(ext, "client")
+	}
+	if len(ext) == 0 {
+		delete(t, extKey)
+	}
+	return nil
 }
 
 // Client is one proxy in both subscription formats.
@@ -64,11 +125,15 @@ type clientBuilder struct {
 
 func (c *clientBuilder) addr() string { return net.JoinHostPort(c.host, strconv.Itoa(c.port)) }
 
+// fingerprint: the inbound's own choice, then the panel's default. A value saved before
+// the panel checked them falls through rather than reaching apps that refuse it.
 func (c *clientBuilder) fingerprint() string {
-	if c.ext.Client.Fingerprint != "" {
-		return c.ext.Client.Fingerprint
+	for _, fp := range []string{c.ext.Client.Fingerprint, c.in.Fingerprint} {
+		if ValidFingerprint(fp) {
+			return fp
+		}
 	}
-	return "chrome"
+	return DefaultFingerprint
 }
 
 // sniKey: vless and vmess call the TLS name "servername", everything else "sni".

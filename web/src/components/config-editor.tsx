@@ -6,6 +6,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { useEffect, useRef } from "react";
+import { FINGERPRINTS } from "../lib/fingerprints";
 
 // Mirrors the allow list in internal/proto (rules): the server is the authority, this only
 // saves typing.
@@ -43,7 +44,7 @@ const VALUES: Record<string, string[]> = {
   transport: ["TCP"],
   "aead-method": ["chacha20-poly1305", "aes-128-gcm"],
   "table-type": ["prefer_ascii", "prefer_entropy", "up_ascii_down_entropy", "up_entropy_down_ascii"],
-  fingerprint: ["chrome", "firefox", "safari", "ios", "edge", "random"],
+  fingerprint: [...FINGERPRINTS],
 };
 
 const indent = (s: string) => s.length - s.trimStart().length;

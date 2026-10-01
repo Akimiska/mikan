@@ -141,3 +141,10 @@ func (c *Client) Logs(ctx context.Context, since time.Time) ([]LogLine, error) {
 	err := c.do(ctx, http.MethodGet, "/v1/logs?since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil, &r, 5*time.Second)
 	return r, err
 }
+
+// Warp checks the node's way out through WARP (a request to Cloudflare through it).
+func (c *Client) Warp(ctx context.Context) (WarpStatus, error) {
+	var r WarpStatus
+	err := c.do(ctx, http.MethodGet, "/v1/warp", nil, &r, 20*time.Second)
+	return r, err
+}

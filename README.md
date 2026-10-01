@@ -65,7 +65,7 @@ mihomo is embedded as a library, so traffic is counted per user on every connect
 <td valign="top">
 
 ### 🤖 Telegram bot and Mini App built in
-Subscribers check their plan, devices and connection guides in a bot you set up in the panel, open the subscription page as a Telegram Mini App and get notified before it expires. Broadcasts respect Telegram's limits.
+Subscribers check their plan, devices and connection guides in a bot you set up in the panel, open the subscription page as a Telegram Mini App and get notified before it expires. They can also buy and renew — Telegram Stars, cards and SBP through YooKassa, or crypto through CryptoBot — and the panel hands out the link by itself. Broadcasts respect Telegram's limits.
 
 </td>
 </tr>
@@ -80,6 +80,20 @@ Go and SQLite, two small containers. On a working server with clients: **~14 MB 
 
 ### 🔒 Locked down by default
 Secret admin link on a random port, HTTPS with Let's Encrypt (even for a bare IP), argon2id, TOTP 2FA, CSRF protection, strict CSP, audit log. Containers run non-root, read-only, with all capabilities dropped.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🌐 Cloudflare WARP for chosen protocols
+Each node can have its own WARP — registered in one click or from your WireGuard config. Chosen protocols, domains and networks leave through WARP, everything else goes direct.
+
+</td>
+<td valign="top">
+
+### 🧩 API and keys for integrations
+A REST API documented right in the panel, with read-only or full-access keys for bots, billing and monitoring.
 
 </td>
 </tr>

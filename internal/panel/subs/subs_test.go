@@ -8,6 +8,7 @@ import (
 
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 )
 
 func TestFormat(t *testing.T) {
@@ -364,6 +365,53 @@ func TestNodePrefix(t *testing.T) {
 	for in, want := range map[string]string{"🇳🇱 Нидерланды": "🇳🇱", "🇺🇸США": "🇺🇸", "Германия": "Германия", "": "", " 🇩🇪 DE ": "🇩🇪"} {
 		if got := NodePrefix(in); got != want {
 			t.Errorf("NodePrefix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The panel's default fingerprint reaches every uTLS proxy in links and the mihomo
+// profile; an inbound's own one wins.
+func TestDefaultFingerprint(t *testing.T) {
+	prof := profile(t, "ab12")
+	prof.Fingerprint = "firefox"
+	for i, in := range prof.Inbounds {
+		if in.Preset == "vless_reality_vision" {
+			tpl, err := proto.Parse(in.Config)
+			if err != nil || proto.SetFingerprint(tpl, "safari") != nil {
+				t.Fatal(err)
+			}
+			prof.Inbounds[i].Config = proto.Marshal(tpl)
+		}
+	}
+	want := map[string]string{"VLESS XHTTP": "firefox", "VLESS Vision": "safari"}
+	links, err := URIs(prof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range strings.Split(links, "\n") {
+		u, err := url.Parse(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fp := u.Query().Get("fp"); fp != want[u.Fragment] {
+			t.Errorf("%s: fp=%q, want %q", u.Fragment, fp, want[u.Fragment])
+		}
+	}
+	raw, err := Mihomo(prof, Groups{}, RoutingAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Proxies []map[string]any `json:"proxies"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range cfg.Proxies {
+		name := p["name"].(string)
+		got, _ := p["client-fingerprint"].(string)
+		if got != want[name] {
+			t.Errorf("%s: client-fingerprint=%q, want %q", name, got, want[name])
 		}
 	}
 }

@@ -114,7 +114,7 @@ type pendingTOTP struct {
 
 func (h *handlers) registerAuth() {
 	public := map[string]any{"public": true}
-	huma.Register(h.api, huma.Operation{OperationID: "login", Method: http.MethodPost, Path: "/api/v1/auth/login", Summary: "Вход", Tags: []string{"auth"}, Metadata: public}, h.login)
+	huma.Register(h.api, huma.Operation{OperationID: "login", Method: http.MethodPost, Path: "/api/v1/auth/login", Summary: "Вход", Tags: []string{"auth"}, Metadata: public, Security: []map[string][]string{{}}}, h.login)
 	huma.Register(h.api, huma.Operation{OperationID: "logout", Method: http.MethodPost, Path: "/api/v1/auth/logout", Summary: "Выход", Tags: []string{"auth"}, DefaultStatus: http.StatusNoContent}, h.logout)
 	huma.Register(h.api, huma.Operation{OperationID: "me", Method: http.MethodGet, Path: "/api/v1/auth/me", Summary: "Текущий админ", Tags: []string{"auth"}}, h.me)
 	huma.Register(h.api, huma.Operation{OperationID: "change-password", Method: http.MethodPost, Path: "/api/v1/auth/password", Summary: "Сменить пароль", Tags: []string{"auth"}, DefaultStatus: http.StatusNoContent}, h.changePassword)

@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { LoaderCircle, SearchX, TriangleAlert, UserRound } from "lucide-react";
-import { cloneElement, isValidElement, lazy, Suspense, useId, type ButtonHTMLAttributes, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { cloneElement, isValidElement, lazy, Suspense, useId, type ButtonHTMLAttributes, type ComponentProps, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { UserState } from "../api/client";
 import { t } from "../i18n";
 
@@ -66,8 +66,18 @@ export function Avatar({ name, seed, size }: { name: string; seed: number; size?
   );
 }
 
-// Moved to switch.tsx; re-exported so the pages keep importing it from here.
-export { Switch } from "./switch";
+// The switch lives in switch.tsx (Radix: the subscription page has no use for it) and the
+// pages import it from there. This stand-in is for the ones that still import it from here
+// (payments.tsx, payment-addons.tsx): it fetches switch.tsx when one first renders, so the
+// shared bundle of the subscription page stays free of Radix. Delete it once they moved.
+const SwitchImpl = lazy(() => import("./switch").then((m) => ({ default: m.Switch })));
+export function Switch(props: ComponentProps<typeof SwitchImpl>) {
+  return (
+    <Suspense fallback={<span className="switch" aria-hidden />}>
+      <SwitchImpl {...props} />
+    </Suspense>
+  );
+}
 
 export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
   return (

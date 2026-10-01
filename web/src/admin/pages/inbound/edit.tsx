@@ -13,7 +13,7 @@ import { fingerprintLabel, validFingerprint } from "../../../lib/fingerprints";
 import { destIsIP } from "../../../lib/format";
 import { nodeLabel } from "../nodes";
 import { useWarp } from "../node-warp";
-import { Editor, type ListenAt, ValidateResult, hostPort, listenAt, loopback, useValidate } from "./shared";
+import { Editor, type ListenAt, ValidateResult, hostPort, listenAt, loopback, preloadEditor, useValidate } from "./shared";
 import { TargetPicker } from "./target";
 
 export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: () => void }) {
@@ -67,6 +67,12 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     setErrors({});
     validate.reset();
     // `validate` changes identity on every render; reset only for another inbound.
+  }, [inbound]);
+  // The config tab is a click away: have its editor on the way once the drawer has settled.
+  useEffect(() => {
+    if (!inbound) return;
+    const id = window.setTimeout(preloadEditor, 400);
+    return () => window.clearTimeout(id);
   }, [inbound]);
   const defaultName = presets.data?.find((p) => p.id === inbound?.preset)?.sub_name ?? "";
   const editConfig = (v: string) => {

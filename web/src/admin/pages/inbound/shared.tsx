@@ -5,7 +5,13 @@ import { api, ApiError, errorText, unwrap, type Preset, type Schemas } from "../
 import { Pill, Skeleton } from "../../../components/ui";
 import { t, tMaybe } from "../../../i18n";
 
-export const ConfigEditor = lazy(() => import("../../../components/config-editor"));
+const loadEditor = () => import("../../../components/config-editor");
+const ConfigEditor = lazy(loadEditor);
+
+/** Starts fetching the editor's chunk (CodeMirror, 400 kB) before the config tab is opened, so the tab does not wait for it. */
+export function preloadEditor() {
+  void loadEditor();
+}
 
 /** Protocol names are the same in every language; the one-line pitch is translated. */
 export function presetSummary(p: Preset): string {

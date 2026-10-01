@@ -22,8 +22,13 @@ const (
 	KeyACMEEmail = "acme_email"
 	KeyGroupMain = "sub_group_main" // subscription group names, see subs.Groups
 	KeyGroupAuto = "sub_group_auto"
+	KeyGroupIcon = "sub_group_icon" // AoiVPN fork: icon URL for the main group
 	KeyRouting   = "sub_routing" // subs.Routing
 	KeyRules     = "sub_rules"   // the admin's own Clash rules, as typed (subs.ParseRules)
+	// KeySubBypass (AoiVPN fork): JSON {group, proxies:[mihomo maps]} of external bypass
+	// proxies injected into the sub as a second select group. Fed by an external script
+	// (not the panel UI); not tracked as mikan slots/inbounds.
+	KeySubBypass = "sub_bypass"
 	// KeyFingerprint is the uTLS profile clients get where an inbound sets none
 	// (proto.Fingerprints); unset means proto.DefaultFingerprint.
 	KeyFingerprint = "client_fingerprint"

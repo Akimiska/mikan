@@ -33,6 +33,8 @@ type Config struct {
 	Groups     Groups
 	Routing    Routing
 	Rules      []string // the admin's own Clash rules, checked (ServedRules)
+	// Bypass (AoiVPN fork): injected external bypass proxies + their group name.
+	Bypass *Bypass
 	// Fingerprint is the default uTLS profile for inbounds that set none.
 	Fingerprint string
 	// Binding gives every device that sends its id keys of its own (domain.Devices);
@@ -193,13 +195,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch format {
 	case "clash":
 		prof.Rules = RulesFor(cfg.Rules, app)
+		prof.Bypass = cfg.Bypass
 		body, err := Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-		w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(cfg.Brand)+".yaml")
+		w.Header().Set("Content-Disposition", "inline; filename*=UTF-8''"+url.PathEscape(cfg.Brand))
 		_, _ = w.Write(body)
 	default:
 		links, err := URIs(prof)

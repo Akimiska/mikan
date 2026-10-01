@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -196,14 +197,22 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		var domainName, publicHost, routing, fingerprint, rules string
 		var groups subs.Groups
-		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto,
+		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto, settings.KeyGroupIcon: &groups.Icon,
 			settings.KeyRouting: &routing, settings.KeyFingerprint: &fingerprint, settings.KeyRules: &rules} {
 			if *dst, err = set.String(ctx, key); err != nil {
 				return subs.Config{}, err
 			}
 		}
+		// AoiVPN fork: external bypass proxies (sub_bypass setting, JSON) injected as a 2nd group.
+		var bypass *subs.Bypass
+		if raw, _ := set.String(ctx, settings.KeySubBypass); raw != "" {
+			var bp subs.Bypass
+			if json.Unmarshal([]byte(raw), &bp) == nil && bp.Group != "" && len(bp.Proxies) > 0 {
+				bypass = &bp
+			}
+		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing), Fingerprint: fingerprint,
-			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang))}
+			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang)), Bypass: bypass}
 		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
 			return subs.Config{}, err
 		}

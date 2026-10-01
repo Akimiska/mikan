@@ -37,6 +37,7 @@ type Node struct {
 type Groups struct {
 	Main string // selector, "VPN" by default
 	Auto string // url-test, "Авто" by default, "Auto" on a panel in English
+	Icon string // AoiVPN fork: optional icon URL for the main group (mihomo `icon`)
 }
 
 // AliasGroup is the name Clash apps assume for the main group in the rules they inject
@@ -125,6 +126,14 @@ func ProxyName(in db.Inbound) string {
 	return info.SubName
 }
 
+// Bypass (AoiVPN fork): external bypass proxies and the name of their group. These are
+// NOT mikan inbounds/slots — they are injected into the sub as extra proxies + a second
+// select group ("🇷🇺 Обход БС"), fed from the sub_bypass setting. Not tracked by the panel.
+type Bypass struct {
+	Group   string           `json:"group"`
+	Proxies []map[string]any `json:"proxies"`
+}
+
 type Profile struct {
 	Slot     db.Slot
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
@@ -134,6 +143,8 @@ type Profile struct {
 	Fingerprint string
 	// Rules are the admin's own Clash rules (ServedRules), before the built-in routing.
 	Rules []string
+	// Bypass (AoiVPN fork): external bypass proxies + group name, injected into the sub.
+	Bypass *Bypass
 }
 
 type proxy struct {
@@ -234,18 +245,24 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 	for i, x := range ps {
 		proxies[i], names[i] = x.yaml, x.name
 	}
-	countries := countryGroups(p.Nodes, ps, g, names)
-	selector := []string{g.Auto}
-	for _, c := range countries {
-		selector = append(selector, c["name"].(string))
-	}
-	groups := []map[string]any{
-		{"name": g.Main, "type": "select", "proxies": append(selector, names...)},
-		urlTest(g.Auto, names),
-	}
-	groups = append(groups, countries...)
-	if g.Main != AliasGroup {
-		groups = append(groups, map[string]any{"name": AliasGroup, "type": "select", "proxies": []string{g.Main}, "hidden": true})
+	// AoiVPN fork: flat two-group layout matching the legacy sub — a single select
+	// group (g.Main, e.g. "Proxy") listing every node, plus an optional "🇷🇺 Обход БС"
+	// select group of injected bypass proxies (added as the last member of the main
+	// group). No url-test / per-country / alias groups.
+	mainMembers := append([]string{}, names...)
+	var groups []map[string]any
+	if p.Bypass != nil && len(p.Bypass.Proxies) > 0 {
+		bnames := make([]string, 0, len(p.Bypass.Proxies))
+		for _, bp := range p.Bypass.Proxies {
+			proxies = append(proxies, bp)
+			if n, ok := bp["name"].(string); ok {
+				bnames = append(bnames, n)
+			}
+		}
+		mainMembers = append(mainMembers, p.Bypass.Group)
+		groups = append(groups, selectGroup(g.Main, mainMembers, g.Icon), selectGroup(p.Bypass.Group, bnames, ""))
+	} else {
+		groups = append(groups, selectGroup(g.Main, mainMembers, g.Icon))
 	}
 	dns := map[string]any{
 		"enable": true, "ipv6": false, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
@@ -281,6 +298,15 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 
 func urlTest(name string, proxies []string) map[string]any {
 	return map[string]any{"name": name, "type": "url-test", "proxies": proxies, "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50}
+}
+
+// selectGroup (AoiVPN fork): a manual select group with an optional mihomo icon URL.
+func selectGroup(name string, proxies []string, icon string) map[string]any {
+	grp := map[string]any{"name": name, "type": "select", "proxies": proxies}
+	if icon != "" {
+		grp["icon"] = icon
+	}
+	return grp
 }
 
 // countryGroups picks the fastest proxy of each node when there are several nodes. A

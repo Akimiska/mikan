@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { ChevronRight, Copy, KeyRound, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { meQuery, qk, useInbounds, usePaymentSettings, useSettings, useUpdates } from "../../api/hooks";
+import { meQuery, qk, useInbounds, useNodes, usePaymentSettings, useSettings, useUpdates } from "../../api/hooks";
 import { LangSwitch } from "../../components/lang";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
@@ -28,6 +28,7 @@ export function SettingsPage() {
         <div className="grid items-start gap-4 xl:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-4">
             <ServerCard s={settings.data} />
+            <SubPortCard s={settings.data} />
             <SubscriptionCard s={settings.data} />
             <LanguageCard s={settings.data} />
             <AutoCard s={settings.data} />
@@ -95,6 +96,98 @@ function ServerCard({ s }: { s: Schemas["SettingsView"] }) {
         <Button type="submit" variant="primary" loading={save.isPending}>
           {t("common.save")}
         </Button>
+      </form>
+    </section>
+  );
+}
+
+// Ports the installer opens in the firewall (443 and the HTTPS pool): a subscription
+// port among them needs nothing else on the server.
+const OPEN_PORTS = [443, 2053, 2083, 2087, 2096, 8443] as const;
+
+// Subscriptions on a port of their own: a usual HTTPS port looks like any site, and the
+// admin panel's port stops showing in every link. Links on the old port keep working.
+function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const inbounds = useInbounds();
+  const nodes = useNodes();
+  const [port, setPort] = useState(s.sub_port ? String(s.sub_port) : "");
+  useEffect(() => setPort(s.sub_port ? String(s.sub_port) : ""), [s.sub_port]);
+  const error = save.error instanceof ApiError ? save.error.fields.sub_port : undefined;
+  const own = nodes.data?.find((n) => n.local)?.id;
+  // Who holds a port over TCP on the panel's own server.
+  const holder = (p: number) => (inbounds.data ?? []).find((i) => i.node_id === own && i.enabled && i.network === "tcp" && i.port === String(p))?.name;
+  const value = Number(port);
+  const valid = port.trim() === "" || (Number.isInteger(value) && value >= 1 && value <= 65535);
+  const next = port.trim() === "" ? 0 : value;
+  const changed = next !== (s.sub_port ?? 0);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (valid) save.mutate({ sub_port: next });
+  };
+  const current = s.sub_port || s.panel_port;
+  return (
+    <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
+      <form onSubmit={submit} noValidate>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t("settings.subPort")}</h2>
+            <div className="card-sub">{t("settings.subPortSub")}</div>
+          </div>
+          {s.sub_port ? <Pill tone={s.sub_port_error ? "bad" : "ok"}>{s.sub_port_error ? t("settings.subPortDown") : t("settings.subPortOn", { port: s.sub_port })}</Pill> : null}
+        </div>
+        {s.sub_port_error ? (
+          <div className="banner err mb-4" role="alert">
+            {t("settings.subPortBusy", { port: s.sub_port, panel: s.panel_port })}
+          </div>
+        ) : null}
+        {s.sub_base_url ? (
+          <div className="panel-soft mb-4 p-3">
+            <div className="text-xs text-[var(--ink-500)]">{t("settings.subPortLinks")}</div>
+            <div className="mono truncate text-[13px]">{s.sub_base_url.replace(/[^/]+\/$/, "…")}</div>
+          </div>
+        ) : null}
+        <Field label={t("settings.subPortField")} htmlFor="s-sub-port" hint={t("settings.subPortHint", { panel: s.panel_port })} error={error ?? (valid ? undefined : t("settings.subPortInvalid"))}>
+          <input
+            id="s-sub-port"
+            className="input mono max-w-[140px]"
+            inputMode="numeric"
+            value={port}
+            onChange={(e) => setPort(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder={String(s.panel_port)}
+            aria-invalid={!!error || !valid}
+          />
+        </Field>
+        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label={t("settings.subPortQuick")}>
+          {OPEN_PORTS.map((p) => {
+            const who = p === s.panel_port ? t("settings.subPortPanel") : holder(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                className="chip"
+                aria-pressed={port === String(p)}
+                disabled={!!who}
+                title={p === s.panel_port ? t("errors.api.sub_port_panel") : who ? t("settings.subPortHeld", { name: who }) : undefined}
+                onClick={() => setPort(String(p))}
+              >
+                <span className="mono">{p}</span>
+                {who ? <span className="text-[var(--ink-400)]"> · {who}</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mb-4 text-xs text-[var(--ink-500)]">{t("settings.subPortNote")}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" loading={save.isPending && save.variables?.sub_port === next} disabled={!changed || !valid}>
+            {t("common.save")}
+          </Button>
+          {s.sub_port ? (
+            <Button variant="ghost" loading={save.isPending && save.variables?.sub_port === 0} onClick={() => save.mutate({ sub_port: 0 })}>
+              {t("settings.subPortOff", { port: current === s.sub_port ? s.panel_port : current })}
+            </Button>
+          ) : null}
+        </div>
       </form>
     </section>
   );

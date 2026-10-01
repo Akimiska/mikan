@@ -1501,6 +1501,11 @@ export interface components {
             quiet_hour_utc?: number;
             sub_group_auto?: string;
             sub_group_main?: string;
+            /**
+             * Format: int64
+             * @description Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать
+             */
+            sub_port?: number;
             /** @enum {string} */
             sub_routing?: "ru_direct" | "all";
             /** @description https://… или tg://… */
@@ -1746,6 +1751,13 @@ export interface components {
             sub_group_auto: string;
             /** @description Главная группа в Clash-приложениях */
             sub_group_main: string;
+            /**
+             * Format: int64
+             * @description Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае
+             */
+            sub_port: number;
+            /** @description sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели */
+            sub_port_error?: string;
             /**
              * @description Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN
              * @enum {string}

@@ -92,6 +92,17 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 		}
 		return nodesync.Target{Node: c, TLS: quic, Local: n.Address == ""}, nil
 	}
+	var panelTLS *tls.Config
+	if !cfg.Dev {
+		panelTLS = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: holder.Get, NextProtos: []string{"h2", "http/1.1"}}
+	}
+	listenHost, _, err := net.SplitHostPort(cfg.Listen)
+	if err != nil {
+		return fmt.Errorf("listen %q: %w", cfg.Listen, err)
+	}
+	subPort := NewSubPort(listenHost, panelTLS, logger)
+	defer subPort.Close()
+	opts.SubPort, opts.SubPortError = subPort.Set, subPort.Error
 	var certs *acme.Manager
 	if !cfg.Dev {
 		certs = acme.New(cfg.DataDir, holder, self, settings.New(st.Q), logger, time.Now)
@@ -108,25 +119,22 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	if paths.Admin == "" {
 		logger.Warn("panel is not initialized yet: run `mikan admin bootstrap`")
 	}
+	subPort.SetHandler(p.SubOnly())
+	if port, _, err := settings.Get[int](ctx, settings.New(st.Q), settings.KeySubPort); err == nil {
+		subPort.Start(port)
+	}
 	go p.Run(ctx)
 	if certs != nil {
 		go certs.Run(ctx)
 	}
 
-	httpSrv := &http.Server{
-		Handler:           p.Handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    64 << 10,
-		ErrorLog:          log.New(dropHandshakeNoise{}, "", log.LstdFlags),
-	}
+	httpSrv := httpServer(p.Handler)
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
 	}
-	if !cfg.Dev {
-		ln = tls.NewListener(ln, &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: holder.Get, NextProtos: []string{"h2", "http/1.1"}})
+	if panelTLS != nil {
+		ln = tls.NewListener(ln, panelTLS)
 	}
 	logger.Info("panel started", "listen", cfg.Listen, "tls", !cfg.Dev, "version", version)
 
@@ -143,6 +151,18 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return httpSrv.Shutdown(shutdownCtx)
+}
+
+// httpServer is the panel's HTTP server, on its own port and on the subscription port.
+func httpServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+		ErrorLog:          log.New(dropHandshakeNoise{}, "", log.LstdFlags),
+	}
 }
 
 // NodeClient reaches a node's API as the running panel does: the local node over its

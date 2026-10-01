@@ -68,6 +68,10 @@ type Options struct {
 	Autotune autotune.Options
 	// TelegramAPI is the Bot API; "" is Telegram's.
 	TelegramAPI string
+	// SubPort moves the subscription port (0: none) and SubPortError says why the saved
+	// one is not served; nil where the panel runs no server (tests, the CLI).
+	SubPort      func(port int) error
+	SubPortError func() string
 	// DataDir is where the host updater and the panel meet (update/); "" turns that off.
 	DataDir string
 	// Releases fetches the newest release; nil never checks.
@@ -113,6 +117,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		deps.Tuner = p.Tuner
 	}
 	deps.PanelCert = o.PanelCert
+	deps.SubPort, deps.SubPortError = o.SubPort, o.SubPortError
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
@@ -120,7 +125,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
 	}
 	subBase := func(ctx context.Context) string {
-		ep, err := set.Endpoint(ctx)
+		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {
 			return ""
 		}
@@ -233,6 +238,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Handler = p.server
 	return p, nil
 }
+
+// SubOnly is what the subscription port serves: the subscription path alone.
+func (p *Panel) SubOnly() http.Handler { return p.server.SubOnly() }
 
 // Apply loads the secret paths into the router and the default language into the pages.
 func (p *Panel) Apply(ctx context.Context) (settings.Paths, error) {

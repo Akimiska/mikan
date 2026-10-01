@@ -67,6 +67,10 @@ type Deps struct {
 	// Warp registers WARP accounts with Cloudflare.
 	Warp    warp.Client
 	SubBase func(ctx context.Context) string
+	// SubPort opens subscriptions on a port of their own (0: closes it); SubPortError says
+	// why the saved one is not served. nil: the panel runs no server (tests).
+	SubPort      func(port int) error
+	SubPortError func() string
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
 }

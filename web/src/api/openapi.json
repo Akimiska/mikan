@@ -1610,6 +1610,13 @@
             "maxLength": 200,
             "type": "string"
           },
+          "sub_port": {
+            "description": "Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать",
+            "format": "int64",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
           "sub_routing": {
             "enum": [
               "ru_direct",
@@ -2320,6 +2327,15 @@
             "description": "Главная группа в Clash-приложениях",
             "type": "string"
           },
+          "sub_port": {
+            "description": "Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sub_port_error": {
+            "description": "sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели",
+            "type": "string"
+          },
           "sub_routing": {
             "description": "Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN",
             "enum": [
@@ -2338,6 +2354,7 @@
           "public_host",
           "domain",
           "panel_port",
+          "sub_port",
           "quiet_hour_utc",
           "admin_url",
           "sub_base_url",

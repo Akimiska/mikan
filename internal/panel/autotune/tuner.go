@@ -143,6 +143,7 @@ type world struct {
 	ownNames     map[string]bool // the panel's and nodes' own names: never a REALITY target
 	panelHost    string
 	panelPort    int
+	subPort      int // 0: none
 	eventsWindow time.Duration
 }
 
@@ -289,6 +290,9 @@ func (t *Tuner) load(ctx context.Context) (*world, error) {
 	own(panelDomain)
 	own(w.panelHost)
 	if w.panelPort, _, err = settings.Get[int](ctx, t.set, settings.KeyPanelPort); err != nil {
+		return nil, err
+	}
+	if w.subPort, _, err = settings.Get[int](ctx, t.set, settings.KeySubPort); err != nil {
 		return nil, err
 	}
 	return w, nil
@@ -478,6 +482,9 @@ func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound,
 	reserved := map[string]bool{"22": true}
 	if n.Address == "" {
 		reserved[strconv.Itoa(w.panelPort)] = true
+		if w.subPort > 0 && network == "tcp" {
+			reserved[strconv.Itoa(w.subPort)] = true
+		}
 	} else if _, p, err := net.SplitHostPort(n.Address); err == nil {
 		reserved[p] = true
 	}

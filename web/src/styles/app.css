@@ -169,6 +169,8 @@
   .chip { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.55); border: 1px solid var(--hairline); font-weight: 500; font-size: 13px; color: var(--ink-600); transition: background-color 0.2s, color 0.2s, border-color 0.2s; white-space: nowrap; }
   .chip:hover { background: rgba(255, 255, 255, 0.85); color: var(--ink-900); }
   .chip[aria-pressed="true"] { background: var(--ink-900); border-color: var(--ink-900); color: #fff; }
+  .chip:disabled { opacity: 0.5; cursor: not-allowed; }
+  .chip:disabled:hover { background: rgba(255, 255, 255, 0.55); color: var(--ink-600); }
   .chip-count { font-size: 12px; opacity: 0.7; }
   .search-field { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: var(--r-md); background: rgba(255, 255, 255, 0.7); border: 1px solid var(--hairline); min-width: 280px; color: var(--ink-500); transition: border-color 0.2s, box-shadow 0.2s; }
   .search-field:focus-within { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }

@@ -212,7 +212,14 @@
       "pool_not_found": "No such pool",
       "tg_proxy_invalid": "A proxy address is socks5://login:password@host:port or http://host:port",
       "tg_route_node": "Pick a remote node of the panel: its own node shares the server",
-      "tg_route_unreachable": "Telegram does not answer this way: check the node or the proxy"
+      "tg_route_unreachable": "Telegram does not answer this way: check the node or the proxy",
+      "sub_port_reserved": "Port {value} is the system's (SSH or Let's Encrypt)",
+      "sub_port_panel": "That is the panel's own port: subscriptions already work on it",
+      "sub_port_inbound": "The port is taken by the protocol “{value}” of the panel's own node",
+      "sub_port_relay": "The port is taken by the cascade: other nodes' traffic goes through it",
+      "sub_port_busy": "Port {value} is taken by another program on the server",
+      "sub_port_unavailable": "The subscription port cannot be changed now",
+      "port_sub": "The panel serves subscriptions on this port: pick another, or change the subscription port in Settings"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -769,7 +776,21 @@
     "salesOffNote": "Off: the bot and the Mini App sell nothing and Payments leaves the menu. Invoices opened before are still applied.",
     "openPayments": "Payments",
     "salesOnToast": "Selling is on",
-    "salesOffToast": "Selling is off"
+    "salesOffToast": "Selling is off",
+    "subPort": "Subscription port",
+    "subPortSub": "Subscriptions and the subscription page on a port of their own. 443 or 2053 look like any website, and the admin panel's port stops showing in links.",
+    "subPortOn": "port {port}",
+    "subPortDown": "not open",
+    "subPortBusy": "Port {port} is taken by another program on the server, so subscriptions go through the panel's port {panel} for now. Pick another port.",
+    "subPortLinks": "Subscription links now",
+    "subPortField": "Port",
+    "subPortHint": "Empty — the panel's ({panel}).",
+    "subPortInvalid": "A port is a number from 1 to 65535",
+    "subPortQuick": "Ports opened at install",
+    "subPortHeld": "Taken by the protocol “{name}”",
+    "subPortNote": "The admin panel does not open on this port. Links on the panel's port keep working, so clients change nothing. The listed ports were opened in the firewall at install; open any other yourself if ufw is on: ufw allow PORT/tcp.",
+    "subPortOff": "Back to the panel's port {port}",
+    "subPortPanel": "panel"
   },
   "sub": {
     "loadFailed": "Could not load the subscription",

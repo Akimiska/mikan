@@ -77,8 +77,8 @@ func cascadeError(err error, field string) error {
 	return err
 }
 
-// relayReserved are ports a relay on node n must not take: SSH, the panel's own port on
-// its node, the node API's port on a remote one.
+// relayReserved are ports a relay on node n must not take: SSH, the panel's own port and
+// its subscription port on its node, the node API's port on a remote one.
 func (h *handlers) relayReserved(ctx context.Context, n db.Node) (map[string]bool, error) {
 	reserved := map[string]bool{"22": true}
 	if n.Address == "" {
@@ -87,6 +87,11 @@ func (h *handlers) relayReserved(ctx context.Context, n db.Node) (map[string]boo
 			return nil, err
 		}
 		reserved[strconv.Itoa(p)] = true
+		if sp, _, err := settings.Get[int](ctx, h.d.Settings, settings.KeySubPort); err != nil {
+			return nil, err
+		} else if sp > 0 {
+			reserved[strconv.Itoa(sp)] = true
+		}
 	} else if _, p, err := net.SplitHostPort(n.Address); err == nil {
 		reserved[p] = true
 	}

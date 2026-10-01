@@ -320,6 +320,11 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	if h.relayPortBusy(ctx, node.ID, port, t.Network()) {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
 	}
+	if taken, err := domain.SubPortTaken(ctx, h.d.Settings, node, port, t.Network()); err != nil {
+		return nil, err
+	} else if taken {
+		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_sub"})
+	}
 	if owner, busy := domain.PortOwner(existing, port, t.Network(), 0); busy {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})
 	}
@@ -493,6 +498,11 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	next.DisplayName = display
 	if enabled != 0 && h.relayPortBusy(ctx, row.NodeID, port, t.Network()) {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
+	}
+	if taken, err := domain.SubPortTaken(ctx, h.d.Settings, node, port, t.Network()); err != nil {
+		return nil, err
+	} else if taken && enabled != 0 {
+		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_sub"})
 	}
 	if owner, busy := domain.PortOwner(existing, port, t.Network(), row.ID); busy && enabled != 0 {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})

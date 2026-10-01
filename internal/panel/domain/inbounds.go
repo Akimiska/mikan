@@ -97,6 +97,22 @@ func InboundNetwork(in db.Inbound) string {
 	return info.Network
 }
 
+// ErrSubPort: the panel serves subscriptions on this TCP port of its own server.
+var ErrSubPort = errors.New("port_sub")
+
+// SubPortTaken: an inbound of node on port over network would take the subscription
+// port. Only the panel's own node shares the panel's server, and only over TCP.
+func SubPortTaken(ctx context.Context, set *settings.Settings, node db.Node, port, network string) (bool, error) {
+	if node.Address != "" || network != "tcp" {
+		return false, nil
+	}
+	p, _, err := settings.Get[int](ctx, set, settings.KeySubPort)
+	if err != nil {
+		return false, err
+	}
+	return p > 0 && strconv.Itoa(p) == port, nil
+}
+
 // PortOwner returns the enabled inbound other than skipID that listens on port over network.
 func PortOwner(existing []db.Inbound, port, network string, skipID int64) (db.Inbound, bool) {
 	for _, e := range existing {
@@ -167,6 +183,11 @@ func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, nod
 	if owner, busy := PortOwner(existing, port, t.Network(), 0); busy {
 		return db.Inbound{}, &PortInUseError{Owner: owner.Name}
 	}
+	if taken, err := SubPortTaken(ctx, set, node, port, t.Network()); err != nil {
+		return db.Inbound{}, err
+	} else if taken {
+		return db.Inbound{}, ErrSubPort
+	}
 	return st.Q.CreateInbound(ctx, db.CreateInboundParams{NodeID: nodeID, Name: FreeName(existing, info.Name), Preset: id, Port: port, Config: config,
 		CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
 }
@@ -176,7 +197,8 @@ func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, nod
 // stay, so clients only need to refresh the subscription. It returns the inbound before
 // and after the move.
 func SetInboundPort(ctx context.Context, st *store.Store, nodeID int64, name, port string, now time.Time) (db.Inbound, db.Inbound, error) {
-	if _, err := st.Q.GetNode(ctx, nodeID); errors.Is(err, sql.ErrNoRows) {
+	node, err := st.Q.GetNode(ctx, nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return db.Inbound{}, db.Inbound{}, ErrUnknownNode
 	} else if err != nil {
 		return db.Inbound{}, db.Inbound{}, err
@@ -199,6 +221,11 @@ func SetInboundPort(ctx context.Context, st *store.Store, nodeID int64, name, po
 	}
 	if r, err := st.Q.GetNodeRelay(ctx, nodeID); err == nil && r.Port == port && InboundNetwork(prev) == "tcp" && prev.Enabled != 0 {
 		return db.Inbound{}, db.Inbound{}, &PortInUseError{Owner: "relay"}
+	}
+	if taken, err := SubPortTaken(ctx, settings.New(st.Q), node, port, InboundNetwork(prev)); err != nil {
+		return db.Inbound{}, db.Inbound{}, err
+	} else if taken && prev.Enabled != 0 {
+		return db.Inbound{}, db.Inbound{}, ErrSubPort
 	}
 	next, err := st.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: prev.Enabled, Config: prev.Config, DisplayName: prev.DisplayName,
 		UpdatedAt: now.Unix(), ID: prev.ID})

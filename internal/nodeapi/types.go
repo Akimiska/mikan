@@ -28,6 +28,8 @@ type DesiredState struct {
 	TLS      *TLSFiles `json:"tls,omitempty"`
 	// SelfStealPort allows REALITY dest 127.0.0.1:<port> (the panel's own HTTPS).
 	SelfStealPort int `json:"self_steal_port,omitempty"`
+	// Warp is Cloudflare WARP as an outbound; nil: everything leaves directly.
+	Warp *Warp `json:"warp,omitempty"`
 }
 
 type Inbound struct {
@@ -206,4 +208,32 @@ type Hysteria2Settings struct {
 
 type TUICSettings struct {
 	CongestionControl string `json:"congestion_control"`
+}
+
+// Warp is a WireGuard tunnel to Cloudflare WARP on the node. The listed inbounds leave
+// through it whole, and so do the listed domains and networks for every inbound; the
+// rest goes out directly. When WARP is down its traffic fails instead of leaving from
+// the server's own address.
+type Warp struct {
+	PrivateKey    string   `json:"private_key"`
+	PeerPublicKey string   `json:"peer_public_key"`
+	Endpoint      string   `json:"endpoint"`       // host:port
+	IPv4          string   `json:"ipv4"`           // the tunnel's address, without a mask
+	IPv6          string   `json:"ipv6,omitempty"` // likewise
+	Reserved      []uint8  `json:"reserved,omitempty"`
+	MTU           int      `json:"mtu,omitempty"`
+	Inbounds      []string `json:"inbounds"`
+	Domains       []string `json:"domains,omitempty"` // suffixes: example.com covers its subdomains
+	CIDRs         []string `json:"cidrs,omitempty"`
+}
+
+// WarpStatus is the node's last look at the internet through WARP.
+type WarpStatus struct {
+	Configured bool      `json:"configured"`
+	OK         bool      `json:"ok"`
+	IP         string    `json:"ip,omitempty"`   // the address sites see
+	Warp       string    `json:"warp,omitempty"` // on | plus | off, as Cloudflare says
+	Colo       string    `json:"colo,omitempty"` // Cloudflare's data center
+	Error      string    `json:"error,omitempty"`
+	CheckedAt  time.Time `json:"checked_at"`
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/warp"
 	"mikan/internal/proto"
 )
 
@@ -129,6 +131,9 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 		return st, err
 	}
 	st.Inbounds = []nodeapi.Inbound{}
+	if st.Warp, err = s.warp(ctx, n, inbounds); err != nil {
+		return st, err
+	}
 	for _, in := range inbounds {
 		// A disabled node keeps running but serves nothing.
 		if in.NodeID != s.id || in.Enabled == 0 || n.Enabled == 0 {
@@ -407,7 +412,8 @@ func stateKey(st nodeapi.DesiredState) string {
 		S []nodeapi.Slot
 		T *nodeapi.TLSFiles
 		P int
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort})
+		W *nodeapi.Warp
+	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -421,4 +427,46 @@ func policyKey(ps []nodeapi.Policy) string {
 		h.Write(raw)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// warp is the node's WARP outbound, nil when it has none or it is off. Inbounds set to
+// WARP on a node without it simply leave directly.
+func (s *Syncer) warp(ctx context.Context, n db.Node, inbounds []db.Inbound) (*nodeapi.Warp, error) {
+	w, err := s.m.st.Q.GetNodeWarp(ctx, n.ID)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && w.Enabled == 0 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := &nodeapi.Warp{PrivateKey: w.PrivateKey, PeerPublicKey: w.PeerPublicKey, Endpoint: w.Endpoint, IPv4: w.Ipv4, IPv6: w.Ipv6,
+		MTU: int(w.Mtu), Inbounds: []string{}}
+	if r, err := base64.StdEncoding.DecodeString(w.Reserved); err == nil && len(r) == 3 {
+		out.Reserved = r
+	}
+	var routes []string
+	_ = json.Unmarshal([]byte(w.Routes), &routes)
+	rs, _ := warp.ParseRoutes(routes)
+	out.Domains, out.CIDRs = rs.Domains, rs.CIDRs
+	for _, in := range inbounds {
+		if in.NodeID == n.ID && in.Enabled != 0 && in.Outbound == "warp" {
+			out.Inbounds = append(out.Inbounds, in.Name)
+		}
+	}
+	return out, nil
+}
+
+// Warp asks the node how it reaches the internet through WARP.
+func (m *Manager) Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error) {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
+	}
+	c, ok := s.node.(interface {
+		Warp(ctx context.Context) (nodeapi.WarpStatus, error)
+	})
+	if !ok {
+		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
+	}
+	return c.Warp(ctx)
 }

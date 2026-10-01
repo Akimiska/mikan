@@ -45,6 +45,7 @@ type InboundView struct {
 	AutoPort    bool      `json:"auto_port" doc:"Панель сама переносит подключение на другой порт, если его блокируют (и включено в настройках)"`
 	AutoSNI     bool      `json:"auto_sni" doc:"Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)"`
 	Auto        AutoView  `json:"auto"`
+	Outbound    string    `json:"outbound" enum:"direct,warp" doc:"Выход в интернет: напрямую с сервера или через WARP ноды"`
 }
 
 // AutoView is what the automatic moves see and last did for an inbound.
@@ -93,6 +94,7 @@ type patchInboundInput struct {
 		Config      *string `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
 		AutoPort    *bool   `json:"auto_port,omitempty"`
 		AutoSNI     *bool   `json:"auto_sni,omitempty"`
+		Outbound    *string `json:"outbound,omitempty" enum:"direct,warp" doc:"Выход в интернет: напрямую или через WARP ноды"`
 	}
 }
 
@@ -143,7 +145,7 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 	info, _ := presets.Get(in.Preset)
 	v := InboundView{ID: in.ID, NodeID: in.NodeID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
 		DisplayName: in.DisplayName, SubName: subs.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: time.Unix(in.UpdatedAt, 0).UTC(),
-		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0}
+		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0, Outbound: in.Outbound}
 	if e, ok := last[in.ID]; ok {
 		v.Auto.Last = &AutoEvent{Kind: e.Kind, Old: e.OldValue, New: e.NewValue, Reason: e.Reason, At: time.Unix(e.CreatedAt, 0).UTC()}
 	}
@@ -341,6 +343,15 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		autoSNI = flag(*b.AutoSNI)
 	}
 	autoChanged := autoPort != row.AutoPort || autoSNI != row.AutoSni
+	// The way out is the node's business: clients get nothing new either.
+	if b.Outbound != nil && *b.Outbound != row.Outbound {
+		if err := h.d.Store.Q.SetInboundOutbound(ctx, db.SetInboundOutboundParams{Outbound: *b.Outbound, ID: row.ID}); err != nil {
+			return nil, err
+		}
+		row.Outbound = *b.Outbound
+		h.d.Changes.SlotsChanged()
+		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.outbound", "inbound", row.Name, map[string]any{"outbound": row.Outbound})
+	}
 	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.Fingerprint == nil && b.DisplayName == nil {
 		// Only the automatic-move switches: clients get nothing new, so updated_at stays
 		// and the block detector keeps trusting their profiles.

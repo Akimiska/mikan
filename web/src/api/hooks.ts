@@ -22,6 +22,7 @@ export const qk = {
   apiKeys: ["api-keys"] as const,
   payments: ["payments"] as const,
   paymentSettings: ["payment-settings"] as const,
+  warp: (node: number) => ["warp", node] as const,
 };
 
 export const meQuery = {

@@ -27,6 +27,7 @@ import (
 	"mikan/internal/panel/subs"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/updates"
+	"mikan/internal/panel/warp"
 )
 
 // Panel is the fully wired HTTP side of the panel, without the listener.
@@ -73,6 +74,8 @@ type Options struct {
 	Releases updates.Source
 	// Payment providers' APIs; "" are the real ones (tests point them at fakes).
 	YooKassaAPI, CryptoBotAPI string
+	// WarpAPI is Cloudflare's WARP client API; "" is the real one.
+	WarpAPI string
 }
 
 type noChanges struct{}
@@ -143,6 +146,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Billing.SetTelegram(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
+	deps.Warp = warp.Client{API: o.WarpAPI}
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err

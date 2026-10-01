@@ -349,6 +349,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** WARP ноды */
+        get: operations["get-node-warp"];
+        put?: never;
+        post?: never;
+        /** Удалить WARP ноды */
+        delete: operations["delete-node-warp"];
+        options?: never;
+        head?: never;
+        /** Включить WARP, списки доменов, ключ WARP+ */
+        patch: operations["update-node-warp"];
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/warp/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Загрузить свой WireGuard-конфиг WARP */
+        post: operations["import-node-warp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/warp/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Зарегистрировать WARP для ноды в Cloudflare */
+        post: operations["register-node-warp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments": {
         parameters: {
             query?: never;
@@ -1098,6 +1151,11 @@ export interface components {
             network: string;
             /** Format: int64 */
             node_id: number;
+            /**
+             * @description Выход в интернет: напрямую с сервера или через WARP ноды
+             * @enum {string}
+             */
+            outbound: "direct" | "warp";
             port: string;
             preset: string;
             server_names?: string[];
@@ -1263,6 +1321,11 @@ export interface components {
             enabled?: boolean;
             /** @description Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек */
             fingerprint?: string;
+            /**
+             * @description Выход в интернет: напрямую или через WARP ноды
+             * @enum {string}
+             */
+            outbound?: "direct" | "warp";
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
@@ -1805,6 +1868,49 @@ export interface components {
         ValidateInboundOutputBody: {
             network: string;
             type: string;
+        };
+        WarpImportInputBody: {
+            /** @description WireGuard-конфиг WARP: wgcf, warp-plus или экспорт приложения */
+            config: string;
+        };
+        WarpPatchInputBody: {
+            enabled?: boolean;
+            /** @description Ключ WARP+ для зарегистрированного аккаунта */
+            license?: string;
+            /** @description Домены (example.com — вместе с поддоменами) и сети (104.16.0.0/13) */
+            routes?: string[];
+        };
+        WarpRegisterInputBody: {
+            /** @description Ключ WARP+ (необязательно) */
+            license?: string;
+        };
+        WarpView: {
+            configured: boolean;
+            enabled: boolean;
+            endpoint?: string;
+            /** @description Подключения ноды, у которых весь трафик идёт через WARP */
+            inbounds: string[];
+            ipv4?: string;
+            ipv6?: string;
+            /** @description Аккаунт WARP+ */
+            plus: boolean;
+            /** @description Домены и сети, которые идут через WARP у всех подключений ноды */
+            routes: string[];
+            /** @enum {string} */
+            source?: "register" | "import" | "";
+            /** @description Последняя проверка выхода через WARP с ноды; нет — нода недоступна */
+            status?: components["schemas"]["WarpViewStatusStruct"];
+        };
+        WarpViewStatusStruct: {
+            /** Format: date-time */
+            checked_at: string;
+            colo?: string;
+            error?: string;
+            /** @description Адрес, который видят сайты */
+            ip?: string;
+            ok: boolean;
+            /** @description on | plus | off — как отвечает Cloudflare */
+            warp?: string;
         };
     };
     responses: never;
@@ -2579,6 +2685,171 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarpPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarpImportInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "register-node-warp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WarpRegisterInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarpView"];
                 };
             };
             /** @description Error */

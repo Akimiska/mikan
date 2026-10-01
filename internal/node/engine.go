@@ -1,11 +1,13 @@
 package node
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -64,6 +66,36 @@ type Engine struct {
 	marker chan string
 
 	sys *sysSampler
+
+	routes string // routesKey of what tunnel's proxies and rules hold now
+	warpMu sync.Mutex
+	warp   nodeapi.WarpStatus // the last check, kept for a minute
+}
+
+// routesKey covers what the outbound side of the config depends on.
+func routesKey(st nodeapi.DesiredState, allowPrivate bool) string {
+	raw, _ := json.Marshal(struct {
+		W *nodeapi.Warp
+		R []string
+	}{st.Warp, rules(st, allowPrivate)})
+	return string(raw)
+}
+
+// WarpStatus checks the internet through WARP, at most once a minute.
+func (e *Engine) WarpStatus(ctx context.Context) nodeapi.WarpStatus {
+	e.mu.Lock()
+	configured := e.applied.Warp != nil
+	e.mu.Unlock()
+	if !configured {
+		return nodeapi.WarpStatus{}
+	}
+	e.warpMu.Lock()
+	defer e.warpMu.Unlock()
+	if !e.warp.CheckedAt.IsZero() && time.Since(e.warp.CheckedAt) < time.Minute {
+		return e.warp
+	}
+	e.warp = warpStatus(ctx)
+	return e.warp
 }
 
 func Start(o Options) (*Engine, error) {
@@ -146,6 +178,25 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	cfg, err := executor.ParseWithBytes(raw)
 	if err != nil {
 		return nodeapi.ApplyResult{}, &nodeapi.Error{Code: "invalid_state", Message: err.Error()}
+	}
+
+	// Listeners are patched below; the way out (WARP and the rules that pick it) is
+	// swapped only when it changed, so open connections keep their outbound otherwise.
+	if key := routesKey(st, e.allowPrivate); key != e.routes {
+		// The old tunnel's WireGuard device would keep its socket and goroutines.
+		if old, ok := tunnel.Proxies()[warpProxy]; ok {
+			defer func() {
+				if c, ok := old.Adapter().(io.Closer); ok {
+					_ = c.Close()
+				}
+			}()
+		}
+		tunnel.UpdateProxies(cfg.Proxies, cfg.Providers)
+		tunnel.UpdateRules(cfg.Rules, cfg.SubRules, cfg.RuleProviders)
+		e.routes = key
+		e.warpMu.Lock()
+		e.warp = nodeapi.WarpStatus{}
+		e.warpMu.Unlock()
 	}
 
 	e.Reg.SetSlots(st.Slots)

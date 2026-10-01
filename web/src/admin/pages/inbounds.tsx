@@ -11,6 +11,7 @@ import { FINGERPRINTS, fingerprintLabel } from "../../lib/fingerprints";
 import { ago, destIsIP, maskedAs } from "../../lib/format";
 
 import { nodeLabel } from "./nodes";
+import { useWarp } from "./node-warp";
 
 const ConfigEditor = lazy(() => import("../../components/config-editor"));
 
@@ -482,12 +483,14 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [dest, setDest] = useState("");
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
+  const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
   const [autoPort, setAutoPort] = useState(true);
   const [autoSni, setAutoSni] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const settings = useSettings();
+  const warp = useWarp(inbound?.node_id ?? null, !!inbound);
   useEffect(() => {
     if (!inbound) return;
     setTab("main");
@@ -495,6 +498,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setDest(inbound.dest ?? "");
     setSni(inbound.server_names?.[0] ?? "");
     setFp(inbound.fingerprint ?? "");
+    setOutbound(inbound.outbound);
     setName(inbound.display_name);
     setConfig(inbound.config);
     setAutoPort(inbound.auto_port);
@@ -514,7 +518,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     onSuccess: (_, body) => {
       void qc.invalidateQueries({ queryKey: qk.inbounds });
       // The automatic-fix switches change nothing clients get.
-      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni");
+      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni" || k === "outbound");
       toast.ok(autoOnly ? t("inbounds.savedAuto") : t("inbounds.saved"));
       onClose();
     },
@@ -548,6 +552,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
     if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
+    if (outbound !== inbound?.outbound) body.outbound = outbound;
     if (Object.keys(body).length === 0) {
       onClose();
       return;
@@ -668,6 +673,26 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
                   </select>
                 </Field>
               ) : null}
+              <Field
+                label={t("inbounds.outbound")}
+                hint={
+                  outbound === "warp" && warp.data && (!warp.data.configured || !warp.data.enabled)
+                    ? t("inbounds.outboundNoWarp")
+                    : outbound === "warp"
+                      ? t("inbounds.outboundWarpHint")
+                      : t("inbounds.outboundDirectHint")
+                }
+              >
+                <Segmented
+                  label={t("inbounds.outbound")}
+                  value={outbound}
+                  onChange={setOutbound}
+                  options={[
+                    { value: "direct", label: t("inbounds.outboundDirect") },
+                    { value: "warp", label: "WARP" },
+                  ]}
+                />
+              </Field>
               <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("inbounds.auto")}>
                 <div className="mb-1 text-[13px] font-semibold">{t("inbounds.auto")}</div>
                 <AutoSwitch title={t("inbounds.autoPort")} sub={t("inbounds.autoPortSub")} on={autoPort} globalOff={settings.data?.auto_port === false} onChange={setAutoPort} />

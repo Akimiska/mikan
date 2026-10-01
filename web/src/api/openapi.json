@@ -761,6 +761,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "outbound": {
+            "description": "Выход в интернет: напрямую с сервера или через WARP ноды",
+            "enum": [
+              "direct",
+              "warp"
+            ],
+            "type": "string"
+          },
           "port": {
             "type": "string"
           },
@@ -819,7 +827,8 @@
           "apps",
           "auto_port",
           "auto_sni",
-          "auto"
+          "auto",
+          "outbound"
         ],
         "type": "object"
       },
@@ -1311,6 +1320,14 @@
           "fingerprint": {
             "description": "Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек",
             "maxLength": 16,
+            "type": "string"
+          },
+          "outbound": {
+            "description": "Выход в интернет: напрямую или через WARP ноды",
+            "enum": [
+              "direct",
+              "warp"
+            ],
             "type": "string"
           },
           "port": {
@@ -2877,6 +2894,143 @@
           "network"
         ],
         "type": "object"
+      },
+      "WarpImportInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "config": {
+            "description": "WireGuard-конфиг WARP: wgcf, warp-plus или экспорт приложения",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "config"
+        ],
+        "type": "object"
+      },
+      "WarpPatchInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "license": {
+            "description": "Ключ WARP+ для зарегистрированного аккаунта",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "routes": {
+            "description": "Домены (example.com — вместе с поддоменами) и сети (104.16.0.0/13)",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "WarpRegisterInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "license": {
+            "description": "Ключ WARP+ (необязательно)",
+            "maxLength": 40,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WarpView": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "inbounds": {
+            "description": "Подключения ноды, у которых весь трафик идёт через WARP",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ipv4": {
+            "type": "string"
+          },
+          "ipv6": {
+            "type": "string"
+          },
+          "plus": {
+            "description": "Аккаунт WARP+",
+            "type": "boolean"
+          },
+          "routes": {
+            "description": "Домены и сети, которые идут через WARP у всех подключений ноды",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source": {
+            "enum": [
+              "register",
+              "import",
+              ""
+            ],
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WarpViewStatusStruct",
+            "description": "Последняя проверка выхода через WARP с ноды; нет — нода недоступна"
+          }
+        },
+        "required": [
+          "configured",
+          "enabled",
+          "plus",
+          "routes",
+          "inbounds"
+        ],
+        "type": "object"
+      },
+      "WarpViewStatusStruct": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "colo": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес, который видят сайты",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "warp": {
+            "description": "on | plus | off — как отвечает Cloudflare",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "checked_at"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -3864,6 +4018,240 @@
           }
         },
         "summary": "Выпустить новый ключ ноды (старый перестаёт работать)",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/warp": {
+      "delete": {
+        "operationId": "delete-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить WARP ноды",
+        "tags": [
+          "node"
+        ]
+      },
+      "get": {
+        "operationId": "get-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "WARP ноды",
+        "tags": [
+          "node"
+        ]
+      },
+      "patch": {
+        "operationId": "update-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WarpPatchInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Включить WARP, списки доменов, ключ WARP+",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/warp/import": {
+      "post": {
+        "operationId": "import-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WarpImportInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Загрузить свой WireGuard-конфиг WARP",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/warp/register": {
+      "post": {
+        "operationId": "register-node-warp",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WarpRegisterInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarpView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Зарегистрировать WARP для ноды в Cloudflare",
         "tags": [
           "node"
         ]

@@ -78,6 +78,7 @@ type Inbound struct {
 	Config      string
 	AutoPort    int64
 	AutoSni     int64
+	Outbound    string
 }
 
 type InboundEvent struct {
@@ -113,6 +114,25 @@ type Node struct {
 type NodeState struct {
 	Key   string
 	Value string
+}
+
+type NodeWarp struct {
+	NodeID        int64
+	Enabled       int64
+	Source        string
+	PrivateKey    string
+	PeerPublicKey string
+	Endpoint      string
+	Ipv4          string
+	Ipv6          string
+	Reserved      string
+	Mtu           int64
+	AccountID     string
+	AccountToken  string
+	Plus          int64
+	Routes        string
+	CreatedAt     int64
+	UpdatedAt     int64
 }
 
 type Payment struct {

@@ -29,6 +29,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/updates"
+	"mikan/internal/panel/warp"
 )
 
 type Deps struct {
@@ -63,6 +64,8 @@ type Deps struct {
 	Telegram *tgbot.Bot
 	// Billing sells tariffs; SubBase is https://host:port/<sub path> ("" without an address).
 	Billing *billing.Service
+	// Warp registers WARP accounts with Cloudflare.
+	Warp    warp.Client
 	SubBase func(ctx context.Context) string
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
@@ -78,6 +81,8 @@ type NodeRuntime interface {
 	NodesChanged()
 	// ScanTargets looks for REALITY targets from the node itself (its RTTs, its routes).
 	ScanTargets(ctx context.Context, id int64, req nodeapi.TargetScanRequest) (nodeapi.TargetScan, error)
+	// Warp checks the node's way out through WARP.
+	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
 }
 
 type ctxKey int
@@ -163,6 +168,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerNodes()
 	h.registerAPIKeys()
 	h.registerPayments()
+	h.registerWarp()
 	return noStore(mux), api, nil
 }
 

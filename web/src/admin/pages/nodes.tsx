@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
+import { Cloud, Copy, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
@@ -8,6 +8,7 @@ import { useToast } from "../../components/toast";
 import { Bar, Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
 import { t } from "../../i18n";
 import { bytes, num } from "../../lib/format";
+import { WarpDrawer } from "./node-warp";
 
 type Node = Schemas["NodeInfo"];
 type Joined = { name: string; key: string; command: string };
@@ -25,6 +26,7 @@ export function NodesPage() {
   const [rekeying, setRekeying] = useState<Node | null>(null);
   const [removing, setRemoving] = useState<Node | null>(null);
   const [joined, setJoined] = useState<Joined | null>(null);
+  const [warpOf, setWarpOf] = useState<Node | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: qk.nodes });
     void qc.invalidateQueries({ queryKey: qk.inbounds });
@@ -83,7 +85,7 @@ export function NodesPage() {
             </div>
           ) : null}
           {nodes.data.map((n, idx) => (
-            <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
+            <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
           ))}
         </div>
       )}
@@ -97,6 +99,7 @@ export function NodesPage() {
       />
       <EditNodeDrawer node={editing} onClose={() => setEditing(null)} />
       <KeyDrawer joined={joined} onClose={() => setJoined(null)} />
+      <WarpDrawer node={warpOf ? { id: warpOf.id, name: nodeLabel(warpOf) } : null} onClose={() => setWarpOf(null)} />
       <Confirm
         open={!!rekeying}
         onOpenChange={(v) => !v && setRekeying(null)}
@@ -120,7 +123,7 @@ export function NodesPage() {
   );
 }
 
-function NodeCard({ n, idx, onEdit, onRekey, onRemove }: { n: Node; idx: number; onEdit: () => void; onRekey: () => void; onRemove: () => void }) {
+function NodeCard({ n, idx, onEdit, onWarp, onRekey, onRemove }: { n: Node; idx: number; onEdit: () => void; onWarp: () => void; onRekey: () => void; onRemove: () => void }) {
   const mem = n.mem_total ? Math.round((n.mem_used / n.mem_total) * 100) : 0;
   return (
     <section className="card glass reveal" style={{ "--i": idx } as React.CSSProperties}>
@@ -191,6 +194,9 @@ function NodeCard({ n, idx, onEdit, onRekey, onRemove }: { n: Node; idx: number;
       <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--hairline)] pt-4">
         <Button size="sm" onClick={onEdit}>
           <Pencil size={16} aria-hidden /> {t("nodes.configure")}
+        </Button>
+        <Button size="sm" onClick={onWarp}>
+          <Cloud size={16} aria-hidden /> WARP
         </Button>
         {!n.local ? (
           <>

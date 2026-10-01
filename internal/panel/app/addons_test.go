@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -14,7 +15,10 @@ import (
 	"testing"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgbot"
 )
 
 // The marketplace end to end on the panel's side: the signed catalog, the request to the
@@ -49,6 +53,8 @@ func TestAddonsMarketplace(t *testing.T) {
 				"settings":[{"key":"shop_id","type":"string","required":true},{"key":"secret_key","type":"string","secret":true,"required":true}]}`)
 		case r.URL.Path == "/v1/check" && in.Settings["secret_key"] == secret:
 			_, _ = io.WriteString(w, `{}`)
+		case r.URL.Path == "/v1/invoices" && in.Settings["secret_key"] == secret:
+			_, _ = io.WriteString(w, `{"external_id":"fk-1","pay_url":"https://pay.example/fk-1"}`)
 		default:
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			_, _ = io.WriteString(w, `{"code":"bad_credentials","message":"refused"}`)
@@ -149,6 +155,28 @@ func TestAddonsMarketplace(t *testing.T) {
 	if strings.Contains(audit, secret) || !strings.Contains(audit, "addon.settings") || !strings.Contains(audit, "secret_key") {
 		t.Fatalf("audit: %s", audit)
 	}
+	// The Mini App offers it by its own name and opens its invoice.
+	ctx := t.Context()
+	must(domain.Seed(ctx, h.st, h.now))
+	must(settings.Set(ctx, settings.New(h.st.Q), tgbot.KeyToken, tgToken))
+	ts, err := h.st.Q.ListTariffs(ctx)
+	must(err)
+	sale, err := h.st.Q.UpdateTariff(ctx, db.UpdateTariffParams{Name: "Месяц", TrafficLimit: ts[1].TrafficLimit, DurationDays: 30, DeviceLimit: ts[1].DeviceLimit,
+		ResetStrategy: ts[1].ResetStrategy, PriceRub: sql.NullInt64{Int64: 19900, Valid: true}, OnSale: 1, ID: ts[1].ID})
+	must(err)
+	same := map[string]string{"Sec-Fetch-Site": "same-origin"}
+	resp, body = h.do(http.MethodPost, "/"+subPath+"/tg/shop", map[string]any{"init_data": initData(tgToken, 555, h.now)}, same)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"addons":[{"provider":"addon:fake","name":"Fake"}]`) {
+		t.Fatalf("Mini App shop: %d %s", resp.StatusCode, body)
+	}
+	resp, body = h.do(http.MethodPost, "/"+subPath+"/tg/pay", map[string]any{"init_data": initData(tgToken, 555, h.now), "tariff_id": sale.ID, "provider": "addon:fake"}, same)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "https://pay.example/fk-1") {
+		t.Fatalf("Mini App pay: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := h.do(http.MethodPost, "/"+subPath+"/tg/pay", map[string]any{"init_data": initData(tgToken, 555, h.now), "tariff_id": sale.ID, "provider": "addon:ghost"}, same); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("an adapter that is not installed: %d %s", resp.StatusCode, body)
+	}
+
 	if resp, body := h.do(http.MethodPost, api+"/fake/remove", nil, csrf); resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("remove: %d %s", resp.StatusCode, body)
 	}

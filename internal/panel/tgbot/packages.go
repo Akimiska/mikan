@@ -71,14 +71,14 @@ func (b *Bot) trafficPackage(ctx context.Context, w *words, userID, id int64) (s
 			continue
 		}
 		text := "<b>" + html.EscapeString(o.Package.Name) + "</b>\n" + html.EscapeString(billing.DescribePackage(o.Package, o.Pool, b.lang(ctx))) + "\n\n" + w.payHow
-		return text, &Keyboard{append(w.payButtons("xp:"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av), back)}
+		return text, &Keyboard{append(w.payButtons("xp:"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av, b.addonName(ctx)), back)}
 	}
 	return html.EscapeString(w.packageGone), &Keyboard{[][]Button{back}}
 }
 
 // payButtons: a button per provider that takes the price; data is the callback prefix
-// the provider's code is added to.
-func (w *words) payButtons(data string, stars, rub int64, av billing.Available) [][]Button {
+// the provider's code is added to, name names the marketplace's adapters.
+func (w *words) payButtons(data string, stars, rub int64, av billing.Available, name func(id string) string) [][]Button {
 	rows := [][]Button{}
 	if stars > 0 {
 		rows = append(rows, []Button{{Text: fmt.Sprintf(w.payStars, w.price(stars, "XTR")), CallbackData: data + "s"}})
@@ -89,6 +89,11 @@ func (w *words) payButtons(data string, stars, rub int64, av billing.Available) 
 	if rub > 0 && av.CryptoBot {
 		rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCrypto, w.price(rub, "RUB")), CallbackData: data + "c"}})
 	}
+	for _, id := range av.Addons {
+		if rub > 0 {
+			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payAddon, name(id), w.price(rub, "RUB")), CallbackData: data + "a-" + id}})
+		}
+	}
 	return rows
 }
 
@@ -97,7 +102,7 @@ func (w *words) payButtons(data string, stars, rub int64, av billing.Available) 
 func (b *Bot) trafficInvoice(ctx context.Context, w *words, chat, userID int64, arg string, back []Button) (string, *Keyboard) {
 	idStr, code, _ := strings.Cut(arg, ":")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
-	provider, ok := providerCodes[code]
+	provider, ok := providerOf(code)
 	if !ok || b.d.Billing == nil {
 		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
 	}

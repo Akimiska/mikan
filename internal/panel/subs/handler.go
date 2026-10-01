@@ -318,13 +318,22 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 			Stars       int64  `json:"stars,omitempty"`
 			Rub         int64  `json:"rub,omitempty"`
 		}
+		// Marketplace adapters take rubles; the buyer sees each by its own name.
+		type addon struct {
+			Provider string `json:"provider"`
+			Name     string `json:"name"`
+		}
 		out := struct {
 			AllowNew  bool            `json:"allow_new"`
 			Providers map[string]bool `json:"providers"`
+			Addons    []addon         `json:"addons"`
 			Offers    []offer         `json:"offers"`
 			Packages  []shopPackage   `json:"packages"`
-		}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages,
+		}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 			Providers: map[string]bool{billing.Stars: av.Stars, billing.YooKassa: av.YooKassa, billing.CryptoBot: av.CryptoBot}}
+		for _, id := range av.Addons {
+			out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
+		}
 		for _, o := range offers {
 			out.Offers = append(out.Offers, offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.Describe(o.Tariff, cfg.Lang), Stars: o.Stars, Rub: o.Rub})
 		}

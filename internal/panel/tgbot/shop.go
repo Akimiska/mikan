@@ -15,9 +15,27 @@ import (
 
 // Callback data of the shop: b buy a new subscription, tn:<tariff> its tariff, pn:<tariff>:<p>
 // pay for it; r renew the shown one, t:<tariff>, py:<tariff>:<p>. <p> is s (Stars),
-// y (YooKassa) or c (CryptoBot).
+// y (YooKassa), c (CryptoBot) or a-<id> (a marketplace adapter).
 
 var providerCodes = map[string]string{"s": billing.Stars, "y": billing.YooKassa, "c": billing.CryptoBot}
+
+// providerOf is the provider a button's code names.
+func providerOf(code string) (string, bool) {
+	if p, ok := providerCodes[code]; ok {
+		return p, true
+	}
+	id, ok := strings.CutPrefix(code, "a-")
+	if !ok || billing.AddonID(billing.AddonPrefix+id) == "" {
+		return "", false
+	}
+	return billing.AddonPrefix + id, true
+}
+
+// addonName names adapters on the buttons in the bot's language.
+func (b *Bot) addonName(ctx context.Context) func(id string) string {
+	lang := b.lang(ctx)
+	return func(id string) string { return b.d.Billing.AddonName(ctx, id, lang) }
+}
 
 // offers lists what the chat can buy; nil without payments.
 func (b *Bot) offers(ctx context.Context) ([]billing.Offer, billing.Available) {
@@ -92,7 +110,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, id int64, prefix string,
 			continue
 		}
 		text := "<b>" + html.EscapeString(o.Tariff.Name) + "</b>\n" + html.EscapeString(billing.Describe(o.Tariff, b.lang(ctx))) + "\n\n" + w.payHow
-		rows := w.payButtons(prefix+":"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av)
+		rows := w.payButtons(prefix+":"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av, b.addonName(ctx))
 		return text, &Keyboard{append(rows, back)}
 	}
 	return html.EscapeString(w.notForSale), &Keyboard{[][]Button{back}}
@@ -103,7 +121,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, id int64, prefix string,
 func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg string, back []Button) (string, *Keyboard) {
 	idStr, code, _ := strings.Cut(arg, ":")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
-	provider, ok := providerCodes[code]
+	provider, ok := providerOf(code)
 	if !ok || b.d.Billing == nil {
 		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
 	}

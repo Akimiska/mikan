@@ -189,6 +189,18 @@ func (s *Service) addonClient(ctx context.Context, id string) (*addons.Client, A
 	return cl, c, err
 }
 
+// AddonName is the adapter's own name for buyers in lang; its id while it does not answer.
+func (s *Service) AddonName(ctx context.Context, id, lang string) string {
+	if s.d.Addons != nil {
+		if info, err := s.d.Addons.Info(ctx, id); err == nil {
+			if n := info.Name.In(lang); n != "" {
+				return n
+			}
+		}
+	}
+	return id
+}
+
 // AddonWebhookURL is where the provider sends its notifications for an adapter: the admin
 // enters it in the provider's dashboard, as for the built-in providers.
 func (s *Service) AddonWebhookURL(ctx context.Context, id, subBase string) string {

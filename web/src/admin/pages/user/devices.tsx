@@ -6,7 +6,8 @@ import { Confirm } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
 import { ErrorState, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
-import { ago, appName, maskIP } from "../../../lib/format";
+import { desktopOS, deviceDetails, deviceLabel } from "../../../lib/devices";
+import { ago, maskIP } from "../../../lib/format";
 import { Section } from "./section";
 
 export function DevicesSection({ u }: { u: User }) {
@@ -59,23 +60,14 @@ export function DevicesSection({ u }: { u: User }) {
   );
 }
 
-export type BoundDevice = Schemas["BoundDeviceView"];
-
-export const desktopOS = /windows|mac|linux|darwin/i;
+type BoundDevice = Schemas["BoundDeviceView"];
 
 /** What to call a bound device: its model, else its system, else the app. */
-export function deviceName(d: BoundDevice): string {
-  if (!d.hwid) return t("userDrawer.sharedPlace");
-  return d.model || [d.os, d.os_version].filter(Boolean).join(" ") || appName(d.app) || t("userDrawer.device");
+function deviceName(d: BoundDevice): string {
+  return d.hwid ? deviceLabel(d, t("userDrawer.device")) : t("userDrawer.sharedPlace");
 }
 
-/** The line under a device's name: its system (when the name is the model), app and last visit. */
-export function deviceMeta(d: BoundDevice): string {
-  const system = d.hwid && d.model ? [d.os, d.os_version].filter(Boolean).join(" ") : "";
-  return [system, appName(d.app)].filter(Boolean).join(" · ");
-}
-
-export function BoundDevices({ u }: { u: User }) {
+function BoundDevices({ u }: { u: User }) {
   const settings = useSettings();
   const bound = useBoundDevices(u.id);
   const unbind = useUserMutation(userActions.unbindDevice);
@@ -98,7 +90,7 @@ export function BoundDevices({ u }: { u: User }) {
       ) : (
         <ul className="flex flex-col gap-2">
           {list.map((d) => {
-            const meta = deviceMeta(d);
+            const meta = deviceDetails(d, !!d.hwid);
             return (
               <li key={d.id} className="panel-soft grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 p-2">
                 <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] text-[var(--ink-600)]" aria-hidden>

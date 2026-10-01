@@ -8,7 +8,7 @@ import { t, type Key } from "../i18n";
 import { rubles } from "../lib/format";
 
 export type Offer = { id: number; name: string; description: string; stars?: number; rub?: number };
-export type ShopData = { allow_new: boolean; providers: { stars: boolean; yookassa: boolean; cryptobot: boolean }; offers: Offer[] };
+export type ShopData = { allow_new: boolean; providers: { stars: boolean; yookassa: boolean; cryptobot: boolean }; offers: Offer[]; packages?: Offer[] };
 type Provider = "stars" | "yookassa" | "cryptobot";
 
 const FAIL: Record<string, Key> = {
@@ -17,18 +17,23 @@ const FAIL: Record<string, Key> = {
   too_many_subs: "sub.shopTooManySubs",
 };
 
-export function loadShop(subRoot: string, initData: string): Promise<ShopData> {
-  return fetch(subRoot + "/tg/shop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ init_data: initData }), cache: "no-store" }).then((r) =>
-    r.ok ? r.json() : Promise.reject(new Error(String(r.status))),
+/** What the account can buy; with token, the traffic packages of that subscription too. */
+export function loadShop(subRoot: string, initData: string, token = ""): Promise<ShopData> {
+  return fetch(subRoot + "/tg/shop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ init_data: initData, token }), cache: "no-store" }).then(
+    (r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
   );
 }
 
 /**
- * Plans and pay buttons. token is the subscription to renew; "" buys a new one.
- * openInvoice/openLink go through the Mini App bridge.
+ * Offers and pay buttons: plans (field tariff_id) or traffic packages (package_id). token
+ * is the subscription to renew or add traffic to; "" buys a new one. openInvoice/openLink
+ * go through the Mini App bridge.
  */
 export function Shop({
   data,
+  offers,
+  field = "tariff_id",
+  pick = t("sub.shopPick"),
   subRoot,
   initData,
   token,
@@ -38,6 +43,9 @@ export function Shop({
   onRefresh,
 }: {
   data: ShopData;
+  offers: Offer[];
+  field?: "tariff_id" | "package_id";
+  pick?: string;
   subRoot: string;
   initData: string;
   token: string;
@@ -46,12 +54,13 @@ export function Shop({
   openLink: (url: string) => void;
   onRefresh: () => void;
 }) {
-  const [picked, setPicked] = useState<number | null>(data.offers.length === 1 ? data.offers[0]!.id : null);
+  const [picked, setPicked] = useState<number | null>(offers.length === 1 ? offers[0]!.id : null);
   const [busy, setBusy] = useState<Provider | null>(null);
   const [error, setError] = useState("");
   const [opened, setOpened] = useState(false);
   useEffect(() => setError(""), [picked]);
-  const offer = data.offers.find((o) => o.id === picked);
+  const offer = offers.find((o) => o.id === picked);
+  const failText = (code: string) => (field === "package_id" && code === "not_for_sale" ? t("sub.packageNotForSale") : t(FAIL[code] ?? "sub.shopFail"));
 
   const pay = async (provider: Provider) => {
     if (!offer) return;
@@ -61,12 +70,12 @@ export function Shop({
       const r = await fetch(subRoot + "/tg/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ init_data: initData, tariff_id: offer.id, provider, token }),
+        body: JSON.stringify({ init_data: initData, [field]: offer.id, provider, token }),
         cache: "no-store",
       });
       const body = (await r.json().catch(() => ({}))) as { url?: string; code?: string };
       if (!r.ok || !body.url) {
-        setError(t(FAIL[body.code ?? ""] ?? "sub.shopFail"));
+        setError(failText(body.code ?? ""));
         return;
       }
       // A Stars link is https://t.me/$<slug>: Telegram opens its payment sheet for it.
@@ -89,9 +98,9 @@ export function Shop({
   return (
     <section className="glass rounded-3xl p-4" aria-label={title}>
       <h2 className="mb-1 text-[15px] font-semibold">{title}</h2>
-      <p className="mb-3 text-xs text-[var(--ink-500)]">{t("sub.shopPick")}</p>
-      <div className="flex flex-col gap-2" role="radiogroup" aria-label={t("sub.shopPick")}>
-        {data.offers.map((o) => (
+      <p className="mb-3 text-xs text-[var(--ink-500)]">{pick}</p>
+      <div className="flex flex-col gap-2" role="radiogroup" aria-label={pick}>
+        {offers.map((o) => (
           <button key={o.id} type="button" role="radio" aria-checked={picked === o.id} className="opt" onClick={() => setPicked(o.id)}>
             <span className="flex items-center justify-between gap-2">
               <span className="font-semibold">{o.name}</span>

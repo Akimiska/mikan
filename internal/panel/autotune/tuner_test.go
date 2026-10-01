@@ -402,6 +402,38 @@ func TestBoundDevices(t *testing.T) {
 	}
 }
 
+// Behind a TCP proxy the port is what the proxy forwards to: a blocked inbound there
+// never moves, even with its switch left on. Its REALITY target is the admin's call.
+func TestNeverMovesAPortBehindAProxy(t *testing.T) {
+	e := setup(t)
+	x := e.inbound(t, "vless-xhttp")
+	if err := e.st.Q.SetInboundListen(e.ctx, db.SetInboundListenParams{Listen: "127.0.0.1", ID: x.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.Q.SetInboundAuto(e.ctx, db.SetInboundAutoParams{AutoPort: 1, AutoSni: 0, ID: x.ID}); err != nil {
+		t.Fatal(err)
+	}
+	hold := DefaultOptions().Hold
+	e.worked(t)
+	for _, d := range []time.Duration{0, hold, hold} {
+		e.reaches("hysteria2", "tuic", "vless-vision")
+		e.step(t, d)
+	}
+	if s, _ := e.tn.Status(x.ID); !s.CutOff || s.Stuck != "off" || e.inbound(t, "vless-xhttp").Port != "443" || len(e.events(t)) != 0 {
+		t.Fatalf("moved behind a proxy: %+v, port %s", s, e.inbound(t, "vless-xhttp").Port)
+	}
+
+	if err := e.st.Q.SetInboundAuto(e.ctx, db.SetInboundAutoParams{AutoPort: 1, AutoSni: 1, ID: x.ID}); err != nil {
+		t.Fatal(err)
+	}
+	e.nodes.found = []nodeapi.TargetResult{good("203.0.113.44:443", "shop.example.org")}
+	e.reaches("hysteria2", "tuic", "vless-vision")
+	e.step(t, time.Minute)
+	if got := e.inbound(t, "vless-xhttp"); got.Port != "443" || sniOf(t, got) != "shop.example.org" {
+		t.Fatalf("port kept, target replaced: port %s sni %s", got.Port, sniOf(t, got))
+	}
+}
+
 // The subscription port is the panel's: a blocked inbound skips it on the way out.
 func TestMoveSkipsTheSubscriptionPort(t *testing.T) {
 	e := setup(t)

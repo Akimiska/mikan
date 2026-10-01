@@ -1134,6 +1134,17 @@ export interface components {
             /** @description Имя для клиентов; по умолчанию — хост из dest */
             sni?: string;
         };
+        ClientEndpoint: {
+            /**
+             * Format: int64
+             * @description Порт для клиентов; 0 — порт подключения
+             */
+            port: number;
+            /** @description Адрес для клиентов; пусто — адрес ноды */
+            server: string;
+            /** @description SNI для клиентов; пусто — как обычно */
+            sni: string;
+        };
         Config: {
             /** @description Кнопки главного меню по порядку */
             buttons: components["schemas"]["MenuButton"][];
@@ -1292,6 +1303,10 @@ export interface components {
             auto_port: boolean;
             /** @description Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках) */
             auto_sni: boolean;
+            /** @description Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне) */
+            client: components["schemas"]["ClientEndpoint"];
+            /** @description Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки */
+            client_sni: boolean;
             /** @description Шаблон листенера (YAML) */
             config: string;
             /** @description Сайт для маскировки REALITY */
@@ -1309,6 +1324,8 @@ export interface components {
             fingerprint?: string;
             /** Format: int64 */
             id: number;
+            /** @description Адрес, на котором нода слушает: пусто — все адреса, 127.0.0.1 — только сам сервер (за nginx или HAProxy) */
+            listen: string;
             name: string;
             network: string;
             /** Format: int64 */
@@ -1498,8 +1515,11 @@ export interface components {
             new: string;
         };
         PatchInboundInputBody: {
+            /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_port?: boolean;
             auto_sni?: boolean;
+            /** @description Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три */
+            client?: components["schemas"]["ClientEndpoint"];
             /** @description Шаблон листенера (YAML) */
             config?: string;
             dest?: string;
@@ -1513,6 +1533,8 @@ export interface components {
             exit_node_id?: number;
             /** @description Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек */
             fingerprint?: string;
+            /** @description Адрес, на котором нода слушает: пусто — все адреса, иначе один IP (127.0.0.1 — за nginx или HAProxy на том же сервере). Свой адрес выключает перенос порта */
+            listen?: string;
             /**
              * @description Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат
              * @enum {string}

@@ -260,6 +260,9 @@ func TestIdleReplyStoresNothing(t *testing.T) {
 	if e, seq, _ := s.countersPos(ctx); e != "e1" || seq != 4 {
 		t.Fatalf("position %s/%d", e, seq)
 	}
+	if len(fake.acked) != 0 {
+		t.Fatalf("nothing was cut, so nothing is acknowledged: %v", fake.acked)
+	}
 	acks := len(fake.acked)
 	fake.batch.Seq = 7 // the node restarted and skipped ahead
 	s.pullCounters(ctx)

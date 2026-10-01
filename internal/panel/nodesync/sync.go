@@ -535,8 +535,12 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		return
 	}
 	s.lastStored = now
-	if err := s.node.Ack(ctx, c.Epoch, c.Seq); err != nil {
-		s.log.Warn("ack counters", "err", err)
+	// An idle reply has no batch behind it: there is nothing for the node to drop, and it
+	// would answer the acknowledgement with stale_ack.
+	if !c.Idle {
+		if err := s.node.Ack(ctx, c.Epoch, c.Seq); err != nil {
+			s.log.Warn("ack counters", "err", err)
+		}
 	}
 	if c.Epoch != epoch && now.Sub(s.epochPush) >= 30*time.Second {
 		// The node started a new counter epoch (fresh volume): re-base its quotas. The

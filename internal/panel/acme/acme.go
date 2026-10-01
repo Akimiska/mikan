@@ -58,7 +58,8 @@ type Manager struct {
 	set       *settings.Settings
 	log       *slog.Logger
 	now       func() time.Time
-	mu        sync.Mutex
+	mu        sync.Mutex // the state below and the serving certificate; never held across an order
+	orderMu   sync.Mutex // one order at a time: it takes minutes when port 80 hangs
 	status    atomic.Pointer[Status]
 	wake      chan struct{}
 	challenge string // listen address for http-01, ":80"
@@ -89,26 +90,47 @@ func (m *Manager) Renew() {
 	}
 }
 
+// How often the certificate is looked after, and how soon after an order that failed. A
+// six-day certificate for an IP leaves two days to renew in: a port 80 that was busy once
+// must not cost the next six hours.
+var (
+	checkEvery = 6 * time.Hour
+	retryAfter = 30 * time.Minute
+)
+
 func (m *Manager) Run(ctx context.Context) {
-	t := time.NewTicker(6 * time.Hour)
-	defer t.Stop()
+	next := time.NewTimer(checkEvery)
+	defer next.Stop()
 	// certbot, acme.sh or Caddy renew a custom certificate in place: a changed file is
 	// served within half a minute, no restart.
 	watch := time.NewTicker(30 * time.Second)
 	defer watch.Stop()
-	m.ensure(ctx)
+	later := func(failed bool) {
+		d := checkEvery
+		if failed {
+			d = retryAfter
+		}
+		if !next.Stop() {
+			select {
+			case <-next.C:
+			default:
+			}
+		}
+		next.Reset(d)
+	}
+	later(m.ensure(ctx))
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-next.C:
 		case <-m.wake:
 		case <-watch.C:
 			if !m.customChanged() {
 				continue
 			}
 		}
-		m.ensure(ctx)
+		later(m.ensure(ctx))
 	}
 }
 
@@ -135,7 +157,8 @@ func (m *Manager) SetCustom(ctx context.Context, certPEM, keyPEM []byte) error {
 	if err := tlscert.SaveCustom(m.customDir, cert); err != nil {
 		return err
 	}
-	m.ensure(ctx)
+	// Served at once, whatever order is running: the lock is not held across one.
+	m.settle(ctx)
 	return nil
 }
 
@@ -157,7 +180,47 @@ func (m *Manager) identifier(ctx context.Context) (string, error) {
 	return m.set.String(ctx, settings.KeyPublicHost)
 }
 
-func (m *Manager) ensure(ctx context.Context) {
+// ensure makes the panel serve the right certificate and, when it needs a new one from
+// Let's Encrypt, orders it. It reports whether that order failed. The order runs outside
+// m.mu: uploading a certificate of one's own must not wait for it.
+func (m *Manager) ensure(ctx context.Context) (orderFailed bool) {
+	id, need := m.settle(ctx)
+	if !need {
+		return false
+	}
+	m.orderMu.Lock()
+	defer m.orderMu.Unlock()
+	// Checked again: a certificate may have come meanwhile, an order that waited for ours.
+	if id, need = m.settle(ctx); !need {
+		return false
+	}
+	cert, err := m.obtain(ctx, id)
+	if err != nil {
+		m.log.Warn("acme: certificate not obtained", "identifier", id, "err", err)
+		if _, need := m.settle(ctx); !need {
+			return false // the admin's own certificate came while the order ran: nothing is wrong
+		}
+		m.mu.Lock()
+		st := *m.status.Load()
+		if st.Error == "" { // a custom certificate that is broken is the thing to tell the admin of
+			st.Error = humanError(err)
+		}
+		st.CheckedAt = m.now()
+		if st.Kind == "self-signed" {
+			m.useFallback()
+		}
+		m.status.Store(&st)
+		m.mu.Unlock()
+		return true
+	}
+	m.log.Info("acme: certificate installed", "identifier", id, "not_after", cert.Leaf.NotAfter)
+	m.settle(ctx) // now on disk: served, unless the admin's own certificate has come in the meantime
+	return false
+}
+
+// settle serves the best certificate there already is and says whether a new one has to
+// be ordered for id. It does no network.
+func (m *Manager) settle(ctx context.Context) (id string, order bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id, err := m.identifier(ctx)
@@ -165,7 +228,7 @@ func (m *Manager) ensure(ctx context.Context) {
 	defer func() { m.status.Store(st) }()
 	if err != nil {
 		st.Error = err.Error()
-		return
+		return id, false
 	}
 	// The admin's own certificate wins while it is valid; an expired or broken one falls
 	// back to the rest, and the status says why.
@@ -179,7 +242,7 @@ func (m *Manager) ensure(ctx context.Context) {
 			if id != "" && !tlscert.Covers(cert.Leaf, id) {
 				st.Error = "custom_wrong_host"
 			}
-			return
+			return id, false
 		}
 		why := "custom_invalid"
 		if errors.Is(err, tlscert.ErrExpired) {
@@ -192,30 +255,19 @@ func (m *Manager) ensure(ctx context.Context) {
 	if isPrivate(id) {
 		m.useFallback()
 		st.Error = "no_public_host"
-		return
+		return id, false
 	}
 	if cert, err := m.load(); err == nil && tlscert.Covers(cert.Leaf, id) {
-		if !m.needsRenewal(cert.Leaf) {
-			m.holder.Set(cert)
-			st.Kind, st.NotAfter = "letsencrypt", cert.Leaf.NotAfter
-			return
-		}
-		// Keep serving the current certificate while renewing.
-		m.holder.Set(cert)
+		m.holder.Set(cert) // kept serving while it is renewed
 		st.Kind, st.NotAfter = "letsencrypt", cert.Leaf.NotAfter
-	}
-	cert, err := m.obtain(ctx, id)
-	if err != nil {
-		m.log.Warn("acme: certificate not obtained", "identifier", id, "err", err)
-		st.Error = humanError(err)
-		if st.Kind == "self-signed" {
-			m.useFallback()
+		if !m.needsRenewal(cert.Leaf) {
+			return id, false
 		}
-		return
 	}
-	m.holder.Set(cert)
-	st.Kind, st.NotAfter, st.Error = "letsencrypt", cert.Leaf.NotAfter, ""
-	m.log.Info("acme: certificate installed", "identifier", id, "not_after", cert.Leaf.NotAfter)
+	if st.Kind == "self-signed" {
+		m.useFallback()
+	}
+	return id, true
 }
 
 func (m *Manager) useFallback() {

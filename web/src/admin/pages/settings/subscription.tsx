@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { ApiError, type Schemas } from "../../../api/client";
+import type { Schemas } from "../../../api/client";
 import { useInbounds, useNodes } from "../../../api/hooks";
 import { Button, Field, Pill } from "../../../components/ui";
 import { Switch } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
+import { fieldErrors } from "../../../lib/fields";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
 import { useSaveSettings } from "./shared";
 
@@ -19,7 +20,7 @@ export function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
   const inbounds = useInbounds();
   const nodes = useNodes();
   const { draft: port, setDraft: setPort } = useDraft(s.sub_port ? String(s.sub_port) : "");
-  const error = save.error instanceof ApiError ? save.error.fields.sub_port : undefined;
+  const error = fieldErrors(save.error).sub_port;
   const own = nodes.data?.find((n) => n.local)?.id;
   // Who holds a port over TCP on the panel's own server.
   const holder = (p: number) => (inbounds.data ?? []).find((i) => i.node_id === own && i.enabled && i.network === "tcp" && i.port === String(p))?.name;
@@ -109,7 +110,7 @@ export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   const inbounds = useInbounds();
   const { draft: form, setDraft: setForm } = useDraft({ brand: s.brand, support_url: s.support_url, sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, sub_routing: s.sub_routing, client_fingerprint: s.client_fingerprint });
   const [fpOk, setFpOk] = useState(true);
-  const errors = save.error instanceof ApiError ? save.error.fields : {};
+  const errors = fieldErrors(save.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     save.mutate({ brand: form.brand, support_url: form.support_url, sub_group_main: form.sub_group_main.trim(), sub_group_auto: form.sub_group_auto.trim(), sub_routing: form.sub_routing, client_fingerprint: form.client_fingerprint });

@@ -9,7 +9,9 @@ import { QueryBoundary } from "../../../components/query";
 import { useToast } from "../../../components/toast";
 import { Button, Field, Pill, QR, Skeleton } from "../../../components/ui";
 import { getLocale, t, tMaybe } from "../../../i18n";
+import { useCopy } from "../../../lib/copy";
 import { CertDrawer, certUntil, type CertInfo } from "../../../components/cert-drawer";
+import { fieldErrors } from "../../../lib/fields";
 import { ago } from "../../../lib/format";
 
 export function AccessCard({ s }: { s: Schemas["SettingsView"] }) {
@@ -23,14 +25,8 @@ export function AccessCard({ s }: { s: Schemas["SettingsView"] }) {
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(s.admin_url);
-      toast.ok(t("settings.adminLinkCopied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
+  const copyText = useCopy();
+  const copy = () => copyText(s.admin_url, t("settings.adminLinkCopied"));
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <div className="card-head">
@@ -141,7 +137,7 @@ export function PasswordCard() {
       toast.ok(t("settings.passwordChanged"));
     },
   });
-  const errors = change.error instanceof ApiError ? change.error.fields : {};
+  const errors = fieldErrors(change.error);
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
       <form

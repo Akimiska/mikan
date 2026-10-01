@@ -5,6 +5,7 @@ import { FileKey2, FileText, ShieldCheck, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, errorText } from "../api/client";
 import { getLocale, t, tMaybe } from "../i18n";
+import { fieldErrors } from "../lib/fields";
 import { Confirm, Drawer } from "./overlay";
 import { useToast } from "./toast";
 import { Button, Field, Pill } from "./ui";
@@ -78,7 +79,7 @@ export function CertDrawer({
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const errors = put.error instanceof ApiError ? put.error.fields : {};
+  const errors = fieldErrors(put.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (cert.trim() && key.trim()) put.mutate();

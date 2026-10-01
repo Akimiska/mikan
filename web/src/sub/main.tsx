@@ -3,6 +3,7 @@ import { Check, Copy, LifeBuoy, QrCode, Send } from "lucide-react";
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Atmosphere } from "../components/atmosphere";
+import { ErrorBoundary } from "../components/error-boundary";
 import { LangSwitch } from "../components/lang";
 import { Bar, Button, Pill, QR, Ring, Skeleton } from "../components/ui";
 import { initI18n, t, useLocale } from "../i18n";
@@ -463,11 +464,15 @@ function Shell({ brand, children }: { brand?: string; children: React.ReactNode 
 }
 
 // Dictionaries load before the first render: t() stays synchronous everywhere.
-void initI18n(subDicts).then(() =>
+void initI18n(subDicts).then(() => {
+  // The tab's title until the subscription says its brand (sub.html's own is Russian).
+  document.title = t("sub.pageTitle");
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <Atmosphere calm />
-      <SubPage />
+      <ErrorBoundary>
+        <Atmosphere calm />
+        <SubPage />
+      </ErrorBoundary>
     </StrictMode>,
-  ),
-);
+  );
+});

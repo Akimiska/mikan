@@ -16,8 +16,8 @@ export function CrashScreen({ text, onRetry }: { text?: string; onRetry?: () => 
           <div className="state-mark err">
             <TriangleAlert size={22} aria-hidden />
           </div>
-          <h2>{t("errors.crashTitle")}</h2>
-          <p>{text ?? t("errors.crashText")}</p>
+          <h2>{t("common.crashTitle")}</h2>
+          <p>{text ?? t("common.crashText")}</p>
           <div className="mt-2 flex flex-wrap justify-center gap-2">
             {onRetry ? (
               <Button variant="primary" onClick={onRetry}>
@@ -25,7 +25,7 @@ export function CrashScreen({ text, onRetry }: { text?: string; onRetry?: () => 
               </Button>
             ) : null}
             <Button variant={onRetry ? "glass" : "primary"} onClick={() => location.reload()}>
-              {t("errors.reload")}
+              {t("common.reload")}
             </Button>
           </div>
         </div>

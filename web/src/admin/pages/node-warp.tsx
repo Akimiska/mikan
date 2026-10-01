@@ -4,7 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
+import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
@@ -13,6 +13,7 @@ import { Button, Field, Pill, Segmented, Skeleton } from "../../components/ui";
 import { Switch } from "../../components/switch";
 import { t } from "../../i18n";
 import { useDraft } from "../../lib/draft";
+import { fieldErrors } from "../../lib/fields";
 import { ago } from "../../lib/format";
 
 type Warp = Schemas["WarpView"];
@@ -63,7 +64,7 @@ function Setup({ nodeId }: { nodeId: number }) {
     onSuccess: done,
   });
   const err = (how === "register" ? register.error : load.error) as unknown;
-  const fields = err instanceof ApiError ? err.fields : {};
+  const fields = fieldErrors(err);
   return (
     <>
       <p className="mb-4 text-[13px] text-[var(--ink-600)]">{t("warp.intro")}</p>
@@ -147,7 +148,7 @@ function Configured({ nodeId, w, refetch, checking, onClose }: { nodeId: number;
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const fields = save.error instanceof ApiError ? save.error.fields : {};
+  const fields = fieldErrors(save.error);
   const s = w.status;
   return (
     <>

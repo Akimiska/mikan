@@ -7,20 +7,14 @@ import { useToast } from "../../../components/toast";
 import { Button, QR } from "../../../components/ui";
 import { Switch } from "../../../components/switch";
 import { t } from "../../../i18n";
+import { useCopy } from "../../../lib/copy";
 import { useDraft } from "../../../lib/draft";
 import { safeHref } from "../../../lib/url";
 import { Section } from "./section";
 
 export function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () => void }) {
-  const toast = useToast();
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(u.sub_url);
-      toast.ok(t("common.linkCopied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
+  const copyText = useCopy();
+  const copy = () => copyText(u.sub_url, t("common.linkCopied"));
   if (!u.sub_url) {
     return (
       <Section title={t("userDrawer.subscription")}>

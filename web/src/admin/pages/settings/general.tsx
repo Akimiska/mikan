@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import clsx from "clsx";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/client";
+import { api, errorText, unwrap, type Schemas } from "../../../api/client";
 import { qk, usePaymentSettings, useUpdates } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
 import { StaleNotice } from "../../../components/query";
@@ -12,6 +12,7 @@ import { Button, ErrorState, Field, Pill, Skeleton } from "../../../components/u
 import { Switch } from "../../../components/switch";
 import { getLocale, LOCALES, t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
+import { fieldErrors } from "../../../lib/fields";
 import { ago } from "../../../lib/format";
 import { useSaveSettings } from "./shared";
 
@@ -19,7 +20,7 @@ export function ServerCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   // Saving another card replaces `s`: what is typed here stays.
   const { draft: form, setDraft: setForm } = useDraft({ public_host: s.public_host, domain: s.domain, quiet_hour_utc: String(s.quiet_hour_utc) });
-  const errors = save.error instanceof ApiError ? save.error.fields : {};
+  const errors = fieldErrors(save.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     save.mutate({ public_host: form.public_host, domain: form.domain, quiet_hour_utc: Number(form.quiet_hour_utc) });

@@ -10,6 +10,7 @@ import { useToast } from "../../components/toast";
 import { Bar, Button, EmptyState, Field, PageHeader, Pill, Skeleton } from "../../components/ui";
 import { Switch } from "../../components/switch";
 import { t, tMaybe } from "../../i18n";
+import { useCopy } from "../../lib/copy";
 import { bytes, num } from "../../lib/format";
 import { CascadeDrawer } from "./node-cascade";
 import { WarpDrawer } from "./node-warp";
@@ -334,7 +335,7 @@ function AddNodeDrawer({ open, onOpenChange, onJoined }: { open: boolean; onOpen
     >
       <form id="add-node" onSubmit={submit} className="pt-5" noValidate>
         <Field label={t("nodes.name")} htmlFor="n-name" hint={t("nodes.nameHint")} error={errors.name}>
-          <input id="n-name" className="input" value={form.name} onChange={set("name")} placeholder="🇺🇸 США" maxLength={48} autoComplete="off" aria-invalid={!!errors.name} />
+          <input id="n-name" className="input" value={form.name} onChange={set("name")} placeholder={t("nodes.namePlaceholderNew")} maxLength={48} autoComplete="off" aria-invalid={!!errors.name} />
         </Field>
         <Field label={t("nodes.host")} htmlFor="n-host" hint={t("nodes.hostHint")} error={errors.host}>
           <input id="n-host" className="input mono" value={form.host} onChange={set("host")} placeholder="203.0.113.10" autoComplete="off" aria-invalid={!!errors.host} />
@@ -352,16 +353,8 @@ function AddNodeDrawer({ open, onOpenChange, onJoined }: { open: boolean; onOpen
 
 /** The join key is shown once: the panel keeps only its fingerprint. */
 function KeyDrawer({ joined, onClose }: { joined: Joined | null; onClose: () => void }) {
-  const toast = useToast();
-  const copy = async () => {
-    if (!joined) return;
-    try {
-      await navigator.clipboard.writeText(joined.command);
-      toast.ok(t("nodes.commandCopied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
+  const copyText = useCopy();
+  const copy = () => joined && copyText(joined.command, t("nodes.commandCopied"));
   return (
     <Drawer
       open={!!joined}
@@ -453,7 +446,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
     >
       <form id="edit-node" onSubmit={submit} className="pt-5" noValidate>
         <Field label={t("nodes.name")} htmlFor="e-name" hint={t("nodes.nameHint")} error={errors.name}>
-          <input id="e-name" className="input" value={form.name} onChange={set("name")} placeholder="🇳🇱 Нидерланды" maxLength={48} autoComplete="off" aria-invalid={!!errors.name} />
+          <input id="e-name" className="input" value={form.name} onChange={set("name")} placeholder={t("nodes.namePlaceholderEdit")} maxLength={48} autoComplete="off" aria-invalid={!!errors.name} />
         </Field>
         {node && !node.local ? (
           <>

@@ -16,7 +16,10 @@
     "qrLabel": "Subscription QR code",
     "retry": "Try again",
     "save": "Save",
-    "staleData": "Could not refresh, showing the last data received."
+    "staleData": "Could not refresh, showing the last data received.",
+    "crashTitle": "This page broke",
+    "crashText": "Something went wrong while showing this page. Reload it, saved data is untouched.",
+    "reload": "Reload the page"
   },
   "nav": {
     "overview": "Overview",
@@ -102,9 +105,6 @@
     "checkInput": "Check the entered data.",
     "tooMany": "Too many attempts. Wait {s} s.",
     "server": "Server error. Please try again.",
-    "crashTitle": "This page broke",
-    "crashText": "Something went wrong while showing this page. Reload it, saved data is untouched.",
-    "reload": "Reload the page",
     "pageNotFoundTitle": "No such page",
     "pageNotFoundText": "The address is wrong or the page has moved.",
     "toOverview": "To the overview",
@@ -946,6 +946,7 @@
     "devicesEmpty": "Devices appear here once an app loads the subscription.",
     "devicesNote": "Each device takes one place. An unbound device is disconnected at once. You can unbind one device a day.",
     "sharedPlace": "Apps without a device ID",
+    "pageTitle": "Subscription",
     "device": "Device",
     "used": "Used",
     "of": "of {total}",
@@ -1048,6 +1049,8 @@
     "newMeta": "A server that will serve VPN for this panel",
     "name": "Name",
     "nameHint": "The group in the subscription. A leading flag prefixes its protocol names: «🇺🇸 VLESS XHTTP».",
+    "namePlaceholderNew": "🇺🇸 USA",
+    "namePlaceholderEdit": "🇳🇱 Netherlands",
     "host": "Server IP",
     "hostHint": "The panel connects to the node at this address, and clients connect to its protocols.",
     "domain": "Domain",

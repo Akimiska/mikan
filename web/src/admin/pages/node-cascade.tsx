@@ -3,7 +3,7 @@
 // where the traffic other nodes relay through it goes next.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, RefreshCw } from "lucide-react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
+import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
 import { Drawer } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
@@ -11,6 +11,7 @@ import { useToast } from "../../components/toast";
 import { Button, Field, Pill, Segmented, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { useDraft } from "../../lib/draft";
+import { fieldErrors } from "../../lib/fields";
 import { ago } from "../../lib/format";
 import { nodeLabel } from "./nodes";
 
@@ -58,7 +59,7 @@ function Body({ nodeId, c, refetch, checking }: { nodeId: number; c: Cascade; re
       toast.ok(t("cascade.saved"));
     },
   });
-  const fields = save.error instanceof ApiError ? save.error.fields : {};
+  const fields = fieldErrors(save.error);
   const changed = route !== ((c.relay?.outbound as Route) ?? "direct") || (route === "node" && exit !== (c.relay?.exit_node_id ?? 0));
 
   return (

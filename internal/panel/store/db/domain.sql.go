@@ -971,6 +971,15 @@ func (q *Queries) SetNodeState(ctx context.Context, arg SetNodeStateParams) erro
 	return err
 }
 
+const setSlotCounter = `-- name: SetSlotCounter :exec
+INSERT INTO slot_counter (id, last) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET last = excluded.last
+`
+
+func (q *Queries) SetSlotCounter(ctx context.Context, last int64) error {
+	_, err := q.db.ExecContext(ctx, setSlotCounter, last)
+	return err
+}
+
 const setUserCredentials = `-- name: SetUserCredentials :exec
 UPDATE users SET slot_id = ?, sub_token = ?, updated_at = ? WHERE id = ?
 `
@@ -1004,6 +1013,18 @@ type SetUserOnlineParams struct {
 func (q *Queries) SetUserOnline(ctx context.Context, arg SetUserOnlineParams) error {
 	_, err := q.db.ExecContext(ctx, setUserOnline, arg.OnlineAt, arg.ID)
 	return err
+}
+
+const slotCounter = `-- name: SlotCounter :one
+SELECT last FROM slot_counter WHERE id = 1
+`
+
+// The last slot number handed out: slots purged from the top do not give theirs back.
+func (q *Queries) SlotCounter(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, slotCounter)
+	var last int64
+	err := row.Scan(&last)
+	return last, err
 }
 
 const takeFreeSlot = `-- name: TakeFreeSlot :one

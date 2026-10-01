@@ -31,6 +31,13 @@ INSERT INTO slots (name, uuid, secret, state, created_at) VALUES (?, ?, ?, 'free
 -- name: MaxSlotID :one
 SELECT CAST(coalesce(max(id), 0) AS INTEGER) FROM slots;
 
+-- name: SlotCounter :one
+-- The last slot number handed out: slots purged from the top do not give theirs back.
+SELECT last FROM slot_counter WHERE id = 1;
+
+-- name: SetSlotCounter :exec
+INSERT INTO slot_counter (id, last) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET last = excluded.last;
+
 -- name: TakeFreeSlot :one
 UPDATE slots SET state = 'assigned'
 WHERE id = (SELECT id FROM slots WHERE state = 'free' ORDER BY id LIMIT 1)

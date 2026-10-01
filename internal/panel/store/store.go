@@ -70,12 +70,20 @@ func migrate(ctx context.Context, conn *sql.DB) error {
 
 func (s *Store) Close() error { return s.DB.Close() }
 
-// Tx runs fn inside a transaction bound to a Queries instance.
+// Tx runs fn inside a transaction bound to a Queries instance. The transaction takes the
+// write lock when it begins, so a panic in fn must not leave it open: the panic goes on,
+// the transaction is rolled back first (a background context would never cancel it).
 func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		}
+	}()
 	if err := fn(s.Q.WithTx(tx)); err != nil {
 		_ = tx.Rollback()
 		return err

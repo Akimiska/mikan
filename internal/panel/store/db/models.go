@@ -200,6 +200,11 @@ type Slot struct {
 	BurnedAt  sql.NullInt64
 }
 
+type SlotCounter struct {
+	ID   int64
+	Last int64
+}
+
 type SubFetch struct {
 	UserID    int64
 	Ip        string

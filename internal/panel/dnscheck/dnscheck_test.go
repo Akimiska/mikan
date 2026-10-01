@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 // FakeDoH answers the JSON DNS-over-HTTPS API from a table: name → A and AAAA records.
@@ -87,5 +88,29 @@ func TestOwn(t *testing.T) {
 		if a.IsPrivate() || a.IsLoopback() {
 			t.Fatalf("a private address counted as the server's: %v", a)
 		}
+	}
+}
+
+// Where a public resolver is blocked (it answers nothing), the others are asked at once:
+// the lookup takes what the answering one takes, not the blocked one's timeout first.
+func TestLookupDoesNotWaitForABlockedResolver(t *testing.T) {
+	block := make(chan struct{})
+	blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-block:
+		case <-r.Context().Done():
+		}
+	}))
+	defer blocked.Close()
+	defer close(block)
+	good := fakeDoH(t, map[string][]string{"vpn.example.com": {"203.0.113.10"}})
+	c := &Checker{Resolvers: []string{blocked.URL, good}, HTTP: http.DefaultClient}
+	start := time.Now()
+	ips, err := c.Lookup(context.Background(), "vpn.example.com")
+	if err != nil || len(ips) != 1 || ips[0].String() != "203.0.113.10" {
+		t.Fatalf("lookup: %v %v", ips, err)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("the lookup waited %v for the blocked resolver", took)
 	}
 }

@@ -400,7 +400,7 @@ func (m *Manager) maintainPool(ctx context.Context, now time.Time) {
 		m.log.Error("pool stats", "err", err)
 		return
 	}
-	quietHour, _, err := settings.Get[int](ctx, m.set, "quiet_hour_utc")
+	quietHour, _, err := settings.Get[int](ctx, m.set, settings.KeyQuietHour)
 	if err != nil {
 		m.log.Error("quiet hour", "err", err)
 	}

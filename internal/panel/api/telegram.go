@@ -90,7 +90,7 @@ func (h *handlers) registerTelegram() {
 func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 	var v TelegramView
 	var err error
-	if v.Enabled, err = h.d.Settings.Bool(ctx, tgbot.KeyEnabled, false); err != nil {
+	if v.Enabled, err = h.d.Settings.On(ctx, tgbot.Enabled); err != nil {
 		return v, err
 	}
 	token, err := h.d.Settings.String(ctx, tgbot.KeyToken)

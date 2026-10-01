@@ -187,14 +187,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return subs.Config{}, err
 		}
-		brand, _, err := settings.Get[string](ctx, set, "brand")
+		brand, _, err := settings.Get[string](ctx, set, settings.KeyBrand)
 		if err != nil {
 			return subs.Config{}, err
 		}
 		if brand == "" {
 			brand = "VPN"
 		}
-		support, _, err := settings.Get[string](ctx, set, "support_url")
+		support, _, err := settings.Get[string](ctx, set, settings.KeySupportURL)
 		if err != nil {
 			return subs.Config{}, err
 		}
@@ -212,10 +212,10 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing), Fingerprint: fingerprint,
 			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang))}
-		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
+		if cfg.Binding, err = set.On(ctx, settings.DeviceBinding); err != nil {
 			return subs.Config{}, err
 		}
-		if cfg.RequireHWID, err = set.Bool(ctx, settings.KeyRequireHWID, false); err != nil {
+		if cfg.RequireHWID, err = set.On(ctx, settings.RequireHWID); err != nil {
 			return subs.Config{}, err
 		}
 		nodes, err := st.Q.ListNodes(ctx)
@@ -287,7 +287,7 @@ func (p *Panel) Run(ctx context.Context) {
 	go p.Telegram.Run(ctx)
 	go p.Billing.Run(ctx)
 	// The host reads the switch from a file; the setting is what the admin chose.
-	if auto, err := p.Settings.Bool(ctx, settings.KeyAutoUpdate, false); err == nil {
+	if auto, err := p.Settings.On(ctx, settings.AutoUpdate); err == nil {
 		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {
 			p.log.Error("update policy", "err", err)
 		}

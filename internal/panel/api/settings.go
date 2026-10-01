@@ -97,8 +97,8 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 			*dst, _, err = settings.Get[string](ctx, h.d.Settings, key)
 		}
 	}
-	get("brand", &v.Brand)
-	get("support_url", &v.SupportURL)
+	get(settings.KeyBrand, &v.Brand)
+	get(settings.KeySupportURL, &v.SupportURL)
 	get(settings.KeyPublicHost, &v.PublicHost)
 	get(settings.KeyDomain, &v.Domain)
 	get(settings.KeyGroupMain, &v.SubGroupMain)
@@ -131,19 +131,19 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if v.SubPort > 0 && h.d.SubPortError != nil {
 		v.SubPortError = h.d.SubPortError()
 	}
-	if v.QuietHourUTC, _, err = settings.Get[int](ctx, h.d.Settings, "quiet_hour_utc"); err != nil {
+	if v.QuietHourUTC, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeyQuietHour); err != nil {
 		return v, err
 	}
-	if v.AutoPort, err = h.d.Settings.Bool(ctx, settings.KeyAutoPort, true); err != nil {
+	if v.AutoPort, err = h.d.Settings.On(ctx, settings.AutoPort); err != nil {
 		return v, err
 	}
-	if v.AutoSNI, err = h.d.Settings.Bool(ctx, settings.KeyAutoSNI, true); err != nil {
+	if v.AutoSNI, err = h.d.Settings.On(ctx, settings.AutoSNI); err != nil {
 		return v, err
 	}
-	if v.DeviceBinding, err = h.d.Settings.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
+	if v.DeviceBinding, err = h.d.Settings.On(ctx, settings.DeviceBinding); err != nil {
 		return v, err
 	}
-	if v.RequireHWID, err = h.d.Settings.Bool(ctx, settings.KeyRequireHWID, false); err != nil {
+	if v.RequireHWID, err = h.d.Settings.On(ctx, settings.RequireHWID); err != nil {
 		return v, err
 	}
 	if v.Brand == "" {
@@ -272,14 +272,14 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			return nil, err
 		}
 	}
-	for key, v := range map[string]*string{"brand": b.Brand, "support_url": b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
+	for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
 		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
 		if err := set(key, v); err != nil {
 			return nil, err
 		}
 	}
 	if b.QuietHourUTC != nil {
-		if err := settings.Set(ctx, h.d.Settings, "quiet_hour_utc", *b.QuietHourUTC); err != nil {
+		if err := settings.Set(ctx, h.d.Settings, settings.KeyQuietHour, *b.QuietHourUTC); err != nil {
 			return nil, err
 		}
 	}

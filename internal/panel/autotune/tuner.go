@@ -198,10 +198,10 @@ func (t *Tuner) load(ctx context.Context) (*world, error) {
 		eventsWindow: max(t.o.ChangesWindow, t.o.Abandon, t.o.Cooldown)}
 	q := t.st.Q
 	var err error
-	if w.portOn, err = t.set.Bool(ctx, settings.KeyAutoPort, true); err != nil {
+	if w.portOn, err = t.set.On(ctx, settings.AutoPort); err != nil {
 		return nil, err
 	}
-	if w.sniOn, err = t.set.Bool(ctx, settings.KeyAutoSNI, true); err != nil {
+	if w.sniOn, err = t.set.On(ctx, settings.AutoSNI); err != nil {
 		return nil, err
 	}
 	own := func(name string) {

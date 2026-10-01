@@ -33,6 +33,9 @@ const (
 	KeySecret  = "tg_secret" // signs the link codes
 )
 
+// Enabled switches the bot on; off until the admin connects it.
+var Enabled = settings.Switch{Key: KeyEnabled}
+
 // MaxLinks: subscriptions one Telegram account may hold.
 const MaxLinks = 5
 
@@ -124,7 +127,7 @@ func (b *Bot) Run(ctx context.Context) {
 			stop()
 			stop = nil
 		}
-		on, _ := b.d.Settings.Bool(ctx, KeyEnabled, false)
+		on, _ := b.d.Settings.On(ctx, Enabled)
 		token, _ := b.d.Settings.String(ctx, KeyToken)
 		if !on || token == "" {
 			b.setStatus(func(s *Status) { *s = Status{} })

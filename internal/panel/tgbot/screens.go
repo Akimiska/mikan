@@ -194,7 +194,7 @@ func (b *Bot) pageButton(ctx context.Context, cfg Config, w *words, label string
 
 func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id int64, notice string, now time.Time) (string, *Keyboard) {
 	back := []Button{{Text: w.back, CallbackData: "m"}}
-	binding, _ := b.d.Settings.Bool(ctx, settings.KeyDeviceBinding, true)
+	binding, _ := b.d.Settings.On(ctx, settings.DeviceBinding)
 	head := "<b>" + w.devicesTitle + "</b> · " + html.EscapeString(b.vars(ctx, w, u, now)["devices"])
 	if !binding {
 		limit := "∞"
@@ -351,7 +351,7 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 }
 
 func (b *Bot) brand(ctx context.Context) string {
-	if s, _ := b.d.Settings.String(ctx, "brand"); s != "" {
+	if s, _ := b.d.Settings.String(ctx, settings.KeyBrand); s != "" {
 		return s
 	}
 	return "VPN"
@@ -359,7 +359,7 @@ func (b *Bot) brand(ctx context.Context) string {
 
 // supportURL is the panel's support link when Telegram can open it.
 func (b *Bot) supportURL(ctx context.Context) string {
-	s, _ := b.d.Settings.String(ctx, "support_url")
+	s, _ := b.d.Settings.String(ctx, settings.KeySupportURL)
 	if safeURL(s) {
 		return s
 	}

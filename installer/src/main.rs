@@ -8,6 +8,7 @@ mod envfile;
 mod host;
 mod net;
 mod ops;
+mod panelfs;
 mod release;
 mod setup;
 mod sites;

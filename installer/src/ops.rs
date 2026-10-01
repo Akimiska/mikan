@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::envfile::EnvFile;
 use crate::setup;
-use crate::{DIR, addon, docker, host, net, release, system};
+use crate::{DIR, addon, docker, host, net, panelfs, release, system};
 
 pub struct Install {
     pub env: EnvFile,
@@ -272,8 +272,9 @@ fn auto_on(install: &Install) -> bool {
     if install.node {
         return install.env.get("MIKAN_AUTO_UPDATE") == Some("1");
     }
-    fs::read(format!("{UPDATE_DIR}/policy.json"))
+    panelfs::read(&Path::new(UPDATE_DIR).join("policy.json"), 4096)
         .ok()
+        .flatten()
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
         .is_some_and(|v| v["auto"] == true)
 }
@@ -284,10 +285,7 @@ fn report(install: &Install, state: &str, version: &str, from: &str, error: &str
         return;
     }
     let body = serde_json::json!({"state": state, "version": version, "from": from, "error": error, "at": now("+%Y-%m-%dT%H:%M:%SZ")});
-    let dir = Path::new(UPDATE_DIR);
-    let _ = fs::create_dir_all(dir);
-    let _ = Command::new("chown").args(["65532:65532"]).arg(dir).status();
-    let _ = fs::write(dir.join("status.json"), body.to_string());
+    let _ = panelfs::write(Path::new(UPDATE_DIR), "status.json", body.to_string().as_bytes(), 0o644);
 }
 
 /// Updates to the latest release (or target) and rolls back when the new version does
@@ -319,17 +317,22 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
 /// Takes the panel's request when it is for the adapters; an update request stays for
 /// update_to.
 fn addons_requested() -> Result<bool> {
-    let path = format!("{UPDATE_DIR}/request");
-    let data = match fs::read(&path) {
-        Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e.into()),
+    let path = Path::new(UPDATE_DIR).join("request");
+    let data = match panelfs::read(&path, 4096) {
+        Ok(Some(d)) => d,
+        Ok(None) => return Ok(false),
+        // Not a small file: the panel never writes that. It goes, so the unit that
+        // watches it does not fire again and again.
+        Err(e) => {
+            panelfs::discard(&path)?;
+            return Err(e);
+        }
     };
     let v: serde_json::Value = serde_json::from_slice(&data).unwrap_or_default();
     if v["do"] != "addons" {
         return Ok(false);
     }
-    fs::remove_file(&path)?;
+    panelfs::discard(&path)?;
     Ok(true)
 }
 
@@ -342,11 +345,11 @@ fn panel_addons(say: &mut dyn FnMut(&str)) -> Result<()> {
 fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64), reported: &mut bool) -> Result<()> {
     let mut install = Install::load()?;
     if a.requested {
-        match fs::remove_file(format!("{UPDATE_DIR}/request")) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.into()),
+        let path = Path::new(UPDATE_DIR).join("request");
+        if fs::symlink_metadata(&path).is_err() {
+            return Ok(());
         }
+        panelfs::discard(&path)?;
     } else if a.auto && !auto_on(&install) {
         return Ok(());
     }

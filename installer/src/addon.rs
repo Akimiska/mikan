@@ -17,15 +17,18 @@ use anyhow::{Context, Result, bail};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
-use crate::envfile::write_private;
-use crate::{docker, net, release, setup};
+use crate::{docker, net, panelfs, release, setup};
 
 pub const CATALOG_URL: &str = "https://github.com/getmikan/marketplace/releases/latest/download/index.json";
 /// The adapter protocol the panel and this command speak.
 const PROTOCOL: u32 = 1;
-/// The panel sees it as /data/panel/addons.
+/// Where the panel and this command meet; the panel sees it as /data/panel/addons. What
+/// lies there is the panel's to write: root reads only its requests from there, through
+/// panelfs, and keeps its own copy of the state.
 const STATE_DIR: &str = "/opt/mikan/data/panel/addons";
 const COMPOSE_DIR: &str = "/opt/mikan/addons";
+/// The state root trusts: the panel cannot see or change it.
+const ROOT_STATE: &str = "/opt/mikan/addons/state.json";
 const PROJECT: &str = "mikan-addons";
 
 #[derive(Deserialize, Debug, Clone)]
@@ -116,27 +119,42 @@ pub fn catalog(panel: &str) -> Result<Vec<Entry>> {
     parse_catalog(&data, &String::from_utf8_lossy(&sig), &release::key()?, panel)
 }
 
+/// The adapters as root keeps them. 0.4.3 kept them only in the panel's directory: such a
+/// state is taken once, entry by entry, and only entries that pass sound() survive.
 pub fn load_state() -> Result<State> {
-    match fs::read(Path::new(STATE_DIR).join("state.json")) {
-        Ok(b) => serde_json::from_slice(&b).context("addons/state.json is malformed"),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(State::default()),
-        Err(e) => Err(e.into()),
-    }
+    let raw = match fs::read(ROOT_STATE) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match panelfs::read(&Path::new(STATE_DIR).join("state.json"), 64 << 10)? {
+            Some(b) => b,
+            None => return Ok(State::default()),
+        },
+        Err(e) => return Err(e.into()),
+    };
+    let mut s: State = serde_json::from_slice(&raw).context("the adapters' state is malformed")?;
+    s.adapters.retain(|id, a| sound(id, a));
+    Ok(s)
 }
 
-/// Only the panel (65532) reads the state: it holds the adapters' tokens.
+/// root's copy first, then the panel's, which holds the tokens it calls adapters with.
 fn save_state(s: &State) -> Result<()> {
-    let dir = Path::new(STATE_DIR);
-    fs::create_dir_all(dir)?;
-    let path = dir.join("state.json");
-    write_private(&path, serde_json::to_string_pretty(s)?.as_bytes())?;
-    for p in [dir, path.as_path()] {
-        let ok = Command::new("chown").args(["65532:65532"]).arg(p).status().is_ok_and(|s| s.success());
-        if !ok {
-            bail!("chown {} failed", p.display());
-        }
-    }
-    Ok(())
+    let data = serde_json::to_string_pretty(s)?;
+    panelfs::write_root(Path::new(ROOT_STATE), data.as_bytes())?;
+    panelfs::write(Path::new(STATE_DIR), "state.json", data.as_bytes(), 0o600)
+}
+
+/// Everything that goes into the compose file is checked here: an id, an image on ghcr.io
+/// by digest, a loopback listen address and a plain token, so no value can carry YAML.
+fn sound(id: &str, a: &Installed) -> bool {
+    let listen_ok = a.listen.strip_prefix("127.0.0.1:").and_then(|p| p.parse::<u16>().ok()).is_some_and(|p| p >= 1024);
+    let token_ok = (16..=128).contains(&a.token.len()) && a.token.bytes().all(|b| b.is_ascii_alphanumeric());
+    let version_ok = a.version.len() <= 32 && a.version.bytes().all(|b| b.is_ascii_alphanumeric() || b".-+".contains(&b));
+    valid_id(id)
+        && valid_image(&a.image)
+        && valid_digest(&a.digest)
+        && listen_ok
+        && token_ok
+        && version_ok
+        && (a.status == "running" || a.status == "failed")
 }
 
 /// The compose project of the adapters, hardened like the panel and with even less: no
@@ -195,7 +213,7 @@ fn up(adapters: &BTreeMap<String, Installed>) -> Result<()> {
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
     }
     let running: BTreeMap<String, Installed> =
-        adapters.iter().filter(|(_, a)| a.status == "running").map(|(k, v)| (k.clone(), v.clone())).collect();
+        adapters.iter().filter(|(id, a)| a.status == "running" && sound(id, a)).map(|(k, v)| (k.clone(), v.clone())).collect();
     if running.is_empty() {
         if dir.join("compose.yml").exists() {
             compose(&["down", "--remove-orphans"])?;
@@ -203,7 +221,7 @@ fn up(adapters: &BTreeMap<String, Installed>) -> Result<()> {
         }
         return Ok(());
     }
-    write_private(&dir.join("compose.yml"), compose_yaml(&running).as_bytes())?;
+    crate::envfile::write_private(&dir.join("compose.yml"), compose_yaml(&running).as_bytes())?;
     compose(&["up", "-d", "--remove-orphans"])
 }
 
@@ -306,19 +324,16 @@ pub fn remove(id: &str, say: &mut dyn FnMut(&str)) -> Result<()> {
 
 /// Whether the panel asked for something.
 pub fn pending() -> bool {
-    Path::new(STATE_DIR).join("request.json").exists()
+    fs::symlink_metadata(Path::new(STATE_DIR).join("request.json")).is_ok()
 }
 
 /// Does what the panel asked for and tells it how it went.
 pub fn apply(panel: &str, say: &mut dyn FnMut(&str)) -> Result<()> {
     let path = Path::new(STATE_DIR).join("request.json");
-    let data = match fs::read(&path) {
-        Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e.into()),
-    };
-    // Taken first: a request that fails is not tried again and again.
-    fs::remove_file(&path)?;
+    // Taken first, whatever it is: a request that fails is not tried again and again.
+    let data = panelfs::read(&path, 4096);
+    panelfs::discard(&path)?;
+    let Some(data) = data? else { return Ok(()) };
     let req: Request = serde_json::from_slice(&data).context("addons/request.json is malformed")?;
     let result = match req.action.as_str() {
         "install" if valid_id(&req.id) => install(&req.id, panel, say),
@@ -462,6 +477,94 @@ mod tests {
             assert!(go.contains(tag), "the panel has no {tag}");
         }
         assert!(go.contains(&format!("const CatalogURL = \"{CATALOG_URL}\"")), "the panel's catalog URL differs");
+    }
+
+    // A state written by a compromised panel cannot smuggle YAML into the compose file
+    // root runs: every field that goes there is checked.
+    #[test]
+    fn only_sound_entries() {
+        let good = Installed {
+            version: "1.0.1".into(),
+            image: "ghcr.io/getmikan/adapter-yookassa".into(),
+            digest: format!("sha256:{}", "c".repeat(64)),
+            listen: "127.0.0.1:45615".into(),
+            token: "a".repeat(48),
+            status: "running".into(),
+            ..Default::default()
+        };
+        assert!(sound("yookassa", &good));
+        let bad = |f: &dyn Fn(&mut Installed)| {
+            let mut a = good.clone();
+            f(&mut a);
+            a
+        };
+        let cases = [
+            (
+                "image",
+                bad(&|a| {
+                    a.image = "ghcr.io/x\"
+    privileged: true
+    x: \""
+                        .into()
+                }),
+            ),
+            ("image elsewhere", bad(&|a| a.image = "docker.io/library/alpine".into())),
+            (
+                "digest",
+                bad(&|a| {
+                    a.digest = "sha256:abc
+    volumes: [\"/:/host\"]"
+                        .into()
+                }),
+            ),
+            ("listen", bad(&|a| a.listen = "0.0.0.0:45615".into())),
+            ("low port", bad(&|a| a.listen = "127.0.0.1:22".into())),
+            (
+                "token",
+                bad(&|a| {
+                    a.token = format!(
+                        "{}\"
+    privileged: true",
+                        "a".repeat(40)
+                    )
+                }),
+            ),
+            ("short token", bad(&|a| a.token = "abc".into())),
+            (
+                "version",
+                bad(&|a| {
+                    a.version = "1
+"
+                    .into()
+                }),
+            ),
+            ("status", bad(&|a| a.status = "hacked".into())),
+        ];
+        for (what, a) in cases {
+            assert!(!sound("yookassa", &a), "{what} passed");
+        }
+        assert!(
+            !sound(
+                "x:
+  privileged",
+                &good
+            ),
+            "a service name with YAML passed"
+        );
+        let mut m = BTreeMap::new();
+        m.insert(
+            "evil".to_owned(),
+            bad(&|a| {
+                a.image = "ghcr.io/x
+    privileged: true"
+                    .into()
+            }),
+        );
+        m.insert("yookassa".to_owned(), good.clone());
+        let mut s = State { adapters: m, request: None };
+        s.adapters.retain(|id, a| sound(id, a));
+        assert_eq!(s.adapters.keys().collect::<Vec<_>>(), ["yookassa"]);
+        assert!(!compose_yaml(&s.adapters).contains("privileged"));
     }
 
     #[test]

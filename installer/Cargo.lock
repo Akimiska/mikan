@@ -764,6 +764,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "ed25519-dalek",
+ "libc",
  "qrcode",
  "ratatui",
  "serde",

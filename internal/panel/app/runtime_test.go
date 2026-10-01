@@ -179,11 +179,11 @@ func TestSubscriptionWithoutServersIsAStub(t *testing.T) {
 	}
 }
 
-// Every answer of a panel that serves TLS asks browsers to keep to HTTPS; one that does
-// not (development, a proxy in front) does not claim it.
+// Every answer of a panel that serves a trusted certificate asks browsers to keep to HTTPS;
+// one that does not (development, a proxy in front, a self-signed fallback) does not claim it.
 func TestHSTSOnlyWhereTheTLSIsOurs(t *testing.T) {
 	for _, on := range []bool{false, true} {
-		h := newHarness(t, func(o *Options) { o.HSTS = on })
+		h := newHarness(t, func(o *Options) { o.HSTS = func() bool { return on } })
 		for _, path := range []string{"/" + adminPath + "/", "/" + subPath + "/", "/nothing-here"} {
 			resp, _ := h.do(http.MethodGet, path, nil, nil)
 			got := resp.Header.Get("Strict-Transport-Security")

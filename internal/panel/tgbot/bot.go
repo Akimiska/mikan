@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -316,8 +317,11 @@ func (b *Bot) loadOffset(ctx context.Context, bot int64) int64 {
 	return rec.Offset
 }
 
+// saveOffset writes the row itself, not through settings.Set: the position moves with
+// every update, and it is not a setting anything is built from (settings.Generation).
 func (b *Bot) saveOffset(ctx context.Context, bot, offset int64) {
-	if err := settings.Set(ctx, b.d.Settings, KeyOffset, offsetRecord{Bot: bot, Offset: offset}); err != nil && ctx.Err() == nil {
+	raw, _ := json.Marshal(offsetRecord{Bot: bot, Offset: offset})
+	if err := b.d.Store.Q.SetSetting(ctx, db.SetSettingParams{Key: KeyOffset, Value: string(raw)}); err != nil && ctx.Err() == nil {
 		b.d.Log.Warn("telegram: offset not saved", "err", err)
 	}
 }

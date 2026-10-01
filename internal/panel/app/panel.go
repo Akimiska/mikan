@@ -89,8 +89,9 @@ type Options struct {
 	AddonsCatalog string
 	// DNS checks new domains against public DNS; nil leaves them unchecked.
 	DNS *dnscheck.Checker
-	// HSTS tells browsers to keep to HTTPS: for a panel that serves TLS itself.
-	HSTS bool
+	// HSTS says whether browsers are told to keep to HTTPS: for a panel that serves TLS
+	// itself, while its certificate is trusted (see server.SetHSTS). nil: never.
+	HSTS func() bool
 }
 
 type noChanges struct{}

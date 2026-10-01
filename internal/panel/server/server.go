@@ -17,7 +17,7 @@ type Server struct {
 	paths atomic.Pointer[settings.Paths]
 	admin http.Handler
 	sub   http.Handler
-	hsts  atomic.Bool
+	hsts  atomic.Pointer[func() bool]
 }
 
 func New(admin, sub http.Handler) *Server {
@@ -28,10 +28,18 @@ func New(admin, sub http.Handler) *Server {
 
 func (s *Server) SetPaths(p settings.Paths) { s.paths.Store(&p) }
 
-// SetHSTS makes every answer tell browsers to use HTTPS for this host from now on. Only
-// for a panel that serves TLS itself: the header means nothing over plain HTTP, and a
-// panel behind a proxy that terminates TLS leaves it to the proxy.
-func (s *Server) SetHSTS(on bool) { s.hsts.Store(on) }
+// SetHSTS makes the answers tell browsers to use HTTPS for this host from now on, while on
+// says so. Only for a panel that serves TLS itself, and only while its certificate is one
+// browsers trust: a browser that remembers HSTS offers no way past a certificate warning,
+// so a panel that falls back to its self-signed certificate (a renewal that failed, a
+// custom one that expired) would lock its admin out. nil: never.
+func (s *Server) SetHSTS(on func() bool) {
+	if on == nil {
+		s.hsts.Store(nil)
+		return
+	}
+	s.hsts.Store(&on)
+}
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.serve(w, r, true) }
 
@@ -43,7 +51,7 @@ func (s *Server) SubOnly() http.Handler {
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request, admin bool) {
 	SecurityHeaders(w.Header())
-	if s.hsts.Load() {
+	if on := s.hsts.Load(); on != nil && (*on)() {
 		w.Header().Set("Strict-Transport-Security", HSTSValue)
 	}
 	p := r.URL.Path

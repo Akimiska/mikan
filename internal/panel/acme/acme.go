@@ -82,6 +82,19 @@ func New(dataDir string, holder *tlscert.Holder, fallback *tls.Certificate, set 
 
 func (m *Manager) Status() Status { return *m.status.Load() }
 
+// Trusted says whether the panel serves a certificate browsers trust for its address: one
+// from Let's Encrypt, or the admin's own when it is publicly trusted and covers the address.
+func (m *Manager) Trusted() bool {
+	st := m.status.Load()
+	switch st.Kind {
+	case "letsencrypt":
+		return true
+	case "custom":
+		return st.Trusted && st.Error == ""
+	}
+	return false
+}
+
 // Renew asks the background loop to try again now (e.g. after the admin freed port 80).
 func (m *Manager) Renew() {
 	select {

@@ -3,6 +3,13 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.4.2
+### en
+- API moved from the sidebar to Settings → API (old /api-docs links lead there). The page has "Download OpenAPI": openapi.json with this panel's address already in it, ready for Postman, Insomnia, Swagger UI and client generators.
+
+### ru
+- Раздел API переехал из бокового меню в «Настройки → API» (старые ссылки /api-docs ведут туда). На странице есть «Скачать OpenAPI»: openapi.json с уже прописанным адресом этой панели — для Postman, Insomnia, Swagger UI и генераторов клиентов.
+
 ## 0.4.1
 ### en
 - Traffic pools (#6): chosen protocols can count to a pool with its own limit, apart from the main traffic — a WL node at 100 GB a month while Germany and Estonia stay unlimited, in one subscription. Make pools on the Plans page, put a protocol into one in its settings, give the pool a limit in the plan or per user. When a pool runs out only its protocols stop (and leave the subscription until the reset); everything else keeps working, and the other way round. Pools reset with the main traffic; the user card, the subscription page and the bot show each pool.

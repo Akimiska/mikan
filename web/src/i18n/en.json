@@ -25,7 +25,6 @@
     "settings": "Settings",
     "nodes": "Nodes",
     "telegram": "Telegram",
-    "api": "API",
     "payments": "Payments"
   },
   "navShort": {
@@ -757,7 +756,10 @@
     "browser": "Browser",
     "fpOwn": "Own…",
     "fpOwnHint": "A uTLS profile name: lowercase letters, digits and _, such as chrome120 or randomizednoalpn. Xray apps may refuse a value off the list, and mihomo connects without uTLS when it does not know it.",
-    "fpOwnBad": "Lowercase letters, digits and _ only, up to 32 characters"
+    "fpOwnBad": "Lowercase letters, digits and _ only, up to 32 characters",
+    "api": "API",
+    "apiSub": "Keys for scripts and integrations, and a reference of every panel method.",
+    "apiOpen": "Open"
   },
   "sub": {
     "loadFailed": "Could not load the subscription",
@@ -1089,7 +1091,10 @@
       "api-keys": "API keys",
       "auth": "Sign-in and sessions",
       "payments": "Payments"
-    }
+    },
+    "back": "Settings",
+    "download": "Download OpenAPI",
+    "downloadHint": "openapi.json for Postman, Insomnia, Swagger UI and client generators. It carries this panel's address, which is secret: do not publish the file."
   },
   "payments": {
     "title": "Payments",

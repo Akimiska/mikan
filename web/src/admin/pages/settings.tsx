@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import clsx from "clsx";
-import { Copy, KeyRound, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import { ChevronRight, Copy, KeyRound, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { meQuery, qk, useInbounds, useSettings, useUpdates } from "../../api/hooks";
@@ -31,6 +32,7 @@ export function SettingsPage() {
             <LanguageCard s={settings.data} />
             <AutoCard s={settings.data} />
             <DevicesCard s={settings.data} />
+            <ApiCard />
           </div>
           <div className="flex min-w-0 flex-col gap-4">
             <UpdatesCard />
@@ -242,6 +244,23 @@ function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
         ))}
       </ul>
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.autoNote")}</p>
+    </section>
+  );
+}
+
+// API keys and the reference live on their own page: they are for scripts, not daily work.
+function ApiCard() {
+  return (
+    <section className="card glass reveal" style={{ "--i": 5 } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.api")}</h2>
+          <div className="card-sub">{t("settings.apiSub")}</div>
+        </div>
+        <Link to="/settings/api" className="btn btn-glass btn-sm">
+          {t("settings.apiOpen")} <ChevronRight size={16} aria-hidden />
+        </Link>
+      </div>
     </section>
   );
 }

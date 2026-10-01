@@ -26,19 +26,18 @@ func TestInboundAddPrintsPortForHostScript(t *testing.T) {
 	if err := domain.Seed(ctx, st, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	set := settings.New(st.Q)
 	var out, errOut bytes.Buffer
-	if err := inboundCmd(ctx, st, set, []string{"add", "anytls"}, &out, &errOut); err != nil {
+	if err := inboundCmd(ctx, st, []string{"add", "anytls"}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "2083/tcp\n" {
 		t.Fatalf("stdout must be port/network, got %q", out.String())
 	}
-	if err := inboundCmd(ctx, st, set, []string{"add", "anytls"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "anytls") {
+	if err := inboundCmd(ctx, st, []string{"add", "anytls"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "anytls") {
 		t.Fatalf("a taken port must name the owner: %v", err)
 	}
 	out.Reset()
-	if err := inboundCmd(ctx, st, set, []string{"list"}, &out, &errOut); err != nil || !strings.Contains(out.String(), "2083/tcp") {
+	if err := inboundCmd(ctx, st, []string{"list"}, &out, &errOut); err != nil || !strings.Contains(out.String(), "2083/tcp") {
 		t.Fatalf("list: %v %q", err, out.String())
 	}
 }
@@ -56,9 +55,8 @@ func TestInboundSetPrintsPortOnlyForOwnNode(t *testing.T) {
 	if err := domain.Seed(ctx, st, now); err != nil {
 		t.Fatal(err)
 	}
-	set := settings.New(st.Q)
 	var out, errOut bytes.Buffer
-	if err := inboundCmd(ctx, st, set, []string{"set", "vless-xhttp", "--port", "2443"}, &out, &errOut); err != nil {
+	if err := inboundCmd(ctx, st, []string{"set", "vless-xhttp", "--port", "2443"}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "2443/tcp\n" || !strings.Contains(errOut.String(), "443 → 2443/tcp") {
@@ -76,14 +74,14 @@ func TestInboundSetPrintsPortOnlyForOwnNode(t *testing.T) {
 	} {
 		out.Reset()
 		errOut.Reset()
-		if err := inboundCmd(ctx, st, set, args, &out, &errOut); err != nil {
+		if err := inboundCmd(ctx, st, args, &out, &errOut); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
 		if out.Len() != 0 || !strings.Contains(errOut.String(), "ufw allow "+args[len(args)-1]+"/udp") {
 			t.Fatalf("%v: remote node must not print a rule for this server: stdout %q, stderr %q", args, out.String(), errOut.String())
 		}
 	}
-	if err := inboundCmd(ctx, st, set, []string{"set", "nope", "--port", "3000"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "nope") {
+	if err := inboundCmd(ctx, st, []string{"set", "nope", "--port", "3000"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("unknown inbound: %v", err)
 	}
 }

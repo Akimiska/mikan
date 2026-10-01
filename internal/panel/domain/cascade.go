@@ -100,6 +100,23 @@ func EnsureRelay(ctx context.Context, q *db.Queries, node db.Node, now time.Time
 	return q.CreateNodeRelay(ctx, db.CreateNodeRelayParams{NodeID: node.ID, Port: strconv.Itoa(port), Config: proto.Marshal(t), CreatedAt: now.Unix()})
 }
 
+// UseExit lets node src leave through node exit: the chain is checked, exit gets its
+// relay and src a key there. It runs on the caller's transaction.
+func UseExit(ctx context.Context, q *db.Queries, src, exit int64, now time.Time) error {
+	if err := CheckExit(ctx, q, src, exit); err != nil {
+		return err
+	}
+	x, err := q.GetNode(ctx, exit)
+	if err != nil {
+		return err
+	}
+	if _, err := EnsureRelay(ctx, q, x, now); err != nil {
+		return err
+	}
+	_, err = RelayUser(ctx, q, exit, src)
+	return err
+}
+
 // RelayUser is the key node src uses at exit's relay, made on first use.
 func RelayUser(ctx context.Context, q *db.Queries, exit, src int64) (string, error) {
 	id, err := q.GetRelayUser(ctx, db.GetRelayUserParams{ExitNodeID: exit, SrcNodeID: src})

@@ -175,12 +175,12 @@ func TestNodePorts(t *testing.T) {
 	}
 }
 
-// The relay and the hopping ranges count for inbounds the CLI adds and moves too.
-func TestPortsForTheCLI(t *testing.T) {
+// The relay and the hopping ranges count for inbounds the CLI and the automatic moves add
+// and move too: they go through the same service, without a node to ask.
+func TestPortsWithoutTheNode(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	st, _, _ := setup(t, &now)
+	st, s := inbounds(t, &now, nil)
 	ctx := context.Background()
-	set := settings.New(st.Q)
 	local, err := st.Q.GetNode(ctx, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -190,10 +190,10 @@ func TestPortsForTheCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	var busy *PortInUseError
-	if _, err := AddPreset(ctx, st, set, 1, "trojan_reality", relay.Port, now); !errors.As(err, &busy) || busy.Kind != PortRelay {
+	if _, err := s.Create(ctx, NewInbound{Preset: "trojan_reality", Port: relay.Port}); !errors.As(err, &busy) || busy.Kind != PortRelay {
 		t.Fatalf("add on the relay's port: %v", err)
 	}
-	if _, _, err := SetInboundPort(ctx, st, 1, "vless-xhttp", relay.Port, now); !errors.As(err, &busy) || busy.Kind != PortRelay {
+	if _, _, err := s.Update(ctx, find(t, s, 1, "vless-xhttp").ID, InboundPatch{Port: &relay.Port}); !errors.As(err, &busy) || busy.Kind != PortRelay {
 		t.Fatalf("move to the relay's port: %v", err)
 	}
 	config, err := presets.NewConfig("hysteria2", "")
@@ -204,10 +204,10 @@ func TestPortsForTheCLI(t *testing.T) {
 		CreatedAt: now.Unix(), UpdatedAt: now.Unix()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := SetInboundPort(ctx, st, 1, "tuic", "25000", now); !errors.As(err, &busy) || busy.Name != "hopping" {
+	if _, _, err := s.Update(ctx, find(t, s, 1, "tuic").ID, InboundPatch{Port: ptr("25000")}); !errors.As(err, &busy) || busy.Name != "hopping" {
 		t.Fatalf("move into a hopping range: %v", err)
 	}
-	if _, err := AddPreset(ctx, st, set, 1, "tuic_v5", "29000-31000", now); !errors.As(err, &busy) || busy.Name != "hopping" {
+	if _, err := s.Create(ctx, NewInbound{Preset: "tuic_v5", Port: "29000-31000"}); !errors.As(err, &busy) || busy.Name != "hopping" {
 		t.Fatalf("a range over a hopping range: %v", err)
 	}
 }

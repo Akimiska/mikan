@@ -127,6 +127,12 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.SubPort, deps.SubPortError = o.SubPort, o.SubPortError
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
+	// The nodes try a new listener before it is saved, when the panel runs them.
+	var dryRun domain.DryRun
+	if p.Nodes != nil {
+		dryRun = p.Nodes
+	}
+	deps.Inbounds = domain.NewInbounds(st, dryRun, o.Now)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
 	deps.Packages = domain.NewPackages(st, o.Now)
 	if o.Certs != nil {

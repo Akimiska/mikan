@@ -16,7 +16,6 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/subs"
 )
 
 // An inbound PATCH refused on any field changes nothing: the pool, the way out, the
@@ -68,7 +67,7 @@ func TestRefusedInboundPatchChangesNothing(t *testing.T) {
 		"the panel's port with a pool":     {map[string]any{"pool_id": pool.ID, "port": "21355"}, http.StatusConflict, "port_panel"},
 		"bad template with a pool":         {map[string]any{"pool_id": pool.ID, "config": "type: nope\n"}, http.StatusUnprocessableEntity, "invalid_config"},
 		"bad target with an exit":          {map[string]any{"outbound": "node", "exit_node_id": b.ID, "dest": "nope"}, http.StatusUnprocessableEntity, "bad_dest"},
-		"taken name with a pool":           {map[string]any{"pool_id": pool.ID, "display_name": subs.ProxyName(vision)}, http.StatusConflict, "name_in_use"},
+		"taken name with a pool":           {map[string]any{"pool_id": pool.ID, "display_name": domain.ProxyName(vision)}, http.StatusConflict, "name_in_use"},
 		"unknown pool with a port":         {map[string]any{"pool_id": 999, "port": "2443"}, http.StatusUnprocessableEntity, "pool_not_found"},
 		"itself as the exit with a port":   {map[string]any{"outbound": "node", "exit_node_id": 1, "port": "2443"}, http.StatusUnprocessableEntity, "exit_self"},
 		"auto port on an address and pool": {map[string]any{"pool_id": pool.ID, "listen": "127.0.0.1", "auto_port": true}, http.StatusUnprocessableEntity, "auto_port_listen"},

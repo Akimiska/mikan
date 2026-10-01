@@ -78,14 +78,15 @@ type Status struct {
 
 // Tuner detects blocked inbounds and moves them. Step is not reentrant: Run calls it.
 type Tuner struct {
-	st      *store.Store
-	set     *settings.Settings
-	nodes   Nodes
-	changes domain.Changes
-	log     *slog.Logger
-	now     func() time.Time
-	o       Options
-	pick    func(n int) int // index of the port to move to; random unless a test fixes it
+	st       *store.Store
+	inbounds *domain.Inbounds // moves ports by the admin's rules, without a dry run on the node
+	set      *settings.Settings
+	nodes    Nodes
+	changes  domain.Changes
+	log      *slog.Logger
+	now      func() time.Time
+	o        Options
+	pick     func(n int) int // index of the port to move to; random unless a test fixes it
 
 	mu    sync.Mutex
 	state map[int64]*state // by inbound id
@@ -101,7 +102,7 @@ type state struct {
 }
 
 func New(st *store.Store, set *settings.Settings, nodes Nodes, changes domain.Changes, log *slog.Logger, now func() time.Time, o Options) *Tuner {
-	return &Tuner{st: st, set: set, nodes: nodes, changes: changes, log: log, now: now, o: o, pick: rand.IntN,
+	return &Tuner{st: st, inbounds: domain.NewInbounds(st, nil, now), set: set, nodes: nodes, changes: changes, log: log, now: now, o: o, pick: rand.IntN,
 		state: map[int64]*state{}, failed: map[string]time.Time{}}
 }
 
@@ -491,7 +492,8 @@ func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound,
 		t.setStuck(x.ID, "no_port")
 		return
 	}
-	prev, next, err := domain.SetInboundPort(ctx, t.st, n.ID, x.Name, free[t.pick(len(free))], w.now)
+	port := free[t.pick(len(free))]
+	prev, next, err := t.inbounds.Update(ctx, x.ID, domain.InboundPatch{Port: &port})
 	if err != nil {
 		t.log.Error("autotune: move port", "node", n.ID, "inbound", x.Name, "err", err)
 		return

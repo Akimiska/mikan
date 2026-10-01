@@ -4,14 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"mikan/internal/nodeapi"
 	"mikan/internal/panel/presets"
+	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -22,9 +23,431 @@ var (
 	ErrUnknownPreset  = errors.New("unknown_preset")
 	ErrUnknownInbound = errors.New("unknown_inbound")
 	ErrBadPort        = errors.New("bad_port")
-	ErrNoReality      = errors.New("no_reality")
 	ErrBadListen      = errors.New("bad_listen")
+	ErrAutoPortListen = errors.New("auto_port_listen") // a proxy in front would not learn the new port
+	ErrUnknownPool    = errors.New("pool_not_found")
 )
+
+// EditError is a form field the inbound's template does not take. Field is the field
+// ("dest", "fingerprint", "obfs", "client"); Err is the template's reason, its Field
+// naming the part ("mikan.client.sni").
+type EditError struct {
+	Field string
+	Err   *proto.Error
+}
+
+func (e *EditError) Error() string { return e.Field + ": " + e.Err.Error() }
+func (e *EditError) Unwrap() error { return e.Err }
+
+// NameInUseError: another inbound of the node already shows under the name in
+// subscriptions.
+type NameInUseError struct{ Owner string }
+
+func (e *NameInUseError) Error() string { return "name_in_use: " + e.Owner }
+
+// DryRun runs a listener through the mihomo of the node that is going to run it.
+type DryRun interface {
+	Validate(ctx context.Context, nodeID int64, req nodeapi.ValidateRequest) error
+}
+
+// Inbounds adds and changes inbounds for the admin API, the server CLI and the automatic
+// moves: one set of rules, and one transaction per change, so a change refused on any
+// field leaves the inbound as it was. Audit entries and change notices stay with the
+// callers.
+type Inbounds struct {
+	st  *store.Store
+	dry DryRun
+	now func() time.Time
+}
+
+// NewInbounds: dry nil skips the nodes' own check, for callers that do not talk to the
+// nodes (the CLI, the automatic moves).
+func NewInbounds(st *store.Store, dry DryRun, now func() time.Time) *Inbounds {
+	return &Inbounds{st: st, dry: dry, now: now}
+}
+
+// NewInbound is an inbound to add.
+type NewInbound struct {
+	NodeID int64  // 0: the panel's own node
+	Preset string // presets.Custom takes Config
+	Port   string // "": the preset's
+	Dest   string // a REALITY preset's target; "": the default
+	Config string // the template of presets.Custom
+}
+
+// InboundPatch changes an inbound; a nil field stays as it is.
+type InboundPatch struct {
+	// What clients get: a change here bumps updated_at, so their profiles refresh.
+	Port        *string
+	Enabled     *bool
+	Config      *string // the whole template
+	Dest        *string // the REALITY target, host:port
+	ServerName  *string // the name clients send with Dest; "" takes the host of Dest
+	Fingerprint *string
+	Obfs        *string
+	Client      *ClientEndpoint // replaces all three
+	DisplayName *string
+	// What only the node uses.
+	Listen     *string
+	AutoPort   *bool
+	AutoSNI    *bool
+	Outbound   *string // direct, warp or node
+	ExitNodeID *int64  // for Outbound node
+	PoolID     *int64  // 0: the main traffic
+}
+
+// EditsTemplate: the patch changes the listener's template.
+func (p InboundPatch) EditsTemplate() bool {
+	return p.Config != nil || p.Dest != nil || p.Fingerprint != nil || p.Obfs != nil || p.Client != nil
+}
+
+// ForClients: the patch changes what clients get.
+func (p InboundPatch) ForClients() bool {
+	return p.EditsTemplate() || p.Port != nil || p.Enabled != nil || p.DisplayName != nil
+}
+
+// ClientEndpoint is where clients connect when a TCP proxy or a CDN stands in front of
+// the node; empty values keep the node's address, the inbound's port and SNI.
+type ClientEndpoint struct {
+	Server string
+	Port   int
+	SNI    string
+}
+
+// Create adds an inbound: a preset's with fresh keys, or a custom template.
+func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error) {
+	info, ok := presets.Get(in.Preset)
+	if !ok {
+		return db.Inbound{}, ErrUnknownPreset
+	}
+	node, err := s.node(ctx, in.NodeID)
+	if err != nil {
+		return db.Inbound{}, err
+	}
+	port := in.Port
+	if port == "" {
+		port = info.Port
+	}
+	if !ValidPort(port) {
+		return db.Inbound{}, ErrBadPort
+	}
+	config := in.Config
+	if info.ID != presets.Custom {
+		if config, err = presets.NewConfig(info.ID, in.Dest); err != nil {
+			return db.Inbound{}, err
+		}
+	}
+	t, err := s.CheckTemplate(ctx, node, config, port)
+	if err != nil {
+		return db.Inbound{}, err
+	}
+	base := info.Name
+	if info.ID == presets.Custom {
+		base = t.Type()
+	}
+	var row db.Inbound
+	err = s.st.Tx(ctx, func(q *db.Queries) error {
+		if err := CheckPort(ctx, q, node, port, t.Network(), PortHolder{}); err != nil {
+			return err
+		}
+		all, err := q.ListInbounds(ctx)
+		if err != nil {
+			return err
+		}
+		now := s.now().Unix()
+		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: FreeName(NodeInbounds(all, node.ID), base), Preset: info.ID, Port: port,
+			Config: config, CreatedAt: now, UpdatedAt: now})
+		return err
+	})
+	return row, err
+}
+
+// Update changes an inbound and returns it before and after. Every field is checked
+// before anything is written, and everything is written in one transaction.
+func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, next db.Inbound, err error) {
+	fail := func(err error) (db.Inbound, db.Inbound, error) { return db.Inbound{}, db.Inbound{}, err }
+	prev, err = s.st.Q.GetInbound(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fail(ErrUnknownInbound)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	next = prev
+	if p.Listen != nil {
+		if next.Listen, err = ParseListen(*p.Listen); err != nil {
+			return fail(err)
+		}
+	}
+	if p.AutoPort != nil {
+		next.AutoPort = flag(*p.AutoPort)
+	}
+	if p.AutoSNI != nil {
+		next.AutoSni = flag(*p.AutoSNI)
+	}
+	if ListenPinsPort(next.Listen) {
+		if p.AutoPort != nil && *p.AutoPort {
+			return fail(ErrAutoPortListen)
+		}
+		next.AutoPort = 0
+	}
+	if p.PoolID != nil {
+		next.PoolID = sql.NullInt64{Int64: *p.PoolID, Valid: *p.PoolID != 0}
+	}
+	if p.Outbound != nil {
+		next.Outbound, next.ExitNodeID = *p.Outbound, sql.NullInt64{}
+		if *p.Outbound == "node" {
+			if p.ExitNodeID == nil {
+				return fail(ErrNotFound)
+			}
+			next.Outbound, next.ExitNodeID = "direct", sql.NullInt64{Int64: *p.ExitNodeID, Valid: true}
+		}
+	}
+	if p.Port != nil {
+		if !ValidPort(*p.Port) {
+			return fail(ErrBadPort)
+		}
+		next.Port = *p.Port
+	}
+	if p.Enabled != nil {
+		next.Enabled = flag(*p.Enabled)
+	}
+	if p.Config != nil {
+		next.Config = *p.Config
+	}
+	if next.Config, err = editTemplate(next.Config, p); err != nil {
+		return fail(err)
+	}
+	if p.DisplayName != nil {
+		next.DisplayName = strings.TrimSpace(*p.DisplayName)
+	}
+	template, client := p.EditsTemplate(), p.ForClients()
+	// The port is checked where the inbound is going to listen: after a move, a new
+	// template (its network may change) or when it comes back on.
+	listens := next.Enabled != 0 && (template || next.Port != prev.Port || prev.Enabled == 0)
+	node, err := s.node(ctx, prev.NodeID)
+	if err != nil {
+		return fail(err)
+	}
+	network := InboundNetwork(next)
+	switch {
+	case template:
+		t, err := s.CheckTemplate(ctx, node, next.Config, next.Port)
+		if err != nil {
+			return fail(err)
+		}
+		network = t.Network()
+	case listens && s.dry != nil:
+		// The template stays; the node still tries it on the new port.
+		if err := s.tryOnNode(ctx, node, next.Config, next.Port); err != nil {
+			return fail(err)
+		}
+	}
+	err = s.st.Tx(ctx, func(q *db.Queries) error {
+		// What other rows hold is checked on the transaction that writes.
+		if listens {
+			if err := CheckPort(ctx, q, node, next.Port, network, InboundHolder(prev)); err != nil {
+				return err
+			}
+		}
+		if p.DisplayName != nil {
+			all, err := q.ListInbounds(ctx)
+			if err != nil {
+				return err
+			}
+			// Names are per node: other nodes' links get their own flag prefix.
+			for _, e := range NodeInbounds(all, prev.NodeID) {
+				if e.ID != prev.ID && strings.EqualFold(ProxyName(e), ProxyName(next)) {
+					return &NameInUseError{Owner: e.Name}
+				}
+			}
+		}
+		if p.PoolID != nil && next.PoolID.Valid {
+			if _, err := q.GetTrafficPool(ctx, next.PoolID.Int64); errors.Is(err, sql.ErrNoRows) {
+				return ErrUnknownPool
+			} else if err != nil {
+				return err
+			}
+		}
+		// The exit's chain is checked, and its relay made, before the inbound changes.
+		if p.Outbound != nil && next.ExitNodeID.Valid {
+			if err := UseExit(ctx, q, prev.NodeID, next.ExitNodeID.Int64, s.now()); err != nil {
+				return err
+			}
+		}
+		if p.PoolID != nil {
+			if err := q.SetInboundPool(ctx, db.SetInboundPoolParams{PoolID: next.PoolID, ID: id}); err != nil {
+				return err
+			}
+		}
+		if p.Outbound != nil {
+			if err := q.SetInboundExit(ctx, db.SetInboundExitParams{ExitNodeID: next.ExitNodeID, Outbound: next.Outbound, ID: id}); err != nil {
+				return err
+			}
+		}
+		if next.Listen != prev.Listen {
+			if err := q.SetInboundListen(ctx, db.SetInboundListenParams{Listen: next.Listen, ID: id}); err != nil {
+				return err
+			}
+		}
+		if next.AutoPort != prev.AutoPort || next.AutoSni != prev.AutoSni {
+			if err := q.SetInboundAuto(ctx, db.SetInboundAutoParams{AutoPort: next.AutoPort, AutoSni: next.AutoSni, ID: id}); err != nil {
+				return err
+			}
+		}
+		if client {
+			if _, err := q.UpdateInbound(ctx, db.UpdateInboundParams{Port: next.Port, Enabled: next.Enabled, Config: next.Config, DisplayName: next.DisplayName,
+				UpdatedAt: s.now().Unix(), ID: id}); err != nil {
+				return err
+			}
+		}
+		next, err = q.GetInbound(ctx, id)
+		return err
+	})
+	if err != nil {
+		return fail(err)
+	}
+	return prev, next, nil
+}
+
+// templateEdit is a form field applied to a template.
+type templateEdit struct {
+	field string
+	apply func(proto.Template) error
+}
+
+// editTemplate applies the patch's form fields to a template; a field the template does
+// not take is an *EditError.
+func editTemplate(config string, p InboundPatch) (string, error) {
+	var edits []templateEdit
+	if p.Dest != nil {
+		sni := ""
+		if p.ServerName != nil {
+			sni = strings.TrimSpace(*p.ServerName)
+		}
+		edits = append(edits, templateEdit{"dest", func(t proto.Template) error { return presets.SetDest(t, strings.TrimSpace(*p.Dest), sni) }})
+	}
+	if p.Fingerprint != nil {
+		edits = append(edits, templateEdit{"fingerprint", func(t proto.Template) error {
+			if !proto.UsesFingerprint(t) {
+				return &proto.Error{Code: "fingerprint_no_tls", Field: "mikan.client.fingerprint"}
+			}
+			return proto.SetFingerprint(t, strings.TrimSpace(*p.Fingerprint))
+		}})
+	}
+	if p.Obfs != nil {
+		edits = append(edits, templateEdit{"obfs", func(t proto.Template) error { return proto.SetObfs(t, *p.Obfs, secure.Token(24)) }})
+	}
+	if c := p.Client; c != nil {
+		edits = append(edits, templateEdit{"client", func(t proto.Template) error {
+			return proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI))
+		}})
+	}
+	for _, e := range edits {
+		t, err := proto.Parse(config)
+		if err == nil {
+			err = e.apply(t)
+		}
+		var pe *proto.Error
+		if errors.As(err, &pe) {
+			return "", &EditError{Field: e.field, Err: pe}
+		}
+		if err != nil {
+			return "", err
+		}
+		config = proto.Marshal(t)
+	}
+	return config, nil
+}
+
+// CheckTemplate parses and checks a template for an inbound of node on port: mikan's
+// rules first, then mihomo's own parser on the node, so a broken template never replaces
+// a working listener. A node that cannot be reached does not stop it: the node checks
+// again when it applies the template.
+func (s *Inbounds) CheckTemplate(ctx context.Context, node db.Node, config, port string) (proto.Template, error) {
+	t, err := proto.Parse(config)
+	if err != nil {
+		return nil, err
+	}
+	selfSteal, err := s.selfStealPort(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	if err := proto.Validate(t, proto.Options{SelfStealPort: selfSteal}); err != nil {
+		return nil, err
+	}
+	// Checked here, not in proto.Validate: nodes keep applying templates saved before.
+	if fp := t.Ext().Client.Fingerprint; fp != "" && !proto.ValidFingerprint(fp) {
+		return nil, &proto.Error{Code: "config_fingerprint", Field: "mikan.client.fingerprint", Detail: fp}
+	}
+	if err := s.dryRun(ctx, node, t, port, selfSteal); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// tryOnNode runs a saved template through the node's mihomo on another port.
+func (s *Inbounds) tryOnNode(ctx context.Context, node db.Node, config, port string) error {
+	t, err := proto.Parse(config)
+	if err != nil {
+		return err
+	}
+	selfSteal, err := s.selfStealPort(ctx, node)
+	if err != nil {
+		return err
+	}
+	return s.dryRun(ctx, node, t, port, selfSteal)
+}
+
+func (s *Inbounds) dryRun(ctx context.Context, node db.Node, t proto.Template, port string, selfSteal int) error {
+	if s.dry == nil {
+		return nil
+	}
+	err := s.dry.Validate(ctx, node.ID, nodeapi.ValidateRequest{Inbound: nodeapi.Inbound{Name: "validate", Port: port, Config: t.JSON()}, SelfStealPort: selfSteal})
+	if errors.Is(err, nodeapi.ErrUnavailable) {
+		return nil
+	}
+	return err
+}
+
+// selfStealPort is the panel's port for the panel's own node, the only one that may use
+// the panel's HTTPS as its REALITY target; 0 for the others.
+func (s *Inbounds) selfStealPort(ctx context.Context, node db.Node) (int, error) {
+	if node.Address != "" {
+		return 0, nil
+	}
+	p, _, err := settings.Get[int](ctx, settings.New(s.st.Q), settings.KeyPanelPort)
+	return p, err
+}
+
+// Find is a node's inbound by name, the way the CLI names inbounds.
+func (s *Inbounds) Find(ctx context.Context, nodeID int64, name string) (db.Inbound, error) {
+	if _, err := s.node(ctx, nodeID); err != nil {
+		return db.Inbound{}, err
+	}
+	all, err := s.st.Q.ListInbounds(ctx)
+	if err != nil {
+		return db.Inbound{}, err
+	}
+	existing := NodeInbounds(all, nodeID)
+	i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
+	if i < 0 {
+		return db.Inbound{}, ErrUnknownInbound
+	}
+	return existing[i], nil
+}
+
+// node loads the node an inbound belongs to; 0 is the panel's own node.
+func (s *Inbounds) node(ctx context.Context, id int64) (db.Node, error) {
+	if id == 0 {
+		id = 1
+	}
+	n, err := s.st.Q.GetNode(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return n, ErrUnknownNode
+	}
+	return n, err
+}
 
 // ValidPort accepts a port ("443") or a Hysteria2 hopping range ("20000-30000").
 func ValidPort(spec string) bool {
@@ -55,51 +478,6 @@ func ParseListen(s string) (string, error) {
 // for every check, and a bind on every address takes the port on all of them.
 func ListenPinsPort(listen string) bool { return listen != "" }
 
-// SetInboundTarget points a REALITY inbound of a node at another camouflage site: dest is
-// host:port, sni the name clients send ("" = the host of dest). Only the panel's own node
-// may use the panel's HTTPS (127.0.0.1:<panel port>, self-steal). The running panel
-// pushes the change to the node on its next reconcile.
-func SetInboundTarget(ctx context.Context, st *store.Store, nodeID int64, name, dest, sni string, now time.Time) (db.Inbound, db.Inbound, error) {
-	n, err := st.Q.GetNode(ctx, nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return db.Inbound{}, db.Inbound{}, ErrUnknownNode
-	} else if err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	}
-	all, err := st.Q.ListInbounds(ctx)
-	if err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	}
-	existing := NodeInbounds(all, nodeID)
-	i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
-	if i < 0 {
-		return db.Inbound{}, db.Inbound{}, ErrUnknownInbound
-	}
-	prev := existing[i]
-	t, err := proto.Parse(prev.Config)
-	if err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	}
-	if old, _ := presets.Dest(t); old == "" {
-		return db.Inbound{}, db.Inbound{}, ErrNoReality
-	}
-	if err := presets.SetDest(t, dest, sni); err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	}
-	var opts proto.Options
-	if n.Address == "" {
-		if opts.SelfStealPort, _, err = settings.Get[int](ctx, settings.New(st.Q), settings.KeyPanelPort); err != nil {
-			return db.Inbound{}, db.Inbound{}, err
-		}
-	}
-	if err := proto.Validate(t, opts); err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	}
-	next, err := st.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: prev.Port, Enabled: prev.Enabled, Config: proto.Marshal(t), DisplayName: prev.DisplayName,
-		UpdatedAt: now.Unix(), ID: prev.ID})
-	return prev, next, err
-}
-
 // InboundNetwork is the network the inbound's port is bound on: "tcp" or "udp".
 func InboundNetwork(in db.Inbound) string {
 	if t, err := proto.Parse(in.Config); err == nil {
@@ -107,6 +485,15 @@ func InboundNetwork(in db.Inbound) string {
 	}
 	info, _ := presets.Get(in.Preset)
 	return info.Network
+}
+
+// ProxyName is the name an inbound gets in subscriptions.
+func ProxyName(in db.Inbound) string {
+	if in.DisplayName != "" {
+		return in.DisplayName
+	}
+	info, _ := presets.Get(in.Preset)
+	return info.SubName
 }
 
 // FreeName returns base, or base-2, base-3… when an inbound already has that name.
@@ -120,101 +507,4 @@ func FreeName(existing []db.Inbound, base string) string {
 		name = base + "-" + strconv.Itoa(i)
 	}
 	return name
-}
-
-// AddPreset creates an inbound from a preset with fresh keys on a node, for the server
-// CLI; the admin API does the same with its own error mapping and a dry run on the
-// node. An empty port takes the preset's default.
-func AddPreset(ctx context.Context, st *store.Store, set *settings.Settings, nodeID int64, id, port string, now time.Time) (db.Inbound, error) {
-	node, err := st.Q.GetNode(ctx, nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return db.Inbound{}, ErrUnknownNode
-	}
-	if err != nil {
-		return db.Inbound{}, err
-	}
-	info, ok := presets.Get(id)
-	if !ok || id == presets.Custom {
-		return db.Inbound{}, ErrUnknownPreset
-	}
-	if port == "" {
-		port = info.Port
-	}
-	if !ValidPort(port) {
-		return db.Inbound{}, ErrBadPort
-	}
-	config, err := presets.NewConfig(id, "")
-	if err != nil {
-		return db.Inbound{}, err
-	}
-	t, err := proto.Parse(config)
-	if err != nil {
-		return db.Inbound{}, err
-	}
-	var opts proto.Options
-	if node.Address == "" {
-		// Only the panel's own node can use the panel as its REALITY target.
-		if opts.SelfStealPort, _, err = settings.Get[int](ctx, set, settings.KeyPanelPort); err != nil {
-			return db.Inbound{}, err
-		}
-	}
-	if err := proto.Validate(t, opts); err != nil {
-		return db.Inbound{}, fmt.Errorf("preset %s: %w", id, err)
-	}
-	var row db.Inbound
-	err = st.Tx(ctx, func(q *db.Queries) error {
-		if err := CheckPort(ctx, q, node, port, t.Network(), PortHolder{}); err != nil {
-			return err
-		}
-		all, err := q.ListInbounds(ctx)
-		if err != nil {
-			return err
-		}
-		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: nodeID, Name: FreeName(NodeInbounds(all, nodeID), info.Name), Preset: id, Port: port,
-			Config: config, CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
-		return err
-	})
-	return row, err
-}
-
-// SetInboundPort moves a node's inbound, found by name, to another port for the server
-// CLI; the admin API does the same in its update handler. Keys and the REALITY target
-// stay, so clients only need to refresh the subscription. It returns the inbound before
-// and after the move.
-func SetInboundPort(ctx context.Context, st *store.Store, nodeID int64, name, port string, now time.Time) (db.Inbound, db.Inbound, error) {
-	node, err := st.Q.GetNode(ctx, nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return db.Inbound{}, db.Inbound{}, ErrUnknownNode
-	} else if err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	}
-	if !ValidPort(port) {
-		return db.Inbound{}, db.Inbound{}, ErrBadPort
-	}
-	var prev, next db.Inbound
-	err = st.Tx(ctx, func(q *db.Queries) error {
-		all, err := q.ListInbounds(ctx)
-		if err != nil {
-			return err
-		}
-		existing := NodeInbounds(all, nodeID)
-		i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
-		if i < 0 {
-			return ErrUnknownInbound
-		}
-		prev = existing[i]
-		// A disabled inbound holds no port: it is checked when it comes back on.
-		if prev.Enabled != 0 {
-			if err := CheckPort(ctx, q, node, port, InboundNetwork(prev), InboundHolder(prev)); err != nil {
-				return err
-			}
-		}
-		next, err = q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: prev.Enabled, Config: prev.Config, DisplayName: prev.DisplayName,
-			UpdatedAt: now.Unix(), ID: prev.ID})
-		return err
-	})
-	if err != nil {
-		return db.Inbound{}, db.Inbound{}, err
-	}
-	return prev, next, nil
 }

@@ -13,14 +13,14 @@ import (
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/presets"
-	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 )
 
 // inboundCmd lists, adds and moves inbounds from the server shell. The running panel pushes
 // the change to the node on its next reconcile, within 30 seconds.
-func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, args []string, stdout, stderr io.Writer) error {
+func inboundCmd(ctx context.Context, st *store.Store, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return errors.New("inbound needs list, add or set\n\n" + usage)
 	}
@@ -50,8 +50,13 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
-		row, err := domain.AddPreset(ctx, st, set, *node, args[1], *port, time.Now())
+		// The shell has no way to pass a template: presets only.
+		if args[1] == presets.Custom {
+			return fmt.Errorf("no preset %q. Presets: %s", args[1], presetIDs())
+		}
+		row, err := domain.NewInbounds(st, nil, time.Now).Create(ctx, domain.NewInbound{NodeID: *node, Preset: args[1], Port: *port})
 		var busy *domain.PortInUseError
+		var pe *proto.Error
 		switch {
 		case errors.Is(err, domain.ErrUnknownNode):
 			return fmt.Errorf("no node %d", *node)
@@ -61,6 +66,8 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 			return fmt.Errorf("bad port %q", *port)
 		case errors.As(err, &busy):
 			return fmt.Errorf("%s, choose another: --port", portHolder(busy.PortHolder))
+		case errors.As(err, &pe):
+			return fmt.Errorf("preset %s: %w", args[1], err)
 		case err != nil:
 			return err
 		}
@@ -81,7 +88,13 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 		if *port == "" {
 			return errors.New("--port is required")
 		}
-		prev, row, err := domain.SetInboundPort(ctx, st, *node, args[1], *port, time.Now())
+		// Keys and the REALITY target stay: clients only need to refresh the subscription.
+		ins := domain.NewInbounds(st, nil, time.Now)
+		var prev, row db.Inbound
+		in, err := ins.Find(ctx, *node, args[1])
+		if err == nil {
+			prev, row, err = ins.Update(ctx, in.ID, domain.InboundPatch{Port: port})
+		}
 		var busy *domain.PortInUseError
 		switch {
 		case errors.Is(err, domain.ErrUnknownNode):

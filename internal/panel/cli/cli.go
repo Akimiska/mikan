@@ -162,7 +162,7 @@ func adminCmd(ctx context.Context, args []string) error {
 	case "node":
 		return nodeCmd(ctx, st, cfg.DataDir, args[1:], os.Stdout, os.Stderr)
 	case "inbound":
-		return inboundCmd(ctx, st, set, args[1:], os.Stdout, os.Stderr)
+		return inboundCmd(ctx, st, args[1:], os.Stdout, os.Stderr)
 	case "targets":
 		return targetsCmd(ctx, st, set, cfg, args[1:], os.Stdout, os.Stderr)
 	case "disable-2fa":

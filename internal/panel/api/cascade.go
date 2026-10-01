@@ -74,23 +74,6 @@ func cascadeError(err error, field string) error {
 	return err
 }
 
-// useExit lets node src leave through node exit: the chain is checked, exit gets its
-// relay and src a key there. It runs on the caller's transaction.
-func (h *handlers) useExit(ctx context.Context, q *db.Queries, src, exit int64) error {
-	if err := domain.CheckExit(ctx, q, src, exit); err != nil {
-		return err
-	}
-	x, err := q.GetNode(ctx, exit)
-	if err != nil {
-		return err
-	}
-	if _, err := domain.EnsureRelay(ctx, q, x, h.d.Now()); err != nil {
-		return err
-	}
-	_, err = domain.RelayUser(ctx, q, exit, src)
-	return err
-}
-
 func (h *handlers) getCascade(ctx context.Context, in *nodeIDInput) (*cascadeOutput, error) {
 	if _, err := h.getNode(ctx, in.ID); err != nil {
 		return nil, err
@@ -182,7 +165,7 @@ func (h *handlers) patchCascade(ctx context.Context, in *cascadePatchInput) (*ca
 			if b.ExitNodeID == 0 {
 				return domain.ErrNotFound
 			}
-			if err := h.useExit(ctx, q, in.ID, b.ExitNodeID); err != nil {
+			if err := domain.UseExit(ctx, q, in.ID, b.ExitNodeID, h.d.Now()); err != nil {
 				return err
 			}
 			outbound, exit = "direct", sql.NullInt64{Int64: b.ExitNodeID, Valid: true}

@@ -383,7 +383,7 @@ func (h *handlers) checkGroups(ctx context.Context, g subs.Groups) []error {
 	}
 	if inbounds, err := h.d.Store.Q.ListInbounds(ctx); err == nil {
 		for _, in := range inbounds {
-			name := subs.ProxyName(in)
+			name := domain.ProxyName(in)
 			if strings.EqualFold(name, g.Main) {
 				bad("sub_group_main", "group_is_proxy", in.Name)
 			}

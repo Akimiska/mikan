@@ -89,16 +89,6 @@ var rules = map[string]rule{
 // route around the node's REJECT rules or read files on the server.
 var managed = []string{"name", "port", "listen", "users", "certificate", "private-key"}
 
-// Types lists the supported listener types.
-func Types() []string {
-	out := make([]string, 0, len(rules))
-	for k := range rules {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // Parse reads a YAML (or JSON) template.
 func Parse(src string) (Template, error) {
 	var t Template

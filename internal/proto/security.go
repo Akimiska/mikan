@@ -76,7 +76,9 @@ func RealityPublicKey(private string) (string, error) {
 // addresses pass, literal private addresses and bare names do not. Names that resolve to
 // private ranges are covered for user traffic by the node's REJECT rules.
 func PublicHost(h string) bool {
-	if h == "localhost" || !strings.Contains(h, ".") && !strings.Contains(h, ":") {
+	// "localhost." and "LOCALHOST" are the same name; so is anything under .localhost.
+	h = strings.ToLower(strings.TrimSuffix(h, "."))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") || !strings.Contains(h, ".") && !strings.Contains(h, ":") {
 		return false
 	}
 	ip, err := netip.ParseAddr(strings.Trim(h, "[]"))

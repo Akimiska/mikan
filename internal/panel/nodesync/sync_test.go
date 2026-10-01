@@ -103,7 +103,9 @@ func TestCountersAppliedOnce(t *testing.T) {
 	if got.UsedDown != 950 {
 		t.Fatalf("new epoch with seq 1 must be applied, down = %d", got.UsedDown)
 	}
-	if len(node.policies) == 0 {
+	select {
+	case <-s.policiesDirty: // the policy loop pushes them, with the quotas re-based
+	default:
 		t.Fatal("epoch change must re-push policies")
 	}
 }

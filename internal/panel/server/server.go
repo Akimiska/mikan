@@ -17,6 +17,7 @@ type Server struct {
 	paths atomic.Pointer[settings.Paths]
 	admin http.Handler
 	sub   http.Handler
+	hsts  atomic.Bool
 }
 
 func New(admin, sub http.Handler) *Server {
@@ -26,6 +27,11 @@ func New(admin, sub http.Handler) *Server {
 }
 
 func (s *Server) SetPaths(p settings.Paths) { s.paths.Store(&p) }
+
+// SetHSTS makes every answer tell browsers to use HTTPS for this host from now on. Only
+// for a panel that serves TLS itself: the header means nothing over plain HTTP, and a
+// panel behind a proxy that terminates TLS leaves it to the proxy.
+func (s *Server) SetHSTS(on bool) { s.hsts.Store(on) }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.serve(w, r, true) }
 
@@ -37,6 +43,9 @@ func (s *Server) SubOnly() http.Handler {
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request, admin bool) {
 	SecurityHeaders(w.Header())
+	if s.hsts.Load() {
+		w.Header().Set("Strict-Transport-Security", HSTSValue)
+	}
 	p := r.URL.Path
 	// Reject non-canonical paths ("//", "/./", "/../") instead of guessing what they mean.
 	if p == "" || p[0] != '/' || (path.Clean(p) != p && path.Clean(p)+"/" != p) {
@@ -66,6 +75,10 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, h http.Handler,
 	r2.URL.RawPath = ""
 	h.ServeHTTP(w, r2)
 }
+
+// HSTSValue: a year, for this host only. includeSubDomains and preload are left out: the
+// panel does not know what else the host's domain serves.
+const HSTSValue = "max-age=31536000"
 
 func SecurityHeaders(h http.Header) {
 	h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")

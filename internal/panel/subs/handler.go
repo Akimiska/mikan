@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mikan/internal/panel/billing"
@@ -60,6 +62,8 @@ type Handler struct {
 	trustProxy bool
 	tg         Telegram         // nil: no bot
 	shop       *billing.Service // nil: nothing on sale
+	log        *slog.Logger
+	logged     sync.Map // what has been logged lately → when, so a standing fault is one line an hour
 }
 
 // Telegram is the bot's part in subscriptions: the page's "Open in Telegram" link and the
@@ -72,11 +76,28 @@ type Telegram interface {
 // SetTelegram plugs in the bot.
 func (h *Handler) SetTelegram(tg Telegram) { h.tg = tg }
 
+// SetLogger sets where the handler says what it could not serve; without one it is silent.
+func (h *Handler) SetLogger(l *slog.Logger) {
+	if l != nil {
+		h.log = l
+	}
+}
+
+// warn logs a fault that repeats with every subscription fetch once an hour, not at each.
+func (h *Handler) warn(key, msg string, args ...any) {
+	now := h.now()
+	if at, ok := h.logged.Load(key); ok && now.Sub(at.(time.Time)) < time.Hour {
+		return
+	}
+	h.logged.Store(key, now)
+	h.log.Warn(msg, args...)
+}
+
 // SetShop takes payments: the providers' webhooks under /pay/ and the Mini App's shop.
 func (h *Handler) SetShop(s *billing.Service) { h.shop = s }
 
 func NewHandler(st *store.Store, cfg func(ctx context.Context) (Config, error), page http.Handler, now func() time.Time, devices Binder, trustProxy bool) *Handler {
-	return &Handler{st: st, cfg: cfg, page: page, now: now, devices: devices, trustProxy: trustProxy}
+	return &Handler{st: st, cfg: cfg, page: page, now: now, devices: devices, trustProxy: trustProxy, log: slog.New(slog.DiscardHandler)}
 }
 
 // clientIP is the device's address as the nodes see it too: clients reach the panel
@@ -190,6 +211,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	prof.Skip = func(in db.Inbound, err error) {
+		h.warn("skip/"+strconv.FormatInt(in.ID, 10)+"/"+err.Error(), "subscription: an inbound is left out of the profiles", "inbound", in.Name, "err", err)
+	}
 	app := DetectApp(r.Header.Get("User-Agent"))
 	prof.Inbounds = forApp(prof.Inbounds, app, domain.State(u, grants.Main(u.ID), h.now()))
 	// The block detector trusts a device only once it took a profile with an inbound's
@@ -199,6 +223,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "clash":
 		prof.Rules = RulesFor(cfg.Rules, app)
 		body, err := Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
+		if errors.Is(err, ErrNoProxies) {
+			h.stub(w, u, cfg, format, err)
+			return
+		}
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -208,6 +236,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 	default:
 		links, err := URIs(prof)
+		if errors.Is(err, ErrNoProxies) {
+			h.stub(w, u, cfg, format, err)
+			return
+		}
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -347,16 +379,34 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: billing.AdapterOf(in.Provider)})
 	}
 	if err != nil {
-		code := billing.ErrProviderOff.Error()
-		for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours} {
-			if errors.Is(err, e) {
-				code = e.Error()
-			}
+		status, code, unexplained := invoiceFailure(err)
+		if unexplained {
+			h.log.Warn("mini app: the invoice was not made", "provider", in.Provider, "err", err)
 		}
-		fail(http.StatusConflict, code)
+		fail(status, code)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]string{"url": p.PayUrl, "provider": p.Provider})
+}
+
+// invoiceFailure is what the Mini App answers when no invoice could be made. What the buyer
+// can act on is told as it is. A provider that is switched off is "provider_off". Anything
+// else, a provider that failed, a database that was busy, is the panel's trouble: the buyer
+// is told it did not work, not that payment is off, and unexplained says nobody has logged
+// the cause yet (billing logs a provider's failure itself).
+func invoiceFailure(err error) (status int, code string, unexplained bool) {
+	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours} {
+		if errors.Is(err, e) {
+			return http.StatusConflict, e.Error(), false
+		}
+	}
+	switch {
+	case err == billing.ErrProviderOff:
+		return http.StatusConflict, billing.ErrProviderOff.Error(), false
+	case errors.Is(err, billing.ErrProviderOff): // the provider failed
+		return http.StatusBadGateway, "invoice_failed", false
+	}
+	return http.StatusBadGateway, "invoice_failed", true
 }
 
 // forApp keeps the inbounds the app can use. Inbounds with one key for everyone go only
@@ -365,7 +415,7 @@ func forApp(ins []db.Inbound, app App, state string) []db.Inbound {
 	active := domain.CanConnect(state)
 	out := make([]db.Inbound, 0, len(ins))
 	for _, in := range ins {
-		t, err := proto.Parse(in.Config)
+		t, err := parseTemplate(in.Config)
 		if err != nil || !app.Supports(proto.NeedsOf(t)) || proto.Shared(t.Type()) && !active {
 			continue
 		}
@@ -585,13 +635,21 @@ func (h *Handler) stub(w http.ResponseWriter, u db.User, cfg Config, format stri
 	if en {
 		name = "⛔ All device places are taken — open the subscription link in a browser"
 	}
-	if errors.Is(reason, domain.ErrNoHWID) {
+	switch {
+	case errors.Is(reason, ErrNoProxies):
+		// Nothing this app can use, or every server of the subscription is switched off: a
+		// profile with an empty group would be refused by the app as a whole.
+		name = "⛔ Для этого приложения нет подходящих серверов — откройте ссылку подписки в браузере"
+		if en {
+			name = "⛔ There are no servers this app can use — open the subscription link in a browser"
+		}
+	case errors.Is(reason, domain.ErrNoHWID):
 		name = "⛔ Приложение не сообщает ID устройства — поставьте Happ, Koala Clash или INCY"
 		if en {
 			name = "⛔ The app does not send a device ID — install Happ, Koala Clash or INCY"
 		}
 		w.Header().Set("X-Hwid-Not-Supported", "true")
-	} else {
+	default:
 		w.Header().Set("X-Hwid-Max-Devices-Reached", "true")
 	}
 	if format == "clash" {
@@ -611,12 +669,12 @@ func (h *Handler) stub(w http.ResponseWriter, u db.User, cfg Config, format stri
 	_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(link))))
 }
 
-var (
-	clashAgents = []string{"clash", "mihomo", "flclash", "stash", "verge", "koala"}
-	uriAgents   = []string{"happ", "v2raytun", "v2rayng", "v2rayn", "streisand", "hiddify", "nekobox", "nekoray", "karing", "shadowrocket", "foxray", "v2box", "sing-box"}
-)
+// Apps that take share links and that DetectApp does not tell apart (it is about what
+// the app's core can run, not about the format).
+var linkApps = []string{"streisand", "shadowrocket", "foxray"}
 
-// Format picks the response format: explicit ?format= wins, then the client's User-Agent.
+// Format picks the response format: explicit ?format= wins, then the client's User-Agent,
+// by the family DetectApp makes of it, so the two never disagree about an app.
 func Format(userAgent, accept, query string) string {
 	switch strings.ToLower(query) {
 	case "clash", "mihomo", "yaml":
@@ -626,13 +684,14 @@ func Format(userAgent, accept, query string) string {
 	case "html":
 		return "html"
 	}
-	ua := strings.ToLower(userAgent)
-	for _, a := range clashAgents {
-		if strings.Contains(ua, a) {
-			return "clash"
-		}
+	switch DetectApp(userAgent).Family {
+	case FamilyMihomo, FamilyStash:
+		return "clash"
+	case FamilyXray, FamilySingBox:
+		return "uri"
 	}
-	for _, a := range uriAgents {
+	ua := strings.ToLower(userAgent)
+	for _, a := range linkApps {
 		if strings.Contains(ua, a) {
 			return "uri"
 		}

@@ -54,9 +54,6 @@ func NewTLSClient(address string, cfg *tls.Config) *Client {
 	}}}
 }
 
-// CloseIdle drops kept-alive connections, e.g. when the node's address changes.
-func (c *Client) CloseIdle() { c.hc.CloseIdleConnections() }
-
 var ErrUnavailable = errors.New("node unavailable")
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any, timeout time.Duration) error {
@@ -90,9 +87,34 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 		return fmt.Errorf("node %s %s: status %d", method, path, resp.StatusCode)
 	}
 	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		return json.NewDecoder(&cappedReader{r: resp.Body, left: MaxResponse}).Decode(out)
 	}
 	return nil
+}
+
+// MaxResponse bounds what the panel reads from a node in one answer: the biggest real one
+// (the counters of thousands of slots) is a few MiB. A node is a server somebody else may
+// run, and one that streams JSON for ever must not take the panel's memory.
+const MaxResponse = 8 << 20
+
+// ErrTooLarge is a node's answer past MaxResponse.
+var ErrTooLarge = errors.New("node answer too large")
+
+type cappedReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (c *cappedReader) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, ErrTooLarge
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
 }
 
 func (c *Client) Apply(ctx context.Context, s DesiredState) (ApplyResult, error) {
@@ -108,10 +130,6 @@ func (c *Client) Validate(ctx context.Context, req ValidateRequest) error {
 
 func (c *Client) SetPolicies(ctx context.Context, epoch string, p []Policy) error {
 	return c.do(ctx, http.MethodPut, "/v1/policies", PoliciesRequest{Epoch: epoch, Policies: p}, nil, 30*time.Second)
-}
-
-func (c *Client) Kick(ctx context.Context, slots []string) error {
-	return c.do(ctx, http.MethodPost, "/v1/kick", KickRequest{Slots: slots}, nil, 10*time.Second)
 }
 
 func (c *Client) Counters(ctx context.Context) (Counters, error) {
@@ -146,12 +164,6 @@ func (c *Client) CheckTarget(ctx context.Context, req TargetCheckRequest) (Targe
 func (c *Client) ScanTargets(ctx context.Context, req TargetScanRequest) (TargetScan, error) {
 	var r TargetScan
 	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, 45*time.Second)
-	return r, err
-}
-
-func (c *Client) Logs(ctx context.Context, since time.Time) ([]LogLine, error) {
-	var r []LogLine
-	err := c.do(ctx, http.MethodGet, "/v1/logs?since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil, &r, 5*time.Second)
 	return r, err
 }
 

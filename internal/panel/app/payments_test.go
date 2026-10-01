@@ -33,6 +33,8 @@ type ykAdapter struct {
 	mu    sync.Mutex
 	pays  map[string]addons.Status
 	count int
+	// failCreate answers a new invoice with the adapter's own failure.
+	failCreate bool
 }
 
 func (f *ykAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +70,10 @@ func (f *ykAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v1/check":
 		_, _ = w.Write([]byte(`{}`))
 	case "/v1/invoices":
+		if f.failCreate {
+			fail(http.StatusBadGateway, "provider_error")
+			return
+		}
 		f.count++
 		id := "yk-" + strconv.Itoa(f.count)
 		f.pays[id] = addons.Status{Status: "pending", Amount: in.Amount, Currency: in.Currency}

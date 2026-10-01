@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/netip"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -245,17 +244,14 @@ func ipv4(ctx context.Context, host string) (string, error) {
 	if host == "" {
 		return "", errors.New("the server's address is not set: run `mikan admin bootstrap`")
 	}
-	if a, err := netip.ParseAddr(host); err == nil {
-		if !a.Is4() {
-			return "", fmt.Errorf("%s is not an IPv4 address", host)
-		}
-		return a.String(), nil
-	}
-	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
-	if err != nil || len(addrs) == 0 {
+	ip, err := scan.ResolveIPv4(ctx, host)
+	switch {
+	case errors.Is(err, scan.ErrNotIPv4):
+		return "", fmt.Errorf("%s is not an IPv4 address", host)
+	case err != nil:
 		return "", fmt.Errorf("%s has no IPv4 address", host)
 	}
-	return addrs[0].String(), nil
+	return ip, nil
 }
 
 // realityTargets lists the node's inbounds that have a REALITY camouflage.
@@ -285,28 +281,23 @@ func targetOf(in db.Inbound) Target {
 	return t
 }
 
-var checkErrors = map[string]string{
+// problemText says in words what scan.Problem names with a code.
+var problemText = map[string]string{
 	"timeout": "no answer", "refused": "connection refused", "no_tls13": "no TLS 1.3", "dns": "the name does not resolve",
 	"sni_required": "an IP needs --sni", "bad_dest": "want host:port", "handshake": "the TLS handshake failed",
+	"no_x25519": "no X25519", "no_h2": "no HTTP/2",
 }
 
 // targetProblem says why a site does not suit REALITY.
 func targetProblem(r scan.Result) string {
+	code := scan.Problem(r)
 	switch {
-	case r.Error != "":
-		if s, ok := checkErrors[r.Error]; ok {
-			return s
-		}
-		return r.Error
-	case !r.TLS13:
-		return "no TLS 1.3"
-	case !r.X25519:
-		return "no X25519"
-	case !r.H2:
-		return "no HTTP/2"
-	default:
+	case problemText[code] != "":
+		return problemText[code]
+	case code == "cert":
 		return "the certificate is not valid for " + r.SNI
 	}
+	return code
 }
 
 func targetError(e *proto.Error) string {

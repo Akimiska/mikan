@@ -89,16 +89,6 @@ var rules = map[string]rule{
 // route around the node's REJECT rules or read files on the server.
 var managed = []string{"name", "port", "listen", "users", "certificate", "private-key"}
 
-// Types lists the supported listener types.
-func Types() []string {
-	out := make([]string, 0, len(rules))
-	for k := range rules {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // Parse reads a YAML (or JSON) template.
 func Parse(src string) (Template, error) {
 	var t Template
@@ -151,6 +141,31 @@ func normalize(v any) any {
 		for i, e := range x {
 			x[i] = normalize(e)
 		}
+	}
+	return v
+}
+
+// Clone is a deep copy: the maps and lists of a template are its own.
+func (t Template) Clone() Template {
+	return Template(deepCopy(map[string]any(t)).(map[string]any))
+}
+
+func deepCopy(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		m := make(map[string]any, len(x))
+		for k, e := range x {
+			m[k] = deepCopy(e)
+		}
+		return m
+	case []any:
+		l := make([]any, len(x))
+		for i, e := range x {
+			l[i] = deepCopy(e)
+		}
+		return l
+	case []string:
+		return append([]string(nil), x...)
 	}
 	return v
 }

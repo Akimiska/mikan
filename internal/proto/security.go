@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Options relax checks for one installation.
@@ -59,8 +60,24 @@ func validateReality(r map[string]any, o Options) error {
 	return nil
 }
 
+// realityKeys remembers the public key of each private key asked about (a panel has a
+// handful): deriving it is an x25519 scalar multiplication, and every subscription fetch
+// and every validation of a REALITY template does it.
+var realityKeys sync.Map
+
 // RealityPublicKey derives the client's public key from the server's private key.
 func RealityPublicKey(private string) (string, error) {
+	if pub, ok := realityKeys.Load(private); ok {
+		return pub.(string), nil
+	}
+	pub, err := realityPublicKey(private)
+	if err == nil {
+		realityKeys.Store(private, pub)
+	}
+	return pub, err
+}
+
+func realityPublicKey(private string) (string, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(private, "="))
 	if err != nil {
 		return "", err
@@ -76,7 +93,9 @@ func RealityPublicKey(private string) (string, error) {
 // addresses pass, literal private addresses and bare names do not. Names that resolve to
 // private ranges are covered for user traffic by the node's REJECT rules.
 func PublicHost(h string) bool {
-	if h == "localhost" || !strings.Contains(h, ".") && !strings.Contains(h, ":") {
+	// "localhost." and "LOCALHOST" are the same name; so is anything under .localhost.
+	h = strings.ToLower(strings.TrimSuffix(h, "."))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") || !strings.Contains(h, ".") && !strings.Contains(h, ":") {
 		return false
 	}
 	ip, err := netip.ParseAddr(strings.Trim(h, "[]"))

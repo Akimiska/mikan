@@ -471,13 +471,18 @@ func TestBot(t *testing.T) {
 		e.later()
 		n := e.tg.count()
 		e.say(other, "https://vpn.example.com:21355/sub/"+e.user.SubToken)
+		// The answer to the one who asks and the question to the owner go out by different
+		// priorities, in either order: wait for both.
 		return e.tg.until(t, n, func(cs []call) bool {
+			told, asked := false, false
 			for _, c := range cs {
-				if c.method == "sendMessage" && c.body["chat_id"] == float64(other) && strings.Contains(text(c), "Эта подписка уже подключена") {
-					return true
+				if c.method != "sendMessage" {
+					continue
 				}
+				told = told || c.body["chat_id"] == float64(other) && strings.Contains(text(c), "Эта подписка уже подключена")
+				asked = asked || c.body["chat_id"] == float64(anna) && strings.Contains(text(c), "хотят подключить")
 			}
-			return false
+			return told && asked
 		})
 	}
 	calls = ask()

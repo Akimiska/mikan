@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -99,13 +98,9 @@ func (h *handlers) scanTargets(ctx context.Context, in *scanTargetsInput) (*scan
 	if !local {
 		publicHost, domain = node.PublicHost, ""
 	}
-	ip := publicHost
-	if _, err := netip.ParseAddr(ip); err != nil {
-		addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", publicHost)
-		if err != nil || len(addrs) == 0 {
-			return nil, huma.Error422UnprocessableEntity("scan_no_ip")
-		}
-		ip = addrs[0].String()
+	ip, err := scan.ResolveIPv4(ctx, publicHost)
+	if err != nil {
+		return nil, huma.Error422UnprocessableEntity("scan_no_ip")
 	}
 	out := &scanTargetsOutput{}
 	out.Body.IP = ip

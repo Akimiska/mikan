@@ -4,11 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +24,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/secure"
+	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -215,7 +213,7 @@ func noStore(next http.Handler) http.Handler {
 }
 
 func (h *handlers) middleware(ctx huma.Context, next func(huma.Context)) {
-	ctx = huma.WithValue(ctx, keyClient, client{IP: h.clientIP(ctx), UserAgent: ctx.Header("User-Agent")})
+	ctx = huma.WithValue(ctx, keyClient, client{IP: server.ClientIP(http.Header{"X-Forwarded-For": {ctx.Header("X-Forwarded-For")}}, ctx.RemoteAddr(), h.d.TrustProxy), UserAgent: ctx.Header("User-Agent")})
 	op := ctx.Operation()
 	mutating := op.Method != http.MethodGet && op.Method != http.MethodHead
 	if mutating && !sameOrigin(ctx) {
@@ -255,35 +253,8 @@ func (h *handlers) middleware(ctx huma.Context, next func(huma.Context)) {
 // sameOrigin rejects cross-site browser requests. Non-browser clients send neither
 // Sec-Fetch-Site nor Origin; they still need the CSRF header for authenticated calls.
 func sameOrigin(ctx huma.Context) bool {
-	switch ctx.Header("Sec-Fetch-Site") {
-	case "same-origin", "none":
-		return true
-	case "":
-	default:
-		return false
-	}
-	origin := ctx.Header("Origin")
-	if origin == "" {
-		return true
-	}
-	u, err := url.Parse(origin)
-	return err == nil && u.Host == ctx.Host()
-}
-
-func (h *handlers) clientIP(ctx huma.Context) string {
-	if h.d.TrustProxy {
-		if xff := ctx.Header("X-Forwarded-For"); xff != "" {
-			parts := strings.Split(xff, ",")
-			if ip := strings.TrimSpace(parts[len(parts)-1]); net.ParseIP(ip) != nil {
-				return ip
-			}
-		}
-	}
-	host, _, err := net.SplitHostPort(ctx.RemoteAddr())
-	if err != nil {
-		return ctx.RemoteAddr()
-	}
-	return host
+	h := http.Header{"Sec-Fetch-Site": {ctx.Header("Sec-Fetch-Site")}, "Origin": {ctx.Header("Origin")}}
+	return server.FetchSite(h, ctx.Host()) != server.SiteCross
 }
 
 func clientOf(ctx context.Context) client {

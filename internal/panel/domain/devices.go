@@ -56,6 +56,9 @@ func NewDevices(st *store.Store, pool *Pool, changes Changes, now func() time.Ti
 	return &Devices{st: st, pool: pool, changes: changes, now: now}
 }
 
+// same: what the app sent tells nothing new (it did not send it, or it is what is known).
+func same(v, old string) bool { return v == "" || v == old }
+
 // clip keeps what a client reports short and printable.
 func clip(s string, n int) string {
 	s = strings.Map(func(r rune) rune {
@@ -97,9 +100,20 @@ func (d *Devices) Bind(ctx context.Context, u db.User, in DeviceInfo, requireHWI
 	return slot, nil
 }
 
+// touchEvery: a known device that reports nothing new is written down at most this often.
+// Apps fetch the subscription every few minutes; last_seen needs no finer grain.
+const touchEvery = 5 * time.Minute
+
 func (d *Devices) bind(ctx context.Context, u db.User, hwid string, in DeviceInfo) (slot db.Slot, created bool, err error) {
 	now := d.now().Unix()
 	os, osv, model, app, ip := clip(in.OS, 40), clip(in.OSVersion, 40), clip(in.Model, 60), clip(in.App, 120), clip(in.IP, 45)
+	// The usual request: a known device, nothing new about it. Read, no write.
+	if dev, err := d.st.Q.GetBoundDevice(ctx, db.GetBoundDeviceParams{UserID: u.ID, Hwid: hwid}); err == nil &&
+		now-dev.LastSeen < int64(touchEvery/time.Second) && now >= dev.LastSeen &&
+		same(os, dev.Os) && same(osv, dev.OsVersion) && same(model, dev.Model) && same(app, dev.App) && same(ip, dev.LastIp) {
+		slot, err = d.st.Q.GetSlot(ctx, dev.SlotID)
+		return slot, false, err
+	}
 	err = d.st.Tx(ctx, func(q *db.Queries) error {
 		dev, err := q.GetBoundDevice(ctx, db.GetBoundDeviceParams{UserID: u.ID, Hwid: hwid})
 		if err == nil {

@@ -3,11 +3,11 @@ package billing
 import (
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 
 	"mikan/internal/panel/secure"
+	"mikan/internal/panel/server"
 )
 
 // Webhook serves the providers' notifications at <sub path>/pay/addon/<id>/<token>. The
@@ -44,15 +44,5 @@ func (s *Service) Webhook() http.Handler {
 }
 
 func (s *Service) clientIP(r *http.Request) string {
-	if s.d.TrustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.Split(xff, ",")
-			return strings.TrimSpace(parts[len(parts)-1])
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return server.ClientIP(r.Header, r.RemoteAddr, s.d.TrustProxy)
 }

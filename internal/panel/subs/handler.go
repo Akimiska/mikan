@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -103,25 +102,7 @@ func NewHandler(st *store.Store, cfg func(ctx context.Context) (Config, error), 
 // clientIP is the device's address as the nodes see it too: clients reach the panel
 // directly (its host is a DIRECT rule in the profile).
 func (h *Handler) clientIP(r *http.Request) string {
-	if h.trustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.Split(xff, ",")
-			if ip := net.ParseIP(strings.TrimSpace(parts[len(parts)-1])); ip != nil {
-				return ip.String()
-			}
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		if v4 := ip.To4(); v4 != nil {
-			return v4.String()
-		}
-		return ip.String()
-	}
-	return host
+	return server.ClientIP(r.Header, r.RemoteAddr, h.trustProxy)
 }
 
 var unbindPath = regexp.MustCompile(`^devices/([0-9]{1,18})/unbind$`)
@@ -616,16 +597,7 @@ func (h *Handler) unbind(w http.ResponseWriter, r *http.Request, u db.User, id i
 }
 
 // sameOrigin: the browser says the request comes from this very site.
-func sameOrigin(r *http.Request) bool {
-	switch r.Header.Get("Sec-Fetch-Site") {
-	case "same-origin":
-		return true
-	case "":
-		o, err := url.Parse(r.Header.Get("Origin"))
-		return err == nil && o.Host != "" && o.Host == r.Host
-	}
-	return false
-}
+func sameOrigin(r *http.Request) bool { return server.FetchSite(r.Header, r.Host) == server.SiteSame }
 
 // stub answers a device that gets no keys: one placeholder server named after the reason,
 // so the app shows it where the servers would be, and the headers Happ-like apps read.

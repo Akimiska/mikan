@@ -1458,8 +1458,8 @@
             "type": "integer"
           },
           "fingerprint": {
-            "description": "Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек",
-            "maxLength": 16,
+            "description": "Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек",
+            "maxLength": 32,
             "type": "string"
           },
           "outbound": {
@@ -1556,18 +1556,8 @@
             "type": "string"
           },
           "client_fingerprint": {
-            "enum": [
-              "chrome",
-              "firefox",
-              "safari",
-              "ios",
-              "android",
-              "edge",
-              "360",
-              "qq",
-              "random",
-              "randomized"
-            ],
+            "description": "Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов",
+            "pattern": "^[a-z0-9_]{1,32}$",
             "type": "string"
           },
           "default_lang": {
@@ -2150,19 +2140,7 @@
             "$ref": "#/components/schemas/Status"
           },
           "client_fingerprint": {
-            "description": "Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой",
-            "enum": [
-              "chrome",
-              "firefox",
-              "safari",
-              "ios",
-              "android",
-              "edge",
-              "360",
-              "qq",
-              "random",
-              "randomized"
-            ],
+            "description": "Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение",
             "type": "string"
           },
           "default_lang": {

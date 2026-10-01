@@ -1390,7 +1390,7 @@ export interface components {
              * @description Для outbound=node: через какую ноду
              */
             exit_node_id?: number;
-            /** @description Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек */
+            /** @description Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек */
             fingerprint?: string;
             /**
              * @description Выход в интернет: напрямую, через WARP ноды или через другую ноду
@@ -1424,8 +1424,8 @@ export interface components {
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
-            /** @enum {string} */
-            client_fingerprint?: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
+            /** @description Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов */
+            client_fingerprint?: string;
             /** @enum {string} */
             default_lang?: "auto" | "ru" | "en";
             device_binding?: boolean;
@@ -1614,11 +1614,8 @@ export interface components {
             auto_sni: boolean;
             brand: string;
             certificate: components["schemas"]["Status"];
-            /**
-             * @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой
-             * @enum {string}
-             */
-            client_fingerprint: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
+            /** @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение */
+            client_fingerprint: string;
             /**
              * @description Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота
              * @enum {string}

@@ -752,7 +752,10 @@
     "activeAgo": "active {ago}",
     "endSession": "End",
     "yandexBrowser": "Yandex Browser",
-    "browser": "Browser"
+    "browser": "Browser",
+    "fpOwn": "Own…",
+    "fpOwnHint": "A uTLS profile name: lowercase letters, digits and _, such as chrome120 or randomizednoalpn. Xray apps may refuse a value off the list, and mihomo connects without uTLS when it does not know it.",
+    "fpOwnBad": "Lowercase letters, digits and _ only, up to 32 characters"
   },
   "sub": {
     "loadFailed": "Could not load the subscription",

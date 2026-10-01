@@ -28,7 +28,7 @@ type SettingsView struct {
 	SubGroupMain string `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
 	SubGroupAuto string `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
 	SubRouting   string `json:"sub_routing" enum:"ru_direct,all" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN"`
-	Fingerprint  string `json:"client_fingerprint" enum:"chrome,firefox,safari,ios,android,edge,360,qq,random,randomized" doc:"Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой"`
+	Fingerprint  string `json:"client_fingerprint" doc:"Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение"`
 	AutoPort     bool   `json:"auto_port" doc:"Переносить подключение на другой порт, если клиенты перестали до него доходить"`
 	AutoSNI      bool   `json:"auto_sni" doc:"Менять сайт маскировки REALITY, если он перестал подходить"`
 	// Devices: see domain.Devices.
@@ -50,7 +50,7 @@ type patchSettingsInput struct {
 		SubGroupMain  *string `json:"sub_group_main,omitempty" maxLength:"200"`
 		SubGroupAuto  *string `json:"sub_group_auto,omitempty" maxLength:"200"`
 		SubRouting    *string `json:"sub_routing,omitempty" enum:"ru_direct,all"`
-		Fingerprint   *string `json:"client_fingerprint,omitempty" enum:"chrome,firefox,safari,ios,android,edge,360,qq,random,randomized"`
+		Fingerprint   *string `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
 		AutoPort      *bool   `json:"auto_port,omitempty"`
 		AutoSNI       *bool   `json:"auto_sni,omitempty"`
 		DeviceBinding *bool   `json:"device_binding,omitempty"`

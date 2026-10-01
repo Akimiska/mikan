@@ -90,7 +90,7 @@ type patchInboundInput struct {
 		Enabled     *bool   `json:"enabled,omitempty"`
 		Dest        *string `json:"dest,omitempty" maxLength:"255"`
 		ServerName  *string `json:"server_name,omitempty" maxLength:"253" doc:"SNI для клиентов, если dest — IP (цель из подбора соседей)"`
-		Fingerprint *string `json:"fingerprint,omitempty" maxLength:"16" doc:"Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек"`
+		Fingerprint *string `json:"fingerprint,omitempty" maxLength:"32" doc:"Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек"`
 		DisplayName *string `json:"display_name,omitempty" maxLength:"200" doc:"Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию"`
 		Config      *string `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
 		AutoPort    *bool   `json:"auto_port,omitempty"`

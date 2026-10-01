@@ -7,7 +7,8 @@ import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
-import { FINGERPRINTS, fingerprintLabel } from "../../lib/fingerprints";
+import { FingerprintSelect } from "../../components/fingerprint-select";
+import { fingerprintLabel } from "../../lib/fingerprints";
 import { ago, destIsIP, maskedAs } from "../../lib/format";
 
 import { nodeLabel } from "./nodes";
@@ -483,6 +484,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [dest, setDest] = useState("");
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
+  const [fpOk, setFpOk] = useState(true);
   const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
   const [exitNode, setExitNode] = useState<number>(0);
   const allNodes = useNodes();
@@ -551,6 +553,10 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
         body.dest = dest.trim();
         if (ip) body.server_name = sni.trim();
       }
+    }
+    if (!fpOk) {
+      setErrors({ fingerprint: t("settings.fpOwnBad") });
+      return;
     }
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
     if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
@@ -663,24 +669,19 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
               ) : null}
               {inbound?.fingerprint !== undefined ? (
                 <Field label={t("inbounds.fingerprint")} htmlFor="ed-fp" error={errors.fingerprint} hint={configChanged ? t("inbounds.fingerprintLocked") : t("inbounds.fingerprintHint")}>
-                  <select
+                  <FingerprintSelect
+                    key={inbound?.id}
                     id="ed-fp"
-                    className="input max-w-[320px]"
                     value={fp}
-                    onChange={(e) => {
-                      setFp(e.target.value);
+                    onChange={(v) => {
+                      setFp(v);
                       setErrors(({ fingerprint: _, ...rest }) => rest);
                     }}
-                    aria-invalid={!!errors.fingerprint}
+                    defaultLabel={t("inbounds.fingerprintDefault", { fp: fingerprintLabel(settings.data?.client_fingerprint ?? "chrome") })}
+                    invalid={!!errors.fingerprint}
                     disabled={configChanged}
-                  >
-                    <option value="">{t("inbounds.fingerprintDefault", { fp: fingerprintLabel(settings.data?.client_fingerprint ?? "chrome") })}</option>
-                    {FINGERPRINTS.map((x) => (
-                      <option key={x} value={x}>
-                        {fingerprintLabel(x)}
-                      </option>
-                    ))}
-                  </select>
+                    onValid={setFpOk}
+                  />
                 </Field>
               ) : null}
               <Field

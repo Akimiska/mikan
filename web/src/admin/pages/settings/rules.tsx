@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, type FormEvent } from "react";
 import { ApiError, type Schemas } from "../../../api/client";
 import { Button, Pill } from "../../../components/ui";
 import { t } from "../../../i18n";
+import { useDraft } from "../../../lib/draft";
 import { useSaveSettings } from "./shared";
 
 // Ready-made rules the admin adds with one click; PROXY is the main group's alias that
@@ -17,16 +18,14 @@ const RULE_EXAMPLES = [
 // The admin's own rules for Clash apps (subs.ParseRules checks them line by line).
 export function ClashRulesCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
-  const [text, setText] = useState(s.sub_rules);
+  const { draft: text, setDraft: setText, dirty: changed, reset } = useDraft(s.sub_rules);
   const gutter = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => setText(s.sub_rules), [s.sub_rules]);
   const lines = text.split("\n");
   const count = lines.filter((l) => l.trim() && !l.trim().startsWith("#")).length;
   const apiErr = save.error instanceof ApiError ? save.error : null;
   const error = apiErr?.fields.sub_rules;
   const badLine = error && typeof apiErr?.values.sub_rules === "number" ? apiErr.values.sub_rules : 0;
-  const changed = text !== s.sub_rules;
   const add = (rule: string) => {
     setText((v) => (v.trim() ? v.replace(/\s*$/, "\n") : "") + rule);
     requestAnimationFrame(() => {
@@ -111,7 +110,7 @@ export function ClashRulesCard({ s }: { s: Schemas["SettingsView"] }) {
             {t("common.save")}
           </Button>
           {changed ? (
-            <Button variant="ghost" onClick={() => setText(s.sub_rules)}>
+            <Button variant="ghost" onClick={reset}>
               {t("telegram.discard")}
             </Button>
           ) : null}

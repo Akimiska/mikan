@@ -3,7 +3,7 @@
 // issued or renewed by the panel once the provider confirms the payment.
 import { Check, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Button, Skeleton } from "../components/ui";
+import { Button } from "../components/ui";
 import { t, type Key } from "../i18n";
 import { rubles } from "../lib/format";
 
@@ -152,6 +152,3 @@ export function Shop({
   );
 }
 
-export function ShopSkeleton() {
-  return <Skeleton style={{ height: 160, borderRadius: 24 }} />;
-}

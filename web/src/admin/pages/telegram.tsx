@@ -1,30 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useBlocker, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowDown, ArrowUp, Bell, Bot, Globe, LayoutList, Link2, Megaphone, Network, Plus, PlugZap, Send, Shield, Trash2, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes, useSettings } from "../../api/hooks";
+import { useDraft } from "../../lib/draft";
+import { TELEGRAM_TABS } from "../search";
 import { ago, num } from "../../lib/format";
 import { Confirm } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { Columns, Tabs } from "../../components/tabs";
 import { useToast } from "../../components/toast";
-import { Bar, Button, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
-import { t, tMaybe } from "../../i18n";
+import { Bar, Button, Field, PageHeader, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Switch } from "../../components/switch";
+import { t, tMaybe, useLocale } from "../../i18n";
 
 type View = Schemas["TelegramView"];
 type Config = Schemas["Config"];
 type MenuButton = Schemas["MenuButton"];
 type TextKey = keyof Schemas["Texts"];
 
-export const TELEGRAM_TABS = ["connect", "menu", "notify", "broadcast"] as const;
-export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };
 const TAB_ICONS = { connect: PlugZap, menu: LayoutList, notify: Bell, broadcast: Megaphone } as const;
 
 function useTelegram() {
   return useQuery({
     queryKey: qk.telegram,
-    queryFn: () => unwrap(api.GET("/api/v1/telegram")),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram", { signal })),
     // A broadcast in progress moves every second; otherwise little changes.
     refetchInterval: (q) => (q.state.data?.broadcast?.active ? 2_000 : 10_000),
   });
@@ -38,91 +40,93 @@ function usePatchTelegram() {
   });
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-
 /**
  * The bot in four sections: connecting it, its menu and texts, notifications and options,
  * broadcasts. Menu, texts and options are one draft saved together from the bar below,
  * whichever section they were changed in.
  */
 export function TelegramPage() {
+  const tg = useTelegram();
+  return (
+    <>
+      <PageHeader title={t("nav.telegram")} sub={t("telegram.subtitle")} />
+      <QueryBoundary
+        query={tg}
+        pending={
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <Skeleton style={{ height: 320, borderRadius: 20 }} />
+            <Skeleton style={{ height: 420, borderRadius: 20 }} />
+          </div>
+        }
+        wrap={(state) => <section className="card glass">{state}</section>}
+      >
+        {(v) => <TelegramBody v={v} />}
+      </QueryBoundary>
+    </>
+  );
+}
+
+function TelegramBody({ v }: { v: View }) {
   const { tab } = useSearch({ from: "/_app/telegram" });
   const navigate = useNavigate({ from: "/telegram" });
-  const tg = useTelegram();
   const patch = usePatchTelegram();
   const toast = useToast();
-  const [draft, setDraft] = useState<Config | null>(null);
-  const saved = tg.data?.config;
-  // A fresh copy of the saved setup whenever it changes under us (and nothing is edited).
-  useEffect(() => {
-    if (saved && (!draft || same(draft, saved))) setDraft(structuredClone(saved));
-    // Only the server's copy drives this.
-  }, [saved]);
-  const dirty = !!draft && !!saved && !same(draft, saved);
+  // The draft follows the server's copy while untouched and keeps the edits when the copy
+  // changes under it (a poll, the bot saved from another session).
+  const { draft, setDraft, dirty, reset } = useDraft(v.config);
   const save = () =>
-    draft &&
     patch.mutate(
       { config: draft },
       {
-        onSuccess: (v) => {
-          setDraft(structuredClone(v.config));
+        onSuccess: (r) => {
+          setDraft(r.config);
           toast.ok(t("telegram.saved"));
         },
         onError: (e) => toast.error(errorText(e)),
       },
     );
+  // Leaving the page drops the draft: ask first. Switching the section stays on the page.
+  const leave = useBlocker({ shouldBlockFn: ({ current, next }) => dirty && current.pathname !== next.pathname, enableBeforeUnload: () => dirty, withResolver: true });
 
   return (
     <>
-      <PageHeader title={t("nav.telegram")} sub={t("telegram.subtitle")} />
-      {tg.isPending || (tg.data && !draft) ? (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <Skeleton style={{ height: 320, borderRadius: 20 }} />
-          <Skeleton style={{ height: 420, borderRadius: 20 }} />
-        </div>
-      ) : tg.isError ? (
-        <section className="card glass">
-          <ErrorState text={errorText(tg.error)} onRetry={() => void tg.refetch()} />
-        </section>
-      ) : (
-        <Tabs
-          id="telegram"
-          label={t("telegram.sections")}
-          tabs={TELEGRAM_TABS.map((id) => ({ id, label: t(`telegram.tabs.${id}`), icon: TAB_ICONS[id] }))}
-          value={tab}
-          onChange={(next) => void navigate({ search: { tab: next }, replace: true })}
-        >
-          {tab === "connect" ? (
-            <Columns
-              wide="left"
-              left={
-                <>
-                  <ConnectCard v={tg.data} />
-                  <RouteCard v={tg.data} />
-                </>
-              }
-              right={<Preview draft={draft!} v={tg.data} />}
-            />
-          ) : tab === "menu" ? (
-            <Columns
-              wide="left"
-              left={
-                <>
-                  <MenuCard draft={draft!} setDraft={setDraft} />
-                  <TextsCard draft={draft!} setDraft={setDraft} defaults={tg.data.defaults} />
-                </>
-              }
-              right={<Preview draft={draft!} v={tg.data} />}
-            />
-          ) : tab === "notify" ? (
-            <Columns wide="left" left={<OptionsCard draft={draft!} setDraft={setDraft} v={tg.data} />} right={<Preview draft={draft!} v={tg.data} />} />
-          ) : (
-            <div className="max-w-3xl">
-              <BroadcastCard v={tg.data} />
-            </div>
-          )}
-        </Tabs>
-      )}
+      <Tabs
+        id="telegram"
+        label={t("telegram.sections")}
+        tabs={TELEGRAM_TABS.map((id) => ({ id, label: t(`telegram.tabs.${id}`), icon: TAB_ICONS[id] }))}
+        value={tab}
+        onChange={(next) => void navigate({ search: { tab: next }, replace: true })}
+      >
+        {tab === "connect" ? (
+          <Columns
+            wide="left"
+            left={
+              <>
+                <ConnectCard v={v} />
+                <RouteCard v={v} />
+              </>
+            }
+            right={<Preview draft={draft} v={v} />}
+          />
+        ) : tab === "menu" ? (
+          <Columns
+            wide="left"
+            left={
+              <>
+                <MenuCard draft={draft} setDraft={setDraft} />
+                <TextsCard draft={draft} setDraft={setDraft} defaults={v.defaults} />
+              </>
+            }
+            right={<Preview draft={draft} v={v} />}
+          />
+        ) : tab === "notify" ? (
+          <Columns wide="left" left={<OptionsCard draft={draft} setDraft={setDraft} v={v} />} right={<Preview draft={draft} v={v} />} />
+        ) : (
+          <div className="max-w-3xl">
+            <BroadcastCard v={v} />
+          </div>
+        )}
+      </Tabs>
       <AnimatePresence>
         {dirty ? (
           <motion.div
@@ -135,7 +139,7 @@ export function TelegramPage() {
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
           >
             <span className="text-[13px] font-medium">{t("telegram.unsaved")}</span>
-            <Button variant="ghost" size="sm" onClick={() => saved && setDraft(structuredClone(saved))}>
+            <Button variant="ghost" size="sm" onClick={reset}>
               {t("telegram.discard")}
             </Button>
             <Button variant="primary" size="sm" loading={patch.isPending} onClick={save}>
@@ -144,6 +148,15 @@ export function TelegramPage() {
           </motion.div>
         ) : null}
       </AnimatePresence>
+      <Confirm
+        open={leave.status === "blocked"}
+        onOpenChange={(open) => !open && leave.reset?.()}
+        title={t("telegram.leaveTitle")}
+        text={t("telegram.leaveText")}
+        confirm={t("telegram.leaveConfirm")}
+        danger
+        onConfirm={() => leave.proceed?.()}
+      />
     </>
   );
 }
@@ -205,7 +218,7 @@ function ConnectCard({ v }: { v: View }) {
             <Bot size={20} />
           </span>
           <div className="min-w-0 flex-1">
-            <a className="font-semibold text-[var(--ink-900)] hover:underline" href={`https://t.me/${v.bot.username}`} target="_blank" rel="noreferrer noopener">
+            <a className="font-semibold text-[var(--ink-900)] hover:underline" href={`https://t.me/${encodeURIComponent(v.bot.username)}`} target="_blank" rel="noreferrer noopener">
               @{v.bot.username}
             </a>
             <div className="truncate text-xs text-[var(--ink-500)]">{v.bot.name}</div>
@@ -290,14 +303,14 @@ function RouteCard({ v }: { v: View }) {
   const toast = useToast();
   const nodes = useNodes();
   const saved = v.route;
-  const [mode, setMode] = useState<RouteMode>(saved.mode);
-  const [nodeId, setNodeId] = useState(saved.node_id ?? 0);
+  const {
+    draft: { mode, nodeId },
+    setDraft: setRoute,
+  } = useDraft<{ mode: RouteMode; nodeId: number }>({ mode: saved.mode, nodeId: saved.node_id ?? 0 });
+  const setMode = (m: RouteMode) => setRoute((d) => ({ ...d, mode: m }));
+  const setNodeId = (n: number) => setRoute((d) => ({ ...d, nodeId: n }));
   const [proxy, setProxy] = useState("");
   const [error, setError] = useState("");
-  useEffect(() => {
-    setMode(saved.mode);
-    setNodeId(saved.node_id ?? 0);
-  }, [saved.mode, saved.node_id]);
   const remote = (nodes.data ?? []).filter((n) => !n.local);
   const nodeName = (id?: number) => remote.find((n) => n.id === id)?.name ?? `#${id}`;
   const now =
@@ -430,12 +443,10 @@ function MenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) =>
     setDraft({ ...draft, buttons: list });
   };
   const add = (action: "url" | "page") => {
-    const n = draft.buttons.filter((b) => b.action === "url" || b.action === "page").length + 1;
     setDraft({
       ...draft,
       buttons: [...draft.buttons, { id: `c${Date.now().toString(36)}`, action, label: action === "url" ? t("telegram.newLink") : t("telegram.newPage"), on: true, row: false, url: action === "url" ? "https://" : undefined, text: action === "page" ? "" : undefined }],
     });
-    void n;
   };
   const custom = (b: MenuButton) => !ACTIONS.includes(b.action as (typeof ACTIONS)[number]);
   const reduce = useReducedMotion();
@@ -649,6 +660,7 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
   const settings = useSettings();
   const brand = settings.data?.brand || "VPN";
   const support = !!settings.data?.support_url;
+  const locale = useLocale();
   const sample: Record<string, string> = useMemo(
     () => ({
       brand,
@@ -664,7 +676,8 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
       limit: t("telegram.sample.limit"),
       reset: t("telegram.sample.reset"),
     }),
-    [brand],
+    // The sample texts are translated: they change with the language.
+    [brand, locale],
   );
   const text = (draft.texts.main || v.defaults.main).replace(/\{(\w+)\}/g, (m, k: string) => sample[k] ?? m);
   const reduce = useReducedMotion();

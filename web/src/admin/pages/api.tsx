@@ -2,12 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { lazy, Suspense, useState, type FormEvent } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
+import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, Field, PageHeader, Segmented, Skeleton } from "../../components/ui";
+import { Button, EmptyState, Field, PageHeader, Segmented, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
+import { useCopy } from "../../lib/copy";
+import { fieldErrors } from "../../lib/fields";
 import { ago, dateShort } from "../../lib/format";
 
 // The reference parses the whole OpenAPI spec: loaded only when the page opens.
@@ -38,7 +41,7 @@ const expiries = [0, 30, 90, 365] as const;
 function KeysCard() {
   const qc = useQueryClient();
   const toast = useToast();
-  const keys = useQuery({ queryKey: qk.apiKeys, queryFn: () => unwrap(api.GET("/api/v1/api-keys")) });
+  const keys = useQuery({ queryKey: qk.apiKeys, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/api-keys", { signal })) });
   const [adding, setAdding] = useState(false);
   const [made, setMade] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<APIKey | null>(null);
@@ -62,19 +65,19 @@ function KeysCard() {
           <Plus size={16} aria-hidden /> {t("apiPage.newKey")}
         </Button>
       </div>
-      {keys.isPending ? (
-        <Skeleton style={{ height: 96 }} />
-      ) : keys.isError ? (
-        <ErrorState text={errorText(keys.error)} onRetry={() => void keys.refetch()} />
-      ) : keys.data.length === 0 ? (
-        <EmptyState title={t("apiPage.noKeys")} text={t("apiPage.noKeysText")} />
-      ) : (
-        <ul className="row-list">
-          {keys.data.map((k) => (
-            <KeyRow key={k.id} k={k} onRevoke={() => setRevoking(k)} />
-          ))}
-        </ul>
-      )}
+      <QueryBoundary query={keys} pending={<Skeleton style={{ height: 96 }} />}>
+        {(list) =>
+          list.length === 0 ? (
+            <EmptyState title={t("apiPage.noKeys")} text={t("apiPage.noKeysText")} />
+          ) : (
+            <ul className="row-list">
+              {list.map((k) => (
+                <KeyRow key={k.id} k={k} onRevoke={() => setRevoking(k)} />
+              ))}
+            </ul>
+          )
+        }
+      </QueryBoundary>
       <NewKeyDrawer open={adding} onOpenChange={setAdding} onMade={setMade} />
       <MadeKeyDrawer apiKey={made} onClose={() => setMade(null)} />
       <Confirm
@@ -138,7 +141,7 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
       onMade(r.key);
     },
   });
-  const errors = create.error instanceof ApiError ? create.error.fields : {};
+  const errors = fieldErrors(create.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     create.mutate();
@@ -194,16 +197,8 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
 
 /** The key is shown once: the panel keeps only its hash. */
 function MadeKeyDrawer({ apiKey, onClose }: { apiKey: string | null; onClose: () => void }) {
-  const toast = useToast();
-  const copy = async () => {
-    if (!apiKey) return;
-    try {
-      await navigator.clipboard.writeText(apiKey);
-      toast.ok(t("apiPage.keyCopied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
+  const copyText = useCopy();
+  const copy = () => apiKey && copyText(apiKey, t("apiPage.keyCopied"));
   return (
     <Drawer
       open={!!apiKey}

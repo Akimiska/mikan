@@ -5,9 +5,9 @@ import { useMemo, useState, type ReactNode } from "react";
 import { basePath } from "../../api/client";
 import { useUpdates } from "../../api/hooks";
 import rawSpec from "../../api/openapi.json";
-import { useToast } from "../../components/toast";
 import { Button, EmptyState } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
+import { useCopy } from "../../lib/copy";
 
 type Schema = {
   $ref?: string;
@@ -160,19 +160,11 @@ function Intro() {
 }
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
-  const toast = useToast();
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      toast.ok(t("apiPage.copied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
+  const copy = useCopy();
   return (
     <div className="code-block">
       {code}
-      <button type="button" className="icon-btn" onClick={() => void copy()} aria-label={label}>
+      <button type="button" className="icon-btn" onClick={() => void copy(code, t("apiPage.copied"))} aria-label={label}>
         <Copy size={16} />
       </button>
     </div>

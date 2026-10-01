@@ -6,7 +6,7 @@ import { Drawer } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
 import { Button, Field } from "../../../components/ui";
 import { t } from "../../../i18n";
-import { Editor, LimitBadges, LimitNotes, ValidateResult, presetSummary, presetTitle, useValidate } from "./shared";
+import { Editor, LimitBadges, LimitNotes, ValidateResult, preloadEditor, presetSummary, presetTitle, useValidate } from "./shared";
 
 export function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: boolean; onOpenChange: (v: boolean) => void; nodeId: number; nodeName?: string }) {
   const presets = usePresets();
@@ -45,6 +45,9 @@ export function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: bool
     },
   });
   const custom = preset === "custom";
+  useEffect(() => {
+    if (custom && open) preloadEditor();
+  }, [custom, open]);
   const chosen = presets.data?.find((p) => p.id === preset);
   const submit = (e: FormEvent) => {
     e.preventDefault();

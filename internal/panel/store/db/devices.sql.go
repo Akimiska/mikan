@@ -217,6 +217,45 @@ func (q *Queries) ListDeviceSlots(ctx context.Context) ([]ListDeviceSlotsRow, er
 	return items, nil
 }
 
+const listIdleBoundDevices = `-- name: ListIdleBoundDevices :many
+SELECT id, user_id, hwid, slot_id, os, os_version, model, app, last_ip, created_at, last_seen FROM bound_devices WHERE last_seen < ?
+`
+
+func (q *Queries) ListIdleBoundDevices(ctx context.Context, lastSeen int64) ([]BoundDevice, error) {
+	rows, err := q.db.QueryContext(ctx, listIdleBoundDevices, lastSeen)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BoundDevice{}
+	for rows.Next() {
+		var i BoundDevice
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Hwid,
+			&i.SlotID,
+			&i.Os,
+			&i.OsVersion,
+			&i.Model,
+			&i.App,
+			&i.LastIp,
+			&i.CreatedAt,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setUserSlot = `-- name: SetUserSlot :exec
 UPDATE users SET slot_id = ?, updated_at = ? WHERE id = ?
 `

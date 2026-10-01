@@ -199,6 +199,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerCascade()
 	h.registerPools()
 	h.registerPackages()
+	h.registerAudit()
 	return noStore(mux), api, nil
 }
 

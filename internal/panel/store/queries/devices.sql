@@ -7,6 +7,9 @@ SELECT * FROM bound_devices WHERE id = ? AND user_id = ?;
 -- name: ListBoundDevices :many
 SELECT * FROM bound_devices WHERE user_id = ? ORDER BY created_at, id;
 
+-- name: ListIdleBoundDevices :many
+SELECT * FROM bound_devices WHERE last_seen < ?;
+
 -- name: CountBoundDevices :one
 SELECT count(*) FROM bound_devices WHERE user_id = ?;
 

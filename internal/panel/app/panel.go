@@ -49,6 +49,8 @@ type Panel struct {
 	spa       *server.SPA
 	subPage   *server.SPA
 	sessions  *auth.Sessions
+	st        *store.Store
+	devices   *domain.Devices
 	ipLimit   *auth.Limiter
 	userLimit *auth.Limiter
 	now       func() time.Time
@@ -139,6 +141,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	deps.Inbounds = domain.NewInbounds(st, dryRun, o.Now)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
+	p.st, p.devices = st, deps.Devices
 	deps.Packages = domain.NewPackages(st, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
@@ -311,6 +314,7 @@ func (p *Panel) Run(ctx context.Context) {
 		}
 		p.ipLimit.Sweep(p.now())
 		p.userLimit.Sweep(p.now())
+		p.maintain(ctx)
 	})
 }
 

@@ -330,6 +330,76 @@
         ],
         "type": "object"
       },
+      "AuditEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "description": "Например user.create, settings.update, auth.login_failed",
+            "type": "string"
+          },
+          "admin_id": {
+            "description": "null — система, консоль сервера или неудачный вход",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "details": {
+            "description": "Подробности действия; null — нет"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "admin_id",
+          "action",
+          "target_type",
+          "target_id",
+          "ip",
+          "details"
+        ],
+        "type": "object"
+      },
+      "AuditOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "От новых к старым",
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "Передайте как before за следующей страницей; 0 — это всё",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      },
       "AutoEvent": {
         "additionalProperties": false,
         "properties": {
@@ -4495,6 +4565,65 @@
         "tags": [
           "api-keys"
         ]
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "operationId": "list-audit",
+        "parameters": [
+          {
+            "description": "Записи до этого номера; 0 — самые новые",
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "default": 0,
+              "description": "Записи до этого номера; 0 — самые новые",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Журнал действий админа: хранится 180 суток",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/auth/login": {

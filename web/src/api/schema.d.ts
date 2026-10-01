@@ -107,6 +107,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал действий админа: хранится 180 суток */
+        get: operations["list-audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -1209,6 +1226,33 @@ export interface components {
             last_login_at?: string;
             totp_enabled: boolean;
             username: string;
+        };
+        AuditEntry: {
+            /** @description Например user.create, settings.update, auth.login_failed */
+            action: string;
+            /**
+             * Format: int64
+             * @description null — система, консоль сервера или неудачный вход
+             */
+            admin_id: number | null;
+            /** Format: date-time */
+            at: string;
+            /** @description Подробности действия; null — нет */
+            details: unknown;
+            /** Format: int64 */
+            id: number;
+            ip: string;
+            target_id: string;
+            target_type: string;
+        };
+        AuditOutputBody: {
+            /** @description От новых к старым */
+            items: components["schemas"]["AuditEntry"][];
+            /**
+             * Format: int64
+             * @description Передайте как before за следующей страницей; 0 — это всё
+             */
+            next: number;
         };
         AutoEvent: {
             /** Format: date-time */
@@ -2808,6 +2852,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-audit": {
+        parameters: {
+            query?: {
+                /** @description Записи до этого номера; 0 — самые новые */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditOutputBody"];
+                };
             };
             /** @description Error */
             default: {

@@ -91,21 +91,26 @@ func nullable(p *int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: *p, Valid: true}
 }
 
+// createTariff and updateTariff write the tariff and its pool limits in one transaction: a
+// refused pool list leaves the tariff, and the limits it had, as they were.
 func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOutput, error) {
 	b := in.Body
 	if err := b.check(); err != nil {
 		return nil, err
 	}
-	t, err := h.d.Store.Q.CreateTariff(ctx, db.CreateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
-		DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
-		Sort: b.Sort, CreatedAt: h.d.Now().Unix(), BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: flag(b.OnSale)})
+	var t db.Tariff
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		var err error
+		t, err = q.CreateTariff(ctx, db.CreateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
+			DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
+			Sort: b.Sort, CreatedAt: h.d.Now().Unix(), BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: flag(b.OnSale)})
+		if err != nil || b.Pools == nil {
+			return err
+		}
+		return setTariffPools(ctx, q, t.ID, b.Pools)
+	})
 	if err != nil {
 		return nil, err
-	}
-	if b.Pools != nil {
-		if err := h.setTariffPools(ctx, h.d.Store.Q, t.ID, b.Pools); err != nil {
-			return nil, err
-		}
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.create", "tariff", strconv.FormatInt(t.ID, 10), nil)
 	return h.tariffOut(ctx, t)
@@ -116,19 +121,22 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 	if err := b.check(); err != nil {
 		return nil, err
 	}
-	t, err := h.d.Store.Q.UpdateTariff(ctx, db.UpdateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
-		DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
-		Sort: b.Sort, BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: flag(b.OnSale), ID: in.ID})
+	var t db.Tariff
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		var err error
+		t, err = q.UpdateTariff(ctx, db.UpdateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
+			DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
+			Sort: b.Sort, BillingDay: nullable(b.BillingDay), PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub), OnSale: flag(b.OnSale), ID: in.ID})
+		if err != nil || b.Pools == nil {
+			return err
+		}
+		return setTariffPools(ctx, q, t.ID, b.Pools)
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, huma.Error404NotFound("not_found")
 	}
 	if err != nil {
 		return nil, err
-	}
-	if b.Pools != nil {
-		if err := h.setTariffPools(ctx, h.d.Store.Q, t.ID, b.Pools); err != nil {
-			return nil, err
-		}
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.update", "tariff", strconv.FormatInt(t.ID, 10), nil)
 	return h.tariffOut(ctx, t)

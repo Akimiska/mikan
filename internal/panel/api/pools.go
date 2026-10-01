@@ -227,19 +227,27 @@ func (h *handlers) setUserPools(ctx context.Context, in *userPoolsInput) (*userP
 	return h.userPools(ctx, &userIDInput{ID: in.ID})
 }
 
-// setTariffPools replaces a tariff's pool limits.
-func (h *handlers) setTariffPools(ctx context.Context, q *db.Queries, tariffID int64, limits []PoolLimit) error {
+// setTariffPools replaces a tariff's pool limits on q's transaction. The list is checked
+// whole (a pool twice, an unknown pool) before the old limits go.
+func setTariffPools(ctx context.Context, q *db.Queries, tariffID int64, limits []PoolLimit) error {
+	seen := make(map[int64]bool, len(limits))
+	for _, p := range limits {
+		if seen[p.PoolID] {
+			return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pools", Message: "pool_duplicate", Value: p.PoolID})
+		}
+		seen[p.PoolID] = true
+		if _, err := q.GetTrafficPool(ctx, p.PoolID); errors.Is(err, sql.ErrNoRows) {
+			return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pools", Message: "pool_not_found", Value: p.PoolID})
+		} else if err != nil {
+			return err
+		}
+	}
 	if err := q.ClearTariffPools(ctx, tariffID); err != nil {
 		return err
 	}
 	for _, p := range limits {
 		if p.TrafficLimit == nil {
 			continue // unlimited: no row
-		}
-		if _, err := q.GetTrafficPool(ctx, p.PoolID); errors.Is(err, sql.ErrNoRows) {
-			return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pools", Message: "pool_not_found", Value: p.PoolID})
-		} else if err != nil {
-			return err
 		}
 		if err := q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: tariffID, PoolID: p.PoolID, TrafficLimit: *p.TrafficLimit}); err != nil {
 			return err

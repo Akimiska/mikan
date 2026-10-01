@@ -1,11 +1,12 @@
 import { Copy, ExternalLink, RefreshCw, Send } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, errorText, unwrap, type User } from "../../../api/client";
 import { useInbounds, userActions, useUserMutation } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
 import { Button, QR, Switch } from "../../../components/ui";
 import { t } from "../../../i18n";
+import { useDraft } from "../../../lib/draft";
 import { Section } from "./section";
 
 export function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () => void }) {
@@ -131,10 +132,10 @@ export function ProtocolsSection({ u }: { u: User }) {
 }
 
 export function NoteSection({ u }: { u: User }) {
-  const [note, setNote] = useState(u.note);
+  // The drawer polls the user every few seconds: a note being typed is not replaced.
+  const { draft: note, setDraft: setNote, dirty } = useDraft(u.note);
   const update = useUserMutation(userActions.update);
   const toast = useToast();
-  useEffect(() => setNote(u.note), [u.note]);
   return (
     <Section title={t("userDrawer.note")} aside={update.isPending ? t("userDrawer.saving") : undefined}>
       <textarea
@@ -145,7 +146,7 @@ export function NoteSection({ u }: { u: User }) {
         value={note}
         onChange={(e) => setNote(e.target.value)}
         onBlur={() => {
-          if (note !== u.note) update.mutate({ id: u.id, body: { note } }, { onSuccess: () => toast.ok(t("userDrawer.noteSaved")), onError: (e) => toast.error(errorText(e)) });
+          if (dirty) update.mutate({ id: u.id, body: { note } }, { onSuccess: () => toast.ok(t("userDrawer.noteSaved")), onError: (e) => toast.error(errorText(e)) });
         }}
       />
     </Section>

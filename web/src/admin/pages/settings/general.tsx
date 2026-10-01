@@ -2,21 +2,22 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import clsx from "clsx";
 import { ChevronRight, RefreshCw } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/client";
 import { qk, usePaymentSettings, useUpdates } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
+import { StaleNotice } from "../../../components/query";
 import { useToast } from "../../../components/toast";
 import { Button, ErrorState, Field, Pill, Skeleton, Switch } from "../../../components/ui";
 import { getLocale, LOCALES, t } from "../../../i18n";
+import { useDraft } from "../../../lib/draft";
 import { ago } from "../../../lib/format";
 import { useSaveSettings } from "./shared";
 
 export function ServerCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
-  const init = () => ({ public_host: s.public_host, domain: s.domain, quiet_hour_utc: String(s.quiet_hour_utc) });
-  const [form, setForm] = useState(init);
-  useEffect(() => setForm(init()), [s]);
+  // Saving another card replaces `s`: what is typed here stays.
+  const { draft: form, setDraft: setForm } = useDraft({ public_host: s.public_host, domain: s.domain, quiet_hour_utc: String(s.quiet_hour_utc) });
   const errors = save.error instanceof ApiError ? save.error.fields : {};
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -138,11 +139,11 @@ export function SalesCard() {
         </div>
         {ps.isPending ? (
           <Skeleton style={{ width: 40, height: 24, borderRadius: 12 }} />
-        ) : ps.isError ? null : (
+        ) : ps.isError && !ps.data ? null : (
           <Switch checked={on} label={t("settings.sales")} disabled={save.isPending} onChange={(v) => save.mutate(v)} />
         )}
       </div>
-      {ps.isError ? (
+      {ps.isError && !ps.data ? (
         <ErrorState text={errorText(ps.error)} onRetry={() => void ps.refetch()} />
       ) : ps.data ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -181,15 +182,15 @@ export function UpdatesCard() {
     },
     onError: fail,
   });
-  if (u.isPending) return <Skeleton style={{ height: 180, borderRadius: 20 }} />;
-  if (u.isError) {
+  const v = u.data;
+  if (!v) {
+    if (!u.isError) return <Skeleton style={{ height: 180, borderRadius: 20 }} />;
     return (
       <section className="card glass">
         <ErrorState text={errorText(u.error)} onRetry={() => void u.refetch()} />
       </section>
     );
   }
-  const v = u.data;
   const notes = v.notes[getLocale()] || v.notes.en || "";
   const running = v.host?.state === "running";
   const waiting = v.requested_at > 0 || running;
@@ -197,6 +198,7 @@ export function UpdatesCard() {
   const lastAt = v.host?.at ? ago(v.host.at) : "";
   return (
     <section id="updates" className="card glass reveal">
+      {u.isError ? <StaleNotice onRetry={() => void u.refetch()} retrying={u.isFetching} /> : null}
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("settings.updates")}</h2>

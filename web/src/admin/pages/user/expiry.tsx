@@ -1,10 +1,10 @@
 import { Check } from "lucide-react";
-import { useEffect, useState } from "react";
 import { errorText, type Schemas, type User } from "../../../api/client";
 import { userActions, useUserMutation } from "../../../api/hooks";
 import { useToast } from "../../../components/toast";
 import { Button, Field } from "../../../components/ui";
 import { t } from "../../../i18n";
+import { useDraft } from "../../../lib/draft";
 import { dateLong, dateShort, days, expiryText, fromInputDate, inputDate, months } from "../../../lib/format";
 import { Section } from "./section";
 
@@ -75,8 +75,7 @@ export function ExactDateField({ u }: { u: User }) {
   const toast = useToast();
   const update = useUserMutation(userActions.update);
   const current = u.expires_at ? inputDate(u.expires_at) : "";
-  const [date, setDate] = useState(current);
-  useEffect(() => setDate(current), [current]);
+  const { draft: date, setDraft: setDate } = useDraft(current);
   const apply = () =>
     update.mutate(
       { id: u.id, body: { expires_at: fromInputDate(date, u.expires_at) } },

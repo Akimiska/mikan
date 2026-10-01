@@ -3,13 +3,14 @@
 // where the traffic other nodes relay through it goes next.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
 import { Drawer } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Button, ErrorState, Field, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Button, Field, Pill, Segmented, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
+import { useDraft } from "../../lib/draft";
 import { ago } from "../../lib/format";
 import { nodeLabel } from "./nodes";
 
@@ -26,13 +27,9 @@ export function CascadeDrawer({ node, onClose }: { node: { id: number; name: str
     <Drawer open={!!node} onOpenChange={(v) => !v && onClose()} title={t("cascade.title")} meta={node?.name}>
       <div className="pt-5">
         <p className="mb-4 text-[13px] text-[var(--ink-600)]">{t("cascade.intro")}</p>
-        {cascade.isPending ? (
-          <Skeleton style={{ height: 240, borderRadius: 16 }} />
-        ) : cascade.isError ? (
-          <ErrorState text={errorText(cascade.error)} onRetry={() => void cascade.refetch()} />
-        ) : (
-          <Body nodeId={node!.id} c={cascade.data} refetch={() => void cascade.refetch()} checking={cascade.isFetching} />
-        )}
+        <QueryBoundary query={cascade} pending={<Skeleton style={{ height: 240, borderRadius: 16 }} />}>
+          {(c) => <Body key={node!.id} nodeId={node!.id} c={c} refetch={() => void cascade.refetch()} checking={cascade.isFetching} />}
+        </QueryBoundary>
       </div>
     </Drawer>
   );
@@ -46,12 +43,13 @@ function Body({ nodeId, c, refetch, checking }: { nodeId: number; c: Cascade; re
     const n = nodes.data?.find((x) => x.id === id);
     return n ? nodeLabel(n) : `#${id}`;
   };
-  const [route, setRoute] = useState<Route>((c.relay?.outbound as Route) ?? "direct");
-  const [exit, setExit] = useState<number>(c.relay?.exit_node_id ?? 0);
-  useEffect(() => {
-    setRoute((c.relay?.outbound as Route) ?? "direct");
-    setExit(c.relay?.exit_node_id ?? 0);
-  }, [c]);
+  // "Check" refetches `c`: the chosen route survives it.
+  const {
+    draft: { route, exit },
+    setDraft,
+  } = useDraft<{ route: Route; exit: number }>({ route: (c.relay?.outbound as Route) ?? "direct", exit: c.relay?.exit_node_id ?? 0 });
+  const setRoute = (v: Route) => setDraft((d) => ({ ...d, route: v }));
+  const setExit = (v: number) => setDraft((d) => ({ ...d, exit: v }));
   const save = useMutation({
     mutationFn: () =>
       unwrap(api.PATCH("/api/v1/nodes/{id}/cascade", { params: { path: { id: nodeId } }, body: { outbound: route, ...(route === "node" ? { exit_node_id: exit } : {}) } })),

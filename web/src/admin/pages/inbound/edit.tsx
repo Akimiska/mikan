@@ -8,7 +8,7 @@ import { useToast } from "../../../components/toast";
 import { Button, Field, Segmented, Switch } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
-import { fingerprintLabel } from "../../../lib/fingerprints";
+import { fingerprintLabel, validFingerprint } from "../../../lib/fingerprints";
 import { destIsIP } from "../../../lib/format";
 import { nodeLabel } from "../nodes";
 import { useWarp } from "../node-warp";
@@ -25,7 +25,6 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
   const [dest, setDest] = useState("");
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
-  const [fpOk, setFpOk] = useState(true);
   const [obfs, setObfs] = useState(""); // Hysteria2: salamander or gecko
   const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
   const [exitNode, setExitNode] = useState<number>(0);
@@ -87,7 +86,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
       validate.reset();
       if (e instanceof ApiError && Object.keys(e.fields).length) {
         setErrors(e.fields);
-        if (e.fields.config) setTab("config");
+        setTab(e.fields.config ? "config" : "main");
       } else toast.error(errorText(e));
     },
   });
@@ -97,6 +96,11 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
   // Behind a proxy the port is what the proxy forwards to: it never moves on its own.
   const behindProxy = listenMode !== "all";
   const clearError = (key: string) => setErrors(({ [key]: _, ...rest }) => rest);
+  // These fields live on the first tab: show it, or Save on the config tab does nothing visible.
+  const reject = (errs: Record<string, string>) => {
+    setErrors(errs);
+    setTab("main");
+  };
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const body: Schemas["PatchInboundInputBody"] = {};
@@ -108,27 +112,27 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
       const ip = destIsIP(dest);
       if (dest.trim() !== inbound.dest || (ip && sni.trim() !== (inbound.server_names?.[0] ?? ""))) {
         if (ip && !sni.trim()) {
-          setErrors({ server_name: t("inbounds.sniRequired") });
+          reject({ server_name: t("inbounds.sniRequired") });
           return;
         }
         body.dest = dest.trim();
         if (ip) body.server_name = sni.trim();
       }
     }
-    if (!fpOk) {
-      setErrors({ fingerprint: t("settings.fpOwnBad") });
+    if (fp !== "" && !validFingerprint(fp)) {
+      reject({ fingerprint: t("settings.fpOwnBad") });
       return;
     }
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
     if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && (obfs === "salamander" || obfs === "gecko")) body.obfs = obfs;
     if (listenMode === "custom" && !listen) {
-      setErrors({ listen: t("inbounds.listenRequired") });
+      reject({ listen: t("inbounds.listenRequired") });
       return;
     }
     if (listen !== inbound?.listen) body.listen = listen;
     const cport = clientPort.trim() === "" ? 0 : Number(clientPort.trim());
     if (!Number.isInteger(cport) || cport < 0 || cport > 65535) {
-      setErrors({ "client.port": t("errors.api.config_client_port") });
+      reject({ "client.port": t("errors.api.config_client_port") });
       return;
     }
     // Without a TLS name of its own to change (REALITY, no TLS) the SNI is not the form's.
@@ -141,7 +145,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     if (autoPortNow !== inbound?.auto_port) body.auto_port = autoPortNow;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
     if (outbound === "node" && !exitNode) {
-      setErrors({ exit_node_id: t("inbounds.exitPick") });
+      reject({ exit_node_id: t("inbounds.exitPick") });
       return;
     }
     if (outbound !== inbound?.outbound || (outbound === "node" && exitNode !== inbound?.exit_node_id)) {
@@ -276,7 +280,6 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                     defaultLabel={t("inbounds.fingerprintDefault", { fp: fingerprintLabel(settings.data?.client_fingerprint ?? "chrome") })}
                     invalid={!!errors.fingerprint}
                     disabled={configChanged}
-                    onValid={setFpOk}
                   />
                 </Field>
               ) : null}

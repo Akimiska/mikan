@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { ApiError, type Schemas } from "../../../api/client";
 import { useInbounds, useNodes } from "../../../api/hooks";
 import { Button, Field, Pill, Switch } from "../../../components/ui";
 import { t } from "../../../i18n";
+import { useDraft } from "../../../lib/draft";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
 import { useSaveSettings } from "./shared";
 
@@ -16,8 +17,7 @@ export function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   const inbounds = useInbounds();
   const nodes = useNodes();
-  const [port, setPort] = useState(s.sub_port ? String(s.sub_port) : "");
-  useEffect(() => setPort(s.sub_port ? String(s.sub_port) : ""), [s.sub_port]);
+  const { draft: port, setDraft: setPort } = useDraft(s.sub_port ? String(s.sub_port) : "");
   const error = save.error instanceof ApiError ? save.error.fields.sub_port : undefined;
   const own = nodes.data?.find((n) => n.local)?.id;
   // Who holds a port over TCP on the panel's own server.
@@ -106,10 +106,8 @@ const routingModes = [
 export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   const inbounds = useInbounds();
-  const init = () => ({ brand: s.brand, support_url: s.support_url, sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, sub_routing: s.sub_routing, client_fingerprint: s.client_fingerprint });
-  const [form, setForm] = useState(init);
+  const { draft: form, setDraft: setForm } = useDraft({ brand: s.brand, support_url: s.support_url, sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, sub_routing: s.sub_routing, client_fingerprint: s.client_fingerprint });
   const [fpOk, setFpOk] = useState(true);
-  useEffect(() => setForm(init()), [s]);
   const errors = save.error instanceof ApiError ? save.error.fields : {};
   const submit = (e: FormEvent) => {
     e.preventDefault();

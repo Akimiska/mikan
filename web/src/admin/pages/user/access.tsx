@@ -8,6 +8,7 @@ import { Button, QR } from "../../../components/ui";
 import { Switch } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
+import { safeHref } from "../../../lib/url";
 import { Section } from "./section";
 
 export function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () => void }) {
@@ -41,7 +42,7 @@ export function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () =
         <QR value={u.sub_url} />
         <div className="flex flex-col items-start gap-2">
           <p className="mb-1 text-[13px] text-[var(--ink-500)]">{t("userDrawer.sendHint")}</p>
-          <a className="btn btn-glass btn-sm" href={u.sub_url} target="_blank" rel="noreferrer noopener">
+          <a className="btn btn-glass btn-sm" href={safeHref(u.sub_url)} target="_blank" rel="noreferrer noopener">
             {t("userDrawer.subPage")} <ExternalLink size={14} aria-hidden />
           </a>
           <Button size="sm" variant="danger" onClick={onReissue}>

@@ -218,7 +218,7 @@ function ConnectCard({ v }: { v: View }) {
             <Bot size={20} />
           </span>
           <div className="min-w-0 flex-1">
-            <a className="font-semibold text-[var(--ink-900)] hover:underline" href={`https://t.me/${v.bot.username}`} target="_blank" rel="noreferrer noopener">
+            <a className="font-semibold text-[var(--ink-900)] hover:underline" href={`https://t.me/${encodeURIComponent(v.bot.username)}`} target="_blank" rel="noreferrer noopener">
               @{v.bot.username}
             </a>
             <div className="truncate text-xs text-[var(--ink-500)]">{v.bot.name}</div>

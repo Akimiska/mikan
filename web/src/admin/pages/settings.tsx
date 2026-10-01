@@ -11,6 +11,7 @@ import { useToast } from "../../components/toast";
 import { Button, ErrorState, Field, PageHeader, Pill, QR, Skeleton, Switch } from "../../components/ui";
 import { getLocale, LOCALES, t, tMaybe } from "../../i18n";
 import { FingerprintSelect } from "../../components/fingerprint-select";
+import { CertDrawer, certUntil, type CertInfo } from "../../components/cert-drawer";
 import { ago } from "../../lib/format";
 
 export function SettingsPage() {
@@ -728,26 +729,54 @@ function CertificateCard({ s }: { s: Schemas["SettingsView"] }) {
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const ok = c.kind === "letsencrypt";
+  const [own, setOwn] = useState(false);
+  const custom = c.kind === "custom";
+  const ok = c.kind === "letsencrypt" || custom;
   const until = new Date(c.not_after).toLocaleString(getLocale(), { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  const sub = custom ? t("settings.certCustom", { names: (c.names ?? []).join(", "), until: certUntil(c.not_after) }) : ok ? t("settings.certLe", { id: c.identifier, until }) : t("settings.certSelf");
+  // The own certificate as the drawer shows it; a broken one is shown by its error.
+  const current: CertInfo | null = custom ? { names: c.names, issuer: c.issuer, not_after: c.not_after, trusted: c.trusted } : c.error?.startsWith("custom_") ? { error: c.error } : null;
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("settings.cert")}</h2>
-          <div className="card-sub">{ok ? t("settings.certLe", { id: c.identifier, until }) : t("settings.certSelf")}</div>
+          <div className="card-sub">{sub}</div>
         </div>
-        {ok ? <Pill tone="ok">{t("settings.certValid")}</Pill> : <Pill tone="warn">{t("settings.certTemp")}</Pill>}
+        {custom ? <Pill tone="ok">{t("settings.certOwn")}</Pill> : ok ? <Pill tone="ok">{t("settings.certValid")}</Pill> : <Pill tone="warn">{t("settings.certTemp")}</Pill>}
       </div>
       {c.error ? (
         <p className="mb-3 text-[13px] text-[var(--berry-600)]" role="alert">
           {tMaybe(`errors.acme.${c.error}`) ?? c.error}
         </p>
       ) : null}
-      <p className="mb-3 text-xs text-[var(--ink-500)]">{t("settings.certNote")}</p>
-      <Button size="sm" loading={renew.isPending} onClick={() => renew.mutate()}>
-        {t("settings.certRenew")}
-      </Button>
+      <p className="mb-3 text-xs text-[var(--ink-500)]">{custom ? t("settings.certOwnNote") : t("settings.certNote")}</p>
+      <div className="flex flex-wrap gap-2">
+        {!custom ? (
+          <Button size="sm" loading={renew.isPending} onClick={() => renew.mutate()}>
+            {t("settings.certRenew")}
+          </Button>
+        ) : null}
+        <Button size="sm" onClick={() => setOwn(true)}>
+          <ShieldCheck size={16} aria-hidden /> {custom ? t("settings.certReplace") : t("settings.certOwnButton")}
+        </Button>
+      </div>
+      <CertDrawer
+        open={own}
+        onClose={() => setOwn(false)}
+        title={t("cert.panelTitle")}
+        lead={t("cert.panelLead")}
+        current={current}
+        save={(cert, key) => unwrap(api.PUT("/api/v1/settings/certificate", { body: { cert, key } })).then((v) => qc.setQueryData(qk.settings, v))}
+        clear={() =>
+          unwrap(api.DELETE("/api/v1/settings/certificate")).then(() => {
+            void qc.invalidateQueries({ queryKey: qk.settings });
+            window.setTimeout(() => void qc.invalidateQueries({ queryKey: qk.settings }), 15_000);
+          })
+        }
+        clearLabel={t("cert.panelClear")}
+        clearText={t("cert.panelClearText")}
+      />
     </section>
   );
 }

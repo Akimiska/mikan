@@ -417,6 +417,28 @@
         ],
         "type": "object"
       },
+      "CertInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "cert": {
+            "description": "Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem)",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "key": {
+            "description": "Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ],
+        "type": "object"
+      },
       "CheckTargetInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1159,12 +1181,71 @@
         ],
         "type": "object"
       },
+      "NodeCertInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "cert": {
+            "description": "Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem)",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "key": {
+            "description": "Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ],
+        "type": "object"
+      },
+      "NodeCertView": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "description": "custom_expired, custom_invalid — сертификат не используется, нода на своём самоподписанном",
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "names": {
+            "description": "Домены и IP, на которые он выписан",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "not_after": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "trusted": {
+            "description": "Публично доверенный для адреса: приложения принимают его без пина",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "names",
+          "issuer",
+          "not_after",
+          "trusted"
+        ],
+        "type": "object"
+      },
       "NodeInfo": {
         "additionalProperties": false,
         "properties": {
           "address": {
             "description": "host:port API ноды; пусто у своей ноды",
             "type": "string"
+          },
+          "certificate": {
+            "$ref": "#/components/schemas/NodeCertView"
           },
           "checked_at": {
             "format": "date-time",
@@ -2415,16 +2496,30 @@
           "identifier": {
             "type": "string"
           },
+          "issuer": {
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "self-signed",
-              "letsencrypt"
+              "letsencrypt",
+              "custom"
             ],
             "type": "string"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "not_after": {
             "format": "date-time",
             "type": "string"
+          },
+          "trusted": {
+            "description": "Свой сертификат публично доверенный для адреса панели",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4515,6 +4610,95 @@
         ]
       }
     },
+    "/api/v1/nodes/{id}/certificate": {
+      "delete": {
+        "operationId": "clear-node-certificate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Вернуть ноде самоподписанный сертификат",
+        "tags": [
+          "node"
+        ],
+        "x-session-only": true
+      },
+      "put": {
+        "operationId": "set-node-certificate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeCertInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Поставить ноде свой сертификат",
+        "tags": [
+          "node"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/nodes/{id}/key": {
       "post": {
         "operationId": "rekey-node",
@@ -5268,6 +5452,71 @@
         "tags": [
           "settings"
         ]
+      }
+    },
+    "/api/v1/settings/certificate": {
+      "delete": {
+        "operationId": "clear-certificate",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Вернуть сертификат Let's Encrypt",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "put": {
+        "operationId": "set-certificate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Поставить свой сертификат панели",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/settings/certificate/renew": {

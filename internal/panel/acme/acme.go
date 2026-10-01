@@ -38,11 +38,15 @@ import (
 const letsEncrypt = "https://acme-v02.api.letsencrypt.org/directory"
 
 type Status struct {
-	Kind       string    `json:"kind" enum:"self-signed,letsencrypt"`
+	Kind       string    `json:"kind" enum:"self-signed,letsencrypt,custom"`
 	Identifier string    `json:"identifier"`
 	NotAfter   time.Time `json:"not_after"`
 	Error      string    `json:"error,omitempty"`
 	CheckedAt  time.Time `json:"checked_at"`
+	// The admin's own certificate (kind custom).
+	Issuer  string   `json:"issuer,omitempty"`
+	Names   []string `json:"names,omitempty"`
+	Trusted bool     `json:"trusted,omitempty" doc:"Свой сертификат публично доверенный для адреса панели"`
 }
 
 type Manager struct {
@@ -57,6 +61,10 @@ type Manager struct {
 	status    atomic.Pointer[Status]
 	wake      chan struct{}
 	challenge string // listen address for http-01, ":80"
+	// customDir holds the admin's own certificate (tlscert.SaveCustom); it wins over
+	// Let's Encrypt while valid. customMod is when its files last changed, as ensure saw.
+	customDir string
+	customMod time.Time
 }
 
 func New(dataDir string, holder *tlscert.Holder, fallback *tls.Certificate, set *settings.Settings, log *slog.Logger, now func() time.Time) *Manager {
@@ -65,7 +73,7 @@ func New(dataDir string, holder *tlscert.Holder, fallback *tls.Certificate, set 
 		dir = letsEncrypt
 	}
 	m := &Manager{dir: filepath.Join(dataDir, "tls", "acme"), directory: dir, holder: holder, fallback: fallback,
-		set: set, log: log, now: now, wake: make(chan struct{}, 1), challenge: ":80"}
+		set: set, log: log, now: now, wake: make(chan struct{}, 1), challenge: ":80", customDir: filepath.Join(dataDir, "tls", "custom")}
 	m.status.Store(&Status{Kind: "self-signed", CheckedAt: now()})
 	return m
 }
@@ -83,6 +91,10 @@ func (m *Manager) Renew() {
 func (m *Manager) Run(ctx context.Context) {
 	t := time.NewTicker(6 * time.Hour)
 	defer t.Stop()
+	// certbot, acme.sh or Caddy renew a custom certificate in place: a changed file is
+	// served within half a minute, no restart.
+	watch := time.NewTicker(30 * time.Second)
+	defer watch.Stop()
 	m.ensure(ctx)
 	for {
 		select {
@@ -90,9 +102,50 @@ func (m *Manager) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		case <-m.wake:
+		case <-watch.C:
+			if !m.customChanged() {
+				continue
+			}
 		}
 		m.ensure(ctx)
 	}
+}
+
+func (m *Manager) customChanged() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !tlscert.CustomModTime(m.customDir).Equal(m.customMod)
+}
+
+// SetCustom installs the admin's own certificate: checked, kept, served at once. It has
+// to cover the panel's address, or every subscription link would fail.
+func (m *Manager) SetCustom(ctx context.Context, certPEM, keyPEM []byte) error {
+	cert, err := tlscert.ParseCustom(certPEM, keyPEM, m.now())
+	if err != nil {
+		return err
+	}
+	id, err := m.identifier(ctx)
+	if err != nil {
+		return err
+	}
+	if id != "" && !tlscert.Covers(cert.Leaf, id) {
+		return tlscert.ErrWrongHost
+	}
+	if err := tlscert.SaveCustom(m.customDir, cert); err != nil {
+		return err
+	}
+	m.ensure(ctx)
+	return nil
+}
+
+// ClearCustom goes back to Let's Encrypt or the self-signed certificate. The custom one
+// is served until the loop has the other: there is no gap.
+func (m *Manager) ClearCustom() error {
+	if err := tlscert.RemoveCustom(m.customDir); err != nil {
+		return err
+	}
+	m.Renew()
+	return nil
 }
 
 func (m *Manager) identifier(ctx context.Context) (string, error) {
@@ -112,6 +165,28 @@ func (m *Manager) ensure(ctx context.Context) {
 	if err != nil {
 		st.Error = err.Error()
 		return
+	}
+	// The admin's own certificate wins while it is valid; an expired or broken one falls
+	// back to the rest, and the status says why.
+	m.customMod = tlscert.CustomModTime(m.customDir)
+	if tlscert.HasCustom(m.customDir) {
+		cert, err := tlscert.LoadCustom(m.customDir, m.now())
+		if err == nil {
+			info := tlscert.Describe(cert, id, m.now())
+			m.holder.Set(cert)
+			st.Kind, st.NotAfter, st.Issuer, st.Names, st.Trusted = "custom", cert.Leaf.NotAfter, info.Issuer, info.Names, info.Trusted
+			if id != "" && !tlscert.Covers(cert.Leaf, id) {
+				st.Error = "custom_wrong_host"
+			}
+			return
+		}
+		why := "custom_invalid"
+		if errors.Is(err, tlscert.ErrExpired) {
+			why = "custom_expired"
+		}
+		m.log.Warn("tls: the custom certificate is not used", "err", err)
+		// What the admin set up and lost says more than why the fallback is what it is.
+		defer func() { st.Error = why }()
 	}
 	if id == "" || id == "localhost" || isPrivate(id) {
 		m.useFallback()

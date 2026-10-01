@@ -350,6 +350,24 @@ export interface paths {
         patch: operations["update-node-cascade"];
         trace?: never;
     };
+    "/api/v1/nodes/{id}/certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Поставить ноде свой сертификат */
+        put: operations["set-node-certificate"];
+        post?: never;
+        /** Вернуть ноде самоподписанный сертификат */
+        delete: operations["clear-node-certificate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/key": {
         parameters: {
             query?: never;
@@ -541,6 +559,24 @@ export interface paths {
         head?: never;
         /** Изменить настройки */
         patch: operations["update-settings"];
+        trace?: never;
+    };
+    "/api/v1/settings/certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Поставить свой сертификат панели */
+        put: operations["set-certificate"];
+        post?: never;
+        /** Вернуть сертификат Let's Encrypt */
+        delete: operations["clear-certificate"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/settings/certificate/renew": {
@@ -1086,6 +1122,12 @@ export interface components {
             /** @description Ноды, которые выходят через эту */
             sources: components["schemas"]["CascadeHop"][];
         };
+        CertInputBody: {
+            /** @description Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem) */
+            cert: string;
+            /** @description Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519 */
+            key: string;
+        };
         CheckTargetInputBody: {
             /** @description host:port */
             dest: string;
@@ -1349,9 +1391,27 @@ export interface components {
             /** @description Для action=url: https:// или tg:// */
             url?: string;
         };
+        NodeCertInputBody: {
+            /** @description Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem) */
+            cert: string;
+            /** @description Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519 */
+            key: string;
+        };
+        NodeCertView: {
+            /** @description custom_expired, custom_invalid — сертификат не используется, нода на своём самоподписанном */
+            error?: string;
+            issuer: string;
+            /** @description Домены и IP, на которые он выписан */
+            names: string[];
+            /** Format: date-time */
+            not_after: string;
+            /** @description Публично доверенный для адреса: приложения принимают его без пина */
+            trusted: boolean;
+        };
         NodeInfo: {
             /** @description host:port API ноды; пусто у своей ноды */
             address: string;
+            certificate?: components["schemas"]["NodeCertView"];
             /** Format: date-time */
             checked_at?: string;
             /** Format: int64 */
@@ -1783,10 +1843,14 @@ export interface components {
             checked_at: string;
             error?: string;
             identifier: string;
+            issuer?: string;
             /** @enum {string} */
-            kind: "self-signed" | "letsencrypt";
+            kind: "self-signed" | "letsencrypt" | "custom";
+            names?: string[];
             /** Format: date-time */
             not_after: string;
+            /** @description Свой сертификат публично доверенный для адреса панели */
+            trusted?: boolean;
         };
         System: {
             /** Format: double */
@@ -2984,6 +3048,70 @@ export interface operations {
             };
         };
     };
+    "set-node-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeCertInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "clear-node-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "rekey-node": {
         parameters: {
             query?: never;
@@ -3514,6 +3642,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SettingsView"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "clear-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

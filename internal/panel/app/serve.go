@@ -12,8 +12,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
 	"mikan/internal/nodeapi"
@@ -64,9 +66,33 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 		Autotune: autotune.DefaultOptions().Scaled(cfg.AutotuneScale), TelegramAPI: cfg.TelegramAPI,
 		DataDir: cfg.DataDir, Releases: updates.Fetch(release.LatestURL)}
 	nodesDir := filepath.Join(tlsDir, "nodes")
-	// The local node shares the panel's self-signed certificate; each remote node gets
-	// its own for its address, pinned in links the same way.
+	nodeCerts := tlscert.NewNodeStore(filepath.Join(tlsDir, "custom-nodes"), time.Now)
+	opts.NodeCerts = nodeCerts
+	set := settings.New(st.Q)
+	// A node's own certificate (Nodes → Certificate) goes first: links pin it only when
+	// clients cannot trust it, so a renewal of a public one changes nothing for them.
+	// Otherwise the local node shares the panel's self-signed certificate and each remote
+	// node gets its own for its address, pinned in links the same way.
 	opts.QUIC = func(n db.Node) (*nodeapi.TLSFiles, string, error) {
+		host := domain.NodeHost(n)
+		if n.Address == "" {
+			if ep, err := set.Endpoint(context.Background()); err == nil {
+				host = ep.Host
+			}
+		}
+		if c, trusted, err := nodeCerts.Get(n.ID, host); c != nil {
+			certPEM, keyPEM, err := tlscert.CustomPEM(c)
+			if err != nil {
+				return nil, "", err
+			}
+			pin := tlscert.Pin(c)
+			if trusted {
+				pin = ""
+			}
+			return &nodeapi.TLSFiles{CertPEM: certPEM, KeyPEM: keyPEM}, pin, nil
+		} else if err != nil {
+			logger.Warn("tls: a node's own certificate is not used", "node", n.ID, "err", err)
+		}
 		dir := tlsDir
 		if n.Address != "" {
 			dir = filepath.Join(nodesDir, strconv.FormatInt(n.ID, 10))
@@ -126,6 +152,20 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	go p.Run(ctx)
 	if certs != nil {
 		go certs.Run(ctx)
+		// kill -HUP (an external tool's renewal hook) serves a new custom certificate now.
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		defer signal.Stop(hup)
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-hup:
+					certs.Renew()
+				}
+			}
+		}()
 	}
 
 	httpSrv := httpServer(p.Handler)

@@ -26,6 +26,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
 	"mikan/internal/panel/warp"
 )
@@ -62,6 +63,8 @@ type Options struct {
 	QUIC func(n db.Node) (*nodeapi.TLSFiles, string, error)
 	// PanelCert is the client certificate remote nodes pin; join keys carry its hash.
 	PanelCert func() (nodetls.Pair, error)
+	// NodeCerts keeps the nodes' own certificates; nil: nodes have none.
+	NodeCerts *tlscert.NodeStore
 	// Certs manages the panel's public certificate; nil in development.
 	Certs *acme.Manager
 	// Autotune are the automatic moves' timings; zero means autotune.DefaultOptions.
@@ -123,7 +126,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
+		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom
 	}
+	deps.NodeCerts = o.NodeCerts
 	subBase := func(ctx context.Context) string {
 		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {

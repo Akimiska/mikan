@@ -228,13 +228,24 @@
       "rule_option": "Line {value}: no-resolve is for GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX and IP-ASN only",
       "rule_too_long": "Line {value}: too long, 512 characters at most",
       "rules_too_many": "Line {value}: more than 500 rules",
-      "group_in_rules": "The Clash rule on line {value} sends traffic to this group: fix the rules first"
+      "group_in_rules": "The Clash rule on line {value} sends traffic to this group: fix the rules first",
+      "cert_pem_invalid": "Not a PEM certificate: fullchain.pem is needed",
+      "key_pem_invalid": "Not a PEM private key: privkey.pem is needed",
+      "cert_key_mismatch": "The key is not this certificate's",
+      "cert_key_weak": "A weak key: RSA of 2048 bits or more, ECDSA P-256/384/521 or Ed25519",
+      "cert_expired": "The certificate has expired",
+      "cert_not_yet_valid": "The certificate is not valid yet",
+      "cert_wrong_host": "The certificate is not for the panel's address ({value}): clients would refuse it",
+      "node_certs_disabled": "Node certificates are not available here"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
       "rate_limited": "Let's Encrypt temporarily limited issuance (too many reinstalls) — we will retry later",
       "unreachable": "Let's Encrypt could not reach the server on port 80 — check the firewall",
-      "no_public_host": "A public IP or domain is required"
+      "no_public_host": "A public IP or domain is required",
+      "custom_expired": "The own certificate has expired, the fallback one is used: install a new one",
+      "custom_invalid": "The own certificate does not load, the fallback one is used: install it again",
+      "custom_wrong_host": "The own certificate is not for the panel's current address: clients will complain"
     }
   },
   "login": {
@@ -820,7 +831,12 @@
     "rulesHint": "One rule per line; lines starting with # are comments. A rule with a mistake is not saved, so it cannot break clients' profiles. Happ, v2RayTun and Hiddify get no rules: their format has none.",
     "rulesTargets": "Targets:",
     "rulesTypes": "Rule types",
-    "rulesTypesText": "DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, GEOSITE, GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX, SRC-IP-CIDR, DST-PORT, SRC-PORT, NETWORK, PROCESS-NAME, PROCESS-PATH work in every mihomo app. DOMAIN-REGEX, IP-ASN, SRC-GEOIP (core 1.18+) and DOMAIN-WILDCARD (1.19.12+) reach only apps that name their core, or an older core would fail the whole profile. no-resolve is for GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX and IP-ASN."
+    "rulesTypesText": "DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, GEOSITE, GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX, SRC-IP-CIDR, DST-PORT, SRC-PORT, NETWORK, PROCESS-NAME, PROCESS-PATH work in every mihomo app. DOMAIN-REGEX, IP-ASN, SRC-GEOIP (core 1.18+) and DOMAIN-WILDCARD (1.19.12+) reach only apps that name their core, or an older core would fail the whole profile. no-resolve is for GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX and IP-ASN.",
+    "certCustom": "Own certificate: {names} · until {until}",
+    "certOwn": "Own",
+    "certOwnNote": "Renewed by your own tools: the panel picks a new file up without a restart.",
+    "certOwnButton": "Own certificate",
+    "certReplace": "Replace"
   },
   "sub": {
     "loadFailed": "Could not load the subscription",
@@ -956,7 +972,10 @@
     "localAddress": "The own node's address is the panel's address; change it in the settings.",
     "serving": "Serves clients",
     "servingHint": "A disabled node accepts no connections and leaves the subscriptions.",
-    "nameLocalHint": "Name your own node with a flag, e.g. «🇳🇱 Netherlands»: that is its group in the subscription, and the flag prefixes its protocols."
+    "nameLocalHint": "Name your own node with a flag, e.g. «🇳🇱 Netherlands»: that is its group in the subscription, and the flag prefixes its protocols.",
+    "cert": "Certificate",
+    "certOwn": "own, until {until}",
+    "certButton": "Certificate"
   },
   "telegram": {
     "subtitle": "A bot for subscription owners and a Mini App with the subscription page",
@@ -1330,5 +1349,32 @@
     "editLimits": "Change limits",
     "userSaved": "Pool limits saved",
     "exhausted": "Used up: the pool's protocols are off until the reset"
+  },
+  "cert": {
+    "panelTitle": "Own panel certificate",
+    "panelLead": "Instead of Let's Encrypt: a wildcard from certbot over DNS, a Cloudflare Origin certificate or your own CA's. Port 80 is not needed then.",
+    "panelClear": "Back to Let's Encrypt",
+    "panelClearText": "The panel gets a Let's Encrypt certificate again (port 80 needed) and keeps the own one until then.",
+    "nodeTitle": "Own node certificate",
+    "nodeLead": "For the protocols on the node's certificate: Hysteria2, TUIC, AnyTLS, TrustTunnel. Apps accept a publicly trusted one without a pin, so renewing it breaks nothing.",
+    "nodeClear": "Back to self-signed",
+    "nodeClearText": "The node goes back to its self-signed certificate; clients get its pin with the next subscription refresh.",
+    "now": "Now",
+    "trusted": "trusted",
+    "pinned": "pinned",
+    "soon": "{n, plural, one {# day left} other {# days left}}",
+    "issued": "Issued by {issuer} · until {until}",
+    "chain": "Certificate with its chain",
+    "chainHint": "fullchain.pem: the certificate first, then the intermediates.",
+    "key": "Private key",
+    "keyHint": "privkey.pem. It stays in the panel and is never shown again.",
+    "pick": "Choose a file",
+    "replace": "Replace",
+    "tooBig": "Larger than 64 KB: not a certificate or a key",
+    "install": "Install",
+    "saved": "Certificate installed",
+    "cleared": "Own certificate removed",
+    "cliHint": "Renewing with certbot or acme.sh? Run this on the server on renewal and the panel picks the new file up:",
+    "cliExample": "mikan cert set --cert /etc/letsencrypt/live/DOMAIN/fullchain.pem \\\n  --key /etc/letsencrypt/live/DOMAIN/privkey.pem"
   }
 }

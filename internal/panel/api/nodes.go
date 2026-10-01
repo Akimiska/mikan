@@ -38,6 +38,9 @@ type NodeInfo struct {
 	MemUsed     uint64     `json:"mem_used"`
 	MemTotal    uint64     `json:"mem_total"`
 	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+	// Certificate is the node's own one for its protocols on the node's TLS; nil: the
+	// node uses its self-signed certificate.
+	Certificate *NodeCertView `json:"certificate,omitempty"`
 }
 
 type nodesOutput struct{ Body []NodeInfo }
@@ -91,6 +94,7 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 		v.Host = ep.Host
 		v.Domain, _ = h.d.Settings.String(ctx, settings.KeyDomain)
 	}
+	v.Certificate = h.nodeCertView(n.ID, v.Host)
 	if h.d.Nodes == nil {
 		return v
 	}
@@ -259,6 +263,15 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 	}
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "enabled": n.Enabled != 0})
+	return h.nodeInfo(ctx, n.ID)
+}
+
+// nodeInfo is one node as the Nodes page shows it.
+func (h *handlers) nodeInfo(ctx context.Context, id int64) (*nodeInfoOutput, error) {
+	n, err := h.getNode(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	inbounds, err := h.d.Store.Q.ListInbounds(ctx)
 	if err != nil {
 		return nil, err

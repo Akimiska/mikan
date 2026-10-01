@@ -28,6 +28,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
 	"mikan/internal/panel/warp"
 )
@@ -71,6 +72,12 @@ type Deps struct {
 	// why the saved one is not served. nil: the panel runs no server (tests).
 	SubPort      func(port int) error
 	SubPortError func() string
+	// SetCert installs the admin's own certificate for the panel, ClearCert goes back to
+	// Let's Encrypt; nil in development.
+	SetCert   func(ctx context.Context, certPEM, keyPEM []byte) error
+	ClearCert func() error
+	// NodeCerts keeps the nodes' own certificates; nil: nodes cannot have one.
+	NodeCerts *tlscert.NodeStore
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
 }
@@ -169,6 +176,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTargets()
 	h.registerStats()
 	h.registerSettings()
+	h.registerCerts()
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()

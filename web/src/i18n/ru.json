@@ -228,13 +228,24 @@
       "rule_option": "Строка {value}: no-resolve — только для GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX и IP-ASN",
       "rule_too_long": "Строка {value}: слишком длинная — до 512 символов",
       "rules_too_many": "Строка {value}: правил больше 500",
-      "group_in_rules": "Правило Clash в строке {value} ведёт в эту группу — сначала поправьте правила"
+      "group_in_rules": "Правило Clash в строке {value} ведёт в эту группу — сначала поправьте правила",
+      "cert_pem_invalid": "Это не сертификат в PEM: нужен fullchain.pem",
+      "key_pem_invalid": "Это не закрытый ключ в PEM: нужен privkey.pem",
+      "cert_key_mismatch": "Ключ не от этого сертификата",
+      "cert_key_weak": "Слабый ключ: нужен RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519",
+      "cert_expired": "Срок сертификата уже истёк",
+      "cert_not_yet_valid": "Сертификат ещё не начал действовать",
+      "cert_wrong_host": "Сертификат не для адреса панели ({value}) — клиенты его не примут",
+      "node_certs_disabled": "Сертификаты нод здесь недоступны"
     },
     "acme": {
       "port80_busy": "Порт 80 занят другой программой — Let's Encrypt проверяет сервер через него",
       "rate_limited": "Let's Encrypt временно ограничил выпуск (много переустановок) — попробуем позже",
       "unreachable": "Let's Encrypt не достучался до сервера по порту 80 — проверьте файрвол",
-      "no_public_host": "Нужен публичный IP или домен"
+      "no_public_host": "Нужен публичный IP или домен",
+      "custom_expired": "Свой сертификат истёк — работает запасной. Поставьте новый",
+      "custom_invalid": "Свой сертификат не читается — работает запасной. Поставьте его заново",
+      "custom_wrong_host": "Свой сертификат не для текущего адреса панели — клиенты будут ругаться"
     }
   },
   "login": {
@@ -820,7 +831,12 @@
     "rulesHint": "По правилу в строке, строки с # — комментарии. Правило с ошибкой не сохранится — так оно не сломает профиль у клиентов. В Happ, v2RayTun и Hiddify правила не попадают: у них нет такого формата.",
     "rulesTargets": "Куда:",
     "rulesTypes": "Типы правил",
-    "rulesTypesText": "DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, GEOSITE, GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX, SRC-IP-CIDR, DST-PORT, SRC-PORT, NETWORK, PROCESS-NAME, PROCESS-PATH — понимают все приложения на mihomo. DOMAIN-REGEX, IP-ASN, SRC-GEOIP (ядро 1.18+) и DOMAIN-WILDCARD (1.19.12+) получают только приложения, которые сообщают версию ядра, — иначе старое ядро не загрузило бы профиль целиком. no-resolve — для GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX и IP-ASN."
+    "rulesTypesText": "DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, GEOSITE, GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX, SRC-IP-CIDR, DST-PORT, SRC-PORT, NETWORK, PROCESS-NAME, PROCESS-PATH — понимают все приложения на mihomo. DOMAIN-REGEX, IP-ASN, SRC-GEOIP (ядро 1.18+) и DOMAIN-WILDCARD (1.19.12+) получают только приложения, которые сообщают версию ядра, — иначе старое ядро не загрузило бы профиль целиком. no-resolve — для GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX и IP-ASN.",
+    "certCustom": "Свой сертификат: {names} · до {until}",
+    "certOwn": "Свой",
+    "certOwnNote": "Продлевается вашими средствами: новый файл панель подхватит без перезапуска.",
+    "certOwnButton": "Свой сертификат",
+    "certReplace": "Заменить"
   },
   "sub": {
     "loadFailed": "Не удалось загрузить подписку",
@@ -956,7 +972,10 @@
     "localAddress": "Адрес своей ноды — это адрес панели, он меняется в настройках.",
     "serving": "Обслуживает клиентов",
     "servingHint": "Выключенная нода не принимает подключения и пропадает из подписок.",
-    "nameLocalHint": "Дайте своей ноде имя с флагом, например «🇳🇱 Нидерланды»: это её группа в подписке, а флаг — префикс её подключений."
+    "nameLocalHint": "Дайте своей ноде имя с флагом, например «🇳🇱 Нидерланды»: это её группа в подписке, а флаг — префикс её подключений.",
+    "cert": "Сертификат",
+    "certOwn": "свой, до {until}",
+    "certButton": "Сертификат"
   },
   "telegram": {
     "subtitle": "Бот для владельцев подписок и Mini App со страницей подписки",
@@ -1330,5 +1349,32 @@
     "editLimits": "Изменить лимиты",
     "userSaved": "Лимиты пулов сохранены",
     "exhausted": "Лимит исчерпан: подключения пула не работают до сброса"
+  },
+  "cert": {
+    "panelTitle": "Свой сертификат панели",
+    "panelLead": "Вместо Let's Encrypt: например, wildcard от certbot по DNS, Cloudflare Origin или сертификат вашего центра. Порт 80 тогда не нужен.",
+    "panelClear": "Вернуть Let's Encrypt",
+    "panelClearText": "Панель снова получит сертификат Let's Encrypt (нужен порт 80), а до этого останется на своём.",
+    "nodeTitle": "Свой сертификат ноды",
+    "nodeLead": "Для протоколов на сертификате ноды: Hysteria2, TUIC, AnyTLS, TrustTunnel. Публично доверенный сертификат приложения примут без пина — его продление ничего не сломает.",
+    "nodeClear": "Вернуть самоподписанный",
+    "nodeClearText": "Нода вернётся на свой самоподписанный сертификат; клиенты получат его пин при обновлении подписки.",
+    "now": "Сейчас",
+    "trusted": "доверенный",
+    "pinned": "с пином",
+    "soon": "{n, plural, one {остался # день} few {осталось # дня} many {осталось # дней} other {осталось # дня}}",
+    "issued": "Выдал {issuer} · до {until}",
+    "chain": "Сертификат с цепочкой",
+    "chainHint": "fullchain.pem: сначала сам сертификат, за ним промежуточные.",
+    "key": "Закрытый ключ",
+    "keyHint": "privkey.pem. Хранится в панели и больше нигде не показывается.",
+    "pick": "Выбрать файл",
+    "replace": "Заменить",
+    "tooBig": "Файл больше 64 КБ — это не сертификат и не ключ",
+    "install": "Поставить",
+    "saved": "Сертификат установлен",
+    "cleared": "Свой сертификат убран",
+    "cliHint": "Продлеваете через certbot или acme.sh? Повесьте на продление команду на сервере — панель подхватит новый файл сама:",
+    "cliExample": "mikan cert set --cert /etc/letsencrypt/live/ДОМЕН/fullchain.pem \\\n  --key /etc/letsencrypt/live/ДОМЕН/privkey.pem"
   }
 }

@@ -180,25 +180,8 @@ func (h *handlers) getSettings(ctx context.Context, _ *struct{}) (*settingsOutpu
 	return &settingsOutput{Body: v}, nil
 }
 
-func validHost(s string) bool {
-	if s == "" {
-		return true
-	}
-	if net.ParseIP(s) != nil {
-		return true
-	}
-	for _, label := range strings.Split(s, ".") {
-		if label == "" || len(label) > 63 {
-			return false
-		}
-		for _, r := range label {
-			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
-				return false
-			}
-		}
-	}
-	return strings.Contains(s, ".")
-}
+// validHost: empty (not set) or a host proto accepts.
+func validHost(s string) bool { return s == "" || proto.ValidHost(s) }
 
 func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (*settingsOutput, error) {
 	b := in.Body

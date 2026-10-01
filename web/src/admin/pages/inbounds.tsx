@@ -115,7 +115,7 @@ export function InboundsPage() {
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-500)]">
                     <span>{i.preset === "custom" ? t("inbounds.customOf", { type: i.type }) : i.title}</span>
                     <span>·</span>
-                    <span>{t("inbounds.port", { port: i.port, network: i.network })}</span>
+                    <span>{t("inbounds.port", { port: i.listen ? hostPort(i.listen, i.port) : i.port, network: i.network })}</span>
                     <span>·</span>
                     <span className="mono">{i.name}</span>
                   </div>
@@ -206,17 +206,54 @@ function AutoInfo({ i }: { i: Inbound }) {
   );
 }
 
-/** One switch of the automatic fixes; says so when the global switch is off. */
-function AutoSwitch({ title, sub, on, globalOff, onChange }: { title: string; sub: string; on: boolean; globalOff: boolean; onChange: (v: boolean) => void }) {
+/** One switch of the automatic fixes; says so when the global switch is off, why it is
+ * locked (shown off), or what to watch out for. */
+function AutoSwitch({
+  title,
+  sub,
+  on,
+  globalOff,
+  locked,
+  warn,
+  onChange,
+}: {
+  title: string;
+  sub: string;
+  on: boolean;
+  globalOff: boolean;
+  locked?: string;
+  warn?: string;
+  onChange: (v: boolean) => void;
+}) {
+  const note = locked ?? (globalOff ? t("inbounds.autoOffGlobal") : sub);
   return (
     <div className="flex items-start justify-between gap-4 py-2">
       <div className="min-w-0">
         <div className="text-[13px] font-medium">{title}</div>
-        <div className={globalOff ? "mt-1 text-xs text-[var(--honey-600)]" : "mt-1 text-xs text-[var(--ink-500)]"}>{globalOff ? t("inbounds.autoOffGlobal") : sub}</div>
+        <div className={locked || globalOff ? "mt-1 text-xs text-[var(--honey-600)]" : "mt-1 text-xs text-[var(--ink-500)]"}>{note}</div>
+        {warn ? (
+          <div className="mt-1 flex items-start gap-1 text-xs text-[var(--honey-600)]" role="note">
+            <TriangleAlert size={14} className="mt-px shrink-0" aria-hidden /> {warn}
+          </div>
+        ) : null}
       </div>
-      <Switch checked={on} label={title} onChange={onChange} />
+      <Switch checked={locked ? false : on} label={title} onChange={onChange} disabled={!!locked} />
     </div>
   );
+}
+
+type ListenAt = "all" | "local" | "custom";
+
+const loopback = (addr: string) => addr === "127.0.0.1" || addr === "::1";
+
+/** Which choice of the listen switch an address is. */
+function listenAt(addr: string): ListenAt {
+  return addr === "" ? "all" : loopback(addr) ? "local" : "custom";
+}
+
+/** host:port as clients and proxies write it: an IPv6 address in brackets. */
+function hostPort(host: string, port: string): string {
+  return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
 }
 
 /** Badges of a preset that not every app or feature works with. */
@@ -495,6 +532,11 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [config, setConfig] = useState("");
   const [autoPort, setAutoPort] = useState(true);
   const [autoSni, setAutoSni] = useState(true);
+  const [listenMode, setListenMode] = useState<ListenAt>("all");
+  const [listenIP, setListenIP] = useState(""); // the address of its own for "custom"
+  const [clientServer, setClientServer] = useState(""); // what clients get: "" = as now
+  const [clientPort, setClientPort] = useState("");
+  const [clientSni, setClientSni] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const settings = useSettings();
   const warp = useWarp(inbound?.node_id ?? null, !!inbound);
@@ -513,6 +555,11 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setConfig(inbound.config);
     setAutoPort(inbound.auto_port);
     setAutoSni(inbound.auto_sni);
+    setListenMode(listenAt(inbound.listen));
+    setListenIP(listenAt(inbound.listen) === "custom" ? inbound.listen : "");
+    setClientServer(inbound.client.server);
+    setClientPort(inbound.client.port ? String(inbound.client.port) : "");
+    setClientSni(inbound.client.sni);
     setErrors({});
     validate.reset();
     // `validate` changes identity on every render; reset only for another inbound.
@@ -527,8 +574,8 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     mutationFn: (body: Schemas["PatchInboundInputBody"]) => unwrap(api.PATCH("/api/v1/inbounds/{id}", { params: { path: { id: inbound!.id } }, body })),
     onSuccess: (_, body) => {
       void qc.invalidateQueries({ queryKey: qk.inbounds });
-      // The automatic-fix switches change nothing clients get.
-      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni" || k === "outbound" || k === "exit_node_id" || k === "pool_id");
+      // The automatic-fix switches and the listen address change nothing clients get.
+      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni" || k === "outbound" || k === "exit_node_id" || k === "pool_id" || k === "listen");
       toast.ok(autoOnly ? t("inbounds.savedAuto") : t("inbounds.saved"));
       onClose();
     },
@@ -541,6 +588,11 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     },
   });
   const configChanged = !!inbound && config !== inbound.config;
+  // Localhost keeps a loopback address it has (::1), else takes 127.0.0.1.
+  const listen = listenMode === "all" ? "" : listenMode === "local" ? (inbound && loopback(inbound.listen) ? inbound.listen : "127.0.0.1") : listenIP.trim();
+  // Behind a proxy the port is what the proxy forwards to: it never moves on its own.
+  const behindProxy = listenMode !== "all";
+  const clearError = (key: string) => setErrors(({ [key]: _, ...rest }) => rest);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const body: Schemas["PatchInboundInputBody"] = {};
@@ -565,8 +617,24 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     }
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
     if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && (obfs === "salamander" || obfs === "gecko")) body.obfs = obfs;
+    if (listenMode === "custom" && !listen) {
+      setErrors({ listen: t("inbounds.listenRequired") });
+      return;
+    }
+    if (listen !== inbound?.listen) body.listen = listen;
+    const cport = clientPort.trim() === "" ? 0 : Number(clientPort.trim());
+    if (!Number.isInteger(cport) || cport < 0 || cport > 65535) {
+      setErrors({ "client.port": t("errors.api.config_client_port") });
+      return;
+    }
+    // Without a TLS name of its own to change (REALITY, no TLS) the SNI is not the form's.
+    const client = { server: clientServer.trim(), port: cport, sni: inbound?.client_sni ? clientSni.trim() : "" };
+    const clientChanged =
+      !!inbound && (client.server !== inbound.client.server || client.port !== inbound.client.port || (inbound.client_sni && client.sni !== inbound.client.sni));
+    if (!configChanged && clientChanged) body.client = client;
     if (poolId !== (inbound?.pool_id ?? 0)) body.pool_id = poolId;
-    if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
+    const autoPortNow = autoPort && !behindProxy;
+    if (autoPortNow !== inbound?.auto_port) body.auto_port = autoPortNow;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
     if (outbound === "node" && !exitNode) {
       setErrors({ exit_node_id: t("inbounds.exitPick") });
@@ -771,11 +839,132 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
                   </select>
                 </Field>
               ) : null}
+              <div className="mb-4 border-t border-[var(--hairline)] pt-4" role="group" aria-labelledby="ed-proxy">
+                <div id="ed-proxy" className="text-[13px] font-semibold">
+                  {t("inbounds.proxy")}
+                </div>
+                <p className="mt-1 mb-4 text-xs text-[var(--ink-500)]">{t("inbounds.proxySub")}</p>
+                <Field
+                  label={t("inbounds.listen")}
+                  htmlFor={listenMode === "custom" ? "ed-listen" : undefined}
+                  error={errors.listen}
+                  hint={
+                    listenMode === "all"
+                      ? t("inbounds.listenAllHint")
+                      : listenMode === "local"
+                        ? t("inbounds.listenLocalHint", { addr: hostPort(listen, port.trim() || (inbound?.port ?? "")) })
+                        : t("inbounds.listenCustomHint")
+                  }
+                >
+                  <Segmented
+                    label={t("inbounds.listen")}
+                    value={listenMode}
+                    onChange={(v) => {
+                      setListenMode(v);
+                      clearError("listen");
+                    }}
+                    options={[
+                      { value: "all", label: t("inbounds.listenAll") },
+                      { value: "local", label: t("inbounds.listenLocal") },
+                      { value: "custom", label: t("inbounds.listenCustom") },
+                    ]}
+                  />
+                  {listenMode === "custom" ? (
+                    <input
+                      id="ed-listen"
+                      className="input mono mt-2 max-w-[320px]"
+                      value={listenIP}
+                      onChange={(e) => {
+                        setListenIP(e.target.value);
+                        clearError("listen");
+                      }}
+                      placeholder="10.0.0.5"
+                      aria-invalid={!!errors.listen}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  ) : null}
+                </Field>
+                <div className="grid gap-x-4 sm:grid-cols-[1fr_160px]">
+                  <Field label={t("inbounds.clientServer")} htmlFor="ed-client-server" error={errors["client.server"]}>
+                    <input
+                      id="ed-client-server"
+                      className="input mono"
+                      value={clientServer}
+                      onChange={(e) => {
+                        setClientServer(e.target.value);
+                        clearError("client.server");
+                      }}
+                      placeholder={t("inbounds.clientServerDefault")}
+                      aria-invalid={!!errors["client.server"]}
+                      spellCheck={false}
+                      autoComplete="off"
+                      disabled={configChanged}
+                    />
+                  </Field>
+                  <Field label={t("inbounds.clientPort")} htmlFor="ed-client-port" error={errors["client.port"]}>
+                    <input
+                      id="ed-client-port"
+                      className="input"
+                      inputMode="numeric"
+                      value={clientPort}
+                      onChange={(e) => {
+                        setClientPort(e.target.value);
+                        clearError("client.port");
+                      }}
+                      placeholder={inbound?.port}
+                      aria-invalid={!!errors["client.port"]}
+                      disabled={configChanged}
+                    />
+                  </Field>
+                </div>
+                {inbound?.client_sni ? (
+                  <Field label={t("inbounds.clientSni")} htmlFor="ed-client-sni" error={errors["client.sni"]}>
+                    <input
+                      id="ed-client-sni"
+                      className="input mono"
+                      value={clientSni}
+                      onChange={(e) => {
+                        setClientSni(e.target.value);
+                        clearError("client.sni");
+                      }}
+                      placeholder={t("inbounds.clientSniDefault")}
+                      aria-invalid={!!errors["client.sni"]}
+                      spellCheck={false}
+                      autoComplete="off"
+                      disabled={configChanged}
+                    />
+                  </Field>
+                ) : null}
+                <p className={behindProxy && !clientPort.trim() && !configChanged ? "text-xs text-[var(--honey-600)]" : "text-xs text-[var(--ink-500)]"} role="note">
+                  {configChanged
+                    ? t("inbounds.clientLocked")
+                    : behindProxy && !clientPort.trim()
+                      ? t("inbounds.clientPortWarn", { port: port.trim() || (inbound?.port ?? "") })
+                      : inbound?.dest !== undefined
+                        ? t("inbounds.clientHintReality")
+                        : t("inbounds.clientHint")}
+                </p>
+              </div>
               <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("inbounds.auto")}>
                 <div className="mb-1 text-[13px] font-semibold">{t("inbounds.auto")}</div>
-                <AutoSwitch title={t("inbounds.autoPort")} sub={t("inbounds.autoPortSub")} on={autoPort} globalOff={settings.data?.auto_port === false} onChange={setAutoPort} />
+                <AutoSwitch
+                  title={t("inbounds.autoPort")}
+                  sub={t("inbounds.autoPortSub")}
+                  on={autoPort}
+                  globalOff={settings.data?.auto_port === false}
+                  locked={behindProxy ? t("inbounds.autoPortProxy") : undefined}
+                  onChange={setAutoPort}
+                />
                 {inbound?.dest !== undefined ? (
-                  <AutoSwitch title={t("inbounds.autoSni")} sub={t("inbounds.autoSniSub")} on={autoSni} globalOff={settings.data?.auto_sni === false} onChange={setAutoSni} />
+                  <AutoSwitch
+                    title={t("inbounds.autoSni")}
+                    sub={t("inbounds.autoSniSub")}
+                    on={autoSni}
+                    globalOff={settings.data?.auto_sni === false}
+                    warn={behindProxy && autoSni ? t("inbounds.autoSniProxy") : undefined}
+                    onChange={setAutoSni}
+                  />
                 ) : null}
               </div>
             </>

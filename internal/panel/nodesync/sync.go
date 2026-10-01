@@ -149,7 +149,7 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 			s.log.Error("inbound config", "inbound", in.Name, "err", err)
 			continue
 		}
-		ni := nodeapi.Inbound{Name: in.Name, Port: in.Port, Config: t.JSON()}
+		ni := nodeapi.Inbound{Name: in.Name, Listen: in.Listen, Port: in.Port, Config: t.JSON()}
 		if in.PoolID.Valid {
 			ni.Pool = strconv.FormatInt(in.PoolID.Int64, 10)
 		}

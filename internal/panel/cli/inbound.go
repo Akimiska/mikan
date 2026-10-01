@@ -117,6 +117,11 @@ func openPort(ctx context.Context, st *store.Store, in db.Inbound, stdout, stder
 		return err
 	}
 	rule := in.Port + "/" + domain.InboundNetwork(in)
+	if domain.ListenPinsPort(in.Listen) {
+		// Behind a proxy on the server: only the proxy's port is open to clients.
+		fmt.Fprintf(stderr, "The inbound listens on %s only: point the proxy in front at port %s.\n", in.Listen, rule)
+		return nil
+	}
 	if n.Address != "" {
 		fmt.Fprintf(stderr, "Open the port on the node's server %s: ufw allow %s\n", n.PublicHost, strings.Replace(rule, "-", ":", 1))
 		return nil

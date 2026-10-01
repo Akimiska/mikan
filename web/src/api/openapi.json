@@ -458,6 +458,34 @@
         ],
         "type": "object"
       },
+      "ClientEndpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "description": "Порт для клиентов; 0 — порт подключения",
+            "format": "int64",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "server": {
+            "description": "Адрес для клиентов; пусто — адрес ноды",
+            "maxLength": 253,
+            "type": "string"
+          },
+          "sni": {
+            "description": "SNI для клиентов; пусто — как обычно",
+            "maxLength": 253,
+            "type": "string"
+          }
+        },
+        "required": [
+          "server",
+          "port",
+          "sni"
+        ],
+        "type": "object"
+      },
       "Config": {
         "additionalProperties": false,
         "properties": {
@@ -876,6 +904,14 @@
             "description": "Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)",
             "type": "boolean"
           },
+          "client": {
+            "$ref": "#/components/schemas/ClientEndpoint",
+            "description": "Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне)"
+          },
+          "client_sni": {
+            "description": "Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки",
+            "type": "boolean"
+          },
           "config": {
             "description": "Шаблон листенера (YAML)",
             "type": "string"
@@ -906,6 +942,10 @@
           "id": {
             "format": "int64",
             "type": "integer"
+          },
+          "listen": {
+            "description": "Адрес, на котором нода слушает: пусто — все адреса, 127.0.0.1 — только сам сервер (за nginx или HAProxy)",
+            "type": "string"
           },
           "name": {
             "type": "string"
@@ -984,6 +1024,7 @@
           "type",
           "network",
           "port",
+          "listen",
           "enabled",
           "display_name",
           "sub_name",
@@ -994,7 +1035,9 @@
           "auto_port",
           "auto_sni",
           "auto",
-          "outbound"
+          "outbound",
+          "client",
+          "client_sni"
         ],
         "type": "object"
       },
@@ -1520,10 +1563,15 @@
         "additionalProperties": false,
         "properties": {
           "auto_port": {
+            "description": "Нельзя включить, пока у подключения свой адрес (listen)",
             "type": "boolean"
           },
           "auto_sni": {
             "type": "boolean"
+          },
+          "client": {
+            "$ref": "#/components/schemas/ClientEndpoint",
+            "description": "Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три"
           },
           "config": {
             "description": "Шаблон листенера (YAML)",
@@ -1551,6 +1599,11 @@
           "fingerprint": {
             "description": "Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек",
             "maxLength": 32,
+            "type": "string"
+          },
+          "listen": {
+            "description": "Адрес, на котором нода слушает: пусто — все адреса, иначе один IP (127.0.0.1 — за nginx или HAProxy на том же сервере). Свой адрес выключает перенос порта",
+            "maxLength": 64,
             "type": "string"
           },
           "obfs": {

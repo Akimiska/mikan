@@ -176,3 +176,39 @@ func TestSetInboundTarget(t *testing.T) {
 		}
 	}
 }
+
+// The listen address the admin types: every address, or one IP literal.
+func TestParseListen(t *testing.T) {
+	for in, want := range map[string]string{"": "", " ": "", "0.0.0.0": "", "::": "", "127.0.0.1": "127.0.0.1", " 10.0.0.5 ": "10.0.0.5",
+		"::1": "::1", "2001:DB8::1": "2001:db8::1", "::ffff:127.0.0.1": "127.0.0.1"} {
+		if got, err := ParseListen(in); err != nil || got != want {
+			t.Errorf("%q: %q %v, want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"localhost", "127.0.0.1:444", "fe80::1%eth0", "224.0.0.1", "10.0.0.0/8", "0.0.0.0\nlisten: x"} {
+		if _, err := ParseListen(bad); !errors.Is(err, ErrBadListen) {
+			t.Errorf("%q accepted: %v", bad, err)
+		}
+	}
+	if ListenPinsPort("") || !ListenPinsPort("127.0.0.1") {
+		t.Fatal("only an address of its own pins the port")
+	}
+}
+
+// One port number per node and network, whatever address the inbounds listen on.
+func TestPortTakenOnAnotherAddress(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	st, _, _ := setup(t, &now)
+	ctx := context.Background()
+	_, moved, err := SetInboundPort(ctx, st, 1, "vless-xhttp", "444", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Q.SetInboundListen(ctx, db.SetInboundListenParams{Listen: "127.0.0.1", ID: moved.ID}); err != nil {
+		t.Fatal(err)
+	}
+	var busy *PortInUseError
+	if _, _, err := SetInboundPort(ctx, st, 1, "vless-vision", "444", now); !errors.As(err, &busy) || busy.Owner != "vless-xhttp" {
+		t.Fatalf("tcp 444 is taken by vless-xhttp on 127.0.0.1: %v", err)
+	}
+}

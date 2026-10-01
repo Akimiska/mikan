@@ -438,7 +438,8 @@ func (t *Tuner) remedy(ctx context.Context, w *world, n db.Node, x db.Inbound) {
 		return
 	}
 	dest, _ := presets.Dest(tpl)
-	portOK := w.portOn && x.AutoPort != 0 && !strings.Contains(x.Port, "-") // hopping ranges are the admin's
+	// Hopping ranges are the admin's, and so is a port a proxy in front forwards to.
+	portOK := w.portOn && x.AutoPort != 0 && !strings.Contains(x.Port, "-") && !domain.ListenPinsPort(x.Listen)
 	sniOK := w.sniOn && x.AutoSni != 0 && dest != ""
 	h := t.history(w, x.ID)
 	switch {

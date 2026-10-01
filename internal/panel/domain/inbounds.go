@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ var (
 	ErrUnknownInbound = errors.New("unknown_inbound")
 	ErrBadPort        = errors.New("bad_port")
 	ErrNoReality      = errors.New("no_reality")
+	ErrBadListen      = errors.New("bad_listen")
 )
 
 // PortInUseError names the enabled inbound that already listens on the port.
@@ -42,6 +44,29 @@ func ValidPort(spec string) bool {
 	b, err := strconv.Atoi(hi)
 	return err == nil && b > a && b <= 65535
 }
+
+// ParseListen reads the address an inbound listens on: "" (or 0.0.0.0, ::) for every
+// address, else one IPv4 or IPv6 address, e.g. 127.0.0.1 behind nginx on the same server.
+func ParseListen(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	a, err := netip.ParseAddr(s)
+	if err != nil || a.Zone() != "" || a.IsMulticast() {
+		return "", ErrBadListen
+	}
+	if a.IsUnspecified() {
+		return "", nil
+	}
+	return a.Unmap().String(), nil
+}
+
+// ListenPinsPort: an inbound on an address of its own sits behind a TCP proxy (nginx
+// stream, HAProxy) that forwards to its port, so the port must not move on its own. Two
+// inbounds of a node still may not share a port number on different addresses: one rule
+// for every check, and a bind on every address takes the port on all of them.
+func ListenPinsPort(listen string) bool { return listen != "" }
 
 // SetInboundTarget points a REALITY inbound of a node at another camouflage site: dest is
 // host:port, sni the name clients send ("" = the host of dest). Only the panel's own node

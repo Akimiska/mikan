@@ -3,6 +3,13 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.4.3
+### en
+- Protocols behind a TCP proxy (#11): a protocol's settings have "Behind a proxy (nginx, HAProxy)". "Where the node listens" picks all addresses (as before), localhost only or an IP of your own, so nginx stream or HAProxy can hold port 443 and route by SNI to protocols on 127.0.0.1:444, :445… "Address for clients", "Port for clients" and "SNI for clients" give subscriptions the proxy's endpoint instead of the node's (empty keeps them as now; with REALITY the camouflage site's domain stays the SNI). Such a protocol's port never moves on its own: automatic port moves are off and cannot be turned on, and the panel warns that an automatic camouflage site change may break SNI routing.
+
+### ru
+- Подключения за TCP-прокси (#11): в настройках подключения — блок «За прокси (nginx, HAProxy)». «Где нода слушает» — все адреса (как раньше), только localhost или свой IP: так nginx stream или HAProxy держит порт 443 и раздаёт по SNI подключениям на 127.0.0.1:444, :445… «Адрес», «Порт» и «SNI для клиентов» отдают в подписке адрес прокси вместо адреса ноды (пусто — как сейчас; у REALITY SNI остаётся доменом сайта маскировки). Порт такого подключения сам не меняется: автоперенос порта выключен и не включается, а про автосмену сайта маскировки панель предупреждает — она может сбить маршрут по SNI.
+
 ## 0.4.2
 ### en
 - ARM servers (Raspberry Pi 4 and other arm64 machines) install again: the arm64 image carried x86-64 binaries and stopped with "exec format error". The image build now fails if a binary does not match its architecture. A Raspberry Pi needs a 64-bit OS.

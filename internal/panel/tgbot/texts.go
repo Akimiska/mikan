@@ -29,6 +29,7 @@ type words struct {
 	// The shop.
 	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payButton, invoice, payNew, payRenew string
 	notForSale, payUnavailable, tooManyInvoices, payStale, paidNew, paidRenew                             string
+	poolOut                                                                                               string // a traffic pool used up
 }
 
 var ru = words{
@@ -75,6 +76,7 @@ var ru = words{
 	payStale:        "Счёт устарел. Откройте меню бота и оплатите заново.",
 	paidNew:         "✅ Оплата получена — подписка «%s» готова (тариф «%s»).\n\nДобавьте ссылку в приложение:\n<code>%s</code>",
 	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
+	poolOut:         "закончился до сброса",
 }
 
 var en = words{
@@ -121,6 +123,7 @@ var en = words{
 	payStale:        "The invoice is out of date. Open the bot's menu and pay again.",
 	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
 	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
+	poolOut:         "used up until the reset",
 }
 
 func wordsFor(lang string) *words {

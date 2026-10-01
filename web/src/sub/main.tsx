@@ -5,7 +5,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Atmosphere } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
-import { Button, Pill, QR, Ring, Skeleton } from "../components/ui";
+import { Bar, Button, Pill, QR, Ring, Skeleton } from "../components/ui";
 import { t, useLocale } from "../i18n";
 import { ago, appName, bytes, dateLong, dateShort, days, daysUntil, time } from "../lib/format";
 import { loadShop, Shop, type ShopData } from "./shop";
@@ -26,6 +26,7 @@ type Info = {
   devices?: Device[];
   unbind_after?: string;
   telegram?: string;
+  pools?: { name: string; limit?: number; used: number }[];
 };
 
 type Device = { id: number; os: string; os_version: string; model: string; app: string; shared: boolean; created_at: string; last_seen: string };
@@ -325,6 +326,24 @@ function SubPage() {
           ) : null}
         </div>
       </section>
+
+      {info.pools?.length ? (
+        <section className="glass rounded-3xl p-4">
+          <h2 className="mb-3 text-[15px] font-semibold">{t("sub.pools")}</h2>
+          <ul className="flex flex-col gap-3">
+            {info.pools.map((p) => (
+              <li key={p.name}>
+                <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
+                  <span className="font-medium">{p.name}</span>
+                  <span className="num text-xs text-[var(--ink-600)]">{p.limit != null ? `${bytes(p.used)} ${t("users.of", { total: bytes(p.limit) })}` : bytes(p.used)}</span>
+                </div>
+                {p.limit != null ? <Bar pct={Math.min(100, (p.used / p.limit) * 100)} /> : null}
+                {p.limit != null && p.used >= p.limit ? <p className="mt-1 text-xs text-[var(--berry-600)]">{t("sub.poolOut")}</p> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {info.binding || info.devices?.length ? <Devices info={info} subURL={subURL} reload={() => load()} /> : null}
 

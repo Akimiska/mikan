@@ -367,12 +367,17 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 		return prof, err
 	}
 	allowed := domain.DecodeInbounds(u.Inbounds)
+	// A traffic pool that ran out leaves the subscription; the node already turns it away.
+	spent, err := domain.ExhaustedPools(ctx, h.st.Q, u.ID)
+	if err != nil {
+		return prof, err
+	}
 	nodes := map[int64]bool{}
 	for _, n := range cfg.Nodes {
 		nodes[n.ID] = true
 	}
 	for _, in := range all {
-		if in.Enabled == 0 || !nodes[in.NodeID] || (len(allowed) > 0 && !slices.Contains(allowed, in.ID)) {
+		if in.Enabled == 0 || !nodes[in.NodeID] || (len(allowed) > 0 && !slices.Contains(allowed, in.ID)) || in.PoolID.Valid && spent[in.PoolID.Int64] {
 			continue
 		}
 		prof.Inbounds = append(prof.Inbounds, in)
@@ -420,6 +425,8 @@ type Info struct {
 	Binding     bool         `json:"binding"`
 	Bound       []DeviceItem `json:"devices"`
 	UnbindAfter *time.Time   `json:"unbind_after,omitempty" doc:"The subscriber may unbind again from then"`
+	// Pools: the user's traffic pools with a limit or with traffic used.
+	Pools []PoolInfo `json:"pools,omitempty"`
 }
 
 // DeviceItem is a bound device as the subscription page lists it.
@@ -480,6 +487,12 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 			out.Locations = append(out.Locations, n.Name)
 		}
 	}
+	pools, err := h.poolInfo(ctx, u.ID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	out.Pools = pools
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(out)
@@ -584,4 +597,41 @@ func Format(userAgent, accept, query string) string {
 		return "html"
 	}
 	return "uri"
+}
+
+// PoolInfo is one traffic pool as the subscription page shows it.
+type PoolInfo struct {
+	Name  string `json:"name"`
+	Limit *int64 `json:"limit,omitempty"` // bytes; none: unlimited
+	Used  int64  `json:"used"`
+}
+
+// poolInfo lists the user's pools worth showing: those with a limit or some traffic.
+func (h *Handler) poolInfo(ctx context.Context, userID int64) ([]PoolInfo, error) {
+	rows, err := h.st.Q.ListUserPools(ctx, userID)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	pools, err := h.st.Q.ListTrafficPools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := map[int64]string{}
+	for _, p := range pools {
+		names[p.ID] = p.Name
+	}
+	var out []PoolInfo
+	for _, r := range rows {
+		used := r.UsedUp + r.UsedDown
+		if !r.TrafficLimit.Valid && used == 0 {
+			continue
+		}
+		pi := PoolInfo{Name: names[r.PoolID], Used: used}
+		if r.TrafficLimit.Valid {
+			l := r.TrafficLimit.Int64
+			pi.Limit = &l
+		}
+		out = append(out, pi)
+	}
+	return out, nil
 }

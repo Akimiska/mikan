@@ -24,6 +24,8 @@ export const qk = {
   paymentSettings: ["payment-settings"] as const,
   warp: (node: number) => ["warp", node] as const,
   cascade: (node: number) => ["cascade", node] as const,
+  pools: ["pools"] as const,
+  userPools: (id: number) => ["users", "pools", id] as const,
 };
 
 export const meQuery = {
@@ -152,3 +154,7 @@ export const userActions = {
 
 /** One paid period: a month up to the billing day, or 30 days without one. */
 export const onePeriod = (u: Pick<User, "billing_day">): Schemas["ExtendInputBody"] => (u.billing_day != null ? { months: 1 } : { days: 30 });
+
+export function usePools() {
+  return useQuery({ queryKey: qk.pools, queryFn: () => unwrap(api.GET("/api/v1/pools")) });
+}

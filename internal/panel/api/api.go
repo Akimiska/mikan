@@ -172,6 +172,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerPayments()
 	h.registerWarp()
 	h.registerCascade()
+	h.registerPools()
 	return noStore(mux), api, nil
 }
 

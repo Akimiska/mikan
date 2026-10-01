@@ -46,6 +46,9 @@ type Inbound struct {
 	// from a saved state, the panel no longer sends them.
 	Preset   string          `json:"preset,omitempty"`
 	Settings json.RawMessage `json:"settings,omitempty"`
+	// Pool is the traffic pool the inbound counts to ("" = the main quota): its own
+	// limit per user, separate from the rest (GitHub issue #6).
+	Pool string `json:"pool,omitempty"`
 }
 
 type Slot = proto.Slot
@@ -66,6 +69,9 @@ type Policy struct {
 	// OtherIPs are the slot's devices on the panel's other nodes: they count against
 	// DeviceLimit here too, and may connect here without taking another device.
 	OtherIPs []string `json:"other_ips,omitempty"`
+	// Pools are the slot's quotas in traffic pools; a pool not listed has no limit.
+	// QuotaRemaining is then the quota of the inbounds outside every pool.
+	Pools []PoolQuota `json:"pools,omitempty"`
 }
 
 type PoliciesRequest struct {
@@ -90,10 +96,11 @@ type TLSFiles struct {
 // Counters is a batch of traffic deltas. The node returns the same batch until it is
 // acknowledged, so the panel can apply it idempotently by (Epoch, Seq).
 type Counters struct {
-	Epoch  string             `json:"epoch"`
-	Seq    int64              `json:"seq"`
-	Slots  map[string]Traffic `json:"slots"`
-	Online map[string]Online  `json:"online"` // live view, not part of the batch
+	Epoch  string                        `json:"epoch"`
+	Seq    int64                         `json:"seq"`
+	Slots  map[string]Traffic            `json:"slots"`           // outside every pool
+	Pools  map[string]map[string]Traffic `json:"pools,omitempty"` // slot → pool → traffic
+	Online map[string]Online             `json:"online"`          // live view, not part of the batch
 }
 
 type Traffic struct {
@@ -271,3 +278,9 @@ func ExitName(id int64) string { return "NODE-" + strconv.FormatInt(id, 10) }
 
 // ProbeResult is the internet as seen through one outbound of the node.
 type ProbeResult = WarpStatus
+
+// PoolQuota is what is left of one traffic pool for a slot, as of the policy's BaseSeq.
+type PoolQuota struct {
+	Pool      string `json:"pool"`
+	Remaining int64  `json:"remaining"` // bytes; -1 = unlimited
+}

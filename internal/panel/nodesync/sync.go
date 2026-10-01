@@ -148,7 +148,11 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 			s.log.Error("inbound config", "inbound", in.Name, "err", err)
 			continue
 		}
-		st.Inbounds = append(st.Inbounds, nodeapi.Inbound{Name: in.Name, Port: in.Port, Config: t.JSON()})
+		ni := nodeapi.Inbound{Name: in.Name, Port: in.Port, Config: t.JSON()}
+		if in.PoolID.Valid {
+			ni.Pool = strconv.FormatInt(in.PoolID.Int64, 10)
+		}
+		st.Inbounds = append(st.Inbounds, ni)
 	}
 	if s.local {
 		// The panel runs next to its own node, so its HTTPS port is the self-steal REALITY target.
@@ -265,12 +269,18 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 		}
 	}
 	others := s.m.otherIPs(s.id, slotUser)
+	pools, err := userPoolQuotas(ctx, q)
+	if err != nil {
+		return "", nil, nil, err
+	}
 	now := s.m.now()
 	for _, u := range users {
 		names := slotsOf[u.ID]
 		sort.Strings(names)
 		for _, name := range names {
-			out = append(out, userPolicy(u, name, seq, now, here, others[name]))
+			p := userPolicy(u, name, seq, now, here, others[name])
+			p.Pools = pools[u.ID]
+			out = append(out, p)
 		}
 	}
 	return epoch, out, slotUser, nil
@@ -278,7 +288,10 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 
 // userPolicy is the user's rules for one of the user's slots.
 func userPolicy(u db.User, name string, seq int64, now time.Time, here map[int64]string, otherIPs []string) nodeapi.Policy {
-	p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(domain.State(u, now)), QuotaRemaining: -1, BaseSeq: seq, OtherIPs: otherIPs}
+	// A user whose main traffic ran out still gets in: the node turns away the inbounds
+	// outside every pool (QuotaRemaining 0) and keeps the pools that have traffic left.
+	state := domain.State(u, now)
+	p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(state) || state == domain.StateLimited, QuotaRemaining: -1, BaseSeq: seq, OtherIPs: otherIPs}
 	if u.DeviceLimit.Valid {
 		p.DeviceLimit = int(u.DeviceLimit.Int64)
 	}
@@ -343,6 +356,45 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 			}
 			if err := q.AddTrafficDaily(ctx, db.AddTrafficDailyParams{UserID: uid, Day: day, Up: t.Up, Down: t.Down}); err != nil {
 				return err
+			}
+		}
+		// Pool traffic counts to the pool, not to the main quota; the statistics take all.
+		// A pool deleted meanwhile is skipped: the batch must still go through.
+		known := map[int64]bool{}
+		if len(c.Pools) > 0 {
+			ps, err := q.ListTrafficPools(ctx)
+			if err != nil {
+				return err
+			}
+			for _, p := range ps {
+				known[p.ID] = true
+			}
+		}
+		for slot, pools := range c.Pools {
+			uid, ok := owner[slot]
+			if !ok {
+				continue
+			}
+			for pool, t := range pools {
+				id, err := strconv.ParseInt(pool, 10, 64)
+				if err == nil && !known[id] {
+					continue
+				}
+				if err != nil {
+					continue
+				}
+				if err := q.AddUserTotalTraffic(ctx, db.AddUserTotalTrafficParams{Up: t.Up, Down: t.Down, ID: uid}); err != nil {
+					return err
+				}
+				if err := q.AddUserPoolTraffic(ctx, db.AddUserPoolTrafficParams{UserID: uid, PoolID: id, UsedUp: t.Up, UsedDown: t.Down}); err != nil {
+					return err
+				}
+				if err := q.AddTrafficHourly(ctx, db.AddTrafficHourlyParams{UserID: uid, Hour: hour, Up: t.Up, Down: t.Down}); err != nil {
+					return err
+				}
+				if err := q.AddTrafficDaily(ctx, db.AddTrafficDailyParams{UserID: uid, Day: day, Up: t.Up, Down: t.Down}); err != nil {
+					return err
+				}
 			}
 		}
 		if err := q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("counters_epoch", s.id), Value: c.Epoch}); err != nil {
@@ -428,7 +480,7 @@ func stateKey(st nodeapi.DesiredState) string {
 func policyKey(ps []nodeapi.Policy) string {
 	h := sha256.New()
 	for _, p := range ps {
-		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs})
+		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, poolKey(p.Pools)})
 		h.Write(raw)
 	}
 	return hex.EncodeToString(h.Sum(nil))
@@ -606,4 +658,29 @@ func (m *Manager) Probe(ctx context.Context, id int64, proxy string) (nodeapi.Pr
 		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
 	}
 	return c.Probe(ctx, proxy)
+}
+
+// userPoolQuotas are the users' pool quotas with a limit: what is left of each.
+func userPoolQuotas(ctx context.Context, q *db.Queries) (map[int64][]nodeapi.PoolQuota, error) {
+	rows, err := q.ListAllUserPools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int64][]nodeapi.PoolQuota{}
+	for _, p := range rows {
+		if !p.TrafficLimit.Valid {
+			continue
+		}
+		out[p.UserID] = append(out[p.UserID], nodeapi.PoolQuota{Pool: strconv.FormatInt(p.PoolID, 10), Remaining: max(0, p.TrafficLimit.Int64-p.UsedUp-p.UsedDown)})
+	}
+	return out, nil
+}
+
+// poolKey: which pools have a quota, not how much is left (the node counts that down).
+func poolKey(ps []nodeapi.PoolQuota) []string {
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, p.Pool)
+	}
+	return out
 }

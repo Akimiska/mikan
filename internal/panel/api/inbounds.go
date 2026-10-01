@@ -47,6 +47,7 @@ type InboundView struct {
 	Auto        AutoView  `json:"auto"`
 	Outbound    string    `json:"outbound" enum:"direct,warp,node" doc:"Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)"`
 	ExitNodeID  *int64    `json:"exit_node_id,omitempty" doc:"Нода, через которую выходит трафик, если outbound=node"`
+	PoolID      *int64    `json:"pool_id,omitempty" doc:"Пул трафика, в который считается подключение; нет — основной трафик"`
 }
 
 // AutoView is what the automatic moves see and last did for an inbound.
@@ -97,6 +98,7 @@ type patchInboundInput struct {
 		AutoSNI     *bool   `json:"auto_sni,omitempty"`
 		Outbound    *string `json:"outbound,omitempty" enum:"direct,warp,node" doc:"Выход в интернет: напрямую, через WARP ноды или через другую ноду"`
 		ExitNodeID  *int64  `json:"exit_node_id,omitempty" minimum:"1" doc:"Для outbound=node: через какую ноду"`
+		PoolID      *int64  `json:"pool_id,omitempty" minimum:"0" doc:"Пул трафика; 0 — основной трафик"`
 	}
 }
 
@@ -148,6 +150,10 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 	v := InboundView{ID: in.ID, NodeID: in.NodeID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
 		DisplayName: in.DisplayName, SubName: subs.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: time.Unix(in.UpdatedAt, 0).UTC(),
 		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0, Outbound: in.Outbound}
+	if in.PoolID.Valid {
+		id := in.PoolID.Int64
+		v.PoolID = &id
+	}
 	if in.ExitNodeID.Valid {
 		id := in.ExitNodeID.Int64
 		v.Outbound, v.ExitNodeID = "node", &id
@@ -353,6 +359,24 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	}
 	autoChanged := autoPort != row.AutoPort || autoSNI != row.AutoSni
 	// The way out is the node's business: clients get nothing new either.
+	// The traffic pool changes only how the node counts: clients get nothing new.
+	if b.PoolID != nil {
+		pool := sql.NullInt64{Int64: *b.PoolID, Valid: *b.PoolID != 0}
+		if pool.Valid {
+			if _, err := h.d.Store.Q.GetTrafficPool(ctx, pool.Int64); errors.Is(err, sql.ErrNoRows) {
+				return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pool_id", Message: "pool_not_found"})
+			} else if err != nil {
+				return nil, err
+			}
+		}
+		if err := h.d.Store.Q.SetInboundPool(ctx, db.SetInboundPoolParams{PoolID: pool, ID: row.ID}); err != nil {
+			return nil, err
+		}
+		row.PoolID = pool
+		h.d.Changes.SlotsChanged()
+		h.d.Changes.PoliciesChanged()
+		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.pool", "inbound", row.Name, map[string]any{"pool_id": pool.Int64})
+	}
 	if b.Outbound != nil {
 		outbound, exit := *b.Outbound, sql.NullInt64{}
 		err := h.d.Store.Tx(ctx, func(q *db.Queries) error {

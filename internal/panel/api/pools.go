@@ -1,0 +1,254 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	"mikan/internal/panel/store/db"
+)
+
+// Traffic pools (GitHub issue #6): chosen inbounds count to a pool with its own limit per
+// user, apart from the main quota.
+
+type PoolView struct {
+	ID       int64    `json:"id"`
+	Name     string   `json:"name"`
+	Inbounds []string `json:"inbounds" doc:"Подключения, которые считаются в этот пул"`
+}
+
+type poolsOutput struct{ Body []PoolView }
+type poolOutput struct{ Body PoolView }
+
+type poolInput struct {
+	Body struct {
+		Name string `json:"name" minLength:"1" maxLength:"40"`
+	}
+}
+
+type poolPatchInput struct {
+	ID   int64 `path:"id" minimum:"1"`
+	Body struct {
+		Name string `json:"name" minLength:"1" maxLength:"40"`
+	}
+}
+
+// UserPoolView is one pool of a user: the limit and what is used this period.
+type UserPoolView struct {
+	PoolID       int64  `json:"pool_id"`
+	Name         string `json:"name"`
+	TrafficLimit *int64 `json:"traffic_limit" doc:"Байты за период; null — без лимита"`
+	UsedUp       int64  `json:"used_up"`
+	UsedDown     int64  `json:"used_down"`
+	Exhausted    bool   `json:"exhausted" doc:"Лимит пула исчерпан: его подключения не работают до сброса"`
+}
+
+type userPoolsOutput struct{ Body []UserPoolView }
+
+type PoolLimit struct {
+	PoolID       int64  `json:"pool_id" minimum:"1"`
+	TrafficLimit *int64 `json:"traffic_limit" minimum:"1" doc:"Байты; null — без лимита"`
+}
+
+type userPoolsInput struct {
+	ID   int64 `path:"id" minimum:"1"`
+	Body struct {
+		Pools []PoolLimit `json:"pools" maxItems:"100"`
+	}
+}
+
+func (h *handlers) registerPools() {
+	tags := []string{"inbounds"}
+	huma.Register(h.api, huma.Operation{OperationID: "list-pools", Method: http.MethodGet, Path: "/api/v1/pools", Summary: "Пулы трафика", Tags: tags}, h.listPools)
+	huma.Register(h.api, huma.Operation{OperationID: "create-pool", Method: http.MethodPost, Path: "/api/v1/pools", Summary: "Создать пул трафика", Tags: tags, DefaultStatus: http.StatusCreated}, h.createPool)
+	huma.Register(h.api, huma.Operation{OperationID: "rename-pool", Method: http.MethodPatch, Path: "/api/v1/pools/{id}", Summary: "Переименовать пул", Tags: tags}, h.renamePool)
+	huma.Register(h.api, huma.Operation{OperationID: "delete-pool", Method: http.MethodDelete, Path: "/api/v1/pools/{id}", Summary: "Удалить пул: его подключения вернутся в основной трафик", Tags: tags, DefaultStatus: http.StatusNoContent}, h.deletePool)
+	huma.Register(h.api, huma.Operation{OperationID: "user-pools", Method: http.MethodGet, Path: "/api/v1/users/{id}/pools", Summary: "Пулы трафика пользователя", Tags: []string{"users"}}, h.userPools)
+	huma.Register(h.api, huma.Operation{OperationID: "set-user-pools", Method: http.MethodPut, Path: "/api/v1/users/{id}/pools", Summary: "Лимиты пулов пользователя", Tags: []string{"users"}}, h.setUserPools)
+}
+
+func (h *handlers) pools(ctx context.Context) ([]PoolView, error) {
+	ps, err := h.d.Store.Q.ListTrafficPools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ins, err := h.d.Store.Q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PoolView, 0, len(ps))
+	for _, p := range ps {
+		v := PoolView{ID: p.ID, Name: p.Name, Inbounds: []string{}}
+		for _, in := range ins {
+			if in.PoolID.Valid && in.PoolID.Int64 == p.ID {
+				v.Inbounds = append(v.Inbounds, in.Name)
+			}
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func (h *handlers) listPools(ctx context.Context, _ *struct{}) (*poolsOutput, error) {
+	ps, err := h.pools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &poolsOutput{Body: ps}, nil
+}
+
+func poolNameError(err error) error {
+	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
+		return huma.Error409Conflict("pool_name_taken", &huma.ErrorDetail{Location: "body.name", Message: "pool_name_taken"})
+	}
+	return err
+}
+
+func (h *handlers) createPool(ctx context.Context, in *poolInput) (*poolOutput, error) {
+	name := strings.TrimSpace(in.Body.Name)
+	if name == "" {
+		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.name", Message: "name_blank"})
+	}
+	p, err := h.d.Store.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: name, CreatedAt: h.d.Now().Unix()})
+	if err != nil {
+		return nil, poolNameError(err)
+	}
+	h.audit(ctx, sessionOf(ctx).AdminID, "pool.create", "pool", strconv.FormatInt(p.ID, 10), map[string]any{"name": name})
+	return &poolOutput{Body: PoolView{ID: p.ID, Name: p.Name, Inbounds: []string{}}}, nil
+}
+
+func (h *handlers) renamePool(ctx context.Context, in *poolPatchInput) (*poolOutput, error) {
+	name := strings.TrimSpace(in.Body.Name)
+	if name == "" {
+		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.name", Message: "name_blank"})
+	}
+	n, err := h.d.Store.Q.RenameTrafficPool(ctx, db.RenameTrafficPoolParams{Name: name, ID: in.ID})
+	if err != nil {
+		return nil, poolNameError(err)
+	}
+	if n == 0 {
+		return nil, huma.Error404NotFound("not_found")
+	}
+	ps, err := h.pools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range ps {
+		if p.ID == in.ID {
+			return &poolOutput{Body: p}, nil
+		}
+	}
+	return nil, huma.Error404NotFound("not_found")
+}
+
+func (h *handlers) deletePool(ctx context.Context, in *userIDInput) (*struct{}, error) {
+	n, err := h.d.Store.Q.DeleteTrafficPool(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, huma.Error404NotFound("not_found")
+	}
+	// Its inbounds count to the main quota again; nodes and policies must know.
+	h.d.Changes.SlotsChanged()
+	h.d.Changes.PoliciesChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "pool.delete", "pool", strconv.FormatInt(in.ID, 10), nil)
+	return nil, nil
+}
+
+func (h *handlers) userPools(ctx context.Context, in *userIDInput) (*userPoolsOutput, error) {
+	if _, err := h.d.Store.Q.GetUser(ctx, in.ID); errors.Is(err, sql.ErrNoRows) {
+		return nil, huma.Error404NotFound("not_found")
+	} else if err != nil {
+		return nil, err
+	}
+	ps, err := h.d.Store.Q.ListTrafficPools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := h.d.Store.Q.ListUserPools(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	mine := map[int64]db.UserPool{}
+	for _, r := range rows {
+		mine[r.PoolID] = r
+	}
+	out := &userPoolsOutput{Body: make([]UserPoolView, 0, len(ps))}
+	for _, p := range ps {
+		r := mine[p.ID]
+		v := UserPoolView{PoolID: p.ID, Name: p.Name, TrafficLimit: ptrInt(r.TrafficLimit.Int64, r.TrafficLimit.Valid), UsedUp: r.UsedUp, UsedDown: r.UsedDown}
+		v.Exhausted = r.TrafficLimit.Valid && r.UsedUp+r.UsedDown >= r.TrafficLimit.Int64
+		out.Body = append(out.Body, v)
+	}
+	return out, nil
+}
+
+func (h *handlers) setUserPools(ctx context.Context, in *userPoolsInput) (*userPoolsOutput, error) {
+	if _, err := h.d.Store.Q.GetUser(ctx, in.ID); errors.Is(err, sql.ErrNoRows) {
+		return nil, huma.Error404NotFound("not_found")
+	} else if err != nil {
+		return nil, err
+	}
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		for _, p := range in.Body.Pools {
+			if _, err := q.GetTrafficPool(ctx, p.PoolID); errors.Is(err, sql.ErrNoRows) {
+				return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pools", Message: "pool_not_found", Value: p.PoolID})
+			} else if err != nil {
+				return err
+			}
+			limit := sql.NullInt64{}
+			if p.TrafficLimit != nil {
+				limit = sql.NullInt64{Int64: *p.TrafficLimit, Valid: true}
+			}
+			if err := q.SetUserPoolLimit(ctx, db.SetUserPoolLimitParams{UserID: in.ID, PoolID: p.PoolID, TrafficLimit: limit}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	h.d.Changes.PoliciesChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "user.pools", "user", strconv.FormatInt(in.ID, 10), nil)
+	return h.userPools(ctx, &userIDInput{ID: in.ID})
+}
+
+// setTariffPools replaces a tariff's pool limits.
+func (h *handlers) setTariffPools(ctx context.Context, q *db.Queries, tariffID int64, limits []PoolLimit) error {
+	if err := q.ClearTariffPools(ctx, tariffID); err != nil {
+		return err
+	}
+	for _, p := range limits {
+		if p.TrafficLimit == nil {
+			continue // unlimited: no row
+		}
+		if _, err := q.GetTrafficPool(ctx, p.PoolID); errors.Is(err, sql.ErrNoRows) {
+			return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pools", Message: "pool_not_found", Value: p.PoolID})
+		} else if err != nil {
+			return err
+		}
+		if err := q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: tariffID, PoolID: p.PoolID, TrafficLimit: *p.TrafficLimit}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tariffPoolsOf lists a tariff's pool limits for its view.
+func tariffPoolsOf(all []db.TariffPool, tariffID int64) []PoolLimit {
+	out := []PoolLimit{}
+	for _, p := range all {
+		if p.TariffID == tariffID {
+			l := p.TrafficLimit
+			out = append(out, PoolLimit{PoolID: p.PoolID, TrafficLimit: &l})
+		}
+	}
+	return out
+}

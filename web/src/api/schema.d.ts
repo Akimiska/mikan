@@ -472,6 +472,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пулы трафика */
+        get: operations["list-pools"];
+        put?: never;
+        /** Создать пул трафика */
+        post: operations["create-pool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pools/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Удалить пул: его подключения вернутся в основной трафик */
+        delete: operations["delete-pool"];
+        options?: never;
+        head?: never;
+        /** Переименовать пул */
+        patch: operations["rename-pool"];
+        trace?: never;
+    };
     "/api/v1/presets": {
         parameters: {
             query?: never;
@@ -814,6 +850,24 @@ export interface paths {
         put?: never;
         /** Продлить */
         post: operations["extend-user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пулы трафика пользователя */
+        get: operations["user-pools"];
+        /** Лимиты пулов пользователя */
+        put: operations["set-user-pools"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1222,6 +1276,11 @@ export interface components {
              * @enum {string}
              */
             outbound: "direct" | "warp" | "node";
+            /**
+             * Format: int64
+             * @description Пул трафика, в который считается подключение; нет — основной трафик
+             */
+            pool_id?: number;
             port: string;
             preset: string;
             server_names?: string[];
@@ -1397,6 +1456,11 @@ export interface components {
              * @enum {string}
              */
             outbound?: "direct" | "warp" | "node";
+            /**
+             * Format: int64
+             * @description Пул трафика; 0 — основной трафик
+             */
+            pool_id?: number;
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
@@ -1552,6 +1616,28 @@ export interface components {
             /** @description Применённые платежи за 30 дней */
             totals: components["schemas"]["PaymentTotal"][];
         };
+        PoolInputBody: {
+            name: string;
+        };
+        PoolLimit: {
+            /** Format: int64 */
+            pool_id: number;
+            /**
+             * Format: int64
+             * @description Байты; null — без лимита
+             */
+            traffic_limit: number | null;
+        };
+        PoolPatchInputBody: {
+            name: string;
+        };
+        PoolView: {
+            /** Format: int64 */
+            id: number;
+            /** @description Подключения, которые считаются в этот пул */
+            inbounds: string[];
+            name: string;
+        };
         ProbeView: {
             /** Format: date-time */
             checked_at: string;
@@ -1683,6 +1769,8 @@ export interface components {
             name: string;
             /** @description Продавать в боте и Mini App; нужна хотя бы одна цена */
             on_sale?: boolean;
+            /** @description Лимиты пулов трафика; не передан — без изменений */
+            pools?: components["schemas"]["PoolLimit"][];
             price_label?: string;
             /**
              * Format: int64
@@ -1722,6 +1810,8 @@ export interface components {
             name: string;
             /** @description Продаётся в боте и Mini App */
             on_sale: boolean;
+            /** @description Лимиты пулов трафика; пул не в списке — без лимита */
+            pools: components["schemas"]["PoolLimit"][];
             price_label: string;
             /**
              * Format: int64
@@ -1886,6 +1976,25 @@ export interface components {
             expiring: number;
             /** Format: int64 */
             limited: number;
+        };
+        UserPoolView: {
+            /** @description Лимит пула исчерпан: его подключения не работают до сброса */
+            exhausted: boolean;
+            name: string;
+            /** Format: int64 */
+            pool_id: number;
+            /**
+             * Format: int64
+             * @description Байты за период; null — без лимита
+             */
+            traffic_limit: number | null;
+            /** Format: int64 */
+            used_down: number;
+            /** Format: int64 */
+            used_up: number;
+        };
+        UserPoolsInputBody: {
+            pools: components["schemas"]["PoolLimit"][];
         };
         UserView: {
             /**
@@ -3138,6 +3247,132 @@ export interface operations {
             };
         };
     };
+    "list-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "rename-pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-presets": {
         parameters: {
             query?: never;
@@ -3995,6 +4230,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "user-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPoolView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-user-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserPoolsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPoolView"][];
                 };
             };
             /** @description Error */

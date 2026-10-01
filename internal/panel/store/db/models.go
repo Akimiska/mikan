@@ -80,6 +80,7 @@ type Inbound struct {
 	AutoSni     int64
 	Outbound    string
 	ExitNodeID  sql.NullInt64
+	PoolID      sql.NullInt64
 }
 
 type InboundEvent struct {
@@ -221,6 +222,12 @@ type Tariff struct {
 	OnSale        int64
 }
 
+type TariffPool struct {
+	TariffID     int64
+	PoolID       int64
+	TrafficLimit int64
+}
+
 type TgChat struct {
 	TgID      int64
 	Username  string
@@ -259,6 +266,12 @@ type TrafficHourly struct {
 	Down   int64
 }
 
+type TrafficPool struct {
+	ID        int64
+	Name      string
+	CreatedAt int64
+}
+
 type User struct {
 	ID            int64
 	Name          string
@@ -285,4 +298,12 @@ type User struct {
 	UpdatedAt     int64
 	BillingDay    sql.NullInt64
 	UnboundAt     int64
+}
+
+type UserPool struct {
+	UserID       int64
+	PoolID       int64
+	TrafficLimit sql.NullInt64
+	UsedUp       int64
+	UsedDown     int64
 }

@@ -9,6 +9,8 @@
 //	autotune:       with the node's 443/tcp dropped for the client (the blocker container), keep
 //	                checking every proxy like a url-test group until the panel moves XHTTP
 //	autotune-check: the client on the new profile gets through XHTTP again
+//	pools:          VLESS Vision counts to a 4 MiB traffic pool: its bytes go there, not to the
+//	                main quota; past the limit the node cuts it while XHTTP keeps going
 //	cascade:        VLESS Vision of the panel's node leaves through node2: the target sees node2's
 //	                address, the user is charged once, node2 off means no way out, not a leak
 package main
@@ -146,6 +148,8 @@ func main() {
 		devices()
 	case "devices-check":
 		devicesCheck()
+	case "pools":
+		pools()
 	case "cascade":
 		cascade()
 	case "autotune":
@@ -754,4 +758,108 @@ func cascade() {
 	p.call("PATCH", path, map[string]any{"outbound": "direct"}, nil)
 	waitFor(nodeIP)
 	log.Print("CASCADE OK")
+}
+
+// pools puts the local VLESS Vision into a traffic pool with a small limit.
+func pools() {
+	p := login()
+	raw, _ := os.ReadFile("/work/user")
+	uid, _ := strconv.ParseInt(string(raw), 10, 64)
+	userPath := "/api/v1/users/" + strconv.FormatInt(uid, 10)
+	var nodes []struct {
+		ID    int64 `json:"id"`
+		Local bool  `json:"local"`
+	}
+	p.call("GET", "/api/v1/nodes", nil, &nodes)
+	var local int64
+	for _, n := range nodes {
+		if n.Local {
+			local = n.ID
+		}
+	}
+	var ins []struct {
+		ID     int64  `json:"id"`
+		NodeID int64  `json:"node_id"`
+		Preset string `json:"preset"`
+	}
+	p.call("GET", "/api/v1/inbounds", nil, &ins)
+	var vision int64
+	for _, in := range ins {
+		if in.Preset == "vless_reality_vision" && in.NodeID == local {
+			vision = in.ID
+		}
+	}
+	var pool struct {
+		ID int64 `json:"id"`
+	}
+	p.call("POST", "/api/v1/pools", map[string]any{"name": "WL"}, &pool)
+	p.call("PATCH", "/api/v1/inbounds/"+strconv.FormatInt(vision, 10), map[string]any{"pool_id": pool.ID}, nil)
+	const limit = 4 * mib
+	p.call("PUT", userPath+"/pools", map[string]any{"pools": []map[string]any{{"pool_id": pool.ID, "traffic_limit": limit}}}, nil)
+
+	const visionPort, xhttpPort = 11001, 11002
+	usage := func() (main, inPool int64) {
+		var u user
+		p.call("GET", userPath, nil, &u)
+		var ps []struct {
+			PoolID   int64 `json:"pool_id"`
+			UsedUp   int64 `json:"used_up"`
+			UsedDown int64 `json:"used_down"`
+		}
+		p.call("GET", userPath+"/pools", nil, &ps)
+		for _, x := range ps {
+			if x.PoolID == pool.ID {
+				inPool = x.UsedUp + x.UsedDown
+			}
+		}
+		return u.UsedUp + u.UsedDown, inPool
+	}
+	settle := func(check func(main, inPool int64) bool) (int64, int64) {
+		deadline := time.Now().Add(20 * time.Second)
+		var m, pl int64
+		for time.Now().Before(deadline) {
+			if m, pl = usage(); check(m, pl) {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		return m, pl
+	}
+	// The node learns the pool with its next state; wait until Vision counts there.
+	time.Sleep(3 * time.Second)
+	main0, pool0 := usage()
+	if _, err := download(visionPort, 2*mib); err != nil {
+		log.Fatalf("pools: vision download: %v", err)
+	}
+	main1, pool1 := settle(func(_, pl int64) bool { return pl-pool0 >= 2*mib })
+	if pool1-pool0 < 2*mib || main1-main0 > 1024 {
+		log.Fatalf("pools: 2 MiB through Vision went to the pool %d and the main quota %d", pool1-pool0, main1-main0)
+	}
+	log.Printf("pools: 2 MiB through Vision counted to the pool (%d), main +%d", pool1-pool0, main1-main0)
+
+	// Past the limit the node cuts the pool mid-download.
+	if n, err := download(visionPort, 16*mib); err == nil {
+		log.Fatalf("pools: a 16 MiB download through a 4 MiB pool finished (%d bytes)", n)
+	}
+	if _, err := download(visionPort, mib); err == nil {
+		log.Fatal("pools: the used-up pool still lets Vision in")
+	}
+	log.Print("pools: past 4 MiB the pool is cut")
+	// The rest keeps working and counts to the main quota.
+	if _, err := download(xhttpPort, 2*mib); err != nil {
+		log.Fatalf("pools: XHTTP outside the pool stopped too: %v", err)
+	}
+	main2, _ := settle(func(m, _ int64) bool { return m-main1 >= 2*mib })
+	if main2-main1 < 2*mib {
+		log.Fatalf("pools: XHTTP's 2 MiB did not reach the main quota (%d)", main2-main1)
+	}
+	log.Printf("pools: XHTTP still works, main +%d", main2-main1)
+
+	// Clean up for the next phases: Vision back to the main traffic.
+	p.call("DELETE", "/api/v1/pools/"+strconv.FormatInt(pool.ID, 10), nil, nil)
+	time.Sleep(3 * time.Second)
+	if _, err := download(visionPort, mib); err != nil {
+		log.Fatalf("pools: Vision without the pool: %v", err)
+	}
+	log.Print("POOLS OK")
 }

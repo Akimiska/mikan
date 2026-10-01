@@ -205,6 +205,13 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	e.Reg.SetSlots(st.Slots)
 	e.Reg.SetPolicies(st.Epoch, st.Policies)
 	e.Reg.SetShared(sharedListeners(st))
+	pools := map[string]string{}
+	for _, in := range st.Inbounds {
+		if in.Pool != "" {
+			pools[in.Name] = in.Pool
+		}
+	}
+	e.Reg.SetPools(pools)
 
 	recreated := changedInbounds(e.applied, st)
 	e.errsMu.Lock()

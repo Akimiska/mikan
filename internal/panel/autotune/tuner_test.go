@@ -401,3 +401,20 @@ func TestBoundDevices(t *testing.T) {
 		t.Fatalf("the bound device must count, and what it reached must survive a restart: %+v", s)
 	}
 }
+
+// The subscription port is the panel's: a blocked inbound skips it on the way out.
+func TestMoveSkipsTheSubscriptionPort(t *testing.T) {
+	e := setup(t)
+	if err := settings.Set(e.ctx, settings.New(e.st.Q), settings.KeySubPort, 2053); err != nil {
+		t.Fatal(err)
+	}
+	hold := DefaultOptions().Hold
+	e.worked(t)
+	for _, d := range []time.Duration{0, hold} {
+		e.reaches("hysteria2", "tuic", "vless-vision")
+		e.step(t, d)
+	}
+	if got := e.inbound(t, "vless-xhttp").Port; got != "2083" {
+		t.Fatalf("moved to %s, want the next pool port after the subscription port", got)
+	}
+}

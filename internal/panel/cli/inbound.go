@@ -61,6 +61,8 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 			return fmt.Errorf("bad port %q", *port)
 		case errors.As(err, &busy):
 			return fmt.Errorf("the port is taken by inbound %s, choose another: --port", busy.Owner)
+		case errors.Is(err, domain.ErrSubPort):
+			return errors.New("the panel serves subscriptions on this port, choose another: --port")
 		case err != nil:
 			return err
 		}
@@ -92,6 +94,8 @@ func inboundCmd(ctx context.Context, st *store.Store, set *settings.Settings, ar
 			return fmt.Errorf("bad port %q", *port)
 		case errors.As(err, &busy):
 			return fmt.Errorf("the port is taken by inbound %s, choose another", busy.Owner)
+		case errors.Is(err, domain.ErrSubPort):
+			return errors.New("the panel serves subscriptions on this port, choose another")
 		case err != nil:
 			return err
 		}

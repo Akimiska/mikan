@@ -70,6 +70,9 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Your own TLS certificate for the panel or a node (certbot, acme.sh, Caddy…)
+    #[command(subcommand)]
+    Cert(CertCmd),
     /// REALITY camouflage sites: scan, check, apply
     #[command(disable_help_flag = true)]
     Targets {
@@ -99,6 +102,33 @@ enum Cmd {
     },
 }
 
+#[derive(Subcommand)]
+enum CertCmd {
+    /// Install a certificate: the chain and its key. Fits a renewal hook:
+    /// certbot ... --deploy-hook "mikan cert set --cert $RENEWED_LINEAGE/fullchain.pem --key $RENEWED_LINEAGE/privkey.pem"
+    Set {
+        /// The chain, leaf first (fullchain.pem)
+        #[arg(long)]
+        cert: PathBuf,
+        /// The private key (privkey.pem)
+        #[arg(long)]
+        key: PathBuf,
+        /// A node's own certificate instead of the panel's (mikan node list)
+        #[arg(long)]
+        node: Option<u32>,
+    },
+    /// Go back to Let's Encrypt (a node: to its self-signed certificate)
+    Clear {
+        #[arg(long)]
+        node: Option<u32>,
+    },
+    /// What the own certificate is
+    Show {
+        #[arg(long)]
+        node: Option<u32>,
+    },
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.cmd {
@@ -112,6 +142,11 @@ fn main() -> ExitCode {
         Some(Cmd::Disable2fa) => ops::admin(&["disable-2fa"]),
         Some(Cmd::Node { args }) => passthrough("node", &args),
         Some(Cmd::Targets { args }) => passthrough("targets", &args),
+        Some(Cmd::Cert(c)) => match c {
+            CertCmd::Set { cert, key, node } => ops::cert_set(&cert, &key, node),
+            CertCmd::Clear { node } => ops::cert(&["clear"], node),
+            CertCmd::Show { node } => ops::cert(&["show"], node),
+        },
         Some(Cmd::Inbound { args }) => ops::inbound(&args),
         Some(Cmd::Backup) => ops::backup().map(|f| println!("Backup: {}", f.display())),
         Some(Cmd::Restore { file, yes }) => {

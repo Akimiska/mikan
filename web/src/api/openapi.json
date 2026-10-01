@@ -417,6 +417,28 @@
         ],
         "type": "object"
       },
+      "CertInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "cert": {
+            "description": "Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem)",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "key": {
+            "description": "Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ],
+        "type": "object"
+      },
       "CheckTargetInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -592,6 +614,7 @@
             "enum": [
               "vless_reality_xhttp",
               "hysteria2",
+              "hysteria2_gecko",
               "tuic_v5",
               "vless_reality_vision",
               "vless_reality_grpc",
@@ -894,6 +917,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "obfs": {
+            "description": "Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет",
+            "type": "string"
+          },
           "outbound": {
             "description": "Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)",
             "enum": [
@@ -1154,12 +1181,71 @@
         ],
         "type": "object"
       },
+      "NodeCertInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "cert": {
+            "description": "Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem)",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "key": {
+            "description": "Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519",
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ],
+        "type": "object"
+      },
+      "NodeCertView": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "description": "custom_expired, custom_invalid — сертификат не используется, нода на своём самоподписанном",
+            "type": "string"
+          },
+          "issuer": {
+            "type": "string"
+          },
+          "names": {
+            "description": "Домены и IP, на которые он выписан",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "not_after": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "trusted": {
+            "description": "Публично доверенный для адреса: приложения принимают его без пина",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "names",
+          "issuer",
+          "not_after",
+          "trusted"
+        ],
+        "type": "object"
+      },
       "NodeInfo": {
         "additionalProperties": false,
         "properties": {
           "address": {
             "description": "host:port API ноды; пусто у своей ноды",
             "type": "string"
+          },
+          "certificate": {
+            "$ref": "#/components/schemas/NodeCertView"
           },
           "checked_at": {
             "format": "date-time",
@@ -1467,6 +1553,14 @@
             "maxLength": 32,
             "type": "string"
           },
+          "obfs": {
+            "description": "Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат",
+            "enum": [
+              "salamander",
+              "gecko"
+            ],
+            "type": "string"
+          },
           "outbound": {
             "description": "Выход в интернет: напрямую, через WARP ноды или через другую ноду",
             "enum": [
@@ -1531,6 +1625,9 @@
             "description": "Пусто — удалить токен",
             "maxLength": 200,
             "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
           },
           "renew_resets_traffic": {
             "type": "boolean"
@@ -1607,11 +1704,23 @@
             "maxLength": 200,
             "type": "string"
           },
+          "sub_port": {
+            "description": "Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать",
+            "format": "int64",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
           "sub_routing": {
             "enum": [
               "ru_direct",
               "all"
             ],
+            "type": "string"
+          },
+          "sub_rules": {
+            "description": "Свои правила Clash, до 500 строк; ошибка указывает номер строки",
+            "maxLength": 65536,
             "type": "string"
           },
           "support_url": {
@@ -1630,6 +1739,10 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "route": {
+            "$ref": "#/components/schemas/RouteStruct",
+            "description": "Перед сохранением панель проверяет, что Telegram отвечает этим путём"
           },
           "token": {
             "description": "Токен от @BotFather; пустая строка — удалить",
@@ -1741,6 +1854,15 @@
           "cryptobot_token_set": {
             "type": "boolean"
           },
+          "enabled": {
+            "description": "Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются",
+            "type": "boolean"
+          },
+          "on_sale": {
+            "description": "Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату",
+            "format": "int64",
+            "type": "integer"
+          },
           "renew_resets_traffic": {
             "description": "Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок",
             "type": "boolean"
@@ -1769,6 +1891,7 @@
           }
         },
         "required": [
+          "enabled",
           "stars",
           "yookassa",
           "yookassa_shop_id",
@@ -1779,6 +1902,7 @@
           "allow_new",
           "renew_resets_traffic",
           "available",
+          "on_sale",
           "webhook_yookassa",
           "webhook_cryptobot"
         ],
@@ -2144,6 +2268,34 @@
         ],
         "type": "object"
       },
+      "RouteStruct": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "direct",
+              "node",
+              "proxy"
+            ],
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Удалённая нода панели (mode=node)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proxy": {
+            "description": "socks5://user:pass@host:port, http://… или https://…; не передан — прежний (mode=proxy)",
+            "maxLength": 512,
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "ScanTargetsOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2263,6 +2415,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "rule_targets": {
+            "description": "Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "sub_base_url": {
             "type": "string"
           },
@@ -2274,12 +2433,25 @@
             "description": "Главная группа в Clash-приложениях",
             "type": "string"
           },
+          "sub_port": {
+            "description": "Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sub_port_error": {
+            "description": "sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели",
+            "type": "string"
+          },
           "sub_routing": {
             "description": "Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN",
             "enum": [
               "ru_direct",
               "all"
             ],
+            "type": "string"
+          },
+          "sub_rules": {
+            "description": "Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий",
             "type": "string"
           },
           "support_url": {
@@ -2292,11 +2464,14 @@
           "public_host",
           "domain",
           "panel_port",
+          "sub_port",
           "quiet_hour_utc",
           "admin_url",
           "sub_base_url",
           "sub_group_main",
           "sub_group_auto",
+          "sub_rules",
+          "rule_targets",
           "sub_routing",
           "client_fingerprint",
           "auto_port",
@@ -2321,16 +2496,30 @@
           "identifier": {
             "type": "string"
           },
+          "issuer": {
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "self-signed",
-              "letsencrypt"
+              "letsencrypt",
+              "custom"
             ],
             "type": "string"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "not_after": {
             "format": "date-time",
             "type": "string"
+          },
+          "trusted": {
+            "description": "Свой сертификат публично доверенный для адреса панели",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2637,6 +2826,33 @@
         ],
         "type": "object"
       },
+      "TelegramRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "description": "Напрямую с сервера панели, через её ноду или через прокси — когда Telegram на сервере заблокирован",
+            "enum": [
+              "direct",
+              "node",
+              "proxy"
+            ],
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Нода, через которую идут запросы",
+            "format": "int64",
+            "type": "integer"
+          },
+          "proxy": {
+            "description": "Адрес прокси; пароль скрыт",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "TelegramView": {
         "additionalProperties": false,
         "properties": {
@@ -2675,6 +2891,10 @@
             "description": "Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный",
             "type": "string"
           },
+          "route": {
+            "$ref": "#/components/schemas/TelegramRoute",
+            "description": "Как бот ходит в Telegram"
+          },
           "running": {
             "type": "boolean"
           },
@@ -2695,7 +2915,8 @@
           "defaults",
           "mini_app_url",
           "linked",
-          "accounts"
+          "accounts",
+          "route"
         ],
         "type": "object"
       },
@@ -3363,7 +3584,7 @@
     }
   },
   "info": {
-    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → Ключи API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET, «полный» — всё, кроме входа, сессий и самих ключей.\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.",
+    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET, «полный» — всё, кроме входа, сессий и самих ключей.\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.",
     "title": "mikan",
     "version": "dev"
   },
@@ -4389,6 +4610,95 @@
         ]
       }
     },
+    "/api/v1/nodes/{id}/certificate": {
+      "delete": {
+        "operationId": "clear-node-certificate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Вернуть ноде самоподписанный сертификат",
+        "tags": [
+          "node"
+        ],
+        "x-session-only": true
+      },
+      "put": {
+        "operationId": "set-node-certificate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeCertInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Поставить ноде свой сертификат",
+        "tags": [
+          "node"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/nodes/{id}/key": {
       "post": {
         "operationId": "rekey-node",
@@ -5142,6 +5452,71 @@
         "tags": [
           "settings"
         ]
+      }
+    },
+    "/api/v1/settings/certificate": {
+      "delete": {
+        "operationId": "clear-certificate",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Вернуть сертификат Let's Encrypt",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "put": {
+        "operationId": "set-certificate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Поставить свой сертификат панели",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/settings/certificate/renew": {

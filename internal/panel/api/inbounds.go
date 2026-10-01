@@ -13,6 +13,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/presets"
+	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
@@ -37,6 +38,7 @@ type InboundView struct {
 	// Fingerprint is the inbound's own uTLS profile, "" for the panel's default; absent when
 	// its clients do not dial through uTLS (QUIC protocols, shared keys).
 	Fingerprint *string   `json:"fingerprint,omitempty" doc:"Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек"`
+	Obfs        *string   `json:"obfs,omitempty" doc:"Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет"`
 	Status      string    `json:"status" enum:"ok,error,unknown"`
 	Error       string    `json:"error,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -76,7 +78,7 @@ type inboundOutput struct{ Body InboundView }
 
 type createInboundInput struct {
 	Body struct {
-		Preset string `json:"preset" enum:"vless_reality_xhttp,hysteria2,tuic_v5,vless_reality_vision,vless_reality_grpc,trojan_reality,anytls,vless_reality_xhttp_pq,trusttunnel,shadowquic,mieru,shadowsocks_2022,sudoku,snell,custom"`
+		Preset string `json:"preset" enum:"vless_reality_xhttp,hysteria2,hysteria2_gecko,tuic_v5,vless_reality_vision,vless_reality_grpc,trojan_reality,anytls,vless_reality_xhttp_pq,trusttunnel,shadowquic,mieru,shadowsocks_2022,sudoku,snell,custom"`
 		NodeID int64  `json:"node_id,omitempty" minimum:"1" doc:"Нода; по умолчанию — своя нода панели"`
 		Port   string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$"`
 		Dest   string `json:"dest,omitempty" maxLength:"255" doc:"host:port для REALITY"`
@@ -91,6 +93,7 @@ type patchInboundInput struct {
 		Enabled     *bool   `json:"enabled,omitempty"`
 		Dest        *string `json:"dest,omitempty" maxLength:"255"`
 		ServerName  *string `json:"server_name,omitempty" maxLength:"253" doc:"SNI для клиентов, если dest — IP (цель из подбора соседей)"`
+		Obfs        *string `json:"obfs,omitempty" enum:"salamander,gecko" doc:"Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат"`
 		Fingerprint *string `json:"fingerprint,omitempty" maxLength:"32" doc:"Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек"`
 		DisplayName *string `json:"display_name,omitempty" maxLength:"200" doc:"Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию"`
 		Config      *string `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
@@ -185,6 +188,10 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 		if proto.UsesFingerprint(t) {
 			fp := t.Ext().Client.Fingerprint
 			v.Fingerprint = &fp
+		}
+		if t.Type() == "hysteria2" {
+			obfs := proto.Obfs(t)
+			v.Obfs = &obfs
 		}
 		if in.Preset == presets.Custom {
 			v.Title = t.Type()
@@ -320,6 +327,11 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	if h.relayPortBusy(ctx, node.ID, port, t.Network()) {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
 	}
+	if taken, err := domain.SubPortTaken(ctx, h.d.Settings, node, port, t.Network()); err != nil {
+		return nil, err
+	} else if taken {
+		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_sub"})
+	}
 	if owner, busy := domain.PortOwner(existing, port, t.Network(), 0); busy {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})
 	}
@@ -398,7 +410,7 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		h.d.Changes.SlotsChanged()
 		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.outbound", "inbound", row.Name, map[string]any{"outbound": *b.Outbound, "exit_node_id": exit.Int64})
 	}
-	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.Fingerprint == nil && b.DisplayName == nil {
+	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.Fingerprint == nil && b.Obfs == nil && b.DisplayName == nil {
 		// Only the automatic-move switches: clients get nothing new, so updated_at stays
 		// and the block detector keeps trusting their profiles.
 		if autoChanged {
@@ -465,6 +477,20 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		}
 		config = proto.Marshal(t)
 	}
+	if b.Obfs != nil {
+		t, err := proto.Parse(config)
+		if err == nil {
+			err = proto.SetObfs(t, *b.Obfs, secure.Token(24))
+		}
+		var pe *proto.Error
+		if errors.As(err, &pe) {
+			return nil, huma.Error422UnprocessableEntity("bad_obfs", &huma.ErrorDetail{Location: "body.obfs", Message: pe.Code})
+		}
+		if err != nil {
+			return nil, err
+		}
+		config = proto.Marshal(t)
+	}
 	if b.DisplayName != nil {
 		display = strings.TrimSpace(*b.DisplayName)
 	}
@@ -493,6 +519,11 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	next.DisplayName = display
 	if enabled != 0 && h.relayPortBusy(ctx, row.NodeID, port, t.Network()) {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
+	}
+	if taken, err := domain.SubPortTaken(ctx, h.d.Settings, node, port, t.Network()); err != nil {
+		return nil, err
+	} else if taken && enabled != 0 {
+		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_sub"})
 	}
 	if owner, busy := domain.PortOwner(existing, port, t.Network(), row.ID); busy && enabled != 0 {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})
@@ -527,7 +558,7 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		return nil, err
 	}
 	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil || b.Fingerprint != nil,
+	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.update", "inbound", row.Name, map[string]any{"config_changed": b.Config != nil || b.Dest != nil || b.Fingerprint != nil || b.Obfs != nil,
 		"auto_port": row.AutoPort != 0, "auto_sni": row.AutoSni != 0})
 	last, err := h.lastAuto(ctx)
 	if err != nil {

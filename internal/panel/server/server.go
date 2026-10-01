@@ -27,7 +27,15 @@ func New(admin, sub http.Handler) *Server {
 
 func (s *Server) SetPaths(p settings.Paths) { s.paths.Store(&p) }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.serve(w, r, true) }
+
+// SubOnly serves the subscription path alone, for the subscription port: the admin panel
+// is not there, and its path gets the same 404 as any other.
+func (s *Server) SubOnly() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { s.serve(w, r, false) })
+}
+
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, admin bool) {
 	SecurityHeaders(w.Header())
 	p := r.URL.Path
 	// Reject non-canonical paths ("//", "/./", "/../") instead of guessing what they mean.
@@ -38,7 +46,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	seg, rest, _ := strings.Cut(p[1:], "/")
 	paths := s.paths.Load()
 	switch {
-	case seg != "" && paths.Admin != "" && secure.Equal(seg, paths.Admin):
+	case admin && seg != "" && paths.Admin != "" && secure.Equal(seg, paths.Admin):
 		s.forward(w, r, s.admin, seg, rest, p)
 	case seg != "" && paths.Sub != "" && secure.Equal(seg, paths.Sub):
 		s.forward(w, r, s.sub, seg, rest, p)

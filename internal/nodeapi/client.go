@@ -1,6 +1,7 @@
 package nodeapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -18,10 +19,15 @@ import (
 type Client struct {
 	hc   *http.Client
 	base string
+	// dial opens a bare connection to the Node API, for Tunnel.
+	dial func(ctx context.Context) (net.Conn, error)
 }
 
 func NewUnixClient(socket string) *Client {
-	return &Client{base: "http://node", hc: &http.Client{Transport: &http.Transport{
+	dial := func(ctx context.Context) (net.Conn, error) {
+		return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "unix", socket)
+	}
+	return &Client{base: "http://node", dial: dial, hc: &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "unix", socket)
 		},
@@ -31,7 +37,14 @@ func NewUnixClient(socket string) *Client {
 
 // NewTLSClient reaches a remote node at host:port; cfg pins both sides (see nodetls).
 func NewTLSClient(address string, cfg *tls.Config) *Client {
-	return &Client{base: "https://" + address, hc: &http.Client{Transport: &http.Transport{
+	// A tunnel takes over the connection, which HTTP/2 does not allow.
+	h1 := cfg.Clone()
+	h1.NextProtos = []string{"http/1.1"}
+	dial := func(ctx context.Context) (net.Conn, error) {
+		d := tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}, Config: h1}
+		return d.DialContext(ctx, "tcp", address)
+	}
+	return &Client{base: "https://" + address, dial: dial, hc: &http.Client{Transport: &http.Transport{
 		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		TLSClientConfig:     cfg,
 		TLSHandshakeTimeout: 5 * time.Second,
@@ -155,3 +168,52 @@ func (c *Client) Probe(ctx context.Context, proxy string) (ProbeResult, error) {
 	err := c.do(ctx, http.MethodGet, "/v1/probe?proxy="+url.QueryEscape(proxy), nil, &r, 20*time.Second)
 	return r, err
 }
+
+// TunnelHosts are what a node opens a tunnel to: the Bot API, for a panel whose own
+// server cannot reach Telegram. Nothing else, so a node is no open proxy.
+var TunnelHosts = []string{"api.telegram.org:443"}
+
+// Tunnel opens a TCP stream to addr through the node (HTTP CONNECT on the Node API).
+func (c *Client) Tunnel(ctx context.Context, addr string) (net.Conn, error) {
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	if d, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(d)
+	} else {
+		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	}
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: addr}, Host: addr, Header: http.Header{}}
+	if err := req.Write(conn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, req)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer conn.Close()
+		var e Error
+		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&e) == nil && e.Code != "" {
+			return nil, &e
+		}
+		return nil, fmt.Errorf("node tunnel: status %d", resp.StatusCode)
+	}
+	_ = conn.SetDeadline(time.Time{})
+	if br.Buffered() > 0 {
+		return &bufConn{Conn: conn, r: br}, nil
+	}
+	return conn, nil
+}
+
+// bufConn reads what the CONNECT response left buffered before the connection itself.
+type bufConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }

@@ -302,6 +302,12 @@ func (c *clientBuilder) finish() (Client, error) {
 			c.y["obfs"], c.y["obfs-password"] = obfs, c.t.str("obfs-password")
 			c.q.Set("obfs", obfs)
 			c.q.Set("obfs-password", c.t.str("obfs-password"))
+			// Gecko's sizes are the sender's own; the client gets the server's.
+			for _, key := range []string{"obfs-min-packet-size", "obfs-max-packet-size"} {
+				if n, ok := toInt(c.t[key]); ok {
+					c.y[key] = n
+				}
+			}
 		}
 		return Client{c.y, "hysteria2://" + url.PathEscape(s.Secret) + "@" + c.addr() + "/?" + c.q.Encode() + "#" + name}, nil
 	case "tuic":

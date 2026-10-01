@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,8 +18,8 @@ import (
 
 var scanning sync.Mutex
 
-// Handler exposes the Node API. It is served on a unix socket only; the socket file
-// permissions are the access control.
+// Handler exposes the Node API: on the unix socket, whose file permissions are the
+// access control, and on a remote node over TLS that only the panel's certificate opens.
 func Handler(e *Engine, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /v1/state", func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +148,52 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, e.Logs(since))
 	})
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			connectTunnel(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// connectTunnel is HTTP CONNECT for the panel: the bot reaches Telegram through this node when
+// the panel's own server cannot. Only nodeapi.TunnelHosts go through.
+func connectTunnel(w http.ResponseWriter, r *http.Request) {
+	if !slices.Contains(nodeapi.TunnelHosts, r.Host) {
+		writeJSON(w, http.StatusForbidden, nodeapi.Error{Code: "tunnel_forbidden", Message: r.Host + " is not a tunnel host"})
+		return
+	}
+	up, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(r.Context(), "tcp", r.Host)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, nodeapi.Error{Code: "tunnel_unreachable", Message: err.Error()})
+		return
+	}
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		up.Close()
+		writeJSON(w, http.StatusInternalServerError, nodeapi.Error{Code: "tunnel_unsupported"})
+		return
+	}
+	conn, buf, err := hj.Hijack()
+	if err != nil {
+		up.Close()
+		return
+	}
+	// Long polling keeps the stream idle for most of a minute: no deadlines from here on.
+	_ = conn.SetDeadline(time.Time{})
+	if _, err := conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
+		conn.Close()
+		up.Close()
+		return
+	}
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(up, buf.Reader); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(conn, up); done <- struct{}{} }()
+	<-done
+	conn.Close()
+	up.Close()
+	<-done
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

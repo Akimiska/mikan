@@ -15,11 +15,15 @@ const (
 	KeySubPath    = "sub_path"
 	KeyPublicHost = "public_host"
 	KeyPanelPort  = "panel_port"
-	KeyDomain     = "domain"
-	KeyACMEEmail  = "acme_email"
-	KeyGroupMain  = "sub_group_main" // subscription group names, see subs.Groups
-	KeyGroupAuto  = "sub_group_auto"
-	KeyRouting    = "sub_routing" // subs.Routing
+	// KeySubPort is a port of its own for subscriptions; 0 or unset: the panel's port.
+	// The panel's port keeps serving subscriptions either way, for links handed out.
+	KeySubPort   = "sub_port"
+	KeyDomain    = "domain"
+	KeyACMEEmail = "acme_email"
+	KeyGroupMain = "sub_group_main" // subscription group names, see subs.Groups
+	KeyGroupAuto = "sub_group_auto"
+	KeyRouting   = "sub_routing" // subs.Routing
+	KeyRules     = "sub_rules"   // the admin's own Clash rules, as typed (subs.ParseRules)
 	// KeyFingerprint is the uTLS profile clients get where an inbound sets none
 	// (proto.Fingerprints); unset means proto.DefaultFingerprint.
 	KeyFingerprint = "client_fingerprint"
@@ -130,6 +134,20 @@ func (s *Settings) Paths(ctx context.Context) (Paths, error) {
 type Endpoint struct {
 	Host string
 	Port int
+}
+
+// SubEndpoint is where subscription links point: the subscription port when one is set.
+func (s *Settings) SubEndpoint(ctx context.Context) (Endpoint, error) {
+	ep, err := s.Endpoint(ctx)
+	if err != nil {
+		return ep, err
+	}
+	if p, _, err := Get[int](ctx, s, KeySubPort); err != nil {
+		return ep, err
+	} else if p > 0 {
+		ep.Port = p
+	}
+	return ep, nil
 }
 
 func (s *Settings) Endpoint(ctx context.Context) (Endpoint, error) {

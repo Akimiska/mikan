@@ -52,6 +52,9 @@ const (
 
 // Config is what the admin sets; secrets are separate settings.
 type Config struct {
+	// Enabled is the switch for selling at all: off, the bot and the Mini App offer
+	// nothing and take no new invoices, while invoices already opened are still applied.
+	Enabled   bool   `json:"enabled"`
 	Stars     bool   `json:"stars"`
 	YooKassa  bool   `json:"yookassa"`
 	ShopID    string `json:"yookassa_shop_id"`
@@ -64,7 +67,8 @@ type Config struct {
 	RenewResetsTraffic bool `json:"renew_resets_traffic"`
 }
 
-// DefaultConfig: Stars on (it needs nothing but the bot), new buyers welcome.
+// DefaultConfig: selling off until the admin turns it on; then Stars (it needs nothing but
+// the bot) and new buyers are welcome.
 var DefaultConfig = Config{Stars: true, AllowNew: true, RenewResetsTraffic: true}
 
 // Telegram is the bot's part: Stars invoices and refunds, and telling buyers.
@@ -143,8 +147,12 @@ var (
 )
 
 func (s *Service) Config(ctx context.Context) Config {
-	c, _, err := settings.GetOver(ctx, s.d.Settings, KeyConfig, DefaultConfig)
-	if err != nil {
+	// Payment settings saved before the switch existed (0.4.0, 0.4.1) come from panels that
+	// set up selling: they keep selling. A panel that never saved them starts with it off.
+	saved := DefaultConfig
+	saved.Enabled = true
+	c, found, err := settings.GetOver(ctx, s.d.Settings, KeyConfig, saved)
+	if err != nil || !found {
 		return DefaultConfig
 	}
 	return c
@@ -160,8 +168,8 @@ func (s *Service) secrets(ctx context.Context) Secrets {
 	return sec
 }
 
-// Available says which providers can take a payment right now: on, configured and, for
-// Stars, with the bot running.
+// Available says which providers can take a payment right now: selling on, the provider
+// on, configured and, for Stars, with the bot running.
 type Available struct {
 	Stars, YooKassa, CryptoBot bool
 }
@@ -170,6 +178,9 @@ func (a Available) Any() bool { return a.Stars || a.YooKassa || a.CryptoBot }
 
 func (s *Service) Available(ctx context.Context) Available {
 	c, sec := s.Config(ctx), s.secrets(ctx)
+	if !c.Enabled {
+		return Available{}
+	}
 	tg := s.telegram()
 	return Available{
 		Stars:     c.Stars && tg != nil && tg.BotURL(ctx) != "",

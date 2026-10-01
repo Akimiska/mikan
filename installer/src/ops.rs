@@ -75,6 +75,43 @@ pub fn admin(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// The largest PEM file the panel takes (tlscert.MaxPEM).
+const MAX_PEM: u64 = 64 << 10;
+
+/// Installs an own certificate: both files go to the panel on stdin, never on the
+/// command line or into another file; the panel checks them and serves them at once.
+pub fn cert_set(cert: &Path, key: &Path, node: Option<u32>) -> Result<()> {
+    Install::load()?.panel_only()?;
+    let mut pem = String::new();
+    for path in [cert, key] {
+        let size = fs::metadata(path).with_context(|| format!("{}", path.display()))?.len();
+        if size > MAX_PEM {
+            bail!("{} is larger than a certificate or a key can be", path.display());
+        }
+        pem.push_str(&fs::read_to_string(path).with_context(|| format!("{}", path.display()))?);
+        pem.push('\n');
+    }
+    let mut args = vec!["cert", "set"];
+    let n = node.map(|n| n.to_string());
+    if let Some(n) = &n {
+        args.extend(["--node", n.as_str()]);
+    }
+    let out = docker::check(docker::admin(&args, Some(&pem))?)?;
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    Ok(())
+}
+
+/// `mikan admin cert clear|show` for the panel or a node.
+pub fn cert(cmd: &[&str], node: Option<u32>) -> Result<()> {
+    let mut args = vec!["cert"];
+    args.extend_from_slice(cmd);
+    let n = node.map(|n| n.to_string());
+    if let Some(n) = &n {
+        args.extend(["--node", n.as_str()]);
+    }
+    admin(&args)
+}
+
 /// Inbounds; a new or moved port on this server is opened in ufw.
 pub fn inbound(args: &[String]) -> Result<()> {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();

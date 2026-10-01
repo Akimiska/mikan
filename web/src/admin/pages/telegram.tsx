@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowDown, ArrowUp, Bot, Link2, Plus, Send, Trash2, TriangleAlert } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ArrowDown, ArrowUp, Bot, Globe, Link2, Network, Plus, Send, Shield, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk, useSettings } from "../../api/hooks";
+import { qk, useNodes, useSettings } from "../../api/hooks";
 import { ago, num } from "../../lib/format";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
@@ -75,6 +76,7 @@ export function TelegramPage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="flex min-w-0 flex-col gap-4">
             <ConnectCard v={tg.data} />
+            <RouteCard v={tg.data} />
             <MenuCard draft={draft!} setDraft={setDraft} />
             <TextsCard draft={draft!} setDraft={setDraft} defaults={tg.data.defaults} />
             <OptionsCard draft={draft!} setDraft={setDraft} v={tg.data} />
@@ -229,6 +231,151 @@ function ConnectCard({ v }: { v: View }) {
         loading={patch.isPending}
         onConfirm={() => patch.mutate({ token: "" }, { onSuccess: () => setRemoving(false), onError: (e) => toast.error(errorText(e)) })}
       />
+    </section>
+  );
+}
+
+type RouteMode = Schemas["TelegramRoute"]["mode"];
+const ROUTE_ICON = { direct: Globe, node: Network, proxy: Shield } as const;
+
+// A node opens the tunnel to Telegram since 0.4.2; dev builds and nodes not heard from yet
+// are given the benefit of the doubt (the check on saving tells).
+function tunnels(version?: string): boolean {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version ?? "");
+  if (!m) return true;
+  const [a, b, c] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  return a > 0 || b > 4 || (b === 4 && c >= 2);
+}
+
+// How the bot reaches Telegram: straight, through a node of the panel or a proxy — for a
+// server where Telegram is blocked.
+function RouteCard({ v }: { v: View }) {
+  const patch = usePatchTelegram();
+  const toast = useToast();
+  const nodes = useNodes();
+  const saved = v.route;
+  const [mode, setMode] = useState<RouteMode>(saved.mode);
+  const [nodeId, setNodeId] = useState(saved.node_id ?? 0);
+  const [proxy, setProxy] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setMode(saved.mode);
+    setNodeId(saved.node_id ?? 0);
+  }, [saved.mode, saved.node_id]);
+  const remote = (nodes.data ?? []).filter((n) => !n.local);
+  const nodeName = (id?: number) => remote.find((n) => n.id === id)?.name ?? `#${id}`;
+  const now =
+    saved.mode === "node"
+      ? t("telegram.routeNowNode", { name: nodeName(saved.node_id) })
+      : saved.mode === "proxy"
+        ? t("telegram.routeNowProxy", { proxy: saved.proxy ?? "" })
+        : t("telegram.routeNowDirect");
+  const changed = mode !== saved.mode || (mode === "node" && nodeId !== (saved.node_id ?? 0)) || (mode === "proxy" && proxy.trim() !== "");
+  const ready = mode === "direct" || (mode === "node" && nodeId > 0) || (mode === "proxy" && (proxy.trim() !== "" || !!saved.proxy));
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setError("");
+    const route: Schemas["PatchTelegramInputBody"]["route"] =
+      mode === "node" ? { mode, node_id: nodeId } : mode === "proxy" ? { mode, ...(proxy.trim() ? { proxy: proxy.trim() } : {}) } : { mode };
+    patch.mutate(
+      { route },
+      {
+        onSuccess: (r) => {
+          setProxy("");
+          const how = r.route.mode === "node" ? nodeName(r.route.node_id) : r.route.mode === "proxy" ? (r.route.proxy ?? "") : t("telegram.routeDirectShort");
+          toast.ok(t("telegram.routeSaved", { how }));
+        },
+        onError: (err) => setError(err instanceof ApiError && Object.keys(err.fields).length ? (Object.values(err.fields)[0] ?? "") : errorText(err)),
+      },
+    );
+  };
+  const Icon = ROUTE_ICON[saved.mode];
+  return (
+    <section {...rise(1)}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("telegram.routeTitle")}</h2>
+          <div className="card-sub">{t("telegram.routeSub")}</div>
+        </div>
+      </div>
+      <div className="panel-soft mb-4 flex items-center gap-3 p-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--hover)] text-[var(--ink-700)]" aria-hidden>
+          <Icon size={20} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-xs text-[var(--ink-500)]">{t("telegram.routeNow")}</div>
+          <div className="truncate text-[13px] font-semibold">{now}</div>
+        </div>
+      </div>
+      <form onSubmit={submit} noValidate>
+        <div className="mb-4">
+          <Segmented
+            value={mode}
+            onChange={(m) => {
+              setMode(m);
+              setError("");
+            }}
+            label={t("telegram.routeTitle")}
+            options={[
+              { value: "direct", label: t("telegram.routeDirect") },
+              { value: "node", label: t("telegram.routeNode") },
+              { value: "proxy", label: t("telegram.routeProxy") },
+            ]}
+          />
+        </div>
+        {mode === "direct" ? <p className="mb-4 text-xs text-[var(--ink-500)]">{t("telegram.routeDirectHint")}</p> : null}
+        {mode === "node" ? (
+          nodes.isPending ? (
+            <Skeleton style={{ height: 40, borderRadius: 12, maxWidth: 320 }} />
+          ) : remote.length === 0 ? (
+            <div className="banner warn mb-4 flex-wrap" role="status">
+              <span className="min-w-0 flex-1">{t("telegram.routeNoNodes")}</span>
+              <Link to="/nodes" className="btn btn-glass btn-sm">
+                {t("telegram.routeOpenNodes")}
+              </Link>
+            </div>
+          ) : (
+            <Field label={t("telegram.routeNodeLabel")} htmlFor="tg-route-node" hint={t("telegram.routeNodeHint")} error={error}>
+              <select id="tg-route-node" className="input max-w-[320px]" value={nodeId} onChange={(e) => setNodeId(Number(e.target.value))} aria-invalid={!!error}>
+                <option value={0} disabled>
+                  {t("telegram.routeNodePick")}
+                </option>
+                {remote.map((n) => (
+                  <option key={n.id} value={n.id} disabled={!tunnels(n.version)}>
+                    {tunnels(n.version) ? n.name : t("telegram.routeNodeOld", { name: n.name })}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )
+        ) : null}
+        {mode === "proxy" ? (
+          <Field label={t("telegram.routeProxyLabel")} htmlFor="tg-route-proxy" hint={saved.proxy ? t("telegram.routeProxyKeep", { proxy: saved.proxy }) : t("telegram.routeProxyHint")} error={error}>
+            <input
+              id="tg-route-proxy"
+              className="input mono"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              value={proxy}
+              onChange={(e) => setProxy(e.target.value)}
+              placeholder="socks5://user:pass@203.0.113.5:1080"
+              maxLength={512}
+              aria-invalid={!!error}
+            />
+          </Field>
+        ) : null}
+        {error && mode === "direct" ? (
+          <p className="mb-3 text-xs text-[var(--berry-600)]" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {mode === "node" && !nodes.isPending && remote.length === 0 ? null : (
+          <Button variant="primary" type="submit" loading={patch.isPending} disabled={!changed || !ready}>
+            {mode === "direct" ? t("common.save") : t("telegram.routeSave")}
+          </Button>
+        )}
+      </form>
     </section>
   );
 }

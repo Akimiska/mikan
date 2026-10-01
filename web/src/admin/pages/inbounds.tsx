@@ -485,6 +485,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
   const [fpOk, setFpOk] = useState(true);
+  const [obfs, setObfs] = useState(""); // Hysteria2: salamander or gecko
   const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
   const [exitNode, setExitNode] = useState<number>(0);
   const [poolId, setPoolId] = useState<number>(0);
@@ -504,6 +505,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setDest(inbound.dest ?? "");
     setSni(inbound.server_names?.[0] ?? "");
     setFp(inbound.fingerprint ?? "");
+    setObfs(inbound.obfs ?? "");
     setOutbound(inbound.outbound);
     setExitNode(inbound.exit_node_id ?? 0);
     setPoolId(inbound.pool_id ?? 0);
@@ -562,6 +564,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
       return;
     }
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
+    if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && (obfs === "salamander" || obfs === "gecko")) body.obfs = obfs;
     if (poolId !== (inbound?.pool_id ?? 0)) body.pool_id = poolId;
     if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
@@ -618,7 +621,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
               <Field label={t("inbounds.subName")} htmlFor="ed-name" hint={t("inbounds.subNameHint")} error={errors.display_name}>
                 <input id="ed-name" className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={defaultName} maxLength={48} aria-invalid={!!errors.display_name} autoComplete="off" />
               </Field>
-              <Field label={t("inbounds.portLabel")} htmlFor="ed-port" error={errors.port}>
+              <Field label={t("inbounds.portLabel")} htmlFor="ed-port" error={errors.port} hint={inbound?.type === "hysteria2" ? t("inbounds.portHopHint") : undefined}>
                 <input id="ed-port" className="input max-w-[200px]" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value)} aria-invalid={!!errors.port} />
               </Field>
               {inbound?.dest !== undefined ? (
@@ -670,6 +673,23 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
                     />
                   ) : null}
                 </>
+              ) : null}
+              {inbound?.obfs !== undefined ? (
+                <Field label={t("inbounds.obfs")} error={errors.obfs} hint={configChanged ? t("inbounds.fingerprintLocked") : obfs === "gecko" ? t("inbounds.obfsGeckoHint") : t("inbounds.obfsHint")}>
+                  <Segmented
+                    value={obfs}
+                    label={t("inbounds.obfs")}
+                    onChange={(v) => {
+                      if (configChanged) return;
+                      setObfs(v);
+                      setErrors(({ obfs: _, ...rest }) => rest);
+                    }}
+                    options={[
+                      { value: "salamander", label: "Salamander" },
+                      { value: "gecko", label: "Gecko" },
+                    ]}
+                  />
+                </Field>
               ) : null}
               {inbound?.fingerprint !== undefined ? (
                 <Field label={t("inbounds.fingerprint")} htmlFor="ed-fp" error={errors.fingerprint} hint={configChanged ? t("inbounds.fingerprintLocked") : t("inbounds.fingerprintHint")}>

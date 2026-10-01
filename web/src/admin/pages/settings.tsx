@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import clsx from "clsx";
-import { Copy, KeyRound, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { ChevronRight, Copy, KeyRound, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { meQuery, qk, useInbounds, useSettings, useUpdates } from "../../api/hooks";
+import { meQuery, qk, useInbounds, useNodes, usePaymentSettings, useSettings, useUpdates } from "../../api/hooks";
 import { LangSwitch } from "../../components/lang";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, ErrorState, Field, PageHeader, Pill, QR, Skeleton, Switch } from "../../components/ui";
 import { getLocale, LOCALES, t, tMaybe } from "../../i18n";
 import { FingerprintSelect } from "../../components/fingerprint-select";
+import { CertDrawer, certUntil, type CertInfo } from "../../components/cert-drawer";
 import { ago } from "../../lib/format";
 
 export function SettingsPage() {
@@ -27,10 +29,14 @@ export function SettingsPage() {
         <div className="grid items-start gap-4 xl:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-4">
             <ServerCard s={settings.data} />
+            <SubPortCard s={settings.data} />
             <SubscriptionCard s={settings.data} />
+            <ClashRulesCard s={settings.data} />
             <LanguageCard s={settings.data} />
             <AutoCard s={settings.data} />
             <DevicesCard s={settings.data} />
+            <SalesCard />
+            <ApiCard />
           </div>
           <div className="flex min-w-0 flex-col gap-4">
             <UpdatesCard />
@@ -92,6 +98,98 @@ function ServerCard({ s }: { s: Schemas["SettingsView"] }) {
         <Button type="submit" variant="primary" loading={save.isPending}>
           {t("common.save")}
         </Button>
+      </form>
+    </section>
+  );
+}
+
+// Ports the installer opens in the firewall (443 and the HTTPS pool): a subscription
+// port among them needs nothing else on the server.
+const OPEN_PORTS = [443, 2053, 2083, 2087, 2096, 8443] as const;
+
+// Subscriptions on a port of their own: a usual HTTPS port looks like any site, and the
+// admin panel's port stops showing in every link. Links on the old port keep working.
+function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const inbounds = useInbounds();
+  const nodes = useNodes();
+  const [port, setPort] = useState(s.sub_port ? String(s.sub_port) : "");
+  useEffect(() => setPort(s.sub_port ? String(s.sub_port) : ""), [s.sub_port]);
+  const error = save.error instanceof ApiError ? save.error.fields.sub_port : undefined;
+  const own = nodes.data?.find((n) => n.local)?.id;
+  // Who holds a port over TCP on the panel's own server.
+  const holder = (p: number) => (inbounds.data ?? []).find((i) => i.node_id === own && i.enabled && i.network === "tcp" && i.port === String(p))?.name;
+  const value = Number(port);
+  const valid = port.trim() === "" || (Number.isInteger(value) && value >= 1 && value <= 65535);
+  const next = port.trim() === "" ? 0 : value;
+  const changed = next !== (s.sub_port ?? 0);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (valid) save.mutate({ sub_port: next });
+  };
+  const current = s.sub_port || s.panel_port;
+  return (
+    <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
+      <form onSubmit={submit} noValidate>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t("settings.subPort")}</h2>
+            <div className="card-sub">{t("settings.subPortSub")}</div>
+          </div>
+          {s.sub_port ? <Pill tone={s.sub_port_error ? "bad" : "ok"}>{s.sub_port_error ? t("settings.subPortDown") : t("settings.subPortOn", { port: s.sub_port })}</Pill> : null}
+        </div>
+        {s.sub_port_error ? (
+          <div className="banner err mb-4" role="alert">
+            {t("settings.subPortBusy", { port: s.sub_port, panel: s.panel_port })}
+          </div>
+        ) : null}
+        {s.sub_base_url ? (
+          <div className="panel-soft mb-4 p-3">
+            <div className="text-xs text-[var(--ink-500)]">{t("settings.subPortLinks")}</div>
+            <div className="mono truncate text-[13px]">{s.sub_base_url.replace(/[^/]+\/$/, "…")}</div>
+          </div>
+        ) : null}
+        <Field label={t("settings.subPortField")} htmlFor="s-sub-port" hint={t("settings.subPortHint", { panel: s.panel_port })} error={error ?? (valid ? undefined : t("settings.subPortInvalid"))}>
+          <input
+            id="s-sub-port"
+            className="input mono max-w-[140px]"
+            inputMode="numeric"
+            value={port}
+            onChange={(e) => setPort(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder={String(s.panel_port)}
+            aria-invalid={!!error || !valid}
+          />
+        </Field>
+        <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label={t("settings.subPortQuick")}>
+          {OPEN_PORTS.map((p) => {
+            const who = p === s.panel_port ? t("settings.subPortPanel") : holder(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                className="chip"
+                aria-pressed={port === String(p)}
+                disabled={!!who}
+                title={p === s.panel_port ? t("errors.api.sub_port_panel") : who ? t("settings.subPortHeld", { name: who }) : undefined}
+                onClick={() => setPort(String(p))}
+              >
+                <span className="mono">{p}</span>
+                {who ? <span className="text-[var(--ink-400)]"> · {who}</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mb-4 text-xs text-[var(--ink-500)]">{t("settings.subPortNote")}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" loading={save.isPending && save.variables?.sub_port === next} disabled={!changed || !valid}>
+            {t("common.save")}
+          </Button>
+          {s.sub_port ? (
+            <Button variant="ghost" loading={save.isPending && save.variables?.sub_port === 0} onClick={() => save.mutate({ sub_port: 0 })}>
+              {t("settings.subPortOff", { port: current === s.sub_port ? s.panel_port : current })}
+            </Button>
+          ) : null}
+        </div>
       </form>
     </section>
   );
@@ -178,6 +276,123 @@ function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   );
 }
 
+// Ready-made rules the admin adds with one click; PROXY is the main group's alias that
+// survives renaming it.
+const RULE_EXAMPLES = [
+  { key: "siteDirect", rule: "DOMAIN-SUFFIX,example.com,DIRECT" },
+  { key: "siteVpn", rule: "DOMAIN-SUFFIX,example.com,PROXY" },
+  { key: "ads", rule: "GEOSITE,category-ads-all,REJECT" },
+  { key: "app", rule: "PROCESS-NAME,Telegram.exe,PROXY" },
+  { key: "lan", rule: "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve" },
+] as const;
+
+// The admin's own rules for Clash apps (subs.ParseRules checks them line by line).
+function ClashRulesCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const [text, setText] = useState(s.sub_rules);
+  const gutter = useRef<HTMLDivElement>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => setText(s.sub_rules), [s.sub_rules]);
+  const lines = text.split("\n");
+  const count = lines.filter((l) => l.trim() && !l.trim().startsWith("#")).length;
+  const apiErr = save.error instanceof ApiError ? save.error : null;
+  const error = apiErr?.fields.sub_rules;
+  const badLine = error && typeof apiErr?.values.sub_rules === "number" ? apiErr.values.sub_rules : 0;
+  const changed = text !== s.sub_rules;
+  const add = (rule: string) => {
+    setText((v) => (v.trim() ? v.replace(/\s*$/, "\n") : "") + rule);
+    requestAnimationFrame(() => {
+      const el = area.current;
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+      el.scrollTop = el.scrollHeight;
+    });
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    save.mutate({ sub_rules: text });
+  };
+  return (
+    <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+      <form onSubmit={submit} noValidate>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t("settings.rules")}</h2>
+            <div className="card-sub">{t("settings.rulesSub")}</div>
+          </div>
+          {count ? <Pill tone="off">{t("settings.rulesCount", { n: count })}</Pill> : null}
+        </div>
+        <div className="rules-editor" aria-invalid={!!error}>
+          <div className="rules-gutter" ref={gutter} aria-hidden>
+            {lines.map((_, i) => (
+              <div key={i} className={i + 1 === badLine ? "bad" : undefined}>
+                {i + 1}
+              </div>
+            ))}
+          </div>
+          <textarea
+            ref={area}
+            id="s-rules"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onScroll={(e) => {
+              if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop;
+            }}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoComplete="off"
+            wrap="off"
+            maxLength={65536}
+            placeholder={t("settings.rulesPlaceholder")}
+            aria-label={t("settings.rules")}
+            aria-invalid={!!error}
+            aria-describedby="s-rules-hint"
+          />
+        </div>
+        {error ? (
+          <p className="mt-2 text-xs text-[var(--berry-600)]" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t("settings.rulesExamples")}>
+          {RULE_EXAMPLES.map((x) => (
+            <button key={x.key} type="button" className="chip-btn" onClick={() => add(x.rule)} title={x.rule}>
+              + {t(`settings.rulesEx.${x.key}`)}
+            </button>
+          ))}
+        </div>
+        <div id="s-rules-hint" className="mt-3 text-xs text-[var(--ink-500)]">
+          <p>{t("settings.rulesHint")}</p>
+          <p className="mt-1">
+            {t("settings.rulesTargets")}{" "}
+            {s.rule_targets.map((x, i) => (
+              <span key={x}>
+                {i ? " · " : ""}
+                <code className="mono">{x}</code>
+              </span>
+            ))}
+          </p>
+          <details className="mt-2">
+            <summary className="cursor-pointer font-medium text-[var(--ink-700)]">{t("settings.rulesTypes")}</summary>
+            <p className="mt-2">{t("settings.rulesTypesText")}</p>
+          </details>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" loading={save.isPending && save.variables?.sub_rules !== undefined} disabled={!changed}>
+            {t("common.save")}
+          </Button>
+          {changed ? (
+            <Button variant="ghost" onClick={() => setText(s.sub_rules)}>
+              {t("telegram.discard")}
+            </Button>
+          ) : null}
+        </div>
+      </form>
+    </section>
+  );
+}
+
 /** What visitors get until they pick a language; the header's switch is this browser's own. */
 function LanguageCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
@@ -242,6 +457,65 @@ function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
         ))}
       </ul>
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.autoNote")}</p>
+    </section>
+  );
+}
+
+// The switch for selling at all. Off, Payments leaves the menu; the page stays reachable
+// from here for the history.
+function SalesCard() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const ps = usePaymentSettings();
+  const save = useMutation({
+    mutationFn: (enabled: boolean) => unwrap(api.PATCH("/api/v1/payments/settings", { body: { enabled } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.paymentSettings, v);
+      toast.ok(v.enabled ? t("settings.salesOnToast") : t("settings.salesOffToast"));
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  const on = ps.data?.enabled === true;
+  return (
+    <section className="card glass reveal" style={{ "--i": 5 } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.sales")}</h2>
+          <div className="card-sub">{t("settings.salesSub")}</div>
+        </div>
+        {ps.isPending ? (
+          <Skeleton style={{ width: 40, height: 24, borderRadius: 12 }} />
+        ) : ps.isError ? null : (
+          <Switch checked={on} label={t("settings.sales")} disabled={save.isPending} onChange={(v) => save.mutate(v)} />
+        )}
+      </div>
+      {ps.isError ? (
+        <ErrorState text={errorText(ps.error)} onRetry={() => void ps.refetch()} />
+      ) : ps.data ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="min-w-0 flex-1 text-xs text-[var(--ink-500)]">{on ? t("settings.salesOnNote") : t("settings.salesOffNote")}</p>
+          <Link to="/payments" className="btn btn-glass btn-sm">
+            {t("settings.openPayments")} <ChevronRight size={16} aria-hidden />
+          </Link>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+// API keys and the reference live on their own page: they are for scripts, not daily work.
+function ApiCard() {
+  return (
+    <section className="card glass reveal" style={{ "--i": 5 } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("settings.api")}</h2>
+          <div className="card-sub">{t("settings.apiSub")}</div>
+        </div>
+        <Link to="/settings/api" className="btn btn-glass btn-sm">
+          {t("settings.apiOpen")} <ChevronRight size={16} aria-hidden />
+        </Link>
+      </div>
     </section>
   );
 }
@@ -455,26 +729,54 @@ function CertificateCard({ s }: { s: Schemas["SettingsView"] }) {
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const ok = c.kind === "letsencrypt";
+  const [own, setOwn] = useState(false);
+  const custom = c.kind === "custom";
+  const ok = c.kind === "letsencrypt" || custom;
   const until = new Date(c.not_after).toLocaleString(getLocale(), { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  const sub = custom ? t("settings.certCustom", { names: (c.names ?? []).join(", "), until: certUntil(c.not_after) }) : ok ? t("settings.certLe", { id: c.identifier, until }) : t("settings.certSelf");
+  // The own certificate as the drawer shows it; a broken one is shown by its error.
+  const current: CertInfo | null = custom ? { names: c.names, issuer: c.issuer, not_after: c.not_after, trusted: c.trusted } : c.error?.startsWith("custom_") ? { error: c.error } : null;
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("settings.cert")}</h2>
-          <div className="card-sub">{ok ? t("settings.certLe", { id: c.identifier, until }) : t("settings.certSelf")}</div>
+          <div className="card-sub">{sub}</div>
         </div>
-        {ok ? <Pill tone="ok">{t("settings.certValid")}</Pill> : <Pill tone="warn">{t("settings.certTemp")}</Pill>}
+        {custom ? <Pill tone="ok">{t("settings.certOwn")}</Pill> : ok ? <Pill tone="ok">{t("settings.certValid")}</Pill> : <Pill tone="warn">{t("settings.certTemp")}</Pill>}
       </div>
       {c.error ? (
         <p className="mb-3 text-[13px] text-[var(--berry-600)]" role="alert">
           {tMaybe(`errors.acme.${c.error}`) ?? c.error}
         </p>
       ) : null}
-      <p className="mb-3 text-xs text-[var(--ink-500)]">{t("settings.certNote")}</p>
-      <Button size="sm" loading={renew.isPending} onClick={() => renew.mutate()}>
-        {t("settings.certRenew")}
-      </Button>
+      <p className="mb-3 text-xs text-[var(--ink-500)]">{custom ? t("settings.certOwnNote") : t("settings.certNote")}</p>
+      <div className="flex flex-wrap gap-2">
+        {!custom ? (
+          <Button size="sm" loading={renew.isPending} onClick={() => renew.mutate()}>
+            {t("settings.certRenew")}
+          </Button>
+        ) : null}
+        <Button size="sm" onClick={() => setOwn(true)}>
+          <ShieldCheck size={16} aria-hidden /> {custom ? t("settings.certReplace") : t("settings.certOwnButton")}
+        </Button>
+      </div>
+      <CertDrawer
+        open={own}
+        onClose={() => setOwn(false)}
+        title={t("cert.panelTitle")}
+        lead={t("cert.panelLead")}
+        current={current}
+        save={(cert, key) => unwrap(api.PUT("/api/v1/settings/certificate", { body: { cert, key } })).then((v) => qc.setQueryData(qk.settings, v))}
+        clear={() =>
+          unwrap(api.DELETE("/api/v1/settings/certificate")).then(() => {
+            void qc.invalidateQueries({ queryKey: qk.settings });
+            window.setTimeout(() => void qc.invalidateQueries({ queryKey: qk.settings }), 15_000);
+          })
+        }
+        clearLabel={t("cert.panelClear")}
+        clearText={t("cert.panelClearText")}
+      />
     </section>
   );
 }

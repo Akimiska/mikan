@@ -44,6 +44,10 @@ Commands:
                                 add an inbound from a preset with fresh keys
   admin inbound set NAME --port PORT [--node NODE]
                                 move an inbound to another port; keys and camouflage stay
+  admin cert set [--node NODE]  install an own certificate: the chain and the key (PEM) on stdin
+  admin cert clear [--node NODE]
+                                go back to Let's Encrypt (a node: to its self-signed one)
+  admin cert show [--node NODE] what the own certificate is
   admin node list               the panel's nodes
   admin node add --name NAME --host IP [--domain DOMAIN] [--api-port PORT]
                                 add a node; prints its join key
@@ -153,6 +157,8 @@ func adminCmd(ctx context.Context, args []string) error {
 		}
 		fmt.Println("Database copied to", args[1])
 		return nil
+	case "cert":
+		return certCmd(ctx, st, set, cfg.DataDir, args[1:], os.Stdin, os.Stdout)
 	case "node":
 		return nodeCmd(ctx, st, cfg.DataDir, args[1:], os.Stdout, os.Stderr)
 	case "inbound":

@@ -26,6 +26,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
 	"mikan/internal/panel/warp"
 )
@@ -62,12 +63,18 @@ type Options struct {
 	QUIC func(n db.Node) (*nodeapi.TLSFiles, string, error)
 	// PanelCert is the client certificate remote nodes pin; join keys carry its hash.
 	PanelCert func() (nodetls.Pair, error)
+	// NodeCerts keeps the nodes' own certificates; nil: nodes have none.
+	NodeCerts *tlscert.NodeStore
 	// Certs manages the panel's public certificate; nil in development.
 	Certs *acme.Manager
 	// Autotune are the automatic moves' timings; zero means autotune.DefaultOptions.
 	Autotune autotune.Options
 	// TelegramAPI is the Bot API; "" is Telegram's.
 	TelegramAPI string
+	// SubPort moves the subscription port (0: none) and SubPortError says why the saved
+	// one is not served; nil where the panel runs no server (tests, the CLI).
+	SubPort      func(port int) error
+	SubPortError func() string
 	// DataDir is where the host updater and the panel meet (update/); "" turns that off.
 	DataDir string
 	// Releases fetches the newest release; nil never checks.
@@ -113,14 +120,17 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		deps.Tuner = p.Tuner
 	}
 	deps.PanelCert = o.PanelCert
+	deps.SubPort, deps.SubPortError = o.SubPort, o.SubPortError
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
+		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom
 	}
+	deps.NodeCerts = o.NodeCerts
 	subBase := func(ctx context.Context) string {
-		ep, err := set.Endpoint(ctx)
+		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {
 			return ""
 		}
@@ -139,9 +149,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
 		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks})
 	deps.Billing, deps.SubBase = p.Billing, subBase
+	// The bot may reach Telegram through a node when the panel's server cannot.
+	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
+	if p.Nodes != nil {
+		tunnel = p.Nodes.Tunnel
+	}
 	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
-		MiniApp: func() bool { return o.Certs != nil && o.Certs.Status().Kind == "letsencrypt" }})
+		MiniApp: func() bool { return o.Certs != nil && o.Certs.Status().Kind == "letsencrypt" }, Tunnel: tunnel})
 	deps.Telegram = p.Telegram
 	p.Billing.SetTelegram(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
@@ -179,16 +194,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return subs.Config{}, err
 		}
-		var domainName, publicHost, routing, fingerprint string
+		var domainName, publicHost, routing, fingerprint, rules string
 		var groups subs.Groups
 		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto,
-			settings.KeyRouting: &routing, settings.KeyFingerprint: &fingerprint} {
+			settings.KeyRouting: &routing, settings.KeyFingerprint: &fingerprint, settings.KeyRules: &rules} {
 			if *dst, err = set.String(ctx, key); err != nil {
 				return subs.Config{}, err
 			}
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing), Fingerprint: fingerprint,
-			Direct: []string{publicHost, domainName}, Lang: lang}
+			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang))}
 		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
 			return subs.Config{}, err
 		}
@@ -228,6 +243,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Handler = p.server
 	return p, nil
 }
+
+// SubOnly is what the subscription port serves: the subscription path alone.
+func (p *Panel) SubOnly() http.Handler { return p.server.SubOnly() }
 
 // Apply loads the secret paths into the router and the default language into the pages.
 func (p *Panel) Apply(ctx context.Context) (settings.Paths, error) {

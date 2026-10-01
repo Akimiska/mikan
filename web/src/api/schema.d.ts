@@ -350,6 +350,24 @@ export interface paths {
         patch: operations["update-node-cascade"];
         trace?: never;
     };
+    "/api/v1/nodes/{id}/certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Поставить ноде свой сертификат */
+        put: operations["set-node-certificate"];
+        post?: never;
+        /** Вернуть ноде самоподписанный сертификат */
+        delete: operations["clear-node-certificate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/key": {
         parameters: {
             query?: never;
@@ -541,6 +559,24 @@ export interface paths {
         head?: never;
         /** Изменить настройки */
         patch: operations["update-settings"];
+        trace?: never;
+    };
+    "/api/v1/settings/certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Поставить свой сертификат панели */
+        put: operations["set-certificate"];
+        post?: never;
+        /** Вернуть сертификат Let's Encrypt */
+        delete: operations["clear-certificate"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/settings/certificate/renew": {
@@ -1086,6 +1122,12 @@ export interface components {
             /** @description Ноды, которые выходят через эту */
             sources: components["schemas"]["CascadeHop"][];
         };
+        CertInputBody: {
+            /** @description Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem) */
+            cert: string;
+            /** @description Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519 */
+            key: string;
+        };
         CheckTargetInputBody: {
             /** @description host:port */
             dest: string;
@@ -1152,7 +1194,7 @@ export interface components {
             node_id?: number;
             port?: string;
             /** @enum {string} */
-            preset: "vless_reality_xhttp" | "hysteria2" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "vless_reality_xhttp_pq" | "trusttunnel" | "shadowquic" | "mieru" | "shadowsocks_2022" | "sudoku" | "snell" | "custom";
+            preset: "vless_reality_xhttp" | "hysteria2" | "hysteria2_gecko" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "anytls" | "vless_reality_xhttp_pq" | "trusttunnel" | "shadowquic" | "mieru" | "shadowsocks_2022" | "sudoku" | "snell" | "custom";
         };
         CreateNodeInputBody: {
             /**
@@ -1271,6 +1313,8 @@ export interface components {
             network: string;
             /** Format: int64 */
             node_id: number;
+            /** @description Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет */
+            obfs?: string;
             /**
              * @description Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)
              * @enum {string}
@@ -1347,9 +1391,27 @@ export interface components {
             /** @description Для action=url: https:// или tg:// */
             url?: string;
         };
+        NodeCertInputBody: {
+            /** @description Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem) */
+            cert: string;
+            /** @description Закрытый ключ в PEM (privkey.pem): RSA от 2048 бит, ECDSA P-256/384/521 или Ed25519 */
+            key: string;
+        };
+        NodeCertView: {
+            /** @description custom_expired, custom_invalid — сертификат не используется, нода на своём самоподписанном */
+            error?: string;
+            issuer: string;
+            /** @description Домены и IP, на которые он выписан */
+            names: string[];
+            /** Format: date-time */
+            not_after: string;
+            /** @description Публично доверенный для адреса: приложения принимают его без пина */
+            trusted: boolean;
+        };
         NodeInfo: {
             /** @description host:port API ноды; пусто у своей ноды */
             address: string;
+            certificate?: components["schemas"]["NodeCertView"];
             /** Format: date-time */
             checked_at?: string;
             /** Format: int64 */
@@ -1452,6 +1514,11 @@ export interface components {
             /** @description Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек */
             fingerprint?: string;
             /**
+             * @description Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат
+             * @enum {string}
+             */
+            obfs?: "salamander" | "gecko";
+            /**
              * @description Выход в интернет: напрямую, через WARP ноды или через другую ноду
              * @enum {string}
              */
@@ -1477,6 +1544,7 @@ export interface components {
             cryptobot_testnet?: boolean;
             /** @description Пусто — удалить токен */
             cryptobot_token?: string;
+            enabled?: boolean;
             renew_resets_traffic?: boolean;
             stars?: boolean;
             yookassa?: boolean;
@@ -1500,14 +1568,23 @@ export interface components {
             quiet_hour_utc?: number;
             sub_group_auto?: string;
             sub_group_main?: string;
+            /**
+             * Format: int64
+             * @description Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать
+             */
+            sub_port?: number;
             /** @enum {string} */
             sub_routing?: "ru_direct" | "all";
+            /** @description Свои правила Clash, до 500 строк; ошибка указывает номер строки */
+            sub_rules?: string;
             /** @description https://… или tg://… */
             support_url?: string;
         };
         PatchTelegramInputBody: {
             config?: components["schemas"]["Config"];
             enabled?: boolean;
+            /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
+            route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */
             token?: string;
         };
@@ -1549,6 +1626,13 @@ export interface components {
             cryptobot: boolean;
             cryptobot_testnet: boolean;
             cryptobot_token_set: boolean;
+            /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату
+             */
+            on_sale: number;
             /** @description Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок */
             renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */
@@ -1673,6 +1757,17 @@ export interface components {
             tls13: boolean;
             x25519: boolean;
         };
+        RouteStruct: {
+            /** @enum {string} */
+            mode: "direct" | "node" | "proxy";
+            /**
+             * Format: int64
+             * @description Удалённая нода панели (mode=node)
+             */
+            node_id?: number;
+            /** @description socks5://user:pass@host:port, http://… или https://…; не передан — прежний (mode=proxy) */
+            proxy?: string;
+        };
         ScanTargetsOutputBody: {
             /** @description Адрес сервера, вокруг которого искали */
             ip: string;
@@ -1720,16 +1815,27 @@ export interface components {
              * @description Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов
              */
             quiet_hour_utc: number;
+            /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
+            rule_targets: string[];
             sub_base_url: string;
             /** @description Группа автовыбора самого быстрого подключения */
             sub_group_auto: string;
             /** @description Главная группа в Clash-приложениях */
             sub_group_main: string;
             /**
+             * Format: int64
+             * @description Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае
+             */
+            sub_port: number;
+            /** @description sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели */
+            sub_port_error?: string;
+            /**
              * @description Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN
              * @enum {string}
              */
             sub_routing: "ru_direct" | "all";
+            /** @description Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий */
+            sub_rules: string;
             support_url: string;
         };
         Status: {
@@ -1737,10 +1843,14 @@ export interface components {
             checked_at: string;
             error?: string;
             identifier: string;
+            issuer?: string;
             /** @enum {string} */
-            kind: "self-signed" | "letsencrypt";
+            kind: "self-signed" | "letsencrypt" | "custom";
+            names?: string[];
             /** Format: date-time */
             not_after: string;
+            /** @description Свой сертификат публично доверенный для адреса панели */
+            trusted?: boolean;
         };
         System: {
             /** Format: double */
@@ -1861,6 +1971,20 @@ export interface components {
             name: string;
             username: string;
         };
+        TelegramRoute: {
+            /**
+             * @description Напрямую с сервера панели, через её ноду или через прокси — когда Telegram на сервере заблокирован
+             * @enum {string}
+             */
+            mode: "direct" | "node" | "proxy";
+            /**
+             * Format: int64
+             * @description Нода, через которую идут запросы
+             */
+            node_id?: number;
+            /** @description Адрес прокси; пароль скрыт */
+            proxy?: string;
+        };
         TelegramView: {
             /**
              * Format: int64
@@ -1883,6 +2007,8 @@ export interface components {
             linked: number;
             /** @description Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный */
             mini_app_url: string;
+            /** @description Как бот ходит в Telegram */
+            route: components["schemas"]["TelegramRoute"];
             running: boolean;
             /** @description ID бота из токена */
             token_hint?: string;
@@ -2922,6 +3048,70 @@ export interface operations {
             };
         };
     };
+    "set-node-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeCertInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "clear-node-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "rekey-node": {
         parameters: {
             query?: never;
@@ -3452,6 +3642,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SettingsView"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "clear-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

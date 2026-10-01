@@ -1,9 +1,9 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Copy, Undo2 } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk } from "../../api/hooks";
+import { qk, usePaymentSettings } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
@@ -27,10 +27,18 @@ const STATUSES: Status[] = ["applied", "paid", "pending", "failed", "expired", "
 const PROVIDERS: Provider[] = ["stars", "yookassa", "cryptobot"];
 
 export function PaymentsPage() {
-  const settings = useQuery({ queryKey: qk.paymentSettings, queryFn: () => unwrap(api.GET("/api/v1/payments/settings")) });
+  const settings = usePaymentSettings();
   return (
     <>
       <PageHeader title={t("payments.title")} sub={t("payments.subtitle")} />
+      {settings.data && !settings.data.enabled ? (
+        <div className="banner warn mb-4 flex-wrap" role="status">
+          <span className="min-w-0 flex-1">{t("payments.salesOff")}</span>
+          <Link to="/settings" className="btn btn-glass btn-sm">
+            {t("payments.openSettings")}
+          </Link>
+        </div>
+      ) : null}
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <History />
         {settings.isPending ? (
@@ -213,10 +221,18 @@ function SettingsCard({ s }: { s: Settings }) {
           </div>
         </div>
         {save.error && !Object.keys(errors).length ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        {(s.available.stars || s.available.yookassa || s.available.cryptobot) && s.on_sale === 0 ? (
+          <div className="banner warn mb-4 flex-wrap" role="status">
+            <span className="min-w-0 flex-1">{t("payments.nothingOnSale")}</span>
+            <Link to="/tariffs" className="btn btn-glass btn-sm">
+              {t("payments.openTariffs")}
+            </Link>
+          </div>
+        ) : null}
 
-        <Provider title={t("payments.providers.stars")} sub={t("payments.starsSub")} on={form.stars} onChange={set("stars")} live={s.available.stars} offline={form.stars && !s.available.stars ? t("payments.starsBotOff") : ""} />
+        <Provider title={t("payments.providers.stars")} sub={t("payments.starsSub")} on={form.stars} onChange={set("stars")} live={s.available.stars} selling={s.enabled} offline={s.enabled && form.stars && !s.available.stars ? t("payments.starsBotOff") : ""} />
 
-        <Provider title={t("payments.providers.yookassa")} sub={t("payments.yookassaSub")} on={form.yookassa} onChange={set("yookassa")} live={s.available.yookassa} error={errors.yookassa}>
+        <Provider title={t("payments.providers.yookassa")} sub={t("payments.yookassaSub")} on={form.yookassa} onChange={set("yookassa")} live={s.available.yookassa} selling={s.enabled} error={errors.yookassa}>
           <div className="grid gap-x-3 sm:grid-cols-2">
             <Field label={t("payments.shopId")} htmlFor="p-shop" error={errors.yookassa_shop_id}>
               <input id="p-shop" className="input mono" inputMode="numeric" value={form.shop} onChange={(e) => setForm((f) => ({ ...f, shop: e.target.value }))} autoComplete="off" aria-invalid={!!errors.yookassa_shop_id} />
@@ -237,7 +253,7 @@ function SettingsCard({ s }: { s: Settings }) {
           <Webhook label={t("payments.webhookYooKassa")} url={s.webhook_yookassa} />
         </Provider>
 
-        <Provider title={t("payments.providers.cryptobot")} sub={t("payments.cryptobotSub")} on={form.cryptobot} onChange={set("cryptobot")} live={s.available.cryptobot} error={errors.cryptobot}>
+        <Provider title={t("payments.providers.cryptobot")} sub={t("payments.cryptobotSub")} on={form.cryptobot} onChange={set("cryptobot")} live={s.available.cryptobot} selling={s.enabled} error={errors.cryptobot}>
           <Field label={t("payments.cryptoToken")} htmlFor="p-cb" error={errors.cryptobot_token}>
             <input
               id="p-cb"
@@ -278,14 +294,15 @@ function SettingsCard({ s }: { s: Settings }) {
   );
 }
 
-function Provider({ title, sub, on, onChange, live, offline, error, children }: { title: string; sub: string; on: boolean; onChange: (v: boolean) => void; live: boolean; offline?: string; error?: string; children?: ReactNode }) {
+// With selling off nothing takes payments: the readiness pill would only mislead, so it hides.
+function Provider({ title, sub, on, onChange, live, selling, offline, error, children }: { title: string; sub: string; on: boolean; onChange: (v: boolean) => void; live: boolean; selling: boolean; offline?: string; error?: string; children?: ReactNode }) {
   return (
     <div className="mb-4 border-t border-[var(--hairline)] pt-4 first-of-type:border-t-0 first-of-type:pt-0" role="group" aria-label={title}>
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-[13px] font-semibold">
             {title}
-            {on ? <Pill tone={live ? "ok" : "warn"}>{live ? t("payments.live") : t("payments.notReady")}</Pill> : null}
+            {on && selling ? <Pill tone={live ? "ok" : "warn"}>{live ? t("payments.live") : t("payments.notReady")}</Pill> : null}
           </div>
           <div className="text-xs text-[var(--ink-500)]">{sub}</div>
           {offline ? <div className="mt-1 text-xs text-[var(--honey-600)]">{offline}</div> : null}

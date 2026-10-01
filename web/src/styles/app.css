@@ -169,6 +169,8 @@
   .chip { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.55); border: 1px solid var(--hairline); font-weight: 500; font-size: 13px; color: var(--ink-600); transition: background-color 0.2s, color 0.2s, border-color 0.2s; white-space: nowrap; }
   .chip:hover { background: rgba(255, 255, 255, 0.85); color: var(--ink-900); }
   .chip[aria-pressed="true"] { background: var(--ink-900); border-color: var(--ink-900); color: #fff; }
+  .chip:disabled { opacity: 0.5; cursor: not-allowed; }
+  .chip:disabled:hover { background: rgba(255, 255, 255, 0.55); color: var(--ink-600); }
   .chip-count { font-size: 12px; opacity: 0.7; }
   .search-field { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: var(--r-md); background: rgba(255, 255, 255, 0.7); border: 1px solid var(--hairline); min-width: 280px; color: var(--ink-500); transition: border-color 0.2s, box-shadow 0.2s; }
   .search-field:focus-within { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }
@@ -245,6 +247,14 @@
   .input:focus { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }
   .input[aria-invalid="true"] { border-color: var(--berry-600); }
   textarea.input { height: auto; min-height: 80px; padding: 12px; resize: vertical; line-height: 20px; }
+  .rules-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); border-radius: var(--r-md); border: 1px solid var(--hairline); background: rgba(255, 255, 255, 0.8); overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s; }
+  .rules-editor:focus-within { border-color: var(--mikan-400); box-shadow: 0 0 0 3px rgba(240, 122, 46, 0.18); }
+  .rules-editor[aria-invalid="true"] { border-color: var(--berry-600); }
+  .rules-gutter { min-width: 44px; padding: 12px 8px 12px 12px; text-align: right; font: 12px/20px var(--font-mono-stack); color: var(--ink-400); background: rgba(31, 26, 23, 0.03); border-right: 1px solid var(--hairline); overflow: hidden; user-select: none; }
+  .rules-gutter div { height: 20px; }
+  .rules-gutter .bad { color: var(--berry-600); font-weight: 700; }
+  .rules-editor textarea { display: block; width: 100%; min-height: 200px; max-height: 60vh; padding: 12px; border: 0; outline: 0; background: transparent; resize: vertical; white-space: pre; overflow: auto; font: 13px/20px var(--font-mono-stack); color: var(--ink-900); tab-size: 2; }
+  .rules-editor textarea::placeholder { color: var(--ink-400); }
   .config-editor { border-radius: var(--r-md); border: 1px solid var(--hairline); background: rgba(255, 255, 255, 0.8); overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s; }
   .config-editor .cm-editor { min-height: 280px; max-height: 60vh; }
   .config-editor .cm-scroller { overflow: auto; }

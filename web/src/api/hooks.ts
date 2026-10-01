@@ -112,6 +112,11 @@ export function useNodes() {
   return useQuery({ queryKey: qk.nodes, queryFn: () => unwrap(api.GET("/api/v1/nodes")), refetchInterval: 10_000 });
 }
 
+/** Payment settings: also whether selling is on, which shows Payments in the menu. */
+export function usePaymentSettings() {
+  return useQuery({ queryKey: qk.paymentSettings, queryFn: () => unwrap(api.GET("/api/v1/payments/settings")) });
+}
+
 export function useSettings() {
   return useQuery({ queryKey: qk.settings, queryFn: () => unwrap(api.GET("/api/v1/settings")) });
 }

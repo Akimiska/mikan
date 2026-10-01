@@ -24,12 +24,13 @@ type Client struct {
 	hc    *http.Client
 }
 
-func NewClient(base, token string) *Client {
+// NewClient: rt is the way to Telegram (see route.go); nil goes straight.
+func NewClient(base, token string, rt http.RoundTripper) *Client {
 	if base == "" {
 		base = DefaultAPI
 	}
 	// Long polling holds a request for up to pollTimeout; the client waits a bit longer.
-	return &Client{base: strings.TrimRight(base, "/"), token: token, hc: &http.Client{Timeout: pollTimeout + 15*time.Second}}
+	return &Client{base: strings.TrimRight(base, "/"), token: token, hc: &http.Client{Transport: rt, Timeout: pollTimeout + 15*time.Second}}
 }
 
 // APIError is Telegram's refusal. Code 403 means the user blocked the bot; 429 carries

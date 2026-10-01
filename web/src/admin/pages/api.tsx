@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ChevronLeft, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { lazy, Suspense, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
@@ -18,6 +19,9 @@ type Scope = APIKey["scope"];
 export function ApiPage() {
   return (
     <>
+      <Link to="/settings" className="mb-2 inline-flex items-center gap-1 rounded-lg text-[13px] font-medium text-[var(--ink-500)] hover:text-[var(--ink-900)]">
+        <ChevronLeft size={16} aria-hidden /> {t("apiPage.back")}
+      </Link>
       <PageHeader title={t("apiPage.title")} sub={t("apiPage.subtitle")} />
       <div className="flex flex-col gap-4">
         <KeysCard />

@@ -1,12 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cloud, Copy, KeyRound, Pencil, Plus, Trash2, Waypoints } from "lucide-react";
+import { Cloud, Copy, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
+import { CertDrawer, certUntil } from "../../components/cert-drawer";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Bar, Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
-import { t } from "../../i18n";
+import { t, tMaybe } from "../../i18n";
 import { bytes, num } from "../../lib/format";
 import { CascadeDrawer } from "./node-cascade";
 import { WarpDrawer } from "./node-warp";
@@ -29,6 +30,7 @@ export function NodesPage() {
   const [joined, setJoined] = useState<Joined | null>(null);
   const [warpOf, setWarpOf] = useState<Node | null>(null);
   const [cascadeOf, setCascadeOf] = useState<Node | null>(null);
+  const [certOf, setCertOf] = useState<Node | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: qk.nodes });
     void qc.invalidateQueries({ queryKey: qk.inbounds });
@@ -87,7 +89,7 @@ export function NodesPage() {
             </div>
           ) : null}
           {nodes.data.map((n, idx) => (
-            <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
+            <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
           ))}
         </div>
       )}
@@ -103,6 +105,18 @@ export function NodesPage() {
       <KeyDrawer joined={joined} onClose={() => setJoined(null)} />
       <WarpDrawer node={warpOf ? { id: warpOf.id, name: nodeLabel(warpOf) } : null} onClose={() => setWarpOf(null)} />
       <CascadeDrawer node={cascadeOf ? { id: cascadeOf.id, name: nodeLabel(cascadeOf) } : null} onClose={() => setCascadeOf(null)} />
+      <CertDrawer
+        open={!!certOf}
+        onClose={() => setCertOf(null)}
+        title={t("cert.nodeTitle")}
+        meta={certOf ? nodeLabel(certOf) : undefined}
+        lead={t("cert.nodeLead")}
+        current={certOf?.certificate ?? null}
+        save={(cert, key) => unwrap(api.PUT("/api/v1/nodes/{id}/certificate", { params: { path: { id: certOf!.id } }, body: { cert, key } })).then(() => qc.invalidateQueries({ queryKey: qk.nodes }))}
+        clear={() => unwrap(api.DELETE("/api/v1/nodes/{id}/certificate", { params: { path: { id: certOf!.id } } })).then(() => qc.invalidateQueries({ queryKey: qk.nodes }))}
+        clearLabel={t("cert.nodeClear")}
+        clearText={t("cert.nodeClearText")}
+      />
       <Confirm
         open={!!rekeying}
         onOpenChange={(v) => !v && setRekeying(null)}
@@ -126,7 +140,25 @@ export function NodesPage() {
   );
 }
 
-function NodeCard({ n, idx, onEdit, onWarp, onCascade, onRekey, onRemove }: { n: Node; idx: number; onEdit: () => void; onWarp: () => void; onCascade: () => void; onRekey: () => void; onRemove: () => void }) {
+function NodeCard({
+  n,
+  idx,
+  onEdit,
+  onWarp,
+  onCascade,
+  onCert,
+  onRekey,
+  onRemove,
+}: {
+  n: Node;
+  idx: number;
+  onEdit: () => void;
+  onWarp: () => void;
+  onCascade: () => void;
+  onCert: () => void;
+  onRekey: () => void;
+  onRemove: () => void;
+}) {
   const mem = n.mem_total ? Math.round((n.mem_used / n.mem_total) * 100) : 0;
   return (
     <section className="card glass reveal" style={{ "--i": idx } as React.CSSProperties}>
@@ -193,6 +225,14 @@ function NodeCard({ n, idx, onEdit, onWarp, onCascade, onRekey, onRemove }: { n:
             <dd className="num">{n.version}</dd>
           </div>
         ) : null}
+        {n.certificate ? (
+          <div className="col-span-2">
+            <dt className="text-xs text-[var(--ink-500)]">{t("nodes.cert")}</dt>
+            <dd className={n.certificate.error ? "text-[var(--berry-600)]" : undefined}>
+              {n.certificate.error ? (tMaybe(`errors.acme.${n.certificate.error}`) ?? n.certificate.error) : t("nodes.certOwn", { until: certUntil(n.certificate.not_after) })}
+            </dd>
+          </div>
+        ) : null}
       </dl>
       <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--hairline)] pt-4">
         <Button size="sm" onClick={onEdit}>
@@ -203,6 +243,9 @@ function NodeCard({ n, idx, onEdit, onWarp, onCascade, onRekey, onRemove }: { n:
         </Button>
         <Button size="sm" onClick={onCascade}>
           <Waypoints size={16} aria-hidden /> {t("cascade.title")}
+        </Button>
+        <Button size="sm" onClick={onCert}>
+          <ShieldCheck size={16} aria-hidden /> {t("nodes.certButton")}
         </Button>
         {!n.local ? (
           <>

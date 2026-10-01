@@ -1,13 +1,16 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Undo2 } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, usePaymentSettings } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, PageHeader, Pill, Skeleton, Spinner, Switch } from "../../components/ui";
+import { QueryBoundary, StaleNotice } from "../../components/query";
+import { Switch } from "../../components/switch";
+import { Button, EmptyState, ErrorState, PageHeader, Pill, Skeleton, Spinner } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
+import { useDraft } from "../../lib/draft";
 import { dateShort, money, num, time } from "../../lib/format";
 import { AddonsCard, addonName, useAddons } from "./payment-addons";
 
@@ -65,15 +68,9 @@ export function PaymentsPage() {
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <History />
         <div className="flex min-w-0 flex-col gap-4">
-          {settings.isPending ? (
-            <Skeleton style={{ height: 420, borderRadius: 20 }} />
-          ) : settings.isError ? (
-            <section className="card glass">
-              <ErrorState text={errorText(settings.error)} onRetry={() => void settings.refetch()} />
-            </section>
-          ) : (
-            <SettingsCard s={settings.data} />
-          )}
+          <QueryBoundary query={settings} pending={<Skeleton style={{ height: 420, borderRadius: 20 }} />} wrap={(state) => <section className="card glass">{state}</section>}>
+            {(s) => <SettingsCard s={s} />}
+          </QueryBoundary>
           <AddonsCard selling={!!settings.data?.enabled} />
         </div>
       </div>
@@ -148,13 +145,14 @@ function History() {
           ))}
         </select>
       </div>
+      {list.isError && list.data ? <StaleNotice onRetry={() => void list.refetch()} retrying={list.isFetching} /> : null}
       {list.isPending ? (
         <div className="flex flex-col gap-2">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} style={{ height: 56 }} />
           ))}
         </div>
-      ) : list.isError ? (
+      ) : !list.data ? (
         <ErrorState text={errorText(list.error)} onRetry={() => void list.refetch()} />
       ) : items.length === 0 ? (
         <EmptyState title={t("payments.empty")} text={status || provider ? t("payments.emptyFiltered") : t("payments.emptyText")} search={!!(status || provider)} />
@@ -223,9 +221,7 @@ function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; o
 function SettingsCard({ s }: { s: Settings }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const init = () => ({ stars: s.stars, allowNew: s.allow_new, resetTraffic: s.renew_resets_traffic });
-  const [form, setForm] = useState(init);
-  useEffect(() => setForm(init()), [s]);
+  const { draft: form, setDraft: setForm } = useDraft({ stars: s.stars, allowNew: s.allow_new, resetTraffic: s.renew_resets_traffic });
   const save = useMutation({
     mutationFn: (body: Schemas["PatchPaymentSettingsInputBody"]) => unwrap(api.PATCH("/api/v1/payments/settings", { body })),
     onSuccess: (v) => {
@@ -237,7 +233,7 @@ function SettingsCard({ s }: { s: Settings }) {
     e.preventDefault();
     save.mutate({ stars: form.stars, allow_new: form.allowNew, renew_resets_traffic: form.resetTraffic });
   };
-  const set = (k: keyof ReturnType<typeof init>) => (v: boolean) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof typeof form) => (v: boolean) => setForm((f) => ({ ...f, [k]: v }));
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>

@@ -24,8 +24,9 @@ const (
 
 // ykFake is YooKassa as far as the panel uses it.
 type ykFake struct {
-	mu   sync.Mutex
-	pays map[string]map[string]any
+	mu         sync.Mutex
+	pays       map[string]map[string]any
+	failCreate bool // answer a new payment with a server error
 }
 
 func (f *ykFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +40,9 @@ func (f *ykFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/me":
 		_, _ = w.Write([]byte(`{"account_id":"` + ykShop + `"}`))
+	case r.Method == http.MethodPost && r.URL.Path == "/payments" && f.failCreate:
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"type":"error","code":"internal_server_error"}`))
 	case r.Method == http.MethodPost && r.URL.Path == "/payments":
 		var in map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&in)

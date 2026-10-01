@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"mikan/internal/nodeapi"
@@ -90,6 +91,8 @@ type Options struct {
 	AddonsCatalog string
 	// DNS checks new domains against public DNS; nil leaves them unchecked.
 	DNS *dnscheck.Checker
+	// HSTS tells browsers to keep to HTTPS: for a panel that serves TLS itself.
+	HSTS bool
 }
 
 type noChanges struct{}
@@ -192,7 +195,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	if sp, err := server.NewSPA(o.Web, "sub.html"); err == nil {
 		p.subPage, subPageHandler = sp, sp
 	}
-	subCfg := func(ctx context.Context) (subs.Config, error) {
+	buildSubCfg := func(ctx context.Context) (subs.Config, error) {
 		ep, err := set.Endpoint(ctx)
 		if err != nil {
 			return subs.Config{}, err
@@ -250,7 +253,23 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return cfg, nil
 	}
+	// A subscription is fetched by every app of every user every hour or so, and building
+	// its config reads some twenty settings and every node and takes a node's certificate
+	// from disk. It is kept for a few seconds, and dropped at once when this process changes
+	// a setting, a node or a node's certificate.
+	cache := &configCache{now: o.Now, gen: func() uint64 {
+		g := settings.Generation()
+		if p.Nodes != nil {
+			g += p.Nodes.Generation()
+		}
+		if o.NodeCerts != nil {
+			g += o.NodeCerts.Generation()
+		}
+		return g
+	}}
+	subCfg := func(ctx context.Context) (subs.Config, error) { return cache.get(ctx, buildSubCfg) }
 	subHandler := subs.NewHandler(st, subCfg, subPageHandler, o.Now, deps.Devices, o.TrustProxy)
+	subHandler.SetLogger(o.Log)
 	subHandler.SetTelegram(p.Telegram)
 	subHandler.SetShop(p.Billing)
 
@@ -258,6 +277,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	adminMux.Handle("/api/", apiHandler)
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
+	p.server.SetHSTS(o.HSTS)
 	p.Handler = p.server
 	return p, nil
 }
@@ -286,35 +306,81 @@ func (p *Panel) Apply(ctx context.Context) (settings.Paths, error) {
 }
 
 // Run keeps paths and the language in sync with the DB (the CLI and the settings page
-// edit them), drives the node syncer and cleans up expired state.
+// edit them), drives the node syncer and cleans up expired state. It returns once ctx is
+// done and every one of its workers has stopped: the caller closes the database after it.
 func (p *Panel) Run(ctx context.Context) {
-	if p.Nodes != nil {
-		go p.Nodes.Run(ctx)
-	}
-	if p.Tuner != nil {
-		go p.Tuner.Run(ctx)
-	}
-	go p.Telegram.Run(ctx)
-	go p.Billing.Run(ctx)
 	// The host reads the switch from a file; the setting is what the admin chose.
 	if auto, err := p.Settings.On(ctx, settings.AutoUpdate); err == nil {
 		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {
 			p.log.Error("update policy", "err", err)
 		}
 	}
-	go p.Updates.Run(ctx)
-	go every(ctx, 5*time.Second, func() {
-		if _, err := p.Apply(ctx); err != nil {
-			p.log.Error("reload settings", "err", err)
-		}
-	})
-	every(ctx, 10*time.Minute, func() {
-		if err := p.sessions.Cleanup(ctx); err != nil {
-			p.log.Error("session cleanup", "err", err)
-		}
-		p.ipLimit.Sweep(p.now())
-		p.userLimit.Sweep(p.now())
-	})
+	var workers []func(context.Context)
+	if p.Nodes != nil {
+		workers = append(workers, p.Nodes.Run)
+	}
+	if p.Tuner != nil {
+		workers = append(workers, p.Tuner.Run)
+	}
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run,
+		func(ctx context.Context) {
+			every(ctx, 5*time.Second, func() {
+				if _, err := p.Apply(ctx); err != nil {
+					p.log.Error("reload settings", "err", err)
+				}
+			})
+		},
+		func(ctx context.Context) {
+			every(ctx, 10*time.Minute, func() {
+				if err := p.sessions.Cleanup(ctx); err != nil {
+					p.log.Error("session cleanup", "err", err)
+				}
+				p.ipLimit.Sweep(p.now())
+				p.userLimit.Sweep(p.now())
+			})
+		})
+	runAll(ctx, workers...)
+}
+
+// runAll runs the workers until ctx is done and waits for every one to return, so that
+// nothing is still using what the caller shuts down after it (the database).
+func runAll(ctx context.Context, workers ...func(context.Context)) {
+	var wg sync.WaitGroup
+	for _, w := range workers {
+		wg.Go(func() { w(ctx) })
+	}
+	wg.Wait()
+}
+
+// configCacheTTL: the longest a changed setting is not seen, when the change was made by
+// another process (the server CLI); this process's own changes drop the cache at once.
+const configCacheTTL = 10 * time.Second
+
+// configCache keeps the subscription's config between requests. Errors are not kept.
+type configCache struct {
+	now func() time.Time
+	gen func() uint64
+
+	mu  sync.Mutex
+	at  time.Time
+	g   uint64
+	cfg subs.Config
+	ok  bool
+}
+
+func (c *configCache) get(ctx context.Context, build func(context.Context) (subs.Config, error)) (subs.Config, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now, g := c.now(), c.gen()
+	if c.ok && g == c.g && now.Sub(c.at) < configCacheTTL && !now.Before(c.at) {
+		return c.cfg, nil
+	}
+	cfg, err := build(ctx)
+	if err != nil {
+		return subs.Config{}, err
+	}
+	c.cfg, c.g, c.at, c.ok = cfg, g, now, true
+	return cfg, nil
 }
 
 func every(ctx context.Context, d time.Duration, fn func()) {

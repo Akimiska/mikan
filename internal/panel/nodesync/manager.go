@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mikan/internal/nodeapi"
@@ -54,6 +55,8 @@ type Manager struct {
 	running   map[int64]*running
 	lastPurge time.Time
 	lastPrune time.Time
+
+	generation atomic.Uint64 // moves whenever a node is added, changed or removed
 }
 
 type running struct {
@@ -99,7 +102,14 @@ func (m *Manager) SlotsChanged() {
 }
 
 // NodesChanged restarts syncers after a node was added, removed or re-keyed.
-func (m *Manager) NodesChanged() { signal(m.nodesDirty) }
+func (m *Manager) NodesChanged() {
+	m.generation.Add(1)
+	signal(m.nodesDirty)
+}
+
+// Generation moves with every NodesChanged: what is built from the nodes (the subscription's
+// server list) is built again when it has moved.
+func (m *Manager) Generation() uint64 { return m.generation.Load() }
 
 // Syncers returns the running syncers ordered by node id.
 func (m *Manager) Syncers() []*Syncer {

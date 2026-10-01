@@ -290,6 +290,10 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	p := domain.InboundPatch{Port: b.Port, Enabled: b.Enabled, Config: b.Config, Dest: b.Dest, ServerName: b.ServerName, Fingerprint: b.Fingerprint, Obfs: b.Obfs,
 		DisplayName: b.DisplayName, Listen: b.Listen, AutoPort: b.AutoPort, AutoSNI: b.AutoSNI, Outbound: b.Outbound, ExitNodeID: b.ExitNodeID, PoolID: b.PoolID}
 	if c := b.Client; c != nil {
+		// The address clients connect to: like the panel's public host, not for a key.
+		if err := requireSession(ctx, "client"); err != nil {
+			return nil, err
+		}
 		p.Client = &domain.ClientEndpoint{Server: c.Server, Port: c.Port, SNI: c.SNI}
 	}
 	prev, row, err := h.d.Inbounds.Update(ctx, in.ID, p)

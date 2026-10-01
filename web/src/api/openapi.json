@@ -807,18 +807,30 @@
             "minLength": 1,
             "type": "string"
           },
+          "password": {
+            "description": "Пароль админа: ключ не выпускается из одной лишь украденной сессии",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
           "scope": {
-            "description": "read — только GET-запросы, full — всё, кроме входа, сессий и ключей",
+            "description": "read — только GET-запросы, без ссылок подписок и секретных адресов; full — изменения, кроме входа, сессий, ключей и операций, где уходят деньги, ключи и адреса клиентов (в справочнике помечены «только сессия»)",
             "enum": [
               "read",
               "full"
             ],
             "type": "string"
+          },
+          "totp": {
+            "description": "Код из приложения, если включена 2FA",
+            "maxLength": 16,
+            "type": "string"
           }
         },
         "required": [
           "name",
-          "scope"
+          "scope",
+          "password"
         ],
         "type": "object"
       },
@@ -992,9 +1004,6 @@
       "DeviceView": {
         "additionalProperties": false,
         "properties": {
-          "client": {
-            "type": "string"
-          },
           "first_seen": {
             "format": "date-time",
             "type": "string"
@@ -1012,7 +1021,6 @@
         },
         "required": [
           "ip",
-          "client",
           "first_seen",
           "last_seen",
           "online"
@@ -2074,6 +2082,10 @@
             "maxLength": 256,
             "minLength": 12,
             "type": "string"
+          },
+          "revoke_keys": {
+            "description": "Отозвать и ключи API (по умолчанию да): другие сессии завершаются при смене пароля, ключ, выпущенный из угнанной сессии, пережил бы это",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3607,6 +3619,21 @@
         ],
         "type": "object"
       },
+      "TotpSetupInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "description": "Пароль: без него украденная сессия включила бы 2FA на себя и закрыла вход владельцу",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "type": "object"
+      },
       "TotpSetupOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -4184,7 +4211,7 @@
     }
   },
   "info": {
-    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET, «полный» — всё, кроме входа, сессий и самих ключей.\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.",
+    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.",
     "title": "mikan",
     "version": "dev"
   },
@@ -4765,6 +4792,16 @@
     "/api/v1/auth/totp/setup": {
       "post": {
         "operationId": "totp-setup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotpSetupInputBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -5197,7 +5234,8 @@
         "summary": "Добавить ноду",
         "tags": [
           "node"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/nodes/{id}": {
@@ -5284,7 +5322,8 @@
         "summary": "Изменить ноду",
         "tags": [
           "node"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/nodes/{id}/cascade": {
@@ -5378,7 +5417,8 @@
         "summary": "Куда нода выпускает трафик других нод",
         "tags": [
           "node"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/nodes/{id}/certificate": {
@@ -5510,7 +5550,8 @@
         "summary": "Выпустить новый ключ ноды (старый перестаёт работать)",
         "tags": [
           "node"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/nodes/{id}/warp": {
@@ -5691,7 +5732,8 @@
         "summary": "Загрузить свой WireGuard-конфиг WARP",
         "tags": [
           "node"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/nodes/{id}/warp/register": {
@@ -5744,7 +5786,8 @@
         "summary": "Зарегистрировать WARP для ноды в Cloudflare",
         "tags": [
           "node"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/packages": {
@@ -6219,7 +6262,7 @@
             "description": "Error"
           }
         },
-        "summary": "Удалить пул: его подключения вернутся в основной трафик",
+        "summary": "Удалить пул: его подключения вернутся в основной трафик; пока в нём есть оплаченный трафик, пул остаётся",
         "tags": [
           "inbounds"
         ]
@@ -6497,7 +6540,8 @@
         "summary": "Выдать новую секретную ссылку на панель",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/stats/overview": {
@@ -6805,7 +6849,8 @@
         "summary": "Настроить Telegram-бота",
         "tags": [
           "telegram"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/telegram/broadcast": {
@@ -6846,7 +6891,8 @@
         "summary": "Разослать сообщение всем в боте",
         "tags": [
           "telegram"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/updates": {
@@ -6916,7 +6962,8 @@
         "summary": "Включить или выключить автообновление",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/updates/check": {
@@ -6978,7 +7025,8 @@
         "summary": "Обновить сейчас: заявка серверу",
         "tags": [
           "settings"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/users": {

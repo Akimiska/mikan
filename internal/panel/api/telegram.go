@@ -82,8 +82,8 @@ type broadcastOutput struct {
 func (h *handlers) registerTelegram() {
 	tags := []string{"telegram"}
 	huma.Register(h.api, huma.Operation{OperationID: "get-telegram", Method: http.MethodGet, Path: "/api/v1/telegram", Summary: "Telegram-бот", Tags: tags}, h.getTelegram)
-	huma.Register(h.api, huma.Operation{OperationID: "update-telegram", Method: http.MethodPatch, Path: "/api/v1/telegram", Summary: "Настроить Telegram-бота", Tags: tags}, h.updateTelegram)
-	huma.Register(h.api, huma.Operation{OperationID: "telegram-broadcast", Method: http.MethodPost, Path: "/api/v1/telegram/broadcast", Summary: "Разослать сообщение всем в боте", Tags: tags, DefaultStatus: http.StatusAccepted}, h.broadcast)
+	huma.Register(h.api, huma.Operation{OperationID: "update-telegram", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/telegram", Summary: "Настроить Telegram-бота", Tags: tags}, h.updateTelegram)
+	huma.Register(h.api, huma.Operation{OperationID: "telegram-broadcast", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/telegram/broadcast", Summary: "Разослать сообщение всем в боте", Tags: tags, DefaultStatus: http.StatusAccepted}, h.broadcast)
 	huma.Register(h.api, huma.Operation{OperationID: "unlink-telegram", Method: http.MethodDelete, Path: "/api/v1/users/{id}/telegram", Summary: "Отвязать подписку от Telegram", Tags: tags, DefaultStatus: http.StatusNoContent}, h.unlinkTelegram)
 }
 

@@ -622,7 +622,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Удалить пул: его подключения вернутся в основной трафик */
+        /** Удалить пул: его подключения вернутся в основной трафик; пока в нём есть оплаченный трафик, пул остаётся */
         delete: operations["delete-pool"];
         options?: never;
         head?: never;
@@ -1373,11 +1373,15 @@ export interface components {
              */
             expire_days?: number;
             name: string;
+            /** @description Пароль админа: ключ не выпускается из одной лишь украденной сессии */
+            password: string;
             /**
-             * @description read — только GET-запросы, full — всё, кроме входа, сессий и ключей
+             * @description read — только GET-запросы, без ссылок подписок и секретных адресов; full — изменения, кроме входа, сессий, ключей и операций, где уходят деньги, ключи и адреса клиентов (в справочнике помечены «только сессия»)
              * @enum {string}
              */
             scope: "read" | "full";
+            /** @description Код из приложения, если включена 2FA */
+            totp?: string;
         };
         CreateAPIKeyOutputBody: {
             /** Format: date-time */
@@ -1432,7 +1436,6 @@ export interface components {
             tariff_id: number;
         };
         DeviceView: {
-            client: string;
             /** Format: date-time */
             first_seen: string;
             ip: string;
@@ -1829,6 +1832,8 @@ export interface components {
             current: string;
             /** @description Не короче 12 символов */
             new: string;
+            /** @description Отозвать и ключи API (по умолчанию да): другие сессии завершаются при смене пароля, ключ, выпущенный из угнанной сессии, пережил бы это */
+            revoke_keys?: boolean;
         };
         PatchAddonInputBody: {
             enabled?: boolean;
@@ -2391,6 +2396,10 @@ export interface components {
         };
         TotpDisableInputBody: {
             code: string;
+            password: string;
+        };
+        TotpSetupInputBody: {
+            /** @description Пароль: без него украденная сессия включила бы 2FA на себя и закрыла вход владельцу */
             password: string;
         };
         TotpSetupOutputBody: {
@@ -3062,7 +3071,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpSetupInputBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

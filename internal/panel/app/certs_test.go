@@ -106,7 +106,7 @@ func TestCertificatesOverHTTP(t *testing.T) {
 	}
 
 	// An API key cannot touch where the panel's identity comes from.
-	resp, body = h.do(http.MethodPost, api+"/api-keys", map[string]any{"name": "ops", "scope": "full"}, csrf)
+	resp, body = h.do(http.MethodPost, api+"/api-keys", map[string]any{"name": "ops", "scope": "full", "password": password}, csrf)
 	var key struct {
 		Key string `json:"key"`
 	}

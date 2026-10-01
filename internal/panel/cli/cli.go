@@ -36,7 +36,7 @@ Commands:
   serve                         run the panel
   admin bootstrap [flags]       first setup: admin, secret paths, address, language
   admin url                     print the panel's link
-  admin reset-password          set a new admin password (ends all sessions)
+  admin reset-password          set a new admin password (ends all sessions and revokes all API keys)
   admin reset-path              give the panel a new secret link
   admin disable-2fa             turn off the admin's 2FA
   admin backup FILE             write a consistent copy of the database while the panel runs
@@ -132,7 +132,7 @@ func adminCmd(ctx context.Context, args []string) error {
 		printURL(os.Stdout, os.Stderr, u, login)
 		return nil
 	case "reset-password":
-		return resetPassword(ctx, st, args[1:])
+		return resetPassword(ctx, st, args[1:], os.Stdin, os.Stdout)
 	case "reset-path":
 		if err := settings.Set(ctx, set, settings.KeyAdminPath, secure.Token(24)); err != nil {
 			return err
@@ -281,7 +281,7 @@ func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, arg
 	return nil
 }
 
-func resetPassword(ctx context.Context, st *store.Store, args []string) error {
+func resetPassword(ctx context.Context, st *store.Store, args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("reset-password", flag.ContinueOnError)
 	username := fs.String("username", "", "admin login (may be left out when there is one admin)")
 	passwordStdin := fs.Bool("password-stdin", false, "read the password from stdin instead of generating one")
@@ -292,7 +292,7 @@ func resetPassword(ctx context.Context, st *store.Store, args []string) error {
 	if err != nil {
 		return err
 	}
-	password, generated, err := readOrGeneratePassword(*passwordStdin, os.Stdin)
+	password, generated, err := readOrGeneratePassword(*passwordStdin, stdin)
 	if err != nil {
 		return err
 	}
@@ -300,6 +300,7 @@ func resetPassword(ctx context.Context, st *store.Store, args []string) error {
 	if err != nil {
 		return err
 	}
+	var keys int64
 	err = st.Tx(ctx, func(q *db.Queries) error {
 		if err := q.SetAdminPassword(ctx, db.SetAdminPasswordParams{PasswordHash: hash, ID: a.ID}); err != nil {
 			return err
@@ -307,14 +308,21 @@ func resetPassword(ctx context.Context, st *store.Store, args []string) error {
 		if err := q.DeleteAdminSessions(ctx, a.ID); err != nil {
 			return err
 		}
-		return audit.Write(ctx, q, time.Now(), audit.Entry{Action: "cli.reset_password", TargetType: "admin", TargetID: a.Username})
+		// This is what an owner runs on the server after losing the panel or suspecting a
+		// hijacked session: a key made from that session must not survive it. Scripts get
+		// new keys from the admin panel.
+		keys, err = q.DeleteAPIKeysOf(ctx, a.ID)
+		if err != nil {
+			return err
+		}
+		return audit.Write(ctx, q, time.Now(), audit.Entry{Action: "cli.reset_password", TargetType: "admin", TargetID: a.Username, Details: map[string]any{"keys_revoked": keys}})
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("The password of %s is changed, all sessions are ended.\n", a.Username)
+	fmt.Fprintf(stdout, "The password of %s is changed, all sessions are ended and %d API keys are revoked.\n", a.Username, keys)
 	if generated {
-		fmt.Println("New password: " + password + "   ← shown once")
+		fmt.Fprintln(stdout, "New password: "+password+"   ← shown once")
 	}
 	return nil
 }

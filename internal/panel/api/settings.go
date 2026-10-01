@@ -78,7 +78,7 @@ type resetPathOutput struct {
 func (h *handlers) registerSettings() {
 	huma.Register(h.api, huma.Operation{OperationID: "get-settings", Method: http.MethodGet, Path: "/api/v1/settings", Summary: "Настройки", Tags: []string{"settings"}}, h.getSettings)
 	huma.Register(h.api, huma.Operation{OperationID: "update-settings", Method: http.MethodPatch, Path: "/api/v1/settings", Summary: "Изменить настройки", Tags: []string{"settings"}}, h.updateSettings)
-	huma.Register(h.api, huma.Operation{OperationID: "reset-admin-path", Method: http.MethodPost, Path: "/api/v1/settings/reset-admin-path", Summary: "Выдать новую секретную ссылку на панель", Tags: []string{"settings"}}, h.resetAdminPath)
+	huma.Register(h.api, huma.Operation{OperationID: "reset-admin-path", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/settings/reset-admin-path", Summary: "Выдать новую секретную ссылку на панель", Tags: []string{"settings"}}, h.resetAdminPath)
 	huma.Register(h.api, huma.Operation{OperationID: "renew-certificate", Method: http.MethodPost, Path: "/api/v1/settings/certificate/renew", Summary: "Запросить сертификат Let's Encrypt сейчас", Tags: []string{"settings"}, DefaultStatus: http.StatusAccepted}, h.renewCertificate)
 }
 
@@ -159,7 +159,8 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if host == "" {
 		host = v.PublicHost
 	}
-	if host != "" {
+	// The addresses carry the secret path segments: not for a key that may only read.
+	if host != "" && !hidesSecrets(ctx) {
 		v.AdminURL = "https://" + net.JoinHostPort(host, strconv.Itoa(v.PanelPort)) + "/" + paths.Admin + "/"
 		subPort := v.PanelPort
 		if v.SubPort > 0 {
@@ -184,6 +185,16 @@ func (h *handlers) getSettings(ctx context.Context, _ *struct{}) (*settingsOutpu
 
 func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (*settingsOutput, error) {
 	b := in.Body
+	// Where clients are sent, and what they are told to trust: a leaked API key must not
+	// move subscriptions to another server or add rules to every client.
+	for field, touched := range map[string]bool{"public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
+		"sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil} {
+		if touched {
+			if err := requireSession(ctx, field); err != nil {
+				return nil, err
+			}
+		}
+	}
 	var details []error
 	if b.PublicHost != nil && !hostname.Valid(*b.PublicHost) {
 		details = append(details, &huma.ErrorDetail{Location: "body.public_host", Message: "public_host_invalid"})

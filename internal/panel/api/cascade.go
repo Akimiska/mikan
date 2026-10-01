@@ -58,7 +58,7 @@ type cascadePatchInput struct {
 func (h *handlers) registerCascade() {
 	tags := []string{"node"}
 	huma.Register(h.api, huma.Operation{OperationID: "get-node-cascade", Method: http.MethodGet, Path: "/api/v1/nodes/{id}/cascade", Summary: "Каскад ноды: выходы и служебный вход", Tags: tags}, h.getCascade)
-	huma.Register(h.api, huma.Operation{OperationID: "update-node-cascade", Method: http.MethodPatch, Path: "/api/v1/nodes/{id}/cascade", Summary: "Куда нода выпускает трафик других нод", Tags: tags}, h.patchCascade)
+	huma.Register(h.api, huma.Operation{OperationID: "update-node-cascade", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/nodes/{id}/cascade", Summary: "Куда нода выпускает трафик других нод", Tags: tags}, h.patchCascade)
 }
 
 // cascadeRefusals are the domain's refusals of an exit the API reports by their own code.

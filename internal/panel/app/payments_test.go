@@ -119,7 +119,7 @@ func TestPaymentsOverHTTP(t *testing.T) {
 	}
 
 	// A key may read payments but never touch where the money goes.
-	resp, body = h.do(http.MethodPost, api+"/api-keys", map[string]any{"name": "billing", "scope": "full"}, csrf)
+	resp, body = h.do(http.MethodPost, api+"/api-keys", map[string]any{"name": "billing", "scope": "full", "password": password}, csrf)
 	var key struct {
 		Key string `json:"key"`
 	}

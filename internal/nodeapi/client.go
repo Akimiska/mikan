@@ -87,9 +87,34 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 		return fmt.Errorf("node %s %s: status %d", method, path, resp.StatusCode)
 	}
 	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		return json.NewDecoder(&cappedReader{r: resp.Body, left: MaxResponse}).Decode(out)
 	}
 	return nil
+}
+
+// MaxResponse bounds what the panel reads from a node in one answer: the biggest real one
+// (the counters of thousands of slots) is a few MiB. A node is a server somebody else may
+// run, and one that streams JSON for ever must not take the panel's memory.
+const MaxResponse = 8 << 20
+
+// ErrTooLarge is a node's answer past MaxResponse.
+var ErrTooLarge = errors.New("node answer too large")
+
+type cappedReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (c *cappedReader) Read(p []byte) (int, error) {
+	if c.left <= 0 {
+		return 0, ErrTooLarge
+	}
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
 }
 
 func (c *Client) Apply(ctx context.Context, s DesiredState) (ApplyResult, error) {

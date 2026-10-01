@@ -143,6 +143,39 @@ fn forward(r: impl Read + Send + 'static, tx: mpsc::Sender<String>) -> thread::J
     })
 }
 
+/// What a distribution ships as Docker (Ubuntu's and Debian's docker.io, often without
+/// compose v2) and what Docker CE replaces.
+const DISTRO_PACKAGES: [&str; 7] =
+    ["docker.io", "docker-compose", "docker-compose-v2", "docker-doc", "podman-docker", "containerd", "runc"];
+
+/// Replaces a Docker that cannot run mikan (no compose v2) with Docker CE from
+/// get.docker.com. The packages are removed, not purged: images, volumes and containers
+/// stay in /var/lib/docker and come back with the new engine.
+pub fn replace(mut line: impl FnMut(&str)) -> Result<()> {
+    let snap = which("docker").is_some_and(|p| p.starts_with("/snap/"));
+    if snap {
+        // snap keeps a snapshot of its data on removal.
+        let mut cmd = Command::new("snap");
+        cmd.args(["remove", "docker"]);
+        stream(cmd, &mut line).context("remove the snap docker")?;
+    }
+    let installed: Vec<&str> = DISTRO_PACKAGES.into_iter().filter(|p| package_installed(p)).collect();
+    if !installed.is_empty() {
+        let mut cmd = Command::new("apt-get");
+        cmd.args(["remove", "-y"]).args(&installed).env("DEBIAN_FRONTEND", "noninteractive");
+        stream(cmd, &mut line).context("remove the old Docker")?;
+    }
+    install(line)
+}
+
+fn package_installed(name: &str) -> bool {
+    output("dpkg-query", &["-W", "-f=${Status}", name]).is_some_and(|s| s.contains("install ok installed"))
+}
+
+fn which(cmd: &str) -> Option<String> {
+    output("sh", &["-c", &format!("command -v {cmd}")]).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
+}
+
 /// Installs Docker with its official script, get.docker.com.
 pub fn install(line: impl FnMut(&str)) -> Result<()> {
     let script = crate::net::get("https://get.docker.com", 1 << 20).context("download get.docker.com")?;

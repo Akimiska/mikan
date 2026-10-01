@@ -51,6 +51,10 @@ pub struct Options {
     /// Ask nothing: take the flags and the defaults
     #[arg(long, short = 'y')]
     pub yes: bool,
+    /// Replace a Docker without compose v2 (the distribution's docker.io) with Docker from
+    /// get.docker.com; images, volumes and containers stay. The interactive installer asks.
+    #[arg(long)]
+    pub replace_docker: bool,
     /// The old installer's flag; --join is enough now
     #[arg(long, hide = true)]
     pub node: bool,
@@ -68,6 +72,8 @@ pub struct Plan {
     pub join: Option<String>,
     pub image: Option<String>,
     pub image_tar: Option<String>,
+    /// The admin agreed to replace a Docker without compose v2.
+    pub replace_docker: bool,
 }
 
 impl Plan {
@@ -88,6 +94,7 @@ impl Plan {
             join: o.join.clone().map(|k| k.trim().to_owned()),
             image: o.image.clone(),
             image_tar: o.image_tar.clone(),
+            replace_docker: o.replace_docker,
         }
     }
 
@@ -233,17 +240,27 @@ fn run(plan: &Plan, tx: &Sender<Event>) -> StepResult<()> {
     })?;
 
     step(tx, Step::Docker, || {
-        if let Some(v) = docker::version() {
-            if !docker::compose_ok() {
-                bail!("Docker {v} has no compose v2: update Docker");
-            }
-            note(tx, Step::Docker, format!("Docker {v}"));
-            return Ok(());
-        }
-        note(tx, Step::Docker, "installing from get.docker.com");
-        docker::install(|l| {
+        let log = |l: &str| {
             let _ = tx.send(Event::Log(l.to_owned()));
-        })?;
+        };
+        match docker::version() {
+            Some(v) if docker::compose_ok() => {
+                note(tx, Step::Docker, format!("Docker {v}"));
+                return Ok(());
+            }
+            Some(v) => {
+                // The distribution's Docker (Ubuntu 22.04's docker.io 24.0.7) has no compose v2.
+                if !plan.replace_docker {
+                    bail!("Docker {v} has no compose v2: agree to replace it in the installer, or add --replace-docker");
+                }
+                note(tx, Step::Docker, format!("Docker {v} has no compose v2: replacing it from get.docker.com"));
+                docker::replace(log)?;
+            }
+            None => {
+                note(tx, Step::Docker, "installing from get.docker.com");
+                docker::install(log)?;
+            }
+        }
         note(tx, Step::Docker, format!("Docker {} installed", docker::version().unwrap_or_default()));
         Ok(())
     })?;
@@ -500,6 +517,9 @@ fn plain(opts: Options) -> Result<()> {
     }
     if checks.iter().any(|c| c.level == system::Level::Error) {
         bail!("fix the problems above and run the installer again");
+    }
+    if system::docker_to_replace(&checks).is_some() && !plan.replace_docker {
+        bail!("this Docker has no compose v2: add --replace-docker to replace it from get.docker.com (images and containers stay)");
     }
     if !plan.node() {
         if plan.host.is_empty() {

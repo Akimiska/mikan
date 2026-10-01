@@ -53,12 +53,28 @@ type AddonView struct {
 	InfoError  string            `json:"info_error,omitempty" doc:"Адаптер не ответил о себе: настройки недоступны"`
 }
 
+// AddonRequest is what the panel asked the server for.
+type AddonRequest struct {
+	Action string `json:"action" enum:"install,remove"`
+	ID     string `json:"id"`
+	At     string `json:"at" doc:"RFC 3339"`
+}
+
+// AddonResult is how the server did what was asked.
+type AddonResult struct {
+	Action string `json:"action" enum:"install,remove"`
+	ID     string `json:"id"`
+	State  string `json:"state" enum:"done,failed"`
+	Error  string `json:"error,omitempty"`
+	At     string `json:"at" doc:"RFC 3339"`
+}
+
 type AddonsView struct {
 	Catalog      []AddonCatalogEntry `json:"catalog"`
 	CatalogError string              `json:"catalog_error,omitempty" doc:"catalog_unavailable — каталог не загрузился"`
 	Installed    []AddonView         `json:"installed"`
-	Pending      *addons.Request     `json:"pending,omitempty" doc:"Заявка, которую сервер ещё не взял"`
-	Last         *addons.LastRequest `json:"last,omitempty" doc:"Как сервер выполнил последнюю заявку"`
+	Pending      *AddonRequest       `json:"pending,omitempty" doc:"Заявка, которую сервер ещё не взял"`
+	Last         *AddonResult        `json:"last,omitempty" doc:"Как сервер выполнил последнюю заявку"`
 	Supported    bool                `json:"supported" doc:"Панель видит каталог данных сервера; иначе ставить адаптеры нельзя"`
 }
 
@@ -107,9 +123,12 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	if err != nil {
 		return v, err
 	}
-	v.Supported, v.Last = m.Supported(), st.Request
+	v.Supported = m.Supported()
+	if l := st.Request; l != nil {
+		v.Last = &AddonResult{Action: l.Action, ID: l.ID, State: l.State, Error: l.Error, At: l.At}
+	}
 	if r, ok := m.Pending(); ok {
-		v.Pending = &r
+		v.Pending = &AddonRequest{Action: r.Action, ID: r.ID, At: r.At}
 	}
 	if c, err := h.catalog(ctx); err != nil {
 		v.CatalogError = "catalog_unavailable"

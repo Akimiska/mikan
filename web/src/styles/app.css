@@ -294,6 +294,7 @@
 
   .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 16px; font-size: 13px; }
   .banner.err { background: var(--berry-50); color: var(--berry-600); border: 1px solid rgba(198, 61, 51, 0.2); }
+  .banner.info { background: var(--lagoon-50); color: var(--lagoon-500); border: 1px solid rgba(43, 140, 158, 0.2); }
   .banner.warn { background: var(--honey-50); color: var(--honey-600); border: 1px solid rgba(168, 111, 8, 0.2); }
 
   .reveal { animation: rise 0.6s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 45ms); }

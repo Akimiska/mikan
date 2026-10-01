@@ -241,7 +241,16 @@
       "cert_expired": "The certificate has expired",
       "cert_not_yet_valid": "The certificate is not valid yet",
       "cert_wrong_host": "The certificate is not for the panel's address ({value}): clients would refuse it",
-      "node_certs_disabled": "Node certificates are not available here"
+      "node_certs_disabled": "Node certificates are not available here",
+      "addon_busy": "The server is still working on the previous request: wait a minute.",
+      "addons_unavailable": "Adapters are installed only by the mikan installer on the server.",
+      "catalog_unavailable": "The marketplace catalog did not load. Check that the server reaches GitHub.",
+      "addon_unknown": "The catalog has no such adapter.",
+      "addon_current": "This version is installed already.",
+      "addon_not_installed": "The adapter is not installed or not running.",
+      "addon_setting_invalid": "Check the value.",
+      "addon_settings_refused": "The payment provider refused the settings ({value}).",
+      "addon_unreachable": "The adapter does not answer."
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -1402,5 +1411,33 @@
     "cleared": "Own certificate removed",
     "cliHint": "Renewing with certbot or acme.sh? Run this on the server on renewal and the panel picks the new file up:",
     "cliExample": "mikan cert set --cert /etc/letsencrypt/live/DOMAIN/fullchain.pem \\\n  --key /etc/letsencrypt/live/DOMAIN/privkey.pem"
+  },
+  "addons": {
+    "title": "Payment methods from the marketplace",
+    "sub": "Payment adapters from the signed getmikan/marketplace catalog, installed on this server as containers of their own.",
+    "add": "Add",
+    "unsupported": "The panel cannot see the server's data directory: adapters are installed only by the mikan installer.",
+    "installing": "The server is installing {name}…",
+    "removing": "The server is removing {name}…",
+    "installFailed": "Could not install {name}: {error}",
+    "removeFailed": "Could not remove {name}: {error}",
+    "empty": "Nothing installed",
+    "emptyText": "Press Add to connect a payment provider from the marketplace.",
+    "failed": "Does not start",
+    "unreachable": "The adapter does not answer, its settings are unavailable. On the server: mikan addon list",
+    "saved": "{name}: settings saved",
+    "requested": "The request went to the server",
+    "remove": "Remove",
+    "removeTitle": "Remove {name}?",
+    "removeText": "The adapter's container stops and payments through it are no longer offered. Its settings and payment history stay: installing it again brings everything back.",
+    "webhook": "Notification URL for the provider's dashboard:",
+    "catalog": "Marketplace",
+    "catalogMeta": "The signed getmikan/marketplace catalog",
+    "catalogEmpty": "The catalog is empty",
+    "catalogEmptyText": "No adapters for this panel version yet.",
+    "homepage": "Details",
+    "installed": "Installed",
+    "install": "Install",
+    "update": "Update"
   }
 }

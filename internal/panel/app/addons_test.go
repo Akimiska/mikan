@@ -80,8 +80,10 @@ func TestAddonsMarketplace(t *testing.T) {
 				Set   bool   `json:"set"`
 			} `json:"settings"`
 		} `json:"installed"`
-		Pending   *addons.Request `json:"pending"`
-		Supported bool            `json:"supported"`
+		Pending *struct {
+			ID string `json:"id"`
+		} `json:"pending"`
+		Supported bool `json:"supported"`
 	}
 	read := func(resp *http.Response, body []byte) view {
 		t.Helper()

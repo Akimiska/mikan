@@ -4,6 +4,74 @@
  */
 
 export interface paths {
+    "/api/v1/addons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Маркетплейс способов оплаты */
+        get: operations["list-addons"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addons/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настройки адаптера */
+        patch: operations["update-addon"];
+        trace?: never;
+    };
+    "/api/v1/addons/{id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Установить или обновить адаптер: заявка серверу */
+        post: operations["install-addon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addons/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Удалить адаптер: заявка серверу */
+        post: operations["remove-addon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/api-keys": {
         parameters: {
             query?: never;
@@ -998,6 +1066,88 @@ export interface components {
             /** @enum {string} */
             scope: "read" | "full";
         };
+        AddonCatalogEntry: {
+            description: {
+                [key: string]: string;
+            };
+            homepage: string;
+            id: string;
+            installed: boolean;
+            /** @description Название по языкам */
+            name: {
+                [key: string]: string;
+            };
+            /** @description Установлен, а в каталоге другая сборка */
+            update: boolean;
+            version: string;
+        };
+        AddonField: {
+            key: string;
+            label: {
+                [key: string]: string;
+            };
+            pattern?: string;
+            required: boolean;
+            /** @description Значение API не отдаёт; пусто при сохранении — оставить прежнее */
+            secret: boolean;
+            /** @description Значение сохранено */
+            set: boolean;
+            /** @enum {string} */
+            type: "string" | "bool";
+            /** @description Текущее значение, кроме секретов */
+            value?: unknown;
+        };
+        AddonRequest: {
+            /** @enum {string} */
+            action: "install" | "remove";
+            /** @description RFC 3339 */
+            at: string;
+            id: string;
+        };
+        AddonResult: {
+            /** @enum {string} */
+            action: "install" | "remove";
+            /** @description RFC 3339 */
+            at: string;
+            error?: string;
+            id: string;
+            /** @enum {string} */
+            state: "done" | "failed";
+        };
+        AddonView: {
+            /** @description Принимает оплату прямо сейчас: включён, настроен, работает */
+            available: boolean;
+            enabled: boolean;
+            /** @description Почему контейнер не работает */
+            error?: string;
+            help: {
+                [key: string]: string;
+            };
+            id: string;
+            /** @description Адаптер не ответил о себе: настройки недоступны */
+            info_error?: string;
+            name: {
+                [key: string]: string;
+            };
+            settings: components["schemas"]["AddonField"][];
+            /** @enum {string} */
+            status: "running" | "failed";
+            version: string;
+            /** @description Адрес для уведомлений в кабинете провайдера */
+            webhook_url: string;
+        };
+        AddonsView: {
+            catalog: components["schemas"]["AddonCatalogEntry"][];
+            /** @description catalog_unavailable — каталог не загрузился */
+            catalog_error?: string;
+            installed: components["schemas"]["AddonView"][];
+            /** @description Как сервер выполнил последнюю заявку */
+            last?: components["schemas"]["AddonResult"];
+            /** @description Заявка, которую сервер ещё не взял */
+            pending?: components["schemas"]["AddonRequest"];
+            /** @description Панель видит каталог данных сервера; иначе ставить адаптеры нельзя */
+            supported: boolean;
+        };
         AdminView: {
             /** Format: int64 */
             id: number;
@@ -1514,6 +1664,13 @@ export interface components {
             /** @description Не короче 12 символов */
             new: string;
         };
+        PatchAddonInputBody: {
+            enabled?: boolean;
+            /** @description Только то, что меняется; секрет пустой строкой — оставить прежний */
+            settings?: {
+                [key: string]: unknown;
+            };
+        };
         PatchInboundInputBody: {
             /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_port?: boolean;
@@ -1703,8 +1860,8 @@ export interface components {
             kind: "new" | "renew";
             /** Format: date-time */
             paid_at?: string;
-            /** @enum {string} */
-            provider: "stars" | "yookassa" | "cryptobot";
+            /** @description stars, yookassa, cryptobot или addon:<id> — адаптер маркетплейса */
+            provider: string;
             /** Format: date-time */
             refunded_at?: string;
             /** @enum {string} */
@@ -2258,6 +2415,132 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "list-addons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchAddonInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "install-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "remove-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-api-keys": {
         parameters: {
             query?: never;
@@ -3334,7 +3617,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded" | "";
-                provider?: "stars" | "yookassa" | "cryptobot" | "";
+                provider?: string;
                 user_id?: number;
                 /** @description id последнего платежа предыдущей страницы */
                 before?: number;

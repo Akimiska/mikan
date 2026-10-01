@@ -22,6 +22,7 @@ export const qk = {
   apiKeys: ["api-keys"] as const,
   payments: ["payments"] as const,
   paymentSettings: ["payment-settings"] as const,
+  addons: ["addons"] as const,
   warp: (node: number) => ["warp", node] as const,
   cascade: (node: number) => ["cascade", node] as const,
   pools: ["pools"] as const,

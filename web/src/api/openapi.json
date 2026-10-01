@@ -47,6 +47,264 @@
         ],
         "type": "object"
       },
+      "AddonCatalogEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "homepage": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "name": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Название по языкам",
+            "type": "object"
+          },
+          "update": {
+            "description": "Установлен, а в каталоге другая сборка",
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "version",
+          "homepage",
+          "installed",
+          "update"
+        ],
+        "type": "object"
+      },
+      "AddonField": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "secret": {
+            "description": "Значение API не отдаёт; пусто при сохранении — оставить прежнее",
+            "type": "boolean"
+          },
+          "set": {
+            "description": "Значение сохранено",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "bool"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "Текущее значение, кроме секретов"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type",
+          "secret",
+          "required",
+          "set"
+        ],
+        "type": "object"
+      },
+      "AddonRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "install",
+              "remove"
+            ],
+            "type": "string"
+          },
+          "at": {
+            "description": "RFC 3339",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "id",
+          "at"
+        ],
+        "type": "object"
+      },
+      "AddonResult": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "install",
+              "remove"
+            ],
+            "type": "string"
+          },
+          "at": {
+            "description": "RFC 3339",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "done",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "id",
+          "state",
+          "at"
+        ],
+        "type": "object"
+      },
+      "AddonView": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "Принимает оплату прямо сейчас: включён, настроен, работает",
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "description": "Почему контейнер не работает",
+            "type": "string"
+          },
+          "help": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "string"
+          },
+          "info_error": {
+            "description": "Адаптер не ответил о себе: настройки недоступны",
+            "type": "string"
+          },
+          "name": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/AddonField"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "webhook_url": {
+            "description": "Адрес для уведомлений в кабинете провайдера",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "status",
+          "name",
+          "help",
+          "enabled",
+          "available",
+          "settings",
+          "webhook_url"
+        ],
+        "type": "object"
+      },
+      "AddonsView": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog": {
+            "items": {
+              "$ref": "#/components/schemas/AddonCatalogEntry"
+            },
+            "type": "array"
+          },
+          "catalog_error": {
+            "description": "catalog_unavailable — каталог не загрузился",
+            "type": "string"
+          },
+          "installed": {
+            "items": {
+              "$ref": "#/components/schemas/AddonView"
+            },
+            "type": "array"
+          },
+          "last": {
+            "$ref": "#/components/schemas/AddonResult",
+            "description": "Как сервер выполнил последнюю заявку"
+          },
+          "pending": {
+            "$ref": "#/components/schemas/AddonRequest",
+            "description": "Заявка, которую сервер ещё не взял"
+          },
+          "supported": {
+            "description": "Панель видит каталог данных сервера; иначе ставить адаптеры нельзя",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "catalog",
+          "installed",
+          "supported"
+        ],
+        "type": "object"
+      },
       "AdminView": {
         "additionalProperties": false,
         "properties": {
@@ -1559,6 +1817,20 @@
         ],
         "type": "object"
       },
+      "PatchAddonInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "settings": {
+            "additionalProperties": {},
+            "description": "Только то, что меняется; секрет пустой строкой — оставить прежний",
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
       "PatchInboundInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2054,11 +2326,7 @@
             "type": "string"
           },
           "provider": {
-            "enum": [
-              "stars",
-              "yookassa",
-              "cryptobot"
-            ],
+            "description": "stars, yookassa, cryptobot или addon:\u003cid\u003e — адаптер маркетплейса",
             "type": "string"
           },
           "refunded_at": {
@@ -3643,6 +3911,177 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/addons": {
+      "get": {
+        "operationId": "list-addons",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Маркетплейс способов оплаты",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/addons/{id}": {
+      "patch": {
+        "operationId": "update-addon",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchAddonInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настройки адаптера",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/addons/{id}/install": {
+      "post": {
+        "operationId": "install-addon",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonsView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Установить или обновить адаптер: заявка серверу",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/addons/{id}/remove": {
+      "post": {
+        "operationId": "remove-addon",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonsView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить адаптер: заявка серверу",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/api-keys": {
       "get": {
         "operationId": "list-api-keys",
@@ -5055,12 +5494,7 @@
             "in": "query",
             "name": "provider",
             "schema": {
-              "enum": [
-                "stars",
-                "yookassa",
-                "cryptobot",
-                ""
-              ],
+              "pattern": "^(stars|yookassa|cryptobot|addon:[a-z0-9][a-z0-9-]{0,31})?$",
               "type": "string"
             }
           },

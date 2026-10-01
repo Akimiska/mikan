@@ -330,7 +330,7 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 			Offers    []offer         `json:"offers"`
 			Packages  []shopPackage   `json:"packages"`
 		}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
-			Providers: map[string]bool{billing.Stars: av.Stars, billing.YooKassa: av.YooKassa, billing.CryptoBot: av.CryptoBot}}
+			Providers: map[string]bool{billing.Stars: av.Stars}}
 		for _, id := range av.Addons {
 			out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
 		}
@@ -342,9 +342,9 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	}
 	var p db.Payment
 	if in.PackageID != 0 {
-		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: in.Provider})
+		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider)})
 	} else {
-		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: in.Provider})
+		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: billing.AdapterOf(in.Provider)})
 	}
 	if err != nil {
 		code := billing.ErrProviderOff.Error()

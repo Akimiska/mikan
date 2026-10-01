@@ -14,10 +14,21 @@ import (
 )
 
 // Callback data of the shop: b buy a new subscription, tn:<tariff> its tariff, pn:<tariff>:<p>
-// pay for it; r renew the shown one, t:<tariff>, py:<tariff>:<p>. <p> is s (Stars),
-// y (YooKassa), c (CryptoBot) or a-<id> (a marketplace adapter).
+// pay for it; r renew the shown one, t:<tariff>, py:<tariff>:<p>. <p> is s (Stars) or
+// a-<id> (a marketplace adapter); y and c are YooKassa's and CryptoBot's, short, and as
+// messages sent before 0.4.4 carry them for the built-in providers those adapters replaced.
 
-var providerCodes = map[string]string{"s": billing.Stars, "y": billing.YooKassa, "c": billing.CryptoBot}
+var providerCodes = map[string]string{"s": billing.Stars, "y": billing.AddonPrefix + "yookassa", "c": billing.AddonPrefix + "cryptobot"}
+
+// addonCode is an adapter's code on a pay button.
+func addonCode(id string) string {
+	for code, p := range providerCodes {
+		if p == billing.AddonPrefix+id {
+			return code
+		}
+	}
+	return "a-" + id
+}
 
 // providerOf is the provider a button's code names.
 func providerOf(code string) (string, bool) {

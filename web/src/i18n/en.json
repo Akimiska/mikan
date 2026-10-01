@@ -184,11 +184,6 @@
       "read_only_key": "The key is read-only",
       "session_only": "Only the admin panel can do this, not a key",
       "on_sale_no_price": "To sell a plan, give it a price in Stars or in rubles",
-      "shop_id_invalid": "shopId is the digits from your YooKassa account",
-      "yookassa_keys_invalid": "YooKassa did not accept the shopId and key ({value})",
-      "cryptobot_token_invalid": "CryptoBot did not accept the token ({value})",
-      "yookassa_not_configured": "To turn YooKassa on, enter the shopId and the secret key",
-      "cryptobot_not_configured": "To turn CryptoBot on, enter the app token",
       "not_refundable": "Only a Stars payment applied to a subscription can be refunded",
       "refund_failed": "Telegram did not accept the refund — try later",
       "no_slots": "Out of free slots — the panel refills them and applies the payment on its own",
@@ -1306,9 +1301,7 @@
       "refunded": "Refunded"
     },
     "providers": {
-      "stars": "Telegram Stars",
-      "yookassa": "YooKassa",
-      "cryptobot": "CryptoBot"
+      "stars": "Telegram Stars"
     },
     "kindNew": "new subscription",
     "kindRenew": "renewal",
@@ -1328,15 +1321,7 @@
     "notReady": "Not ready",
     "starsSub": "Payment inside Telegram, no keys — only the running bot.",
     "starsBotOff": "The bot is not running: turn it on on the Telegram tab.",
-    "yookassaSub": "Cards and SBP. The shopId and secret key are in your YooKassa account → Integration → API keys.",
-    "shopId": "shopId",
-    "secretKey": "Secret key",
     "keySaved": "Saved — enter a new one to replace it",
-    "webhookYooKassa": "Address for HTTP notifications (YooKassa → Integration → HTTP notifications, event payment.succeeded):",
-    "cryptobotSub": "Crypto through @CryptoBot. The token is in @CryptoBot → Crypto Pay → Create App.",
-    "cryptoToken": "App token",
-    "testnet": "Test network (testnet)",
-    "webhookCryptoBot": "Webhook address (@CryptoBot → Crypto Pay → the app → Webhooks):",
     "webhookNoHost": "The address appears once the panel has a domain or IP.",
     "webhookCopied": "Address copied",
     "copyWebhook": "Copy address",
@@ -1350,7 +1335,9 @@
     "salesOff": "Selling is off: the bot and the Mini App sell nothing. Payment methods can be set up beforehand.",
     "kindPackage": "traffic package",
     "sellNow": "Start selling",
-    "invoiceFailed": "The invoice did not open: {error}."
+    "invoiceFailed": "The invoice did not open: {error}.",
+    "rublesInMarketplace": "Rubles (YooKassa, CryptoBot and more) are set up below, in Payment methods from the marketplace.",
+    "moving": "YooKassa and CryptoBot moved to the marketplace and their keys came along. The server is installing the adapter ({names}): it takes no payments until then."
   },
   "warp": {
     "title": "WARP",

@@ -1885,17 +1885,9 @@ export interface components {
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
-            cryptobot?: boolean;
-            cryptobot_testnet?: boolean;
-            /** @description Пусто — удалить токен */
-            cryptobot_token?: string;
             enabled?: boolean;
             renew_resets_traffic?: boolean;
             stars?: boolean;
-            yookassa?: boolean;
-            /** @description Пусто — удалить ключ */
-            yookassa_secret?: string;
-            yookassa_shop_id?: string;
         };
         PatchSettingsInputBody: {
             auto_port?: boolean;
@@ -1968,11 +1960,10 @@ export interface components {
             allow_new: boolean;
             /** @description Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен */
             available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
-            cryptobot: boolean;
-            cryptobot_testnet: boolean;
-            cryptobot_token_set: boolean;
             /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
             enabled: boolean;
+            /** @description Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит */
+            moving: string[];
             /**
              * Format: int64
              * @description Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату
@@ -1982,19 +1973,11 @@ export interface components {
             renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */
             stars: boolean;
-            /** @description Адрес вебхуков в настройках приложения @CryptoBot */
-            webhook_cryptobot: string;
-            /** @description Адрес для HTTP-уведомлений в личном кабинете ЮKassa */
-            webhook_yookassa: string;
-            yookassa: boolean;
-            /** @description Секретный ключ сохранён; сам ключ API не отдаёт */
-            yookassa_secret_set: boolean;
-            yookassa_shop_id: string;
         };
         PaymentSettingsViewAvailableStruct: {
-            cryptobot: boolean;
+            /** @description Адаптеры маркетплейса, которые принимают оплату прямо сейчас */
+            addons: string[];
             stars: boolean;
-            yookassa: boolean;
         };
         PaymentTotal: {
             /** Format: int64 */
@@ -2029,7 +2012,7 @@ export interface components {
             kind: "new" | "renew" | "package";
             /** Format: date-time */
             paid_at?: string;
-            /** @description stars, yookassa, cryptobot или addon:<id> — адаптер маркетплейса */
+            /** @description stars или addon:<id> — адаптер маркетплейса */
             provider: string;
             /** Format: date-time */
             refunded_at?: string;

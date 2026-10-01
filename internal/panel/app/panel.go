@@ -82,8 +82,6 @@ type Options struct {
 	DataDir string
 	// Releases fetches the newest release; nil never checks.
 	Releases updates.Source
-	// Payment providers' APIs; "" are the real ones (tests point them at fakes).
-	YooKassaAPI, CryptoBotAPI string
 	// WarpAPI is Cloudflare's WARP client API; "" is the real one.
 	WarpAPI string
 	// AddonsCatalog is the marketplace's signed catalog; "" is the real one.
@@ -164,8 +162,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
-		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks,
-		Addons: deps.Addons, SubBase: subBase})
+		MaxLinks: tgbot.MaxLinks,
+		Addons:   deps.Addons, SubBase: subBase})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
@@ -295,6 +293,10 @@ func (p *Panel) Run(ctx context.Context) {
 		go p.Tuner.Run(ctx)
 	}
 	go p.Telegram.Run(ctx)
+	// Before the reconcile loop: payments of the built-in providers take their adapters' names.
+	if err := p.Billing.MoveBuiltin(ctx); err != nil {
+		p.log.Error("billing: move the built-in providers", "err", err)
+	}
 	go p.Billing.Run(ctx)
 	// The host reads the switch from a file; the setting is what the admin chose.
 	if auto, err := p.Settings.On(ctx, settings.AutoUpdate); err == nil {

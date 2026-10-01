@@ -184,11 +184,6 @@
       "read_only_key": "Ключ только для чтения",
       "session_only": "Это доступно только из админки, не по ключу",
       "on_sale_no_price": "Чтобы продавать тариф, укажите цену в Stars или в рублях",
-      "shop_id_invalid": "shopId — только цифры из личного кабинета ЮKassa",
-      "yookassa_keys_invalid": "ЮKassa не приняла shopId и ключ ({value})",
-      "cryptobot_token_invalid": "CryptoBot не принял токен ({value})",
-      "yookassa_not_configured": "Чтобы включить ЮKassa, укажите shopId и секретный ключ",
-      "cryptobot_not_configured": "Чтобы включить CryptoBot, укажите токен приложения",
       "not_refundable": "Вернуть можно только оплату в Stars, применённую к подписке",
       "refund_failed": "Telegram не принял возврат — попробуйте позже",
       "no_slots": "Закончились свободные слоты — панель пополнит их и применит оплату сама",
@@ -1306,9 +1301,7 @@
       "refunded": "Возвращён"
     },
     "providers": {
-      "stars": "Telegram Stars",
-      "yookassa": "ЮKassa",
-      "cryptobot": "CryptoBot"
+      "stars": "Telegram Stars"
     },
     "kindNew": "новая подписка",
     "kindRenew": "продление",
@@ -1328,15 +1321,7 @@
     "notReady": "Не готово",
     "starsSub": "Оплата внутри Telegram без ключей — нужен только запущенный бот.",
     "starsBotOff": "Бот не запущен: включите его на вкладке Telegram.",
-    "yookassaSub": "Карты и СБП. shopId и секретный ключ — в личном кабинете ЮKassa → Интеграция → Ключи API.",
-    "shopId": "shopId",
-    "secretKey": "Секретный ключ",
     "keySaved": "Сохранён — введите новый, чтобы заменить",
-    "webhookYooKassa": "Адрес для HTTP-уведомлений (ЮKassa → Интеграция → HTTP-уведомления, событие payment.succeeded):",
-    "cryptobotSub": "Криптовалюта через @CryptoBot. Токен — в @CryptoBot → Crypto Pay → Create App.",
-    "cryptoToken": "Токен приложения",
-    "testnet": "Тестовая сеть (testnet)",
-    "webhookCryptoBot": "Адрес вебхуков (@CryptoBot → Crypto Pay → приложение → Webhooks):",
     "webhookNoHost": "Адрес появится, когда у панели будет домен или IP.",
     "webhookCopied": "Адрес скопирован",
     "copyWebhook": "Скопировать адрес",
@@ -1350,7 +1335,9 @@
     "salesOff": "Продажа подписок выключена: бот и Mini App ничего не продают. Способы оплаты можно настроить заранее.",
     "kindPackage": "пакет трафика",
     "sellNow": "Включить продажу",
-    "invoiceFailed": "Счёт не открылся: {error}."
+    "invoiceFailed": "Счёт не открылся: {error}.",
+    "rublesInMarketplace": "Оплата в рублях — ЮKassa, CryptoBot и другие — подключается ниже, в «Способах оплаты из маркетплейса».",
+    "moving": "ЮKassa и CryptoBot переехали в маркетплейс, ключи перенесены. Сервер устанавливает адаптер ({names}): до этого оплата через него недоступна."
   },
   "warp": {
     "title": "WARP",

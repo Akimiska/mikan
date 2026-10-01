@@ -1,5 +1,5 @@
 // The Mini App's shop: the plans on sale and a way to pay for them. Stars open Telegram's
-// own payment sheet; YooKassa, CryptoBot and the marketplace's adapters open their pages. The subscription itself is
+// own payment sheet; the marketplace's adapters (YooKassa, CryptoBot…) open their pages. The subscription itself is
 // issued or renewed by the panel once the provider confirms the payment.
 import { Check, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -10,13 +10,17 @@ import { rubles } from "../lib/format";
 export type Offer = { id: number; name: string; description: string; stars?: number; rub?: number };
 export type ShopData = {
   allow_new: boolean;
-  providers: { stars: boolean; yookassa: boolean; cryptobot: boolean };
+  providers: { stars: boolean };
   /** Marketplace adapters that take rubles, by the name the buyer sees. */
   addons?: { provider: `addon:${string}`; name: string }[];
   offers: Offer[];
   packages?: Offer[];
 };
-type Provider = "stars" | "yookassa" | "cryptobot" | `addon:${string}`;
+type Provider = "stars" | `addon:${string}`;
+
+// YooKassa and CryptoBot keep the words buyers knew them by, and come first.
+const KNOWN: Record<string, Key> = { "addon:yookassa": "sub.shopCard", "addon:cryptobot": "sub.shopCrypto" };
+const rank = (p: string) => (p === "addon:yookassa" ? 0 : p === "addon:cryptobot" ? 1 : 2);
 
 const FAIL: Record<string, Key> = {
   not_for_sale: "sub.shopNotForSale",
@@ -99,9 +103,10 @@ export function Shop({
 
   const methods: { id: Provider; label: string; price?: string }[] = [];
   if (offer?.stars && data.providers.stars) methods.push({ id: "stars", label: t("sub.shopStars"), price: `⭐ ${offer.stars}` });
-  if (offer?.rub && data.providers.yookassa) methods.push({ id: "yookassa", label: t("sub.shopCard"), price: rubles(offer.rub) });
-  if (offer?.rub && data.providers.cryptobot) methods.push({ id: "cryptobot", label: t("sub.shopCrypto"), price: rubles(offer.rub) });
-  for (const a of data.addons ?? []) if (offer?.rub) methods.push({ id: a.provider, label: a.name, price: rubles(offer.rub) });
+  if (offer?.rub) {
+    const adapters = [...(data.addons ?? [])].sort((a, b) => rank(a.provider) - rank(b.provider) || a.provider.localeCompare(b.provider));
+    for (const a of adapters) methods.push({ id: a.provider, label: KNOWN[a.provider] ? t(KNOWN[a.provider]!) : a.name, price: rubles(offer.rub) });
+  }
 
   return (
     <section className="glass rounded-3xl p-4" aria-label={title}>

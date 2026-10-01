@@ -3,6 +3,17 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.4.4
+### en
+- YooKassa and CryptoBot now come from the marketplace like every other payment method. On the update the panel moves their keys into the adapters, asks the server to install the adapter that took payments (Payments shows a notice until it runs), and keeps everything working: invoices opened before the update are paid through the adapter, the notification URLs set in the YooKassa and CryptoBot dashboards stay valid, and pay buttons in old bot messages still work. Payments → Accepting payments keeps Telegram Stars and the selling switches.
+- Security: the server's mikan command no longer trusts the payment adapters' state file the panel can write, and never follows links in the panel's folders, so even a compromised panel container cannot reach root on the host through them.
+- Paid payments that could not be applied are retried until they apply instead of being dropped after a week; the payments history loads in one query.
+
+### ru
+- ЮKassa и CryptoBot теперь ставятся из маркетплейса, как и остальные способы оплаты. При обновлении панель сама переносит их ключи в адаптеры, просит сервер установить адаптер того, что принимало оплату (на «Платежах» висит уведомление, пока он не запустится), и ничего не ломает: счета, открытые до обновления, оплачиваются через адаптер, адреса уведомлений в кабинетах ЮKassa и CryptoBot остаются прежними, кнопки оплаты в старых сообщениях бота работают. В «Приёме оплаты» остаются Telegram Stars и переключатели продаж.
+- Безопасность: команда mikan на сервере больше не доверяет файлу состояния платёжных адаптеров, который может записать панель, и не ходит по ссылкам в её каталогах — даже взломанный контейнер панели не доберётся через них до root на хосте.
+- Оплаченные, но не применённые платежи повторяются, пока не применятся, а не бросаются через неделю; история платежей грузится одним запросом.
+
 ## 0.4.3
 ### en
 - Protocols behind a TCP proxy (#11): a protocol's settings have "Behind a proxy (nginx, HAProxy)". "Where the node listens" picks all addresses (as before), localhost only or an IP of your own, so nginx stream or HAProxy can hold port 443 and route by SNI to protocols on 127.0.0.1:444, :445… "Address for clients", "Port for clients" and "SNI for clients" give subscriptions the proxy's endpoint instead of the node's (empty keeps them as now; with REALITY the camouflage site's domain stays the SNI). Such a protocol's port never moves on its own: automatic port moves are off and cannot be turned on, and the panel warns that an automatic camouflage site change may break SNI routing.

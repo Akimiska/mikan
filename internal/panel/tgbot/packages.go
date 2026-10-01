@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -83,16 +84,35 @@ func (w *words) payButtons(data string, stars, rub int64, av billing.Available, 
 	if stars > 0 {
 		rows = append(rows, []Button{{Text: fmt.Sprintf(w.payStars, w.price(stars, "XTR")), CallbackData: data + "s"}})
 	}
-	if rub > 0 && av.YooKassa {
-		rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCard, w.price(rub, "RUB")), CallbackData: data + "y"}})
+	if rub <= 0 {
+		return rows
 	}
-	if rub > 0 && av.CryptoBot {
-		rows = append(rows, []Button{{Text: fmt.Sprintf(w.payCrypto, w.price(rub, "RUB")), CallbackData: data + "c"}})
-	}
-	for _, id := range av.Addons {
-		if rub > 0 {
-			rows = append(rows, []Button{{Text: fmt.Sprintf(w.payAddon, name(id), w.price(rub, "RUB")), CallbackData: data + "a-" + id}})
+	// Cards first: YooKassa, then CryptoBot, then the rest by id. Those two keep the words
+	// buyers knew them by; the others go by their own names.
+	ids := slices.Clone(av.Addons)
+	rank := map[string]int{"yookassa": 0, "cryptobot": 1}
+	slices.SortStableFunc(ids, func(a, b string) int {
+		ra, oka := rank[a]
+		rb, okb := rank[b]
+		switch {
+		case oka && okb:
+			return ra - rb
+		case oka:
+			return -1
+		case okb:
+			return 1
 		}
+		return strings.Compare(a, b)
+	})
+	for _, id := range ids {
+		text := fmt.Sprintf(w.payAddon, name(id), w.price(rub, "RUB"))
+		switch id {
+		case "yookassa":
+			text = fmt.Sprintf(w.payCard, w.price(rub, "RUB"))
+		case "cryptobot":
+			text = fmt.Sprintf(w.payCrypto, w.price(rub, "RUB"))
+		}
+		rows = append(rows, []Button{{Text: text, CallbackData: data + addonCode(id)}})
 	}
 	return rows
 }

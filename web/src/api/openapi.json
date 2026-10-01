@@ -2205,17 +2205,6 @@
           "allow_new": {
             "type": "boolean"
           },
-          "cryptobot": {
-            "type": "boolean"
-          },
-          "cryptobot_testnet": {
-            "type": "boolean"
-          },
-          "cryptobot_token": {
-            "description": "Пусто — удалить токен",
-            "maxLength": 200,
-            "type": "string"
-          },
           "enabled": {
             "type": "boolean"
           },
@@ -2224,18 +2213,6 @@
           },
           "stars": {
             "type": "boolean"
-          },
-          "yookassa": {
-            "type": "boolean"
-          },
-          "yookassa_secret": {
-            "description": "Пусто — удалить ключ",
-            "maxLength": 200,
-            "type": "string"
-          },
-          "yookassa_shop_id": {
-            "maxLength": 20,
-            "type": "string"
           }
         },
         "type": "object"
@@ -2435,18 +2412,16 @@
             "$ref": "#/components/schemas/PaymentSettingsViewAvailableStruct",
             "description": "Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"
           },
-          "cryptobot": {
-            "type": "boolean"
-          },
-          "cryptobot_testnet": {
-            "type": "boolean"
-          },
-          "cryptobot_token_set": {
-            "type": "boolean"
-          },
           "enabled": {
             "description": "Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются",
             "type": "boolean"
+          },
+          "moving": {
+            "description": "Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "on_sale": {
             "description": "Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату",
@@ -2460,61 +2435,36 @@
           "stars": {
             "description": "Telegram Stars: нужен только запущенный бот",
             "type": "boolean"
-          },
-          "webhook_cryptobot": {
-            "description": "Адрес вебхуков в настройках приложения @CryptoBot",
-            "type": "string"
-          },
-          "webhook_yookassa": {
-            "description": "Адрес для HTTP-уведомлений в личном кабинете ЮKassa",
-            "type": "string"
-          },
-          "yookassa": {
-            "type": "boolean"
-          },
-          "yookassa_secret_set": {
-            "description": "Секретный ключ сохранён; сам ключ API не отдаёт",
-            "type": "boolean"
-          },
-          "yookassa_shop_id": {
-            "type": "string"
           }
         },
         "required": [
           "enabled",
           "stars",
-          "yookassa",
-          "yookassa_shop_id",
-          "yookassa_secret_set",
-          "cryptobot",
-          "cryptobot_testnet",
-          "cryptobot_token_set",
           "allow_new",
           "renew_resets_traffic",
           "available",
           "on_sale",
-          "webhook_yookassa",
-          "webhook_cryptobot"
+          "moving"
         ],
         "type": "object"
       },
       "PaymentSettingsViewAvailableStruct": {
         "additionalProperties": false,
         "properties": {
-          "cryptobot": {
-            "type": "boolean"
+          "addons": {
+            "description": "Адаптеры маркетплейса, которые принимают оплату прямо сейчас",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "stars": {
-            "type": "boolean"
-          },
-          "yookassa": {
             "type": "boolean"
           }
         },
         "required": [
           "stars",
-          "yookassa",
-          "cryptobot"
+          "addons"
         ],
         "type": "object"
       },
@@ -2593,7 +2543,7 @@
             "type": "string"
           },
           "provider": {
-            "description": "stars, yookassa, cryptobot или addon:\u003cid\u003e — адаптер маркетплейса",
+            "description": "stars или addon:\u003cid\u003e — адаптер маркетплейса",
             "type": "string"
           },
           "refunded_at": {
@@ -5933,7 +5883,7 @@
             "in": "query",
             "name": "provider",
             "schema": {
-              "pattern": "^(stars|yookassa|cryptobot|addon:[a-z0-9][a-z0-9-]{0,31})?$",
+              "pattern": "^(stars|addon:[a-z0-9][a-z0-9-]{0,31})?$",
               "type": "string"
             }
           },

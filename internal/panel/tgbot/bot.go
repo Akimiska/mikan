@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -50,6 +51,8 @@ type Deps struct {
 	Limits  Limits // zero: DefaultLimits
 	// Billing sells tariffs in the menu; nil: no shop.
 	Billing *billing.Service
+	// Tunnel reaches addr through node id, for RouteNode; nil: the panel has no nodes.
+	Tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
 }
 
 // Status is what the admin panel shows.
@@ -127,9 +130,14 @@ func (b *Bot) Run(ctx context.Context) {
 			b.setStatus(func(s *Status) { *s = Status{} })
 			return
 		}
+		rt, err := b.transport(b.Route(ctx))
+		if err != nil {
+			b.setStatus(func(s *Status) { *s = Status{Error: "route_invalid"} })
+			return
+		}
 		pctx, cancel := context.WithCancel(ctx)
 		stop = cancel
-		go b.poll(pctx, NewClient(b.d.API, token))
+		go b.poll(pctx, NewClient(b.d.API, token, rt))
 	}
 	start()
 	for {
@@ -485,11 +493,15 @@ func labelOf(cfg Config, action, def string) string {
 	return def
 }
 
-// CheckToken asks Telegram whose token this is.
+// CheckToken asks Telegram whose token this is, the way the bot goes there.
 func (b *Bot) CheckToken(ctx context.Context, token string) (User, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return NewClient(b.d.API, token).Me(ctx)
+	rt, err := b.transport(b.Route(ctx))
+	if err != nil {
+		return User{}, err
+	}
+	return NewClient(b.d.API, token, rt).Me(ctx)
 }
 
 // MiniAppURL is where the bot's Mini App opens; "" when Telegram could not load it.

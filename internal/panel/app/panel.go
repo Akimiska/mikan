@@ -139,9 +139,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
 		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks})
 	deps.Billing, deps.SubBase = p.Billing, subBase
+	// The bot may reach Telegram through a node when the panel's server cannot.
+	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
+	if p.Nodes != nil {
+		tunnel = p.Nodes.Tunnel
+	}
 	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
-		MiniApp: func() bool { return o.Certs != nil && o.Certs.Status().Kind == "letsencrypt" }})
+		MiniApp: func() bool { return o.Certs != nil && o.Certs.Status().Kind == "letsencrypt" }, Tunnel: tunnel})
 	deps.Telegram = p.Telegram
 	p.Billing.SetTelegram(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)

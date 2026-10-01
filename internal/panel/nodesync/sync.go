@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"sort"
 	"strconv"
 	"sync"
@@ -658,6 +659,22 @@ func (m *Manager) Probe(ctx context.Context, id int64, proxy string) (nodeapi.Pr
 		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
 	}
 	return c.Probe(ctx, proxy)
+}
+
+// Tunnel opens a stream to addr through node id: the bot reaches Telegram this way when
+// the panel's own server cannot. The node lets through only nodeapi.TunnelHosts.
+func (m *Manager) Tunnel(ctx context.Context, id int64, addr string) (net.Conn, error) {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return nil, nodeapi.ErrUnavailable
+	}
+	c, ok := s.node.(interface {
+		Tunnel(ctx context.Context, addr string) (net.Conn, error)
+	})
+	if !ok {
+		return nil, nodeapi.ErrUnavailable
+	}
+	return c.Tunnel(ctx, addr)
 }
 
 // userPoolQuotas are the users' pool quotas with a limit: what is left of each.

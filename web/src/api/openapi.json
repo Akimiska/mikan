@@ -1634,6 +1634,10 @@
           "enabled": {
             "type": "boolean"
           },
+          "route": {
+            "$ref": "#/components/schemas/RouteStruct",
+            "description": "Перед сохранением панель проверяет, что Telegram отвечает этим путём"
+          },
           "token": {
             "description": "Токен от @BotFather; пустая строка — удалить",
             "maxLength": 100,
@@ -2158,6 +2162,34 @@
         ],
         "type": "object"
       },
+      "RouteStruct": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "direct",
+              "node",
+              "proxy"
+            ],
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Удалённая нода панели (mode=node)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proxy": {
+            "description": "socks5://user:pass@host:port, http://… или https://…; не передан — прежний (mode=proxy)",
+            "maxLength": 512,
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "ScanTargetsOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2651,6 +2683,33 @@
         ],
         "type": "object"
       },
+      "TelegramRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "description": "Напрямую с сервера панели, через её ноду или через прокси — когда Telegram на сервере заблокирован",
+            "enum": [
+              "direct",
+              "node",
+              "proxy"
+            ],
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Нода, через которую идут запросы",
+            "format": "int64",
+            "type": "integer"
+          },
+          "proxy": {
+            "description": "Адрес прокси; пароль скрыт",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
       "TelegramView": {
         "additionalProperties": false,
         "properties": {
@@ -2689,6 +2748,10 @@
             "description": "Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный",
             "type": "string"
           },
+          "route": {
+            "$ref": "#/components/schemas/TelegramRoute",
+            "description": "Как бот ходит в Telegram"
+          },
           "running": {
             "type": "boolean"
           },
@@ -2709,7 +2772,8 @@
           "defaults",
           "mini_app_url",
           "linked",
-          "accounts"
+          "accounts",
+          "route"
         ],
         "type": "object"
       },

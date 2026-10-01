@@ -168,7 +168,7 @@
       "nodes_disabled": "Nodes are unavailable: the panel runs without nodes",
       "tg_token_format": "Not a bot token: it looks like 123456789:AAH…",
       "tg_token_invalid": "Telegram refused the token: check it with @BotFather",
-      "tg_unreachable": "Telegram is unreachable: try again",
+      "tg_unreachable": "Telegram is unreachable from this server: send the bot through a node or a proxy in “Way to Telegram”",
       "tg_no_token": "Paste the bot token first",
       "tg_buttons": "Up to 20 buttons, built-in ones once each",
       "tg_button_label": "Every button needs a label of up to 40 characters",
@@ -209,7 +209,10 @@
       "exit_not_found": "Pick the exit node",
       "relay_no_port": "The exit node has no free port for the relay",
       "pool_name_taken": "A pool with this name already exists",
-      "pool_not_found": "No such pool"
+      "pool_not_found": "No such pool",
+      "tg_proxy_invalid": "A proxy address is socks5://login:password@host:port or http://host:port",
+      "tg_route_node": "Pick a remote node of the panel: its own node shares the server",
+      "tg_route_unreachable": "Telegram does not answer this way: check the node or the proxy"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -933,7 +936,8 @@
     "err": {
       "token_invalid": "Telegram refused the token: check it with @BotFather",
       "token_revoked": "The token was revoked in @BotFather: paste a new one",
-      "unreachable": "Telegram is unreachable: the bot will reconnect by itself"
+      "unreachable": "Telegram is unreachable: the bot will reconnect by itself. If Telegram is blocked on the server, send the bot through a node or a proxy in “Way to Telegram”.",
+      "route_invalid": "The way to Telegram does not work: check the node or the proxy in “Way to Telegram”."
     },
     "menu": "Main menu",
     "menuSub": "Buttons under the bot's message. A press changes that message instead of sending a new one",
@@ -1020,7 +1024,29 @@
       "left": "137.7 GB",
       "limit": "150 GB",
       "reset": "Oct 28"
-    }
+    },
+    "routeTitle": "Way to Telegram",
+    "routeSub": "When Telegram is blocked on the panel's server, the bot can reach it through a node in another country or through a proxy.",
+    "routeNow": "The bot reaches Telegram",
+    "routeNowDirect": "straight from the panel's server",
+    "routeNowNode": "through the node “{name}”",
+    "routeNowProxy": "through the proxy {proxy}",
+    "routeDirect": "Direct",
+    "routeNode": "Via a node",
+    "routeProxy": "Via a proxy",
+    "routeDirectShort": "direct",
+    "routeDirectHint": "Requests leave from the panel's server. Fine where Telegram is open.",
+    "routeNodeLabel": "Node",
+    "routeNodePick": "Pick a node",
+    "routeNodeHint": "A remote node of the panel in a country where Telegram is open. The node passes only requests to Telegram; it needs 0.4.2 or later.",
+    "routeNodeOld": "{name} — update to 0.4.2",
+    "routeNoNodes": "No remote nodes: connect a server in another country on the Nodes page.",
+    "routeOpenNodes": "Open Nodes",
+    "routeProxyLabel": "Proxy address",
+    "routeProxyHint": "SOCKS5 or HTTP(S): socks5://login:password@host:port. The password stays in the panel and is not shown again.",
+    "routeProxyKeep": "Saved: {proxy}. Leave the field empty to keep it.",
+    "routeSave": "Check and save",
+    "routeSaved": "The bot reaches Telegram: {how}"
   },
   "apiPage": {
     "title": "API",

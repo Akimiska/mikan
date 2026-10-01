@@ -1509,6 +1509,8 @@ export interface components {
         PatchTelegramInputBody: {
             config?: components["schemas"]["Config"];
             enabled?: boolean;
+            /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
+            route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */
             token?: string;
         };
@@ -1680,6 +1682,17 @@ export interface components {
             sni: string;
             tls13: boolean;
             x25519: boolean;
+        };
+        RouteStruct: {
+            /** @enum {string} */
+            mode: "direct" | "node" | "proxy";
+            /**
+             * Format: int64
+             * @description Удалённая нода панели (mode=node)
+             */
+            node_id?: number;
+            /** @description socks5://user:pass@host:port, http://… или https://…; не передан — прежний (mode=proxy) */
+            proxy?: string;
         };
         ScanTargetsOutputBody: {
             /** @description Адрес сервера, вокруг которого искали */
@@ -1869,6 +1882,20 @@ export interface components {
             name: string;
             username: string;
         };
+        TelegramRoute: {
+            /**
+             * @description Напрямую с сервера панели, через её ноду или через прокси — когда Telegram на сервере заблокирован
+             * @enum {string}
+             */
+            mode: "direct" | "node" | "proxy";
+            /**
+             * Format: int64
+             * @description Нода, через которую идут запросы
+             */
+            node_id?: number;
+            /** @description Адрес прокси; пароль скрыт */
+            proxy?: string;
+        };
         TelegramView: {
             /**
              * Format: int64
@@ -1891,6 +1918,8 @@ export interface components {
             linked: number;
             /** @description Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный */
             mini_app_url: string;
+            /** @description Как бот ходит в Telegram */
+            route: components["schemas"]["TelegramRoute"];
             running: boolean;
             /** @description ID бота из токена */
             token_hint?: string;

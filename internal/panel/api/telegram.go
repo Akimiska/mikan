@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -28,6 +29,13 @@ type TelegramView struct {
 	Linked     int64              `json:"linked" doc:"Подписок, привязанных к Telegram"`
 	Accounts   int64              `json:"accounts" doc:"Аккаунтов Telegram с подписками"`
 	Broadcast  *TelegramBroadcast `json:"broadcast,omitempty" doc:"Последняя рассылка с запуска панели"`
+	Route      TelegramRoute      `json:"route" doc:"Как бот ходит в Telegram"`
+}
+
+type TelegramRoute struct {
+	Mode   string `json:"mode" enum:"direct,node,proxy" doc:"Напрямую с сервера панели, через её ноду или через прокси — когда Telegram на сервере заблокирован"`
+	NodeID int64  `json:"node_id,omitempty" doc:"Нода, через которую идут запросы"`
+	Proxy  string `json:"proxy,omitempty" doc:"Адрес прокси; пароль скрыт"`
 }
 
 // TelegramBroadcast is how far the last broadcast went.
@@ -51,6 +59,11 @@ type patchTelegramInput struct {
 		Enabled *bool         `json:"enabled,omitempty"`
 		Token   *string       `json:"token,omitempty" maxLength:"100" doc:"Токен от @BotFather; пустая строка — удалить"`
 		Config  *tgbot.Config `json:"config,omitempty"`
+		Route   *struct {
+			Mode   string  `json:"mode" enum:"direct,node,proxy"`
+			NodeID int64   `json:"node_id,omitempty" minimum:"0" doc:"Удалённая нода панели (mode=node)"`
+			Proxy  *string `json:"proxy,omitempty" maxLength:"512" doc:"socks5://user:pass@host:port, http://… или https://…; не передан — прежний (mode=proxy)"`
+		} `json:"route,omitempty" doc:"Перед сохранением панель проверяет, что Telegram отвечает этим путём"`
 	}
 }
 
@@ -109,6 +122,11 @@ func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 		v.Config = tgbot.Default(lang)
 	}
 	v.Defaults = tgbot.DefaultTexts(v.Config.Lang)
+	route := tgbot.Route{Mode: tgbot.RouteDirect}
+	if h.d.Telegram != nil {
+		route = h.d.Telegram.Route(ctx)
+	}
+	v.Route = TelegramRoute{Mode: route.Mode, NodeID: route.NodeID, Proxy: tgbot.MaskProxy(route.Proxy)}
 	if v.Linked, err = h.d.Store.Q.CountTgLinks(ctx); err != nil {
 		return v, err
 	}
@@ -147,6 +165,48 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 	}
 	b := in.Body
 	details := map[string]any{}
+	// The route goes first: a token typed together with it is checked the new way.
+	if b.Route != nil {
+		r := h.d.Telegram.Route(ctx)
+		r.Mode = b.Route.Mode
+		switch r.Mode {
+		case tgbot.RouteNode:
+			n, err := h.d.Store.Q.GetNode(ctx, b.Route.NodeID)
+			if err != nil || n.Address == "" {
+				// The panel's own node shares its server, and with it the block.
+				return nil, tgFieldErr("route", "tg_route_node")
+			}
+			r.NodeID = n.ID
+			details["route"], details["node"] = r.Mode, n.Name
+		case tgbot.RouteProxy:
+			if b.Route.Proxy != nil {
+				r.Proxy = strings.TrimSpace(*b.Route.Proxy)
+			}
+			if _, err := tgbot.ParseProxy(r.Proxy); err != nil {
+				return nil, tgFieldErr("route", "tg_proxy_invalid")
+			}
+			details["route"], details["proxy"] = r.Mode, tgbot.ProxyHost(r.Proxy)
+		default:
+			details["route"] = r.Mode
+		}
+		if r.Mode != tgbot.RouteDirect {
+			token, err := h.d.Settings.String(ctx, tgbot.KeyToken)
+			if err != nil {
+				return nil, err
+			}
+			if b.Token != nil {
+				if _, _, ok := cutToken(*b.Token); ok {
+					token = *b.Token
+				}
+			}
+			if err := h.d.Telegram.CheckRoute(ctx, r, token); err != nil {
+				return nil, tgFieldErr("route", "tg_route_unreachable")
+			}
+		}
+		if err := settings.Set(ctx, h.d.Settings, tgbot.KeyRoute, r); err != nil {
+			return nil, err
+		}
+	}
 	if b.Token != nil {
 		switch {
 		case *b.Token == "":

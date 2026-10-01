@@ -90,5 +90,6 @@ export function errorText(e: unknown): string {
   if (e.status === 404) return t("errors.notFound");
   if (e.status === 409 || e.status === 422) return Object.values(e.fields)[0] || tMaybe(`errors.api.${e.detail}`) || t("errors.checkInput");
   if (e.status === 429) return t("errors.tooMany", { s: e.retryAfter || 60 });
-  return t("errors.server");
+  // A known code says more than "server error" (502 tg_unreachable, say).
+  return (e.detail ? tMaybe(`errors.api.${e.detail}`) : undefined) ?? t("errors.server");
 }

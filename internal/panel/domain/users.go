@@ -242,6 +242,36 @@ type Patch struct {
 	ClearBillingDay     bool
 	Inbounds            *[]int64 // empty slice = all inbounds
 	TariffID            *int64   // applies the tariff's limits and restarts the term from now
+	// Extend adds a term to the expiry the transaction reads, so a payment that lands
+	// meanwhile is not overwritten by an absolute date worked out before it.
+	Extend *Extension
+}
+
+// Extension adds time to the current expiry, or to now when the term already ended. Days
+// adds that many; Months goes to the n-th billing day, or without one to the same day of
+// the month (see AddMonths); Period is one paid period: a month up to the billing day, or
+// 30 days without one. It also turns the user on.
+type Extension struct {
+	Days   int64
+	Months int
+	Period bool
+}
+
+// until is where the term ends after the extension, counted from the expiry exp.
+func (e Extension) until(now time.Time, exp sql.NullInt64, billingDay sql.NullInt64) time.Time {
+	base := now
+	if exp.Valid && time.Unix(exp.Int64, 0).After(now) {
+		base = time.Unix(exp.Int64, 0)
+	}
+	switch {
+	case e.Period && billingDay.Valid:
+		return AddMonths(base, 1, billingDay)
+	case e.Period:
+		return base.Add(30 * 24 * time.Hour)
+	case e.Months > 0:
+		return AddMonths(base, e.Months, billingDay)
+	}
+	return base.Add(time.Duration(e.Days) * 24 * time.Hour)
 }
 
 // ErrBadBillingDay: a billing day is 1–31.
@@ -326,6 +356,10 @@ func (s *Users) Update(ctx context.Context, id int64, p Patch) (db.User, error) 
 		case p.ExpiresAt != nil:
 			par.ExpiresAt = sql.NullInt64{Int64: p.ExpiresAt.Unix(), Valid: true}
 		}
+		if p.Extend != nil {
+			par.ExpiresAt = sql.NullInt64{Int64: p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay).Unix(), Valid: true}
+			par.Status = "active"
+		}
 		if p.Inbounds != nil {
 			if len(*p.Inbounds) == 0 {
 				par.Inbounds = sql.NullString{}
@@ -344,48 +378,20 @@ func (s *Users) Update(ctx context.Context, id int64, p Patch) (db.User, error) 
 }
 
 // Extend adds days to the current expiry, or to now if the term already ended.
+// The three extensions read the user and write the new expiry in one transaction (Update).
 func (s *Users) Extend(ctx context.Context, id int64, days int64) (db.User, error) {
-	u, err := s.Get(ctx, id)
-	if err != nil {
-		return u, err
-	}
-	now := s.now()
-	base := now
-	if u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).After(now) {
-		base = time.Unix(u.ExpiresAt.Int64, 0)
-	}
-	until := base.Add(time.Duration(days) * 24 * time.Hour)
-	enable := false
-	return s.Update(ctx, id, Patch{ExpiresAt: &until, Disabled: &enable})
+	return s.Update(ctx, id, Patch{Extend: &Extension{Days: days}})
 }
 
 // ExtendMonths adds n months: to the n-th billing day, or without one to the same day of
 // the month (see AddMonths). A term that already ended restarts from now.
 func (s *Users) ExtendMonths(ctx context.Context, id int64, n int) (db.User, error) {
-	u, err := s.Get(ctx, id)
-	if err != nil {
-		return u, err
-	}
-	now := s.now()
-	base := now
-	if u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).After(now) {
-		base = time.Unix(u.ExpiresAt.Int64, 0)
-	}
-	until := AddMonths(base, n, u.BillingDay)
-	enable := false
-	return s.Update(ctx, id, Patch{ExpiresAt: &until, Disabled: &enable})
+	return s.Update(ctx, id, Patch{Extend: &Extension{Months: n}})
 }
 
 // ExtendPeriod adds one paid period: a month up to the billing day, or 30 days without one.
 func (s *Users) ExtendPeriod(ctx context.Context, id int64) (db.User, error) {
-	u, err := s.Get(ctx, id)
-	if err != nil {
-		return u, err
-	}
-	if u.BillingDay.Valid {
-		return s.ExtendMonths(ctx, id, 1)
-	}
-	return s.Extend(ctx, id, 30)
+	return s.Update(ctx, id, Patch{Extend: &Extension{Period: true}})
 }
 
 // ResetTraffic starts a new traffic period now (see StartPeriod).

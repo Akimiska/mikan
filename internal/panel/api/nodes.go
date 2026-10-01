@@ -12,6 +12,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/hostname"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -176,10 +177,10 @@ func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKe
 		return nil, err
 	}
 	var details []error
-	if host == "" || !validHost(host) {
+	if !hostname.Valid(host) {
 		details = append(details, &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
 	}
-	if !validHost(dom) {
+	if dom != "" && !hostname.Valid(dom) {
 		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 	}
 	if len(details) > 0 {
@@ -232,7 +233,7 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 	}
 	if b.Host != nil {
 		host := strings.TrimSpace(*b.Host)
-		if host == "" || !validHost(host) {
+		if !hostname.Valid(host) {
 			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
 		}
 		_, port, err := net.SplitHostPort(n.Address)
@@ -243,7 +244,7 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 	}
 	if b.Domain != nil {
 		dom := strings.TrimSpace(*b.Domain)
-		if !validHost(dom) {
+		if dom != "" && !hostname.Valid(dom) {
 			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 		}
 		n.Domain = dom

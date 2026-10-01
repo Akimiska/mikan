@@ -246,4 +246,18 @@ mod tests {
         assert!(valid_email("admin@example.com"));
         assert!(!valid_email("admin@") && !valid_email("a b@example.com"));
     }
+
+    /// The panel judges names by the same cases (internal/hostname, Name).
+    #[test]
+    fn names_match_the_panel() {
+        let cases = std::fs::read_to_string("../internal/hostname/testdata/hosts.txt").unwrap();
+        let mut n = 0;
+        for line in cases.lines().map(str::trim_end).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let (verdict, host) = line.split_once(' ').unwrap();
+            assert!(["name", "ip", "bad"].contains(&verdict), "{line}");
+            assert_eq!(valid_domain(host), verdict == "name", "{verdict} {host:?}");
+            n += 1;
+        }
+        assert!(n >= 20, "only {n} cases");
+    }
 }

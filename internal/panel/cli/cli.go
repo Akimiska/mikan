@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/hostname"
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/app"
 	"mikan/internal/panel/audit"
@@ -202,6 +203,12 @@ func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, arg
 	}
 	if *host == "" || *port <= 0 || *port > 65535 {
 		return errors.New("--public-host and --port are required")
+	}
+	if !hostname.Valid(*host) {
+		return fmt.Errorf("--public-host: want an IP address or a host name, got %q", *host)
+	}
+	if *domain != "" && !hostname.Valid(*domain) {
+		return fmt.Errorf("--domain: want a host name like vpn.example.com, got %q", *domain)
 	}
 	if *lang != "" && !settings.ValidLang(*lang) {
 		return fmt.Errorf("--lang: want en or ru, got %q", *lang)

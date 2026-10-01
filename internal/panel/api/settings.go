@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/hostname"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
@@ -180,16 +181,13 @@ func (h *handlers) getSettings(ctx context.Context, _ *struct{}) (*settingsOutpu
 	return &settingsOutput{Body: v}, nil
 }
 
-// validHost: empty (not set) or a host proto accepts.
-func validHost(s string) bool { return s == "" || proto.ValidHost(s) }
-
 func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (*settingsOutput, error) {
 	b := in.Body
 	var details []error
-	if b.PublicHost != nil && (*b.PublicHost == "" || !validHost(*b.PublicHost)) {
+	if b.PublicHost != nil && !hostname.Valid(*b.PublicHost) {
 		details = append(details, &huma.ErrorDetail{Location: "body.public_host", Message: "public_host_invalid"})
 	}
-	if b.Domain != nil && !validHost(*b.Domain) {
+	if b.Domain != nil && *b.Domain != "" && !hostname.Valid(*b.Domain) {
 		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 	}
 	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {

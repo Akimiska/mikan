@@ -31,6 +31,7 @@ import (
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/registration"
 
+	"mikan/internal/hostname"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/tlscert"
 )
@@ -188,7 +189,7 @@ func (m *Manager) ensure(ctx context.Context) {
 		// What the admin set up and lost says more than why the fallback is what it is.
 		defer func() { st.Error = why }()
 	}
-	if id == "" || id == "localhost" || isPrivate(id) {
+	if isPrivate(id) {
 		m.useFallback()
 		st.Error = "no_public_host"
 		return
@@ -341,11 +342,11 @@ func covers(leaf *x509.Certificate, id string) bool {
 }
 
 // isPrivate reports identifiers Let's Encrypt can never validate: private and loopback
-// IPs, and single-label names such as docker service names in test setups.
+// IPs, and what is not a DNS name, such as docker service names in test setups.
 func isPrivate(id string) bool {
 	ip := net.ParseIP(id)
 	if ip == nil {
-		return !strings.Contains(id, ".")
+		return !hostname.Name(id)
 	}
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }

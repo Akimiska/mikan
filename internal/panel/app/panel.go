@@ -239,7 +239,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			if n.Enabled == 0 {
 				continue
 			}
-			sn := subs.Node{ID: n.ID, Name: n.Name, Endpoint: subs.Endpoint{Host: ep.Host, SNI: domainName}}
+			// AoiVPN fork: the local node is reached by its IP, not the panel's domain.
+			// A .ru domain host (se.aoimusic.ru) is resolved client-side via DoH, which
+			// stalls/gets poisoned under RU TSPU, so the whole node dies while IP-addressed
+			// nodes work. The cert SNI stays the domain (hysteria/tuic match the LE cert);
+			// reality carries its own SNI from the inbound.
+			localHost := ep.Host
+			if publicHost != "" {
+				localHost = publicHost
+			}
+			sn := subs.Node{ID: n.ID, Name: n.Name, Endpoint: subs.Endpoint{Host: localHost, SNI: domainName}}
 			if n.Address != "" {
 				sn.Endpoint = subs.Endpoint{Host: domain.NodeHost(n), SNI: n.Domain}
 				cfg.Direct = append(cfg.Direct, n.PublicHost, n.Domain)

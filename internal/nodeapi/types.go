@@ -79,10 +79,6 @@ type PoliciesRequest struct {
 	Policies []Policy `json:"policies"`
 }
 
-type KickRequest struct {
-	Slots []string `json:"slots"`
-}
-
 type AckRequest struct {
 	Epoch string `json:"epoch"`
 	Seq   int64  `json:"seq"`
@@ -101,6 +97,10 @@ type Counters struct {
 	Slots  map[string]Traffic            `json:"slots"`           // outside every pool
 	Pools  map[string]map[string]Traffic `json:"pools,omitempty"` // slot → pool → traffic
 	Online map[string]Online             `json:"online"`          // live view, not part of the batch
+	// Idle: no batch was cut because there was no traffic to report. There is nothing to
+	// store and nothing to acknowledge; only Online is of use. Nodes before 0.4.4 cut an
+	// empty batch instead, which must be acknowledged like any other.
+	Idle bool `json:"idle,omitempty"`
 }
 
 type Traffic struct {
@@ -176,12 +176,6 @@ type ApplyResult struct {
 	Revision  int64            `json:"revision"`
 	Recreated []string         `json:"recreated"`
 	Listeners []ListenerStatus `json:"listeners"`
-}
-
-type LogLine struct {
-	Time    time.Time `json:"time"`
-	Level   string    `json:"level"`
-	Message string    `json:"message"`
 }
 
 type Error struct {

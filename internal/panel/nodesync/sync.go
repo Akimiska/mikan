@@ -77,8 +77,6 @@ func newSyncer(m *Manager, id int64, t Target) *Syncer {
 	return s
 }
 
-func (s *Syncer) ID() int64        { return s.id }
-func (s *Syncer) Client() Node     { return s.node }
 func (s *Syncer) PoliciesChanged() { signal(s.policiesDirty) }
 func (s *Syncer) SlotsChanged()    { signal(s.stateDirty) }
 

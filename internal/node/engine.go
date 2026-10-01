@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,12 +58,13 @@ type Engine struct {
 	Reg *Registry
 	tun *Tunnel
 
-	mu        sync.Mutex // serializes Apply
-	applied   nodeapi.DesiredState
-	cert      proto.Cert // node certificate files written by the last Apply
-	listeners map[string]nodeapi.ListenerStatus
+	mu         sync.Mutex // serializes Apply
+	savedShape string     // policyShape of the policies in the state file
+	savedAt    time.Time  // when the state file was written
+	applied    nodeapi.DesiredState
+	cert       proto.Cert // node certificate files written by the last Apply
+	listeners  map[string]nodeapi.ListenerStatus
 
-	logs   *logRing
 	errsMu sync.Mutex
 	errs   map[string]string // listener name → last listen error
 	marker chan string
@@ -115,19 +118,19 @@ func Start(o Options) (*Engine, error) {
 
 	e := &Engine{
 		dataDir: dataDir, home: home, log: log, version: version, started: time.Now(), allowPrivate: o.AllowPrivate,
-		listeners: map[string]nodeapi.ListenerStatus{}, logs: newLogRing(500),
-		errs: map[string]string{}, marker: make(chan string, 8), sys: newSysSampler(),
+		listeners: map[string]nodeapi.ListenerStatus{},
+		errs:      map[string]string{}, marker: make(chan string, 8), sys: newSysSampler(),
 	}
 	go e.pumpLogs()
 
-	cs, err := loadCounters(filepath.Join(dataDir, countersFile))
+	cs, err := loadCounters(filepath.Join(dataDir, countersFile), log)
 	if err != nil {
 		return nil, err
 	}
 	e.Reg = NewRegistry(cs.Epoch, cs.Seq, o.DeviceRelease, time.Now)
 	e.tun = &Tunnel{inner: tunnel.Tunnel, reg: e.Reg}
 
-	base, err := buildConfig(nodeapi.DesiredState{}, proto.Cert{}, o.AllowPrivate)
+	base, _, err := buildConfig(nodeapi.DesiredState{}, proto.Cert{}, o.AllowPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -140,22 +143,29 @@ func Start(o Options) (*Engine, error) {
 	cfg.Listeners = map[string]C.InboundListener{}
 	executor.ApplyConfig(cfg, true)
 
-	var st nodeapi.DesiredState
-	raw, err := os.ReadFile(filepath.Join(dataDir, stateFile))
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(raw, &st); err != nil {
-			return nil, fmt.Errorf("%s: %w", stateFile, err)
-		}
+	st, ok, err := loadState(filepath.Join(dataDir, stateFile), log)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		if _, err := e.Apply(st); err != nil {
 			log.Error("restore saved state", "err", err)
 		}
-	case !errors.Is(err, os.ErrNotExist):
-		return nil, err
 	}
-	e.Reg.restore(cs)
+	e.restoreCounters(cs)
 	go e.sys.run()
 	return e, nil
+}
+
+// restoreCounters brings back what the slots had counted before the restart. Apply ran
+// first, so the quotas it set leave that out: they are set again with the counters in
+// place, or users close to their limit would get the traffic counted since the last push
+// on top of it.
+func (e *Engine) restoreCounters(cs counterState) {
+	e.Reg.restore(cs)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.Reg.SetPolicies(e.applied.Epoch, e.applied.Policies)
 }
 
 // Apply renders the desired state into mihomo listeners. Unchanged listeners keep their
@@ -174,7 +184,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		}
 	}
 	e.cert = cert
-	raw, err := buildConfig(st, cert, e.allowPrivate)
+	raw, rejected, err := buildConfig(st, cert, e.allowPrivate)
 	if err != nil {
 		return nodeapi.ApplyResult{}, &nodeapi.Error{Code: "invalid_state", Message: err.Error()}
 	}
@@ -214,7 +224,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	}
 	e.Reg.SetPools(pools)
 
-	recreated := changedInbounds(e.applied, st)
+	recreated := withoutRejected(changedInbounds(e.applied, st), rejected)
 	e.errsMu.Lock()
 	for name := range cfg.Listeners {
 		delete(e.errs, name)
@@ -237,6 +247,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	}
 	hasFailures := len(failed) != len(cfg.Listeners)
 	e.errsMu.Unlock()
+	statuses = append(statuses, rejected...)
 	// A listener that failed to bind stays registered under its old instance in mihomo
 	// and would be skipped as "unchanged" next time; re-patching without it forgets it.
 	if hasFailures {
@@ -288,15 +299,39 @@ func (e *Engine) TargetAllowed(dest string) bool {
 	return self > 0 && (host == "127.0.0.1" || host == "localhost") && port == strconv.Itoa(self)
 }
 
+// quotaSaveEvery is how often a push that changed only the quotas left reaches the disk:
+// the panel sends those every half minute and a node that restarts gets fresh ones from
+// it at once, so there is little to lose and a fsync of the whole state to save.
+const quotaSaveEvery = time.Minute
+
 func (e *Engine) SetPolicies(req nodeapi.PoliciesRequest) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Reg.SetPolicies(req.Epoch, req.Policies)
+	shape := policyShape(req.Policies)
+	changed := shape != e.savedShape || req.Epoch != e.applied.Epoch
 	e.applied.Policies = req.Policies
 	e.applied.Epoch = req.Epoch
+	if !changed && time.Since(e.savedAt) < quotaSaveEvery {
+		return
+	}
 	if err := e.saveState(e.applied); err != nil {
 		e.log.Error("save state", "err", err)
 	}
+}
+
+// policyShape is who may do what, without the quotas left: those change with every byte.
+func policyShape(ps []nodeapi.Policy) string {
+	h := sha256.New()
+	enc := json.NewEncoder(h)
+	for _, p := range ps {
+		pools := make([]string, 0, len(p.Pools))
+		for _, q := range p.Pools {
+			pools = append(pools, q.Pool+strconv.FormatBool(q.Remaining < 0))
+		}
+		_ = enc.Encode([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, pools})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (e *Engine) Health() nodeapi.Health {
@@ -314,8 +349,6 @@ func (e *Engine) Health() nodeapi.Health {
 	}
 }
 
-func (e *Engine) Logs(since time.Time) []nodeapi.LogLine { return e.logs.since(since) }
-
 // PersistCounters is called periodically and on shutdown; at most the last interval
 // of traffic is lost if the process dies.
 func (e *Engine) PersistCounters() error {
@@ -331,11 +364,15 @@ func (e *Engine) saveState(st nodeapi.DesiredState) error {
 	if err != nil {
 		return err
 	}
-	return fsutil.WriteFileAtomic(filepath.Join(e.dataDir, stateFile), raw, 0o600)
+	if err := fsutil.WriteFileAtomic(filepath.Join(e.dataDir, stateFile), raw, 0o600); err != nil {
+		return err
+	}
+	e.savedShape, e.savedAt = policyShape(st.Policies), time.Now()
+	return nil
 }
 
-// pumpLogs forwards mihomo's log stream: warnings and errors go to our logger and the
-// ring buffer, listener bind errors are remembered for the listener status.
+// pumpLogs forwards mihomo's log stream: warnings and errors go to our logger,
+// listener bind errors are remembered for the listener status.
 func (e *Engine) pumpLogs() {
 	sub := mlog.Subscribe()
 	for ev := range sub {
@@ -355,7 +392,6 @@ func (e *Engine) pumpLogs() {
 			e.errs[name] = rest
 			e.errsMu.Unlock()
 		}
-		e.logs.add(nodeapi.LogLine{Time: time.Now(), Level: ev.Type(), Message: msg})
 		if ev.LogLevel >= mlog.ERROR {
 			e.log.Error("mihomo", "msg", msg)
 		} else {
@@ -403,6 +439,17 @@ func parseListenErr(msg string) (name, reason string, ok bool) {
 	return name, reason, ok
 }
 
+func withoutRejected(names []string, rejected []nodeapi.ListenerStatus) []string {
+	if len(rejected) == 0 {
+		return names
+	}
+	bad := make(map[string]bool, len(rejected))
+	for _, r := range rejected {
+		bad[r.Name] = true
+	}
+	return slices.DeleteFunc(names, func(n string) bool { return bad[n] })
+}
+
 func changedInbounds(prev, next nodeapi.DesiredState) []string {
 	old := map[string]string{}
 	for _, in := range prev.Inbounds {
@@ -443,21 +490,63 @@ func mihomoVersion() string {
 	return "unknown"
 }
 
-func loadCounters(path string) (counterState, error) {
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+// loadCounters reads the counters file. A missing or broken one starts a new counter
+// epoch, which the panel takes as a node with a fresh volume and re-bases its quotas.
+func loadCounters(path string, log *slog.Logger) (counterState, error) {
+	fresh := func() counterState {
 		id := make([]byte, 8)
 		_, _ = rand.Read(id)
-		return counterState{Epoch: hex.EncodeToString(id)}, nil
+		return counterState{Epoch: hex.EncodeToString(id)}
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return fresh(), nil
 	}
 	if err != nil {
 		return counterState{}, err
 	}
 	var cs counterState
-	if err := json.Unmarshal(raw, &cs); err != nil {
-		return counterState{}, fmt.Errorf("%s: %w", countersFile, err)
+	if err := json.Unmarshal(raw, &cs); err != nil || cs.Epoch == "" {
+		if err == nil {
+			err = errors.New("no epoch")
+		}
+		if err := setAside(path, err, log); err != nil {
+			return counterState{}, err
+		}
+		return fresh(), nil
 	}
 	return cs, nil
+}
+
+// loadState reads the saved desired state; ok is false when there is none to apply: no
+// file, or a broken one, which is kept aside. The panel then pushes the whole state, as
+// it does to any node that reports revision 0.
+func loadState(path string, log *slog.Logger) (st nodeapi.DesiredState, ok bool, err error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return st, false, nil
+	}
+	if err != nil {
+		return st, false, err
+	}
+	if err := json.Unmarshal(raw, &st); err != nil {
+		if err := setAside(path, err, log); err != nil {
+			return nodeapi.DesiredState{}, false, err
+		}
+		return nodeapi.DesiredState{}, false, nil
+	}
+	return st, true, nil
+}
+
+// setAside renames a file the node cannot read to <name>.corrupt-<time>, so the node
+// starts clean instead of failing on it at every restart, and the evidence stays.
+func setAside(path string, why error, log *slog.Logger) error {
+	to := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405")
+	if err := os.Rename(path, to); err != nil {
+		return fmt.Errorf("%s is broken (%v) and cannot be moved aside: %w", filepath.Base(path), why, err)
+	}
+	log.Error("a saved file is broken: starting without it", "file", filepath.Base(path), "kept_as", filepath.Base(to), "err", why)
+	return nil
 }
 
 // Probe checks the internet through one outbound of the running config, at most once a

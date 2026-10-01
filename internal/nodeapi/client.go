@@ -54,9 +54,6 @@ func NewTLSClient(address string, cfg *tls.Config) *Client {
 	}}}
 }
 
-// CloseIdle drops kept-alive connections, e.g. when the node's address changes.
-func (c *Client) CloseIdle() { c.hc.CloseIdleConnections() }
-
 var ErrUnavailable = errors.New("node unavailable")
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any, timeout time.Duration) error {
@@ -110,10 +107,6 @@ func (c *Client) SetPolicies(ctx context.Context, epoch string, p []Policy) erro
 	return c.do(ctx, http.MethodPut, "/v1/policies", PoliciesRequest{Epoch: epoch, Policies: p}, nil, 30*time.Second)
 }
 
-func (c *Client) Kick(ctx context.Context, slots []string) error {
-	return c.do(ctx, http.MethodPost, "/v1/kick", KickRequest{Slots: slots}, nil, 10*time.Second)
-}
-
 func (c *Client) Counters(ctx context.Context) (Counters, error) {
 	var r Counters
 	err := c.do(ctx, http.MethodGet, "/v1/counters", nil, &r, 10*time.Second)
@@ -146,12 +139,6 @@ func (c *Client) CheckTarget(ctx context.Context, req TargetCheckRequest) (Targe
 func (c *Client) ScanTargets(ctx context.Context, req TargetScanRequest) (TargetScan, error) {
 	var r TargetScan
 	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, 45*time.Second)
-	return r, err
-}
-
-func (c *Client) Logs(ctx context.Context, since time.Time) ([]LogLine, error) {
-	var r []LogLine
-	err := c.do(ctx, http.MethodGet, "/v1/logs?since="+url.QueryEscape(since.Format(time.RFC3339Nano)), nil, &r, 5*time.Second)
 	return r, err
 }
 

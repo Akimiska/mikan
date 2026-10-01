@@ -31,6 +31,7 @@ type Registry struct {
 
 type slot struct {
 	name, uuid string
+	shared     bool // a listener's one key for everyone: no devices, no counters
 
 	up, down  atomic.Int64 // counted but not yet cut into a batch
 	quotaOn   atomic.Bool
@@ -46,6 +47,8 @@ type slot struct {
 	conns       map[*countingConn]struct{}
 	ips         map[string]*ipUse
 	seen        map[seenKey]time.Time // last admitted connection per device and inbound
+	cleaned     time.Time             // when ips was last swept of devices that left
+	seenPruned  time.Time             // likewise for seen
 	pools       map[string]*bucket    // traffic pools of the slot, made on first use
 }
 
@@ -58,6 +61,11 @@ type seenKey struct{ ip, inbound string }
 
 // activityKeep bounds how far back Activity reports; the panel looks at the last minutes.
 const activityKeep = time.Hour
+
+// seqAfterCrash is how far restore moves the batch counter on: far more batches than the
+// counters file can be behind (one is cut at most every couple of seconds, the file is
+// written every ten).
+const seqAfterCrash = 100_000
 
 func NewRegistry(epoch string, seq int64, release time.Duration, now func() time.Time) *Registry {
 	return &Registry{byKey: map[string]*slot{}, byName: map[string]*slot{}, epoch: epoch, seq: seq, release: release, now: now}
@@ -209,7 +217,8 @@ func (r *Registry) lookup(key string) *slot {
 
 // SetShared names the listeners whose clients carry no user: one key for everyone
 // (Shadowsocks-2022, Sudoku, Snell). Their connections go through without a policy or
-// limits; the traffic is counted to the listener, which no user owns.
+// limits, and are not counted: no user owns the traffic and the panel has no use for a
+// listener's total.
 func (r *Registry) SetShared(names []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -218,6 +227,7 @@ func (r *Registry) SetShared(names []string) {
 		s := r.shared[n]
 		if s == nil {
 			s = newSlot("~"+n, "")
+			s.shared = true
 			s.allowed = true
 			s.blocked.Store(false)
 		}
@@ -250,10 +260,10 @@ func (r *Registry) admitIn(user, inName, ip string, tcp bool) (*slot, *bucket) {
 	if s == nil || s.blocked.Load() {
 		return nil, nil
 	}
-	pool := ""
-	if user != "" { // one key for everyone has no user, so no pools either
-		pool = r.poolOfListener(inName)
+	if s.shared {
+		return s, nil
 	}
+	pool := r.poolOfListener(inName)
 	now := r.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -269,12 +279,19 @@ func (r *Registry) admitIn(user, inName, ip string, tcp bool) (*slot, *bucket) {
 	} else if s.exhausted {
 		return nil, nil
 	}
-	for k, u := range s.ips {
-		if u.open == 0 && now.Sub(u.lastSeen) > r.release {
-			delete(s.ips, k)
-		}
-	}
+	// Devices that left are dropped when a new one asks for a place, and otherwise at most
+	// once a second: a busy UDP flow admits every packet and must not walk the slot's
+	// devices each time.
 	u := s.ips[ip]
+	if u == nil || now.Sub(s.cleaned) >= time.Second || u.open == 0 && now.Sub(u.lastSeen) > r.release {
+		for k, d := range s.ips {
+			if d.open == 0 && now.Sub(d.lastSeen) > r.release {
+				delete(s.ips, k)
+			}
+		}
+		s.cleaned = now
+		u = s.ips[ip]
+	}
 	if u == nil {
 		// A device already counted on another node is not a new one.
 		if s.deviceLimit > 0 && !s.otherIPs[ip] && s.devicesLocked() >= s.deviceLimit {
@@ -288,13 +305,14 @@ func (r *Registry) admitIn(user, inName, ip string, tcp bool) (*slot, *bucket) {
 		u.open++
 	}
 	s.seen[seenKey{ip, inName}] = now
-	if len(s.seen) > 256 {
+	if len(s.seen) > 256 && now.Sub(s.seenPruned) >= time.Minute {
 		// Activity prunes too, but a panel that never asks must not grow it forever.
 		for k, t := range s.seen {
 			if now.Sub(t) > activityKeep {
 				delete(s.seen, k)
 			}
 		}
+		s.seenPruned = now
 	}
 	return s, b
 }
@@ -356,6 +374,9 @@ func (s *slot) closeConn(c *countingConn, now time.Time) {
 }
 
 func (s *slot) count(up, down int64) {
+	if s.shared {
+		return
+	}
 	if up != 0 {
 		s.up.Add(up)
 	}
@@ -400,19 +421,6 @@ func closeAll(conns []*countingConn) {
 	}
 }
 
-// Kick closes the active connections of the given slots. Access is not changed.
-func (r *Registry) Kick(names []string) {
-	var toClose []*countingConn
-	for _, n := range names {
-		if s := r.lookup(n); s != nil {
-			s.mu.Lock()
-			toClose = append(toClose, s.connsLocked()...)
-			s.mu.Unlock()
-		}
-	}
-	closeAll(toClose)
-}
-
 // Counters returns the outstanding batch, cutting a new one if the previous was acked.
 func (r *Registry) Counters() nodeapi.Counters {
 	r.batchMu.Lock()
@@ -428,9 +436,9 @@ func (r *Registry) Counters() nodeapi.Counters {
 	}
 	r.mu.Unlock()
 
-	if r.pending == nil {
-		r.seq++
-		b := &nodeapi.Counters{Epoch: r.epoch, Seq: r.seq, Slots: map[string]nodeapi.Traffic{}}
+	batch := r.pending
+	if batch == nil {
+		b := &nodeapi.Counters{Epoch: r.epoch, Seq: r.seq + 1, Slots: map[string]nodeapi.Traffic{}}
 		for _, s := range all {
 			up, down := s.up.Swap(0), s.down.Swap(0)
 			if up != 0 || down != 0 {
@@ -454,9 +462,18 @@ func (r *Registry) Counters() nodeapi.Counters {
 			}
 			s.mu.Unlock()
 		}
-		r.pending = b
+		// A batch without traffic is not cut: it would cost the panel a transaction every
+		// couple of seconds to learn nothing. The reply says Idle, so the panel keeps to
+		// the live view; an older panel takes it for the last batch again and drops it.
+		if len(b.Slots) > 0 || len(b.Pools) > 0 {
+			r.seq = b.Seq
+			r.pending = b
+		} else {
+			b.Seq, b.Idle = r.seq, true
+		}
+		batch = b
 	}
-	out := *r.pending
+	out := *batch
 	out.Online = map[string]nodeapi.Online{}
 	now := r.now()
 	for _, s := range all {
@@ -543,7 +560,12 @@ func (r *Registry) snapshot() counterState {
 func (r *Registry) restore(st counterState) {
 	r.batchMu.Lock()
 	defer r.batchMu.Unlock()
-	r.epoch, r.seq, r.pending = st.Epoch, st.Seq, st.Pending
+	// The file is written every few seconds, so after a crash it is behind the batches the
+	// panel has stored since. The panel drops a batch whose seq it has seen already: skip
+	// ahead of anything the node could have cut, or the first traffic after a crash would
+	// be thrown away as a duplicate. A pending batch keeps its own seq: the panel treats
+	// it as the duplicate or the news it is.
+	r.epoch, r.seq, r.pending = st.Epoch, st.Seq+seqAfterCrash, st.Pending
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for name, t := range st.Current {
@@ -628,6 +650,9 @@ func (r *Registry) poolOfListener(inName string) string {
 // countIn counts bytes to b (nil: the main quota) and cuts the bucket's connections once
 // its quota runs out.
 func (s *slot) countIn(b *bucket, up, down int64) {
+	if s.shared {
+		return
+	}
 	if b == nil {
 		s.count(up, down)
 		return

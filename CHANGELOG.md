@@ -3,6 +3,13 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.4.1
+### en
+- Server cascades: a protocol can send its traffic out through another node of the panel — client → node A → node B → internet, so sites see B's address while clients connect to A. Pick "Way out: Via a node" in a protocol's settings; the panel opens a hidden relay on the exit node by itself, with a key per source node. Chains of three or more servers work too (Nodes → Cascade sets where a node sends other nodes' traffic next: direct, its WARP or one more node), loops are refused, and WARP is not needed. Traffic is counted once, on the first node; when the exit node is down the traffic does not fall back to the first node's address. Nodes → Cascade shows the address sites see through each chain.
+
+### ru
+- Каскад серверов: подключение может выпускать трафик через другую ноду панели — клиент → нода A → нода B → интернет, сайты видят адрес B, а клиенты подключаются к A. В настройках подключения выберите «Выход в интернет: Через ноду»; служебный вход на ноде выхода панель откроет сама, с отдельным ключом для каждой ноды. Работают и цепочки из трёх и более серверов («Ноды → Каскад»: куда нода выпускает трафик других нод — напрямую, через свой WARP или дальше через ещё одну ноду), петли панель не даст сохранить, WARP не обязателен. Трафик считается один раз, на первой ноде; если нода выхода недоступна, трафик не уходит с адреса первой ноды. «Ноды → Каскад» показывает, какой адрес видят сайты через каждую цепочку.
+
 ## 0.4.0
 ### en
 - Pick the TLS fingerprint clients send: Settings → Subscription sets the default for all protocols, and a protocol's settings can choose its own (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ or a random one). Links (`fp=`) and Clash profiles (`client-fingerprint`) follow the choice; Hysteria2 and TUIC have no such fingerprint.

@@ -332,6 +332,24 @@ export interface paths {
         patch: operations["update-node"];
         trace?: never;
     };
+    "/api/v1/nodes/{id}/cascade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Каскад ноды: выходы и служебный вход */
+        get: operations["get-node-cascade"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Куда нода выпускает трафик других нод */
+        patch: operations["update-node-cascade"];
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/key": {
         parameters: {
             query?: never;
@@ -971,6 +989,49 @@ export interface components {
             /** Format: int64 */
             affected: number;
         };
+        CascadeExit: {
+            /** @description Подключения этой ноды, которые выходят через ту ноду */
+            inbounds: string[];
+            name: string;
+            /** Format: int64 */
+            node_id: number;
+            /** @description Проверка с этой ноды: какой IP видят сайты через цепочку */
+            probe?: components["schemas"]["ProbeView"];
+            /** @description Через неё идёт и трафик, который другие ноды передают через эту */
+            relay: boolean;
+        };
+        CascadeHop: {
+            name: string;
+            /** Format: int64 */
+            node_id: number;
+        };
+        CascadePatchInputBody: {
+            /** Format: int64 */
+            exit_node_id?: number;
+            /**
+             * @description Куда выпускать трафик других нод, пришедший через эту
+             * @enum {string}
+             */
+            outbound: "direct" | "warp" | "node";
+        };
+        CascadeView: {
+            /** @description Ноды, через которые эта нода выпускает трафик */
+            exits: components["schemas"]["CascadeExit"][];
+            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
+            relay?: components["schemas"]["CascadeViewRelayStruct"];
+        };
+        CascadeViewRelayStruct: {
+            /** Format: int64 */
+            exit_node_id?: number;
+            /**
+             * @description Куда эта нода выпускает их трафик
+             * @enum {string}
+             */
+            outbound: "direct" | "warp" | "node";
+            port: string;
+            /** @description Ноды, которые выходят через эту */
+            sources: components["schemas"]["CascadeHop"][];
+        };
         CheckTargetInputBody: {
             /** @description host:port */
             dest: string;
@@ -1143,6 +1204,11 @@ export interface components {
             display_name: string;
             enabled: boolean;
             error?: string;
+            /**
+             * Format: int64
+             * @description Нода, через которую выходит трафик, если outbound=node
+             */
+            exit_node_id?: number;
             /** @description Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек */
             fingerprint?: string;
             /** Format: int64 */
@@ -1152,10 +1218,10 @@ export interface components {
             /** Format: int64 */
             node_id: number;
             /**
-             * @description Выход в интернет: напрямую с сервера или через WARP ноды
+             * @description Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)
              * @enum {string}
              */
-            outbound: "direct" | "warp";
+            outbound: "direct" | "warp" | "node";
             port: string;
             preset: string;
             server_names?: string[];
@@ -1319,13 +1385,18 @@ export interface components {
             /** @description Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию */
             display_name?: string;
             enabled?: boolean;
+            /**
+             * Format: int64
+             * @description Для outbound=node: через какую ноду
+             */
+            exit_node_id?: number;
             /** @description Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек */
             fingerprint?: string;
             /**
-             * @description Выход в интернет: напрямую или через WARP ноды
+             * @description Выход в интернет: напрямую, через WARP ноды или через другую ноду
              * @enum {string}
              */
-            outbound?: "direct" | "warp";
+            outbound?: "direct" | "warp" | "node";
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
@@ -1480,6 +1551,15 @@ export interface components {
             items: components["schemas"]["PaymentView"][];
             /** @description Применённые платежи за 30 дней */
             totals: components["schemas"]["PaymentTotal"][];
+        };
+        ProbeView: {
+            /** Format: date-time */
+            checked_at: string;
+            colo?: string;
+            error?: string;
+            /** @description Адрес, который видят сайты */
+            ip?: string;
+            ok: boolean;
         };
         RecoveryOutputBody: {
             /** @description Показываются один раз */
@@ -2657,6 +2737,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeInfo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-node-cascade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CascadeView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-node-cascade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CascadePatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CascadeView"];
                 };
             };
             /** @description Error */

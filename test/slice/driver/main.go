@@ -9,6 +9,8 @@
 //	autotune:       with the node's 443/tcp dropped for the client (the blocker container), keep
 //	                checking every proxy like a url-test group until the panel moves XHTTP
 //	autotune-check: the client on the new profile gets through XHTTP again
+//	cascade:        VLESS Vision of the panel's node leaves through node2: the target sees node2's
+//	                address, the user is charged once, node2 off means no way out, not a leak
 package main
 
 import (
@@ -144,6 +146,8 @@ func main() {
 		devices()
 	case "devices-check":
 		devicesCheck()
+	case "cascade":
+		cascade()
 	case "autotune":
 		autotune()
 	case "autotune-check":
@@ -634,4 +638,120 @@ func waitRemote(p *panel) {
 		time.Sleep(time.Second)
 	}
 	log.Fatal("the remote node did not come up")
+}
+
+// whoami asks the target which address the connection through proxy port came from.
+func whoami(port int) (string, error) {
+	d, _ := proxy.SOCKS5("tcp", net.JoinHostPort("client", strconv.Itoa(port)), nil, &net.Dialer{Timeout: 10 * time.Second})
+	c, err := d.Dial("tcp", "target:9000")
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
+	if _, err := c.Write([]byte{'W', 0, 0, 0, 0, 0, 0, 0, 0}); err != nil {
+		return "", err
+	}
+	raw, err := io.ReadAll(c)
+	if err == nil && len(raw) == 0 {
+		err = fmt.Errorf("no answer")
+	}
+	return string(raw), err
+}
+
+// cascade sends the local Vision inbound out through node2 and back.
+func cascade() {
+	p := login()
+	raw, _ := os.ReadFile("/work/user")
+	uid, _ := strconv.ParseInt(string(raw), 10, 64)
+	var nodes []struct {
+		ID    int64 `json:"id"`
+		Local bool  `json:"local"`
+	}
+	p.call("GET", "/api/v1/nodes", nil, &nodes)
+	var remote int64
+	for _, n := range nodes {
+		if !n.Local {
+			remote = n.ID
+		}
+	}
+	var ins []struct {
+		ID     int64  `json:"id"`
+		NodeID int64  `json:"node_id"`
+		Preset string `json:"preset"`
+	}
+	p.call("GET", "/api/v1/inbounds", nil, &ins)
+	var vision int64
+	for _, in := range ins {
+		if in.Preset == "vless_reality_vision" && in.NodeID != remote {
+			vision = in.ID
+		}
+	}
+	addrOf := func(host string) string {
+		ips, err := net.LookupHost(host)
+		if err != nil || len(ips) == 0 {
+			log.Fatalf("resolve %s: %v", host, err)
+		}
+		return ips[0]
+	}
+	nodeIP, node2IP := addrOf("node"), addrOf("node2.slice")
+	const port = 11001 // VLESS Vision in the client
+	waitFor := func(want string) {
+		deadline := time.Now().Add(30 * time.Second)
+		var got string
+		var err error
+		for time.Now().Before(deadline) {
+			if got, err = whoami(port); err == nil && got == want {
+				return
+			}
+			time.Sleep(time.Second)
+		}
+		log.Fatalf("cascade: the target saw %q (%v), want %s", got, err, want)
+	}
+	waitFor(nodeIP)
+	log.Printf("direct: the target sees node %s", nodeIP)
+
+	path := "/api/v1/inbounds/" + strconv.FormatInt(vision, 10)
+	p.call("PATCH", path, map[string]any{"outbound": "node", "exit_node_id": remote}, nil)
+	waitFor(node2IP)
+	log.Printf("cascade: the target sees node2 %s", node2IP)
+
+	var before, after user
+	p.call("GET", "/api/v1/users/"+strconv.FormatInt(uid, 10), nil, &before)
+	const each = 8 * mib
+	if _, err := download(port, each); err != nil {
+		log.Fatalf("cascade download: %v", err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		p.call("GET", "/api/v1/users/"+strconv.FormatInt(uid, 10), nil, &after)
+		if after.UsedDown-before.UsedDown >= each {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	got := after.UsedDown - before.UsedDown
+	if diff := float64(got-each) / float64(each); diff < -0.01 || diff > 0.01 {
+		log.Fatalf("cascade: the user was charged %d for %d (once, at the first node)", got, each)
+	}
+	log.Printf("cascade: charged %d for %d", got, each)
+
+	// node2 off: its relay stops, and the first node must not fall back to going direct.
+	p.call("PATCH", "/api/v1/nodes/"+strconv.FormatInt(remote, 10), map[string]any{"enabled": false}, nil)
+	deadline = time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := whoami(port); err != nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if ip, err := whoami(port); err == nil {
+		log.Fatalf("cascade: with node2 off the traffic still got out, from %s", ip)
+	}
+	log.Print("cascade: node2 off, no way out")
+	p.call("PATCH", "/api/v1/nodes/"+strconv.FormatInt(remote, 10), map[string]any{"enabled": true}, nil)
+	waitFor(node2IP)
+	p.call("PATCH", path, map[string]any{"outbound": "direct"}, nil)
+	waitFor(nodeIP)
+	log.Print("CASCADE OK")
 }

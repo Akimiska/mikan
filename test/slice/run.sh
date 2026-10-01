@@ -26,6 +26,10 @@ if [ "$status" = 0 ]; then
   sleep 3
   docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver verify || status=$?
 fi
+# Cascade: the panel's node sends VLESS Vision out through node2.
+if [ "$status" = 0 ]; then
+  docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver cascade || status=$?
+fi
 # Devices: the client also gets a device's own keys, then the admin unbinds the device.
 if [ "$status" = 0 ]; then
   docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver devices || status=$?

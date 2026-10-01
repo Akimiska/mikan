@@ -203,7 +203,12 @@
       "warp_conf_incomplete": "The config needs PrivateKey, Address and the peer's PublicKey",
       "warp_bad_route": "Not a domain or a network: “{value}”",
       "too_many_routes": "At most 1000 domains and networks",
-      "warp_not_configured": "The node has no WARP yet"
+      "warp_not_configured": "The node has no WARP yet",
+      "exit_self": "A node cannot be its own exit",
+      "exit_cycle": "That would be a loop: that node already sends its traffic through this one",
+      "exit_off": "That node is off",
+      "exit_not_found": "Pick the exit node",
+      "relay_no_port": "The exit node has no free port for the relay"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -627,7 +632,11 @@
     "outboundDirect": "Direct",
     "outboundDirectHint": "Sites see the server's IP.",
     "outboundWarpHint": "All traffic of this protocol leaves through the node's Cloudflare WARP: sites see a Cloudflare address. When WARP is down the traffic does not go direct — the protocol stops working until WARP is back.",
-    "outboundNoWarp": "The node has no WARP or it is off — the traffic goes direct for now. Set WARP up on the Nodes page."
+    "outboundNoWarp": "The node has no WARP or it is off — the traffic goes direct for now. Set WARP up on the Nodes page.",
+    "outboundNode": "Via a node",
+    "outboundNodeHint": "Cascade: clients connect to this node, and the traffic leaves the internet through the chosen one — sites see its IP. When that node is down the traffic does not go direct.",
+    "exitNode": "Exit node",
+    "exitPick": "Pick a node"
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
@@ -1172,5 +1181,27 @@
     "deleteTitle": "Delete the node's WARP?",
     "deleteText": "All traffic of the node goes direct. The account is removed from the panel; protocols set to WARP stay so but work direct.",
     "deleted": "WARP deleted"
+  },
+  "cascade": {
+    "title": "Cascade",
+    "intro": "A cascade is a chain of servers: client → this node → another node → internet. Clients connect to the near node, sites see the far one. No WARP needed.",
+    "exits": "This node sends traffic out through",
+    "exitsNone": "Nothing yet: everything leaves from here.",
+    "exitsHint": "The exit node is picked in a protocol's settings: “Way out to the internet → Via a node”.",
+    "check": "Check",
+    "exitIP": "sites see {ip}",
+    "down": "no way out",
+    "unknown": "not checked",
+    "relayed": "other nodes' traffic",
+    "relay": "Other nodes' traffic through this one",
+    "sources": "Leaving through this node: {list}. The relay listens on {port}/tcp.",
+    "sourcesNone": "No node leaves through this one yet. Once one does, the panel opens the relay itself.",
+    "route": "Where other nodes' traffic goes next",
+    "routeHint": {
+      "direct": "To the internet from this server.",
+      "warp": "Through this node's WARP — WARP must be set up.",
+      "node": "Further down the chain, through one more node."
+    },
+    "saved": "Cascade saved"
   }
 }

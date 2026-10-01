@@ -141,7 +141,7 @@ func (q *Queries) CountTariffs(ctx context.Context) (int64, error) {
 const createInbound = `-- name: CreateInbound :one
 INSERT INTO inbounds (node_id, name, preset, port, enabled, settings, config, created_at, updated_at)
 VALUES (?, ?, ?, ?, 1, '{}', ?, ?, ?)
-RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound
+RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id
 `
 
 type CreateInboundParams struct {
@@ -180,6 +180,7 @@ func (q *Queries) CreateInbound(ctx context.Context, arg CreateInboundParams) (I
 		&i.AutoPort,
 		&i.AutoSni,
 		&i.Outbound,
+		&i.ExitNodeID,
 	)
 	return i, err
 }
@@ -354,7 +355,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
 }
 
 const getInbound = `-- name: GetInbound :one
-SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound FROM inbounds WHERE id = ?
+SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id FROM inbounds WHERE id = ?
 `
 
 func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
@@ -375,6 +376,7 @@ func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
 		&i.AutoPort,
 		&i.AutoSni,
 		&i.Outbound,
+		&i.ExitNodeID,
 	)
 	return i, err
 }
@@ -531,7 +533,7 @@ func (q *Queries) InsertSlot(ctx context.Context, arg InsertSlotParams) error {
 }
 
 const listInbounds = `-- name: ListInbounds :many
-SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound FROM inbounds ORDER BY id
+SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id FROM inbounds ORDER BY id
 `
 
 func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
@@ -558,6 +560,7 @@ func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
 			&i.AutoPort,
 			&i.AutoSni,
 			&i.Outbound,
+			&i.ExitNodeID,
 		); err != nil {
 			return nil, err
 		}
@@ -1024,7 +1027,7 @@ func (q *Queries) TotalTrafficHourly(ctx context.Context, hour int64) ([]TotalTr
 }
 
 const updateInbound = `-- name: UpdateInbound :one
-UPDATE inbounds SET port = ?, enabled = ?, config = ?, display_name = ?, updated_at = ? WHERE id = ? RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound
+UPDATE inbounds SET port = ?, enabled = ?, config = ?, display_name = ?, updated_at = ? WHERE id = ? RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id
 `
 
 type UpdateInboundParams struct {
@@ -1061,6 +1064,7 @@ func (q *Queries) UpdateInbound(ctx context.Context, arg UpdateInboundParams) (I
 		&i.AutoPort,
 		&i.AutoSni,
 		&i.Outbound,
+		&i.ExitNodeID,
 	)
 	return i, err
 }

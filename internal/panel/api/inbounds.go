@@ -45,7 +45,8 @@ type InboundView struct {
 	AutoPort    bool      `json:"auto_port" doc:"Панель сама переносит подключение на другой порт, если его блокируют (и включено в настройках)"`
 	AutoSNI     bool      `json:"auto_sni" doc:"Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)"`
 	Auto        AutoView  `json:"auto"`
-	Outbound    string    `json:"outbound" enum:"direct,warp" doc:"Выход в интернет: напрямую с сервера или через WARP ноды"`
+	Outbound    string    `json:"outbound" enum:"direct,warp,node" doc:"Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)"`
+	ExitNodeID  *int64    `json:"exit_node_id,omitempty" doc:"Нода, через которую выходит трафик, если outbound=node"`
 }
 
 // AutoView is what the automatic moves see and last did for an inbound.
@@ -94,7 +95,8 @@ type patchInboundInput struct {
 		Config      *string `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
 		AutoPort    *bool   `json:"auto_port,omitempty"`
 		AutoSNI     *bool   `json:"auto_sni,omitempty"`
-		Outbound    *string `json:"outbound,omitempty" enum:"direct,warp" doc:"Выход в интернет: напрямую или через WARP ноды"`
+		Outbound    *string `json:"outbound,omitempty" enum:"direct,warp,node" doc:"Выход в интернет: напрямую, через WARP ноды или через другую ноду"`
+		ExitNodeID  *int64  `json:"exit_node_id,omitempty" minimum:"1" doc:"Для outbound=node: через какую ноду"`
 	}
 }
 
@@ -146,6 +148,10 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 	v := InboundView{ID: in.ID, NodeID: in.NodeID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
 		DisplayName: in.DisplayName, SubName: subs.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: time.Unix(in.UpdatedAt, 0).UTC(),
 		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0, Outbound: in.Outbound}
+	if in.ExitNodeID.Valid {
+		id := in.ExitNodeID.Int64
+		v.Outbound, v.ExitNodeID = "node", &id
+	}
 	if e, ok := last[in.ID]; ok {
 		v.Auto.Last = &AutoEvent{Kind: e.Kind, Old: e.OldValue, New: e.NewValue, Reason: e.Reason, At: time.Unix(e.CreatedAt, 0).UTC()}
 	}
@@ -305,6 +311,9 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	if info.ID == presets.Custom {
 		base = t.Type()
 	}
+	if h.relayPortBusy(ctx, node.ID, port, t.Network()) {
+		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
+	}
 	if owner, busy := domain.PortOwner(existing, port, t.Network(), 0); busy {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})
 	}
@@ -344,13 +353,26 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	}
 	autoChanged := autoPort != row.AutoPort || autoSNI != row.AutoSni
 	// The way out is the node's business: clients get nothing new either.
-	if b.Outbound != nil && *b.Outbound != row.Outbound {
-		if err := h.d.Store.Q.SetInboundOutbound(ctx, db.SetInboundOutboundParams{Outbound: *b.Outbound, ID: row.ID}); err != nil {
-			return nil, err
+	if b.Outbound != nil {
+		outbound, exit := *b.Outbound, sql.NullInt64{}
+		err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+			if outbound == "node" {
+				if b.ExitNodeID == nil {
+					return domain.ErrNotFound
+				}
+				if err := h.useExit(ctx, q, row.NodeID, *b.ExitNodeID); err != nil {
+					return err
+				}
+				outbound, exit = "direct", sql.NullInt64{Int64: *b.ExitNodeID, Valid: true}
+			}
+			return q.SetInboundExit(ctx, db.SetInboundExitParams{ExitNodeID: exit, Outbound: outbound, ID: row.ID})
+		})
+		if err != nil {
+			return nil, cascadeError(err, "exit_node_id")
 		}
-		row.Outbound = *b.Outbound
+		row.Outbound, row.ExitNodeID = outbound, exit
 		h.d.Changes.SlotsChanged()
-		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.outbound", "inbound", row.Name, map[string]any{"outbound": row.Outbound})
+		h.audit(ctx, sessionOf(ctx).AdminID, "inbound.outbound", "inbound", row.Name, map[string]any{"outbound": *b.Outbound, "exit_node_id": exit.Int64})
 	}
 	if b.Port == nil && b.Enabled == nil && b.Config == nil && b.Dest == nil && b.Fingerprint == nil && b.DisplayName == nil {
 		// Only the automatic-move switches: clients get nothing new, so updated_at stays
@@ -445,6 +467,9 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	existing := domain.NodeInbounds(all, row.NodeID)
 	next := row
 	next.DisplayName = display
+	if enabled != 0 && h.relayPortBusy(ctx, row.NodeID, port, t.Network()) {
+		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: "relay"})
+	}
 	if owner, busy := domain.PortOwner(existing, port, t.Network(), row.ID); busy && enabled != 0 {
 		return nil, huma.Error409Conflict("port_in_use", &huma.ErrorDetail{Location: "body.port", Message: "port_in_use", Value: owner.Name})
 	}

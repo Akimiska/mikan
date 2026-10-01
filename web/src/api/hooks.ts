@@ -23,6 +23,7 @@ export const qk = {
   payments: ["payments"] as const,
   paymentSettings: ["payment-settings"] as const,
   warp: (node: number) => ["warp", node] as const,
+  cascade: (node: number) => ["cascade", node] as const,
 };
 
 export const meQuery = {

@@ -8,6 +8,8 @@ import (
 
 	N "github.com/metacubex/mihomo/common/net"
 	C "github.com/metacubex/mihomo/constant"
+
+	"mikan/internal/nodeapi"
 )
 
 // Tunnel sits between mihomo listeners and mihomo's own tunnel: it resolves the slot
@@ -31,6 +33,12 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 		N.Relay(conn, remote)
 		return
 	}
+	// Another node of the panel relays its users' traffic: the listener checked its key,
+	// and the source node has already counted and limited them. The rules still apply.
+	if m.InName == nodeapi.RelayListener {
+		t.inner.HandleTCPConn(conn, m)
+		return
+	}
 	ip := m.SrcIP.Unmap().String()
 	s := t.reg.admit(userOf(conn, m), m.InName, ip, true)
 	if s == nil {
@@ -44,7 +52,7 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 }
 
 func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
-	if m.Type == C.INNER {
+	if m.Type == C.INNER || m.InName == nodeapi.RelayListener {
 		t.inner.HandleUDPPacket(p, m)
 		return
 	}

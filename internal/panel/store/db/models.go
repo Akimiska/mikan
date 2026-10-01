@@ -79,6 +79,7 @@ type Inbound struct {
 	AutoPort    int64
 	AutoSni     int64
 	Outbound    string
+	ExitNodeID  sql.NullInt64
 }
 
 type InboundEvent struct {
@@ -109,6 +110,15 @@ type Node struct {
 	Enabled    int64
 	CreatedAt  int64
 	UpdatedAt  int64
+}
+
+type NodeRelay struct {
+	NodeID     int64
+	Port       string
+	Config     string
+	Outbound   string
+	ExitNodeID sql.NullInt64
+	CreatedAt  int64
 }
 
 type NodeState struct {
@@ -154,6 +164,12 @@ type Payment struct {
 	PaidAt     sql.NullInt64
 	AppliedAt  sql.NullInt64
 	RefundedAt sql.NullInt64
+}
+
+type RelayUser struct {
+	ExitNodeID int64
+	SrcNodeID  int64
+	Uuid       string
 }
 
 type Session struct {

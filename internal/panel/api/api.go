@@ -83,6 +83,8 @@ type NodeRuntime interface {
 	ScanTargets(ctx context.Context, id int64, req nodeapi.TargetScanRequest) (nodeapi.TargetScan, error)
 	// Warp checks the node's way out through WARP.
 	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
+	// Probe checks the internet through one outbound of a node (NODE-<id> of a cascade).
+	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 }
 
 type ctxKey int
@@ -169,6 +171,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerAPIKeys()
 	h.registerPayments()
 	h.registerWarp()
+	h.registerCascade()
 	return noStore(mux), api, nil
 }
 

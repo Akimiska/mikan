@@ -484,6 +484,8 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
   const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
+  const [exitNode, setExitNode] = useState<number>(0);
+  const allNodes = useNodes();
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
   const [autoPort, setAutoPort] = useState(true);
@@ -499,6 +501,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setSni(inbound.server_names?.[0] ?? "");
     setFp(inbound.fingerprint ?? "");
     setOutbound(inbound.outbound);
+    setExitNode(inbound.exit_node_id ?? 0);
     setName(inbound.display_name);
     setConfig(inbound.config);
     setAutoPort(inbound.auto_port);
@@ -518,7 +521,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     onSuccess: (_, body) => {
       void qc.invalidateQueries({ queryKey: qk.inbounds });
       // The automatic-fix switches change nothing clients get.
-      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni" || k === "outbound");
+      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni" || k === "outbound" || k === "exit_node_id");
       toast.ok(autoOnly ? t("inbounds.savedAuto") : t("inbounds.saved"));
       onClose();
     },
@@ -552,7 +555,14 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
     if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
-    if (outbound !== inbound?.outbound) body.outbound = outbound;
+    if (outbound === "node" && !exitNode) {
+      setErrors({ exit_node_id: t("inbounds.exitPick") });
+      return;
+    }
+    if (outbound !== inbound?.outbound || (outbound === "node" && exitNode !== inbound?.exit_node_id)) {
+      body.outbound = outbound;
+      if (outbound === "node") body.exit_node_id = exitNode;
+    }
     if (Object.keys(body).length === 0) {
       onClose();
       return;
@@ -675,23 +685,54 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
               ) : null}
               <Field
                 label={t("inbounds.outbound")}
+                error={errors.exit_node_id}
                 hint={
-                  outbound === "warp" && warp.data && (!warp.data.configured || !warp.data.enabled)
-                    ? t("inbounds.outboundNoWarp")
-                    : outbound === "warp"
-                      ? t("inbounds.outboundWarpHint")
-                      : t("inbounds.outboundDirectHint")
+                  outbound === "node"
+                    ? t("inbounds.outboundNodeHint")
+                    : outbound === "warp" && warp.data && (!warp.data.configured || !warp.data.enabled)
+                      ? t("inbounds.outboundNoWarp")
+                      : outbound === "warp"
+                        ? t("inbounds.outboundWarpHint")
+                        : t("inbounds.outboundDirectHint")
                 }
               >
                 <Segmented
                   label={t("inbounds.outbound")}
                   value={outbound}
-                  onChange={setOutbound}
+                  onChange={(v) => {
+                    setOutbound(v);
+                    setErrors(({ exit_node_id: _, ...rest }) => rest);
+                  }}
                   options={[
                     { value: "direct", label: t("inbounds.outboundDirect") },
                     { value: "warp", label: "WARP" },
+                    { value: "node", label: t("inbounds.outboundNode") },
                   ]}
                 />
+                {outbound === "node" ? (
+                  <select
+                    className="input mt-2 max-w-[320px]"
+                    value={exitNode}
+                    onChange={(e) => {
+                      setExitNode(Number(e.target.value));
+                      setErrors(({ exit_node_id: _, ...rest }) => rest);
+                    }}
+                    aria-label={t("inbounds.exitNode")}
+                    aria-invalid={!!errors.exit_node_id}
+                  >
+                    <option value={0} disabled>
+                      {t("inbounds.exitPick")}
+                    </option>
+                    {(allNodes.data ?? [])
+                      .filter((n) => n.id !== inbound?.node_id)
+                      .map((n) => (
+                        <option key={n.id} value={n.id} disabled={!n.enabled}>
+                          {nodeLabel(n)}
+                          {n.enabled ? "" : ` — ${t("nodes.disabled")}`}
+                        </option>
+                      ))}
+                  </select>
+                ) : null}
               </Field>
               <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("inbounds.auto")}>
                 <div className="mb-1 text-[13px] font-semibold">{t("inbounds.auto")}</div>

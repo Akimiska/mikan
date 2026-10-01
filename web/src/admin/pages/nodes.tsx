@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cloud, Copy, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
+import { Cloud, Copy, KeyRound, Pencil, Plus, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
@@ -8,6 +8,7 @@ import { useToast } from "../../components/toast";
 import { Bar, Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
 import { t } from "../../i18n";
 import { bytes, num } from "../../lib/format";
+import { CascadeDrawer } from "./node-cascade";
 import { WarpDrawer } from "./node-warp";
 
 type Node = Schemas["NodeInfo"];
@@ -27,6 +28,7 @@ export function NodesPage() {
   const [removing, setRemoving] = useState<Node | null>(null);
   const [joined, setJoined] = useState<Joined | null>(null);
   const [warpOf, setWarpOf] = useState<Node | null>(null);
+  const [cascadeOf, setCascadeOf] = useState<Node | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: qk.nodes });
     void qc.invalidateQueries({ queryKey: qk.inbounds });
@@ -85,7 +87,7 @@ export function NodesPage() {
             </div>
           ) : null}
           {nodes.data.map((n, idx) => (
-            <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
+            <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
           ))}
         </div>
       )}
@@ -100,6 +102,7 @@ export function NodesPage() {
       <EditNodeDrawer node={editing} onClose={() => setEditing(null)} />
       <KeyDrawer joined={joined} onClose={() => setJoined(null)} />
       <WarpDrawer node={warpOf ? { id: warpOf.id, name: nodeLabel(warpOf) } : null} onClose={() => setWarpOf(null)} />
+      <CascadeDrawer node={cascadeOf ? { id: cascadeOf.id, name: nodeLabel(cascadeOf) } : null} onClose={() => setCascadeOf(null)} />
       <Confirm
         open={!!rekeying}
         onOpenChange={(v) => !v && setRekeying(null)}
@@ -123,7 +126,7 @@ export function NodesPage() {
   );
 }
 
-function NodeCard({ n, idx, onEdit, onWarp, onRekey, onRemove }: { n: Node; idx: number; onEdit: () => void; onWarp: () => void; onRekey: () => void; onRemove: () => void }) {
+function NodeCard({ n, idx, onEdit, onWarp, onCascade, onRekey, onRemove }: { n: Node; idx: number; onEdit: () => void; onWarp: () => void; onCascade: () => void; onRekey: () => void; onRemove: () => void }) {
   const mem = n.mem_total ? Math.round((n.mem_used / n.mem_total) * 100) : 0;
   return (
     <section className="card glass reveal" style={{ "--i": idx } as React.CSSProperties}>
@@ -197,6 +200,9 @@ function NodeCard({ n, idx, onEdit, onWarp, onRekey, onRemove }: { n: Node; idx:
         </Button>
         <Button size="sm" onClick={onWarp}>
           <Cloud size={16} aria-hidden /> WARP
+        </Button>
+        <Button size="sm" onClick={onCascade}>
+          <Waypoints size={16} aria-hidden /> {t("cascade.title")}
         </Button>
         {!n.local ? (
           <>

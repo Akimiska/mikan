@@ -134,6 +134,9 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 	if st.Warp, err = s.warp(ctx, n, inbounds); err != nil {
 		return st, err
 	}
+	if st.Relay, st.Exits, err = s.cascade(ctx, n, inbounds); err != nil {
+		return st, err
+	}
 	for _, in := range inbounds {
 		// A disabled node keeps running but serves nothing.
 		if in.NodeID != s.id || in.Enabled == 0 || n.Enabled == 0 {
@@ -413,7 +416,9 @@ func stateKey(st nodeapi.DesiredState) string {
 		T *nodeapi.TLSFiles
 		P int
 		W *nodeapi.Warp
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp})
+		R *nodeapi.Relay
+		E []nodeapi.Exit
+	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -449,9 +454,13 @@ func (s *Syncer) warp(ctx context.Context, n db.Node, inbounds []db.Inbound) (*n
 	rs, _ := warp.ParseRoutes(routes)
 	out.Domains, out.CIDRs = rs.Domains, rs.CIDRs
 	for _, in := range inbounds {
-		if in.NodeID == n.ID && in.Enabled != 0 && in.Outbound == "warp" {
+		if in.NodeID == n.ID && in.Enabled != 0 && in.Outbound == "warp" && !in.ExitNodeID.Valid {
 			out.Inbounds = append(out.Inbounds, in.Name)
 		}
+	}
+	// Traffic other nodes relay through this one may leave by WARP too.
+	if r, err := s.m.st.Q.GetNodeRelay(ctx, n.ID); err == nil && r.Outbound == "warp" && !r.ExitNodeID.Valid {
+		out.Inbounds = append(out.Inbounds, nodeapi.RelayListener)
 	}
 	return out, nil
 }
@@ -469,4 +478,132 @@ func (m *Manager) Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error
 		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
 	}
 	return c.Warp(ctx)
+}
+
+// cascade is the node's part in cascades: its relay listener when other nodes leave
+// through it, and the other nodes it sends inbounds (and its own relay) to. Keys and
+// relays are made by the API when an exit is chosen; a missing one leaves that exit out,
+// and the inbounds behind it fail instead of going direct.
+func (s *Syncer) cascade(ctx context.Context, n db.Node, inbounds []db.Inbound) (*nodeapi.Relay, []nodeapi.Exit, error) {
+	q := s.m.st.Q
+	if n.Enabled == 0 {
+		return nil, nil, nil
+	}
+	var relay *nodeapi.Relay
+	own, err := q.GetNodeRelay(ctx, n.ID)
+	hasRelay := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, err
+	}
+	if hasRelay {
+		users, err := q.ListRelayUsers(ctx, n.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(users) > 0 {
+			t, err := proto.Parse(own.Config)
+			if err != nil {
+				return nil, nil, err
+			}
+			relay = &nodeapi.Relay{Port: own.Port, Config: t.JSON()}
+			for _, u := range users {
+				relay.Users = append(relay.Users, nodeapi.Slot{Name: domain.RelayUserName(u.SrcNodeID), UUID: u.Uuid})
+			}
+		}
+	}
+	// Which listeners go to which exit, in the order exits first appear.
+	routes := map[int64][]string{}
+	var order []int64
+	add := func(exit int64, name string) {
+		if _, ok := routes[exit]; !ok {
+			order = append(order, exit)
+		}
+		routes[exit] = append(routes[exit], name)
+	}
+	for _, in := range inbounds {
+		if in.NodeID == n.ID && in.Enabled != 0 && in.ExitNodeID.Valid {
+			add(in.ExitNodeID.Int64, in.Name)
+		}
+	}
+	if relay != nil && own.ExitNodeID.Valid {
+		add(own.ExitNodeID.Int64, nodeapi.RelayListener)
+	}
+	var exits []nodeapi.Exit
+	for _, id := range order {
+		e, err := s.exitTo(ctx, n.ID, id)
+		if err != nil {
+			s.log.Warn("cascade exit", "exit", id, "err", err)
+			// Still name the exit, with no way to reach it: the inbounds fail, not leak.
+			e = nodeapi.Exit{Name: nodeapi.ExitName(id), Proxy: unreachableExit(id)}
+		}
+		e.Inbounds = routes[id]
+		exits = append(exits, e)
+	}
+	return relay, exits, nil
+}
+
+// exitTo is the outbound from node src to node id's relay.
+func (s *Syncer) exitTo(ctx context.Context, src, id int64) (nodeapi.Exit, error) {
+	q := s.m.st.Q
+	x, err := q.GetNode(ctx, id)
+	if err != nil {
+		return nodeapi.Exit{}, err
+	}
+	if x.Enabled == 0 {
+		return nodeapi.Exit{}, errors.New("exit node is off")
+	}
+	r, err := q.GetNodeRelay(ctx, id)
+	if err != nil {
+		return nodeapi.Exit{}, err
+	}
+	key, err := q.GetRelayUser(ctx, db.GetRelayUserParams{ExitNodeID: id, SrcNodeID: src})
+	if err != nil {
+		return nodeapi.Exit{}, err
+	}
+	host := domain.NodeHost(x)
+	if x.Address == "" {
+		// The panel's own node: clients reach it at the panel's address.
+		ep, err := settings.New(q).Endpoint(ctx)
+		if err != nil {
+			return nodeapi.Exit{}, err
+		}
+		host = ep.Host
+	}
+	port, err := strconv.Atoi(r.Port)
+	if err != nil || host == "" {
+		return nodeapi.Exit{}, errors.New("exit node has no address")
+	}
+	t, err := proto.Parse(r.Config)
+	if err != nil {
+		return nodeapi.Exit{}, err
+	}
+	c, err := proto.ClientConfig(t, proto.ClientInput{Name: nodeapi.ExitName(id), Host: host, Port: port, Slot: proto.Slot{Name: domain.RelayUserName(src), UUID: key}})
+	if err != nil {
+		return nodeapi.Exit{}, err
+	}
+	raw, _ := json.Marshal(c.Mihomo)
+	return nodeapi.Exit{Name: nodeapi.ExitName(id), Proxy: raw}, nil
+}
+
+// unreachableExit is a VLESS outbound to nowhere (TEST-NET-1, port 9): it keeps an
+// exit's rules in place while the exit itself is not usable.
+func unreachableExit(id int64) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{"name": nodeapi.ExitName(id), "type": "vless", "server": "192.0.2.1", "port": 9,
+		"uuid": "00000000-0000-4000-8000-000000000000", "udp": true})
+	return raw
+}
+
+// Probe asks the node how it reaches the internet through one of its outbounds.
+func (m *Manager) Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error) {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
+	}
+	c, ok := s.node.(interface {
+		Probe(ctx context.Context, proxy string) (nodeapi.ProbeResult, error)
+	})
+	if !ok {
+		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
+	}
+	return c.Probe(ctx, proxy)
 }

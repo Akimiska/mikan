@@ -32,31 +32,47 @@ func rules(st nodeapi.DesiredState, allowPrivate bool) []string {
 	}
 	// Outbound SMTP from a shared VPN IP gets the address blacklisted within hours.
 	r = append(r, "DST-PORT,25,REJECT")
+	r = append(r, exitRules(st)...)
 	r = append(r, warpRules(st)...)
 	return append(r, "MATCH,DIRECT")
 }
 
-// outbounds are the proxies besides DIRECT: WARP when the state has it.
+// outbounds are the proxies besides DIRECT: WARP and the other nodes used as exits.
 func outbounds(st nodeapi.DesiredState) ([]any, error) {
-	if st.Warp == nil {
-		return []any{}, nil
+	out := []any{}
+	if st.Warp != nil {
+		p, err := warpProxyConfig(st.Warp)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
-	p, err := warpProxyConfig(st.Warp)
-	if err != nil {
-		return nil, err
+	for _, e := range st.Exits {
+		p, err := exitProxyConfig(e)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
-	return []any{p}, nil
+	return out, nil
 }
 
 // buildConfig renders the mihomo config as JSON, which mihomo's YAML parser accepts.
 // log-level warning keeps per-connection lines out of mihomo's own output; the ones that
 // still come through are dropped by pumpLogs.
 func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) ([]byte, error) {
-	listeners := make([]map[string]any, 0, len(st.Inbounds))
+	listeners := make([]map[string]any, 0, len(st.Inbounds)+1)
 	for _, in := range st.Inbounds {
 		l, err := listenerFor(in, st.Slots, cert, proto.Options{SelfStealPort: st.SelfStealPort})
 		if err != nil {
 			return nil, fmt.Errorf("inbound %s: %w", in.Name, err)
+		}
+		listeners = append(listeners, l)
+	}
+	if st.Relay != nil {
+		l, err := relayListener(st.Relay, cert)
+		if err != nil {
+			return nil, fmt.Errorf("relay: %w", err)
 		}
 		listeners = append(listeners, l)
 	}

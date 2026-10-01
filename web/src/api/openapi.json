@@ -289,6 +289,134 @@
         ],
         "type": "object"
       },
+      "CascadeExit": {
+        "additionalProperties": false,
+        "properties": {
+          "inbounds": {
+            "description": "Подключения этой ноды, которые выходят через ту ноду",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "probe": {
+            "$ref": "#/components/schemas/ProbeView",
+            "description": "Проверка с этой ноды: какой IP видят сайты через цепочку"
+          },
+          "relay": {
+            "description": "Через неё идёт и трафик, который другие ноды передают через эту",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "inbounds",
+          "relay",
+          "node_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "CascadeHop": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "CascadePatchInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "exit_node_id": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "outbound": {
+            "description": "Куда выпускать трафик других нод, пришедший через эту",
+            "enum": [
+              "direct",
+              "warp",
+              "node"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "outbound"
+        ],
+        "type": "object"
+      },
+      "CascadeView": {
+        "additionalProperties": false,
+        "properties": {
+          "exits": {
+            "description": "Ноды, через которые эта нода выпускает трафик",
+            "items": {
+              "$ref": "#/components/schemas/CascadeExit"
+            },
+            "type": "array"
+          },
+          "relay": {
+            "$ref": "#/components/schemas/CascadeViewRelayStruct",
+            "description": "Служебный вход для других нод; есть, когда кто-то выходит через эту ноду"
+          }
+        },
+        "required": [
+          "exits"
+        ],
+        "type": "object"
+      },
+      "CascadeViewRelayStruct": {
+        "additionalProperties": false,
+        "properties": {
+          "exit_node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "outbound": {
+            "description": "Куда эта нода выпускает их трафик",
+            "enum": [
+              "direct",
+              "warp",
+              "node"
+            ],
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          },
+          "sources": {
+            "description": "Ноды, которые выходят через эту",
+            "items": {
+              "$ref": "#/components/schemas/CascadeHop"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "port",
+          "sources",
+          "outbound"
+        ],
+        "type": "object"
+      },
       "CheckTargetInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -743,6 +871,11 @@
           "error": {
             "type": "string"
           },
+          "exit_node_id": {
+            "description": "Нода, через которую выходит трафик, если outbound=node",
+            "format": "int64",
+            "type": "integer"
+          },
           "fingerprint": {
             "description": "Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек",
             "type": "string"
@@ -762,10 +895,11 @@
             "type": "integer"
           },
           "outbound": {
-            "description": "Выход в интернет: напрямую с сервера или через WARP ноды",
+            "description": "Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)",
             "enum": [
               "direct",
-              "warp"
+              "warp",
+              "node"
             ],
             "type": "string"
           },
@@ -1317,16 +1451,23 @@
           "enabled": {
             "type": "boolean"
           },
+          "exit_node_id": {
+            "description": "Для outbound=node: через какую ноду",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "fingerprint": {
             "description": "Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек",
             "maxLength": 16,
             "type": "string"
           },
           "outbound": {
-            "description": "Выход в интернет: напрямую или через WARP ноды",
+            "description": "Выход в интернет: напрямую, через WARP ноды или через другую ноду",
             "enum": [
               "direct",
-              "warp"
+              "warp",
+              "node"
             ],
             "type": "string"
           },
@@ -1808,6 +1949,33 @@
         "required": [
           "items",
           "totals"
+        ],
+        "type": "object"
+      },
+      "ProbeView": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "colo": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес, который видят сайты",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "checked_at"
         ],
         "type": "object"
       },
@@ -3983,6 +4151,100 @@
           }
         },
         "summary": "Изменить ноду",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/cascade": {
+      "get": {
+        "operationId": "get-node-cascade",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CascadeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Каскад ноды: выходы и служебный вход",
+        "tags": [
+          "node"
+        ]
+      },
+      "patch": {
+        "operationId": "update-node-cascade",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CascadePatchInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CascadeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Куда нода выпускает трафик других нод",
         "tags": [
           "node"
         ]

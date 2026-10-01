@@ -81,6 +81,16 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		defer cancel()
 		writeJSON(w, http.StatusOK, e.WarpStatus(ctx))
 	})
+	mux.HandleFunc("GET /v1/probe", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
+		defer cancel()
+		res, ok := e.Probe(ctx, r.URL.Query().Get("proxy"))
+		if !ok {
+			writeJSON(w, http.StatusNotFound, nodeapi.Error{Code: "no_such_outbound", Message: "not an outbound of this node"})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("GET /v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Reg.Activity())
 	})

@@ -148,3 +148,10 @@ func (c *Client) Warp(ctx context.Context) (WarpStatus, error) {
 	err := c.do(ctx, http.MethodGet, "/v1/warp", nil, &r, 20*time.Second)
 	return r, err
 }
+
+// Probe checks the internet through one outbound of the node: WARP or NODE-<id>.
+func (c *Client) Probe(ctx context.Context, proxy string) (ProbeResult, error) {
+	var r ProbeResult
+	err := c.do(ctx, http.MethodGet, "/v1/probe?proxy="+url.QueryEscape(proxy), nil, &r, 20*time.Second)
+	return r, err
+}

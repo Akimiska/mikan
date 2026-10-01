@@ -4,6 +4,7 @@ package nodeapi
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"mikan/internal/proto"
@@ -30,6 +31,10 @@ type DesiredState struct {
 	SelfStealPort int `json:"self_steal_port,omitempty"`
 	// Warp is Cloudflare WARP as an outbound; nil: everything leaves directly.
 	Warp *Warp `json:"warp,omitempty"`
+	// Relay is the hidden listener other nodes send their chosen traffic out through;
+	// Exits are the other nodes this one sends chosen inbounds through (a cascade).
+	Relay *Relay `json:"relay,omitempty"`
+	Exits []Exit `json:"exits,omitempty"`
 }
 
 type Inbound struct {
@@ -237,3 +242,32 @@ type WarpStatus struct {
 	Error      string    `json:"error,omitempty"`
 	CheckedAt  time.Time `json:"checked_at"`
 }
+
+// RelayListener names the relay's listener. It cannot clash with an inbound: their
+// names are [a-z0-9-].
+const RelayListener = "mikan~relay"
+
+// Relay is a node's door for other nodes of the panel: a VLESS REALITY listener with a
+// key per source node. Its connections carry no subscriber, so they pass the per-user
+// accounting and limits (the source node already applied them); the REJECT rules still
+// hold. Where the relay's traffic leaves is decided like any inbound's: IN-NAME rules of
+// Warp.Inbounds or an Exit's Inbounds may name RelayListener.
+type Relay struct {
+	Port   string          `json:"port"`
+	Config json.RawMessage `json:"config"` // proto.Template as JSON
+	Users  []Slot          `json:"users"`  // one per source node
+}
+
+// Exit is another node as an outbound: Proxy is the mihomo proxy reaching its relay,
+// Inbounds the local listeners (RelayListener included) whose traffic goes there.
+type Exit struct {
+	Name     string          `json:"name"` // the proxy's name in rules, NODE-<id>
+	Proxy    json.RawMessage `json:"proxy"`
+	Inbounds []string        `json:"inbounds"`
+}
+
+// ExitName is the proxy name of node id as an exit.
+func ExitName(id int64) string { return "NODE-" + strconv.FormatInt(id, 10) }
+
+// ProbeResult is the internet as seen through one outbound of the node.
+type ProbeResult = WarpStatus

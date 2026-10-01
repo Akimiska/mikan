@@ -149,11 +149,7 @@ func adminCmd(ctx context.Context, args []string) error {
 		if len(args) < 2 {
 			return errors.New("name the file: mikan admin backup /data/backup.db")
 		}
-		// VACUUM INTO writes a consistent copy while the panel keeps running.
-		if _, err := st.DB.ExecContext(ctx, "VACUUM INTO ?", args[1]); err != nil {
-			return fmt.Errorf("backup: %w", err)
-		}
-		if err := os.Chmod(args[1], 0o600); err != nil {
+		if err := backup(ctx, st, args[1]); err != nil {
 			return err
 		}
 		fmt.Println("Database copied to", args[1])
@@ -185,6 +181,25 @@ func adminCmd(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown admin subcommand %q\n\n%s", args[0], usage)
 	}
+}
+
+// backup writes a consistent copy of the database to path while the panel keeps running.
+// The copy holds the password hashes, the bot's token and the WARP keys: the file is made
+// private before anything is written to it, not after. VACUUM INTO takes an existing file
+// only when it is empty.
+func backup(ctx context.Context, st *store.Store, path string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
+	if _, err := st.DB.ExecContext(ctx, "VACUUM INTO ?", path); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("backup: %w", err)
+	}
+	return os.Chmod(path, 0o600)
 }
 
 func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, args []string, stdin io.Reader, stdout io.Writer) error {

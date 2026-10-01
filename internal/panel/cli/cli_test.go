@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -193,5 +195,38 @@ func TestHostsAreChecked(t *testing.T) {
 	}
 	if n, err := st.Q.GetNode(ctx, b.ID); err != nil || n.PublicHost != "198.51.100.21" || n.Address != "198.51.100.21:40000" {
 		t.Fatalf("moved: %+v %v", n, err)
+	}
+}
+
+// The backup holds secrets: it is never readable by others, not even for a moment.
+func TestBackupIsPrivateAndConsistent(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := domain.Seed(ctx, st, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "backup.db")
+	if err := backup(ctx, st, path); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Size() == 0 || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("backup file: %v %v", fi, err)
+	}
+	// An existing backup is not overwritten, and is left as it was.
+	before, _ := os.ReadFile(path)
+	if err := backup(ctx, st, path); err == nil {
+		t.Fatal("a second backup over the first")
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
+		t.Fatal("the existing backup was changed")
+	}
+	// A bad path leaves nothing behind.
+	if err := backup(ctx, st, filepath.Join(t.TempDir(), "no", "dir", "x.db")); err == nil {
+		t.Fatal("a path that cannot be written")
 	}
 }

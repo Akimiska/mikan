@@ -2,12 +2,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleCheck, Pencil, Plus, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
 import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Inbound, type Preset, type Schemas } from "../../api/client";
-import { qk, useInbounds, useNodes, usePresets, useSettings } from "../../api/hooks";
+import { qk, useInbounds, useNodes, usePools, usePresets, useSettings } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
-import { FINGERPRINTS, fingerprintLabel } from "../../lib/fingerprints";
+import { FingerprintSelect } from "../../components/fingerprint-select";
+import { fingerprintLabel } from "../../lib/fingerprints";
 import { ago, destIsIP, maskedAs } from "../../lib/format";
 
 import { nodeLabel } from "./nodes";
@@ -483,7 +484,12 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [dest, setDest] = useState("");
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
+  const [fpOk, setFpOk] = useState(true);
   const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
+  const [exitNode, setExitNode] = useState<number>(0);
+  const [poolId, setPoolId] = useState<number>(0);
+  const pools = usePools();
+  const allNodes = useNodes();
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
   const [autoPort, setAutoPort] = useState(true);
@@ -499,6 +505,8 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setSni(inbound.server_names?.[0] ?? "");
     setFp(inbound.fingerprint ?? "");
     setOutbound(inbound.outbound);
+    setExitNode(inbound.exit_node_id ?? 0);
+    setPoolId(inbound.pool_id ?? 0);
     setName(inbound.display_name);
     setConfig(inbound.config);
     setAutoPort(inbound.auto_port);
@@ -518,7 +526,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     onSuccess: (_, body) => {
       void qc.invalidateQueries({ queryKey: qk.inbounds });
       // The automatic-fix switches change nothing clients get.
-      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni" || k === "outbound");
+      const autoOnly = Object.keys(body).every((k) => k === "auto_port" || k === "auto_sni" || k === "outbound" || k === "exit_node_id" || k === "pool_id");
       toast.ok(autoOnly ? t("inbounds.savedAuto") : t("inbounds.saved"));
       onClose();
     },
@@ -549,10 +557,22 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
         if (ip) body.server_name = sni.trim();
       }
     }
+    if (!fpOk) {
+      setErrors({ fingerprint: t("settings.fpOwnBad") });
+      return;
+    }
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
+    if (poolId !== (inbound?.pool_id ?? 0)) body.pool_id = poolId;
     if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
-    if (outbound !== inbound?.outbound) body.outbound = outbound;
+    if (outbound === "node" && !exitNode) {
+      setErrors({ exit_node_id: t("inbounds.exitPick") });
+      return;
+    }
+    if (outbound !== inbound?.outbound || (outbound === "node" && exitNode !== inbound?.exit_node_id)) {
+      body.outbound = outbound;
+      if (outbound === "node") body.exit_node_id = exitNode;
+    }
     if (Object.keys(body).length === 0) {
       onClose();
       return;
@@ -653,46 +673,84 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
               ) : null}
               {inbound?.fingerprint !== undefined ? (
                 <Field label={t("inbounds.fingerprint")} htmlFor="ed-fp" error={errors.fingerprint} hint={configChanged ? t("inbounds.fingerprintLocked") : t("inbounds.fingerprintHint")}>
-                  <select
+                  <FingerprintSelect
+                    key={inbound?.id}
                     id="ed-fp"
-                    className="input max-w-[320px]"
                     value={fp}
-                    onChange={(e) => {
-                      setFp(e.target.value);
+                    onChange={(v) => {
+                      setFp(v);
                       setErrors(({ fingerprint: _, ...rest }) => rest);
                     }}
-                    aria-invalid={!!errors.fingerprint}
+                    defaultLabel={t("inbounds.fingerprintDefault", { fp: fingerprintLabel(settings.data?.client_fingerprint ?? "chrome") })}
+                    invalid={!!errors.fingerprint}
                     disabled={configChanged}
-                  >
-                    <option value="">{t("inbounds.fingerprintDefault", { fp: fingerprintLabel(settings.data?.client_fingerprint ?? "chrome") })}</option>
-                    {FINGERPRINTS.map((x) => (
-                      <option key={x} value={x}>
-                        {fingerprintLabel(x)}
-                      </option>
-                    ))}
-                  </select>
+                    onValid={setFpOk}
+                  />
                 </Field>
               ) : null}
               <Field
                 label={t("inbounds.outbound")}
+                error={errors.exit_node_id}
                 hint={
-                  outbound === "warp" && warp.data && (!warp.data.configured || !warp.data.enabled)
-                    ? t("inbounds.outboundNoWarp")
-                    : outbound === "warp"
-                      ? t("inbounds.outboundWarpHint")
-                      : t("inbounds.outboundDirectHint")
+                  outbound === "node"
+                    ? t("inbounds.outboundNodeHint")
+                    : outbound === "warp" && warp.data && (!warp.data.configured || !warp.data.enabled)
+                      ? t("inbounds.outboundNoWarp")
+                      : outbound === "warp"
+                        ? t("inbounds.outboundWarpHint")
+                        : t("inbounds.outboundDirectHint")
                 }
               >
                 <Segmented
                   label={t("inbounds.outbound")}
                   value={outbound}
-                  onChange={setOutbound}
+                  onChange={(v) => {
+                    setOutbound(v);
+                    setErrors(({ exit_node_id: _, ...rest }) => rest);
+                  }}
                   options={[
                     { value: "direct", label: t("inbounds.outboundDirect") },
                     { value: "warp", label: "WARP" },
+                    { value: "node", label: t("inbounds.outboundNode") },
                   ]}
                 />
+                {outbound === "node" ? (
+                  <select
+                    className="input mt-2 max-w-[320px]"
+                    value={exitNode}
+                    onChange={(e) => {
+                      setExitNode(Number(e.target.value));
+                      setErrors(({ exit_node_id: _, ...rest }) => rest);
+                    }}
+                    aria-label={t("inbounds.exitNode")}
+                    aria-invalid={!!errors.exit_node_id}
+                  >
+                    <option value={0} disabled>
+                      {t("inbounds.exitPick")}
+                    </option>
+                    {(allNodes.data ?? [])
+                      .filter((n) => n.id !== inbound?.node_id)
+                      .map((n) => (
+                        <option key={n.id} value={n.id} disabled={!n.enabled}>
+                          {nodeLabel(n)}
+                          {n.enabled ? "" : ` — ${t("nodes.disabled")}`}
+                        </option>
+                      ))}
+                  </select>
+                ) : null}
               </Field>
+              {pools.data?.length ? (
+                <Field label={t("pools.inbound")} htmlFor="ed-pool" hint={t("pools.inboundHint")}>
+                  <select id="ed-pool" className="input max-w-[320px]" value={poolId} onChange={(e) => setPoolId(Number(e.target.value))}>
+                    <option value={0}>{t("pools.mainTraffic")}</option>
+                    {pools.data.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
               <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("inbounds.auto")}>
                 <div className="mb-1 text-[13px] font-semibold">{t("inbounds.auto")}</div>
                 <AutoSwitch title={t("inbounds.autoPort")} sub={t("inbounds.autoPortSub")} on={autoPort} globalOff={settings.data?.auto_port === false} onChange={setAutoPort} />

@@ -3,6 +3,17 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.4.1
+### en
+- Traffic pools (#6): chosen protocols can count to a pool with its own limit, apart from the main traffic — a WL node at 100 GB a month while Germany and Estonia stay unlimited, in one subscription. Make pools on the Plans page, put a protocol into one in its settings, give the pool a limit in the plan or per user. When a pool runs out only its protocols stop (and leave the subscription until the reset); everything else keeps working, and the other way round. Pools reset with the main traffic; the user card, the subscription page and the bot show each pool.
+- Server cascades: a protocol can send its traffic out through another node of the panel — client → node A → node B → internet, so sites see B's address while clients connect to A. Pick "Way out: Via a node" in a protocol's settings; the panel opens a hidden relay on the exit node by itself, with a key per source node. Chains of three or more servers work too (Nodes → Cascade sets where a node sends other nodes' traffic next: direct, its WARP or one more node), loops are refused, and WARP is not needed. Traffic is counted once, on the first node; when the exit node is down the traffic does not fall back to the first node's address. Nodes → Cascade shows the address sites see through each chain.
+- TLS fingerprints: besides the list, "Own…" takes any uTLS profile name (lowercase letters, digits, _), such as chrome120 or randomizednoalpn, in Settings and in a protocol's settings.
+
+### ru
+- Пулы трафика (#6): часть подключений может считаться в пул со своим лимитом, отдельно от основного трафика — WL-нода на 100 ГБ в месяц, а Германия и Эстония без лимита, в одной подписке. Пулы создаются на странице «Тарифы», подключение добавляется в пул в своих настройках, лимит пула задаётся в тарифе или у пользователя. Когда пул кончился, перестают работать только его подключения (и до сброса пропадают из подписки), остальное работает — и наоборот. Пулы сбрасываются вместе с основным трафиком; карточка пользователя, страница подписки и бот показывают каждый пул.
+- Каскад серверов: подключение может выпускать трафик через другую ноду панели — клиент → нода A → нода B → интернет, сайты видят адрес B, а клиенты подключаются к A. В настройках подключения выберите «Выход в интернет: Через ноду»; служебный вход на ноде выхода панель откроет сама, с отдельным ключом для каждой ноды. Работают и цепочки из трёх и более серверов («Ноды → Каскад»: куда нода выпускает трафик других нод — напрямую, через свой WARP или дальше через ещё одну ноду), петли панель не даст сохранить, WARP не обязателен. Трафик считается один раз, на первой ноде; если нода выхода недоступна, трафик не уходит с адреса первой ноды. «Ноды → Каскад» показывает, какой адрес видят сайты через каждую цепочку.
+- TLS-отпечатки: кроме списка есть «Своё…» — любое имя профиля uTLS (латиница в нижнем регистре, цифры, _), например chrome120 или randomizednoalpn, в «Настройках» и в настройках подключения.
+
 ## 0.4.0
 ### en
 - Pick the TLS fingerprint clients send: Settings → Subscription sets the default for all protocols, and a protocol's settings can choose its own (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ or a random one). Links (`fp=`) and Clash profiles (`client-fingerprint`) follow the choice; Hysteria2 and TUIC have no such fingerprint.

@@ -197,6 +197,9 @@ func SetInboundPort(ctx context.Context, st *store.Store, nodeID int64, name, po
 	if owner, busy := PortOwner(existing, port, InboundNetwork(prev), prev.ID); busy && prev.Enabled != 0 {
 		return db.Inbound{}, db.Inbound{}, &PortInUseError{Owner: owner.Name}
 	}
+	if r, err := st.Q.GetNodeRelay(ctx, nodeID); err == nil && r.Port == port && InboundNetwork(prev) == "tcp" && prev.Enabled != 0 {
+		return db.Inbound{}, db.Inbound{}, &PortInUseError{Owner: "relay"}
+	}
 	next, err := st.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: port, Enabled: prev.Enabled, Config: prev.Config, DisplayName: prev.DisplayName,
 		UpdatedAt: now.Unix(), ID: prev.ID})
 	return prev, next, err

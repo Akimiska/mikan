@@ -382,6 +382,9 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 		default:
 			continue
 		}
+		if err := m.st.Q.ResetUserPools(ctx, u.ID); err != nil {
+			return err
+		}
 		if err := m.st.Q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: start, UpdatedAt: now.Unix(), ID: u.ID}); err != nil {
 			return err
 		}

@@ -133,13 +133,17 @@ func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, any
 	if err != nil {
 		return db.User{}, err
 	}
-	return q.CreateUser(ctx, db.CreateUserParams{
+	u, err := q.CreateUser(ctx, db.CreateUserParams{
 		Name: strings.TrimSpace(in.Name), Contact: strings.TrimSpace(in.Contact), Note: in.Note, Tags: tags,
 		TariffID: sql.NullInt64{Int64: t.ID, Valid: true}, TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit,
 		ResetStrategy: t.ResetStrategy, PeriodDays: 30, PeriodStart: now,
 		ExpiresAt:  tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay}),
 		BillingDay: t.BillingDay, SubToken: secure.Token(24), SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, CreatedAt: now, UpdatedAt: now,
 	})
+	if err != nil {
+		return u, err
+	}
+	return u, ApplyTariffPools(ctx, q, u.ID, t.ID)
 }
 
 // Purchase applies a paid tariff on q's transaction, so the payment and its effect commit
@@ -181,8 +185,14 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, userID, tariffID in
 	if err != nil {
 		return u, false, err
 	}
+	if err := ApplyTariffPools(ctx, q, u.ID, t.ID); err != nil {
+		return u, false, err
+	}
 	if !resetTraffic {
 		return u, false, nil
+	}
+	if err := q.ResetUserPools(ctx, u.ID); err != nil {
+		return u, false, err
 	}
 	if err := q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now.Unix(), UpdatedAt: now.Unix(), ID: u.ID}); err != nil {
 		return u, false, err
@@ -266,6 +276,9 @@ func (s *Users) Update(ctx context.Context, id int64, p Patch) (db.User, error) 
 			par.TariffID = sql.NullInt64{Int64: t.ID, Valid: true}
 			par.TrafficLimit, par.DeviceLimit, par.ResetStrategy, par.BillingDay = t.TrafficLimit, t.DeviceLimit, t.ResetStrategy, t.BillingDay
 			par.ExpiresAt = tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay})
+			if err := ApplyTariffPools(ctx, q, u.ID, t.ID); err != nil {
+				return err
+			}
 		}
 		switch {
 		case p.ClearBillingDay:
@@ -378,7 +391,13 @@ func (s *Users) ExtendPeriod(ctx context.Context, id int64) (db.User, error) {
 
 func (s *Users) ResetTraffic(ctx context.Context, id int64) (db.User, error) {
 	now := s.now().Unix()
-	if err := s.st.Q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now, UpdatedAt: now, ID: id}); err != nil {
+	err := s.st.Tx(ctx, func(q *db.Queries) error {
+		if err := q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now, UpdatedAt: now, ID: id}); err != nil {
+			return err
+		}
+		return q.ResetUserPools(ctx, id)
+	})
+	if err != nil {
 		return db.User{}, err
 	}
 	s.changes.PoliciesChanged()

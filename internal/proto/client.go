@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 )
@@ -31,8 +32,18 @@ var Fingerprints = []string{"chrome", "firefox", "safari", "ios", "android", "ed
 // DefaultFingerprint is what clients get when neither the inbound nor the panel picks one.
 const DefaultFingerprint = "chrome"
 
-// ValidFingerprint says whether s is one of Fingerprints.
-func ValidFingerprint(s string) bool { return slices.Contains(Fingerprints, s) }
+// KnownFingerprint says whether s is one of Fingerprints.
+func KnownFingerprint(s string) bool { return slices.Contains(Fingerprints, s) }
+
+// fingerprintPattern is the shape of an own fingerprint the admin types: a uTLS profile
+// name of mihomo or Xray that the list leaves out (chrome120, randomizednoalpn, …).
+// Nothing else fits, so the value cannot break a link or a profile.
+var fingerprintPattern = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
+// ValidFingerprint says whether s may be used: one of Fingerprints or an own one of the
+// right shape. An own one is the admin's call: an app that does not know it may refuse
+// the link (Xray) or connect without uTLS (mihomo).
+func ValidFingerprint(s string) bool { return KnownFingerprint(s) || fingerprintPattern.MatchString(s) }
 
 // UsesFingerprint says whether clients of t dial through uTLS, so a fingerprint applies.
 func UsesFingerprint(t Template) bool {
@@ -125,8 +136,8 @@ type clientBuilder struct {
 
 func (c *clientBuilder) addr() string { return net.JoinHostPort(c.host, strconv.Itoa(c.port)) }
 
-// fingerprint: the inbound's own choice, then the panel's default. A value saved before
-// the panel checked them falls through rather than reaching apps that refuse it.
+// fingerprint: the inbound's own choice, then the panel's default. A malformed value saved
+// before the panel checked them falls through rather than reaching the apps.
 func (c *clientBuilder) fingerprint() string {
 	for _, fp := range []string{c.ext.Client.Fingerprint, c.in.Fingerprint} {
 		if ValidFingerprint(fp) {

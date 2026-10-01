@@ -332,6 +332,24 @@ export interface paths {
         patch: operations["update-node"];
         trace?: never;
     };
+    "/api/v1/nodes/{id}/cascade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Каскад ноды: выходы и служебный вход */
+        get: operations["get-node-cascade"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Куда нода выпускает трафик других нод */
+        patch: operations["update-node-cascade"];
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/key": {
         parameters: {
             query?: never;
@@ -452,6 +470,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пулы трафика */
+        get: operations["list-pools"];
+        put?: never;
+        /** Создать пул трафика */
+        post: operations["create-pool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pools/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Удалить пул: его подключения вернутся в основной трафик */
+        delete: operations["delete-pool"];
+        options?: never;
+        head?: never;
+        /** Переименовать пул */
+        patch: operations["rename-pool"];
         trace?: never;
     };
     "/api/v1/presets": {
@@ -802,6 +856,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пулы трафика пользователя */
+        get: operations["user-pools"];
+        /** Лимиты пулов пользователя */
+        put: operations["set-user-pools"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}/reissue": {
         parameters: {
             query?: never;
@@ -970,6 +1042,49 @@ export interface components {
         BulkOutputBody: {
             /** Format: int64 */
             affected: number;
+        };
+        CascadeExit: {
+            /** @description Подключения этой ноды, которые выходят через ту ноду */
+            inbounds: string[];
+            name: string;
+            /** Format: int64 */
+            node_id: number;
+            /** @description Проверка с этой ноды: какой IP видят сайты через цепочку */
+            probe?: components["schemas"]["ProbeView"];
+            /** @description Через неё идёт и трафик, который другие ноды передают через эту */
+            relay: boolean;
+        };
+        CascadeHop: {
+            name: string;
+            /** Format: int64 */
+            node_id: number;
+        };
+        CascadePatchInputBody: {
+            /** Format: int64 */
+            exit_node_id?: number;
+            /**
+             * @description Куда выпускать трафик других нод, пришедший через эту
+             * @enum {string}
+             */
+            outbound: "direct" | "warp" | "node";
+        };
+        CascadeView: {
+            /** @description Ноды, через которые эта нода выпускает трафик */
+            exits: components["schemas"]["CascadeExit"][];
+            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
+            relay?: components["schemas"]["CascadeViewRelayStruct"];
+        };
+        CascadeViewRelayStruct: {
+            /** Format: int64 */
+            exit_node_id?: number;
+            /**
+             * @description Куда эта нода выпускает их трафик
+             * @enum {string}
+             */
+            outbound: "direct" | "warp" | "node";
+            port: string;
+            /** @description Ноды, которые выходят через эту */
+            sources: components["schemas"]["CascadeHop"][];
         };
         CheckTargetInputBody: {
             /** @description host:port */
@@ -1143,6 +1258,11 @@ export interface components {
             display_name: string;
             enabled: boolean;
             error?: string;
+            /**
+             * Format: int64
+             * @description Нода, через которую выходит трафик, если outbound=node
+             */
+            exit_node_id?: number;
             /** @description Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек */
             fingerprint?: string;
             /** Format: int64 */
@@ -1152,10 +1272,15 @@ export interface components {
             /** Format: int64 */
             node_id: number;
             /**
-             * @description Выход в интернет: напрямую с сервера или через WARP ноды
+             * @description Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)
              * @enum {string}
              */
-            outbound: "direct" | "warp";
+            outbound: "direct" | "warp" | "node";
+            /**
+             * Format: int64
+             * @description Пул трафика, в который считается подключение; нет — основной трафик
+             */
+            pool_id?: number;
             port: string;
             preset: string;
             server_names?: string[];
@@ -1319,13 +1444,23 @@ export interface components {
             /** @description Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию */
             display_name?: string;
             enabled?: boolean;
-            /** @description Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек */
+            /**
+             * Format: int64
+             * @description Для outbound=node: через какую ноду
+             */
+            exit_node_id?: number;
+            /** @description Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек */
             fingerprint?: string;
             /**
-             * @description Выход в интернет: напрямую или через WARP ноды
+             * @description Выход в интернет: напрямую, через WARP ноды или через другую ноду
              * @enum {string}
              */
-            outbound?: "direct" | "warp";
+            outbound?: "direct" | "warp" | "node";
+            /**
+             * Format: int64
+             * @description Пул трафика; 0 — основной трафик
+             */
+            pool_id?: number;
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
@@ -1353,8 +1488,8 @@ export interface components {
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
-            /** @enum {string} */
-            client_fingerprint?: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
+            /** @description Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов */
+            client_fingerprint?: string;
             /** @enum {string} */
             default_lang?: "auto" | "ru" | "en";
             device_binding?: boolean;
@@ -1481,6 +1616,37 @@ export interface components {
             /** @description Применённые платежи за 30 дней */
             totals: components["schemas"]["PaymentTotal"][];
         };
+        PoolInputBody: {
+            name: string;
+        };
+        PoolLimit: {
+            /** Format: int64 */
+            pool_id: number;
+            /**
+             * Format: int64
+             * @description Байты; null — без лимита
+             */
+            traffic_limit: number | null;
+        };
+        PoolPatchInputBody: {
+            name: string;
+        };
+        PoolView: {
+            /** Format: int64 */
+            id: number;
+            /** @description Подключения, которые считаются в этот пул */
+            inbounds: string[];
+            name: string;
+        };
+        ProbeView: {
+            /** Format: date-time */
+            checked_at: string;
+            colo?: string;
+            error?: string;
+            /** @description Адрес, который видят сайты */
+            ip?: string;
+            ok: boolean;
+        };
         RecoveryOutputBody: {
             /** @description Показываются один раз */
             recovery_codes: string[];
@@ -1534,11 +1700,8 @@ export interface components {
             auto_sni: boolean;
             brand: string;
             certificate: components["schemas"]["Status"];
-            /**
-             * @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой
-             * @enum {string}
-             */
-            client_fingerprint: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
+            /** @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение */
+            client_fingerprint: string;
             /**
              * @description Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота
              * @enum {string}
@@ -1606,6 +1769,8 @@ export interface components {
             name: string;
             /** @description Продавать в боте и Mini App; нужна хотя бы одна цена */
             on_sale?: boolean;
+            /** @description Лимиты пулов трафика; не передан — без изменений */
+            pools?: components["schemas"]["PoolLimit"][];
             price_label?: string;
             /**
              * Format: int64
@@ -1645,6 +1810,8 @@ export interface components {
             name: string;
             /** @description Продаётся в боте и Mini App */
             on_sale: boolean;
+            /** @description Лимиты пулов трафика; пул не в списке — без лимита */
+            pools: components["schemas"]["PoolLimit"][];
             price_label: string;
             /**
              * Format: int64
@@ -1809,6 +1976,25 @@ export interface components {
             expiring: number;
             /** Format: int64 */
             limited: number;
+        };
+        UserPoolView: {
+            /** @description Лимит пула исчерпан: его подключения не работают до сброса */
+            exhausted: boolean;
+            name: string;
+            /** Format: int64 */
+            pool_id: number;
+            /**
+             * Format: int64
+             * @description Байты за период; null — без лимита
+             */
+            traffic_limit: number | null;
+            /** Format: int64 */
+            used_down: number;
+            /** Format: int64 */
+            used_up: number;
+        };
+        UserPoolsInputBody: {
+            pools: components["schemas"]["PoolLimit"][];
         };
         UserView: {
             /**
@@ -2670,6 +2856,72 @@ export interface operations {
             };
         };
     };
+    "get-node-cascade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CascadeView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-node-cascade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CascadePatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CascadeView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "rekey-node": {
         parameters: {
             query?: never;
@@ -2982,6 +3234,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "rename-pool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PoolView"];
                 };
             };
             /** @description Error */
@@ -3852,6 +4230,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "user-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPoolView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-user-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserPoolsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPoolView"][];
                 };
             };
             /** @description Error */

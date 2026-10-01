@@ -481,6 +481,10 @@ func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound,
 	} else if _, p, err := net.SplitHostPort(n.Address); err == nil {
 		reserved[p] = true
 	}
+	// A cascade relay holds its TCP port on the node.
+	if r, err := t.st.Q.GetNodeRelay(ctx, n.ID); err == nil && network == "tcp" {
+		reserved[r.Port] = true
+	}
 	abandoned := map[string]bool{x.Port: true}
 	for _, e := range w.events {
 		if e.NodeID == n.ID && e.Kind == "port" && e.Network == network && w.now.Sub(time.Unix(e.CreatedAt, 0)) < t.o.Abandon {

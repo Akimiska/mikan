@@ -59,6 +59,9 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	case "s":
 		lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.subTitle, u.Name)) + "</b>", html.EscapeString(vars["state"]), "",
 			"📅 " + html.EscapeString(vars["term"]), "📦 " + html.EscapeString(vars["traffic"])}
+		for _, p := range b.poolLines(ctx, w, u.ID) {
+			lines = append(lines, "📦 "+html.EscapeString(p))
+		}
 		if r := vars["reset"]; r != "" {
 			lines = append(lines, html.EscapeString(fmt.Sprintf(w.resets, r)))
 		}
@@ -357,4 +360,32 @@ func (b *Bot) subURL(ctx context.Context, u db.User) string {
 		return base + "/" + u.SubToken
 	}
 	return ""
+}
+
+// poolLines: one line per traffic pool with a limit — "WL: 30 GB of 100 GB".
+func (b *Bot) poolLines(ctx context.Context, w *words, userID int64) []string {
+	rows, err := b.d.Store.Q.ListUserPools(ctx, userID)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	pools, err := b.d.Store.Q.ListTrafficPools(ctx)
+	if err != nil {
+		return nil
+	}
+	names := map[int64]string{}
+	for _, p := range pools {
+		names[p.ID] = p.Name
+	}
+	var out []string
+	for _, r := range rows {
+		if !r.TrafficLimit.Valid {
+			continue
+		}
+		line := names[r.PoolID] + ": " + fmt.Sprintf(w.trafficOf, w.bytes(r.UsedUp+r.UsedDown), w.bytes(r.TrafficLimit.Int64))
+		if domain.PoolExhausted(r) {
+			line += " — " + w.poolOut
+		}
+		out = append(out, line)
+	}
+	return out
 }

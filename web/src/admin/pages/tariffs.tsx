@@ -2,12 +2,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, Pencil, Plus } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas, type Tariff } from "../../api/client";
-import { qk, useTariffs } from "../../api/hooks";
+import { qk, usePools, useTariffs } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t } from "../../i18n";
 import { bytes, days, GiB, months, rubles, termMonths } from "../../lib/format";
+import { PoolLimitsField, PoolsCard } from "./pools";
 
 /** How long a term on the tariff runs: days, or months up to the billing day. */
 export function tariffTerm(tr: Tariff): string {
@@ -58,6 +59,7 @@ export function TariffsPage() {
           </Button>
         }
       />
+      <PoolsCard />
       {tariffs.isPending ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map((i) => (
@@ -149,6 +151,8 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   const [reset, setReset] = useState<Tariff["reset_strategy"]>("period");
   const [price, setPrice] = useState("");
   const [onSale, setOnSale] = useState(false);
+  const allPools = usePools();
+  const [poolGB, setPoolGB] = useState<Record<number, string>>({});
   const [stars, setStars] = useState("");
   const [rub, setRub] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -168,6 +172,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setReset(tr?.reset_strategy ?? "period");
     setPrice(tr?.price_label ?? "");
     setOnSale(tr?.on_sale ?? false);
+    setPoolGB(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / GiB).toFixed(2)) : ""])));
     setStars(tr?.price_stars != null ? String(tr.price_stars) : "");
     setRub(tr?.price_rub != null ? String(tr.price_rub / 100) : "");
     setErrors({});
@@ -195,6 +200,11 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     const monN = Number(monthsN);
     const dayN = Number(billingDay);
     const devN = Number(devices);
+    const poolLimits = (allPools.data ?? []).map((p) => {
+      const v = (poolGB[p.id] ?? "").trim().replace(",", ".");
+      return { pool_id: p.id, traffic_limit: v ? Math.round(Number(v) * GiB) : null };
+    });
+    if (poolLimits.some((p) => p.traffic_limit !== null && (!Number.isFinite(p.traffic_limit) || p.traffic_limit <= 0))) errs.pools = t("pools.errLimit");
     const toDay = term === "day";
     if (!name.trim()) errs.name = t("tariffs.errName");
     if (!unlimited && (!Number.isFinite(gbN) || gbN <= 0)) errs.traffic_limit = t("tariffs.errTraffic");
@@ -221,6 +231,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       price_stars: stars.trim() ? starsN : undefined,
       price_rub: rub.trim() ? rubN : undefined,
       on_sale: onSale,
+      pools: poolLimits,
       // PUT replaces the tariff: keep its place in the list.
       sort: tariff && tariff !== "new" ? tariff.sort : undefined,
     });
@@ -314,6 +325,11 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
                 { value: "none", label: t("tariffs.resetNever") },
               ]}
             />
+          </Field>
+        ) : null}
+        {allPools.data?.length ? (
+          <Field label={t("pools.tariffLimits")} hint={t("pools.tariffLimitsHint")} error={errors.pools}>
+            <PoolLimitsField pools={allPools.data} value={poolGB} onChange={setPoolGB} />
           </Field>
         ) : null}
         <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("tariffs.sale")}>

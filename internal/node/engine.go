@@ -69,15 +69,17 @@ type Engine struct {
 
 	routes string // routesKey of what tunnel's proxies and rules hold now
 	warpMu sync.Mutex
-	warp   nodeapi.WarpStatus // the last check, kept for a minute
+	warp   nodeapi.WarpStatus             // the last check, kept for a minute
+	probes map[string]nodeapi.ProbeResult // the same for the exits to other nodes
 }
 
 // routesKey covers what the outbound side of the config depends on.
 func routesKey(st nodeapi.DesiredState, allowPrivate bool) string {
 	raw, _ := json.Marshal(struct {
 		W *nodeapi.Warp
+		E []nodeapi.Exit
 		R []string
-	}{st.Warp, rules(st, allowPrivate)})
+	}{st.Warp, st.Exits, rules(st, allowPrivate)})
 	return string(raw)
 }
 
@@ -94,7 +96,7 @@ func (e *Engine) WarpStatus(ctx context.Context) nodeapi.WarpStatus {
 	if !e.warp.CheckedAt.IsZero() && time.Since(e.warp.CheckedAt) < time.Minute {
 		return e.warp
 	}
-	e.warp = warpStatus(ctx)
+	e.warp = probe(ctx, warpProxy)
 	return e.warp
 }
 
@@ -196,12 +198,20 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		e.routes = key
 		e.warpMu.Lock()
 		e.warp = nodeapi.WarpStatus{}
+		e.probes = nil
 		e.warpMu.Unlock()
 	}
 
 	e.Reg.SetSlots(st.Slots)
 	e.Reg.SetPolicies(st.Epoch, st.Policies)
 	e.Reg.SetShared(sharedListeners(st))
+	pools := map[string]string{}
+	for _, in := range st.Inbounds {
+		if in.Pool != "" {
+			pools[in.Name] = in.Pool
+		}
+	}
+	e.Reg.SetPools(pools)
 
 	recreated := changedInbounds(e.applied, st)
 	e.errsMu.Lock()
@@ -471,4 +481,32 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// Probe checks the internet through one outbound of the running config, at most once a
+// minute per outbound: only WARP and the exits to other nodes may be asked about.
+func (e *Engine) Probe(ctx context.Context, proxy string) (nodeapi.ProbeResult, bool) {
+	if proxy == warpProxy {
+		return e.WarpStatus(ctx), true
+	}
+	e.mu.Lock()
+	known := false
+	for _, x := range e.applied.Exits {
+		known = known || x.Name == proxy
+	}
+	e.mu.Unlock()
+	if !known {
+		return nodeapi.ProbeResult{}, false
+	}
+	e.warpMu.Lock()
+	defer e.warpMu.Unlock()
+	if r, ok := e.probes[proxy]; ok && time.Since(r.CheckedAt) < time.Minute {
+		return r, true
+	}
+	r := probe(ctx, proxy)
+	if e.probes == nil {
+		e.probes = map[string]nodeapi.ProbeResult{}
+	}
+	e.probes[proxy] = r
+	return r, true
 }

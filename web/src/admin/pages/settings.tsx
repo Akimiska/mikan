@@ -9,7 +9,7 @@ import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, ErrorState, Field, PageHeader, Pill, QR, Skeleton, Switch } from "../../components/ui";
 import { getLocale, LOCALES, t, tMaybe } from "../../i18n";
-import { FINGERPRINTS, fingerprintLabel, type Fingerprint } from "../../lib/fingerprints";
+import { FingerprintSelect } from "../../components/fingerprint-select";
 import { ago } from "../../lib/format";
 
 export function SettingsPage() {
@@ -107,6 +107,7 @@ function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   const inbounds = useInbounds();
   const init = () => ({ brand: s.brand, support_url: s.support_url, sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, sub_routing: s.sub_routing, client_fingerprint: s.client_fingerprint });
   const [form, setForm] = useState(init);
+  const [fpOk, setFpOk] = useState(true);
   useEffect(() => setForm(init()), [s]);
   const errors = save.error instanceof ApiError ? save.error.fields : {};
   const submit = (e: FormEvent) => {
@@ -164,24 +165,12 @@ function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
           </div>
         </Field>
         <Field label={t("settings.fingerprint")} htmlFor="s-fp" hint={t("settings.fingerprintHint")} error={errors.client_fingerprint}>
-          <select
-            id="s-fp"
-            className="input max-w-[320px]"
-            value={form.client_fingerprint}
-            onChange={(e) => setForm((f) => ({ ...f, client_fingerprint: e.target.value as Fingerprint }))}
-            aria-invalid={!!errors.client_fingerprint}
-          >
-            {FINGERPRINTS.map((fp) => (
-              <option key={fp} value={fp}>
-                {fingerprintLabel(fp)}
-              </option>
-            ))}
-          </select>
+          <FingerprintSelect key={s.client_fingerprint} id="s-fp" value={form.client_fingerprint} onChange={(v) => setForm((f) => ({ ...f, client_fingerprint: v }))} invalid={!!errors.client_fingerprint} onValid={setFpOk} />
         </Field>
         <Field label={t("settings.support")} htmlFor="s-support" hint={t("settings.supportHint")} error={errors.support_url}>
           <input id="s-support" className="input" value={form.support_url} onChange={set("support_url")} placeholder="https://t.me/your_support" aria-invalid={!!errors.support_url} />
         </Field>
-        <Button type="submit" variant="primary" loading={save.isPending}>
+        <Button type="submit" variant="primary" loading={save.isPending} disabled={!fpOk || !form.client_fingerprint}>
           {t("common.save")}
         </Button>
       </form>

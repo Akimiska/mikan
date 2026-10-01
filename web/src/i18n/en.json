@@ -203,7 +203,14 @@
       "warp_conf_incomplete": "The config needs PrivateKey, Address and the peer's PublicKey",
       "warp_bad_route": "Not a domain or a network: “{value}”",
       "too_many_routes": "At most 1000 domains and networks",
-      "warp_not_configured": "The node has no WARP yet"
+      "warp_not_configured": "The node has no WARP yet",
+      "exit_self": "A node cannot be its own exit",
+      "exit_cycle": "That would be a loop: that node already sends its traffic through this one",
+      "exit_off": "That node is off",
+      "exit_not_found": "Pick the exit node",
+      "relay_no_port": "The exit node has no free port for the relay",
+      "pool_name_taken": "A pool with this name already exists",
+      "pool_not_found": "No such pool"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -627,7 +634,11 @@
     "outboundDirect": "Direct",
     "outboundDirectHint": "Sites see the server's IP.",
     "outboundWarpHint": "All traffic of this protocol leaves through the node's Cloudflare WARP: sites see a Cloudflare address. When WARP is down the traffic does not go direct — the protocol stops working until WARP is back.",
-    "outboundNoWarp": "The node has no WARP or it is off — the traffic goes direct for now. Set WARP up on the Nodes page."
+    "outboundNoWarp": "The node has no WARP or it is off — the traffic goes direct for now. Set WARP up on the Nodes page.",
+    "outboundNode": "Via a node",
+    "outboundNodeHint": "Cascade: clients connect to this node, and the traffic leaves the internet through the chosen one — sites see its IP. When that node is down the traffic does not go direct.",
+    "exitNode": "Exit node",
+    "exitPick": "Pick a node"
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
@@ -743,7 +754,10 @@
     "activeAgo": "active {ago}",
     "endSession": "End",
     "yandexBrowser": "Yandex Browser",
-    "browser": "Browser"
+    "browser": "Browser",
+    "fpOwn": "Own…",
+    "fpOwnHint": "A uTLS profile name: lowercase letters, digits and _, such as chrome120 or randomizednoalpn. Xray apps may refuse a value off the list, and mihomo connects without uTLS when it does not know it.",
+    "fpOwnBad": "Lowercase letters, digits and _ only, up to 32 characters"
   },
   "sub": {
     "loadFailed": "Could not load the subscription",
@@ -823,7 +837,9 @@
     "shopFail": "Could not open the payment. Try again or message support.",
     "shopNotForSale": "This plan is no longer sold.",
     "shopTooMany": "Too many invoices in a row — try again in an hour.",
-    "shopTooManySubs": "The account already holds the most subscriptions it can."
+    "shopTooManySubs": "The account already holds the most subscriptions it can.",
+    "pools": "Separate limits",
+    "poolOut": "Used up — these servers come back after the traffic resets."
   },
   "nodes": {
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",
@@ -1172,5 +1188,54 @@
     "deleteTitle": "Delete the node's WARP?",
     "deleteText": "All traffic of the node goes direct. The account is removed from the panel; protocols set to WARP stay so but work direct.",
     "deleted": "WARP deleted"
+  },
+  "cascade": {
+    "title": "Cascade",
+    "intro": "A cascade is a chain of servers: client → this node → another node → internet. Clients connect to the near node, sites see the far one. No WARP needed.",
+    "exits": "This node sends traffic out through",
+    "exitsNone": "Nothing yet: everything leaves from here.",
+    "exitsHint": "The exit node is picked in a protocol's settings: “Way out to the internet → Via a node”.",
+    "check": "Check",
+    "exitIP": "sites see {ip}",
+    "down": "no way out",
+    "unknown": "not checked",
+    "relayed": "other nodes' traffic",
+    "relay": "Other nodes' traffic through this one",
+    "sources": "Leaving through this node: {list}. The relay listens on {port}/tcp.",
+    "sourcesNone": "No node leaves through this one yet. Once one does, the panel opens the relay itself.",
+    "route": "Where other nodes' traffic goes next",
+    "routeHint": {
+      "direct": "To the internet from this server.",
+      "warp": "Through this node's WARP — WARP must be set up.",
+      "node": "Further down the chain, through one more node."
+    },
+    "saved": "Cascade saved"
+  },
+  "pools": {
+    "title": "Traffic pools",
+    "sub": "A separate limit for some protocols: say, a WL node at 100 GB a month while the rest stay unlimited. A pool's traffic does not use the main limit.",
+    "none": "No pools yet — all traffic counts to the main limit.",
+    "empty": "No protocols in the pool yet",
+    "name": "Pool name",
+    "placeholder": "Such as WL",
+    "add": "Add pool",
+    "created": "Pool created",
+    "deleted": "Pool deleted",
+    "rename": "Rename {name}",
+    "delete": "Delete {name}",
+    "deleteTitle": "Delete pool “{name}”?",
+    "deleteText": "Its protocols go back to the main traffic; the pool's limits in plans and users are dropped.",
+    "hint": "A protocol joins a pool in its own settings: “Traffic pool”. The pool's limit is set in the plan and per user.",
+    "inbound": "Traffic pool",
+    "inboundHint": "This protocol's traffic counts to the pool with its own limit, not to the main one. When the pool runs out, only it stops.",
+    "mainTraffic": "Main traffic",
+    "tariffLimits": "Pool limits",
+    "tariffLimitsHint": "GB for the same period as the main traffic. Empty — unlimited.",
+    "unlimited": "unlimited",
+    "limitOf": "Limit of pool {name}",
+    "errLimit": "A limit is a positive number of GB, or empty",
+    "editLimits": "Change limits",
+    "userSaved": "Pool limits saved",
+    "exhausted": "Used up: the pool's protocols are off until the reset"
   }
 }

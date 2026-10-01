@@ -1,13 +1,15 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { CalendarPlus, Check, Copy, ExternalLink, Laptop, Layers, MoreHorizontal, Power, RefreshCw, RotateCcw, Send, Smartphone, Trash2, Unlink } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, errorText, unwrap, type Schemas, type User } from "../../api/client";
-import { onePeriod, useBoundDevices, useDevices, useInbounds, userActions, useSettings, useTariffs, useUser, useUserMutation, useUserTraffic } from "../../api/hooks";
+import { onePeriod, qk, useBoundDevices, useDevices, useInbounds, userActions, useSettings, useTariffs, useUser, useUserMutation, useUserTraffic } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Avatar, Button, ErrorState, Field, QR, Ring, Skeleton, StatePill, Switch } from "../../components/ui";
+import { Avatar, Bar, Button, ErrorState, Field, QR, Ring, Skeleton, StatePill, Switch } from "../../components/ui";
 import { t } from "../../i18n";
 import { ago, appName, bytes, dateLong, dateShort, days, expiryText, fromInputDate, inputDate, maskIP, months } from "../../lib/format";
+import { PoolLimitsField } from "./pools";
 import { tariffSummary } from "./tariffs";
 
 export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }) {
@@ -98,6 +100,7 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
 
       <TariffSection u={u} />
       <TrafficSection u={u} />
+      <PoolsSection u={u} />
       <ExpirySection u={u} />
       <SubscriptionSection u={u} onReissue={() => setConfirm("reissue")} />
       <TelegramSection u={u} />
@@ -629,6 +632,89 @@ function NoteSection({ u }: { u: User }) {
           if (note !== u.note) update.mutate({ id: u.id, body: { note } }, { onSuccess: () => toast.ok(t("userDrawer.noteSaved")), onError: (e) => toast.error(errorText(e)) });
         }}
       />
+    </Section>
+  );
+}
+
+/** Traffic pools of the user: what each one used this period and its limit. */
+function PoolsSection({ u }: { u: User }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const pools = useQuery({ queryKey: qk.userPools(u.id), queryFn: () => unwrap(api.GET("/api/v1/users/{id}/pools", { params: { path: { id: u.id } } })) });
+  const [edit, setEdit] = useState<Record<number, string> | null>(null);
+  const save = useMutation({
+    mutationFn: (limits: Record<number, string>) =>
+      unwrap(
+        api.PUT("/api/v1/users/{id}/pools", {
+          params: { path: { id: u.id } },
+          body: {
+            pools: Object.entries(limits).map(([id, gb]) => {
+              const v = gb.trim().replace(",", ".");
+              return { pool_id: Number(id), traffic_limit: v ? Math.round(Number(v) * 2 ** 30) : null };
+            }),
+          },
+        }),
+      ),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.userPools(u.id), v);
+      setEdit(null);
+      toast.ok(t("pools.userSaved"));
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  if (!pools.data?.length) return null;
+  const bad = edit && Object.values(edit).some((v) => v.trim() !== "" && !(Number(v.replace(",", ".")) > 0));
+  return (
+    <Section
+      title={t("pools.title")}
+      aside={
+        edit ? undefined : (
+          <button
+            type="button"
+            className="link-btn text-xs"
+            onClick={() => setEdit(Object.fromEntries(pools.data.map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / 2 ** 30).toFixed(2)) : ""])))}
+          >
+            {t("pools.editLimits")}
+          </button>
+        )
+      }
+    >
+      {edit ? (
+        <>
+          <PoolLimitsField pools={pools.data.map((p) => ({ id: p.pool_id, name: p.name, inbounds: [] }))} value={edit} onChange={setEdit} />
+          {bad ? (
+            <p className="mt-2 text-xs text-[var(--berry-600)]" role="alert">
+              {t("pools.errLimit")}
+            </p>
+          ) : null}
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" variant="primary" loading={save.isPending} disabled={!!bad} onClick={() => save.mutate(edit)}>
+              {t("common.save")}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {pools.data.map((p) => {
+            const used = p.used_up + p.used_down;
+            return (
+              <li key={p.pool_id}>
+                <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
+                  <span className="font-medium">{p.name}</span>
+                  <span className="num text-xs text-[var(--ink-600)]">
+                    {p.traffic_limit != null ? `${bytes(used)} ${t("users.of", { total: bytes(p.traffic_limit) })}` : `${bytes(used)} · ${t("users.unlimited")}`}
+                  </span>
+                </div>
+                {p.traffic_limit != null ? <Bar pct={Math.min(100, (used / p.traffic_limit) * 100)} /> : null}
+                {p.exhausted ? <div className="mt-1 text-xs text-[var(--berry-600)]">{t("pools.exhausted")}</div> : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </Section>
   );
 }

@@ -79,6 +79,8 @@ type Inbound struct {
 	AutoPort    int64
 	AutoSni     int64
 	Outbound    string
+	ExitNodeID  sql.NullInt64
+	PoolID      sql.NullInt64
 }
 
 type InboundEvent struct {
@@ -109,6 +111,15 @@ type Node struct {
 	Enabled    int64
 	CreatedAt  int64
 	UpdatedAt  int64
+}
+
+type NodeRelay struct {
+	NodeID     int64
+	Port       string
+	Config     string
+	Outbound   string
+	ExitNodeID sql.NullInt64
+	CreatedAt  int64
 }
 
 type NodeState struct {
@@ -154,6 +165,12 @@ type Payment struct {
 	PaidAt     sql.NullInt64
 	AppliedAt  sql.NullInt64
 	RefundedAt sql.NullInt64
+}
+
+type RelayUser struct {
+	ExitNodeID int64
+	SrcNodeID  int64
+	Uuid       string
 }
 
 type Session struct {
@@ -205,6 +222,12 @@ type Tariff struct {
 	OnSale        int64
 }
 
+type TariffPool struct {
+	TariffID     int64
+	PoolID       int64
+	TrafficLimit int64
+}
+
 type TgChat struct {
 	TgID      int64
 	Username  string
@@ -243,6 +266,12 @@ type TrafficHourly struct {
 	Down   int64
 }
 
+type TrafficPool struct {
+	ID        int64
+	Name      string
+	CreatedAt int64
+}
+
 type User struct {
 	ID            int64
 	Name          string
@@ -269,4 +298,12 @@ type User struct {
 	UpdatedAt     int64
 	BillingDay    sql.NullInt64
 	UnboundAt     int64
+}
+
+type UserPool struct {
+	UserID       int64
+	PoolID       int64
+	TrafficLimit sql.NullInt64
+	UsedUp       int64
+	UsedDown     int64
 }

@@ -71,6 +71,8 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch method {
+	case "createInvoiceLink":
+		ok("https://t.me/$inv" + strconv.FormatInt(id, 10))
 	case "sendMessage":
 		ok(Message{MessageID: 1000 + id, Chat: Chat{ID: int64(chat), Type: "private"}})
 	default:
@@ -195,7 +197,8 @@ type noChanges struct{}
 func (noChanges) PoliciesChanged() {}
 func (noChanges) SlotsChanged()    {}
 
-func setup(t *testing.T) *env {
+// setup starts a bot on a fake Bot API; with may change its deps before it starts.
+func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	t.Helper()
 	e := &env{t: t, now: time.Unix(1_800_000_000, 0), tg: &fakeTelegram{blocked: map[int64]bool{}}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -223,9 +226,13 @@ func setup(t *testing.T) *env {
 	e.devs = domain.NewDevices(e.st, pool, noChanges{}, e.clock)
 	srv := httptest.NewServer(e.tg)
 	t.Cleanup(srv.Close)
-	e.bot = New(Deps{Store: e.st, Settings: e.set, Devices: e.devs, API: srv.URL, Now: e.clock,
+	deps := Deps{Store: e.st, Settings: e.set, Devices: e.devs, API: srv.URL, Now: e.clock,
 		SubBase: func(context.Context) string { return "https://vpn.example.com:21355/sub" },
-		MiniApp: func() bool { return true }, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Limits: fast})
+		MiniApp: func() bool { return true }, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Limits: fast}
+	for _, f := range with {
+		f(e, &deps)
+	}
+	e.bot = New(deps)
 	go e.bot.Run(ctx)
 	deadline := time.Now().Add(3 * time.Second)
 	for !e.bot.Status().Running {
@@ -402,7 +409,7 @@ func TestBot(t *testing.T) {
 
 	// The Mini App signs in with Telegram's initData.
 	vals := url.Values{"auth_date": {strconv.FormatInt(e.clock().Unix(), 10)}, "user": {`{"id":555,"first_name":"Anna"}`}}
-	subs, err := e.bot.MiniAppUser(e.ctx, signed("123:test", vals))
+	_, subs, err := e.bot.MiniAppUser(e.ctx, signed("123:test", vals))
 	if err != nil || len(subs) != 1 || subs[0].ID != e.user.ID {
 		t.Fatalf("mini app: %v %v", subs, err)
 	}

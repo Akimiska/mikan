@@ -25,7 +25,8 @@
     "settings": "Settings",
     "nodes": "Nodes",
     "telegram": "Telegram",
-    "api": "API"
+    "api": "API",
+    "payments": "Payments"
   },
   "navShort": {
     "overview": "Overview",
@@ -35,7 +36,8 @@
     "settings": "Settings",
     "nodes": "Nodes",
     "telegram": "Bot",
-    "api": "API"
+    "api": "API",
+    "payments": "Payments"
   },
   "shell": {
     "update": "{v} is out",
@@ -179,7 +181,15 @@
       "bot_unavailable": "The bot is not available in this mode",
       "api_keys_limit": "Too many keys — revoke the ones you do not need",
       "read_only_key": "The key is read-only",
-      "session_only": "Only the admin panel can do this, not a key"
+      "session_only": "Only the admin panel can do this, not a key",
+      "on_sale_no_price": "To sell a plan, give it a price in Stars or in rubles",
+      "shop_id_invalid": "shopId is the digits from your YooKassa account",
+      "yookassa_keys_invalid": "YooKassa did not accept the shopId and key ({value})",
+      "cryptobot_token_invalid": "CryptoBot did not accept the token ({value})",
+      "yookassa_not_configured": "To turn YooKassa on, enter the shopId and the secret key",
+      "cryptobot_not_configured": "To turn CryptoBot on, enter the app token",
+      "not_refundable": "Only a Stars payment applied to a subscription can be refunded",
+      "refund_failed": "Telegram did not accept the refund — try later"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -448,9 +458,18 @@
     "resetMonthStart": "on the 1st",
     "resetOnDayShort": "on day {d}",
     "resetNever": "never",
-    "price": "Price note",
-    "priceHint": "Only a label in the panel — there are no payments in the panel yet.",
-    "pricePlaceholder": "$5 / month"
+    "price": "Price label",
+    "priceHint": "Shown only in the panel.",
+    "pricePlaceholder": "$5 / month",
+    "sale": "Selling",
+    "saleSub": "The plan shows in the bot and the Mini App: once paid, the panel issues or renews the subscription itself.",
+    "onSale": "On sale",
+    "priceStars": "Price in Stars",
+    "priceStarsHint": "Telegram Stars, 1–10,000.",
+    "priceRub": "Price in rubles",
+    "priceRubHint": "For YooKassa and CryptoBot (it converts to the coin picked).",
+    "errStars": "A whole number from 1 to 10,000",
+    "errRub": "From 1 to 1,000,000 ₽"
   },
   "presets": {
     "vless_reality_xhttp": "Main one for Russia: looks like plain HTTPS and keeps few connections",
@@ -772,7 +791,20 @@
     "tgNoSubTitle": "No subscription connected",
     "tgNoSubText": "Open your subscription link in a browser and tap “Open in Telegram”, or send the link to the bot.",
     "tgFailed": "Could not sign in with Telegram. Close the page and open it again.",
-    "tgBrowser": "A browser opens, then the app"
+    "tgBrowser": "A browser opens, then the app",
+    "shop": "Renew",
+    "shopNew": "Buy a subscription",
+    "shopPick": "Pick a plan",
+    "shopPaying": "Opening the payment…",
+    "shopStars": "Stars",
+    "shopCard": "Card, SBP",
+    "shopCrypto": "Crypto",
+    "shopDone": "Once paid, the subscription updates by itself and the bot messages you.",
+    "shopRefresh": "Refresh",
+    "shopFail": "Could not open the payment. Try again or message support.",
+    "shopNotForSale": "This plan is no longer sold.",
+    "shopTooMany": "Too many invoices in a row — try again in an hour.",
+    "shopTooManySubs": "The account already holds the most subscriptions it can."
   },
   "nodes": {
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",
@@ -1020,7 +1052,64 @@
       "settings": "Settings",
       "telegram": "Telegram",
       "api-keys": "API keys",
-      "auth": "Sign-in and sessions"
+      "auth": "Sign-in and sessions",
+      "payments": "Payments"
     }
+  },
+  "payments": {
+    "title": "Payments",
+    "subtitle": "Plans paid for in the bot and the Mini App: subscriptions are issued and renewed by themselves.",
+    "history": "History",
+    "total": "{n} for {sum}",
+    "noTotals": "No payments in 30 days",
+    "status": "Status",
+    "provider": "Payment method",
+    "allStatuses": "All statuses",
+    "allProviders": "All methods",
+    "statuses": {
+      "applied": "Paid",
+      "paid": "Paid, not applied",
+      "pending": "Awaiting payment",
+      "failed": "Failed",
+      "expired": "Expired",
+      "refunded": "Refunded"
+    },
+    "providers": {
+      "stars": "Telegram Stars",
+      "yookassa": "YooKassa",
+      "cryptobot": "CryptoBot"
+    },
+    "kindNew": "new subscription",
+    "kindRenew": "renewal",
+    "notApplied": "Not applied: {error}. The panel retries every minute.",
+    "empty": "No payments yet",
+    "emptyText": "Turn a payment method on and mark plans “On sale”.",
+    "emptyFiltered": "Nothing matches the filter.",
+    "more": "Show more",
+    "refund": "Refund",
+    "refunded": "Stars refunded",
+    "refundTitle": "Refund {sum}?",
+    "refundText": "The Stars go back to the buyer. The subscription stays as it is — turn it off in the user card if needed.",
+    "settings": "Accepting payments",
+    "settingsSub": "Keys stay in the panel and are never shown again.",
+    "saved": "Payment settings saved",
+    "live": "Accepting",
+    "notReady": "Not ready",
+    "starsSub": "Payment inside Telegram, no keys — only the running bot.",
+    "starsBotOff": "The bot is not running: turn it on on the Telegram tab.",
+    "yookassaSub": "Cards and SBP. The shopId and secret key are in your YooKassa account → Integration → API keys.",
+    "shopId": "shopId",
+    "secretKey": "Secret key",
+    "keySaved": "Saved — enter a new one to replace it",
+    "webhookYooKassa": "Address for HTTP notifications (YooKassa → Integration → HTTP notifications, event payment.succeeded):",
+    "cryptobotSub": "Crypto through @CryptoBot. The token is in @CryptoBot → Crypto Pay → Create App.",
+    "cryptoToken": "App token",
+    "testnet": "Test network (testnet)",
+    "webhookCryptoBot": "Webhook address (@CryptoBot → Crypto Pay → the app → Webhooks):",
+    "webhookNoHost": "The address appears once the panel has a domain or IP.",
+    "webhookCopied": "Address copied",
+    "copyWebhook": "Copy address",
+    "allowNew": "Sell to new people",
+    "allowNewSub": "Someone without a subscription can buy one in the bot. Off: renewals only."
   }
 }

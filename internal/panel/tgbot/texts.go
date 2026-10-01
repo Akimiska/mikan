@@ -25,6 +25,10 @@ type words struct {
 	// menuApp is the Mini App button next to the input field. It shares the row with the
 	// field: a long one leaves no room to type on a phone.
 	menuApp string
+
+	// The shop.
+	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payButton, invoice, payNew, payRenew string
+	notForSale, payUnavailable, tooManyInvoices, payStale, paidNew, paidRenew                             string
 }
 
 var ru = words{
@@ -59,6 +63,18 @@ var ru = words{
 	months:   [12]string{"января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"},
 	commands: "Главное меню",
 	menuApp:  "Подписка",
+
+	buy: "🛒 Купить подписку", buyTitle: "Выберите тариф", renewTitle: "Продление подписки «%s»: выберите тариф",
+	payHow: "Как оплатить?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Картой или СБП — %s", payCrypto: "🪙 Криптовалютой — %s", payButton: "Оплатить %s",
+	invoice:         "Счёт: «%s» — %s.\n\nОплатите по кнопке ниже: %s сразу после оплаты, бот пришлёт сообщение.",
+	payNew:          "подписка будет готова",
+	payRenew:        "подписка продлится",
+	notForSale:      "Этот тариф больше не продаётся.",
+	payUnavailable:  "Оплата сейчас недоступна. Попробуйте позже или напишите в поддержку.",
+	tooManyInvoices: "Слишком много счетов подряд. Попробуйте через час.",
+	payStale:        "Счёт устарел. Откройте меню бота и оплатите заново.",
+	paidNew:         "✅ Оплата получена — подписка «%s» готова (тариф «%s»).\n\nДобавьте ссылку в приложение:\n<code>%s</code>",
+	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
 }
 
 var en = words{
@@ -93,6 +109,18 @@ var en = words{
 	months:   [12]string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"},
 	commands: "Main menu",
 	menuApp:  "Subscription",
+
+	buy: "🛒 Buy a subscription", buyTitle: "Pick a plan", renewTitle: "Renew subscription “%s”: pick a plan",
+	payHow: "How would you like to pay?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Card or SBP — %s", payCrypto: "🪙 Crypto — %s", payButton: "Pay %s",
+	invoice:         "Invoice: “%s” — %s.\n\nPay with the button below: the %s as soon as it is paid, and the bot will message you.",
+	payNew:          "subscription is ready",
+	payRenew:        "subscription is renewed",
+	notForSale:      "This plan is no longer sold.",
+	payUnavailable:  "Payment is not available right now. Try later or message support.",
+	tooManyInvoices: "Too many invoices in a row. Try again in an hour.",
+	payStale:        "The invoice is out of date. Open the bot's menu and pay again.",
+	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
+	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
 }
 
 func wordsFor(lang string) *words {

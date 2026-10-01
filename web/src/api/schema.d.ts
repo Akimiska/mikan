@@ -349,6 +349,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** История платежей */
+        get: operations["list-payments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Настройки оплаты */
+        get: operations["get-payment-settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Изменить настройки оплаты */
+        patch: operations["update-payment-settings"];
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Вернуть Stars покупателю */
+        post: operations["refund-payment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/presets": {
         parameters: {
             query?: never;
@@ -1221,6 +1273,18 @@ export interface components {
             host?: string;
             name?: string;
         };
+        PatchPaymentSettingsInputBody: {
+            allow_new?: boolean;
+            cryptobot?: boolean;
+            cryptobot_testnet?: boolean;
+            /** @description Пусто — удалить токен */
+            cryptobot_token?: string;
+            stars?: boolean;
+            yookassa?: boolean;
+            /** @description Пусто — удалить ключ */
+            yookassa_secret?: string;
+            yookassa_shop_id?: string;
+        };
         PatchSettingsInputBody: {
             auto_port?: boolean;
             auto_sni?: boolean;
@@ -1277,6 +1341,79 @@ export interface components {
             /** Format: int64 */
             traffic_limit?: number;
             traffic_unlimited?: boolean;
+        };
+        PaymentSettingsView: {
+            /** @description Новые люди могут купить подписку в боте; иначе — только продление */
+            allow_new: boolean;
+            /** @description Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен */
+            available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
+            cryptobot: boolean;
+            cryptobot_testnet: boolean;
+            cryptobot_token_set: boolean;
+            /** @description Telegram Stars: нужен только запущенный бот */
+            stars: boolean;
+            /** @description Адрес вебхуков в настройках приложения @CryptoBot */
+            webhook_cryptobot: string;
+            /** @description Адрес для HTTP-уведомлений в личном кабинете ЮKassa */
+            webhook_yookassa: string;
+            yookassa: boolean;
+            /** @description Секретный ключ сохранён; сам ключ API не отдаёт */
+            yookassa_secret_set: boolean;
+            yookassa_shop_id: string;
+        };
+        PaymentSettingsViewAvailableStruct: {
+            cryptobot: boolean;
+            stars: boolean;
+            yookassa: boolean;
+        };
+        PaymentTotal: {
+            /** Format: int64 */
+            count: number;
+            /** @enum {string} */
+            currency: "XTR" | "RUB";
+            /** Format: int64 */
+            total: number;
+        };
+        PaymentView: {
+            /**
+             * Format: int64
+             * @description Stars или копейки
+             */
+            amount: number;
+            /** Format: date-time */
+            applied_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @enum {string} */
+            currency: "XTR" | "RUB";
+            /** @description Почему оплаченный платёж ещё не применён */
+            error?: string;
+            /** @description Номер платежа у провайдера */
+            external_id?: string;
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            kind: "new" | "renew";
+            /** Format: date-time */
+            paid_at?: string;
+            /** @enum {string} */
+            provider: "stars" | "yookassa" | "cryptobot";
+            /** Format: date-time */
+            refunded_at?: string;
+            /** @enum {string} */
+            status: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded";
+            tariff_name: string;
+            /** Format: int64 */
+            tg_id: number;
+            tg_username?: string;
+            /** Format: int64 */
+            user_id?: number;
+            user_name?: string;
+        };
+        PaymentsOutputBody: {
+            items: components["schemas"]["PaymentView"][];
+            /** @description Применённые платежи за 30 дней */
+            totals: components["schemas"]["PaymentTotal"][];
         };
         RecoveryOutputBody: {
             /** @description Показываются один раз */
@@ -1401,7 +1538,19 @@ export interface components {
             /** Format: int64 */
             duration_days: number;
             name: string;
+            /** @description Продавать в боте и Mini App; нужна хотя бы одна цена */
+            on_sale?: boolean;
             price_label?: string;
+            /**
+             * Format: int64
+             * @description Цена в копейках: 19900 — 199 ₽
+             */
+            price_rub?: number;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars
+             */
+            price_stars?: number;
             /**
              * @default none
              * @enum {string}
@@ -1428,7 +1577,19 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+            /** @description Продаётся в боте и Mini App */
+            on_sale: boolean;
             price_label: string;
+            /**
+             * Format: int64
+             * @description Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars; null — не продаётся за Stars
+             */
+            price_stars: number | null;
             /** @enum {string} */
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
@@ -2418,6 +2579,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-payments": {
+        parameters: {
+            query?: {
+                status?: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded" | "";
+                provider?: "stars" | "yookassa" | "cryptobot" | "";
+                user_id?: number;
+                /** @description id последнего платежа предыдущей страницы */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-payment-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-payment-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchPaymentSettingsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSettingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "refund-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentView"];
                 };
             };
             /** @description Error */

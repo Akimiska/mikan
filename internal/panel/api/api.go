@@ -20,6 +20,7 @@ import (
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
+	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/secure"
@@ -60,6 +61,9 @@ type Deps struct {
 	}
 	// Telegram is the subscription owners' bot.
 	Telegram *tgbot.Bot
+	// Billing sells tariffs; SubBase is https://host:port/<sub path> ("" without an address).
+	Billing *billing.Service
+	SubBase func(ctx context.Context) string
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
 }
@@ -158,6 +162,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerUpdates()
 	h.registerNodes()
 	h.registerAPIKeys()
+	h.registerPayments()
 	return noStore(mux), api, nil
 }
 

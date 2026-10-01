@@ -17,6 +17,7 @@ import (
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
+	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/server"
@@ -35,6 +36,7 @@ type Panel struct {
 	Nodes     *nodesync.Manager
 	Tuner     *autotune.Tuner // nil without nodes
 	Telegram  *tgbot.Bot
+	Billing   *billing.Service
 	Updates   *updates.Checker
 	server    *server.Server
 	spa       *server.SPA
@@ -69,6 +71,8 @@ type Options struct {
 	DataDir string
 	// Releases fetches the newest release; nil never checks.
 	Releases updates.Source
+	// Payment providers' APIs; "" are the real ones (tests point them at fakes).
+	YooKassaAPI, CryptoBotAPI string
 }
 
 type noChanges struct{}
@@ -129,10 +133,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return ""
 	}
-	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now,
+	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
+		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks})
+	deps.Billing, deps.SubBase = p.Billing, subBase
+	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Status().Kind == "letsencrypt" }})
 	deps.Telegram = p.Telegram
+	p.Billing.SetTelegram(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
 	apiHandler, _, err := api.New(deps)
@@ -207,6 +215,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	subHandler := subs.NewHandler(st, subCfg, subPageHandler, o.Now, deps.Devices, o.TrustProxy)
 	subHandler.SetTelegram(p.Telegram)
+	subHandler.SetShop(p.Billing)
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)
@@ -246,6 +255,7 @@ func (p *Panel) Run(ctx context.Context) {
 		go p.Tuner.Run(ctx)
 	}
 	go p.Telegram.Run(ctx)
+	go p.Billing.Run(ctx)
 	// The host reads the switch from a file; the setting is what the admin chose.
 	if auto, err := p.Settings.Bool(ctx, settings.KeyAutoUpdate, false); err == nil {
 		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {

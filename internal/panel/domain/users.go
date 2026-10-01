@@ -102,38 +102,103 @@ func (s *Users) Create(ctx context.Context, in CreateInput) (db.User, error) {
 }
 
 func (s *Users) create(ctx context.Context, in CreateInput) (db.User, error) {
+	var u db.User
+	err := s.st.Tx(ctx, func(q *db.Queries) error {
+		var err error
+		u, err = s.createTx(ctx, q, in, false)
+		return err
+	})
+	return u, err
+}
+
+// createTx makes a user on q's transaction; anyTariff also takes an archived tariff (one
+// that was paid for before the admin archived it).
+func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, anyTariff bool) (db.User, error) {
 	now := s.now().Unix()
 	tags, err := encodeTags(in.Tags)
 	if err != nil {
 		return db.User{}, err
 	}
-	var u db.User
-	err = s.st.Tx(ctx, func(q *db.Queries) error {
-		t, err := q.GetTariff(ctx, in.TariffID)
-		if errors.Is(err, sql.ErrNoRows) || (err == nil && t.Archived != 0) {
-			return fmt.Errorf("tariff %d: %w", in.TariffID, ErrNotFound)
-		}
-		if err != nil {
-			return err
-		}
-		slot, err := q.TakeFreeSlot(ctx)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNoSlots
-		}
-		if err != nil {
-			return err
-		}
-		u, err = q.CreateUser(ctx, db.CreateUserParams{
-			Name: strings.TrimSpace(in.Name), Contact: strings.TrimSpace(in.Contact), Note: in.Note, Tags: tags,
-			TariffID: sql.NullInt64{Int64: t.ID, Valid: true}, TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit,
-			ResetStrategy: t.ResetStrategy, PeriodDays: 30, PeriodStart: now,
-			ExpiresAt:  tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay}),
-			BillingDay: t.BillingDay, SubToken: secure.Token(24), SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, CreatedAt: now, UpdatedAt: now,
-		})
-		return err
+	t, err := q.GetTariff(ctx, in.TariffID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && t.Archived != 0 && !anyTariff) {
+		return db.User{}, fmt.Errorf("tariff %d: %w", in.TariffID, ErrNotFound)
+	}
+	if err != nil {
+		return db.User{}, err
+	}
+	slot, err := q.TakeFreeSlot(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.User{}, ErrNoSlots
+	}
+	if err != nil {
+		return db.User{}, err
+	}
+	return q.CreateUser(ctx, db.CreateUserParams{
+		Name: strings.TrimSpace(in.Name), Contact: strings.TrimSpace(in.Contact), Note: in.Note, Tags: tags,
+		TariffID: sql.NullInt64{Int64: t.ID, Valid: true}, TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit,
+		ResetStrategy: t.ResetStrategy, PeriodDays: 30, PeriodStart: now,
+		ExpiresAt:  tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay}),
+		BillingDay: t.BillingDay, SubToken: secure.Token(24), SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, CreatedAt: now, UpdatedAt: now,
 	})
-	return u, err
 }
+
+// Purchase applies a paid tariff on q's transaction, so the payment and its effect commit
+// together. userID 0 (or a user deleted since the invoice) makes a new subscription named
+// name. A renewal takes the tariff's limits, adds its term after the current one (from
+// now when that already ended), turns the user on and starts a new traffic period: the
+// payment buys a full quota. ErrNoSlots: refill the pool and run the transaction again.
+// The caller calls Changed after the commit.
+func (s *Users) Purchase(ctx context.Context, q *db.Queries, userID, tariffID int64, name string) (u db.User, created bool, err error) {
+	if userID != 0 {
+		u, err = q.GetUser(ctx, userID)
+	}
+	if userID == 0 || errors.Is(err, sql.ErrNoRows) {
+		u, err = s.createTx(ctx, q, CreateInput{Name: name, Note: "Telegram", TariffID: tariffID}, true)
+		return u, err == nil, err
+	}
+	if err != nil {
+		return u, false, err
+	}
+	t, err := q.GetTariff(ctx, tariffID)
+	if err != nil {
+		return u, false, err
+	}
+	now := s.now()
+	base := now
+	if u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).After(now) {
+		base = time.Unix(u.ExpiresAt.Int64, 0)
+	}
+	billingDay := t.BillingDay
+	if !billingDay.Valid {
+		billingDay = u.BillingDay
+	}
+	u, err = q.UpdateUser(ctx, db.UpdateUserParams{
+		Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: "active", TariffID: sql.NullInt64{Int64: t.ID, Valid: true},
+		TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit, ResetStrategy: t.ResetStrategy, PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart,
+		ExpiresAt: tariffExpiry(base, durationTariff{t.DurationDays, billingDay}), Inbounds: u.Inbounds, BillingDay: billingDay,
+		UpdatedAt: now.Unix(), ID: u.ID,
+	})
+	if err != nil {
+		return u, false, err
+	}
+	if err := q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now.Unix(), UpdatedAt: now.Unix(), ID: u.ID}); err != nil {
+		return u, false, err
+	}
+	u, err = q.GetUser(ctx, u.ID)
+	return u, false, err
+}
+
+// RefillSlots tops the slot pool up after ErrNoSlots.
+func (s *Users) RefillSlots(ctx context.Context) error {
+	if err := s.pool.Refill(ctx, RefillBatch); err != nil {
+		return err
+	}
+	s.changes.SlotsChanged()
+	return nil
+}
+
+// Changed tells the nodes about users changed on a transaction of the caller's.
+func (s *Users) Changed() { s.changes.PoliciesChanged() }
 
 func expiry(from, days int64) sql.NullInt64 {
 	if days <= 0 {

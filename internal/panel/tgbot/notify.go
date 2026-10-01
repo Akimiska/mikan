@@ -150,20 +150,20 @@ func (b *Bot) Progress() BroadcastProgress {
 	return b.bcast
 }
 
-// MiniAppUser checks the Mini App's initData and returns the subscriptions of that
-// Telegram account.
-func (b *Bot) MiniAppUser(ctx context.Context, initData string) ([]db.User, error) {
+// MiniAppUser checks the Mini App's initData and returns that Telegram account's id and
+// its subscriptions, the one the chat shows first.
+func (b *Bot) MiniAppUser(ctx context.Context, initData string) (int64, []db.User, error) {
 	token, err := b.d.Settings.String(ctx, KeyToken)
 	if err != nil || token == "" {
-		return nil, ErrOff
+		return 0, nil, ErrOff
 	}
 	tu, err := CheckInitData(token, initData, b.d.Now())
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	list, err := b.d.Store.Q.ListTgLinksOf(ctx, tu.ID)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	if ch, err := b.d.Store.Q.GetTgChat(ctx, tu.ID); err == nil {
 		for i, u := range list {
@@ -172,5 +172,5 @@ func (b *Bot) MiniAppUser(ctx context.Context, initData string) ([]db.User, erro
 			}
 		}
 	}
-	return list, nil
+	return tu.ID, list, nil
 }

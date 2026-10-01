@@ -115,6 +115,27 @@ type NodeState struct {
 	Value string
 }
 
+type Payment struct {
+	ID         int64
+	Provider   string
+	Payload    string
+	ExternalID sql.NullString
+	TgID       int64
+	Kind       string
+	UserID     sql.NullInt64
+	TariffID   int64
+	TariffName string
+	Amount     int64
+	Currency   string
+	Status     string
+	Error      string
+	PayUrl     string
+	CreatedAt  int64
+	PaidAt     sql.NullInt64
+	AppliedAt  sql.NullInt64
+	RefundedAt sql.NullInt64
+}
+
 type Session struct {
 	IDHash     string
 	AdminID    int64
@@ -159,6 +180,9 @@ type Tariff struct {
 	Archived      int64
 	CreatedAt     int64
 	BillingDay    sql.NullInt64
+	PriceStars    sql.NullInt64
+	PriceRub      sql.NullInt64
+	OnSale        int64
 }
 
 type TgChat struct {

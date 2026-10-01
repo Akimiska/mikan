@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -47,6 +48,8 @@ type Deps struct {
 	Log     *slog.Logger
 	Now     func() time.Time
 	Limits  Limits // zero: DefaultLimits
+	// Billing sells tariffs in the menu; nil: no shop.
+	Billing *billing.Service
 }
 
 // Status is what the admin panel shows.
@@ -60,6 +63,7 @@ type Bot struct {
 	d      Deps
 	reload chan struct{}
 	out    atomic.Pointer[Outbox] // nil while the bot is off
+	client atomic.Pointer[Client] // the running bot's, for calls outside the update loop
 
 	mu     sync.Mutex
 	status Status
@@ -211,6 +215,8 @@ func (b *Bot) poll(ctx context.Context, c *Client) {
 	}, func(err error) { b.d.Log.Warn("telegram: send", "err", errText(err)) })
 	go out.Run(ctx)
 	b.out.Store(out)
+	b.client.Store(c)
+	defer b.client.CompareAndSwap(c, nil)
 	defer b.out.CompareAndSwap(out, nil)
 	b.setStatus(func(s *Status) { *s = Status{Running: true, Bot: me} })
 	var offset int64
@@ -305,6 +311,10 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) {
 		return
 	}
 	switch {
+	case up.PreCheckoutQuery != nil:
+		b.preCheckout(ctx, c, up.PreCheckoutQuery)
+	case up.Message != nil && up.Message.SuccessfulPayment != nil && up.Message.Chat.Type == "private":
+		b.starsPaid(ctx, up.Message)
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil && up.CallbackQuery.Message.Chat.Type == "private":
 		b.onPress(ctx, c, out, up.CallbackQuery)
 	case up.Message != nil && up.Message.From != nil && up.Message.Chat.Type == "private":

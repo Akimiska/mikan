@@ -9,6 +9,7 @@ import { NodesPage } from "./pages/nodes";
 import { SettingsPage } from "./pages/settings";
 import { TariffsPage } from "./pages/tariffs";
 import { ApiPage } from "./pages/api";
+import { PaymentsPage } from "./pages/payments";
 import { TelegramPage } from "./pages/telegram";
 import { UsersPage, type UsersSearch } from "./pages/users";
 import { Shell } from "./shell";
@@ -59,9 +60,10 @@ export function createAppRouter(queryClient: QueryClient) {
   const nodes = createRoute({ getParentRoute: () => app, path: "/nodes", component: NodesPage });
   const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: SettingsPage });
   const telegram = createRoute({ getParentRoute: () => app, path: "/telegram", component: TelegramPage });
+  const payments = createRoute({ getParentRoute: () => app, path: "/payments", component: PaymentsPage });
   const apiDocs = createRoute({ getParentRoute: () => app, path: "/api-docs", component: ApiPage });
 
-  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, telegram, apiDocs, settings])]);
+  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, payments, telegram, apiDocs, settings])]);
   return createRouter({ routeTree, basepath: basePath || "/", context: { queryClient }, defaultPreload: "intent", scrollRestoration: true });
 }
 

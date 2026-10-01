@@ -5,9 +5,9 @@ import { api, ApiError, errorText, unwrap, type Schemas, type Tariff } from "../
 import { qk, useTariffs } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, Field, PageHeader, Segmented, Skeleton } from "../../components/ui";
+import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t } from "../../i18n";
-import { bytes, days, GiB, months, termMonths } from "../../lib/format";
+import { bytes, days, GiB, months, rubles, termMonths } from "../../lib/format";
 
 /** How long a term on the tariff runs: days, or months up to the billing day. */
 export function tariffTerm(tr: Tariff): string {
@@ -84,6 +84,13 @@ export function TariffsPage() {
                 <div>
                   <h2 className="font-display text-xl font-medium tracking-tight">{tr.name}</h2>
                   {tr.price_label ? <div className="mt-1 text-[13px] font-medium text-[var(--mikan-700)]">{tr.price_label}</div> : null}
+                  {tr.on_sale ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-600)]">
+                      <Pill tone="ok">{t("tariffs.onSale")}</Pill>
+                      {tr.price_stars != null ? <span className="num">⭐ {tr.price_stars}</span> : null}
+                      {tr.price_rub != null ? <span className="num">{rubles(tr.price_rub)}</span> : null}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex gap-1">
                   <button type="button" className="icon-btn" aria-label={t("tariffs.editLabel", { name: tr.name })} onClick={() => setEdit(tr)}>
@@ -141,6 +148,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   const [devicesUnlimited, setDevicesUnlimited] = useState(false);
   const [reset, setReset] = useState<Tariff["reset_strategy"]>("period");
   const [price, setPrice] = useState("");
+  const [onSale, setOnSale] = useState(false);
+  const [stars, setStars] = useState("");
+  const [rub, setRub] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -157,6 +167,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setDevices(String(tr?.device_limit ?? 3));
     setReset(tr?.reset_strategy ?? "period");
     setPrice(tr?.price_label ?? "");
+    setOnSale(tr?.on_sale ?? false);
+    setStars(tr?.price_stars != null ? String(tr.price_stars) : "");
+    setRub(tr?.price_rub != null ? String(tr.price_rub / 100) : "");
     setErrors({});
   }, [tariff]);
 
@@ -189,6 +202,11 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     if (toDay && (!Number.isInteger(monN) || monN < 0 || monN > 120)) errs.duration_days = t("tariffs.errMonths");
     if (toDay && (!Number.isInteger(dayN) || dayN < 1 || dayN > 31)) errs.billing_day = t("tariffs.errBillingDay");
     if (!devicesUnlimited && (!Number.isInteger(devN) || devN < 1 || devN > 100)) errs.device_limit = t("tariffs.errDevices");
+    const starsN = Number(stars);
+    const rubN = Math.round(Number(rub.replace(",", ".")) * 100);
+    if (stars.trim() && (!Number.isInteger(starsN) || starsN < 1 || starsN > 10000)) errs.price_stars = t("tariffs.errStars");
+    if (rub.trim() && (!Number.isFinite(rubN) || rubN < 100 || rubN > 100000000)) errs.price_rub = t("tariffs.errRub");
+    if (onSale && !stars.trim() && !rub.trim()) errs.on_sale = t("errors.api.on_sale_no_price");
     setErrors(errs);
     if (Object.keys(errs).length) return;
     save.mutate({
@@ -200,6 +218,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       device_limit: devicesUnlimited ? undefined : devN,
       reset_strategy: unlimited ? "none" : reset,
       price_label: price.trim() || undefined,
+      price_stars: stars.trim() ? starsN : undefined,
+      price_rub: rub.trim() ? rubN : undefined,
+      on_sale: onSale,
       // PUT replaces the tariff: keep its place in the list.
       sort: tariff && tariff !== "new" ? tariff.sort : undefined,
     });
@@ -295,9 +316,37 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
             />
           </Field>
         ) : null}
-        <Field label={t("tariffs.price")} htmlFor="t-price" hint={t("tariffs.priceHint")}>
-          <input id="t-price" className="input" value={price} onChange={(e) => setPrice(e.target.value)} maxLength={40} placeholder={t("tariffs.pricePlaceholder")} />
-        </Field>
+        <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("tariffs.sale")}>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[13px] font-semibold">{t("tariffs.sale")}</div>
+              <div className="text-xs text-[var(--ink-500)]">{t("tariffs.saleSub")}</div>
+            </div>
+            <Switch checked={onSale} onChange={setOnSale} label={t("tariffs.onSale")} />
+          </div>
+          {errors.on_sale ? (
+            <p className="mb-3 text-xs text-[var(--berry-600)]" role="alert">
+              {errors.on_sale}
+            </p>
+          ) : null}
+          <div className="grid gap-x-3 sm:grid-cols-2">
+            <Field label={t("tariffs.priceStars")} htmlFor="t-stars" hint={t("tariffs.priceStarsHint")} error={errors.price_stars}>
+              <div className="flex items-center gap-2">
+                <input id="t-stars" className="input max-w-[140px]" inputMode="numeric" value={stars} onChange={(e) => setStars(e.target.value)} placeholder="150" aria-invalid={!!errors.price_stars} />
+                <span className="text-[var(--ink-500)]">⭐</span>
+              </div>
+            </Field>
+            <Field label={t("tariffs.priceRub")} htmlFor="t-rub" hint={t("tariffs.priceRubHint")} error={errors.price_rub}>
+              <div className="flex items-center gap-2">
+                <input id="t-rub" className="input max-w-[140px]" inputMode="decimal" value={rub} onChange={(e) => setRub(e.target.value)} placeholder="199" aria-invalid={!!errors.price_rub} />
+                <span className="text-[var(--ink-500)]">₽</span>
+              </div>
+            </Field>
+          </div>
+          <Field label={t("tariffs.price")} htmlFor="t-price" hint={t("tariffs.priceHint")}>
+            <input id="t-price" className="input" value={price} onChange={(e) => setPrice(e.target.value)} maxLength={40} placeholder={t("tariffs.pricePlaceholder")} />
+          </Field>
+        </div>
       </form>
     </Drawer>
   );

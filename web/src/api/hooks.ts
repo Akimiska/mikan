@@ -20,6 +20,8 @@ export const qk = {
   telegram: ["telegram"] as const,
   updates: ["updates"] as const,
   apiKeys: ["api-keys"] as const,
+  payments: ["payments"] as const,
+  paymentSettings: ["payment-settings"] as const,
 };
 
 export const meQuery = {

@@ -1,0 +1,268 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	"mikan/internal/panel/billing"
+	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
+)
+
+type PaymentSettingsView struct {
+	Stars             bool   `json:"stars" doc:"Telegram Stars: нужен только запущенный бот"`
+	YooKassa          bool   `json:"yookassa"`
+	YooKassaShopID    string `json:"yookassa_shop_id"`
+	YooKassaSecretSet bool   `json:"yookassa_secret_set" doc:"Секретный ключ сохранён; сам ключ API не отдаёт"`
+	CryptoBot         bool   `json:"cryptobot"`
+	CryptoBotTestnet  bool   `json:"cryptobot_testnet"`
+	CryptoBotTokenSet bool   `json:"cryptobot_token_set"`
+	AllowNew          bool   `json:"allow_new" doc:"Новые люди могут купить подписку в боте; иначе — только продление"`
+	Available         struct {
+		Stars     bool `json:"stars"`
+		YooKassa  bool `json:"yookassa"`
+		CryptoBot bool `json:"cryptobot"`
+	} `json:"available" doc:"Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"`
+	WebhookYooKassa  string `json:"webhook_yookassa" doc:"Адрес для HTTP-уведомлений в личном кабинете ЮKassa"`
+	WebhookCryptoBot string `json:"webhook_cryptobot" doc:"Адрес вебхуков в настройках приложения @CryptoBot"`
+}
+
+type paymentSettingsOutput struct{ Body PaymentSettingsView }
+
+type patchPaymentSettingsInput struct {
+	Body struct {
+		Stars            *bool   `json:"stars,omitempty"`
+		YooKassa         *bool   `json:"yookassa,omitempty"`
+		YooKassaShopID   *string `json:"yookassa_shop_id,omitempty" maxLength:"20"`
+		YooKassaSecret   *string `json:"yookassa_secret,omitempty" maxLength:"200" doc:"Пусто — удалить ключ"`
+		CryptoBot        *bool   `json:"cryptobot,omitempty"`
+		CryptoBotTestnet *bool   `json:"cryptobot_testnet,omitempty"`
+		CryptoBotToken   *string `json:"cryptobot_token,omitempty" maxLength:"200" doc:"Пусто — удалить токен"`
+		AllowNew         *bool   `json:"allow_new,omitempty"`
+	}
+}
+
+type PaymentView struct {
+	ID         int64      `json:"id"`
+	Provider   string     `json:"provider" enum:"stars,yookassa,cryptobot"`
+	Kind       string     `json:"kind" enum:"new,renew"`
+	Status     string     `json:"status" enum:"pending,paid,applied,expired,failed,refunded"`
+	TgID       int64      `json:"tg_id"`
+	TgUsername string     `json:"tg_username,omitempty"`
+	UserID     *int64     `json:"user_id,omitempty"`
+	UserName   string     `json:"user_name,omitempty"`
+	TariffName string     `json:"tariff_name"`
+	Amount     int64      `json:"amount" doc:"Stars или копейки"`
+	Currency   string     `json:"currency" enum:"XTR,RUB"`
+	ExternalID string     `json:"external_id,omitempty" doc:"Номер платежа у провайдера"`
+	Error      string     `json:"error,omitempty" doc:"Почему оплаченный платёж ещё не применён"`
+	CreatedAt  time.Time  `json:"created_at"`
+	PaidAt     *time.Time `json:"paid_at,omitempty"`
+	AppliedAt  *time.Time `json:"applied_at,omitempty"`
+	RefundedAt *time.Time `json:"refunded_at,omitempty"`
+}
+
+type PaymentTotal struct {
+	Currency string `json:"currency" enum:"XTR,RUB"`
+	Count    int64  `json:"count"`
+	Total    int64  `json:"total"`
+}
+
+type listPaymentsInput struct {
+	Status   string `query:"status" enum:"pending,paid,applied,expired,failed,refunded,"`
+	Provider string `query:"provider" enum:"stars,yookassa,cryptobot,"`
+	UserID   int64  `query:"user_id" minimum:"0"`
+	Before   int64  `query:"before" minimum:"0" doc:"id последнего платежа предыдущей страницы"`
+	Limit    int64  `query:"limit" minimum:"1" maximum:"200" default:"50"`
+}
+
+type paymentsOutput struct {
+	Body struct {
+		Items  []PaymentView  `json:"items"`
+		Totals []PaymentTotal `json:"totals" doc:"Применённые платежи за 30 дней"`
+	}
+}
+
+type paymentOutput struct{ Body PaymentView }
+
+func (h *handlers) registerPayments() {
+	tags := []string{"payments"}
+	huma.Register(h.api, huma.Operation{OperationID: "get-payment-settings", Method: http.MethodGet, Path: "/api/v1/payments/settings", Summary: "Настройки оплаты", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.getPaymentSettings)
+	huma.Register(h.api, huma.Operation{OperationID: "update-payment-settings", Method: http.MethodPatch, Path: "/api/v1/payments/settings", Summary: "Изменить настройки оплаты", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.updatePaymentSettings)
+	huma.Register(h.api, huma.Operation{OperationID: "list-payments", Method: http.MethodGet, Path: "/api/v1/payments", Summary: "История платежей", Tags: tags}, h.listPayments)
+	huma.Register(h.api, huma.Operation{OperationID: "refund-payment", Method: http.MethodPost, Path: "/api/v1/payments/{id}/refund", Summary: "Вернуть Stars покупателю", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.refundPayment)
+}
+
+func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, error) {
+	c := h.d.Billing.Config(ctx)
+	v := PaymentSettingsView{Stars: c.Stars, YooKassa: c.YooKassa, YooKassaShopID: c.ShopID, CryptoBot: c.CryptoBot, CryptoBotTestnet: c.Testnet, AllowNew: c.AllowNew}
+	ykSecret, err := h.d.Settings.String(ctx, billing.KeyYooKassaSecret)
+	if err != nil {
+		return v, err
+	}
+	cbToken, err := h.d.Settings.String(ctx, billing.KeyCryptoBotToken)
+	if err != nil {
+		return v, err
+	}
+	v.YooKassaSecretSet, v.CryptoBotTokenSet = ykSecret != "", cbToken != ""
+	av := h.d.Billing.Available(ctx)
+	v.Available.Stars, v.Available.YooKassa, v.Available.CryptoBot = av.Stars, av.YooKassa, av.CryptoBot
+	if h.d.SubBase != nil {
+		v.WebhookYooKassa, v.WebhookCryptoBot = h.d.Billing.WebhookURLs(ctx, h.d.SubBase(ctx))
+	}
+	return v, nil
+}
+
+func (h *handlers) getPaymentSettings(ctx context.Context, _ *struct{}) (*paymentSettingsOutput, error) {
+	v, err := h.paymentSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &paymentSettingsOutput{Body: v}, nil
+}
+
+var shopIDPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
+
+func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSettingsInput) (*paymentSettingsOutput, error) {
+	b := in.Body
+	c := h.d.Billing.Config(ctx)
+	for dst, v := range map[*bool]*bool{&c.Stars: b.Stars, &c.YooKassa: b.YooKassa, &c.CryptoBot: b.CryptoBot, &c.Testnet: b.CryptoBotTestnet, &c.AllowNew: b.AllowNew} {
+		if v != nil {
+			*dst = *v
+		}
+	}
+	if b.YooKassaShopID != nil {
+		c.ShopID = strings.TrimSpace(*b.YooKassaShopID)
+		if c.ShopID != "" && !shopIDPattern.MatchString(c.ShopID) {
+			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.yookassa_shop_id", Message: "shop_id_invalid"})
+		}
+	}
+	ykSecret, err := h.d.Settings.String(ctx, billing.KeyYooKassaSecret)
+	if err != nil {
+		return nil, err
+	}
+	cbToken, err := h.d.Settings.String(ctx, billing.KeyCryptoBotToken)
+	if err != nil {
+		return nil, err
+	}
+	if b.YooKassaSecret != nil {
+		ykSecret = strings.TrimSpace(*b.YooKassaSecret)
+	}
+	if b.CryptoBotToken != nil {
+		cbToken = strings.TrimSpace(*b.CryptoBotToken)
+	}
+	// New keys are tried before they are saved: a typo shows now, not at the first sale.
+	if (b.YooKassaSecret != nil || b.YooKassaShopID != nil) && ykSecret != "" && c.ShopID != "" {
+		if err := h.d.Billing.CheckYooKassa(ctx, c.ShopID, ykSecret); err != nil {
+			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.yookassa_secret", Message: "yookassa_keys_invalid", Value: billing.ErrorCode(err)})
+		}
+	}
+	if (b.CryptoBotToken != nil || b.CryptoBotTestnet != nil) && cbToken != "" {
+		if err := h.d.Billing.CheckCryptoBot(ctx, cbToken, c.Testnet); err != nil {
+			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.cryptobot_token", Message: "cryptobot_token_invalid", Value: billing.ErrorCode(err)})
+		}
+	}
+	if c.YooKassa && (c.ShopID == "" || ykSecret == "") {
+		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.yookassa", Message: "yookassa_not_configured"})
+	}
+	if c.CryptoBot && cbToken == "" {
+		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.cryptobot", Message: "cryptobot_not_configured"})
+	}
+	if err := settings.Set(ctx, h.d.Settings, billing.KeyConfig, c); err != nil {
+		return nil, err
+	}
+	if b.YooKassaSecret != nil {
+		if err := settings.Set(ctx, h.d.Settings, billing.KeyYooKassaSecret, ykSecret); err != nil {
+			return nil, err
+		}
+	}
+	if b.CryptoBotToken != nil {
+		if err := settings.Set(ctx, h.d.Settings, billing.KeyCryptoBotToken, cbToken); err != nil {
+			return nil, err
+		}
+	}
+	// What changed, never the secrets themselves.
+	h.audit(ctx, sessionOf(ctx).AdminID, "payments.settings", "", "", map[string]any{"stars": c.Stars, "yookassa": c.YooKassa, "cryptobot": c.CryptoBot,
+		"allow_new": c.AllowNew, "yookassa_secret_changed": b.YooKassaSecret != nil, "cryptobot_token_changed": b.CryptoBotToken != nil})
+	v, err := h.paymentSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &paymentSettingsOutput{Body: v}, nil
+}
+
+func unixPtr(n sql.NullInt64) *time.Time {
+	if !n.Valid {
+		return nil
+	}
+	t := time.Unix(n.Int64, 0).UTC()
+	return &t
+}
+
+func (h *handlers) viewPayment(ctx context.Context, p db.Payment) PaymentView {
+	v := PaymentView{ID: p.ID, Provider: p.Provider, Kind: p.Kind, Status: p.Status, TgID: p.TgID, TariffName: p.TariffName, Amount: p.Amount,
+		Currency: p.Currency, ExternalID: p.ExternalID.String, Error: p.Error, CreatedAt: time.Unix(p.CreatedAt, 0).UTC(),
+		PaidAt: unixPtr(p.PaidAt), AppliedAt: unixPtr(p.AppliedAt), RefundedAt: unixPtr(p.RefundedAt)}
+	if p.UserID.Valid {
+		id := p.UserID.Int64
+		v.UserID = &id
+		if u, err := h.d.Store.Q.GetUser(ctx, id); err == nil {
+			v.UserName = u.Name
+		}
+	}
+	if c, err := h.d.Store.Q.GetTgChat(ctx, p.TgID); err == nil {
+		v.TgUsername = c.Username
+	}
+	return v
+}
+
+func (h *handlers) listPayments(ctx context.Context, in *listPaymentsInput) (*paymentsOutput, error) {
+	before := in.Before
+	if before == 0 {
+		before = 1 << 62
+	}
+	rows, err := h.d.Store.Q.ListPayments(ctx, db.ListPaymentsParams{BeforeID: before, Status: in.Status, Provider: in.Provider, UserID: in.UserID, Lim: in.Limit})
+	if err != nil {
+		return nil, err
+	}
+	out := &paymentsOutput{}
+	out.Body.Items = make([]PaymentView, 0, len(rows))
+	for _, p := range rows {
+		out.Body.Items = append(out.Body.Items, h.viewPayment(ctx, p))
+	}
+	totals, err := h.d.Store.Q.PaymentTotals(ctx, sql.NullInt64{Int64: h.d.Now().Add(-30 * 24 * time.Hour).Unix(), Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	out.Body.Totals = make([]PaymentTotal, 0, len(totals))
+	for _, t := range totals {
+		out.Body.Totals = append(out.Body.Totals, PaymentTotal{Currency: t.Currency, Count: t.N, Total: t.Total})
+	}
+	return out, nil
+}
+
+func (h *handlers) refundPayment(ctx context.Context, in *userIDInput) (*paymentOutput, error) {
+	err := h.d.Billing.Refund(ctx, in.ID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, huma.Error404NotFound("not_found")
+	case errors.Is(err, billing.ErrNotRefunable):
+		return nil, huma.Error409Conflict("not_refundable")
+	case err != nil:
+		h.d.Log.Warn("refund", "payment", in.ID, "err", err)
+		return nil, huma.Error502BadGateway("refund_failed")
+	}
+	h.audit(ctx, sessionOf(ctx).AdminID, "payment.refund", "payment", "", map[string]any{"id": in.ID})
+	p, err := h.d.Store.Q.GetPayment(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &paymentOutput{Body: h.viewPayment(ctx, p)}, nil
+}

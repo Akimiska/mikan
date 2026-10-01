@@ -25,7 +25,8 @@
     "settings": "Настройки",
     "nodes": "Ноды",
     "telegram": "Telegram",
-    "api": "API"
+    "api": "API",
+    "payments": "Платежи"
   },
   "navShort": {
     "overview": "Обзор",
@@ -35,7 +36,8 @@
     "settings": "Настройки",
     "nodes": "Ноды",
     "telegram": "Бот",
-    "api": "API"
+    "api": "API",
+    "payments": "Платежи"
   },
   "shell": {
     "update": "Вышла {v}",
@@ -179,7 +181,15 @@
       "bot_unavailable": "Бот недоступен в этом режиме",
       "api_keys_limit": "Ключей слишком много — отзовите ненужные",
       "read_only_key": "Ключ только для чтения",
-      "session_only": "Это доступно только из админки, не по ключу"
+      "session_only": "Это доступно только из админки, не по ключу",
+      "on_sale_no_price": "Чтобы продавать тариф, укажите цену в Stars или в рублях",
+      "shop_id_invalid": "shopId — только цифры из личного кабинета ЮKassa",
+      "yookassa_keys_invalid": "ЮKassa не приняла shopId и ключ ({value})",
+      "cryptobot_token_invalid": "CryptoBot не принял токен ({value})",
+      "yookassa_not_configured": "Чтобы включить ЮKassa, укажите shopId и секретный ключ",
+      "cryptobot_not_configured": "Чтобы включить CryptoBot, укажите токен приложения",
+      "not_refundable": "Вернуть можно только оплату в Stars, применённую к подписке",
+      "refund_failed": "Telegram не принял возврат — попробуйте позже"
     },
     "acme": {
       "port80_busy": "Порт 80 занят другой программой — Let's Encrypt проверяет сервер через него",
@@ -448,9 +458,18 @@
     "resetMonthStart": "1-го числа",
     "resetOnDayShort": "{d}-го числа",
     "resetNever": "никогда",
-    "price": "Цена для себя",
-    "priceHint": "Только подпись в панели — оплаты в панели пока нет.",
-    "pricePlaceholder": "490 ₽ / мес"
+    "price": "Подпись цены",
+    "priceHint": "Видна только в панели.",
+    "pricePlaceholder": "490 ₽ / мес",
+    "sale": "Продажа",
+    "saleSub": "Тариф появится в боте и Mini App: человек оплатит, и панель сама выдаст или продлит подписку.",
+    "onSale": "В продаже",
+    "priceStars": "Цена в Stars",
+    "priceStarsHint": "Telegram Stars, 1–10 000.",
+    "priceRub": "Цена в рублях",
+    "priceRubHint": "Для ЮKassa и CryptoBot (переведёт в выбранную монету).",
+    "errStars": "Целое число от 1 до 10 000",
+    "errRub": "От 1 до 1 000 000 ₽"
   },
   "presets": {
     "vless_reality_xhttp": "Основной для РФ: похож на обычный HTTPS, держит мало соединений",
@@ -772,7 +791,20 @@
     "tgNoSubTitle": "Подписка не подключена",
     "tgNoSubText": "Откройте ссылку на подписку в браузере и нажмите «Открыть в Telegram» — или пришлите ссылку боту.",
     "tgFailed": "Не удалось войти через Telegram. Закройте и откройте страницу снова.",
-    "tgBrowser": "Откроется браузер, оттуда — приложение"
+    "tgBrowser": "Откроется браузер, оттуда — приложение",
+    "shop": "Продлить",
+    "shopNew": "Купить подписку",
+    "shopPick": "Выберите тариф",
+    "shopPaying": "Открываем оплату…",
+    "shopStars": "Stars",
+    "shopCard": "Карта, СБП",
+    "shopCrypto": "Крипта",
+    "shopDone": "После оплаты подписка обновится сама — бот пришлёт сообщение.",
+    "shopRefresh": "Обновить",
+    "shopFail": "Не удалось открыть оплату. Попробуйте ещё раз или напишите в поддержку.",
+    "shopNotForSale": "Этот тариф больше не продаётся.",
+    "shopTooMany": "Слишком много счетов подряд — попробуйте через час.",
+    "shopTooManySubs": "К аккаунту уже подключено максимум подписок."
   },
   "nodes": {
     "subtitle": "Серверы, на которых работает VPN. В подписке — подключения всех включённых нод, у каждой своя группа.",
@@ -1020,7 +1052,64 @@
       "settings": "Настройки",
       "telegram": "Telegram",
       "api-keys": "Ключи API",
-      "auth": "Вход и сессии"
+      "auth": "Вход и сессии",
+      "payments": "Платежи"
     }
+  },
+  "payments": {
+    "title": "Платежи",
+    "subtitle": "Оплата тарифов в боте и Mini App: подписка выдаётся и продлевается сама.",
+    "history": "История",
+    "total": "{n} на {sum}",
+    "noTotals": "За 30 дней оплат не было",
+    "status": "Статус",
+    "provider": "Способ оплаты",
+    "allStatuses": "Все статусы",
+    "allProviders": "Все способы",
+    "statuses": {
+      "applied": "Оплачен",
+      "paid": "Оплачен, не применён",
+      "pending": "Ждёт оплаты",
+      "failed": "Не прошёл",
+      "expired": "Истёк",
+      "refunded": "Возвращён"
+    },
+    "providers": {
+      "stars": "Telegram Stars",
+      "yookassa": "ЮKassa",
+      "cryptobot": "CryptoBot"
+    },
+    "kindNew": "новая подписка",
+    "kindRenew": "продление",
+    "notApplied": "Не применён: {error}. Панель повторяет попытку каждую минуту.",
+    "empty": "Платежей пока нет",
+    "emptyText": "Включите способ оплаты и отметьте тарифы «В продаже».",
+    "emptyFiltered": "Под фильтр ничего не попало.",
+    "more": "Показать ещё",
+    "refund": "Вернуть",
+    "refunded": "Stars возвращены",
+    "refundTitle": "Вернуть {sum}?",
+    "refundText": "Stars вернутся покупателю. Подписка останется как есть — при необходимости выключите её в карточке пользователя.",
+    "settings": "Приём оплаты",
+    "settingsSub": "Ключи хранятся в панели и больше не показываются.",
+    "saved": "Настройки оплаты сохранены",
+    "live": "Принимает",
+    "notReady": "Не готово",
+    "starsSub": "Оплата внутри Telegram без ключей — нужен только запущенный бот.",
+    "starsBotOff": "Бот не запущен: включите его на вкладке Telegram.",
+    "yookassaSub": "Карты и СБП. shopId и секретный ключ — в личном кабинете ЮKassa → Интеграция → Ключи API.",
+    "shopId": "shopId",
+    "secretKey": "Секретный ключ",
+    "keySaved": "Сохранён — введите новый, чтобы заменить",
+    "webhookYooKassa": "Адрес для HTTP-уведомлений (ЮKassa → Интеграция → HTTP-уведомления, событие payment.succeeded):",
+    "cryptobotSub": "Криптовалюта через @CryptoBot. Токен — в @CryptoBot → Crypto Pay → Create App.",
+    "cryptoToken": "Токен приложения",
+    "testnet": "Тестовая сеть (testnet)",
+    "webhookCryptoBot": "Адрес вебхуков (@CryptoBot → Crypto Pay → приложение → Webhooks):",
+    "webhookNoHost": "Адрес появится, когда у панели будет домен или IP.",
+    "webhookCopied": "Адрес скопирован",
+    "copyWebhook": "Скопировать адрес",
+    "allowNew": "Продавать новым",
+    "allowNewSub": "Человек без подписки сможет купить её в боте. Выключено — только продление."
   }
 }

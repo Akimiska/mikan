@@ -31,8 +31,14 @@ const (
 	maxKeyDays      = 3650
 )
 
-// sessionOnlyTags are the endpoints an API key cannot use.
+// sessionOnlyTags are the endpoints an API key cannot use, with the operations marked
+// sessionOnly (payment keys and refunds: whoever sets them decides where money goes).
 var sessionOnlyTags = []string{"auth", "api-keys"}
+
+var (
+	sessionOnly    = map[string]any{"sessionOnly": true}
+	sessionOnlyExt = map[string]any{"x-session-only": true} // tells the API reference
+)
 
 const keyAPIKey ctxKey = 100
 
@@ -174,7 +180,12 @@ func (h *handlers) bearer(ctx huma.Context, next func(huma.Context), mutating bo
 		_ = huma.WriteErr(h.api, ctx, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	for _, tag := range ctx.Operation().Tags {
+	op := ctx.Operation()
+	if only, _ := op.Metadata["sessionOnly"].(bool); only {
+		_ = huma.WriteErr(h.api, ctx, http.StatusForbidden, "session_only")
+		return
+	}
+	for _, tag := range op.Tags {
 		if slices.Contains(sessionOnlyTags, tag) {
 			_ = huma.WriteErr(h.api, ctx, http.StatusForbidden, "session_only")
 			return

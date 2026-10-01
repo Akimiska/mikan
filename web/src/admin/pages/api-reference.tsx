@@ -37,6 +37,7 @@ type Operation = {
   requestBody?: { content?: Record<string, Media>; required?: boolean };
   responses?: Record<string, { description?: string; content?: Record<string, Media> }>;
   security?: Record<string, string[]>[];
+  "x-session-only"?: boolean;
 };
 type Spec = {
   info: { title: string; version: string; description?: string };
@@ -49,7 +50,7 @@ const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 // Endpoints an API key cannot reach (internal/panel/api/apikeys.go, sessionOnlyTags).
 const SESSION_ONLY = ["auth", "api-keys"];
 // Sections in the order of the admin panel.
-const TAG_ORDER = ["users", "tariffs", "inbounds", "node", "stats", "settings", "telegram", "api-keys", "auth"];
+const TAG_ORDER = ["users", "tariffs", "payments", "inbounds", "node", "stats", "settings", "telegram", "api-keys", "auth"];
 
 type Op = { method: (typeof METHODS)[number]; path: string; op: Operation; tag: string };
 
@@ -162,7 +163,7 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
 
 function access(o: Op): { text: string; tone: string } {
   if (o.op.security && o.op.security.every((s) => Object.keys(s).length === 0)) return { text: t("apiPage.public"), tone: "off" };
-  if (SESSION_ONLY.includes(o.tag)) return { text: t("apiPage.sessionOnly"), tone: "warn" };
+  if (SESSION_ONLY.includes(o.tag) || o.op["x-session-only"]) return { text: t("apiPage.sessionOnly"), tone: "warn" };
   return o.method === "get" ? { text: t("apiPage.scopeRead"), tone: "ok" } : { text: t("apiPage.scopeFull"), tone: "off" };
 }
 

@@ -1275,7 +1275,7 @@
     "copyExample": "Copy example",
     "example": "Example",
     "authKey": "Scripts send the key in the header Authorization: Bearer mk_…",
-    "authScopes": "A Read key runs GET only. Full access runs everything except sign-in, sessions and key management.",
+    "authScopes": "A Read key runs GET only and does not see subscription links. Full access works with users, tariffs and inbounds; sign-in, keys, 2FA, the panel's addresses, nodes, certificates, WARP, payments, the bot and updates change only in the admin panel.",
     "authSession": "In the browser the API works with the admin session; changing requests then need X-CSRF-Token from GET /auth/me.",
     "errorsFormat": "Errors follow RFC 9457: detail holds the error code, errors[].message the code per field.",
     "secret": "The address holds the panel's secret path — do not publish it together with a key.",

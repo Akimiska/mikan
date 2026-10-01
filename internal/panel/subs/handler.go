@@ -166,7 +166,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.page.ServeHTTP(w, r)
 		return
 	}
-	h.userInfoHeaders(w, u, cfg)
+	grants, err := domain.UserGrantsLeft(r.Context(), h.st.Q, u.ID, h.now())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg)
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodHead {
 		return // apps peek at the traffic headers; the keys go only with a real fetch
@@ -186,7 +191,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app := DetectApp(r.Header.Get("User-Agent"))
-	prof.Inbounds = forApp(prof.Inbounds, app, domain.State(u, h.now()))
+	prof.Inbounds = forApp(prof.Inbounds, app, domain.State(u, grants.Main(u.ID), h.now()))
 	// The block detector trusts a device only once it took a profile with an inbound's
 	// current port and target (see autotune.Detect).
 	_ = h.st.Q.RecordSubFetch(r.Context(), db.RecordSubFetchParams{UserID: u.ID, Ip: h.clientIP(r), FetchedAt: h.now().Unix()})
@@ -255,14 +260,16 @@ func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
 	}
 }
 
-// miniAppShop: "shop" lists what the Telegram account can buy, "pay" opens an invoice
-// for a new subscription (token "") or one of the account's own.
+// miniAppShop: "shop" lists what the Telegram account can buy (with token: the traffic
+// packages of that subscription too), "pay" opens an invoice for a new subscription
+// (token ""), one of the account's own, or a traffic package for it (package_id).
 func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest string) {
 	var in struct {
-		InitData string `json:"init_data"`
-		TariffID int64  `json:"tariff_id"`
-		Provider string `json:"provider"`
-		Token    string `json:"token"`
+		InitData  string `json:"init_data"`
+		TariffID  int64  `json:"tariff_id"`
+		PackageID int64  `json:"package_id"`
+		Provider  string `json:"provider"`
+		Token     string `json:"token"`
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
@@ -280,32 +287,6 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 		return
 	}
 	ctx := r.Context()
-	if rest == "shop" {
-		offers, av, err := h.shop.Offers(ctx)
-		if err != nil {
-			fail(http.StatusInternalServerError, "internal")
-			return
-		}
-		cfg, _ := h.cfg(ctx)
-		type offer struct {
-			ID          int64  `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Stars       int64  `json:"stars,omitempty"`
-			Rub         int64  `json:"rub,omitempty"`
-		}
-		out := struct {
-			AllowNew  bool            `json:"allow_new"`
-			Providers map[string]bool `json:"providers"`
-			Offers    []offer         `json:"offers"`
-		}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{},
-			Providers: map[string]bool{billing.Stars: av.Stars, billing.YooKassa: av.YooKassa, billing.CryptoBot: av.CryptoBot}}
-		for _, o := range offers {
-			out.Offers = append(out.Offers, offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.Describe(o.Tariff, cfg.Lang), Stars: o.Stars, Rub: o.Rub})
-		}
-		_ = json.NewEncoder(w).Encode(out)
-		return
-	}
 	var userID int64
 	if in.Token != "" {
 		for _, u := range users {
@@ -318,7 +299,44 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 			return
 		}
 	}
-	p, err := h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: in.Provider})
+	if rest == "shop" {
+		offers, av, err := h.shop.Offers(ctx)
+		if err != nil {
+			fail(http.StatusInternalServerError, "internal")
+			return
+		}
+		cfg, _ := h.cfg(ctx)
+		packages, err := h.shopPackages(ctx, userID, cfg.Lang)
+		if err != nil {
+			fail(http.StatusInternalServerError, "internal")
+			return
+		}
+		type offer struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Stars       int64  `json:"stars,omitempty"`
+			Rub         int64  `json:"rub,omitempty"`
+		}
+		out := struct {
+			AllowNew  bool            `json:"allow_new"`
+			Providers map[string]bool `json:"providers"`
+			Offers    []offer         `json:"offers"`
+			Packages  []shopPackage   `json:"packages"`
+		}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages,
+			Providers: map[string]bool{billing.Stars: av.Stars, billing.YooKassa: av.YooKassa, billing.CryptoBot: av.CryptoBot}}
+		for _, o := range offers {
+			out.Offers = append(out.Offers, offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.Describe(o.Tariff, cfg.Lang), Stars: o.Stars, Rub: o.Rub})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+		return
+	}
+	var p db.Payment
+	if in.PackageID != 0 {
+		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: in.Provider})
+	} else {
+		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: in.Provider})
+	}
 	if err != nil {
 		code := billing.ErrProviderOff.Error()
 		for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours} {
@@ -371,7 +389,7 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 	}
 	allowed := domain.DecodeInbounds(u.Inbounds)
 	// A traffic pool that ran out leaves the subscription; the node already turns it away.
-	spent, err := domain.ExhaustedPools(ctx, h.st.Q, u.ID)
+	spent, err := domain.ExhaustedPools(ctx, h.st.Q, u.ID, h.now())
 	if err != nil {
 		return prof, err
 	}
@@ -388,10 +406,15 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 	return prof, nil
 }
 
-func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, cfg Config) {
+// userInfoHeaders: the traffic and term apps show. With traffic packages left the total
+// is what the user can reach: what is used plus what is left.
+func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64, cfg Config) {
 	var total, expire int64
 	if u.TrafficLimit.Valid {
 		total = u.TrafficLimit.Int64
+		if grants > 0 {
+			total = max(total, u.UsedUp+u.UsedDown) + grants
+		}
 	}
 	if u.ExpiresAt.Valid {
 		expire = u.ExpiresAt.Int64
@@ -417,6 +440,7 @@ type Info struct {
 	UsedUp     int64      `json:"used_up"`
 	UsedDown   int64      `json:"used_down"`
 	Limit      *int64     `json:"limit,omitempty"`
+	Extra      int64      `json:"extra,omitempty"` // bytes left in traffic packages, spent after Limit
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	ResetsAt   *time.Time `json:"resets_at,omitempty"`
 	Devices    int        `json:"device_limit"`
@@ -446,8 +470,16 @@ type DeviceItem struct {
 
 func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, prof Profile, cfg Config) {
 	now := h.now()
-	out := Info{Name: u.Name, Brand: cfg.Brand, SupportURL: cfg.SupportURL, State: domain.State(u, now), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
+	grants, err := domain.UserGrantsLeft(ctx, h.st.Q, u.ID, now)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	out := Info{Name: u.Name, Brand: cfg.Brand, SupportURL: cfg.SupportURL, State: domain.State(u, grants.Main(u.ID), now), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
 		Binding: cfg.Binding, Bound: []DeviceItem{}}
+	if u.TrafficLimit.Valid {
+		out.Extra = grants.Main(u.ID)
+	}
 	if h.tg != nil {
 		out.Telegram = h.tg.LinkURL(ctx, u.ID)
 	}
@@ -490,7 +522,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 			out.Locations = append(out.Locations, n.Name)
 		}
 	}
-	pools, err := h.poolInfo(ctx, u.ID)
+	pools, err := h.poolInfo(ctx, u.ID, grants)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -607,10 +639,11 @@ type PoolInfo struct {
 	Name  string `json:"name"`
 	Limit *int64 `json:"limit,omitempty"` // bytes; none: unlimited
 	Used  int64  `json:"used"`
+	Extra int64  `json:"extra,omitempty"` // bytes left in the pool's traffic packages
 }
 
 // poolInfo lists the user's pools worth showing: those with a limit or some traffic.
-func (h *Handler) poolInfo(ctx context.Context, userID int64) ([]PoolInfo, error) {
+func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.GrantsLeft) ([]PoolInfo, error) {
 	rows, err := h.st.Q.ListUserPools(ctx, userID)
 	if err != nil || len(rows) == 0 {
 		return nil, err
@@ -633,6 +666,7 @@ func (h *Handler) poolInfo(ctx context.Context, userID int64) ([]PoolInfo, error
 		if r.TrafficLimit.Valid {
 			l := r.TrafficLimit.Int64
 			pi.Limit = &l
+			pi.Extra = grants.Pool(userID, r.PoolID)
 		}
 		out = append(out, pi)
 	}

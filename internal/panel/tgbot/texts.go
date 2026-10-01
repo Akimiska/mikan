@@ -30,6 +30,9 @@ type words struct {
 	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payButton, invoice, payNew, payRenew string
 	notForSale, payUnavailable, tooManyInvoices, payStale, paidNew, paidRenew                             string
 	poolOut                                                                                               string // a traffic pool used up
+
+	// Traffic packages.
+	buyTraffic, trafficTitle, payPackage, packageGone, paidPackage, plusPackages string
 }
 
 var ru = words{
@@ -77,6 +80,13 @@ var ru = words{
 	paidNew:         "✅ Оплата получена — подписка «%s» готова (тариф «%s»).\n\nДобавьте ссылку в приложение:\n<code>%s</code>",
 	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
 	poolOut:         "закончился до сброса",
+
+	buyTraffic:   "📦 Докупить трафик",
+	trafficTitle: "Трафик для подписки «%s»: выберите пакет",
+	payPackage:   "трафик начислится",
+	packageGone:  "Этот пакет больше не продаётся.",
+	paidPackage:  "✅ Оплата получена — пакет «%s» начислен на подписку «%s».",
+	plusPackages: "%s + пакеты %s",
 }
 
 var en = words{
@@ -124,6 +134,13 @@ var en = words{
 	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
 	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
 	poolOut:         "used up until the reset",
+
+	buyTraffic:   "📦 Buy more traffic",
+	trafficTitle: "Traffic for subscription “%s”: pick a package",
+	payPackage:   "traffic is added",
+	packageGone:  "This package is no longer sold.",
+	paidPackage:  "✅ Payment received — package “%s” is added to subscription “%s”.",
+	plusPackages: "%s + packages %s",
 }
 
 func wordsFor(lang string) *words {

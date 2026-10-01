@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 )
 
@@ -45,7 +46,8 @@ type UserPoolView struct {
 	TrafficLimit *int64 `json:"traffic_limit" doc:"Байты за период; null — без лимита"`
 	UsedUp       int64  `json:"used_up"`
 	UsedDown     int64  `json:"used_down"`
-	Exhausted    bool   `json:"exhausted" doc:"Лимит пула исчерпан: его подключения не работают до сброса"`
+	Extra        int64  `json:"extra" doc:"Байты, оставшиеся в пакетах трафика пула: тратятся после лимита"`
+	Exhausted    bool   `json:"exhausted" doc:"Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса"`
 }
 
 type userPoolsOutput struct{ Body []UserPoolView }
@@ -179,11 +181,16 @@ func (h *handlers) userPools(ctx context.Context, in *userIDInput) (*userPoolsOu
 	for _, r := range rows {
 		mine[r.PoolID] = r
 	}
+	grants, err := domain.UserGrantsLeft(ctx, h.d.Store.Q, in.ID, h.d.Now())
+	if err != nil {
+		return nil, err
+	}
 	out := &userPoolsOutput{Body: make([]UserPoolView, 0, len(ps))}
 	for _, p := range ps {
 		r := mine[p.ID]
-		v := UserPoolView{PoolID: p.ID, Name: p.Name, TrafficLimit: ptrInt(r.TrafficLimit.Int64, r.TrafficLimit.Valid), UsedUp: r.UsedUp, UsedDown: r.UsedDown}
-		v.Exhausted = r.TrafficLimit.Valid && r.UsedUp+r.UsedDown >= r.TrafficLimit.Int64
+		v := UserPoolView{PoolID: p.ID, Name: p.Name, TrafficLimit: ptrInt(r.TrafficLimit.Int64, r.TrafficLimit.Valid), UsedUp: r.UsedUp, UsedDown: r.UsedDown,
+			Extra: grants.Pool(in.ID, p.ID)}
+		v.Exhausted = domain.PoolExhausted(r, v.Extra)
 		out.Body = append(out.Body, v)
 	}
 	return out, nil

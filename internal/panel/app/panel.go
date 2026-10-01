@@ -128,6 +128,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
+	deps.Packages = domain.NewPackages(st, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
 		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom

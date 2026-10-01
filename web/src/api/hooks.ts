@@ -27,6 +27,8 @@ export const qk = {
   cascade: (node: number) => ["cascade", node] as const,
   pools: ["pools"] as const,
   userPools: (id: number) => ["users", "pools", id] as const,
+  packages: ["packages"] as const,
+  userGrants: (id: number) => ["users", "grants", id] as const,
 };
 
 export const meQuery = {
@@ -163,4 +165,12 @@ export const onePeriod = (u: Pick<User, "billing_day">): Schemas["ExtendInputBod
 
 export function usePools() {
   return useQuery({ queryKey: qk.pools, queryFn: () => unwrap(api.GET("/api/v1/pools")) });
+}
+
+export function usePackages() {
+  return useQuery({ queryKey: qk.packages, queryFn: () => unwrap(api.GET("/api/v1/packages")) });
+}
+
+export function useUserGrants(id: number) {
+  return useQuery({ queryKey: qk.userGrants(id), queryFn: () => unwrap(api.GET("/api/v1/users/{id}/grants", { params: { path: { id } } })) });
 }

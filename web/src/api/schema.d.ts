@@ -506,6 +506,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пакеты трафика */
+        get: operations["list-packages"];
+        put?: never;
+        /** Создать пакет трафика */
+        post: operations["create-package"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Изменить пакет трафика */
+        put: operations["update-package"];
+        post?: never;
+        /** Убрать пакет в архив */
+        delete: operations["archive-package"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments": {
         parameters: {
             query?: never;
@@ -954,6 +990,24 @@ export interface paths {
         put?: never;
         /** Продлить */
         post: operations["extend-user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пакеты трафика пользователя */
+        get: operations["user-grants"];
+        put?: never;
+        /** Начислить трафик */
+        post: operations["grant-traffic"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1436,6 +1490,52 @@ export interface components {
              */
             months?: number;
         };
+        GrantInputBody: {
+            /**
+             * Format: int64
+             * @description От 1 ГБ до 100 ТБ
+             */
+            bytes: number;
+            /** Format: int64 */
+            days?: number;
+            /** @enum {string} */
+            lifetime: "used" | "period" | "days";
+            /** @description За что: бонус, компенсация */
+            note?: string;
+            /**
+             * Format: int64
+             * @description Пул трафика; не передан — основной трафик
+             */
+            pool_id?: number;
+        };
+        GrantView: {
+            /** @description Ещё считается: не израсходован и не истёк */
+            active: boolean;
+            /** Format: int64 */
+            bytes: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            lifetime: "used" | "period" | "days";
+            note: string;
+            /** @description Название пакета; пусто — начислено вручную */
+            package_name: string;
+            /** Format: int64 */
+            payment_id: number | null;
+            /**
+             * Format: int64
+             * @description Пул трафика; null — основной трафик
+             */
+            pool_id: number | null;
+            /** Format: int64 */
+            remaining: number;
+            /** @enum {string} */
+            source: "purchase" | "admin";
+        };
         HostStatus: {
             /** @description RFC 3339 */
             at: string;
@@ -1659,6 +1759,72 @@ export interface components {
             /** Format: int64 */
             users_total: number;
         };
+        PackageBody: {
+            /**
+             * Format: int64
+             * @description От 1 ГБ до 100 ТБ
+             */
+            bytes: number;
+            /**
+             * Format: int64
+             * @description Для lifetime=days: 1–3650
+             */
+            days?: number;
+            /** @enum {string} */
+            lifetime: "used" | "period" | "days";
+            name: string;
+            /** @description Продавать в боте и Mini App; нужна хотя бы одна цена */
+            on_sale?: boolean;
+            /**
+             * Format: int64
+             * @description Пул трафика; не передан — основной трафик
+             */
+            pool_id?: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках: 7900 — 79 ₽
+             */
+            price_rub?: number;
+            /** Format: int64 */
+            price_stars?: number;
+            /** Format: int64 */
+            sort?: number;
+        };
+        PackageView: {
+            /** Format: int64 */
+            bytes: number;
+            /**
+             * Format: int64
+             * @description Срок в днях для lifetime=days
+             */
+            days: number;
+            /** Format: int64 */
+            id: number;
+            /**
+             * @description used — пока не израсходован, period — до конца периода, days — N дней с покупки
+             * @enum {string}
+             */
+            lifetime: "used" | "period" | "days";
+            name: string;
+            on_sale: boolean;
+            /**
+             * Format: int64
+             * @description Пул трафика; null — основной трафик
+             */
+            pool_id: number | null;
+            /**
+             * Format: int64
+             * @description Цена в копейках; null — не продаётся за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars; null — не продаётся за Stars
+             */
+            price_stars: number | null;
+            /** Format: int64 */
+            sort: number;
+        };
         PasswordInputBody: {
             current: string;
             /** @description Не короче 12 символов */
@@ -1856,8 +2022,11 @@ export interface components {
             external_id?: string;
             /** Format: int64 */
             id: number;
-            /** @enum {string} */
-            kind: "new" | "renew";
+            /**
+             * @description package — пакет трафика: tariff_name — название пакета
+             * @enum {string}
+             */
+            kind: "new" | "renew" | "package";
             /** Format: date-time */
             paid_at?: string;
             /** @description stars, yookassa, cryptobot или addon:<id> — адаптер маркетплейса */
@@ -2283,8 +2452,13 @@ export interface components {
             limited: number;
         };
         UserPoolView: {
-            /** @description Лимит пула исчерпан: его подключения не работают до сброса */
+            /** @description Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса */
             exhausted: boolean;
+            /**
+             * Format: int64
+             * @description Байты, оставшиеся в пакетах трафика пула: тратятся после лимита
+             */
+            extra: number;
             name: string;
             /** Format: int64 */
             pool_id: number;
@@ -2343,6 +2517,11 @@ export interface components {
             total_down: number;
             /** Format: int64 */
             total_up: number;
+            /**
+             * Format: int64
+             * @description Байты, оставшиеся в пакетах трафика основного лимита: тратятся после лимита тарифа
+             */
+            traffic_extra: number;
             /**
              * Format: int64
              * @description Байты за период; null — без лимита
@@ -3613,6 +3792,132 @@ export interface operations {
             };
         };
     };
+    "list-packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "archive-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-payments": {
         parameters: {
             query?: {
@@ -4785,6 +5090,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "user-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "grant-traffic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantView"];
                 };
             };
             /** @description Error */

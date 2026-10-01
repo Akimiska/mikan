@@ -8,6 +8,7 @@ import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t } from "../../i18n";
 import { bytes, days, GiB, months, rubles, termMonths } from "../../lib/format";
+import { PackagesCard } from "./packages";
 import { PoolLimitsField, PoolsCard } from "./pools";
 
 /** How long a term on the tariff runs: days, or months up to the billing day. */
@@ -62,6 +63,7 @@ export function TariffsPage() {
         }
       />
       <PoolsCard />
+      <PackagesCard />
       {tariffs.isPending ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[0, 1, 2].map((i) => (

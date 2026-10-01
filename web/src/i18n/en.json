@@ -250,7 +250,12 @@
       "addon_not_installed": "The adapter is not installed or not running.",
       "addon_setting_invalid": "Check the value.",
       "addon_settings_refused": "The payment provider refused the settings ({value}).",
-      "addon_unreachable": "The adapter does not answer."
+      "addon_unreachable": "The adapter does not answer.",
+      "bad_bytes": "Size: from 1 GB to 100 TB",
+      "bad_lifetime": "Pick how long it is valid",
+      "bad_days": "From 1 to 3650 days",
+      "bad_price": "The price is out of range",
+      "note_too_long": "Up to 200 characters"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -953,7 +958,11 @@
     "shopTooMany": "Too many invoices in a row — try again in an hour.",
     "shopTooManySubs": "The account already holds the most subscriptions it can.",
     "pools": "Separate limits",
-    "poolOut": "Used up — these servers come back after the traffic resets."
+    "poolOut": "Used up — these servers come back after the traffic resets.",
+    "packages": "Buy more traffic",
+    "packagesPick": "Pick a package: it adds to the plan's traffic",
+    "packageNotForSale": "This package is no longer sold.",
+    "plusPackages": "{limit} + packages {extra}"
   },
   "nodes": {
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",
@@ -1295,7 +1304,8 @@
     "nothingOnSale": "The bot sells nothing yet: no plan is on sale with a price for a method that takes payments. Instead of buying, people are told to message support.",
     "openTariffs": "Open plans",
     "salesOff": "Selling subscriptions is off: the bot and the Mini App sell nothing. Turn it on in Settings.",
-    "openSettings": "Open Settings"
+    "openSettings": "Open Settings",
+    "kindPackage": "traffic package"
   },
   "warp": {
     "title": "WARP",
@@ -1439,5 +1449,61 @@
     "installed": "Installed",
     "install": "Install",
     "update": "Update"
+  },
+  "packages": {
+    "title": "Traffic packages",
+    "sub": "Extra traffic on top of the plan, for the main limit or a pool. The plan's traffic is spent first, then the packages, the one that expires sooner first.",
+    "add": "Add a package",
+    "none": "No packages yet. A package can be sold in the bot and the Mini App or given by hand in a user's card.",
+    "poolGone": "pool deleted",
+    "lifetime": {
+      "used": "Until used up",
+      "period": "Until the period ends"
+    },
+    "lifetimeDays": "N days",
+    "lifetimeDaysN": "for {days}",
+    "lifetimeLabel": "Valid",
+    "lifetimeHint": {
+      "used": "What is left carries over to the next period until it is used up.",
+      "period": "Expires at the traffic reset, even if some is left.",
+      "days": "Valid for that many days from purchase; what is left carries over the traffic reset."
+    },
+    "notOnSale": "Not on sale",
+    "editLabel": "Edit {name}",
+    "archiveLabel": "Archive {name}",
+    "archived": "Package archived",
+    "archiveTitle": "Archive package “{name}”?",
+    "archiveText": "It can no longer be bought. Traffic already bought stays with the users.",
+    "new": "New package",
+    "edit": "Traffic package",
+    "drawerMeta": "Bought traffic is added to the plan's limit",
+    "name": "Name",
+    "namePlaceholder": "For example, +50 GB",
+    "size": "Size",
+    "target": "Adds to",
+    "targetHint": "A pool package is offered only to those who have a limit in that pool.",
+    "saleSub": "Shown in the bot (“Buy more traffic”) and in the Mini App; needs at least one price.",
+    "sellingOff": "Selling is off in Settings: the prices are kept until it is on.",
+    "created": "Package created",
+    "saved": "Package saved",
+    "errName": "Enter a name"
+  },
+  "grants": {
+    "title": "Traffic packages",
+    "add": "Add traffic",
+    "none": "No packages.",
+    "bought": "bought “{name}”",
+    "package": "package",
+    "byAdmin": "added by hand",
+    "left": "{bytes} left",
+    "expired": "Expired",
+    "usedUp": "Used up",
+    "until": "until {date}",
+    "noEnd": "no end date",
+    "added": "Added {bytes}",
+    "note": "Comment",
+    "notePlaceholder": "For example, compensation for downtime",
+    "submit": "Add",
+    "plusPackages": "{limit} + packages {extra}"
   }
 }

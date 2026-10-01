@@ -48,6 +48,7 @@ type Deps struct {
 
 	Users     *domain.Users
 	Devices   *domain.Devices
+	Packages  *domain.Packages
 	Pool      *domain.Pool
 	Changes   domain.Changes
 	SubURL    func(ctx context.Context, token string) string
@@ -189,6 +190,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerWarp()
 	h.registerCascade()
 	h.registerPools()
+	h.registerPackages()
 	return noStore(mux), api, nil
 }
 

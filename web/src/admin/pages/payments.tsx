@@ -169,7 +169,7 @@ function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; o
           <Pill tone={STATUS_TONE[p.status]}>{t(`payments.statuses.${p.status}`)}</Pill>
         </div>
         <div className="mt-1 text-xs text-[var(--ink-500)]">
-          {dateShort(p.created_at)} {time(p.created_at)} · {provider} · {p.kind === "new" ? t("payments.kindNew") : t("payments.kindRenew")} · {buyer}
+          {dateShort(p.created_at)} {time(p.created_at)} · {provider} · {p.kind === "new" ? t("payments.kindNew") : p.kind === "package" ? t("payments.kindPackage") : t("payments.kindRenew")} · {buyer}
           {p.user_id != null ? (
             <>
               {" → "}

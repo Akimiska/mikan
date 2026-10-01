@@ -57,7 +57,7 @@ type patchPaymentSettingsInput struct {
 type PaymentView struct {
 	ID         int64      `json:"id"`
 	Provider   string     `json:"provider" doc:"stars, yookassa, cryptobot или addon:<id> — адаптер маркетплейса"`
-	Kind       string     `json:"kind" enum:"new,renew"`
+	Kind       string     `json:"kind" enum:"new,renew,package" doc:"package — пакет трафика: tariff_name — название пакета"`
 	Status     string     `json:"status" enum:"pending,paid,applied,expired,failed,refunded"`
 	TgID       int64      `json:"tg_id"`
 	TgUsername string     `json:"tg_username,omitempty"`

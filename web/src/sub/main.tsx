@@ -18,6 +18,7 @@ type Info = {
   used_up: number;
   used_down: number;
   limit?: number;
+  extra?: number;
   expires_at?: string;
   resets_at?: string;
   device_limit: number;
@@ -26,7 +27,7 @@ type Info = {
   devices?: Device[];
   unbind_after?: string;
   telegram?: string;
-  pools?: { name: string; limit?: number; used: number }[];
+  pools?: { name: string; limit?: number; used: number; extra?: number }[];
 };
 
 type Device = { id: number; os: string; os_version: string; model: string; app: string; shared: boolean; created_at: string; last_seen: string };
@@ -117,6 +118,7 @@ function SubPage() {
   const [subURL, setSubURL] = useState(tgMode ? "" : pageURL);
   const [tg, setTg] = useState<{ state: "loading" | "none" | "failed" | "ok"; subs: TgSub[] }>({ state: tgMode ? "loading" : "ok", subs: [] });
   const [shop, setShop] = useState<ShopData | null>(null);
+  const [packages, setPackages] = useState<{ token: string; data: ShopData } | null>(null);
 
   const load = (url = subURL) =>
     fetch(url + "/info", { cache: "no-store" })
@@ -192,11 +194,45 @@ function SubPage() {
 
   const shopFor = (token: string, title: string) =>
     shop && shop.offers.length > 0 ? (
-      <Shop data={shop} subRoot={subRoot} initData={initData} token={token} title={title} openInvoice={(slug) => tgEvent("web_app_open_invoice", { slug })} openLink={openOutside} onRefresh={refresh} />
+      <Shop
+        data={shop}
+        offers={shop.offers}
+        subRoot={subRoot}
+        initData={initData}
+        token={token}
+        title={title}
+        openInvoice={(slug) => tgEvent("web_app_open_invoice", { slug })}
+        openLink={openOutside}
+        onRefresh={refresh}
+      />
+    ) : null;
+  // Traffic packages are for the subscription on screen.
+  const token = subURL.slice(subURL.lastIndexOf("/") + 1);
+  const packagesShop =
+    packages && packages.data.packages?.length && packages.token === token ? (
+      <Shop
+        key={token}
+        data={packages.data}
+        offers={packages.data.packages}
+        field="package_id"
+        pick={t("sub.packagesPick")}
+        subRoot={subRoot}
+        initData={initData}
+        token={token}
+        title={t("sub.packages")}
+        openInvoice={(slug) => tgEvent("web_app_open_invoice", { slug })}
+        openLink={openOutside}
+        onRefresh={refresh}
+      />
     ) : null;
 
   useEffect(() => {
     if (subURL) load(subURL).catch(() => setFailed(true));
+    if (!tgMode || !subURL) return;
+    const tok = subURL.slice(subURL.lastIndexOf("/") + 1);
+    loadShop(subRoot, initData, tok)
+      .then((data) => setPackages({ token: tok, data }))
+      .catch(() => setPackages(null));
   }, [subURL]);
 
   // The Mini App sends an app's "Add" to the browser as #open=<app>: open it right away.
@@ -266,8 +302,12 @@ function SubPage() {
   }
 
   const used = info.used_up + info.used_down;
-  const left = info.limit != null ? Math.max(0, info.limit - used) : null;
-  const pct = info.limit ? (used / info.limit) * 100 : 0;
+  const extra = info.extra ?? 0;
+  // Traffic packages are spent after the tariff's traffic: they add to what is left.
+  const left = info.limit != null ? Math.max(0, info.limit - used) + extra : null;
+  const cap = info.limit != null ? Math.max(info.limit, used) + extra : 0;
+  const pct = cap ? (used / cap) * 100 : 0;
+  const ofTotal = (limit: number, more: number) => t("users.of", { total: more > 0 ? t("sub.plusPackages", { limit: bytes(limit), extra: bytes(more) }) : bytes(limit) });
   const d = info.expires_at ? daysUntil(info.expires_at) : null;
   const firstName = info.name.split(/\s+/)[0] ?? "";
   const tone = ({ active: "ok", expiring: "warn", limited: "bad", expired: "bad", disabled: "off" } as const)[info.state];
@@ -303,14 +343,15 @@ function SubPage() {
         ) : null}
       </motion.section>
 
-      {tgMode ? shopFor(subURL.slice(subURL.lastIndexOf("/") + 1), t("sub.shop")) : null}
+      {tgMode ? shopFor(token, t("sub.shop")) : null}
+      {tgMode ? packagesShop : null}
 
       <section className="glass grid grid-cols-[104px_1fr] items-center gap-4 rounded-3xl p-4">
         <Ring size={104} pct={info.limit != null ? pct : 100} label={leftValue} sub={left != null ? t("sub.left", { unit: leftUnit ?? "" }) : t("users.unlimited")} />
         <div className="flex flex-col gap-2 text-xs text-[var(--ink-500)]">
           <div>
             {t("userDrawer.used")}
-            <b className="num block text-base font-medium text-[var(--ink-900)]">{info.limit != null ? `${bytes(used)} ${t("users.of", { total: bytes(info.limit) })}` : bytes(used)}</b>
+            <b className="num block text-base font-medium text-[var(--ink-900)]">{info.limit != null ? `${bytes(used)} ${ofTotal(info.limit, extra)}` : bytes(used)}</b>
           </div>
           {info.resets_at ? (
             <div>
@@ -335,10 +376,10 @@ function SubPage() {
               <li key={p.name}>
                 <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
                   <span className="font-medium">{p.name}</span>
-                  <span className="num text-xs text-[var(--ink-600)]">{p.limit != null ? `${bytes(p.used)} ${t("users.of", { total: bytes(p.limit) })}` : bytes(p.used)}</span>
+                  <span className="num text-xs text-[var(--ink-600)]">{p.limit != null ? `${bytes(p.used)} ${ofTotal(p.limit, p.extra ?? 0)}` : bytes(p.used)}</span>
                 </div>
-                {p.limit != null ? <Bar pct={Math.min(100, (p.used / p.limit) * 100)} /> : null}
-                {p.limit != null && p.used >= p.limit ? <p className="mt-1 text-xs text-[var(--berry-600)]">{t("sub.poolOut")}</p> : null}
+                {p.limit != null ? <Bar pct={Math.min(100, (p.used / (Math.max(p.limit, p.used) + (p.extra ?? 0))) * 100)} /> : null}
+                {p.limit != null && p.used >= p.limit && !p.extra ? <p className="mt-1 text-xs text-[var(--berry-600)]">{t("sub.poolOut")}</p> : null}
               </li>
             ))}
           </ul>

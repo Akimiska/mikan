@@ -11,6 +11,7 @@ import { t } from "../../i18n";
 import { ago, appName, bytes, dateLong, dateShort, days, expiryText, fromInputDate, inputDate, maskIP, months } from "../../lib/format";
 import { PoolLimitsField } from "./pools";
 import { tariffSummary } from "./tariffs";
+import { GrantsSection } from "./user-grants";
 
 export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }) {
   const user = useUser(id);
@@ -101,6 +102,7 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
       <TariffSection u={u} />
       <TrafficSection u={u} />
       <PoolsSection u={u} />
+      <GrantsSection u={u} />
       <ExpirySection u={u} />
       <SubscriptionSection u={u} onReissue={() => setConfirm("reissue")} />
       <TelegramSection u={u} />
@@ -236,7 +238,10 @@ function TrafficSection({ u }: { u: User }) {
         <div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs text-[var(--ink-500)]">
             <Stat label={t("userDrawer.used")} value={bytes(used)} />
-            <Stat label={t("userDrawer.left")} value={u.traffic_limit != null ? bytes(Math.max(0, u.traffic_limit - used)) : "∞"} />
+            <Stat label={t("userDrawer.left")} value={u.traffic_limit != null ? bytes(Math.max(0, u.traffic_limit - used) + u.traffic_extra) : "∞"} />
+            {u.traffic_limit != null && u.traffic_extra > 0 ? (
+              <div className="col-span-2 text-[var(--ink-600)]">{t("grants.plusPackages", { limit: bytes(u.traffic_limit), extra: bytes(u.traffic_extra) })}</div>
+            ) : null}
             <Stat label={t("chart.down")} value={bytes(u.used_down)} />
             <Stat label={t("chart.up")} value={bytes(u.used_up)} />
           </div>
@@ -705,7 +710,9 @@ function PoolsSection({ u }: { u: User }) {
                 <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
                   <span className="font-medium">{p.name}</span>
                   <span className="num text-xs text-[var(--ink-600)]">
-                    {p.traffic_limit != null ? `${bytes(used)} ${t("users.of", { total: bytes(p.traffic_limit) })}` : `${bytes(used)} · ${t("users.unlimited")}`}
+                    {p.traffic_limit != null
+                      ? `${bytes(used)} ${t("users.of", { total: p.extra > 0 ? t("grants.plusPackages", { limit: bytes(p.traffic_limit), extra: bytes(p.extra) }) : bytes(p.traffic_limit) })}`
+                      : `${bytes(used)} · ${t("users.unlimited")}`}
                   </span>
                 </div>
                 {p.traffic_limit != null ? <Bar pct={Math.min(100, (used / p.traffic_limit) * 100)} /> : null}

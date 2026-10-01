@@ -32,7 +32,7 @@ type ClientOverrides struct {
 	Server      string `json:"server,omitempty" yaml:"server,omitempty"`
 	Port        int    `json:"port,omitempty" yaml:"port,omitempty"`
 	SNI         string `json:"sni,omitempty" yaml:"sni,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty" yaml:"fingerprint,omitempty"` // uTLS profile, chrome by default
+	Fingerprint string `json:"fingerprint,omitempty" yaml:"fingerprint,omitempty"` // uTLS profile (Fingerprints); the panel's default when empty
 }
 
 // Error is a validation failure: Code is stable (the UI translates it), Field names the

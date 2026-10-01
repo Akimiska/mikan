@@ -20,6 +20,9 @@ const (
 	KeyGroupMain  = "sub_group_main" // subscription group names, see subs.Groups
 	KeyGroupAuto  = "sub_group_auto"
 	KeyRouting    = "sub_routing" // subs.Routing
+	// KeyFingerprint is the uTLS profile clients get where an inbound sets none
+	// (proto.Fingerprints); unset means proto.DefaultFingerprint.
+	KeyFingerprint = "client_fingerprint"
 	// Automatic moves (internal/panel/autotune), on unless switched off.
 	KeyAutoPort = "auto_port" // move an inbound whose port is blocked on the way to clients
 	KeyAutoSNI  = "auto_sni"  // replace a REALITY target that stopped working

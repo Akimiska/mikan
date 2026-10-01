@@ -7,6 +7,7 @@ import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
+import { FINGERPRINTS, fingerprintLabel } from "../../lib/fingerprints";
 import { ago, destIsIP, maskedAs } from "../../lib/format";
 
 import { nodeLabel } from "./nodes";
@@ -480,6 +481,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
   const [port, setPort] = useState("");
   const [dest, setDest] = useState("");
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
+  const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
   const [name, setName] = useState("");
   const [config, setConfig] = useState("");
   const [autoPort, setAutoPort] = useState(true);
@@ -492,6 +494,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
     setPort(inbound.port);
     setDest(inbound.dest ?? "");
     setSni(inbound.server_names?.[0] ?? "");
+    setFp(inbound.fingerprint ?? "");
     setName(inbound.display_name);
     setConfig(inbound.config);
     setAutoPort(inbound.auto_port);
@@ -542,6 +545,7 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
         if (ip) body.server_name = sni.trim();
       }
     }
+    if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
     if (autoPort !== inbound?.auto_port) body.auto_port = autoPort;
     if (autoSni !== inbound?.auto_sni) body.auto_sni = autoSni;
     if (Object.keys(body).length === 0) {
@@ -641,6 +645,28 @@ function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: ()
                     />
                   ) : null}
                 </>
+              ) : null}
+              {inbound?.fingerprint !== undefined ? (
+                <Field label={t("inbounds.fingerprint")} htmlFor="ed-fp" error={errors.fingerprint} hint={configChanged ? t("inbounds.fingerprintLocked") : t("inbounds.fingerprintHint")}>
+                  <select
+                    id="ed-fp"
+                    className="input max-w-[320px]"
+                    value={fp}
+                    onChange={(e) => {
+                      setFp(e.target.value);
+                      setErrors(({ fingerprint: _, ...rest }) => rest);
+                    }}
+                    aria-invalid={!!errors.fingerprint}
+                    disabled={configChanged}
+                  >
+                    <option value="">{t("inbounds.fingerprintDefault", { fp: fingerprintLabel(settings.data?.client_fingerprint ?? "chrome") })}</option>
+                    {FINGERPRINTS.map((x) => (
+                      <option key={x} value={x}>
+                        {fingerprintLabel(x)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
               ) : null}
               <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("inbounds.auto")}>
                 <div className="mb-1 text-[13px] font-semibold">{t("inbounds.auto")}</div>

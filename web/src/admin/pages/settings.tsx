@@ -9,6 +9,7 @@ import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Button, ErrorState, Field, PageHeader, Pill, QR, Skeleton, Switch } from "../../components/ui";
 import { getLocale, LOCALES, t, tMaybe } from "../../i18n";
+import { FINGERPRINTS, fingerprintLabel, type Fingerprint } from "../../lib/fingerprints";
 import { ago } from "../../lib/format";
 
 export function SettingsPage() {
@@ -104,13 +105,13 @@ const routingModes = [
 function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   const inbounds = useInbounds();
-  const init = () => ({ brand: s.brand, support_url: s.support_url, sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, sub_routing: s.sub_routing });
+  const init = () => ({ brand: s.brand, support_url: s.support_url, sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, sub_routing: s.sub_routing, client_fingerprint: s.client_fingerprint });
   const [form, setForm] = useState(init);
   useEffect(() => setForm(init()), [s]);
   const errors = save.error instanceof ApiError ? save.error.fields : {};
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate({ brand: form.brand, support_url: form.support_url, sub_group_main: form.sub_group_main.trim(), sub_group_auto: form.sub_group_auto.trim(), sub_routing: form.sub_routing });
+    save.mutate({ brand: form.brand, support_url: form.support_url, sub_group_main: form.sub_group_main.trim(), sub_group_auto: form.sub_group_auto.trim(), sub_routing: form.sub_routing, client_fingerprint: form.client_fingerprint });
   };
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const proxies = (inbounds.data ?? []).filter((i) => i.enabled).map((i) => i.sub_name);
@@ -161,6 +162,21 @@ function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
               </button>
             ))}
           </div>
+        </Field>
+        <Field label={t("settings.fingerprint")} htmlFor="s-fp" hint={t("settings.fingerprintHint")} error={errors.client_fingerprint}>
+          <select
+            id="s-fp"
+            className="input max-w-[320px]"
+            value={form.client_fingerprint}
+            onChange={(e) => setForm((f) => ({ ...f, client_fingerprint: e.target.value as Fingerprint }))}
+            aria-invalid={!!errors.client_fingerprint}
+          >
+            {FINGERPRINTS.map((fp) => (
+              <option key={fp} value={fp}>
+                {fingerprintLabel(fp)}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label={t("settings.support")} htmlFor="s-support" hint={t("settings.supportHint")} error={errors.support_url}>
           <input id="s-support" className="input" value={form.support_url} onChange={set("support_url")} placeholder="https://t.me/your_support" aria-invalid={!!errors.support_url} />

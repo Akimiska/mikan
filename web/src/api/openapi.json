@@ -616,6 +616,10 @@
           "error": {
             "type": "string"
           },
+          "fingerprint": {
+            "description": "Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек",
+            "type": "string"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -1177,6 +1181,11 @@
           "enabled": {
             "type": "boolean"
           },
+          "fingerprint": {
+            "description": "Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек",
+            "maxLength": 16,
+            "type": "string"
+          },
           "port": {
             "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
             "type": "string"
@@ -1221,6 +1230,21 @@
           },
           "brand": {
             "maxLength": 40,
+            "type": "string"
+          },
+          "client_fingerprint": {
+            "enum": [
+              "chrome",
+              "firefox",
+              "safari",
+              "ios",
+              "android",
+              "edge",
+              "360",
+              "qq",
+              "random",
+              "randomized"
+            ],
             "type": "string"
           },
           "default_lang": {
@@ -1543,6 +1567,22 @@
           "certificate": {
             "$ref": "#/components/schemas/Status"
           },
+          "client_fingerprint": {
+            "description": "Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой",
+            "enum": [
+              "chrome",
+              "firefox",
+              "safari",
+              "ios",
+              "android",
+              "edge",
+              "360",
+              "qq",
+              "random",
+              "randomized"
+            ],
+            "type": "string"
+          },
           "default_lang": {
             "description": "Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота",
             "enum": [
@@ -1610,6 +1650,7 @@
           "sub_group_main",
           "sub_group_auto",
           "sub_routing",
+          "client_fingerprint",
           "auto_port",
           "auto_sni",
           "device_binding",

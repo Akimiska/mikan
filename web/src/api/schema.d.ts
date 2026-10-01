@@ -956,6 +956,8 @@ export interface components {
             display_name: string;
             enabled: boolean;
             error?: string;
+            /** @description Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек */
+            fingerprint?: string;
             /** Format: int64 */
             id: number;
             name: string;
@@ -1125,6 +1127,8 @@ export interface components {
             /** @description Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию */
             display_name?: string;
             enabled?: boolean;
+            /** @description Отпечаток TLS у клиентов (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized); пусто — общий из настроек */
+            fingerprint?: string;
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
@@ -1139,6 +1143,8 @@ export interface components {
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
+            /** @enum {string} */
+            client_fingerprint?: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
             /** @enum {string} */
             default_lang?: "auto" | "ru" | "en";
             device_binding?: boolean;
@@ -1243,6 +1249,11 @@ export interface components {
             auto_sni: boolean;
             brand: string;
             certificate: components["schemas"]["Status"];
+            /**
+             * @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой
+             * @enum {string}
+             */
+            client_fingerprint: "chrome" | "firefox" | "safari" | "ios" | "android" | "edge" | "360" | "qq" | "random" | "randomized";
             /**
              * @description Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота
              * @enum {string}

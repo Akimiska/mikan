@@ -31,6 +31,8 @@ type Config struct {
 	Direct     []string // the panel's and nodes' hosts: kept out of the tunnel
 	Groups     Groups
 	Routing    Routing
+	// Fingerprint is the default uTLS profile for inbounds that set none.
+	Fingerprint string
 	// Binding gives every device that sends its id keys of its own (domain.Devices);
 	// RequireHWID refuses apps that send none instead of seating them together.
 	Binding     bool
@@ -269,7 +271,7 @@ func (h *Handler) slotFor(r *http.Request, u db.User, cfg Config) (db.Slot, erro
 
 // profile lists what the user may use; slot is whose keys go in (zero for the page).
 func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Slot) (Profile, error) {
-	prof := Profile{Nodes: cfg.Nodes, Direct: cfg.Direct, Slot: slot}
+	prof := Profile{Nodes: cfg.Nodes, Direct: cfg.Direct, Slot: slot, Fingerprint: cfg.Fingerprint}
 	all, err := h.st.Q.ListInbounds(ctx)
 	if err != nil {
 		return prof, err

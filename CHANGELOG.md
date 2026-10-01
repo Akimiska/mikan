@@ -3,6 +3,13 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.4.0
+### en
+- Pick the TLS fingerprint clients send: Settings → Subscription sets the default for all protocols, and a protocol's settings can choose its own (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ or a random one). Links (`fp=`) and Clash profiles (`client-fingerprint`) follow the choice; Hysteria2 and TUIC have no such fingerprint.
+
+### ru
+- Выбор TLS-отпечатка клиентов: в «Настройки → Подписка» — общий для всех протоколов, в настройках протокола — свой (Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ или случайный). Ссылки (`fp=`) и Clash-профили (`client-fingerprint`) берут выбранный; у Hysteria2 и TUIC такого отпечатка нет.
+
 ## 0.3.9
 ### en
 - The panel has a default language, picked at install: the admin panel and the subscription page open in it until a visitor picks their own, and default names (tariffs, the auto-select group, the bot's menu) are in it. Settings → Default language changes it; "Browser language" keeps the old behaviour.

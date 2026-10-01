@@ -1167,7 +1167,14 @@
     "routeProxyHint": "SOCKS5 или HTTP(S): socks5://логин:пароль@хост:порт. Пароль хранится в панели и больше не показывается.",
     "routeProxyKeep": "Сохранён {proxy}. Оставьте поле пустым, чтобы его не менять.",
     "routeSave": "Проверить и сохранить",
-    "routeSaved": "Бот ходит в Telegram: {how}"
+    "routeSaved": "Бот ходит в Telegram: {how}",
+    "tabs": {
+      "connect": "Подключение",
+      "menu": "Меню и тексты",
+      "notify": "Уведомления",
+      "broadcast": "Рассылка"
+    },
+    "sections": "Разделы бота"
   },
   "apiPage": {
     "title": "API",

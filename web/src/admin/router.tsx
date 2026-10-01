@@ -10,7 +10,7 @@ import { SETTINGS_TABS, SettingsPage, type SettingsSearch } from "./pages/settin
 import { TariffsPage } from "./pages/tariffs";
 import { ApiPage } from "./pages/api";
 import { PaymentsPage } from "./pages/payments";
-import { TelegramPage } from "./pages/telegram";
+import { TELEGRAM_TABS, TelegramPage, type TelegramSearch } from "./pages/telegram";
 import { UsersPage, type UsersSearch } from "./pages/users";
 import { Shell } from "./shell";
 
@@ -66,7 +66,14 @@ export function createAppRouter(queryClient: QueryClient) {
       tab: SETTINGS_TABS.includes(s.tab as SettingsSearch["tab"]) ? (s.tab as SettingsSearch["tab"]) : "general",
     }),
   });
-  const telegram = createRoute({ getParentRoute: () => app, path: "/telegram", component: TelegramPage });
+  const telegram = createRoute({
+    getParentRoute: () => app,
+    path: "/telegram",
+    component: TelegramPage,
+    validateSearch: (s: Record<string, unknown>): TelegramSearch => ({
+      tab: TELEGRAM_TABS.includes(s.tab as TelegramSearch["tab"]) ? (s.tab as TelegramSearch["tab"]) : "connect",
+    }),
+  });
   const payments = createRoute({ getParentRoute: () => app, path: "/payments", component: PaymentsPage });
   const apiDocs = createRoute({ getParentRoute: () => app, path: "/settings/api", component: ApiPage });
   // The API section lived in the sidebar until 0.4.2: old links land on its new place.

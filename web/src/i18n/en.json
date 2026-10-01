@@ -1167,7 +1167,14 @@
     "routeProxyHint": "SOCKS5 or HTTP(S): socks5://login:password@host:port. The password stays in the panel and is not shown again.",
     "routeProxyKeep": "Saved: {proxy}. Leave the field empty to keep it.",
     "routeSave": "Check and save",
-    "routeSaved": "The bot reaches Telegram: {how}"
+    "routeSaved": "The bot reaches Telegram: {how}",
+    "tabs": {
+      "connect": "Connection",
+      "menu": "Menu and texts",
+      "notify": "Notifications",
+      "broadcast": "Broadcast"
+    },
+    "sections": "Bot sections"
   },
   "apiPage": {
     "title": "API",

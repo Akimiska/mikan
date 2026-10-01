@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Link } from "@tanstack/react-router";
-import { ArrowDown, ArrowUp, Bot, Globe, Link2, Network, Plus, Send, Shield, Trash2, TriangleAlert } from "lucide-react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { ArrowDown, ArrowUp, Bell, Bot, Globe, LayoutList, Link2, Megaphone, Network, Plus, PlugZap, Send, Shield, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes, useSettings } from "../../api/hooks";
 import { ago, num } from "../../lib/format";
 import { Confirm } from "../../components/overlay";
+import { Columns, Tabs } from "../../components/tabs";
 import { useToast } from "../../components/toast";
 import { Bar, Button, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
@@ -15,6 +16,10 @@ type View = Schemas["TelegramView"];
 type Config = Schemas["Config"];
 type MenuButton = Schemas["MenuButton"];
 type TextKey = keyof Schemas["Texts"];
+
+export const TELEGRAM_TABS = ["connect", "menu", "notify", "broadcast"] as const;
+export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };
+const TAB_ICONS = { connect: PlugZap, menu: LayoutList, notify: Bell, broadcast: Megaphone } as const;
 
 function useTelegram() {
   return useQuery({
@@ -35,7 +40,14 @@ function usePatchTelegram() {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+/**
+ * The bot in four sections: connecting it, its menu and texts, notifications and options,
+ * broadcasts. Menu, texts and options are one draft saved together from the bar below,
+ * whichever section they were changed in.
+ */
 export function TelegramPage() {
+  const { tab } = useSearch({ from: "/_app/telegram" });
+  const navigate = useNavigate({ from: "/telegram" });
   const tg = useTelegram();
   const patch = usePatchTelegram();
   const toast = useToast();
@@ -73,19 +85,43 @@ export function TelegramPage() {
           <ErrorState text={errorText(tg.error)} onRetry={() => void tg.refetch()} />
         </section>
       ) : (
-        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="flex min-w-0 flex-col gap-4">
-            <ConnectCard v={tg.data} />
-            <RouteCard v={tg.data} />
-            <MenuCard draft={draft!} setDraft={setDraft} />
-            <TextsCard draft={draft!} setDraft={setDraft} defaults={tg.data.defaults} />
-            <OptionsCard draft={draft!} setDraft={setDraft} v={tg.data} />
-            <BroadcastCard v={tg.data} />
-          </div>
-          <div className="min-w-0 xl:sticky xl:top-4">
-            <Preview draft={draft!} v={tg.data} />
-          </div>
-        </div>
+        <Tabs
+          id="telegram"
+          label={t("telegram.sections")}
+          tabs={TELEGRAM_TABS.map((id) => ({ id, label: t(`telegram.tabs.${id}`), icon: TAB_ICONS[id] }))}
+          value={tab}
+          onChange={(next) => void navigate({ search: { tab: next }, replace: true })}
+        >
+          {tab === "connect" ? (
+            <Columns
+              wide="left"
+              left={
+                <>
+                  <ConnectCard v={tg.data} />
+                  <RouteCard v={tg.data} />
+                </>
+              }
+              right={<Preview draft={draft!} v={tg.data} />}
+            />
+          ) : tab === "menu" ? (
+            <Columns
+              wide="left"
+              left={
+                <>
+                  <MenuCard draft={draft!} setDraft={setDraft} />
+                  <TextsCard draft={draft!} setDraft={setDraft} defaults={tg.data.defaults} />
+                </>
+              }
+              right={<Preview draft={draft!} v={tg.data} />}
+            />
+          ) : tab === "notify" ? (
+            <Columns wide="left" left={<OptionsCard draft={draft!} setDraft={setDraft} v={tg.data} />} right={<Preview draft={draft!} v={tg.data} />} />
+          ) : (
+            <div className="max-w-3xl">
+              <BroadcastCard v={tg.data} />
+            </div>
+          )}
+        </Tabs>
       )}
       <AnimatePresence>
         {dirty ? (

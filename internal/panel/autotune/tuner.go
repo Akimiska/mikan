@@ -629,22 +629,11 @@ func (t *Tuner) replaceTarget(ctx context.Context, w *world, n db.Node, x db.Inb
 		t.setStuck(x.ID, "no_target")
 		return false
 	}
-	if err := presets.SetDest(tpl, pick.Dest, pick.SNI); err != nil {
-		t.log.Error("autotune: set target", "inbound", x.Name, "err", err)
-		return false
-	}
-	var opts proto.Options
-	if n.Address == "" {
-		opts.SelfStealPort = w.panelPort
-	}
-	if err := proto.Validate(tpl, opts); err != nil {
-		t.log.Error("autotune: new target", "inbound", x.Name, "err", err)
-		return false
-	}
-	next, err := t.st.Q.UpdateInbound(ctx, db.UpdateInboundParams{Port: x.Port, Enabled: x.Enabled, Config: proto.Marshal(tpl), DisplayName: x.DisplayName,
-		UpdatedAt: w.now.Unix(), ID: x.ID})
+	// The scan above took minutes at most; the admin may have edited the inbound meanwhile.
+	// Update applies the new target to the row as it is now, not to the round's snapshot.
+	_, next, err := t.inbounds.Update(ctx, x.ID, domain.InboundPatch{Dest: &pick.Dest, ServerName: &pick.SNI})
 	if err != nil {
-		t.log.Error("autotune: save target", "inbound", x.Name, "err", err)
+		t.log.Error("autotune: new target", "inbound", x.Name, "err", err)
 		return false
 	}
 	old := oldDest

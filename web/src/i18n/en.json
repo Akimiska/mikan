@@ -228,6 +228,7 @@
       "pool_name_taken": "A pool with this name already exists",
       "pool_not_found": "No such pool",
       "pool_duplicate": "The pool is listed twice",
+      "inbound_changed": "The inbound was just changed elsewhere: open it again and retry",
       "bad_listen": "One IP address is required, e.g. 127.0.0.1",
       "auto_port_listen": "Port moves cannot be turned on while the connection listens on its own address: the proxy in front would not know the new port",
       "config_client_server": "The address is a domain or an IP",

@@ -26,7 +26,16 @@ var (
 	ErrBadListen      = errors.New("bad_listen")
 	ErrAutoPortListen = errors.New("auto_port_listen") // a proxy in front would not learn the new port
 	ErrUnknownPool    = errors.New("pool_not_found")
+	// ErrInboundChanged: someone else kept changing the inbound while the change was
+	// checked; nothing was written, the caller may try again.
+	ErrInboundChanged = errors.New("inbound_changed")
 )
+
+// errStale: the inbound differs from the row the checks of this attempt ran on.
+var errStale = errors.New("inbound changed under the checks")
+
+// updateTries is how often Update checks again on a row that changed under it.
+const updateTries = 3
 
 // EditError is a form field the inbound's template does not take. Field is the field
 // ("dest", "fingerprint", "obfs", "client"); Err is the template's reason, its Field
@@ -163,8 +172,22 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 }
 
 // Update changes an inbound and returns it before and after. Every field is checked
-// before anything is written, and everything is written in one transaction.
+// before anything is written, and everything is written in one transaction. The checks
+// reach the node over the network, so the patch is applied to the row they ran on and the
+// transaction writes only if the row is still that one: a change made meanwhile (the
+// automatic moves, the CLI, another admin) is checked again, never overwritten with a
+// copy of the old row.
 func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, next db.Inbound, err error) {
+	for range updateTries {
+		prev, next, err = s.update(ctx, id, p)
+		if !errors.Is(err, errStale) {
+			return prev, next, err
+		}
+	}
+	return db.Inbound{}, db.Inbound{}, ErrInboundChanged
+}
+
+func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, next db.Inbound, err error) {
 	fail := func(err error) (db.Inbound, db.Inbound, error) { return db.Inbound{}, db.Inbound{}, err }
 	prev, err = s.st.Q.GetInbound(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -244,6 +267,16 @@ func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		}
 	}
 	err = s.st.Tx(ctx, func(q *db.Queries) error {
+		cur, err := q.GetInbound(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUnknownInbound
+		}
+		if err != nil {
+			return err
+		}
+		if cur != prev {
+			return errStale
+		}
 		// What other rows hold is checked on the transaction that writes.
 		if listens {
 			if err := CheckPort(ctx, q, node, next.Port, network, InboundHolder(prev)); err != nil {

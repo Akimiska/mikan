@@ -343,6 +343,8 @@ func inboundError(err error, dest bool) error {
 		return huma.Error422UnprocessableEntity("bad_listen", &huma.ErrorDetail{Location: "body.listen", Message: "bad_listen"})
 	case errors.Is(err, domain.ErrAutoPortListen):
 		return huma.Error422UnprocessableEntity("auto_port_listen", &huma.ErrorDetail{Location: "body.auto_port", Message: "auto_port_listen"})
+	case errors.Is(err, domain.ErrInboundChanged):
+		return huma.Error409Conflict("inbound_changed")
 	case errors.Is(err, domain.ErrUnknownPool):
 		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pool_id", Message: "pool_not_found"})
 	case errors.As(err, &name):

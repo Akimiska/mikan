@@ -18,10 +18,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
@@ -94,6 +96,10 @@ type Deps struct {
 	// TrustProxy reads the client's IP from X-Forwarded-For (the YooKassa IP check).
 	TrustProxy bool
 	MaxLinks   int64 // subscriptions one Telegram account may hold
+	// Addons are the marketplace's payment adapters; nil: none.
+	Addons *addons.Manager
+	// SubBase is https://host:port/<sub path>, where the webhooks are; "" without an address.
+	SubBase func(ctx context.Context) string
 }
 
 type Service struct {
@@ -189,9 +195,27 @@ func (s *Service) secrets(ctx context.Context) Secrets {
 // on, configured and, for Stars, with the bot running.
 type Available struct {
 	Stars, YooKassa, CryptoBot bool
+	// Addons are the adapters that take rubles now, by id.
+	Addons []string
 }
 
-func (a Available) Any() bool { return a.Stars || a.YooKassa || a.CryptoBot }
+func (a Available) Any() bool { return a.Stars || a.Rub() }
+
+// Rub: some provider takes rubles.
+func (a Available) Rub() bool { return a.YooKassa || a.CryptoBot || len(a.Addons) > 0 }
+
+func (a Available) has(provider string) bool {
+	switch provider {
+	case Stars:
+		return a.Stars
+	case YooKassa:
+		return a.YooKassa
+	case CryptoBot:
+		return a.CryptoBot
+	}
+	id := AddonID(provider)
+	return id != "" && slices.Contains(a.Addons, id)
+}
 
 func (s *Service) Available(ctx context.Context) Available {
 	c, sec := s.Config(ctx), s.secrets(ctx)
@@ -203,6 +227,7 @@ func (s *Service) Available(ctx context.Context) Available {
 		Stars:     c.Stars && tg != nil && tg.BotURL(ctx) != "",
 		YooKassa:  c.YooKassa && c.ShopID != "" && sec.YooKassaSecret != "",
 		CryptoBot: c.CryptoBot && sec.CryptoBotToken != "",
+		Addons:    s.availableAddons(ctx),
 	}
 }
 
@@ -229,7 +254,7 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 		if av.Stars && t.PriceStars.Valid {
 			o.Stars = t.PriceStars.Int64
 		}
-		if (av.YooKassa || av.CryptoBot) && t.PriceRub.Valid {
+		if av.Rub() && t.PriceRub.Valid {
 			o.Rub = t.PriceRub.Int64
 		}
 		if o.Stars > 0 || o.Rub > 0 {
@@ -264,7 +289,7 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 	switch {
 	case req.Provider == Stars && av.Stars && t.PriceStars.Valid:
 		amount, currency = t.PriceStars.Int64, "XTR"
-	case (req.Provider == YooKassa && av.YooKassa || req.Provider == CryptoBot && av.CryptoBot) && t.PriceRub.Valid:
+	case req.Provider != Stars && av.has(req.Provider) && t.PriceRub.Valid:
 		amount, currency = t.PriceRub.Int64, "RUB"
 	default:
 		return db.Payment{}, ErrProviderOff
@@ -359,6 +384,9 @@ func (s *Service) openInvoice(ctx context.Context, p db.Payment, t db.Tariff) (s
 		}
 		id, url, err := cb.create(ctx, p.Payload, p.Amount, title+" — "+desc, back)
 		return sql.NullString{String: id, Valid: id != ""}, url, err
+	}
+	if AddonID(p.Provider) != "" {
+		return s.openAddonInvoice(ctx, p, title+" — "+desc)
 	}
 	return sql.NullString{}, "", ErrProviderOff
 }
@@ -574,6 +602,8 @@ func (s *Service) Reconcile(ctx context.Context) {
 			_ = s.checkYooKassa(ctx, p.ExternalID.String)
 		case p.Provider == CryptoBot && p.ExternalID.Valid:
 			_ = s.checkCryptoBot(ctx, p.ExternalID.String)
+		case AddonID(p.Provider) != "" && p.ExternalID.Valid:
+			_ = s.checkAddon(ctx, p.Provider, p.ExternalID.String)
 		}
 	}
 	if _, err := q.ExpirePayments(ctx, now.Add(-pendingTTL).Unix()); err != nil {
@@ -594,9 +624,14 @@ func (s *Service) WebhookToken(ctx context.Context) (string, error) {
 // errCode keeps provider errors short and free of secrets for the payments list.
 func errCode(err error) string {
 	var pe *providerError
+	var ae *addons.Error
 	switch {
 	case errors.As(err, &pe):
 		return pe.Code
+	case errors.As(err, &ae):
+		return ae.Code
+	case errors.Is(err, addons.ErrUnreachable), errors.Is(err, addons.ErrNotInstalled):
+		return "addon_unreachable"
 	case errors.Is(err, domain.ErrNoSlots):
 		return "no_slots"
 	case errors.Is(err, context.DeadlineExceeded):

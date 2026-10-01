@@ -14,6 +14,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
+	"mikan/internal/panel/addons"
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
@@ -40,6 +41,7 @@ type Panel struct {
 	Telegram  *tgbot.Bot
 	Billing   *billing.Service
 	Updates   *updates.Checker
+	Addons    *addons.Manager
 	server    *server.Server
 	spa       *server.SPA
 	subPage   *server.SPA
@@ -83,6 +85,8 @@ type Options struct {
 	YooKassaAPI, CryptoBotAPI string
 	// WarpAPI is Cloudflare's WARP client API; "" is the real one.
 	WarpAPI string
+	// AddonsCatalog is the marketplace's signed catalog; "" is the real one.
+	AddonsCatalog string
 }
 
 type noChanges struct{}
@@ -146,8 +150,11 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return ""
 	}
+	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
+	deps.Addons = p.Addons
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
-		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks})
+		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks,
+		Addons: deps.Addons, SubBase: subBase})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)

@@ -56,7 +56,7 @@ type patchPaymentSettingsInput struct {
 
 type PaymentView struct {
 	ID         int64      `json:"id"`
-	Provider   string     `json:"provider" enum:"stars,yookassa,cryptobot"`
+	Provider   string     `json:"provider" doc:"stars, yookassa, cryptobot или addon:<id> — адаптер маркетплейса"`
 	Kind       string     `json:"kind" enum:"new,renew"`
 	Status     string     `json:"status" enum:"pending,paid,applied,expired,failed,refunded"`
 	TgID       int64      `json:"tg_id"`
@@ -82,7 +82,7 @@ type PaymentTotal struct {
 
 type listPaymentsInput struct {
 	Status   string `query:"status" enum:"pending,paid,applied,expired,failed,refunded,"`
-	Provider string `query:"provider" enum:"stars,yookassa,cryptobot,"`
+	Provider string `query:"provider" pattern:"^(stars|yookassa|cryptobot|addon:[a-z0-9][a-z0-9-]{0,31})?$"`
 	UserID   int64  `query:"user_id" minimum:"0"`
 	Before   int64  `query:"before" minimum:"0" doc:"id последнего платежа предыдущей страницы"`
 	Limit    int64  `query:"limit" minimum:"1" maximum:"200" default:"50"`

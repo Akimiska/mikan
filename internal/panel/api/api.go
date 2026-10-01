@@ -17,6 +17,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
+	"mikan/internal/panel/addons"
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
@@ -80,6 +81,8 @@ type Deps struct {
 	NodeCerts *tlscert.NodeStore
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
+	// Addons are the marketplace's payment adapters; nil in tests.
+	Addons *addons.Manager
 }
 
 // NodeRuntime is what the API needs from the running nodes.
@@ -182,6 +185,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerNodes()
 	h.registerAPIKeys()
 	h.registerPayments()
+	h.registerAddons()
 	h.registerWarp()
 	h.registerCascade()
 	h.registerPools()

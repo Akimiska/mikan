@@ -112,6 +112,20 @@ func TestManagerAndClient(t *testing.T) {
 	if err := m.Ask("remove", "yookassa"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second request while one waits: %v", err)
 	}
+	// An update the admin asked for is not turned into an adapter request.
+	other := t.TempDir()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.MkdirAll(filepath.Join(other, "update"), 0o755))
+	must(os.WriteFile(filepath.Join(other, "update", "request"), []byte(`{"at":"2026-10-01T00:00:00Z"}`), 0o644))
+	must(New(other, "", "0.4.3", m.log, time.Now).Ask("install", "yookassa"))
+	if wake, _ := os.ReadFile(filepath.Join(other, "update", "request")); strings.Contains(string(wake), "addons") {
+		t.Fatalf("update request replaced: %s", wake)
+	}
 
 	// The host ran it.
 	var infos atomic.Int64

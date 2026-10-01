@@ -37,6 +37,9 @@ const CatalogURL = "https://github.com/getmikan/marketplace/releases/latest/down
 // Protocol is the adapter protocol this panel speaks.
 const Protocol = 1
 
+// AdapterTimeout bounds one call to an adapter: some make two calls to their provider.
+const AdapterTimeout = 40 * time.Second
+
 var (
 	ErrUnavailable  = errors.New("addons_unavailable") // no data directory (tests, the CLI)
 	ErrUnknown      = errors.New("addon_unknown")
@@ -157,7 +160,7 @@ type Manager struct {
 	catalogURL     string
 	pub            ed25519.PublicKey
 	version        string
-	hc             *http.Client
+	hc, adapters   *http.Client
 	log            *slog.Logger
 	now            func() time.Time
 
@@ -180,12 +183,15 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 	}
 	pub, _ := release.Key(release.PublicKey)
 	m := &Manager{catalogURL: catalogURL, pub: pub, version: panelVersion, log: log, now: now,
-		hc: &http.Client{Timeout: 15 * time.Second}, infos: map[string]cachedInfo{}}
+		hc: &http.Client{Timeout: 15 * time.Second}, adapters: &http.Client{Timeout: AdapterTimeout}, infos: map[string]cachedInfo{}}
 	if dataDir != "" {
 		m.dir, m.updateDir = filepath.Join(dataDir, "addons"), filepath.Join(dataDir, "update")
 	}
 	return m
 }
+
+// Supported: the panel sees the server's data directory, so the host can run adapters.
+func (m *Manager) Supported() bool { return m.dir != "" }
 
 // SetKey replaces the catalog key (tests sign with their own).
 func (m *Manager) SetKey(pub ed25519.PublicKey) { m.pub = pub }
@@ -283,7 +289,11 @@ func (m *Manager) Ask(action, id string) error {
 	if err := writeFile(m.dir, "request.json", Request{Action: action, ID: id, At: at}); err != nil {
 		return err
 	}
-	// The host's update request unit wakes up on this file: no unit of its own needed.
+	// The host's update request unit wakes up on this file: no unit of its own needed. An
+	// update the admin asked for stays asked: the host takes the adapters after it.
+	if _, err := os.Stat(filepath.Join(m.updateDir, "request")); err == nil {
+		return nil
+	}
 	return writeFile(m.updateDir, "request", map[string]string{"at": at, "do": "addons"})
 }
 
@@ -312,7 +322,7 @@ func (m *Manager) Client(id string) (*Client, error) {
 	if !ok || a.Status != "running" || a.Listen == "" {
 		return nil, ErrNotInstalled
 	}
-	return NewClient("http://"+a.Listen, a.Token, m.hc), nil
+	return NewClient("http://"+a.Listen, a.Token, m.adapters), nil
 }
 
 // Info is the adapter's own description, asked once per installed image.
@@ -331,7 +341,7 @@ func (m *Manager) Info(ctx context.Context, id string) (Info, error) {
 		return c.info, nil
 	}
 	m.mu.Unlock()
-	info, err := NewClient("http://"+a.Listen, a.Token, m.hc).Info(ctx)
+	info, err := NewClient("http://"+a.Listen, a.Token, m.adapters).Info(ctx)
 	if err != nil {
 		return Info{}, err
 	}

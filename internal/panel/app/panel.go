@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -143,6 +145,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom
 	}
 	deps.NodeCerts = o.NodeCerts
+	deps.ForgetNode = forgetNodeFiles(o)
 	subBase := func(ctx context.Context) string {
 		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {
@@ -315,6 +318,21 @@ func (p *Panel) Run(ctx context.Context) {
 		p.ipLimit.Sweep(p.now())
 		p.userLimit.Sweep(p.now())
 	})
+}
+
+// forgetNodeFiles removes what the panel keeps on disk for a node id: its own certificate
+// (Options.NodeCerts) and the self-signed pair its QUIC protocols use, <data>/tls/nodes/<id>.
+func forgetNodeFiles(o Options) func(id int64) error {
+	return func(id int64) error {
+		var errs []error
+		if o.NodeCerts != nil {
+			errs = append(errs, o.NodeCerts.Clear(id))
+		}
+		if o.DataDir != "" {
+			errs = append(errs, os.RemoveAll(filepath.Join(o.DataDir, "tls", "nodes", strconv.FormatInt(id, 10))))
+		}
+		return errors.Join(errs...)
+	}
 }
 
 func every(ctx context.Context, d time.Duration, fn func()) {

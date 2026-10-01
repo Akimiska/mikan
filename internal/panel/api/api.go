@@ -82,6 +82,8 @@ type Deps struct {
 	ClearCert func() error
 	// NodeCerts keeps the nodes' own certificates; nil: nodes cannot have one.
 	NodeCerts *tlscert.NodeStore
+	// ForgetNode removes the certificates and keys kept on disk for a node id; nil: none.
+	ForgetNode func(id int64) error
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
 	// Addons are the marketplace's payment adapters; nil in tests.

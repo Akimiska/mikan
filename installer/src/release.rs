@@ -63,16 +63,22 @@ pub fn latest() -> Result<Manifest> {
     parse(&data, &String::from_utf8_lossy(&sig), &key()?)
 }
 
-fn key() -> Result<VerifyingKey> {
+pub fn key() -> Result<VerifyingKey> {
     let raw: [u8; 32] = STANDARD.decode(PUBLIC_KEY)?.try_into().map_err(|_| anyhow::anyhow!("bad release key"))?;
     Ok(VerifyingKey::from_bytes(&raw)?)
 }
 
+/// Checks a signature of the release key over exact bytes (the manifest, the marketplace's
+/// catalog); what names the file goes into the errors.
+pub fn verify(data: &[u8], sig: &str, key: &VerifyingKey, what: &str) -> Result<()> {
+    let raw = STANDARD.decode(sig.trim()).with_context(|| format!("the {what}'s signature is not base64"))?;
+    let sig = Signature::from_slice(&raw).with_context(|| format!("the {what}'s signature is malformed"))?;
+    key.verify_strict(data, &sig).with_context(|| format!("the {what}'s signature does not match the release key"))
+}
+
 /// Checks the signature over the manifest's exact bytes, then what it says.
 pub fn parse(data: &[u8], sig: &str, key: &VerifyingKey) -> Result<Manifest> {
-    let raw = STANDARD.decode(sig.trim()).context("the manifest's signature is not base64")?;
-    let sig = Signature::from_slice(&raw).context("the manifest's signature is malformed")?;
-    key.verify_strict(data, &sig).context("the manifest's signature does not match the release key")?;
+    verify(data, sig, key, "manifest")?;
     let m: Manifest = serde_json::from_slice(data).context("the manifest is malformed")?;
     if semver(&m.version).is_none() {
         bail!("the manifest has a bad version {:?}", m.version);

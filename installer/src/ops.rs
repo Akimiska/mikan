@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::envfile::EnvFile;
 use crate::setup;
-use crate::{DIR, docker, host, net, release, system};
+use crate::{DIR, addon, docker, host, net, release, system};
 
 pub struct Install {
     pub env: EnvFile,
@@ -181,7 +181,7 @@ pub fn restart() -> Result<()> {
     Ok(())
 }
 
-fn now(format: &str) -> String {
+pub fn now(format: &str) -> String {
     system::output("date", &["-u", format]).map(|s| s.trim().to_owned()).unwrap_or_else(|| "now".into())
 }
 
@@ -293,8 +293,19 @@ fn report(install: &Install, state: &str, version: &str, from: &str, error: &str
 /// Updates to the latest release (or target) and rolls back when the new version does
 /// not start; then updates this command too.
 pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64)) -> Result<()> {
+    // The panel wakes this unit for its payment adapters too ({"do": "addons"}).
+    if a.requested && addons_requested()? {
+        return panel_addons(say);
+    }
     let mut reported = false;
     let r = update_to(a, say, progress, &mut reported);
+    // An adapter request that came while an update was asked for waits for it.
+    if a.requested
+        && addon::pending()
+        && let Err(e) = panel_addons(say)
+    {
+        say(&format!("Payment adapters: {e:#}"));
+    }
     // The admin pressed Update and waits: a failure before the update began (no network,
     // no release) still reaches the panel.
     if let (Err(e), true, false) = (&r, a.requested, reported)
@@ -303,6 +314,29 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
         report(&install, "failed", "", &install.version(), &format!("{e:#}"));
     }
     r
+}
+
+/// Takes the panel's request when it is for the adapters; an update request stays for
+/// update_to.
+fn addons_requested() -> Result<bool> {
+    let path = format!("{UPDATE_DIR}/request");
+    let data = match fs::read(&path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    let v: serde_json::Value = serde_json::from_slice(&data).unwrap_or_default();
+    if v["do"] != "addons" {
+        return Ok(false);
+    }
+    fs::remove_file(&path)?;
+    Ok(true)
+}
+
+fn panel_addons(say: &mut dyn FnMut(&str)) -> Result<()> {
+    let install = Install::load()?;
+    install.panel_only()?;
+    addon::apply(&install.version(), say)
 }
 
 fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64), reported: &mut bool) -> Result<()> {
@@ -431,6 +465,7 @@ pub fn join(key: &str) -> Result<()> {
 pub fn uninstall() -> Result<()> {
     Install::load()?;
     docker::compose_run(&["down"])?;
+    addon::down();
     host::remove_units();
     if fs::remove_file(host::SYSCTL).is_ok() {
         let _ = Command::new("sysctl").arg("--system").stdout(Stdio::null()).stderr(Stdio::null()).status();

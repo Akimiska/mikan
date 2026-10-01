@@ -29,6 +29,9 @@ const (
 	// proxies injected into the sub as a second select group. Fed by an external script
 	// (not the panel UI); not tracked as mikan slots/inbounds.
 	KeySubBypass = "sub_bypass"
+	// KeySubSort (AoiVPN fork): JSON {nodes:[name substrings], presets:[preset ids]} —
+	// custom display order of nodes/inbounds in the subscription.
+	KeySubSort = "sub_sort"
 	// KeyFingerprint is the uTLS profile clients get where an inbound sets none
 	// (proto.Fingerprints); unset means proto.DefaultFingerprint.
 	KeyFingerprint = "client_fingerprint"

@@ -211,8 +211,20 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 				bypass = &bp
 			}
 		}
+		// AoiVPN fork: custom display order (sub_sort setting, JSON {nodes,presets}).
+		var nodeOrder, protoOrder []string
+		if raw, _ := set.String(ctx, settings.KeySubSort); raw != "" {
+			var so struct {
+				Nodes   []string `json:"nodes"`
+				Presets []string `json:"presets"`
+			}
+			if json.Unmarshal([]byte(raw), &so) == nil {
+				nodeOrder, protoOrder = so.Nodes, so.Presets
+			}
+		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing), Fingerprint: fingerprint,
-			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang)), Bypass: bypass}
+			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang)), Bypass: bypass,
+			NodeOrder: nodeOrder, ProtoOrder: protoOrder}
 		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
 			return subs.Config{}, err
 		}

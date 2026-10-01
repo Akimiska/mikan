@@ -35,6 +35,9 @@ type Config struct {
 	Rules      []string // the admin's own Clash rules, checked (ServedRules)
 	// Bypass (AoiVPN fork): injected external bypass proxies + their group name.
 	Bypass *Bypass
+	// NodeOrder/ProtoOrder (AoiVPN fork): custom node/inbound display order.
+	NodeOrder  []string
+	ProtoOrder []string
 	// Fingerprint is the default uTLS profile for inbounds that set none.
 	Fingerprint string
 	// Binding gives every device that sends its id keys of its own (domain.Devices);
@@ -196,6 +199,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "clash":
 		prof.Rules = RulesFor(cfg.Rules, app)
 		prof.Bypass = cfg.Bypass
+		prof.NodeOrder, prof.ProtoOrder = cfg.NodeOrder, cfg.ProtoOrder
 		body, err := Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)

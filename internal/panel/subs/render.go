@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -145,6 +146,10 @@ type Profile struct {
 	Rules []string
 	// Bypass (AoiVPN fork): external bypass proxies + group name, injected into the sub.
 	Bypass *Bypass
+	// NodeOrder/ProtoOrder (AoiVPN fork): custom display order — nodes by a case-sensitive
+	// substring of their name, inbounds by preset id. Empty keeps the by-id order.
+	NodeOrder  []string
+	ProtoOrder []string
 }
 
 type proxy struct {
@@ -171,6 +176,8 @@ func build(p Profile) ([]proxy, error) {
 	var out []proxy
 	used := map[string]bool{}
 	slot := proto.Slot{Name: p.Slot.Name, UUID: p.Slot.Uuid, Secret: p.Slot.Secret}
+	orderNodes(p.Nodes, p.NodeOrder)
+	orderInbounds(p.Inbounds, p.ProtoOrder)
 	multi := len(p.Nodes) > 1
 	for _, n := range p.Nodes {
 		for _, in := range p.Inbounds {
@@ -307,6 +314,31 @@ func selectGroup(name string, proxies []string, icon string) map[string]any {
 		grp["icon"] = icon
 	}
 	return grp
+}
+
+// sortByOrder (AoiVPN fork): stable-sort items by the first `order` entry they match
+// (substring for node names, exact for presets); unknown items keep to the end.
+func sortByOrder[T any](items []T, order []string, keyOf func(T) string, contains bool) {
+	if len(order) == 0 {
+		return
+	}
+	idx := func(s string) int {
+		for i, o := range order {
+			if (contains && strings.Contains(s, o)) || (!contains && s == o) {
+				return i
+			}
+		}
+		return len(order)
+	}
+	sort.SliceStable(items, func(i, j int) bool { return idx(keyOf(items[i])) < idx(keyOf(items[j])) })
+}
+
+func orderNodes(nodes []Node, order []string) {
+	sortByOrder(nodes, order, func(n Node) string { return n.Name }, true)
+}
+
+func orderInbounds(ins []db.Inbound, order []string) {
+	sortByOrder(ins, order, func(in db.Inbound) string { return in.Preset }, false)
 }
 
 // countryGroups picks the fastest proxy of each node when there are several nodes. A

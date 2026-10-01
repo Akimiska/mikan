@@ -213,7 +213,7 @@ function ServerCard() {
             {n ? Math.round(n.system.cpu_percent) : "—"}
             <small>%</small>
           </div>
-          <Bar pct={n?.system.cpu_percent ?? 0} className="mt-2" />
+          <Bar pct={n?.system.cpu_percent ?? 0} className="mt-2" label="CPU" />
         </div>
         <div className="metric">
           <div className="metric-label">{t("dashboard.memory")}</div>
@@ -221,7 +221,7 @@ function ServerCard() {
             {n ? Math.round(memPct) : "—"}
             <small>%</small>
           </div>
-          <Bar pct={memPct} className="mt-2" />
+          <Bar pct={memPct} className="mt-2" label={t("dashboard.memory")} />
         </div>
         <div className="metric">
           <div className="metric-label">{t("dashboard.netDown")}</div>

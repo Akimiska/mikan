@@ -136,10 +136,10 @@ function NodeCard() {
       {n.ok ? (
         <div className="node-bars">
           <span>CPU</span>
-          <Bar pct={n.system.cpu_percent} />
+          <Bar pct={n.system.cpu_percent} label="CPU" />
           <span className="num">{Math.round(n.system.cpu_percent)}%</span>
           <span>RAM</span>
-          <Bar pct={memPct} />
+          <Bar pct={memPct} label="RAM" />
           <span className="num">{Math.round(memPct)}%</span>
         </div>
       ) : null}

@@ -200,7 +200,7 @@ function NodeCard({
           <dd>
             {n.status === "ok" ? (
               <div className="flex items-center gap-2">
-                <Bar pct={n.cpu_percent} className="flex-1" />
+                <Bar pct={n.cpu_percent} className="flex-1" label={t("nodes.cpu")} />
                 <span className="num w-10 text-right">{Math.round(n.cpu_percent)}%</span>
               </div>
             ) : (
@@ -213,7 +213,7 @@ function NodeCard({
           <dd>
             {n.status === "ok" && n.mem_total ? (
               <div className="flex items-center gap-2" title={`${bytes(n.mem_used)} / ${bytes(n.mem_total)}`}>
-                <Bar pct={mem} className="flex-1" />
+                <Bar pct={mem} className="flex-1" label={t("nodes.memory")} />
                 <span className="num w-10 text-right">{mem}%</span>
               </div>
             ) : (

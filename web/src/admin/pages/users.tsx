@@ -197,7 +197,7 @@ function Usage({ u }: { u: User }) {
         </span>
         <span className="num">{Math.min(100, Math.round(pct))}%</span>
       </div>
-      <Bar pct={pct} />
+      <Bar pct={pct} label={t("users.colTraffic")} />
     </div>
   );
 }

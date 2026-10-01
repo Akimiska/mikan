@@ -201,7 +201,7 @@ func prepare() {
 	var u user
 	p.call("POST", "/api/v1/users", map[string]any{"name": "Slice User", "tariff_id": tariffID}, &u)
 	log.Printf("created user %d, subscription %s", u.ID, u.SubURL)
-	if !strings.HasPrefix(u.SubURL, "https://node:2053/slicesub0000/") {
+	if !strings.HasPrefix(u.SubURL, "https://node.slice:2053/slicesub0000/") {
 		log.Fatalf("unexpected sub_url %q", u.SubURL)
 	}
 	token := u.SubURL[strings.LastIndex(u.SubURL, "/")+1:]

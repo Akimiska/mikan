@@ -12,7 +12,7 @@ docker compose build node target
 
 PW=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)
 echo "$PW" | docker compose run --rm -T panel admin bootstrap \
-  --public-host node --port 2053 --admin-path slice-admin-path-0000 --sub-path slicesub0000 --username admin --password-stdin >/dev/null
+  --public-host node.slice --port 2053 --admin-path slice-admin-path-0000 --sub-path slicesub0000 --username admin --password-stdin >/dev/null
 docker compose up -d node panel target driver
 
 status=0

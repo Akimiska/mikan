@@ -85,6 +85,11 @@ type Bot struct {
 
 	noticeMu sync.Mutex
 	notices  map[string]*noticeState
+
+	// What the bot started and has not ended: the poll loop and its outbox, and the calls
+	// that must not hold the loop up. Run returns when they have all returned, so that the
+	// database is not closed under them.
+	running sync.WaitGroup
 }
 
 // BroadcastProgress is the last broadcast as the admin panel shows it.
@@ -151,7 +156,8 @@ func (b *Bot) Run(ctx context.Context) {
 		}
 		pctx, cancel := context.WithCancel(ctx)
 		stop = cancel
-		go b.poll(pctx, NewClient(b.d.API, token, rt))
+		c := NewClient(b.d.API, token, rt)
+		b.running.Go(func() { b.poll(pctx, c) })
 	}
 	start()
 	for {
@@ -160,6 +166,7 @@ func (b *Bot) Run(ctx context.Context) {
 			if stop != nil {
 				stop()
 			}
+			b.running.Wait()
 			return
 		case <-b.reload:
 			start()
@@ -238,7 +245,7 @@ func (b *Bot) poll(ctx context.Context, c *Client) {
 	out := NewOutbox(c, b.d.Limits, time.Now, func(chat int64) {
 		_ = b.d.Store.Q.SetTgBlocked(context.WithoutCancel(ctx), db.SetTgBlockedParams{Blocked: 1, TgID: chat})
 	}, func(err error) { b.d.Log.Warn("telegram: send", "err", errText(err)) })
-	go out.Run(ctx)
+	b.running.Go(func() { out.Run(ctx) })
 	b.out.Store(out)
 	b.client.Store(c)
 	defer b.client.CompareAndSwap(c, nil)
@@ -318,12 +325,12 @@ func (b *Bot) saveOffset(ctx context.Context, bot, offset int64) {
 // retryLater re-reads the settings in a minute: a network hiccup at start must not leave
 // the bot off until the admin touches it.
 func (b *Bot) retryLater(ctx context.Context) {
-	go func() {
+	b.running.Go(func() {
 		sleep(ctx, time.Minute)
 		if ctx.Err() == nil {
 			b.Reload()
 		}
-	}()
+	})
 }
 
 func errText(err error) string {
@@ -384,7 +391,7 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) error {
 	switch {
 	case up.PreCheckoutQuery != nil:
 		// Ten seconds from Telegram, whatever else the loop waits for: its own goroutine.
-		go b.preCheckout(ctx, c, up.PreCheckoutQuery)
+		b.running.Go(func() { b.preCheckout(ctx, c, up.PreCheckoutQuery) })
 	case up.Message != nil && up.Message.SuccessfulPayment != nil && up.Message.Chat.Type == "private":
 		return b.starsPaid(ctx, up.Message)
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil && up.CallbackQuery.Message.Chat.Type == "private":
@@ -450,7 +457,7 @@ func (b *Bot) sendMenu(ctx context.Context, c *Client, chat int64, notice string
 // answer stops the spinner on a pressed button. A call to Telegram that hangs must not
 // hold up the update loop, so it goes on its own.
 func (b *Bot) answer(ctx context.Context, c *Client, id string) {
-	go func() { _ = c.Answer(ctx, id, "") }()
+	b.running.Go(func() { _ = c.Answer(ctx, id, "") })
 }
 
 // onPress edits the menu message in place: the chat never fills up with menus. The

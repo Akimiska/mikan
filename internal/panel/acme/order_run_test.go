@@ -135,7 +135,12 @@ func TestFailedOrderIsRetriedSoon(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if s := m.Status(); s.Error == "" {
-		t.Fatalf("the failure is shown: %+v", s)
+	// The error is put on the status once the order has failed, a moment after it was tried.
+	shown := time.Now().Add(3 * time.Second)
+	for m.Status().Error == "" {
+		if time.Now().After(shown) {
+			t.Fatalf("the failure is not shown: %+v", m.Status())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -197,11 +197,14 @@ func (m *Manager) ensure(ctx context.Context) (orderFailed bool) {
 	cert, err := m.obtain(ctx, id)
 	if err != nil {
 		m.log.Warn("acme: certificate not obtained", "identifier", id, "err", err)
-		if _, need := m.settle(ctx); !need {
-			return false // the admin's own certificate came while the order ran: nothing is wrong
-		}
 		m.mu.Lock()
 		st := *m.status.Load()
+		if st.Kind == "custom" {
+			// The admin's own certificate came while the order ran (SetCustom settled it into
+			// the status): nothing is wrong.
+			m.mu.Unlock()
+			return false
+		}
 		if st.Error == "" { // a custom certificate that is broken is the thing to tell the admin of
 			st.Error = humanError(err)
 		}

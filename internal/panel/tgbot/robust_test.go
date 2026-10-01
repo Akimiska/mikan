@@ -397,3 +397,26 @@ func TestBroadcastFeedStopsWithTheOutbox(t *testing.T) {
 		t.Fatalf("what a stopped outbox did not send is failed, and the progress ends: %+v", p)
 	}
 }
+
+// Run returns only when the poll loop, the outbox and the calls it started have: the
+// database is closed after it.
+func TestRunWaitsForItsWorkers(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	b := New(e.bot.d)
+	returned := make(chan struct{})
+	go func() { b.Run(ctx); close(returned) }()
+	until(t, "the second bot polls", func() bool { return b.Status().Running })
+	if b.out.Load() == nil {
+		t.Fatal("no outbox while running")
+	}
+	cancel()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after its context ended")
+	}
+	if b.out.Load() != nil || b.client.Load() != nil {
+		t.Fatal("Run returned while the poll loop was still running")
+	}
+}

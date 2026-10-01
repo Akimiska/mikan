@@ -6,9 +6,15 @@ the signed manifest, and the panel shows the one in its language.
 ## 0.4.3
 ### en
 - Protocols behind a TCP proxy (#11): a protocol's settings have "Behind a proxy (nginx, HAProxy)". "Where the node listens" picks all addresses (as before), localhost only or an IP of your own, so nginx stream or HAProxy can hold port 443 and route by SNI to protocols on 127.0.0.1:444, :445… "Address for clients", "Port for clients" and "SNI for clients" give subscriptions the proxy's endpoint instead of the node's (empty keeps them as now; with REALITY the camouflage site's domain stays the SNI). Such a protocol's port never moves on its own: automatic port moves are off and cannot be turned on, and the panel warns that an automatic camouflage site change may break SNI routing.
+- The installer replaces a Docker without compose v2 (the docker.io of Ubuntu 22.04 and Debian) with Docker from get.docker.com, after asking: the interactive installer has a page for it, a plain install needs --replace-docker. Images, volumes and containers stay.
+- A panel without a domain gets its Let's Encrypt IP certificate again: the request no longer puts the IP into the Common Name, which Let's Encrypt refused (badCSR).
+- Payment settings that cannot be read (a busy database) are no longer replaced by the defaults and saved over yours: selling pauses until they read again. Changes on the Telegram page are saved whole or not at all.
 
 ### ru
 - Подключения за TCP-прокси (#11): в настройках подключения — блок «За прокси (nginx, HAProxy)». «Где нода слушает» — все адреса (как раньше), только localhost или свой IP: так nginx stream или HAProxy держит порт 443 и раздаёт по SNI подключениям на 127.0.0.1:444, :445… «Адрес», «Порт» и «SNI для клиентов» отдают в подписке адрес прокси вместо адреса ноды (пусто — как сейчас; у REALITY SNI остаётся доменом сайта маскировки). Порт такого подключения сам не меняется: автоперенос порта выключен и не включается, а про автосмену сайта маскировки панель предупреждает — она может сбить маршрут по SNI.
+- Установщик заменяет Docker без compose v2 (docker.io из Ubuntu 22.04 и Debian) на Docker с get.docker.com, но сначала спрашивает: в интерактивном установщике для этого отдельный экран, без него нужен флаг --replace-docker. Образы, тома и контейнеры остаются.
+- Панель без домена снова получает сертификат Let's Encrypt на IP: в запросе больше нет IP в поле Common Name, из-за которого Let's Encrypt отказывал (badCSR).
+- Настройки оплаты, которые не удалось прочитать (занятая база), больше не подменяются значениями по умолчанию и не записываются поверх ваших: продажи ставятся на паузу, пока чтение не наладится. Изменения на странице Telegram сохраняются целиком или не сохраняются вовсе.
 
 ## 0.4.2
 ### en

@@ -31,11 +31,6 @@ pub fn output(cmd: &str, args: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Whether a command exists and runs.
-pub fn has(cmd: &str) -> bool {
-    Command::new(cmd).arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
-}
-
 pub fn is_root() -> bool {
     fs::read_to_string("/proc/self/status")
         .ok()
@@ -94,18 +89,54 @@ pub fn clock_synced() -> Option<bool> {
 }
 
 /// A fresh VPS keeps apt busy for minutes (the hoster's setup, unattended upgrades).
-pub fn dpkg_busy() -> bool {
-    if has("fuser") {
-        let locks = ["/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/lib/apt/lists/lock", "/var/cache/apt/archives/lock"];
-        return Command::new("fuser")
-            .args(locks)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
+/// Who keeps the package manager busy: whoever holds one of its locks, or a running
+/// apt, dpkg or unattended-upgrade. Read from /proc, so it needs neither fuser (Debian
+/// images come without psmisc) nor pgrep. Matching names alone is not enough:
+/// unattended-upgrades keeps `unattended-upgrade-shutdown --wait-for-signal` running
+/// for good, and its name is cut to the same "unattended-upgr" as the real run.
+pub fn dpkg_holder() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let locks = ["/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock", "/var/lib/apt/lists/lock", "/var/cache/apt/archives/lock"];
+    let inodes: Vec<u64> = locks.iter().filter_map(|p| fs::metadata(p).ok()).map(|m| m.ino()).collect();
+    if let Some(pid) = fs::read_to_string("/proc/locks").ok().and_then(|t| lock_holder(&t, &inodes)) {
+        return Some(match pid {
+            Some(pid) => format!("{} pid {pid}", proc_name(pid).unwrap_or_else(|| "a process".into())),
+            None => "a package manager".into(),
+        });
     }
-    ["apt-get", "apt", "dpkg", "unattended-upgr"].iter().any(|p| output("pgrep", &["-x", p]).is_some())
+    let procs = fs::read_dir("/proc").ok()?;
+    procs.flatten().filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok()).find_map(|pid| {
+        let comm = proc_name(pid)?;
+        let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+        package_process(&comm, &String::from_utf8_lossy(&cmdline)).then(|| format!("{comm} pid {pid}"))
+    })
+}
+
+/// The pid holding a lock on one of the inodes in /proc/locks text: Some(None) for an
+/// open-file-description lock, which has no owner pid.
+fn lock_holder(text: &str, inodes: &[u64]) -> Option<Option<u32>> {
+    text.lines().find_map(|l| {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        // "1: POSIX  ADVISORY  WRITE 1234 fd:01:131090 0 EOF"; blocked waiters start with "->".
+        let at = f.iter().position(|s| s.matches(':').count() == 2)?;
+        if f.get(1) == Some(&"->") {
+            return None;
+        }
+        let ino: u64 = f[at].rsplit(':').next()?.parse().ok()?;
+        inodes.contains(&ino).then(|| f.get(at - 1).and_then(|p| p.parse::<u32>().ok()).filter(|&p| p > 0))
+    })
+}
+
+fn package_process(comm: &str, cmdline: &str) -> bool {
+    match comm {
+        "apt-get" | "apt" | "aptitude" | "dpkg" => true,
+        "unattended-upgr" => !cmdline.contains("unattended-upgrade-shutdown"),
+        _ => false,
+    }
+}
+
+fn proc_name(pid: u32) -> Option<String> {
+    fs::read_to_string(format!("/proc/{pid}/comm")).ok().map(|s| s.trim().to_owned())
 }
 
 /// Half-configured packages left by the hoster's image: every apt call fails until
@@ -237,8 +268,8 @@ pub fn checks(node: bool) -> Vec<Check> {
         Some(v) => Check::new("Docker", Level::Error, format!("{v} without compose v2: update Docker")),
         None => Check::new("Docker", Level::Ok, "not installed: the installer sets it up (get.docker.com)"),
     });
-    if dpkg_busy() {
-        out.push(Check::new("Packages", Level::Warn, "the package manager is busy: the installer waits for it"));
+    if let Some(who) = dpkg_holder() {
+        out.push(Check::new("Packages", Level::Warn, format!("busy, {who}: the installer waits for it")));
     }
     out
 }
@@ -254,6 +285,27 @@ mod tests {
         assert!(os_supported(&os));
         let old = Os { id: "debian".into(), version: "11".into(), pretty: String::new() };
         assert!(!os_supported(&old));
+    }
+
+    #[test]
+    fn package_locks() {
+        let locks = "1: POSIX  ADVISORY  WRITE 4242 fd:01:131090 0 EOF\n\
+                     1: -> POSIX  ADVISORY  WRITE 5151 fd:01:131090 0 EOF\n\
+                     2: OFDLCK ADVISORY  WRITE -1 fd:01:131091 0 EOF\n\
+                     3: FLOCK  ADVISORY  WRITE 777 00:19:999 0 EOF\n";
+        assert_eq!(lock_holder(locks, &[131090]), Some(Some(4242)));
+        assert_eq!(lock_holder(locks, &[131091]), Some(None));
+        assert_eq!(lock_holder(locks, &[555]), None);
+        assert_eq!(lock_holder("", &[131090]), None);
+
+        // The idle helper unattended-upgrades keeps running must not read as busy.
+        assert!(!package_process(
+            "unattended-upgr",
+            "/usr/bin/python3\0/usr/share/unattended-upgrades/unattended-upgrade-shutdown\0--wait-for-signal\0"
+        ));
+        assert!(package_process("unattended-upgr", "/usr/bin/python3\0/usr/bin/unattended-upgrade\0"));
+        assert!(package_process("apt-get", "apt-get\0install\0"));
+        assert!(!package_process("aptd", ""));
     }
 
     #[test]

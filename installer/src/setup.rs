@@ -209,15 +209,17 @@ fn note(tx: &Sender<Event>, s: Step, text: impl Into<String>) {
 fn run(plan: &Plan, tx: &Sender<Event>) -> StepResult<()> {
     let node = plan.node();
     step(tx, Step::Packages, || {
-        if system::dpkg_busy() {
-            note(tx, Step::Packages, "busy with the hoster's setup: waiting for it");
-            let start = Instant::now();
-            while system::dpkg_busy() {
-                if start.elapsed() > Duration::from_secs(600) {
-                    bail!("the package manager has been busy for 10 minutes: try again later");
-                }
-                thread::sleep(Duration::from_secs(5));
+        let start = Instant::now();
+        let mut shown = String::new();
+        while let Some(who) = system::dpkg_holder() {
+            if start.elapsed() > Duration::from_secs(600) {
+                bail!("the package manager has been busy for 10 minutes, {who}: wait for it to finish and run the installer again");
             }
+            if who != shown {
+                note(tx, Step::Packages, format!("busy, {who}: waiting for it"));
+                shown = who;
+            }
+            thread::sleep(Duration::from_secs(5));
         }
         if system::dpkg_unfinished() {
             note(tx, Step::Packages, "finishing the hoster's half-done package setup");

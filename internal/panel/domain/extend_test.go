@@ -13,7 +13,9 @@ import (
 // read and written on one transaction, not worked out from a copy read before the payment.
 func TestExtendKeepsConcurrentPayments(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	st, users, _ := setup(t, &now)
+	st, _, _ := setup(t, &now)
+	clock := func() time.Time { return now }
+	users := NewUsers(st, NewPool(st, clock), quietChanges{}, clock) // the counting fake is not for goroutines
 	ctx := context.Background()
 	tariffs, _ := st.Q.ListTariffs(ctx)
 	std := tariffs[1] // 30 days
@@ -53,6 +55,13 @@ func TestExtendKeepsConcurrentPayments(t *testing.T) {
 		t.Fatalf("expiry %d, want %d: %d days lost", got.ExpiresAt.Int64, want, (want-got.ExpiresAt.Int64)/86400)
 	}
 }
+
+// quietChanges ignores the notices: the tests that run goroutines must not share the
+// counting fake.
+type quietChanges struct{}
+
+func (quietChanges) PoliciesChanged() {}
+func (quietChanges) SlotsChanged()    {}
 
 // An extension turns a disabled user on; a term that already ended counts from now.
 func TestExtendFromNowAfterTheTerm(t *testing.T) {

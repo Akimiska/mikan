@@ -126,7 +126,7 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		if limit <= 0 || limit > 32 {
 			limit = 12
 		}
-		res, scanned, err := scan.Neighbors(ctx, req.IP, limit, scan.Options{})
+		res, scanned, err := scan.Neighbors(ctx, req.IP, limit, e.TargetOptions())
 		if err != nil && ctx.Err() == nil {
 			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_request", Message: err.Error()})
 			return

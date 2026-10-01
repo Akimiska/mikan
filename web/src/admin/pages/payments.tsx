@@ -41,7 +41,7 @@ export function PaymentsPage() {
       {settings.data && !settings.data.enabled ? (
         <div className="banner warn mb-4 flex-wrap" role="status">
           <span className="min-w-0 flex-1">{t("payments.salesOff")}</span>
-          <Link to="/settings" className="btn btn-glass btn-sm">
+          <Link to="/settings" search={{ tab: "general" }} className="btn btn-glass btn-sm">
             {t("payments.openSettings")}
           </Link>
         </div>

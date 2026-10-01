@@ -106,7 +106,7 @@ function UpdateChip() {
   const u = useUpdates();
   if (!u.data?.available) return null;
   return (
-    <Link to="/settings" hash="updates" className="update-chip" title={t("shell.updateHint")}>
+    <Link to="/settings" search={{ tab: "general" }} hash="updates" className="update-chip" title={t("shell.updateHint")}>
       <ArrowUpCircle size={16} aria-hidden />
       <span className="truncate">{t("shell.update", { v: u.data.latest })}</span>
     </Link>

@@ -6,7 +6,7 @@ import { Dashboard } from "./pages/dashboard";
 import { InboundsPage } from "./pages/inbounds";
 import { LoginPage } from "./pages/login";
 import { NodesPage } from "./pages/nodes";
-import { SettingsPage } from "./pages/settings";
+import { SETTINGS_TABS, SettingsPage, type SettingsSearch } from "./pages/settings";
 import { TariffsPage } from "./pages/tariffs";
 import { ApiPage } from "./pages/api";
 import { PaymentsPage } from "./pages/payments";
@@ -58,7 +58,14 @@ export function createAppRouter(queryClient: QueryClient) {
   const tariffs = createRoute({ getParentRoute: () => app, path: "/tariffs", component: TariffsPage });
   const inbounds = createRoute({ getParentRoute: () => app, path: "/inbounds", component: InboundsPage });
   const nodes = createRoute({ getParentRoute: () => app, path: "/nodes", component: NodesPage });
-  const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: SettingsPage });
+  const settings = createRoute({
+    getParentRoute: () => app,
+    path: "/settings",
+    component: SettingsPage,
+    validateSearch: (s: Record<string, unknown>): SettingsSearch => ({
+      tab: SETTINGS_TABS.includes(s.tab as SettingsSearch["tab"]) ? (s.tab as SettingsSearch["tab"]) : "general",
+    }),
+  });
   const telegram = createRoute({ getParentRoute: () => app, path: "/telegram", component: TelegramPage });
   const payments = createRoute({ getParentRoute: () => app, path: "/payments", component: PaymentsPage });
   const apiDocs = createRoute({ getParentRoute: () => app, path: "/settings/api", component: ApiPage });

@@ -876,7 +876,14 @@
     "certOwn": "Own",
     "certOwnNote": "Renewed by your own tools: the panel picks a new file up without a restart.",
     "certOwnButton": "Own certificate",
-    "certReplace": "Replace"
+    "certReplace": "Replace",
+    "tabs": {
+      "general": "General",
+      "subscription": "Subscription",
+      "rules": "Clash rules",
+      "security": "Security"
+    },
+    "sections": "Settings sections"
   },
   "sub": {
     "loadFailed": "Could not load the subscription",

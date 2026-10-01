@@ -498,7 +498,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
 
 /** One switch of the automatic fixes; says so when the global switch is off, why it is
  * locked (shown off), or what to watch out for. */
-export function AutoSwitch({
+function AutoSwitch({
   title,
   sub,
   on,

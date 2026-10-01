@@ -1448,7 +1448,6 @@
     "mainTraffic": "Main traffic",
     "tariffLimits": "Pool limits",
     "tariffLimitsHint": "GB for the same period as the main traffic. Empty — unlimited.",
-    "unlimited": "unlimited",
     "limitOf": "Limit of pool {name}",
     "errLimit": "A limit is a positive number of GB, or empty",
     "editLimits": "Change limits",

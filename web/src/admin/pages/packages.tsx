@@ -25,7 +25,7 @@ export function targetName(poolId: number | null | undefined, pools: Pool[] | un
 }
 
 /** How long a package lasts: until used up, until the period ends, or N days. */
-export function lifetimeText(lifetime: Lifetime, days: number): string {
+function lifetimeText(lifetime: Lifetime, days: number): string {
   if (lifetime === "days") return t("packages.lifetimeDaysN", { days: daysText(days) });
   return t(`packages.lifetime.${lifetime}`);
 }

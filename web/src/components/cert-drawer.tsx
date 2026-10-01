@@ -18,7 +18,7 @@ export function certUntil(iso?: string): string {
 }
 
 /** Days left, negative once expired. */
-export function certDaysLeft(iso?: string): number {
+function certDaysLeft(iso?: string): number {
   return iso ? Math.floor((new Date(iso).getTime() - Date.now()) / 86_400_000) : 0;
 }
 

@@ -5,9 +5,9 @@ import { Button, Pill, Skeleton } from "../../../components/ui";
 import { t, tMaybe } from "../../../i18n";
 import { destIsIP } from "../../../lib/format";
 
-export type Target = Schemas["Result"];
+type Target = Schemas["Result"];
 
-export function TargetBadges({ r }: { r: Target }) {
+function TargetBadges({ r }: { r: Target }) {
   if (r.error) {
     return <span className="text-xs text-[var(--berry-600)]">{tMaybe(`inbounds.targetErr.${r.error}`) ?? r.error}</span>;
   }

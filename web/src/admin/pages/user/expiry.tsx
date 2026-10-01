@@ -49,7 +49,7 @@ export function ExpirySection({ u }: { u: User }) {
   );
 }
 
-export function BillingDayField({ u }: { u: User }) {
+function BillingDayField({ u }: { u: User }) {
   const toast = useToast();
   const update = useUserMutation(userActions.update);
   const set = (d: number) =>
@@ -71,7 +71,7 @@ export function BillingDayField({ u }: { u: User }) {
   );
 }
 
-export function ExactDateField({ u }: { u: User }) {
+function ExactDateField({ u }: { u: User }) {
   const toast = useToast();
   const update = useUserMutation(userActions.update);
   const current = u.expires_at ? inputDate(u.expires_at) : "";

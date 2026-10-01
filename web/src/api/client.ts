@@ -7,11 +7,9 @@ export type User = Schemas["UserView"];
 export type Tariff = Schemas["TariffView"];
 export type Inbound = Schemas["InboundView"];
 export type Preset = Schemas["Info"];
-export type NodeView = Schemas["NodeView"];
 export type Overview = Schemas["OverviewOutputBody"];
 export type SettingsView = Schemas["SettingsView"];
 export type TrafficPoint = Schemas["TrafficPoint"];
-export type Me = Schemas["MeBody"];
 export type UserState = User["state"];
 
 // The server injects <base href="/<secret>/">; everything is relative to it.

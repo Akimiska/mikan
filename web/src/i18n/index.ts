@@ -9,7 +9,7 @@
 import { useSyncExternalStore } from "react";
 import type ru from "./ru.json";
 
-export type Locale = "ru" | "en";
+type Locale = "ru" | "en";
 export const LOCALES: { id: Locale; label: string }[] = [
   { id: "ru", label: "Русский" },
   { id: "en", label: "English" },
@@ -18,7 +18,7 @@ export const LOCALES: { id: Locale; label: string }[] = [
 export type Dict = typeof ru;
 type Leaves<T> = { [K in keyof T & string]: T[K] extends string ? K : `${K}.${Leaves<T[K]>}` }[keyof T & string];
 export type Key = Leaves<Dict>;
-export type Params = Record<string, string | number>;
+type Params = Record<string, string | number>;
 /** How an entry fetches a language's dictionary; the module's default export is the dictionary. */
 export type Loaders<D extends Partial<Dict> = Dict> = Record<Locale, () => Promise<{ default: D }>>;
 

@@ -38,10 +38,10 @@ export const meQuery = {
   retry: false,
 };
 
-export type UsersFilter = { state: "all" | User["state"]; q: string };
+type UsersFilter = { state: "all" | User["state"]; q: string };
 
 /** The users page lists everyone it can (the API's cap); a card that shows a few asks for just those. */
-export const USERS_MAX = 500;
+const USERS_MAX = 500;
 
 export function useUsers(f: UsersFilter, o: { limit?: number; refetchInterval?: number } = {}) {
   const limit = o.limit ?? USERS_MAX;

@@ -17,7 +17,7 @@ import { PackagesCard } from "./packages";
 import { PoolLimitsField, PoolsCard } from "./pools";
 
 /** How long a term on the tariff runs: days, or months up to the billing day. */
-export function tariffTerm(tr: Tariff): string {
+function tariffTerm(tr: Tariff): string {
   if (!tr.duration_days) return t("time.forever");
   if (tr.billing_day != null) return t("tariffs.termToDay", { months: months(termMonths(tr.duration_days)), d: tr.billing_day });
   return days(tr.duration_days);

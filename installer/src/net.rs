@@ -132,7 +132,9 @@ fn judge(
         note(Level::Ok, format!("{domain} → {server}, this server"));
         let others: Vec<String> = a.iter().filter(|ip| **ip != server).map(ToString::to_string).collect();
         if !others.is_empty() {
-            note(Level::Warn, format!("it also points to {}: some clients would miss this server", others.join(", ")));
+            // The panel refuses such a domain too (internal/panel/dnscheck): some clients would
+            // land on another machine.
+            note(Level::Error, format!("it also points to {}: remove that A record, some clients would go there", others.join(", ")));
         }
     } else if a.iter().all(|ip| cloudflare(*ip)) {
         note(Level::Error, format!("{domain} is behind Cloudflare's proxy: turn the orange cloud off (DNS only) so it points to {server}"));
@@ -150,7 +152,7 @@ fn judge(
     }
     let strangers: Vec<String> = aaaa.iter().filter(|ip| !own_v6.contains(ip)).map(ToString::to_string).collect();
     if !strangers.is_empty() {
-        note(Level::Warn, format!("an AAAA record points to {}: IPv6 clients would go there, remove it", strangers.join(", ")));
+        note(Level::Error, format!("an AAAA record points to {}: IPv6 clients would go there, remove it", strangers.join(", ")));
     }
     DomainCheck { notes }
 }
@@ -218,7 +220,9 @@ mod tests {
         assert!(elsewhere.level() == Level::Error && elsewhere.notes[0].text.contains("198.51.100.7"));
         assert!(judge(d, SERVER, &[], &both(&[]), &[]).notes[0].text.contains("no A record"));
         let v6: Ipv6Addr = "2001:db8::1".parse().unwrap();
-        assert_eq!(judge(d, SERVER, &[], &both(&[SERVER]), &[v6]).level(), Level::Warn);
+        assert_eq!(judge(d, SERVER, &[], &both(&[SERVER]), &[v6]).level(), Level::Error);
+        let mixed = judge(d, SERVER, &[], &both(&[SERVER, Ipv4Addr::new(198, 51, 100, 7)]), &[]);
+        assert!(mixed.level() == Level::Error && mixed.notes.iter().any(|n| n.text.contains("198.51.100.7")));
         assert_eq!(judge(d, SERVER, &[v6], &both(&[SERVER]), &[v6]).level(), Level::Ok);
         let split = vec![("Cloudflare", Ok(vec![SERVER])), ("Google", Ok(vec![Ipv4Addr::new(198, 51, 100, 7)]))];
         assert_eq!(judge(d, SERVER, &[], &split, &[]).level(), Level::Warn);

@@ -187,7 +187,9 @@
   .utable tbody tr { cursor: pointer; transition: background-color 0.15s; }
   .utable tbody tr:hover td { background: rgba(255, 255, 255, 0.55); }
   .utable tbody tr.sel td { background: var(--mikan-50); }
-  .utable tbody tr:focus-visible { outline: 2px solid var(--mikan-500); outline-offset: -2px; }
+  .utable tbody tr:has(.row-link:focus-visible) td { background: rgba(255, 255, 255, 0.55); }
+  .row-link { color: inherit; }
+  .row-link:hover { text-decoration: underline; text-underline-offset: 3px; }
   .utable td:first-child { border-radius: 12px 0 0 12px; }
   .utable td:last-child { border-radius: 0 12px 12px 0; }
   .check { appearance: none; width: 18px; height: 18px; border-radius: 6px; border: 1.5px solid var(--ink-300); background: rgba(255, 255, 255, 0.8); display: grid; place-items: center; cursor: pointer; margin: 0; transition: background-color 0.15s, border-color 0.15s; }
@@ -358,7 +360,6 @@
 @media (max-width: 760px) {
   .page-title { font-size: 22px; line-height: 28px; }
   .kpi-value { font-size: 26px; line-height: 32px; }
-  .utable { display: none; }
   .search-field { min-width: 0; flex: 1; }
 }
 @media (prefers-reduced-motion: reduce) {

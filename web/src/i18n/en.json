@@ -15,7 +15,8 @@
     "open": "Open",
     "qrLabel": "Subscription QR code",
     "retry": "Try again",
-    "save": "Save"
+    "save": "Save",
+    "staleData": "Could not refresh, showing the last data received."
   },
   "nav": {
     "overview": "Overview",
@@ -363,7 +364,7 @@
     "colDevices": "Devices",
     "colStatus": "Status",
     "shown": "Showing {n} of {total}",
-    "keyboardHint": "A row opens the card · space selects it",
+    "keyboardHint": "Click a row to open its card · tick the boxes to select several",
     "subtitle": "{n, plural, one {# person} other {# people}} · {active} with an active subscription",
     "filter": "Filter",
     "filters": {
@@ -394,6 +395,7 @@
     "clearSelection": "Clear selection",
     "deleteTitle": "{n, plural, one {Delete # user?} other {Delete # users?}}",
     "deleteText": "Their links stop working immediately and the statistics are deleted. This cannot be undone.",
+    "deleteWho": "Selected: {names}.",
     "bulkDone": {
       "extend": "Extended: {n}",
       "reset": "Traffic reset: {n}",

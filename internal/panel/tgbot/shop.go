@@ -153,8 +153,12 @@ func (w *words) payError(err error) string {
 
 func (b *Bot) lang(ctx context.Context) string { return b.Config(ctx).Lang }
 
-// preCheckout answers Telegram's last question before a Stars payment; it has ten seconds.
+// preCheckout answers Telegram's last question before a Stars payment; it has ten seconds,
+// so it runs off the update loop with a deadline of its own: whatever else the loop is
+// busy with, the answer goes out in time or the buyer's payment fails.
 func (b *Bot) preCheckout(ctx context.Context, c *Client, q *PreCheckoutQuery) {
+	ctx, cancel := context.WithTimeout(ctx, preCheckoutDeadline)
+	defer cancel()
 	if b.d.Billing == nil {
 		_ = c.AnswerPreCheckout(ctx, q.ID, false, wordsFor(b.lang(ctx)).payUnavailable)
 		return
@@ -169,15 +173,35 @@ func (b *Bot) preCheckout(ctx context.Context, c *Client, q *PreCheckoutQuery) {
 	}
 }
 
+// preCheckoutDeadline is the whole of a pre-checkout answer, the lookup and the call.
+const preCheckoutDeadline = 9 * time.Second
+
 // starsPaid takes Telegram's successful_payment: the billing applies it and calls Paid.
-func (b *Bot) starsPaid(ctx context.Context, m *Message) {
+// An error that may go away (the database busy) is returned: the update is then not
+// acknowledged to Telegram and comes again, so a payment is not left unapplied. A payment
+// that matches no invoice never will, and is only logged.
+func (b *Bot) starsPaid(ctx context.Context, m *Message) error {
 	sp := m.SuccessfulPayment
-	if b.d.Billing == nil || m.From == nil {
-		return
+	if m.From == nil {
+		return nil
 	}
-	if err := b.d.Billing.StarsPaid(ctx, m.From.ID, sp.InvoicePayload, sp.ChargeID, sp.Currency, sp.TotalAmount); err != nil {
-		b.d.Log.Error("telegram: stars payment", "err", err)
+	pay := b.d.stars
+	if pay == nil && b.d.Billing != nil {
+		pay = b.d.Billing.StarsPaid
 	}
+	if pay == nil {
+		return nil
+	}
+	err := pay(ctx, m.From.ID, sp.InvoicePayload, sp.ChargeID, sp.Currency, sp.TotalAmount)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, billing.ErrBadPayment):
+		b.d.Log.Error("telegram: stars payment is not an invoice of ours", "tg", m.From.ID, "charge", sp.ChargeID, "amount", sp.TotalAmount)
+		return nil
+	}
+	b.d.Log.Error("telegram: stars payment", "err", err, "charge", sp.ChargeID)
+	return err
 }
 
 // InvoiceLink implements billing.Telegram.

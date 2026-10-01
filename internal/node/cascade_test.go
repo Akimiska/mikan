@@ -37,7 +37,7 @@ func cascadeState(t *testing.T) nodeapi.DesiredState {
 // the REJECT ones and before WARP's, and only listeners that exist are named.
 func TestCascadeConfig(t *testing.T) {
 	st := cascadeState(t)
-	raw, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false)
+	raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,12 +85,12 @@ func TestCascadeConfig(t *testing.T) {
 	// Only VLESS relays and NODE-<id> names.
 	bad := cascadeState(t)
 	bad.Exits[0].Proxy = json.RawMessage(`{"type":"socks5","server":"1.2.3.4","port":1}`)
-	if _, err := buildConfig(bad, proto.Cert{}, false); err == nil {
+	if _, _, err := buildConfig(bad, proto.Cert{}, false); err == nil {
 		t.Fatal("a non-VLESS exit was accepted")
 	}
 	bad = cascadeState(t)
 	bad.Exits[0].Name = "DIRECT"
-	if _, err := buildConfig(bad, proto.Cert{}, false); err == nil {
+	if _, _, err := buildConfig(bad, proto.Cert{}, false); err == nil {
 		t.Fatal("an exit named like a built-in policy was accepted")
 	}
 	if routesKey(cascadeState(t), false) == routesKey(warpState(), false) {

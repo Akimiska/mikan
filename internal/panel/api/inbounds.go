@@ -270,13 +270,6 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	return &inboundOutput{Body: v}, nil
 }
 
-func flag(on bool) int64 {
-	if on {
-		return 1
-	}
-	return 0
-}
-
 func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*inboundOutput, error) {
 	b := in.Body
 	// How a name may look is the subscription's rule; that it is free, the domain's.
@@ -290,6 +283,10 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	p := domain.InboundPatch{Port: b.Port, Enabled: b.Enabled, Config: b.Config, Dest: b.Dest, ServerName: b.ServerName, Fingerprint: b.Fingerprint, Obfs: b.Obfs,
 		DisplayName: b.DisplayName, Listen: b.Listen, AutoPort: b.AutoPort, AutoSNI: b.AutoSNI, Outbound: b.Outbound, ExitNodeID: b.ExitNodeID, PoolID: b.PoolID}
 	if c := b.Client; c != nil {
+		// The address clients connect to: like the panel's public host, not for a key.
+		if err := requireSession(ctx, "client"); err != nil {
+			return nil, err
+		}
 		p.Client = &domain.ClientEndpoint{Server: c.Server, Port: c.Port, SNI: c.SNI}
 	}
 	prev, row, err := h.d.Inbounds.Update(ctx, in.ID, p)
@@ -343,6 +340,8 @@ func inboundError(err error, dest bool) error {
 		return huma.Error422UnprocessableEntity("bad_listen", &huma.ErrorDetail{Location: "body.listen", Message: "bad_listen"})
 	case errors.Is(err, domain.ErrAutoPortListen):
 		return huma.Error422UnprocessableEntity("auto_port_listen", &huma.ErrorDetail{Location: "body.auto_port", Message: "auto_port_listen"})
+	case errors.Is(err, domain.ErrInboundChanged):
+		return huma.Error409Conflict("inbound_changed")
 	case errors.Is(err, domain.ErrUnknownPool):
 		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pool_id", Message: "pool_not_found"})
 	case errors.As(err, &name):

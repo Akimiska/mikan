@@ -2,7 +2,6 @@ import { t } from "../i18n";
 
 // Mirrors proto.Fingerprints: the uTLS profiles mihomo, Xray and sing-box all accept.
 export const FINGERPRINTS = ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"] as const;
-export type Fingerprint = string;
 
 const BROWSERS: Record<string, string> = {
   chrome: "Chrome",

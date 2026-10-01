@@ -52,27 +52,45 @@ func New() *Checker {
 	return &Checker{Resolvers: Resolvers, HTTP: &http.Client{Timeout: 8 * time.Second}}
 }
 
+// resolverTimeout is how long one public resolver gets: where DoH is blocked it is the
+// time a lookup waits for it, so it is short and the resolvers are asked at once.
+const resolverTimeout = 3 * time.Second
+
 // Lookup is the domain's A and AAAA records as the first public resolver that answers
 // sees them. When none answers (an outbound filter), the system resolver is asked.
 func (c *Checker) Lookup(ctx context.Context, name string) ([]netip.Addr, error) {
-	var last error
+	type answer struct {
+		out []netip.Addr
+		err error
+	}
+	rctx, cancel := context.WithTimeout(ctx, resolverTimeout)
+	defer cancel()
+	ch := make(chan answer, len(c.Resolvers))
 	for _, base := range c.Resolvers {
-		var out []netip.Addr
-		var err error
-		for _, typ := range []string{"A", "AAAA"} {
-			var as []netip.Addr
-			if as, err = c.doh(ctx, base, name, typ); err != nil {
-				break
+		go func() {
+			var out []netip.Addr
+			for _, typ := range []string{"A", "AAAA"} {
+				as, err := c.doh(rctx, base, name, typ)
+				if err != nil {
+					ch <- answer{err: err}
+					return
+				}
+				out = append(out, as...)
 			}
-			out = append(out, as...)
+			ch <- answer{out: out}
+		}()
+	}
+	var last error
+	for range c.Resolvers {
+		a := <-ch
+		if a.err != nil {
+			last = a.err
+			continue
 		}
-		if err == nil {
-			if len(out) == 0 {
-				return nil, ErrNotFound
-			}
-			return out, nil
+		if len(a.out) == 0 {
+			return nil, ErrNotFound
 		}
-		last = err
+		return a.out, nil
 	}
 	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", name)
 	var dnsErr *net.DNSError

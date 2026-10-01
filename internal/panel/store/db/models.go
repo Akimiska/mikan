@@ -61,7 +61,6 @@ type Device struct {
 	Ip        string
 	FirstSeen int64
 	LastSeen  int64
-	Client    string
 }
 
 type Inbound struct {
@@ -199,6 +198,11 @@ type Slot struct {
 	State     string
 	CreatedAt int64
 	BurnedAt  sql.NullInt64
+}
+
+type SlotCounter struct {
+	ID   int64
+	Last int64
 }
 
 type SubFetch struct {

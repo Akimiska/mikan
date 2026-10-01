@@ -16,6 +16,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/proto"
 )
@@ -78,7 +79,7 @@ type resetPathOutput struct {
 func (h *handlers) registerSettings() {
 	huma.Register(h.api, huma.Operation{OperationID: "get-settings", Method: http.MethodGet, Path: "/api/v1/settings", Summary: "Настройки", Tags: []string{"settings"}}, h.getSettings)
 	huma.Register(h.api, huma.Operation{OperationID: "update-settings", Method: http.MethodPatch, Path: "/api/v1/settings", Summary: "Изменить настройки", Tags: []string{"settings"}}, h.updateSettings)
-	huma.Register(h.api, huma.Operation{OperationID: "reset-admin-path", Method: http.MethodPost, Path: "/api/v1/settings/reset-admin-path", Summary: "Выдать новую секретную ссылку на панель", Tags: []string{"settings"}}, h.resetAdminPath)
+	huma.Register(h.api, huma.Operation{OperationID: "reset-admin-path", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/settings/reset-admin-path", Summary: "Выдать новую секретную ссылку на панель", Tags: []string{"settings"}}, h.resetAdminPath)
 	huma.Register(h.api, huma.Operation{OperationID: "renew-certificate", Method: http.MethodPost, Path: "/api/v1/settings/certificate/renew", Summary: "Запросить сертификат Let's Encrypt сейчас", Tags: []string{"settings"}, DefaultStatus: http.StatusAccepted}, h.renewCertificate)
 }
 
@@ -159,7 +160,8 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if host == "" {
 		host = v.PublicHost
 	}
-	if host != "" {
+	// The addresses carry the secret path segments: not for a key that may only read.
+	if host != "" && !hidesSecrets(ctx) {
 		v.AdminURL = "https://" + net.JoinHostPort(host, strconv.Itoa(v.PanelPort)) + "/" + paths.Admin + "/"
 		subPort := v.PanelPort
 		if v.SubPort > 0 {
@@ -184,6 +186,16 @@ func (h *handlers) getSettings(ctx context.Context, _ *struct{}) (*settingsOutpu
 
 func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (*settingsOutput, error) {
 	b := in.Body
+	// Where clients are sent, and what they are told to trust: a leaked API key must not
+	// move subscriptions to another server or add rules to every client.
+	for field, touched := range map[string]bool{"public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
+		"sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil} {
+		if touched {
+			if err := requireSession(ctx, field); err != nil {
+				return nil, err
+			}
+		}
+	}
 	var details []error
 	if b.PublicHost != nil && !hostname.Valid(*b.PublicHost) {
 		details = append(details, &huma.ErrorDetail{Location: "body.public_host", Message: "public_host_invalid"})
@@ -267,51 +279,70 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if len(details) > 0 {
 		return nil, huma.Error422UnprocessableEntity("validation", details...)
 	}
-	// The port opens before anything is saved: one that cannot be had changes nothing.
+	// The port opens first: one that cannot be had changes nothing. If the settings then
+	// fail to save, the port is put back, so the server does not listen on one nobody saved.
+	var oldPort int
 	if b.SubPort != nil {
 		if h.d.SubPort == nil {
 			return nil, huma.Error503ServiceUnavailable("sub_port_unavailable")
 		}
+		var err error
+		if oldPort, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeySubPort); err != nil {
+			return nil, err
+		}
 		if err := h.d.SubPort(*b.SubPort); err != nil {
 			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.sub_port", Message: "sub_port_busy", Value: *b.SubPort})
 		}
-		if err := settings.Set(ctx, h.d.Settings, settings.KeySubPort, *b.SubPort); err != nil {
-			return nil, err
-		}
-		// The bot's Mini App button points at the subscription page.
-		if h.d.Telegram != nil {
-			h.d.Telegram.Reload()
-		}
 	}
-	set := func(key string, v *string) error {
-		if v == nil {
-			return nil
-		}
-		return settings.Set(ctx, h.d.Settings, key, strings.TrimSpace(*v))
-	}
-	if b.SubRules != nil {
-		if err := settings.Set(ctx, h.d.Settings, settings.KeyRules, strings.TrimRight(*b.SubRules, " \n\r\t")); err != nil {
-			return nil, err
-		}
-	}
-	for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
-		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
-		if err := set(key, v); err != nil {
-			return nil, err
-		}
-	}
-	if b.QuietHourUTC != nil {
-		if err := settings.Set(ctx, h.d.Settings, settings.KeyQuietHour, *b.QuietHourUTC); err != nil {
-			return nil, err
-		}
-	}
-	for key, v := range map[string]*bool{settings.KeyAutoPort: b.AutoPort, settings.KeyAutoSNI: b.AutoSNI,
-		settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID} {
-		if v != nil {
-			if err := settings.Set(ctx, h.d.Settings, key, *v); err != nil {
-				return nil, err
+	// Every setting of the request is written in one transaction: a failure in the middle
+	// leaves the settings as they were, not half changed.
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		set := settings.New(q)
+		if b.SubPort != nil {
+			if err := settings.Set(ctx, set, settings.KeySubPort, *b.SubPort); err != nil {
+				return err
 			}
 		}
+		if b.SubRules != nil {
+			if err := settings.Set(ctx, set, settings.KeyRules, strings.TrimRight(*b.SubRules, " \n\r\t")); err != nil {
+				return err
+			}
+		}
+		for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
+			settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
+			if v == nil {
+				continue
+			}
+			if err := settings.Set(ctx, set, key, strings.TrimSpace(*v)); err != nil {
+				return err
+			}
+		}
+		if b.QuietHourUTC != nil {
+			if err := settings.Set(ctx, set, settings.KeyQuietHour, *b.QuietHourUTC); err != nil {
+				return err
+			}
+		}
+		for key, v := range map[string]*bool{settings.KeyAutoPort: b.AutoPort, settings.KeyAutoSNI: b.AutoSNI,
+			settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID} {
+			if v != nil {
+				if err := settings.Set(ctx, set, key, *v); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		if b.SubPort != nil {
+			if rerr := h.d.SubPort(oldPort); rerr != nil {
+				h.d.Log.Warn("sub port not put back", "port", oldPort, "err", rerr)
+			}
+		}
+		return nil, err
+	}
+	// The bot's Mini App button points at the subscription page.
+	if b.SubPort != nil && h.d.Telegram != nil {
+		h.d.Telegram.Reload()
 	}
 	var auditDetails map[string]any
 	if b.SubPort != nil {

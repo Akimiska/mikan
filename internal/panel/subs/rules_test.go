@@ -83,7 +83,9 @@ func TestRulesInProfile(t *testing.T) {
 	if again := ServedRules(text, testGroups); &again[0] != &rules[0] {
 		t.Fatal("the same text is parsed again instead of cached")
 	}
-	raw, err := Mihomo(Profile{Direct: []string{"vpn.example.com"}, Rules: rules}, testGroups, RoutingRUDirect)
+	prof := profile(t, "")
+	prof.Direct, prof.Rules = []string{"vpn.example.com"}, rules
+	raw, err := Mihomo(prof, testGroups, RoutingRUDirect)
 	if err != nil {
 		t.Fatal(err)
 	}

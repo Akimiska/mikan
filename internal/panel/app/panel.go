@@ -8,7 +8,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"mikan/internal/nodeapi"
@@ -47,6 +51,8 @@ type Panel struct {
 	spa       *server.SPA
 	subPage   *server.SPA
 	sessions  *auth.Sessions
+	st        *store.Store
+	devices   *domain.Devices
 	ipLimit   *auth.Limiter
 	userLimit *auth.Limiter
 	now       func() time.Time
@@ -82,14 +88,18 @@ type Options struct {
 	DataDir string
 	// Releases fetches the newest release; nil never checks.
 	Releases updates.Source
-	// Payment providers' APIs; "" are the real ones (tests point them at fakes).
-	YooKassaAPI, CryptoBotAPI string
 	// WarpAPI is Cloudflare's WARP client API; "" is the real one.
 	WarpAPI string
 	// AddonsCatalog is the marketplace's signed catalog; "" is the real one.
 	AddonsCatalog string
 	// DNS checks new domains against public DNS; nil leaves them unchecked.
 	DNS *dnscheck.Checker
+	// HSTS says whether browsers are told to keep to HTTPS: for a panel that serves TLS
+	// itself, while its certificate is trusted (see server.SetHSTS). nil: never.
+	HSTS func() bool
+	// Resolve looks up the names the panel is told to dial (REALITY targets); nil is the
+	// system's resolver, tests set their own.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type noChanges struct{}
@@ -101,7 +111,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	set := settings.New(st.Q)
 	p := &Panel{
 		Settings:  set,
-		sessions:  auth.NewSessions(st.Q, o.Now),
+		sessions:  auth.NewSessions(st.Q, o.Now, o.Log),
 		ipLimit:   auth.NewLimiter(10, 10*time.Minute, 15*time.Minute, 24*time.Hour),
 		userLimit: auth.NewLimiter(30, 10*time.Minute, 15*time.Minute, 24*time.Hour),
 		now:       o.Now,
@@ -136,13 +146,22 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		dryRun = p.Nodes
 	}
 	deps.Inbounds = domain.NewInbounds(st, dryRun, o.Now)
+	// A REALITY target given by name is looked up when it is saved: the node dials it past the
+	// rules that fence its users in.
+	deps.Resolve = o.Resolve
+	if deps.Resolve == nil {
+		deps.Resolve = domain.SystemResolve
+	}
+	deps.Inbounds.SetResolver(deps.Resolve)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
+	p.st, p.devices = st, deps.Devices
 	deps.Packages = domain.NewPackages(st, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
 		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom
 	}
 	deps.NodeCerts = o.NodeCerts
+	deps.ForgetNode = forgetNodeFiles(o)
 	subBase := func(ctx context.Context) string {
 		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {
@@ -154,18 +173,12 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + paths.Sub
 	}
-	deps.SubURL = func(ctx context.Context, token string) string {
-		if base := subBase(ctx); base != "" {
-			return base + "/" + token
-		}
-		return ""
-	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
-		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks,
-		Addons: deps.Addons, SubBase: subBase})
+		MaxLinks: tgbot.MaxLinks,
+		Addons:   deps.Addons, SubBase: subBase})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
@@ -192,7 +205,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	if sp, err := server.NewSPA(o.Web, "sub.html"); err == nil {
 		p.subPage, subPageHandler = sp, sp
 	}
-	subCfg := func(ctx context.Context) (subs.Config, error) {
+	buildSubCfg := func(ctx context.Context) (subs.Config, error) {
 		ep, err := set.Endpoint(ctx)
 		if err != nil {
 			return subs.Config{}, err
@@ -250,7 +263,23 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return cfg, nil
 	}
+	// A subscription is fetched by every app of every user every hour or so, and building
+	// its config reads some twenty settings and every node and takes a node's certificate
+	// from disk. It is kept for a few seconds, and dropped at once when this process changes
+	// a setting, a node or a node's certificate.
+	cache := &configCache{now: o.Now, gen: func() uint64 {
+		g := settings.Generation()
+		if p.Nodes != nil {
+			g += p.Nodes.Generation()
+		}
+		if o.NodeCerts != nil {
+			g += o.NodeCerts.Generation()
+		}
+		return g
+	}}
+	subCfg := func(ctx context.Context) (subs.Config, error) { return cache.get(ctx, buildSubCfg) }
 	subHandler := subs.NewHandler(st, subCfg, subPageHandler, o.Now, deps.Devices, o.TrustProxy)
+	subHandler.SetLogger(o.Log)
 	subHandler.SetTelegram(p.Telegram)
 	subHandler.SetShop(p.Billing)
 
@@ -258,6 +287,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	adminMux.Handle("/api/", apiHandler)
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
+	p.server.SetHSTS(o.HSTS)
 	p.Handler = p.server
 	return p, nil
 }
@@ -286,35 +316,101 @@ func (p *Panel) Apply(ctx context.Context) (settings.Paths, error) {
 }
 
 // Run keeps paths and the language in sync with the DB (the CLI and the settings page
-// edit them), drives the node syncer and cleans up expired state.
+// edit them), drives the node syncer and cleans up expired state. It returns once ctx is
+// done and every one of its workers has stopped: the caller closes the database after it.
 func (p *Panel) Run(ctx context.Context) {
-	if p.Nodes != nil {
-		go p.Nodes.Run(ctx)
+	// Before the reconcile loop: payments of the built-in providers take their adapters' names.
+	if err := p.Billing.MoveBuiltin(ctx); err != nil {
+		p.log.Error("billing: move the built-in providers", "err", err)
 	}
-	if p.Tuner != nil {
-		go p.Tuner.Run(ctx)
-	}
-	go p.Telegram.Run(ctx)
-	go p.Billing.Run(ctx)
 	// The host reads the switch from a file; the setting is what the admin chose.
 	if auto, err := p.Settings.On(ctx, settings.AutoUpdate); err == nil {
 		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {
 			p.log.Error("update policy", "err", err)
 		}
 	}
-	go p.Updates.Run(ctx)
-	go every(ctx, 5*time.Second, func() {
-		if _, err := p.Apply(ctx); err != nil {
-			p.log.Error("reload settings", "err", err)
+	var workers []func(context.Context)
+	if p.Nodes != nil {
+		workers = append(workers, p.Nodes.Run)
+	}
+	if p.Tuner != nil {
+		workers = append(workers, p.Tuner.Run)
+	}
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run,
+		func(ctx context.Context) {
+			every(ctx, 5*time.Second, func() {
+				if _, err := p.Apply(ctx); err != nil {
+					p.log.Error("reload settings", "err", err)
+				}
+			})
+		},
+		func(ctx context.Context) {
+			every(ctx, 10*time.Minute, func() {
+				if err := p.sessions.Cleanup(ctx); err != nil {
+					p.log.Error("session cleanup", "err", err)
+				}
+				p.ipLimit.Sweep(p.now())
+				p.userLimit.Sweep(p.now())
+				p.maintain(ctx)
+			})
+		})
+	runAll(ctx, workers...)
+}
+
+// runAll runs the workers until ctx is done and waits for every one to return, so that
+// nothing is still using what the caller shuts down after it (the database).
+func runAll(ctx context.Context, workers ...func(context.Context)) {
+	var wg sync.WaitGroup
+	for _, w := range workers {
+		wg.Go(func() { w(ctx) })
+	}
+	wg.Wait()
+}
+
+// configCacheTTL: the longest a changed setting is not seen, when the change was made by
+// another process (the server CLI); this process's own changes drop the cache at once.
+const configCacheTTL = 10 * time.Second
+
+// configCache keeps the subscription's config between requests. Errors are not kept.
+type configCache struct {
+	now func() time.Time
+	gen func() uint64
+
+	mu  sync.Mutex
+	at  time.Time
+	g   uint64
+	cfg subs.Config
+	ok  bool
+}
+
+func (c *configCache) get(ctx context.Context, build func(context.Context) (subs.Config, error)) (subs.Config, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now, g := c.now(), c.gen()
+	if c.ok && g == c.g && now.Sub(c.at) < configCacheTTL && !now.Before(c.at) {
+		return c.cfg, nil
+	}
+	cfg, err := build(ctx)
+	if err != nil {
+		return subs.Config{}, err
+	}
+	c.cfg, c.g, c.at, c.ok = cfg, g, now, true
+	return cfg, nil
+}
+
+// forgetNodeFiles removes what the panel keeps on disk for a node id: its own certificate
+// (Options.NodeCerts) and the self-signed pair its QUIC protocols use, <data>/tls/nodes/<id>.
+func forgetNodeFiles(o Options) func(id int64) error {
+	return func(id int64) error {
+		var errs []error
+		if o.NodeCerts != nil {
+			errs = append(errs, o.NodeCerts.Clear(id))
 		}
-	})
-	every(ctx, 10*time.Minute, func() {
-		if err := p.sessions.Cleanup(ctx); err != nil {
-			p.log.Error("session cleanup", "err", err)
+		if o.DataDir != "" {
+			errs = append(errs, os.RemoveAll(filepath.Join(o.DataDir, "tls", "nodes", strconv.FormatInt(id, 10))))
 		}
-		p.ipLimit.Sweep(p.now())
-		p.userLimit.Sweep(p.now())
-	})
+		return errors.Join(errs...)
+	}
 }
 
 func every(ctx context.Context, d time.Duration, fn func()) {

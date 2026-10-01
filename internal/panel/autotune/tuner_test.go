@@ -21,6 +21,7 @@ type fakeNodes struct {
 	targets  map[string]nodeapi.TargetResult // by dest; any other dest works
 	found    []nodeapi.TargetResult
 	checks   int
+	onScan   func() // runs while a scan is under way: the admin edits meanwhile
 }
 
 func (f *fakeNodes) Activity(_ context.Context, id int64) (nodeapi.Activity, error) {
@@ -40,6 +41,9 @@ func (f *fakeNodes) CheckTarget(_ context.Context, _ int64, req nodeapi.TargetCh
 }
 
 func (f *fakeNodes) ScanTargets(context.Context, int64, nodeapi.TargetScanRequest) (nodeapi.TargetScan, error) {
+	if f.onScan != nil {
+		f.onScan()
+	}
 	return nodeapi.TargetScan{Scanned: 253, Results: f.found}, nil
 }
 

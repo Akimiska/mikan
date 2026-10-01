@@ -1,12 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
+import { useState, type FormEvent } from "react";
+import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, Field, Pill, Skeleton, Spinner, Switch } from "../../components/ui";
+import { QueryBoundary } from "../../components/query";
+import { Switch } from "../../components/switch";
+import { Button, EmptyState, ErrorState, Field, Pill, Skeleton, Spinner } from "../../components/ui";
 import { getLocale, t } from "../../i18n";
+import { useCopy } from "../../lib/copy";
+import { useDraft } from "../../lib/draft";
+import { fieldErrors } from "../../lib/fields";
+import { safeHref } from "../../lib/url";
 
 type Addons = Schemas["AddonsView"];
 type Addon = Schemas["AddonView"];
@@ -16,7 +22,7 @@ type Entry = Schemas["AddonCatalogEntry"];
 export function useAddons() {
   return useQuery({
     queryKey: qk.addons,
-    queryFn: () => unwrap(api.GET("/api/v1/addons")),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/addons", { signal })),
     refetchInterval: (q) => (q.state.data?.pending ? 3_000 : false),
   });
 }
@@ -30,20 +36,23 @@ export function localized(m: Record<string, string> | undefined, fallback: strin
 /** "addon:yookassa" as the admin knows it: the adapter's own name. */
 export function addonName(id: string, data: Addons | undefined): string {
   const a = data?.installed.find((x) => x.id === id) ?? data?.catalog.find((x) => x.id === id);
-  return localized(a?.name, id);
+  return localized(a?.name, KNOWN_NAMES[id] ?? id);
 }
+
+// The two that were built in until 0.4.3, named even while the catalog is out of reach.
+const KNOWN_NAMES: Record<string, string> = { yookassa: "ЮKassa", cryptobot: "CryptoBot" };
 
 export function AddonsCard({ selling }: { selling: boolean }) {
   const q = useAddons();
+  return (
+    <QueryBoundary query={q} pending={<Skeleton style={{ height: 200, borderRadius: 20 }} />} wrap={(state) => <section className="card glass">{state}</section>}>
+      {(d) => <Addons d={d} selling={selling} onRetry={() => void q.refetch()} retrying={q.isFetching} />}
+    </QueryBoundary>
+  );
+}
+
+function Addons({ d, selling, onRetry, retrying }: { d: Addons; selling: boolean; onRetry: () => void; retrying: boolean }) {
   const [shop, setShop] = useState(false);
-  if (q.isPending) return <Skeleton style={{ height: 200, borderRadius: 20 }} />;
-  if (q.isError)
-    return (
-      <section className="card glass">
-        <ErrorState text={errorText(q.error)} onRetry={() => void q.refetch()} />
-      </section>
-    );
-  const d = q.data;
   const busy = !!d.pending;
   const last = d.last && !busy && d.last.state === "failed" ? d.last : null;
   return (
@@ -78,7 +87,7 @@ export function AddonsCard({ selling }: { selling: boolean }) {
       ) : (
         d.installed.map((a) => <AddonBlock key={a.id} a={a} busy={busy} selling={selling} />)
       )}
-      <CatalogDrawer open={shop} onOpenChange={setShop} data={d} onRetry={() => void q.refetch()} retrying={q.isFetching} />
+      <CatalogDrawer open={shop} onOpenChange={setShop} data={d} onRetry={onRetry} retrying={retrying} />
     </section>
   );
 }
@@ -97,19 +106,21 @@ function initial(a: Addon): Values {
 function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [enabled, setEnabled] = useState(a.enabled);
-  const [values, setValues] = useState(() => initial(a));
+  // The secrets in the draft start empty (the API never sends them) and are cleared after a
+  // save, so a saved form is not dirty.
+  const { draft, setDraft } = useDraft({ enabled: a.enabled, values: initial(a) });
+  const { enabled, values } = draft;
+  const setEnabled = (on: boolean) => setDraft((d) => ({ ...d, enabled: on }));
+  const setValues = (fn: (v: Values) => Values) => setDraft((d) => ({ ...d, values: fn(d.values) }));
   const [remove, setRemove] = useState(false);
-  useEffect(() => {
-    setEnabled(a.enabled);
-    setValues(initial(a));
-  }, [a]);
   const name = localized(a.name, a.id);
   const save = useMutation({
     mutationFn: (body: Schemas["PatchAddonInputBody"]) => unwrap(api.PATCH("/api/v1/addons/{id}", { params: { path: { id: a.id } }, body })),
     onSuccess: (v) => {
       qc.setQueryData(qk.addons, v);
       void qc.invalidateQueries({ queryKey: qk.paymentSettings });
+      const now = v.installed.find((x) => x.id === a.id);
+      if (now) setDraft({ enabled: now.enabled, values: initial(now) });
       toast.ok(t("addons.saved", { name }));
     },
   });
@@ -122,7 +133,7 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const errors = save.error instanceof ApiError ? save.error.fields : {};
+  const errors = fieldErrors(save.error);
   const general = save.error && !Object.keys(errors).some((k) => k.startsWith("settings.")) ? errors.settings || errorText(save.error) : "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -250,8 +261,8 @@ function CatalogRow({ e, busy, loading, onInstall }: { e: Entry; busy: boolean; 
           <span className="num text-xs font-normal text-[var(--ink-500)]">v{e.version}</span>
         </div>
         <div className="mt-1 text-xs text-[var(--ink-500)]">{localized(e.description, "")}</div>
-        {e.homepage ? (
-          <a className="link-btn mt-1 inline-flex items-center gap-1 text-xs" href={e.homepage} target="_blank" rel="noopener noreferrer">
+        {safeHref(e.homepage) ? (
+          <a className="link-btn mt-1 inline-flex items-center gap-1 text-xs" href={safeHref(e.homepage)} target="_blank" rel="noopener noreferrer">
             {t("addons.homepage")} <ExternalLink size={12} aria-hidden />
           </a>
         ) : null}
@@ -268,22 +279,14 @@ function CatalogRow({ e, busy, loading, onInstall }: { e: Entry; busy: boolean; 
 }
 
 export function Webhook({ label, url }: { label: string; url: string }) {
-  const toast = useToast();
+  const copy = useCopy();
   if (!url) return <p className="text-xs text-[var(--ink-500)]">{t("payments.webhookNoHost")}</p>;
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.ok(t("payments.webhookCopied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
   return (
     <div>
       <div className="mb-1 text-xs text-[var(--ink-500)]">{label}</div>
       <div className="link-field">
         <span className="mono">{url}</span>
-        <button type="button" className="icon-btn" onClick={() => void copy()} aria-label={t("payments.copyWebhook")}>
+        <button type="button" className="icon-btn" onClick={() => void copy(url, t("payments.webhookCopied"))} aria-label={t("payments.copyWebhook")}>
           <Copy size={18} />
         </button>
       </div>

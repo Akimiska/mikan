@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 
-export type Tab<T extends string> = { id: T; label: string; icon?: LucideIcon };
+type Tab<T extends string> = { id: T; label: string; icon?: LucideIcon };
 
 /**
  * A page's sections as tabs (WAI-ARIA tab list: arrows, Home and End move between them).

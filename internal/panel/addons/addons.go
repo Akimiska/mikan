@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/fsutil"
 	"mikan/internal/release"
 )
 
@@ -305,11 +306,7 @@ func writeFile(dir, name string, v any) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, name+".new")
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(dir, name))
+	return fsutil.WriteFileAtomic(filepath.Join(dir, name), data, 0o644)
 }
 
 // Client talks to an installed, running adapter.

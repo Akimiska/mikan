@@ -5,10 +5,13 @@ import { useState } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/client";
 import { meQuery, qk } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
+import { QueryBoundary } from "../../../components/query";
 import { useToast } from "../../../components/toast";
 import { Button, Field, Pill, QR, Skeleton } from "../../../components/ui";
 import { getLocale, t, tMaybe } from "../../../i18n";
+import { useCopy } from "../../../lib/copy";
 import { CertDrawer, certUntil, type CertInfo } from "../../../components/cert-drawer";
+import { fieldErrors } from "../../../lib/fields";
 import { ago } from "../../../lib/format";
 
 export function AccessCard({ s }: { s: Schemas["SettingsView"] }) {
@@ -22,14 +25,8 @@ export function AccessCard({ s }: { s: Schemas["SettingsView"] }) {
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(s.admin_url);
-      toast.ok(t("settings.adminLinkCopied"));
-    } catch {
-      toast.error(t("common.copyFailed"));
-    }
-  };
+  const copyText = useCopy();
+  const copy = () => copyText(s.admin_url, t("settings.adminLinkCopied"));
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <div className="card-head">
@@ -132,15 +129,16 @@ export function PasswordCard() {
   const toast = useToast();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
+  const [revokeKeys, setRevokeKeys] = useState(true);
   const change = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/v1/auth/password", { body: { current, new: next } })),
+    mutationFn: () => unwrap(api.POST("/api/v1/auth/password", { body: { current, new: next, revoke_keys: revokeKeys } })),
     onSuccess: () => {
       setCurrent("");
       setNext("");
       toast.ok(t("settings.passwordChanged"));
     },
   });
-  const errors = change.error instanceof ApiError ? change.error.fields : {};
+  const errors = fieldErrors(change.error);
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
       <form
@@ -159,6 +157,10 @@ export function PasswordCard() {
         <Field label={t("settings.newPassword")} htmlFor="p-new" hint={t("settings.newPasswordHint")} error={errors.new}>
           <input id="p-new" type="password" className="input" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} minLength={12} />
         </Field>
+        <label className="mb-4 flex items-start gap-2 text-[13px] text-[var(--ink-600)]">
+          <input type="checkbox" className="mt-0.5" checked={revokeKeys} onChange={(e) => setRevokeKeys(e.target.checked)} />
+          <span>{t("settings.revokeKeys")}</span>
+        </label>
         <Button type="submit" variant="primary" loading={change.isPending} disabled={!current || next.length < 12}>
           {t("settings.changePassword")}
         </Button>
@@ -178,7 +180,14 @@ export function TwoFactorCard() {
   const [pw, setPw] = useState("");
   const enabled = me.data?.admin.totp_enabled;
 
-  const start = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/auth/totp/setup")), onSuccess: setSetup, onError: (e) => toast.error(errorText(e)) });
+  const [startPw, setStartPw] = useState("");
+  const start = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/auth/totp/setup", { body: { password: startPw } })),
+    onSuccess: (r) => {
+      setStartPw("");
+      setSetup(r);
+    },
+  });
   const enable = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/auth/totp/enable", { body: { code } })),
     onSuccess: (r) => {
@@ -276,9 +285,20 @@ export function TwoFactorCard() {
           </Button>
         )
       ) : (
-        <Button variant="primary" loading={start.isPending} onClick={() => start.mutate()}>
-          {t("settings.twoFactorEnable")}
-        </Button>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            start.mutate();
+          }}
+          noValidate
+        >
+          <Field label={t("login.password")} htmlFor="on-pw" hint={t("settings.twoFactorPasswordHint")} error={start.error instanceof ApiError ? (start.error.fields.password ?? errorText(start.error)) : undefined}>
+            <input id="on-pw" type="password" className="input max-w-[320px]" value={startPw} onChange={(e) => setStartPw(e.target.value)} autoComplete="current-password" />
+          </Field>
+          <Button type="submit" variant="primary" loading={start.isPending} disabled={!startPw}>
+            {t("settings.twoFactorEnable")}
+          </Button>
+        </form>
       )}
     </section>
   );
@@ -287,7 +307,7 @@ export function TwoFactorCard() {
 export function SessionsCard() {
   const qc = useQueryClient();
   const toast = useToast();
-  const sessions = useQuery({ queryKey: qk.sessions, queryFn: () => unwrap(api.GET("/api/v1/auth/sessions")) });
+  const sessions = useQuery({ queryKey: qk.sessions, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/auth/sessions", { signal })) });
   const revoke = useMutation({
     mutationFn: (id: string) => unwrap(api.DELETE("/api/v1/auth/sessions/{id}", { params: { path: { id } } })),
     onSuccess: () => {
@@ -304,27 +324,27 @@ export function SessionsCard() {
           <div className="card-sub">{t("settings.sessionsSub")}</div>
         </div>
       </div>
-      {sessions.isPending ? (
-        <Skeleton style={{ height: 80 }} />
-      ) : (
-        <ul className="row-list">
-          {(sessions.data ?? []).map((s) => (
-            <li key={s.id} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-medium">{browserName(s.user_agent)}</div>
-                <div className="text-xs text-[var(--ink-500)]">
-                  <span className="mono">{s.ip}</span> · {s.current ? <span className="text-[var(--leaf-700)]">{t("settings.thisSession")}</span> : t("settings.activeAgo", { ago: ago(s.last_seen_at) })}
+      <QueryBoundary query={sessions} pending={<Skeleton style={{ height: 80 }} />}>
+        {(list) => (
+          <ul className="row-list">
+            {list.map((s) => (
+              <li key={s.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium">{browserName(s.user_agent)}</div>
+                  <div className="text-xs text-[var(--ink-500)]">
+                    <span className="mono">{s.ip}</span> · {s.current ? <span className="text-[var(--leaf-700)]">{t("settings.thisSession")}</span> : t("settings.activeAgo", { ago: ago(s.last_seen_at) })}
+                  </div>
                 </div>
-              </div>
-              {!s.current ? (
-                <Button size="sm" variant="danger" loading={revoke.isPending && revoke.variables === s.id} onClick={() => revoke.mutate(s.id)}>
-                  <LogOut size={16} aria-hidden /> {t("settings.endSession")}
-                </Button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
+                {!s.current ? (
+                  <Button size="sm" variant="danger" loading={revoke.isPending && revoke.variables === s.id} onClick={() => revoke.mutate(s.id)}>
+                    <LogOut size={16} aria-hidden /> {t("settings.endSession")}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </QueryBoundary>
     </section>
   );
 }

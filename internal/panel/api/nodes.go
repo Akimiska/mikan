@@ -81,9 +81,9 @@ type nodeIDInput struct {
 
 func (h *handlers) registerNodes() {
 	huma.Register(h.api, huma.Operation{OperationID: "list-nodes", Method: http.MethodGet, Path: "/api/v1/nodes", Summary: "Ноды", Tags: []string{"node"}}, h.listNodes)
-	huma.Register(h.api, huma.Operation{OperationID: "create-node", Method: http.MethodPost, Path: "/api/v1/nodes", Summary: "Добавить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusCreated}, h.createNode)
-	huma.Register(h.api, huma.Operation{OperationID: "update-node", Method: http.MethodPatch, Path: "/api/v1/nodes/{id}", Summary: "Изменить ноду", Tags: []string{"node"}}, h.updateNode)
-	huma.Register(h.api, huma.Operation{OperationID: "rekey-node", Method: http.MethodPost, Path: "/api/v1/nodes/{id}/key", Summary: "Выпустить новый ключ ноды (старый перестаёт работать)", Tags: []string{"node"}}, h.rekeyNode)
+	huma.Register(h.api, huma.Operation{OperationID: "create-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/nodes", Summary: "Добавить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusCreated}, h.createNode)
+	huma.Register(h.api, huma.Operation{OperationID: "update-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/nodes/{id}", Summary: "Изменить ноду", Tags: []string{"node"}}, h.updateNode)
+	huma.Register(h.api, huma.Operation{OperationID: "rekey-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/key", Summary: "Выпустить новый ключ ноды (старый перестаёт работать)", Tags: []string{"node"}}, h.rekeyNode)
 	huma.Register(h.api, huma.Operation{OperationID: "delete-node", Method: http.MethodDelete, Path: "/api/v1/nodes/{id}", Summary: "Удалить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusNoContent}, h.deleteNode)
 }
 
@@ -199,7 +199,8 @@ func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKe
 	if err != nil {
 		return nil, err
 	}
-	h.d.Nodes.NodesChanged()
+	h.forgetNode(n.ID)
+	h.nodesChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.create", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "address": n.Address})
 	inbounds, err := h.d.Store.Q.ListInbounds(ctx)
 	if err != nil {
@@ -271,9 +272,7 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 	if err != nil {
 		return nil, err
 	}
-	if h.d.Nodes != nil {
-		h.d.Nodes.NodesChanged()
-	}
+	h.nodesChanged()
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "enabled": n.Enabled != 0})
 	return h.nodeInfo(ctx, n.ID)
@@ -309,7 +308,7 @@ func (h *handlers) rekeyNode(ctx context.Context, in *nodeIDInput) (*nodeKeyOutp
 	case err != nil:
 		return nil, err
 	}
-	h.d.Nodes.NodesChanged()
+	h.nodesChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.rekey", "node", strconv.FormatInt(in.ID, 10), nil)
 	n, err := h.getNode(ctx, in.ID)
 	if err != nil {
@@ -408,7 +407,30 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 		}
 		h.d.Nodes.NodesChanged()
 	}
+	// The row is gone, and with it the id may be given to the next node: it must not
+	// inherit this one's certificates and private keys from disk.
+	h.forgetNode(n.ID)
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.delete", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name})
 	return nil, nil
+}
+
+// nodesChanged tells the node syncer to look at the nodes again; the panel may run
+// without nodes (tests, development).
+func (h *handlers) nodesChanged() {
+	if h.d.Nodes != nil {
+		h.d.Nodes.NodesChanged()
+	}
+}
+
+// forgetNode drops the certificates and keys the panel keeps for a node id: the admin's
+// own certificate and the node's self-signed pair. Node ids are reused (the table has no
+// AUTOINCREMENT), so a new node also clears what an id left behind.
+func (h *handlers) forgetNode(id int64) {
+	if h.d.ForgetNode == nil {
+		return
+	}
+	if err := h.d.ForgetNode(id); err != nil {
+		h.d.Log.Warn("remove node certificates", "node", id, "err", err)
+	}
 }

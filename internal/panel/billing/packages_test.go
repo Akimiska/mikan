@@ -33,7 +33,7 @@ func TestStarsPackage(t *testing.T) {
 	e, u, pk := packageEnv(t)
 	ctx := context.Background()
 	offers, _, err := e.s.PackageOffers(ctx, u.ID)
-	if err != nil || len(offers) != 1 || offers[0].Stars != 75 || offers[0].Rub != 7900 {
+	if err != nil || len(offers) != 1 || offers[0].Stars != 75 || offers[0].Rub != 0 { // no adapter takes rubles here
 		t.Fatalf("offers: %+v %v", offers, err)
 	}
 	if _, err := e.s.PackageInvoice(ctx, PackageRequest{TgID: 556, UserID: u.ID, PackageID: pk.ID, Provider: Stars}); !errors.Is(err, ErrNotYours) {

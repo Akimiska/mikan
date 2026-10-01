@@ -95,3 +95,25 @@ func TestCustomCertificate(t *testing.T) {
 		t.Fatalf("cleared: %+v", s)
 	}
 }
+
+// HSTS goes out only while browsers trust what is served: a self-signed fallback, a custom
+// certificate of a private CA or one for another host must stay clickable past a warning.
+func TestTrusted(t *testing.T) {
+	m := &Manager{}
+	for _, c := range []struct {
+		st   Status
+		want bool
+	}{
+		{Status{Kind: "self-signed"}, false},
+		{Status{Kind: "letsencrypt"}, true},
+		{Status{Kind: "custom"}, false},
+		{Status{Kind: "custom", Trusted: true}, true},
+		{Status{Kind: "custom", Trusted: true, Error: "custom_wrong_host"}, false},
+		{Status{Kind: "self-signed", Error: "custom_expired"}, false},
+	} {
+		m.status.Store(&c.st)
+		if got := m.Trusted(); got != c.want {
+			t.Fatalf("%+v: %v", c.st, got)
+		}
+	}
+}

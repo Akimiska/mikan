@@ -1,15 +1,18 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Undo2 } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, usePaymentSettings } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
+import { QueryBoundary, StaleNotice } from "../../components/query";
+import { Switch } from "../../components/switch";
+import { Button, EmptyState, ErrorState, PageHeader, Pill, Skeleton, Spinner } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
+import { useDraft } from "../../lib/draft";
 import { dateShort, money, num, time } from "../../lib/format";
-import { AddonsCard, addonName, useAddons, Webhook } from "./payment-addons";
+import { AddonsCard, addonName, useAddons } from "./payment-addons";
 
 type Settings = Schemas["PaymentSettingsView"];
 type Payment = Schemas["PaymentView"];
@@ -26,7 +29,7 @@ const STATUS_TONE: Record<Status, "ok" | "warn" | "bad" | "off"> = {
   refunded: "bad",
 };
 const STATUSES: Status[] = ["applied", "paid", "pending", "failed", "expired", "refunded"];
-const BUILT_IN: Provider[] = ["stars", "yookassa", "cryptobot"];
+const BUILT_IN: Provider[] = ["stars"];
 
 /** Why a payment failed or waits, in words when the code is known; a provider's own code as is. */
 function paymentError(code: string): string {
@@ -53,6 +56,7 @@ export function PaymentsPage() {
   return (
     <>
       <PageHeader title={t("payments.title")} sub={t("payments.subtitle")} />
+      {settings.data?.moving.length ? <MovingBanner ids={settings.data.moving} /> : null}
       {settings.data && !settings.data.enabled ? (
         <div className="banner warn mb-4 flex-wrap" role="status">
           <span className="min-w-0 flex-1">{t("payments.salesOff")}</span>
@@ -64,19 +68,25 @@ export function PaymentsPage() {
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
         <History />
         <div className="flex min-w-0 flex-col gap-4">
-          {settings.isPending ? (
-            <Skeleton style={{ height: 420, borderRadius: 20 }} />
-          ) : settings.isError ? (
-            <section className="card glass">
-              <ErrorState text={errorText(settings.error)} onRetry={() => void settings.refetch()} />
-            </section>
-          ) : (
-            <SettingsCard s={settings.data} />
-          )}
+          <QueryBoundary query={settings} pending={<Skeleton style={{ height: 420, borderRadius: 20 }} />} wrap={(state) => <section className="card glass">{state}</section>}>
+            {(s) => <SettingsCard s={s} />}
+          </QueryBoundary>
           <AddonsCard selling={!!settings.data?.enabled} />
         </div>
       </div>
     </>
+  );
+}
+
+/** The built-in YooKassa and CryptoBot moved to the marketplace: their adapters install after the update. */
+function MovingBanner({ ids }: { ids: string[] }) {
+  const addons = useAddons().data;
+  const names = ids.map((id) => addonName(id, addons)).join(", ");
+  return (
+    <div className="banner info mb-4" role="status">
+      <Spinner />
+      <span className="min-w-0 flex-1">{t("payments.moving", { names })}</span>
+    </div>
   );
 }
 
@@ -135,13 +145,14 @@ function History() {
           ))}
         </select>
       </div>
+      {list.isError && list.data ? <StaleNotice onRetry={() => void list.refetch()} retrying={list.isFetching} /> : null}
       {list.isPending ? (
         <div className="flex flex-col gap-2">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} style={{ height: 56 }} />
           ))}
         </div>
-      ) : list.isError ? (
+      ) : !list.data ? (
         <ErrorState text={errorText(list.error)} onRetry={() => void list.refetch()} />
       ) : items.length === 0 ? (
         <EmptyState title={t("payments.empty")} text={status || provider ? t("payments.emptyFiltered") : t("payments.emptyText")} search={!!(status || provider)} />
@@ -210,36 +221,19 @@ function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; o
 function SettingsCard({ s }: { s: Settings }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const init = () => ({ stars: s.stars, yookassa: s.yookassa, shop: s.yookassa_shop_id, cryptobot: s.cryptobot, testnet: s.cryptobot_testnet, allowNew: s.allow_new, resetTraffic: s.renew_resets_traffic });
-  const [form, setForm] = useState(init);
-  const [ykSecret, setYkSecret] = useState("");
-  const [cbToken, setCbToken] = useState("");
-  useEffect(() => setForm(init()), [s]);
+  const { draft: form, setDraft: setForm } = useDraft({ stars: s.stars, allowNew: s.allow_new, resetTraffic: s.renew_resets_traffic });
   const save = useMutation({
     mutationFn: (body: Schemas["PatchPaymentSettingsInputBody"]) => unwrap(api.PATCH("/api/v1/payments/settings", { body })),
     onSuccess: (v) => {
       qc.setQueryData(qk.paymentSettings, v);
-      setYkSecret("");
-      setCbToken("");
       toast.ok(t("payments.saved"));
     },
   });
-  const errors = save.error instanceof ApiError ? save.error.fields : {};
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate({
-      stars: form.stars,
-      yookassa: form.yookassa,
-      yookassa_shop_id: form.shop.trim(),
-      cryptobot: form.cryptobot,
-      cryptobot_testnet: form.testnet,
-      allow_new: form.allowNew,
-      renew_resets_traffic: form.resetTraffic,
-      ...(ykSecret.trim() ? { yookassa_secret: ykSecret.trim() } : {}),
-      ...(cbToken.trim() ? { cryptobot_token: cbToken.trim() } : {}),
-    });
+    save.mutate({ stars: form.stars, allow_new: form.allowNew, renew_resets_traffic: form.resetTraffic });
   };
-  const set = (k: keyof ReturnType<typeof init>) => (v: boolean) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof typeof form) => (v: boolean) => setForm((f) => ({ ...f, [k]: v }));
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
@@ -249,8 +243,8 @@ function SettingsCard({ s }: { s: Settings }) {
             <div className="card-sub">{t("payments.settingsSub")}</div>
           </div>
         </div>
-        {save.error && !Object.keys(errors).length ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
-        {(s.available.stars || s.available.yookassa || s.available.cryptobot) && s.on_sale === 0 ? (
+        {save.error ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        {(s.available.stars || s.available.addons.length > 0) && s.on_sale === 0 ? (
           <div className="banner warn mb-4 flex-wrap" role="status">
             <span className="min-w-0 flex-1">{t("payments.nothingOnSale")}</span>
             <Link to="/tariffs" search={{ tab: "tariffs" }} className="btn btn-glass btn-sm">
@@ -260,46 +254,7 @@ function SettingsCard({ s }: { s: Settings }) {
         ) : null}
 
         <Provider title={t("payments.providers.stars")} sub={t("payments.starsSub")} on={form.stars} onChange={set("stars")} live={s.available.stars} selling={s.enabled} offline={s.enabled && form.stars && !s.available.stars ? t("payments.starsBotOff") : ""} />
-
-        <Provider title={t("payments.providers.yookassa")} sub={t("payments.yookassaSub")} on={form.yookassa} onChange={set("yookassa")} live={s.available.yookassa} selling={s.enabled} error={errors.yookassa}>
-          <div className="grid gap-x-3 sm:grid-cols-2">
-            <Field label={t("payments.shopId")} htmlFor="p-shop" error={errors.yookassa_shop_id}>
-              <input id="p-shop" className="input mono" inputMode="numeric" value={form.shop} onChange={(e) => setForm((f) => ({ ...f, shop: e.target.value }))} autoComplete="off" aria-invalid={!!errors.yookassa_shop_id} />
-            </Field>
-            <Field label={t("payments.secretKey")} htmlFor="p-yk" error={errors.yookassa_secret}>
-              <input
-                id="p-yk"
-                className="input mono"
-                type="password"
-                value={ykSecret}
-                onChange={(e) => setYkSecret(e.target.value)}
-                placeholder={s.yookassa_secret_set ? t("payments.keySaved") : "live_…"}
-                autoComplete="new-password"
-                aria-invalid={!!errors.yookassa_secret}
-              />
-            </Field>
-          </div>
-          <Webhook label={t("payments.webhookYooKassa")} url={s.webhook_yookassa} />
-        </Provider>
-
-        <Provider title={t("payments.providers.cryptobot")} sub={t("payments.cryptobotSub")} on={form.cryptobot} onChange={set("cryptobot")} live={s.available.cryptobot} selling={s.enabled} error={errors.cryptobot}>
-          <Field label={t("payments.cryptoToken")} htmlFor="p-cb" error={errors.cryptobot_token}>
-            <input
-              id="p-cb"
-              className="input mono"
-              type="password"
-              value={cbToken}
-              onChange={(e) => setCbToken(e.target.value)}
-              placeholder={s.cryptobot_token_set ? t("payments.keySaved") : "12345:AA…"}
-              autoComplete="new-password"
-              aria-invalid={!!errors.cryptobot_token}
-            />
-          </Field>
-          <label className="mb-3 flex items-center gap-2 text-[13px]">
-            <input type="checkbox" className="check" checked={form.testnet} onChange={(e) => setForm((f) => ({ ...f, testnet: e.target.checked }))} /> {t("payments.testnet")}
-          </label>
-          <Webhook label={t("payments.webhookCryptoBot")} url={s.webhook_cryptobot} />
-        </Provider>
+        <p className="mb-4 text-xs text-[var(--ink-500)]">{t("payments.rublesInMarketplace")}</p>
 
         <div className="mb-4 flex items-start justify-between gap-3 border-t border-[var(--hairline)] pt-4">
           <div>

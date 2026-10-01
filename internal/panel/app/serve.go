@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,6 +34,9 @@ import (
 	"mikan/internal/panel/updates"
 	"mikan/internal/release"
 )
+
+// workerStopTimeout is how long Serve waits for the workers before it closes the database.
+const workerStopTimeout = 20 * time.Second
 
 func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
@@ -134,6 +138,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	if !cfg.Dev {
 		certs = acme.New(cfg.DataDir, holder, self, settings.New(st.Q), logger, time.Now)
 		opts.Certs = certs
+		opts.HSTS = certs.Trusted
 	}
 	p, err := NewPanel(st, opts)
 	if err != nil {
@@ -150,23 +155,38 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	if port, _, err := settings.Get[int](ctx, settings.New(st.Q), settings.KeySubPort); err == nil {
 		subPort.Start(port)
 	}
-	go p.Run(ctx)
+	// The workers (node sync, billing, the bot, certificates) use the database: they are
+	// stopped, and waited for, before it is closed, however Serve returns. The deferred
+	// close of the store runs after this one.
+	workers, stopWorkers := context.WithCancel(ctx)
+	var running sync.WaitGroup
+	defer func() {
+		stopWorkers()
+		done := make(chan struct{})
+		go func() { running.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(workerStopTimeout):
+			logger.Warn("workers did not stop in time; closing the database under them")
+		}
+	}()
+	running.Go(func() { p.Run(workers) })
 	if certs != nil {
-		go certs.Run(ctx)
+		running.Go(func() { certs.Run(workers) })
 		// kill -HUP (an external tool's renewal hook) serves a new custom certificate now.
 		hup := make(chan os.Signal, 1)
 		signal.Notify(hup, syscall.SIGHUP)
 		defer signal.Stop(hup)
-		go func() {
+		running.Go(func() {
 			for {
 				select {
-				case <-ctx.Done():
+				case <-workers.Done():
 					return
 				case <-hup:
 					certs.Renew()
 				}
 			}
-		}()
+		})
 	}
 
 	httpSrv := httpServer(p.Handler)

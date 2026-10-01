@@ -5,8 +5,9 @@ import { Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas, type User } from "../../../api/client";
 import { qk, usePools, useUserGrants } from "../../../api/hooks";
+import { QueryBoundary } from "../../../components/query";
 import { useToast } from "../../../components/toast";
-import { Button, ErrorState, Field, Pill, Segmented, Skeleton } from "../../../components/ui";
+import { Button, Field, Pill, Segmented, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { bytes, dateShort, days as daysText, GiB } from "../../../lib/format";
 import { targetName, type Lifetime } from "../packages";
@@ -29,19 +30,21 @@ export function GrantsSection({ u }: { u: User }) {
         ) : null}
       </h3>
       {adding ? <GrantForm u={u} pools={pools.data ?? []} onDone={() => setAdding(false)} /> : null}
-      {grants.isPending ? (
-        <Skeleton style={{ height: 48, borderRadius: 12 }} />
-      ) : grants.isError ? (
-        <ErrorState text={errorText(grants.error)} onRetry={() => void grants.refetch()} />
-      ) : grants.data.length === 0 ? (
-        adding ? null : <p className="text-xs text-[var(--ink-500)]">{t("grants.none")}</p>
-      ) : (
-        <ul className="row-list">
-          {grants.data.map((g) => (
-            <GrantRow key={g.id} g={g} pools={pools.data} />
-          ))}
-        </ul>
-      )}
+      <QueryBoundary query={grants} pending={<Skeleton style={{ height: 48, borderRadius: 12 }} />}>
+        {(list) =>
+          list.length === 0 ? (
+            adding ? null : (
+              <p className="text-xs text-[var(--ink-500)]">{t("grants.none")}</p>
+            )
+          ) : (
+            <ul className="row-list">
+              {list.map((g) => (
+                <GrantRow key={g.id} g={g} pools={pools.data} />
+              ))}
+            </ul>
+          )
+        }
+      </QueryBoundary>
     </section>
   );
 }

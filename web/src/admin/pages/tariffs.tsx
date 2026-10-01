@@ -5,16 +5,19 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas, type Tariff } from "../../api/client";
 import { qk, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { Tabs } from "../../components/tabs";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
+import { Button, EmptyState, Field, PageHeader, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Switch } from "../../components/switch";
 import { t } from "../../i18n";
 import { bytes, days, GiB, months, rubles, termMonths } from "../../lib/format";
+import { TARIFF_TABS } from "../search";
 import { PackagesCard } from "./packages";
 import { PoolLimitsField, PoolsCard } from "./pools";
 
 /** How long a term on the tariff runs: days, or months up to the billing day. */
-export function tariffTerm(tr: Tariff): string {
+function tariffTerm(tr: Tariff): string {
   if (!tr.duration_days) return t("time.forever");
   if (tr.billing_day != null) return t("tariffs.termToDay", { months: months(termMonths(tr.duration_days)), d: tr.billing_day });
   return days(tr.duration_days);
@@ -34,8 +37,6 @@ export function tariffSummary(tr: Tariff): string {
   return parts.join(" · ");
 }
 
-export const TARIFF_TABS = ["tariffs", "pools", "packages"] as const;
-export type TariffsSearch = { tab: (typeof TARIFF_TABS)[number] };
 const TAB_ICONS = { tariffs: Tag, pools: Layers, packages: Package } as const;
 
 /** A tariff's pool limits by pool name: "WL 100 GB"; pools without a limit are left out. */
@@ -97,63 +98,69 @@ export function TariffsPage() {
           <div className="max-w-4xl">
             <PackagesCard />
           </div>
-        ) : tariffs.isPending ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} style={{ height: 180, borderRadius: 20 }} />
-            ))}
-          </div>
-        ) : tariffs.isError ? (
-          <section className="card glass">
-            <ErrorState text={errorText(tariffs.error)} onRetry={() => void tariffs.refetch()} />
-          </section>
-        ) : tariffs.data.length === 0 ? (
-          <section className="card glass">
-            <EmptyState title={t("tariffs.emptyTitle")} text={t("tariffs.emptyText")}>
-              <Button variant="primary" onClick={() => setEdit("new")}>
-                <Plus size={18} aria-hidden /> {t("tariffs.new")}
-              </Button>
-            </EmptyState>
-          </section>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {tariffs.data.map((tr, i) => (
-              <section key={tr.id} className="card glass reveal flex flex-col" style={{ "--i": i } as React.CSSProperties}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-display text-xl font-medium tracking-tight">{tr.name}</h2>
-                    {tr.price_label ? <div className="mt-1 text-[13px] font-medium text-[var(--mikan-700)]">{tr.price_label}</div> : null}
-                    {selling && tr.on_sale ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-600)]">
-                        <Pill tone="ok">{t("tariffs.onSale")}</Pill>
-                        {tr.price_stars != null ? <span className="num">⭐ {tr.price_stars}</span> : null}
-                        {tr.price_rub != null ? <span className="num">{rubles(tr.price_rub)}</span> : null}
+          <QueryBoundary
+            query={tariffs}
+            pending={
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} style={{ height: 180, borderRadius: 20 }} />
+                ))}
+              </div>
+            }
+            wrap={(state) => <section className="card glass">{state}</section>}
+          >
+            {(list) =>
+              list.length === 0 ? (
+                <section className="card glass">
+                  <EmptyState title={t("tariffs.emptyTitle")} text={t("tariffs.emptyText")}>
+                    <Button variant="primary" onClick={() => setEdit("new")}>
+                      <Plus size={18} aria-hidden /> {t("tariffs.new")}
+                    </Button>
+                  </EmptyState>
+                </section>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {list.map((tr, i) => (
+                    <section key={tr.id} className="card glass reveal flex flex-col" style={{ "--i": i } as React.CSSProperties}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h2 className="font-display text-xl font-medium tracking-tight">{tr.name}</h2>
+                          {tr.price_label ? <div className="mt-1 text-[13px] font-medium text-[var(--mikan-700)]">{tr.price_label}</div> : null}
+                          {selling && tr.on_sale ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-600)]">
+                              <Pill tone="ok">{t("tariffs.onSale")}</Pill>
+                              {tr.price_stars != null ? <span className="num">⭐ {tr.price_stars}</span> : null}
+                              {tr.price_rub != null ? <span className="num">{rubles(tr.price_rub)}</span> : null}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="flex gap-1">
+                          <button type="button" className="icon-btn" aria-label={t("tariffs.editLabel", { name: tr.name })} onClick={() => setEdit(tr)}>
+                            <Pencil size={16} />
+                          </button>
+                          <button type="button" className="icon-btn" aria-label={t("tariffs.archiveLabel", { name: tr.name })} onClick={() => setArchive(tr)}>
+                            <Archive size={16} />
+                          </button>
+                        </div>
                       </div>
-                    ) : null}
-                  </div>
-                  <div className="flex gap-1">
-                    <button type="button" className="icon-btn" aria-label={t("tariffs.editLabel", { name: tr.name })} onClick={() => setEdit(tr)}>
-                      <Pencil size={16} />
-                    </button>
-                    <button type="button" className="icon-btn" aria-label={t("tariffs.archiveLabel", { name: tr.name })} onClick={() => setArchive(tr)}>
-                      <Archive size={16} />
-                    </button>
-                  </div>
+                      <dl className="mt-5 grid grid-cols-2 gap-3 text-xs text-[var(--ink-500)]">
+                        <Item label={t("users.colTraffic")} value={tr.traffic_limit != null ? bytes(tr.traffic_limit) : t("users.unlimited")} />
+                        <Item label={t("users.colExpiry")} value={tariffTerm(tr)} />
+                        <Item label={t("users.colDevices")} value={tr.device_limit != null ? String(tr.device_limit) : t("users.unlimited")} />
+                        <Item label={t("tariffs.reset")} value={resetLabel(tr)} />
+                        {poolLimitsText(tr, poolNames) ? (
+                          <div className="col-span-2">
+                            <Item label={t("pools.tariffLimits")} value={poolLimitsText(tr, poolNames)} />
+                          </div>
+                        ) : null}
+                      </dl>
+                    </section>
+                  ))}
                 </div>
-                <dl className="mt-5 grid grid-cols-2 gap-3 text-xs text-[var(--ink-500)]">
-                  <Item label={t("users.colTraffic")} value={tr.traffic_limit != null ? bytes(tr.traffic_limit) : t("users.unlimited")} />
-                  <Item label={t("users.colExpiry")} value={tariffTerm(tr)} />
-                  <Item label={t("users.colDevices")} value={tr.device_limit != null ? String(tr.device_limit) : t("users.unlimited")} />
-                  <Item label={t("tariffs.reset")} value={resetLabel(tr)} />
-                  {poolLimitsText(tr, poolNames) ? (
-                    <div className="col-span-2">
-                      <Item label={t("pools.tariffLimits")} value={poolLimitsText(tr, poolNames)} />
-                    </div>
-                  ) : null}
-                </dl>
-              </section>
-            ))}
-          </div>
+              )
+            }
+          </QueryBoundary>
         )}
       </Tabs>
       <TariffDrawer tariff={edit} onClose={() => setEdit(null)} />

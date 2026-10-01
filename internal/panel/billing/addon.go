@@ -263,8 +263,8 @@ func (s *Service) addonWebhook(ctx context.Context, w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusOK)
 }
 
-// checkAddon asks the adapter about an invoice and records what it says, as checkYooKassa
-// does: the status, the amount and the currency must match the payment.
+// checkAddon asks the adapter about an invoice and records what it says: the status, the
+// amount and the currency must match the payment.
 func (s *Service) checkAddon(ctx context.Context, provider, ext string) error {
 	pay, err := s.d.Store.Q.GetPaymentByExternal(ctx, db.GetPaymentByExternalParams{Provider: provider, ExternalID: sql.NullString{String: ext, Valid: true}})
 	if err != nil {

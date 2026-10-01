@@ -7,8 +7,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, usePackages, usePaymentSettings, usePools } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Button, ErrorState, Field, Pill, Segmented, Skeleton, Switch } from "../../components/ui";
+import { Button, Field, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Switch } from "../../components/switch";
 import { t } from "../../i18n";
 import { bytes, days as daysText, GiB, rubles } from "../../lib/format";
 
@@ -23,7 +25,7 @@ export function targetName(poolId: number | null | undefined, pools: Pool[] | un
 }
 
 /** How long a package lasts: until used up, until the period ends, or N days. */
-export function lifetimeText(lifetime: Lifetime, days: number): string {
+function lifetimeText(lifetime: Lifetime, days: number): string {
   if (lifetime === "days") return t("packages.lifetimeDaysN", { days: daysText(days) });
   return t(`packages.lifetime.${lifetime}`);
 }
@@ -57,39 +59,39 @@ export function PackagesCard() {
           <Plus size={16} aria-hidden /> {t("packages.add")}
         </Button>
       </div>
-      {packages.isPending ? (
-        <Skeleton style={{ height: 64 }} />
-      ) : packages.isError ? (
-        <ErrorState text={errorText(packages.error)} onRetry={() => void packages.refetch()} />
-      ) : packages.data.length === 0 ? (
-        <p className="text-xs text-[var(--ink-500)]">{t("packages.none")}</p>
-      ) : (
-        <ul className="row-list">
-          {packages.data.map((p) => (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="text-[13px] font-semibold">{p.name}</div>
-                <div className="text-xs text-[var(--ink-500)]">
-                  {[bytes(p.bytes), targetName(p.pool_id, pools.data), lifetimeText(p.lifetime, p.days)].join(" · ")}
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-600)]">
-                  {p.on_sale && selling ? <Pill tone="ok">{t("tariffs.onSale")}</Pill> : <Pill tone="off">{t("packages.notOnSale")}</Pill>}
-                  {p.price_stars != null ? <span className="num">⭐ {p.price_stars}</span> : null}
-                  {p.price_rub != null ? <span className="num">{rubles(p.price_rub)}</span> : null}
-                </div>
-              </div>
-              <div className="flex gap-1">
-                <button type="button" className="icon-btn" aria-label={t("packages.editLabel", { name: p.name })} onClick={() => setEdit(p)}>
-                  <Pencil size={16} />
-                </button>
-                <button type="button" className="icon-btn" aria-label={t("packages.archiveLabel", { name: p.name })} onClick={() => setArchive(p)}>
-                  <Archive size={16} />
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <QueryBoundary query={packages} pending={<Skeleton style={{ height: 64 }} />}>
+        {(list) =>
+          list.length === 0 ? (
+            <p className="text-xs text-[var(--ink-500)]">{t("packages.none")}</p>
+          ) : (
+            <ul className="row-list">
+              {list.map((p) => (
+                <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold">{p.name}</div>
+                    <div className="text-xs text-[var(--ink-500)]">
+                      {[bytes(p.bytes), targetName(p.pool_id, pools.data), lifetimeText(p.lifetime, p.days)].join(" · ")}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-600)]">
+                      {p.on_sale && selling ? <Pill tone="ok">{t("tariffs.onSale")}</Pill> : <Pill tone="off">{t("packages.notOnSale")}</Pill>}
+                      {p.price_stars != null ? <span className="num">⭐ {p.price_stars}</span> : null}
+                      {p.price_rub != null ? <span className="num">{rubles(p.price_rub)}</span> : null}
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button type="button" className="icon-btn" aria-label={t("packages.editLabel", { name: p.name })} onClick={() => setEdit(p)}>
+                      <Pencil size={16} />
+                    </button>
+                    <button type="button" className="icon-btn" aria-label={t("packages.archiveLabel", { name: p.name })} onClick={() => setArchive(p)}>
+                      <Archive size={16} />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </QueryBoundary>
       <PackageDrawer pkg={edit} pools={pools.data ?? []} selling={selling} onClose={() => setEdit(null)} />
       <Confirm
         open={!!archive}

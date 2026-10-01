@@ -3,17 +3,25 @@
 //! menu on an installed one; every menu action is a command too.
 
 mod addon;
+mod backup;
+mod clock;
 mod docker;
 mod envfile;
 mod host;
+mod lock;
 mod net;
 mod ops;
+mod panelfs;
 mod release;
 mod setup;
+mod signals;
 mod sites;
 mod system;
 mod tui;
+mod update;
 
+use std::io::Write;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -90,12 +98,22 @@ enum Cmd {
         yes: bool,
     },
     /// Update to the latest release; goes back when the new version does not start
-    Update(ops::UpdateArgs),
+    Update(update::UpdateArgs),
     /// Payment adapters of the marketplace: list, install, remove
     #[command(subcommand)]
     Addon(AddonCmd),
-    /// Node: take a new join key from the panel's Nodes page
-    Join { key: String },
+    /// Node: take a new join key from the panel's Nodes page (asked for when not given;
+    /// MIKAN_JOIN_KEY works too: the key holds the node's private key, keep it out of ps)
+    Join {
+        key: Option<String>,
+        /// Open the node's API port in ufw for this address only, the panel's
+        #[arg(long, value_name = "IP")]
+        panel_ip: Option<IpAddr>,
+    },
+    /// The files of this release: compose.yaml and the update units (`update` runs it, and
+    /// the new command runs it after replacing the old one)
+    #[command(hide = true)]
+    PostUpdate,
     /// Restart the containers
     Restart,
     /// Stop mikan and remove the command; the data stays in /opt/mikan
@@ -164,21 +182,22 @@ fn main() -> ExitCode {
             CertCmd::Show { node } => ops::cert(&["show"], node),
         },
         Some(Cmd::Inbound { args }) => ops::inbound(&args),
-        Some(Cmd::Backup) => ops::backup().map(|f| println!("Backup: {}", f.display())),
+        Some(Cmd::Backup) => backup::backup(&mut out).map(|f| out(&format!("Backup: {}", f.display()))),
         Some(Cmd::Restore { file, yes }) => {
             if yes || ops::confirm(&format!("Replace the current data with {}?", file.display())) {
-                ops::restore(&file).map(|()| println!("Restored from {}.", file.display()))
+                backup::restore(&file, &mut out).map(|()| out(&format!("Restored from {}.", file.display())))
             } else {
                 Ok(())
             }
         }
-        Some(Cmd::Update(a)) => ops::update(&a, &mut |l| println!("{l}"), &mut progress_line()),
+        Some(Cmd::Update(a)) => update::update(&a, &mut out, &mut progress_line()),
         Some(Cmd::Addon(c)) => addon_cmd(c),
-        Some(Cmd::Join { key }) => ops::join(&key),
+        Some(Cmd::Join { key, panel_ip }) => ops::join_key(key).and_then(|k| ops::join(&k, panel_ip)),
+        Some(Cmd::PostUpdate) => update::converge(&mut out),
         Some(Cmd::Restart) => ops::restart(),
         Some(Cmd::Uninstall { yes }) => {
             if yes || ops::confirm("Stop mikan and remove the mikan command? The data stays in /opt/mikan.") {
-                ops::uninstall().map(|()| println!("Done. The data and backups stay in {DIR}; remove them with: rm -rf {DIR}"))
+                ops::uninstall().map(|()| out(&format!("Done. The data and backups stay in {DIR}; remove them with: rm -rf {DIR}")))
             } else {
                 Ok(())
             }
@@ -187,17 +206,23 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("mikan: {e:#}");
+            let _ = writeln!(std::io::stderr(), "mikan: {e:#}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// Prints a line and goes on when nobody reads it any more: an ssh session that dropped in
+/// the middle of an update must not panic the update half way (println! would).
+pub fn out(l: &str) {
+    let _ = writeln!(std::io::stdout(), "{l}");
 }
 
 fn addon_cmd(c: AddonCmd) -> anyhow::Result<()> {
     let install = ops::Install::load()?;
     install.panel_only()?;
     let panel = install.version();
-    let mut say = |l: &str| println!("{l}");
+    let mut say = out;
     match c {
         AddonCmd::List => addon::list(&panel),
         AddonCmd::Install { id } => addon::install(&id, &panel, &mut say),
@@ -219,7 +244,7 @@ fn progress_line() -> impl FnMut(f64) {
         let q = (p * 4.0) as i32;
         if q != last {
             last = q;
-            println!("  {}%", q * 25);
+            out(&format!("  {}%", q * 25));
         }
     }
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"mikan/internal/panel/store/db"
 )
@@ -108,8 +109,20 @@ func Set[T any](ctx context.Context, s *Settings, key string, v T) error {
 	if err != nil {
 		return err
 	}
-	return s.q.SetSetting(ctx, db.SetSettingParams{Key: key, Value: string(raw)})
+	if err := s.q.SetSetting(ctx, db.SetSettingParams{Key: key, Value: string(raw)}); err != nil {
+		return err
+	}
+	generation.Add(1)
+	return nil
 }
+
+// generation counts the settings this process has written. Whoever keeps something built
+// from settings checks it, and builds again when it moved. Changes made by another
+// process (the CLI) do not move it: they are seen when what is kept expires.
+var generation atomic.Uint64
+
+// Generation is how many settings have been written by this process so far.
+func Generation() uint64 { return generation.Load() }
 
 func (s *Settings) String(ctx context.Context, key string) (string, error) {
 	v, _, err := Get[string](ctx, s, key)

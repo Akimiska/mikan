@@ -25,6 +25,7 @@ const adapterSecret = "sk_live_ADAPTERsecret0"
 // fakeAdapter is a payment adapter of protocol v1 for a provider that signs its webhooks
 // with a header.
 type fakeAdapter struct {
+	id       string // what /v1/info answers as; "fake" when empty
 	mu       sync.Mutex
 	status   map[string]addons.Status
 	invoices []addons.InvoiceRequest
@@ -50,7 +51,11 @@ func (f *fakeAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	switch r.URL.Path {
 	case "/v1/info":
-		_, _ = io.WriteString(w, `{"id":"fake","protocol":1,"version":"1.0.0","name":{"en":"Fake"},"currencies":["RUB"],"capabilities":["webhook"],
+		id := f.id
+		if id == "" {
+			id = "fake"
+		}
+		_, _ = io.WriteString(w, `{"id":"`+id+`","protocol":1,"version":"1.0.0","name":{"en":"Fake"},"currencies":["RUB"],"capabilities":["webhook"],
 			"settings":[{"key":"shop_id","type":"string","required":true,"pattern":"^[0-9]+$"},{"key":"secret_key","type":"string","secret":true,"required":true},{"key":"testnet","type":"bool"}]}`)
 		return
 	}
@@ -97,18 +102,30 @@ func (f *fakeAdapter) set(ext string, fn func(*addons.Status)) {
 
 // addonEnv is newEnv with the adapter "fake" installed and running.
 func addonEnv(t *testing.T) (*env, *fakeAdapter) {
+	e, fa, dir := adapterEnv(t, "fake")
+	runAdapter(t, dir, "fake", fa)
+	return e, fa
+}
+
+// adapterEnv is newEnv with the marketplace on a data directory where nothing runs yet,
+// and an adapter answering as id for runAdapter to start.
+func adapterEnv(t *testing.T, id string) (*env, *fakeAdapter, string) {
 	e := newEnv(t)
-	fa := &fakeAdapter{status: map[string]addons.Status{}}
+	fa := &fakeAdapter{id: id, status: map[string]addons.Status{}}
+	dir := t.TempDir()
+	e.s.d.Addons = addons.New(dir, "", "0.4.3", slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return e.now })
+	e.s.d.SubBase = func(context.Context) string { return "https://panel.example:2053/sub" }
+	return e, fa, dir
+}
+
+// runAdapter is the host having installed id: its state lists it running.
+func runAdapter(t *testing.T, dir, id string, fa *fakeAdapter) {
 	srv := httptest.NewServer(fa)
 	t.Cleanup(srv.Close)
-	dir := t.TempDir()
-	state, _ := json.Marshal(addons.State{Adapters: map[string]addons.Installed{"fake": {Version: "1.0.0", Digest: "sha256:1", Status: "running",
+	state, _ := json.Marshal(addons.State{Adapters: map[string]addons.Installed{id: {Version: "1.0.0", Digest: "sha256:1", Status: "running",
 		Listen: strings.TrimPrefix(srv.URL, "http://"), Token: "adapter-token"}}})
 	must(t, os.MkdirAll(filepath.Join(dir, "addons"), 0o755))
 	must(t, os.WriteFile(filepath.Join(dir, "addons", "state.json"), state, 0o600))
-	e.s.d.Addons = addons.New(dir, "", "0.4.3", slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return e.now })
-	e.s.d.SubBase = func(context.Context) string { return "https://panel.example:2053/sub" }
-	return e, fa
 }
 
 // The adapter's settings are checked against its own description and with the provider;

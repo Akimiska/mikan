@@ -107,6 +107,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал действий админа: хранится 180 суток */
+        get: operations["list-audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -622,7 +639,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Удалить пул: его подключения вернутся в основной трафик */
+        /** Удалить пул: его подключения вернутся в основной трафик; пока в нём есть оплаченный трафик, пул остаётся */
         delete: operations["delete-pool"];
         options?: never;
         head?: never;
@@ -1210,6 +1227,33 @@ export interface components {
             totp_enabled: boolean;
             username: string;
         };
+        AuditEntry: {
+            /** @description Например user.create, settings.update, auth.login_failed */
+            action: string;
+            /**
+             * Format: int64
+             * @description null — система, консоль сервера или неудачный вход
+             */
+            admin_id: number | null;
+            /** Format: date-time */
+            at: string;
+            /** @description Подробности действия; null — нет */
+            details: unknown;
+            /** Format: int64 */
+            id: number;
+            ip: string;
+            target_id: string;
+            target_type: string;
+        };
+        AuditOutputBody: {
+            /** @description От новых к старым */
+            items: components["schemas"]["AuditEntry"][];
+            /**
+             * Format: int64
+             * @description Передайте как before за следующей страницей; 0 — это всё
+             */
+            next: number;
+        };
         AutoEvent: {
             /** Format: date-time */
             at: string;
@@ -1373,11 +1417,15 @@ export interface components {
              */
             expire_days?: number;
             name: string;
+            /** @description Пароль админа: ключ не выпускается из одной лишь украденной сессии */
+            password: string;
             /**
-             * @description read — только GET-запросы, full — всё, кроме входа, сессий и ключей
+             * @description read — только GET-запросы, без ссылок подписок и секретных адресов; full — изменения, кроме входа, сессий, ключей и операций, где уходят деньги, ключи и адреса клиентов (в справочнике помечены «только сессия»)
              * @enum {string}
              */
             scope: "read" | "full";
+            /** @description Код из приложения, если включена 2FA */
+            totp?: string;
         };
         CreateAPIKeyOutputBody: {
             /** Format: date-time */
@@ -1432,7 +1480,6 @@ export interface components {
             tariff_id: number;
         };
         DeviceView: {
-            client: string;
             /** Format: date-time */
             first_seen: string;
             ip: string;
@@ -1829,6 +1876,8 @@ export interface components {
             current: string;
             /** @description Не короче 12 символов */
             new: string;
+            /** @description Отозвать и ключи API (по умолчанию да): другие сессии завершаются при смене пароля, ключ, выпущенный из угнанной сессии, пережил бы это */
+            revoke_keys?: boolean;
         };
         PatchAddonInputBody: {
             enabled?: boolean;
@@ -1885,17 +1934,9 @@ export interface components {
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
-            cryptobot?: boolean;
-            cryptobot_testnet?: boolean;
-            /** @description Пусто — удалить токен */
-            cryptobot_token?: string;
             enabled?: boolean;
             renew_resets_traffic?: boolean;
             stars?: boolean;
-            yookassa?: boolean;
-            /** @description Пусто — удалить ключ */
-            yookassa_secret?: string;
-            yookassa_shop_id?: string;
         };
         PatchSettingsInputBody: {
             auto_port?: boolean;
@@ -1968,11 +2009,10 @@ export interface components {
             allow_new: boolean;
             /** @description Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен */
             available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
-            cryptobot: boolean;
-            cryptobot_testnet: boolean;
-            cryptobot_token_set: boolean;
             /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
             enabled: boolean;
+            /** @description Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит */
+            moving: string[];
             /**
              * Format: int64
              * @description Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату
@@ -1982,19 +2022,11 @@ export interface components {
             renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */
             stars: boolean;
-            /** @description Адрес вебхуков в настройках приложения @CryptoBot */
-            webhook_cryptobot: string;
-            /** @description Адрес для HTTP-уведомлений в личном кабинете ЮKassa */
-            webhook_yookassa: string;
-            yookassa: boolean;
-            /** @description Секретный ключ сохранён; сам ключ API не отдаёт */
-            yookassa_secret_set: boolean;
-            yookassa_shop_id: string;
         };
         PaymentSettingsViewAvailableStruct: {
-            cryptobot: boolean;
+            /** @description Адаптеры маркетплейса, которые принимают оплату прямо сейчас */
+            addons: string[];
             stars: boolean;
-            yookassa: boolean;
         };
         PaymentTotal: {
             /** Format: int64 */
@@ -2029,7 +2061,7 @@ export interface components {
             kind: "new" | "renew" | "package";
             /** Format: date-time */
             paid_at?: string;
-            /** @description stars, yookassa, cryptobot или addon:<id> — адаптер маркетплейса */
+            /** @description stars или addon:<id> — адаптер маркетплейса */
             provider: string;
             /** Format: date-time */
             refunded_at?: string;
@@ -2391,6 +2423,10 @@ export interface components {
         };
         TotpDisableInputBody: {
             code: string;
+            password: string;
+        };
+        TotpSetupInputBody: {
+            /** @description Пароль: без него украденная сессия включила бы 2FA на себя и закрыла вход владельцу */
             password: string;
         };
         TotpSetupOutputBody: {
@@ -2811,6 +2847,39 @@ export interface operations {
             };
         };
     };
+    "list-audit": {
+        parameters: {
+            query?: {
+                /** @description Записи до этого номера; 0 — самые новые */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -3062,7 +3131,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpSetupInputBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

@@ -267,6 +267,36 @@ func (q *Queries) ListUserPools(ctx context.Context, userID int64) ([]UserPool, 
 	return items, nil
 }
 
+const poolUsage = `-- name: PoolUsage :one
+SELECT
+  (SELECT COUNT(*) FROM traffic_grants g
+    WHERE g.pool_id = ?1 AND g.remaining > 0 AND (g.expires_at IS NULL OR g.expires_at > CAST(?2 AS INTEGER))) AS grants,
+  (SELECT COUNT(*) FROM traffic_packages k WHERE k.pool_id = ?1 AND k.archived = 0) AS packages,
+  (SELECT COUNT(*) FROM payments p JOIN traffic_packages k ON k.id = p.package_id
+    WHERE k.pool_id = ?1 AND p.status IN ('pending', 'paid')) AS payments
+`
+
+type PoolUsageParams struct {
+	PoolID sql.NullInt64
+	Now    int64
+}
+
+type PoolUsageRow struct {
+	Grants   int64
+	Packages int64
+	Payments int64
+}
+
+// What a pool still holds that deleting it would destroy (the cascade takes grants and
+// packages with it, and a paid invoice of a package loses the package): traffic users
+// paid for and have left, packages of the catalog, invoices not closed yet.
+func (q *Queries) PoolUsage(ctx context.Context, arg PoolUsageParams) (PoolUsageRow, error) {
+	row := q.db.QueryRowContext(ctx, poolUsage, arg.PoolID, arg.Now)
+	var i PoolUsageRow
+	err := row.Scan(&i.Grants, &i.Packages, &i.Payments)
+	return i, err
+}
+
 const renameTrafficPool = `-- name: RenameTrafficPool :execrows
 UPDATE traffic_pools SET name = ? WHERE id = ?
 `

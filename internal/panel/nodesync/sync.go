@@ -15,6 +15,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -55,6 +56,16 @@ type Syncer struct {
 	stateKey    string
 	policyKey   string
 	lastApplied nodeapi.ApplyResult
+	lastPush    time.Time // when the policies last reached the node
+	failedKey   string    // the state key the last failed Apply was for
+	retry       retry     // the pace of attempts at a node that does not answer
+	badInbounds string    // the inbounds left out of the state, as last logged
+
+	// Only the counters loop touches these.
+	counterFails int       // consecutive failed pulls
+	lastStored   time.Time // when a batch was last stored
+	epochPush    time.Time // when a new counter epoch last made the policies go out again
+	vetLogged    time.Time
 
 	health atomic.Pointer[HealthView]
 	online atomic.Pointer[map[string]nodeapi.Online]
@@ -77,8 +88,6 @@ func newSyncer(m *Manager, id int64, t Target) *Syncer {
 	return s
 }
 
-func (s *Syncer) ID() int64        { return s.id }
-func (s *Syncer) Client() Node     { return s.node }
 func (s *Syncer) PoliciesChanged() { signal(s.policiesDirty) }
 func (s *Syncer) SlotsChanged()    { signal(s.stateDirty) }
 
@@ -94,13 +103,23 @@ func (s *Syncer) Health() HealthView { return *s.health.Load() }
 // Online returns the node's live connection view keyed by slot name.
 func (s *Syncer) Online() map[string]nodeapi.Online { return *s.online.Load() }
 
+// run keeps the node in line until ctx ends. State and policies go in one loop, one at a
+// time; the counters and the health check have their own, so a node that is slow to
+// apply a state does not freeze the traffic accounting or the health the admin sees.
 func (s *Syncer) run(ctx context.Context) {
-	counters := time.NewTicker(2 * time.Second)
-	health := time.NewTicker(5 * time.Second)
-	defer counters.Stop()
-	defer health.Stop()
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		every(ctx, 2*time.Second, s.pullCounters)
+	}()
+	go func() {
+		defer wg.Done()
+		s.refreshHealth(ctx)
+		every(ctx, 5*time.Second, s.refreshHealth)
+	}()
 	s.applyState(ctx)
-	s.refreshHealth(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -109,12 +128,28 @@ func (s *Syncer) run(ctx context.Context) {
 			s.applyState(ctx)
 		case <-s.policiesDirty:
 			// Coalesce bursts (bulk actions) into one push.
-			time.Sleep(150 * time.Millisecond)
+			t := time.NewTimer(150 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return
+			case <-t.C:
+			}
 			s.pushPolicies(ctx, true)
-		case <-counters.C:
-			s.pullCounters(ctx)
-		case <-health.C:
-			s.refreshHealth(ctx)
+		}
+	}
+}
+
+// every calls fn on a ticker until ctx ends.
+func every(ctx context.Context, d time.Duration, fn func(context.Context)) {
+	t := time.NewTicker(d)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			fn(ctx)
 		}
 	}
 }
@@ -138,15 +173,28 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 	if st.Relay, st.Exits, err = s.cascade(ctx, n, inbounds); err != nil {
 		return st, err
 	}
+	if s.local {
+		// The panel runs next to its own node, so its HTTPS port is the self-steal REALITY target.
+		if st.SelfStealPort, _, err = settings.Get[int](ctx, s.m.set, settings.KeyPanelPort); err != nil {
+			return st, err
+		}
+	}
+	var bad []string
 	for _, in := range inbounds {
 		// A disabled node keeps running but serves nothing.
 		if in.NodeID != s.id || in.Enabled == 0 || n.Enabled == 0 {
 			continue
 		}
+		// Saved configs were validated when they were saved, but what holds then may not
+		// later: the panel's port moved (REALITY self-steal), or the rules got stricter. The
+		// node refuses such a state as a whole, so the inbound stays out of it, and the
+		// others, the new users and the policies still reach the node.
 		t, err := proto.Parse(in.Config)
+		if err == nil {
+			err = proto.Validate(t, proto.Options{SelfStealPort: st.SelfStealPort})
+		}
 		if err != nil {
-			// Saved configs are validated; a broken one must not take the others down.
-			s.log.Error("inbound config", "inbound", in.Name, "err", err)
+			bad = append(bad, in.Name+": "+err.Error())
 			continue
 		}
 		ni := nodeapi.Inbound{Name: in.Name, Listen: in.Listen, Port: in.Port, Config: t.JSON()}
@@ -155,12 +203,7 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 		}
 		st.Inbounds = append(st.Inbounds, ni)
 	}
-	if s.local {
-		// The panel runs next to its own node, so its HTTPS port is the self-steal REALITY target.
-		if st.SelfStealPort, _, err = settings.Get[int](ctx, s.m.set, settings.KeyPanelPort); err != nil {
-			return st, err
-		}
-	}
+	s.noteBadInbounds(bad)
 	slots, err := q.ListSlots(ctx)
 	if err != nil {
 		return st, err
@@ -182,11 +225,18 @@ func (s *Syncer) applyState(ctx context.Context) {
 		return
 	}
 	key := stateKey(st)
+	now := s.m.now()
 	s.mu.Lock()
 	same := key == s.stateKey
+	// A node that refused this very state is not asked again at once: the pause grows
+	// while it keeps refusing, and a different state is tried straight away.
+	paused := key == s.failedKey && s.retry.waiting(now)
 	s.mu.Unlock()
 	if same {
-		s.pushPolicies(ctx, false)
+		s.sendPolicies(ctx, st.Epoch, st.Policies, s.policiesStale(now))
+		return
+	}
+	if paused {
 		return
 	}
 	rev, err := s.nextRevision(ctx)
@@ -197,8 +247,17 @@ func (s *Syncer) applyState(ctx context.Context) {
 	st.Revision = rev
 	res, err := s.node.Apply(ctx, st)
 	if err != nil {
-		s.log.Warn("apply node state", "err", err)
+		s.mu.Lock()
+		s.failedKey = key
+		log := s.retry.fail(now, err)
+		s.mu.Unlock()
+		if log {
+			s.log.Warn("apply node state", "err", err)
+		}
 		return
+	}
+	if err := s.saveRevision(ctx, rev); err != nil {
+		s.log.Error("revision", "err", err)
 	}
 	for _, l := range res.Listeners {
 		if !l.OK {
@@ -208,30 +267,79 @@ func (s *Syncer) applyState(ctx context.Context) {
 	s.mu.Lock()
 	s.stateKey = key
 	s.policyKey = policyKey(st.Policies)
+	s.lastPush = now
 	s.lastApplied = res
+	s.failedKey = ""
+	recovered := s.retry.ok()
 	s.mu.Unlock()
+	if recovered {
+		s.log.Info("node answers again")
+	}
 	s.log.Info("node state applied", "revision", rev, "recreated", res.Recreated)
 }
 
+// noteBadInbounds logs the inbounds left out of the node's state when that set changes,
+// not at every tick.
+func (s *Syncer) noteBadInbounds(bad []string) {
+	sort.Strings(bad)
+	now := strings.Join(bad, "\n")
+	s.mu.Lock()
+	changed := now != s.badInbounds
+	s.badInbounds = now
+	s.mu.Unlock()
+	if changed {
+		for _, b := range bad {
+			s.log.Error("inbound left out of the node's state", "inbound", b)
+		}
+	}
+}
+
+// policiesStale says whether it is time to send the policies although nothing in them
+// changed. What the node holds goes out of date by itself, as the user's traffic on the
+// other nodes counts against the same quota, and a node sums only its own.
+func (s *Syncer) policiesStale(now time.Time) bool {
+	every := 5 * time.Minute
+	if len(s.m.Syncers()) > 1 {
+		every = time.Minute
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return now.Sub(s.lastPush) >= every
+}
+
+// pushPolicies sends the policies when they changed (or force says so).
 func (s *Syncer) pushPolicies(ctx context.Context, force bool) {
 	epoch, ps, _, err := s.policies(ctx)
 	if err != nil {
 		s.log.Error("build policies", "err", err)
 		return
 	}
+	s.sendPolicies(ctx, epoch, ps, force)
+}
+
+func (s *Syncer) sendPolicies(ctx context.Context, epoch string, ps []nodeapi.Policy, force bool) {
 	key := policyKey(ps)
+	now := s.m.now()
 	s.mu.Lock()
 	unchanged := key == s.policyKey && !force
+	// A node that does not answer would not take these either.
+	down := s.retry.unreachable(now)
 	s.mu.Unlock()
-	if unchanged {
+	if unchanged || down {
 		return
 	}
 	if err := s.node.SetPolicies(ctx, epoch, ps); err != nil {
-		s.log.Warn("push policies", "err", err)
+		s.mu.Lock()
+		log := s.retry.fail(now, err)
+		s.mu.Unlock()
+		if log {
+			s.log.Warn("push policies", "err", err)
+		}
 		return
 	}
 	s.mu.Lock()
 	s.policyKey = key
+	s.lastPush = now
 	s.mu.Unlock()
 }
 
@@ -316,11 +424,21 @@ func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, 
 	return p
 }
 
+// failedPullsBlank is how many pulls in a row may fail before the node's live view is
+// forgotten: devices a node last reported are not still there once it has gone quiet, and
+// would hold places in the device limit on the other nodes.
+const failedPullsBlank = 3
+
 func (s *Syncer) pullCounters(ctx context.Context) {
 	c, err := s.node.Counters(ctx)
 	if err != nil {
+		if s.counterFails++; s.counterFails >= failedPullsBlank {
+			none := map[string]nodeapi.Online{}
+			s.online.Store(&none)
+		}
 		return
 	}
+	s.counterFails = 0
 	online := c.Online
 	if online == nil {
 		online = map[string]nodeapi.Online{}
@@ -332,11 +450,15 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		s.log.Error("counters position", "err", err)
 		return
 	}
+	if c.Idle && c.Epoch == epoch {
+		return // no traffic, nothing cut: only the live view above was of use
+	}
 	if c.Epoch == epoch && c.Seq <= seq {
 		_ = s.node.Ack(ctx, c.Epoch, c.Seq)
 		return
 	}
 	now := s.m.now()
+	c = s.vet(c, now)
 	hour, day := now.Unix()/3600, now.Unix()/86400
 	err = s.m.st.Tx(ctx, func(q *db.Queries) error {
 		rows, err := q.ListSlotUsers(ctx)
@@ -412,13 +534,74 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		s.log.Error("store counters", "err", err)
 		return
 	}
-	if err := s.node.Ack(ctx, c.Epoch, c.Seq); err != nil {
-		s.log.Warn("ack counters", "err", err)
+	s.lastStored = now
+	// An idle reply has no batch behind it: there is nothing for the node to drop, and it
+	// would answer the acknowledgement with stale_ack.
+	if !c.Idle {
+		if err := s.node.Ack(ctx, c.Epoch, c.Seq); err != nil {
+			s.log.Warn("ack counters", "err", err)
+		}
 	}
-	if c.Epoch != epoch {
-		// The node started a new counter epoch (fresh volume): re-base its quotas.
-		s.pushPolicies(ctx, true)
+	if c.Epoch != epoch && now.Sub(s.epochPush) >= 30*time.Second {
+		// The node started a new counter epoch (fresh volume): re-base its quotas. The
+		// policy loop does it, so no two pushes run at once; a node that keeps changing
+		// its epoch gets one push in half a minute, not one per batch.
+		s.epochPush = now
+		signal(s.policiesDirty)
 	}
+}
+
+// What a node can have carried for one slot between two stored batches: 2.5 GB/s, 20
+// Gbit/s, for as long as it has been (and at least ten minutes). Nothing a node reports
+// is trusted beyond that: a node is a server somebody else may run.
+const maxBytesPerSecond = 2_500_000_000
+
+// vet drops what a node cannot have carried: negative amounts, which would take usage
+// from a user and give it to another, and amounts beyond what the link allows. The batch
+// itself is still stored and acknowledged, or the node would offer it again for ever.
+func (s *Syncer) vet(c nodeapi.Counters, now time.Time) nodeapi.Counters {
+	window := 10 * time.Minute
+	if !s.lastStored.IsZero() {
+		window = max(window, now.Sub(s.lastStored))
+	} else {
+		window = 7 * 24 * time.Hour // the panel was not running for who knows how long
+	}
+	limit := int64(window.Seconds()) * maxBytesPerSecond
+	sane := func(t nodeapi.Traffic) bool {
+		return t.Up >= 0 && t.Down >= 0 && t.Up <= limit && t.Down <= limit
+	}
+	var dropped []string
+	slots := make(map[string]nodeapi.Traffic, len(c.Slots))
+	for slot, t := range c.Slots {
+		if sane(t) {
+			slots[slot] = t
+		} else {
+			dropped = append(dropped, slot)
+		}
+	}
+	c.Slots = slots
+	if len(c.Pools) > 0 {
+		pools := make(map[string]map[string]nodeapi.Traffic, len(c.Pools))
+		for slot, byPool := range c.Pools {
+			for pool, t := range byPool {
+				if !sane(t) {
+					dropped = append(dropped, slot+"/"+pool)
+					continue
+				}
+				if pools[slot] == nil {
+					pools[slot] = map[string]nodeapi.Traffic{}
+				}
+				pools[slot][pool] = t
+			}
+		}
+		c.Pools = pools
+	}
+	if len(dropped) > 0 && now.Sub(s.vetLogged) >= time.Minute {
+		s.vetLogged = now
+		sort.Strings(dropped)
+		s.log.Warn("the node reported traffic it cannot have carried: ignored", "slots", len(dropped), "first", dropped[0])
+	}
+	return c
 }
 
 func (s *Syncer) countersPos(ctx context.Context) (string, int64, error) {
@@ -434,15 +617,19 @@ func (s *Syncer) countersPos(ctx context.Context) (string, int64, error) {
 	return epoch, seq, nil
 }
 
+// nextRevision is the revision the next Apply carries; saveRevision keeps it once the node
+// took the state, so attempts that fail do not each cost a write.
 func (s *Syncer) nextRevision(ctx context.Context) (int64, error) {
-	key := stateKeyOf("revision", s.id)
-	raw, err := s.m.st.Q.GetNodeState(ctx, key)
+	raw, err := s.m.st.Q.GetNodeState(ctx, stateKeyOf("revision", s.id))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
 	rev, _ := strconv.ParseInt(raw, 10, 64)
-	rev++
-	return rev, s.m.st.Q.SetNodeState(ctx, db.SetNodeStateParams{Key: key, Value: strconv.FormatInt(rev, 10)})
+	return rev + 1, nil
+}
+
+func (s *Syncer) saveRevision(ctx context.Context, rev int64) error {
+	return s.m.st.Q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("revision", s.id), Value: strconv.FormatInt(rev, 10)})
 }
 
 func (s *Syncer) refreshHealth(ctx context.Context) {
@@ -457,7 +644,16 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 	s.health.Store(view)
 	s.mu.Lock()
 	applied := s.lastApplied.Revision
+	// The node is back: what was held off for it goes out now.
+	back := s.retry.down
+	if back {
+		s.retry.ok()
+	}
 	s.mu.Unlock()
+	if back {
+		signal(s.stateDirty)
+		signal(s.policiesDirty)
+	}
 	// A node that lost its state (new volume, crash before saving) reports an older revision.
 	if h.Revision < applied || (applied == 0 && h.Revision == 0) {
 		s.mu.Lock()

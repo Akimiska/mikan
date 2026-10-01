@@ -311,7 +311,18 @@ impl Wizard {
 
     fn take_events(&mut self) {
         let Some(rx) = &self.run else { return };
-        let events: Vec<Event> = rx.try_iter().collect();
+        let mut events: Vec<Event> = Vec::new();
+        let mut gone = false;
+        loop {
+            match rx.try_recv() {
+                Ok(ev) => events.push(ev),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    gone = true;
+                    break;
+                }
+            }
+        }
         for ev in events {
             match ev {
                 Event::Start(s) => self.view(s, |v| v.running = true),
@@ -339,6 +350,27 @@ impl Wizard {
                 }
                 Event::Finished(o) => self.outcome = Some(o),
             }
+        }
+        // The worker is gone without a last word (it panicked past its own handler): the
+        // screen would wait for it for ever.
+        if gone && self.outcome.is_none() && self.failed.is_none() {
+            let at = self.steps.iter().find(|v| v.running).map_or(Step::Start, |v| v.step);
+            self.view(at, |v| {
+                v.running = false;
+                v.state = Level::Error;
+            });
+            self.failed = Some((at, "the installer stopped without saying why; `mikan install` continues from here".into()));
+        }
+    }
+
+    /// The text field of the page, when it has one.
+    fn text_field(&mut self) -> Option<&mut Input> {
+        match self.page {
+            Page::Address => Some(&mut self.host),
+            Page::Domain => Some(&mut self.domain),
+            Page::Email => Some(&mut self.email),
+            Page::Options if self.focus == 0 => Some(&mut self.port),
+            _ => None,
         }
     }
 
@@ -431,6 +463,15 @@ impl Screen for Wizard {
                 Some(Err(e)) => format!("not changed: {e:#}"),
                 None => "not changed".into(),
             });
+        }
+    }
+
+    fn paste(&mut self, text: &str) {
+        let Some(field) = self.text_field() else { return };
+        field.paste(text);
+        if self.page == Page::Domain {
+            self.dns = Task::Idle;
+            self.domain_err.clear();
         }
     }
 
@@ -747,7 +788,7 @@ impl Wizard {
         } else if self.outcome.is_some() {
             &[("enter", "next")]
         } else if self.quit_armed {
-            &[("ctrl+c", "again to quit: the install stops half way")]
+            &[("ctrl+c", "again to quit: the install stops here; `mikan install` goes on later")]
         } else {
             &[]
         };

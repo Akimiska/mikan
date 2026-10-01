@@ -5,6 +5,7 @@ import { useState } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/client";
 import { meQuery, qk } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
+import { QueryBoundary } from "../../../components/query";
 import { useToast } from "../../../components/toast";
 import { Button, Field, Pill, QR, Skeleton } from "../../../components/ui";
 import { getLocale, t, tMaybe } from "../../../i18n";
@@ -304,27 +305,27 @@ export function SessionsCard() {
           <div className="card-sub">{t("settings.sessionsSub")}</div>
         </div>
       </div>
-      {sessions.isPending ? (
-        <Skeleton style={{ height: 80 }} />
-      ) : (
-        <ul className="row-list">
-          {(sessions.data ?? []).map((s) => (
-            <li key={s.id} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-medium">{browserName(s.user_agent)}</div>
-                <div className="text-xs text-[var(--ink-500)]">
-                  <span className="mono">{s.ip}</span> · {s.current ? <span className="text-[var(--leaf-700)]">{t("settings.thisSession")}</span> : t("settings.activeAgo", { ago: ago(s.last_seen_at) })}
+      <QueryBoundary query={sessions} pending={<Skeleton style={{ height: 80 }} />}>
+        {(list) => (
+          <ul className="row-list">
+            {list.map((s) => (
+              <li key={s.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium">{browserName(s.user_agent)}</div>
+                  <div className="text-xs text-[var(--ink-500)]">
+                    <span className="mono">{s.ip}</span> · {s.current ? <span className="text-[var(--leaf-700)]">{t("settings.thisSession")}</span> : t("settings.activeAgo", { ago: ago(s.last_seen_at) })}
+                  </div>
                 </div>
-              </div>
-              {!s.current ? (
-                <Button size="sm" variant="danger" loading={revoke.isPending && revoke.variables === s.id} onClick={() => revoke.mutate(s.id)}>
-                  <LogOut size={16} aria-hidden /> {t("settings.endSession")}
-                </Button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
+                {!s.current ? (
+                  <Button size="sm" variant="danger" loading={revoke.isPending && revoke.variables === s.id} onClick={() => revoke.mutate(s.id)}>
+                    <LogOut size={16} aria-hidden /> {t("settings.endSession")}
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </QueryBoundary>
     </section>
   );
 }

@@ -8,8 +8,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, usePools, useTariffs } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, Field, Skeleton } from "../../components/ui";
+import { Button, EmptyState, Field, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { bytes } from "../../lib/format";
 
@@ -55,60 +56,65 @@ export function PoolsCard() {
           <Plus size={16} aria-hidden /> {t("pools.add")}
         </Button>
       </div>
-      {pools.isPending ? (
-        <div className="flex flex-col gap-2">
-          {[0, 1].map((i) => (
-            <Skeleton key={i} style={{ height: 56 }} />
-          ))}
-        </div>
-      ) : pools.isError ? (
-        <ErrorState text={errorText(pools.error)} onRetry={() => void pools.refetch()} />
-      ) : pools.data.length === 0 ? (
-        <EmptyState title={t("pools.emptyTitle")} text={t("pools.none")}>
-          <Button variant="primary" onClick={() => setEdit("new")}>
-            <Plus size={16} aria-hidden /> {t("pools.add")}
-          </Button>
-        </EmptyState>
-      ) : (
-        <ul className="row-list">
-          {pools.data.map((p) => {
-            const limits = tariffLimits(p, tariffs.data);
-            return (
-              <li key={p.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-3">
-                <div className="min-w-0">
-                  <div className="text-[13px] font-semibold">{p.name}</div>
-                  <dl className="mt-1 grid gap-1 text-xs">
-                    <div className="flex flex-wrap gap-x-2">
-                      <dt className="text-[var(--ink-500)]">{t("pools.protocols")}</dt>
-                      <dd className="min-w-0 text-[var(--ink-700)]">
-                        {p.inbounds.length ? (
-                          p.inbounds.join(", ")
-                        ) : (
-                          <Link to="/inbounds" className="link-btn">
-                            {t("pools.empty")}
-                          </Link>
-                        )}
-                      </dd>
+      <QueryBoundary
+        query={pools}
+        pending={
+          <div className="flex flex-col gap-2">
+            {[0, 1].map((i) => (
+              <Skeleton key={i} style={{ height: 56 }} />
+            ))}
+          </div>
+        }
+      >
+        {(list) =>
+          list.length === 0 ? (
+            <EmptyState title={t("pools.emptyTitle")} text={t("pools.none")}>
+              <Button variant="primary" onClick={() => setEdit("new")}>
+                <Plus size={16} aria-hidden /> {t("pools.add")}
+              </Button>
+            </EmptyState>
+          ) : (
+            <ul className="row-list">
+              {list.map((p) => {
+                const limits = tariffLimits(p, tariffs.data);
+                return (
+                  <li key={p.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-3">
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-semibold">{p.name}</div>
+                      <dl className="mt-1 grid gap-1 text-xs">
+                        <div className="flex flex-wrap gap-x-2">
+                          <dt className="text-[var(--ink-500)]">{t("pools.protocols")}</dt>
+                          <dd className="min-w-0 text-[var(--ink-700)]">
+                            {p.inbounds.length ? (
+                              p.inbounds.join(", ")
+                            ) : (
+                              <Link to="/inbounds" className="link-btn">
+                                {t("pools.empty")}
+                              </Link>
+                            )}
+                          </dd>
+                        </div>
+                        <div className="flex flex-wrap gap-x-2">
+                          <dt className="text-[var(--ink-500)]">{t("pools.limits")}</dt>
+                          <dd className="min-w-0 text-[var(--ink-700)]">{limits.length ? limits.join(" · ") : t("pools.noLimits")}</dd>
+                        </div>
+                      </dl>
                     </div>
-                    <div className="flex flex-wrap gap-x-2">
-                      <dt className="text-[var(--ink-500)]">{t("pools.limits")}</dt>
-                      <dd className="min-w-0 text-[var(--ink-700)]">{limits.length ? limits.join(" · ") : t("pools.noLimits")}</dd>
+                    <div className="flex gap-1">
+                      <button type="button" className="icon-btn" aria-label={t("pools.rename", { name: p.name })} onClick={() => setEdit(p)}>
+                        <Pencil size={16} />
+                      </button>
+                      <button type="button" className="icon-btn" aria-label={t("pools.delete", { name: p.name })} onClick={() => setRemoving(p)}>
+                        <Trash2 size={16} />
+                      </button>
                     </div>
-                  </dl>
-                </div>
-                <div className="flex gap-1">
-                  <button type="button" className="icon-btn" aria-label={t("pools.rename", { name: p.name })} onClick={() => setEdit(p)}>
-                    <Pencil size={16} />
-                  </button>
-                  <button type="button" className="icon-btn" aria-label={t("pools.delete", { name: p.name })} onClick={() => setRemoving(p)}>
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        }
+      </QueryBoundary>
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("pools.hint")}</p>
       <PoolDrawer pool={edit} onClose={() => setEdit(null)} />
       <Confirm

@@ -5,8 +5,9 @@ import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client
 import { qk, useNodes } from "../../api/hooks";
 import { CertDrawer, certUntil } from "../../components/cert-drawer";
 import { Confirm, Drawer } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Bar, Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
+import { Bar, Button, EmptyState, Field, PageHeader, Pill, Skeleton, Switch } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
 import { bytes, num } from "../../lib/format";
 import { CascadeDrawer } from "./node-cascade";
@@ -68,33 +69,37 @@ export function NodesPage() {
           </Button>
         }
       />
-      {nodes.isPending ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {[0, 1].map((i) => (
-            <Skeleton key={i} style={{ height: 220, borderRadius: 20 }} />
-          ))}
-        </div>
-      ) : nodes.isError ? (
-        <section className="card glass">
-          <ErrorState text={errorText(nodes.error)} onRetry={() => void nodes.refetch()} />
-        </section>
-      ) : nodes.data.length === 0 ? (
-        <section className="card glass">
-          <EmptyState title={t("nodes.emptyTitle")} text={t("nodes.emptyText")} />
-        </section>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {nodes.data.length > 1 && nodes.data.some((n) => n.local && !n.name) ? (
-            <div className="banner warn lg:col-span-2" role="status">
-              <Pencil size={18} className="shrink-0" aria-hidden />
-              <span>{t("nodes.nameLocalHint")}</span>
+      <QueryBoundary
+        query={nodes}
+        pending={
+          <div className="grid gap-4 lg:grid-cols-2">
+            {[0, 1].map((i) => (
+              <Skeleton key={i} style={{ height: 220, borderRadius: 20 }} />
+            ))}
+          </div>
+        }
+        wrap={(state) => <section className="card glass">{state}</section>}
+      >
+        {(list) =>
+          list.length === 0 ? (
+            <section className="card glass">
+              <EmptyState title={t("nodes.emptyTitle")} text={t("nodes.emptyText")} />
+            </section>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {list.length > 1 && list.some((n) => n.local && !n.name) ? (
+                <div className="banner warn lg:col-span-2" role="status">
+                  <Pencil size={18} className="shrink-0" aria-hidden />
+                  <span>{t("nodes.nameLocalHint")}</span>
+                </div>
+              ) : null}
+              {list.map((n, idx) => (
+                <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
+              ))}
             </div>
-          ) : null}
-          {nodes.data.map((n, idx) => (
-            <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
-          ))}
-        </div>
-      )}
+          )
+        }
+      </QueryBoundary>
       <AddNodeDrawer
         open={adding}
         onOpenChange={setAdding}

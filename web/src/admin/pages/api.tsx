@@ -5,8 +5,9 @@ import { lazy, Suspense, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Button, EmptyState, ErrorState, Field, PageHeader, Segmented, Skeleton } from "../../components/ui";
+import { Button, EmptyState, Field, PageHeader, Segmented, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { ago, dateShort } from "../../lib/format";
 
@@ -62,19 +63,19 @@ function KeysCard() {
           <Plus size={16} aria-hidden /> {t("apiPage.newKey")}
         </Button>
       </div>
-      {keys.isPending ? (
-        <Skeleton style={{ height: 96 }} />
-      ) : keys.isError ? (
-        <ErrorState text={errorText(keys.error)} onRetry={() => void keys.refetch()} />
-      ) : keys.data.length === 0 ? (
-        <EmptyState title={t("apiPage.noKeys")} text={t("apiPage.noKeysText")} />
-      ) : (
-        <ul className="row-list">
-          {keys.data.map((k) => (
-            <KeyRow key={k.id} k={k} onRevoke={() => setRevoking(k)} />
-          ))}
-        </ul>
-      )}
+      <QueryBoundary query={keys} pending={<Skeleton style={{ height: 96 }} />}>
+        {(list) =>
+          list.length === 0 ? (
+            <EmptyState title={t("apiPage.noKeys")} text={t("apiPage.noKeysText")} />
+          ) : (
+            <ul className="row-list">
+              {list.map((k) => (
+                <KeyRow key={k.id} k={k} onRevoke={() => setRevoking(k)} />
+              ))}
+            </ul>
+          )
+        }
+      </QueryBoundary>
       <NewKeyDrawer open={adding} onOpenChange={setAdding} onMade={setMade} />
       <MadeKeyDrawer apiKey={made} onClose={() => setMade(null)} />
       <Confirm

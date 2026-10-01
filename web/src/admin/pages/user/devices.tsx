@@ -35,6 +35,8 @@ export function DevicesSection({ u }: { u: User }) {
       <h4 className="mt-5 mb-2 text-xs font-medium text-[var(--ink-500)]">{t("userDrawer.addresses")}</h4>
       {devices.isPending ? (
         <Skeleton style={{ height: 52, borderRadius: 16 }} />
+      ) : devices.data === undefined ? (
+        <ErrorState text={errorText(devices.error)} onRetry={() => void devices.refetch()} />
       ) : list.length === 0 ? (
         <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.noDevices")}</p>
       ) : (
@@ -87,9 +89,9 @@ export function BoundDevices({ u }: { u: User }) {
         {t("userDrawer.boundTitle")}
         {bound.data ? <span className="num">{u.device_limit != null ? t("userDrawer.boundCount", { n: list.length, limit: u.device_limit }) : list.length}</span> : null}
       </h4>
-      {bound.isPending ? (
+      {bound.data === undefined && !bound.isError ? (
         <Skeleton style={{ height: 52, borderRadius: 16 }} />
-      ) : bound.isError ? (
+      ) : bound.data === undefined ? (
         <ErrorState text={errorText(bound.error)} onRetry={() => void bound.refetch()} />
       ) : list.length === 0 ? (
         <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.boundEmpty")}</p>

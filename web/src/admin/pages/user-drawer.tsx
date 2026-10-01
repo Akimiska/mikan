@@ -5,7 +5,8 @@ import { errorText, type User } from "../../api/client";
 import { onePeriod, userActions, useUser, useUserMutation } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { Avatar, Button, ErrorState, Skeleton, StatePill } from "../../components/ui";
+import { QueryBoundary } from "../../components/query";
+import { Avatar, Button, Skeleton, StatePill } from "../../components/ui";
 import { t } from "../../i18n";
 import { ago, dateShort } from "../../lib/format";
 import { GrantsSection } from "./user/grants";
@@ -34,17 +35,19 @@ export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }
         ) : undefined
       }
     >
-      {user.isPending ? (
-        <div className="space-y-4 pt-5">
-          <Skeleton style={{ height: 40 }} />
-          <Skeleton style={{ height: 120, borderRadius: 16 }} />
-          <Skeleton style={{ height: 160, borderRadius: 16 }} />
-        </div>
-      ) : user.isError || !u ? (
-        <ErrorState text={errorText(user.error)} onRetry={() => void user.refetch()} />
-      ) : (
-        <UserBody u={u} onDeleted={onClose} />
-      )}
+      <QueryBoundary
+        query={user}
+        pending={
+          <div className="space-y-4 pt-5">
+            <Skeleton style={{ height: 40 }} />
+            <Skeleton style={{ height: 120, borderRadius: 16 }} />
+            <Skeleton style={{ height: 160, borderRadius: 16 }} />
+          </div>
+        }
+      >
+        {/* A failed poll keeps the card (and the forms in it); the notice sits above it. */}
+        {(data) => <UserBody key={data.id} u={data} onDeleted={onClose} />}
+      </QueryBoundary>
     </Drawer>
   );
 }

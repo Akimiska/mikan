@@ -145,10 +145,10 @@ func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, any
 // Purchase applies a paid tariff on q's transaction, so the payment and its effect commit
 // together. userID 0 (or a user deleted since the invoice) makes a new subscription named
 // name. A renewal takes the tariff's limits, adds its term after the current one (from
-// now when that already ended), turns the user on and starts a new traffic period: the
-// payment buys a full quota. ErrNoSlots: refill the pool and run the transaction again.
+// now when that already ended) and turns the user on; resetTraffic also starts a new
+// traffic period (the payment buys a full quota). ErrNoSlots: refill and run again.
 // The caller calls Changed after the commit.
-func (s *Users) Purchase(ctx context.Context, q *db.Queries, userID, tariffID int64, name string) (u db.User, created bool, err error) {
+func (s *Users) Purchase(ctx context.Context, q *db.Queries, userID, tariffID int64, name string, resetTraffic bool) (u db.User, created bool, err error) {
 	if userID != 0 {
 		u, err = q.GetUser(ctx, userID)
 	}
@@ -180,6 +180,9 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, userID, tariffID in
 	})
 	if err != nil {
 		return u, false, err
+	}
+	if !resetTraffic {
+		return u, false, nil
 	}
 	if err := q.ResetUserTraffic(ctx, db.ResetUserTrafficParams{PeriodStart: now.Unix(), UpdatedAt: now.Unix(), ID: u.ID}); err != nil {
 		return u, false, err

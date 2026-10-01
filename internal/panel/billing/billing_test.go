@@ -135,7 +135,7 @@ func (f *fakeCryptoBot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/createInvoice":
 		f.n++
-		inv := &cbInvoice{ID: f.n, Status: "active", Fiat: in["fiat"].(string), Amount: in["amount"].(string), Payload: in["payload"].(string),
+		inv := &cbInvoice{ID: f.n, Status: "active", Fiat: in["fiat"].(string), Amount: flexNumber(in["amount"].(string)), Payload: in["payload"].(string),
 			BotURL: "https://t.me/CryptoBot?start=IV" + strconv.FormatInt(f.n, 10)}
 		f.invoices[inv.ID] = inv
 		res = inv
@@ -185,7 +185,7 @@ func newEnv(t *testing.T) *env {
 		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})), Now: clock,
 		YooKassaAPI: ykSrv.URL, CryptoBotAPI: cbSrv.URL, CryptoBotTestAPI: cbSrv.URL})
 	e.s.SetTelegram(e.tg)
-	must(t, settings.Set(ctx, set, KeyConfig, Config{Stars: true, YooKassa: true, ShopID: shopID, CryptoBot: true, AllowNew: true}))
+	must(t, settings.Set(ctx, set, KeyConfig, Config{Stars: true, YooKassa: true, ShopID: shopID, CryptoBot: true, AllowNew: true, RenewResetsTraffic: true}))
 	must(t, settings.Set(ctx, set, KeyYooKassaSecret, ykSecret))
 	must(t, settings.Set(ctx, set, KeyCryptoBotToken, cbToken))
 	ts, _ := e.st.Q.ListTariffs(ctx)
@@ -502,5 +502,47 @@ func TestMoney(t *testing.T) {
 	}
 	if rubles(19905) != "199.05" {
 		t.Error(rubles(19905))
+	}
+}
+
+// With the reset off a renewal only adds the term: the traffic counter runs on.
+func TestRenewalKeepsTraffic(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Stars: true, AllowNew: true, RenewResetsTraffic: false}))
+	clock := func() time.Time { return e.now }
+	u, err := domain.NewUsers(e.st, domain.NewPool(e.st, clock), noChanges{}, clock).Create(ctx, domain.CreateInput{Name: "a", TariffID: e.sale.ID})
+	must(t, err)
+	must(t, e.st.Q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: 555, CreatedAt: e.now.Unix()}))
+	_, err = e.st.DB.ExecContext(ctx, "UPDATE users SET used_up = 1000, used_down = 2000 WHERE id = ?", u.ID)
+	must(t, err)
+	p := e.invoice(555, u.ID, Stars)
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-k", "XTR", 150))
+	after, _ := e.st.Q.GetUser(ctx, u.ID)
+	if after.ExpiresAt.Int64 != u.ExpiresAt.Int64+30*24*3600 || after.UsedUp+after.UsedDown != 3000 {
+		t.Fatalf("renewed: expires %d, used %d", after.ExpiresAt.Int64, after.UsedUp+after.UsedDown)
+	}
+}
+
+// CryptoBot documents amounts as strings; a number is taken too.
+func TestCryptoAmountForms(t *testing.T) {
+	for raw, want := range map[string]int64{`{"amount":"199.00"}`: 19900, `{"amount":199}`: 19900, `{"amount":199.5}`: 19950} {
+		var inv cbInvoice
+		if err := json.Unmarshal([]byte(raw), &inv); err != nil || kopecks(string(inv.Amount)) != want {
+			t.Errorf("%s: %q %v", raw, inv.Amount, err)
+		}
+	}
+}
+
+// YooKassa's refusal names the field, so "receipt" shows when the shop wants 54-FZ receipts.
+func TestYooKassaErrorCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","code":"invalid_request","parameter":"receipt","description":"Receipt is missing or illegal"}`))
+	}))
+	t.Cleanup(srv.Close)
+	_, _, err := yooKassa{base: srv.URL, shopID: "1", secret: "s", hc: srv.Client()}.create(context.Background(), "p", 100, "x", "")
+	if errCode(err) != "yookassa_invalid_request:receipt" {
+		t.Fatalf("code: %q", errCode(err))
 	}
 }

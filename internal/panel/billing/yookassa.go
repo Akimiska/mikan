@@ -75,13 +75,20 @@ func (y yooKassa) do(ctx context.Context, method, path, idem string, body any, o
 	}
 	if resp.StatusCode/100 != 2 {
 		var e struct {
-			Code string `json:"code"`
+			Code      string `json:"code"`
+			Parameter string `json:"parameter"`
 		}
 		_ = json.Unmarshal(raw, &e)
 		if e.Code == "" {
-			e.Code = "yookassa_error"
+			e.Code = "error"
 		}
-		return &providerError{Code: "yookassa_" + strings.TrimPrefix(e.Code, "yookassa_"), Status: resp.StatusCode}
+		code := "yookassa_" + e.Code
+		// "invalid_request" alone says little: the field tells what the shop wants, e.g.
+		// "receipt" when it has 54-FZ receipts switched on.
+		if e.Parameter != "" && len(e.Parameter) <= 40 && !strings.ContainsAny(e.Parameter, " \n") {
+			code += ":" + e.Parameter
+		}
+		return &providerError{Code: code, Status: resp.StatusCode}
 	}
 	return json.Unmarshal(raw, out)
 }

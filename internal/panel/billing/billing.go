@@ -59,10 +59,13 @@ type Config struct {
 	Testnet   bool   `json:"cryptobot_testnet"`
 	// AllowNew lets people without a subscription buy one; off: only renewals.
 	AllowNew bool `json:"allow_new"`
+	// RenewResetsTraffic: a paid renewal also starts a new traffic period; off, the
+	// counter keeps running and only the term is extended.
+	RenewResetsTraffic bool `json:"renew_resets_traffic"`
 }
 
 // DefaultConfig: Stars on (it needs nothing but the bot), new buyers welcome.
-var DefaultConfig = Config{Stars: true, AllowNew: true}
+var DefaultConfig = Config{Stars: true, AllowNew: true, RenewResetsTraffic: true}
 
 // Telegram is the bot's part: Stars invoices and refunds, and telling buyers.
 type Telegram interface {
@@ -412,6 +415,7 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		created bool
 		done    bool
 	)
+	reset := s.Config(ctx).RenewResetsTraffic
 	run := func(q *db.Queries) error {
 		var err error
 		if pay, err = q.GetPayment(ctx, id); err != nil {
@@ -425,7 +429,7 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		if pay.Kind == "renew" && pay.UserID.Valid {
 			userID = pay.UserID.Int64
 		}
-		if u, created, err = s.d.Users.Purchase(ctx, q, userID, pay.TariffID, buyerName(ctx, q, pay.TgID)); err != nil {
+		if u, created, err = s.d.Users.Purchase(ctx, q, userID, pay.TariffID, buyerName(ctx, q, pay.TgID), reset); err != nil {
 			return err
 		}
 		if created {

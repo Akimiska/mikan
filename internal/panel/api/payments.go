@@ -17,15 +17,16 @@ import (
 )
 
 type PaymentSettingsView struct {
-	Stars             bool   `json:"stars" doc:"Telegram Stars: нужен только запущенный бот"`
-	YooKassa          bool   `json:"yookassa"`
-	YooKassaShopID    string `json:"yookassa_shop_id"`
-	YooKassaSecretSet bool   `json:"yookassa_secret_set" doc:"Секретный ключ сохранён; сам ключ API не отдаёт"`
-	CryptoBot         bool   `json:"cryptobot"`
-	CryptoBotTestnet  bool   `json:"cryptobot_testnet"`
-	CryptoBotTokenSet bool   `json:"cryptobot_token_set"`
-	AllowNew          bool   `json:"allow_new" doc:"Новые люди могут купить подписку в боте; иначе — только продление"`
-	Available         struct {
+	Stars              bool   `json:"stars" doc:"Telegram Stars: нужен только запущенный бот"`
+	YooKassa           bool   `json:"yookassa"`
+	YooKassaShopID     string `json:"yookassa_shop_id"`
+	YooKassaSecretSet  bool   `json:"yookassa_secret_set" doc:"Секретный ключ сохранён; сам ключ API не отдаёт"`
+	CryptoBot          bool   `json:"cryptobot"`
+	CryptoBotTestnet   bool   `json:"cryptobot_testnet"`
+	CryptoBotTokenSet  bool   `json:"cryptobot_token_set"`
+	AllowNew           bool   `json:"allow_new" doc:"Новые люди могут купить подписку в боте; иначе — только продление"`
+	RenewResetsTraffic bool   `json:"renew_resets_traffic" doc:"Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок"`
+	Available          struct {
 		Stars     bool `json:"stars"`
 		YooKassa  bool `json:"yookassa"`
 		CryptoBot bool `json:"cryptobot"`
@@ -38,14 +39,15 @@ type paymentSettingsOutput struct{ Body PaymentSettingsView }
 
 type patchPaymentSettingsInput struct {
 	Body struct {
-		Stars            *bool   `json:"stars,omitempty"`
-		YooKassa         *bool   `json:"yookassa,omitempty"`
-		YooKassaShopID   *string `json:"yookassa_shop_id,omitempty" maxLength:"20"`
-		YooKassaSecret   *string `json:"yookassa_secret,omitempty" maxLength:"200" doc:"Пусто — удалить ключ"`
-		CryptoBot        *bool   `json:"cryptobot,omitempty"`
-		CryptoBotTestnet *bool   `json:"cryptobot_testnet,omitempty"`
-		CryptoBotToken   *string `json:"cryptobot_token,omitempty" maxLength:"200" doc:"Пусто — удалить токен"`
-		AllowNew         *bool   `json:"allow_new,omitempty"`
+		Stars              *bool   `json:"stars,omitempty"`
+		YooKassa           *bool   `json:"yookassa,omitempty"`
+		YooKassaShopID     *string `json:"yookassa_shop_id,omitempty" maxLength:"20"`
+		YooKassaSecret     *string `json:"yookassa_secret,omitempty" maxLength:"200" doc:"Пусто — удалить ключ"`
+		CryptoBot          *bool   `json:"cryptobot,omitempty"`
+		CryptoBotTestnet   *bool   `json:"cryptobot_testnet,omitempty"`
+		CryptoBotToken     *string `json:"cryptobot_token,omitempty" maxLength:"200" doc:"Пусто — удалить токен"`
+		AllowNew           *bool   `json:"allow_new,omitempty"`
+		RenewResetsTraffic *bool   `json:"renew_resets_traffic,omitempty"`
 	}
 }
 
@@ -102,7 +104,7 @@ func (h *handlers) registerPayments() {
 
 func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, error) {
 	c := h.d.Billing.Config(ctx)
-	v := PaymentSettingsView{Stars: c.Stars, YooKassa: c.YooKassa, YooKassaShopID: c.ShopID, CryptoBot: c.CryptoBot, CryptoBotTestnet: c.Testnet, AllowNew: c.AllowNew}
+	v := PaymentSettingsView{Stars: c.Stars, YooKassa: c.YooKassa, YooKassaShopID: c.ShopID, CryptoBot: c.CryptoBot, CryptoBotTestnet: c.Testnet, AllowNew: c.AllowNew, RenewResetsTraffic: c.RenewResetsTraffic}
 	ykSecret, err := h.d.Settings.String(ctx, billing.KeyYooKassaSecret)
 	if err != nil {
 		return v, err
@@ -133,7 +135,7 @@ var shopIDPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
 func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSettingsInput) (*paymentSettingsOutput, error) {
 	b := in.Body
 	c := h.d.Billing.Config(ctx)
-	for dst, v := range map[*bool]*bool{&c.Stars: b.Stars, &c.YooKassa: b.YooKassa, &c.CryptoBot: b.CryptoBot, &c.Testnet: b.CryptoBotTestnet, &c.AllowNew: b.AllowNew} {
+	for dst, v := range map[*bool]*bool{&c.Stars: b.Stars, &c.YooKassa: b.YooKassa, &c.CryptoBot: b.CryptoBot, &c.Testnet: b.CryptoBotTestnet, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic} {
 		if v != nil {
 			*dst = *v
 		}
@@ -190,7 +192,7 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 	}
 	// What changed, never the secrets themselves.
 	h.audit(ctx, sessionOf(ctx).AdminID, "payments.settings", "", "", map[string]any{"stars": c.Stars, "yookassa": c.YooKassa, "cryptobot": c.CryptoBot,
-		"allow_new": c.AllowNew, "yookassa_secret_changed": b.YooKassaSecret != nil, "cryptobot_token_changed": b.CryptoBotToken != nil})
+		"allow_new": c.AllowNew, "renew_resets_traffic": c.RenewResetsTraffic, "yookassa_secret_changed": b.YooKassaSecret != nil, "cryptobot_token_changed": b.CryptoBotToken != nil})
 	v, err := h.paymentSettings(ctx)
 	if err != nil {
 		return nil, err

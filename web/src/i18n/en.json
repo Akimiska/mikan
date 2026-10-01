@@ -1129,7 +1129,10 @@
     "webhookCopied": "Address copied",
     "copyWebhook": "Copy address",
     "allowNew": "Sell to new people",
-    "allowNewSub": "Someone without a subscription can buy one in the bot. Off: renewals only."
+    "allowNewSub": "Someone without a subscription can buy one in the bot. Off: renewals only.",
+    "resetTraffic": "Renewal resets traffic",
+    "resetTrafficOn": "A paid renewal starts a new period: the used traffic goes back to zero.",
+    "resetTrafficOff": "A paid renewal only adds time: the traffic counter runs on as before."
   },
   "warp": {
     "title": "WARP",

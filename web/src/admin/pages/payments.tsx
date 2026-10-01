@@ -173,7 +173,7 @@ function PaymentRow({ p, onRefund }: { p: Payment; onRefund: () => void }) {
 function SettingsCard({ s }: { s: Settings }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const init = () => ({ stars: s.stars, yookassa: s.yookassa, shop: s.yookassa_shop_id, cryptobot: s.cryptobot, testnet: s.cryptobot_testnet, allowNew: s.allow_new });
+  const init = () => ({ stars: s.stars, yookassa: s.yookassa, shop: s.yookassa_shop_id, cryptobot: s.cryptobot, testnet: s.cryptobot_testnet, allowNew: s.allow_new, resetTraffic: s.renew_resets_traffic });
   const [form, setForm] = useState(init);
   const [ykSecret, setYkSecret] = useState("");
   const [cbToken, setCbToken] = useState("");
@@ -197,6 +197,7 @@ function SettingsCard({ s }: { s: Settings }) {
       cryptobot: form.cryptobot,
       cryptobot_testnet: form.testnet,
       allow_new: form.allowNew,
+      renew_resets_traffic: form.resetTraffic,
       ...(ykSecret.trim() ? { yookassa_secret: ykSecret.trim() } : {}),
       ...(cbToken.trim() ? { cryptobot_token: cbToken.trim() } : {}),
     });
@@ -261,6 +262,13 @@ function SettingsCard({ s }: { s: Settings }) {
             <div className="text-xs text-[var(--ink-500)]">{t("payments.allowNewSub")}</div>
           </div>
           <Switch checked={form.allowNew} onChange={set("allowNew")} label={t("payments.allowNew")} />
+        </div>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[13px] font-semibold">{t("payments.resetTraffic")}</div>
+            <div className="text-xs text-[var(--ink-500)]">{form.resetTraffic ? t("payments.resetTrafficOn") : t("payments.resetTrafficOff")}</div>
+          </div>
+          <Switch checked={form.resetTraffic} onChange={set("resetTraffic")} label={t("payments.resetTraffic")} />
         </div>
         <Button type="submit" variant="primary" loading={save.isPending}>
           {t("common.save")}

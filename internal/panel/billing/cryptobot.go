@@ -23,13 +23,13 @@ type cryptoBot struct {
 }
 
 type cbInvoice struct {
-	ID         int64  `json:"invoice_id"`
-	Status     string `json:"status"` // active | paid | expired
-	Fiat       string `json:"fiat"`
-	Amount     string `json:"amount"`
-	Payload    string `json:"payload"`
-	BotURL     string `json:"bot_invoice_url"`
-	MiniAppURL string `json:"mini_app_invoice_url"`
+	ID         int64      `json:"invoice_id"`
+	Status     string     `json:"status"` // active | paid | expired
+	Fiat       string     `json:"fiat"`
+	Amount     flexNumber `json:"amount"` // a string in the docs, a number in some answers
+	Payload    string     `json:"payload"`
+	BotURL     string     `json:"bot_invoice_url"`
+	MiniAppURL string     `json:"mini_app_invoice_url"`
 }
 
 func (c cryptoBot) call(ctx context.Context, method string, body any, out any) error {
@@ -140,7 +140,7 @@ func (s *Service) checkCryptoBot(ctx context.Context, id string) error {
 		s.d.Log.Error("billing: cryptobot invoice does not match", "payment", pay.ID)
 		return ErrBadPayment
 	case inv.Status == "paid":
-		if inv.Fiat != pay.Currency || kopecks(inv.Amount) != pay.Amount {
+		if inv.Fiat != pay.Currency || kopecks(string(inv.Amount)) != pay.Amount {
 			s.d.Log.Error("billing: cryptobot amount differs", "payment", pay.ID, "got", inv.Amount, "fiat", inv.Fiat)
 			return ErrBadPayment
 		}
@@ -156,4 +156,21 @@ func (s *Service) checkCryptoBot(ctx context.Context, id string) error {
 type cryptoUpdate struct {
 	Type    string    `json:"update_type"`
 	Payload cbInvoice `json:"payload"`
+}
+
+// flexNumber takes a JSON string or number: "199.00" and 199 both mean the same sum.
+type flexNumber string
+
+func (f *flexNumber) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*f = flexNumber(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*f = flexNumber(n.String())
+	return nil
 }

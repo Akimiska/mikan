@@ -1380,6 +1380,9 @@
             "maxLength": 200,
             "type": "string"
           },
+          "renew_resets_traffic": {
+            "type": "boolean"
+          },
           "stars": {
             "type": "boolean"
           },
@@ -1596,6 +1599,10 @@
           "cryptobot_token_set": {
             "type": "boolean"
           },
+          "renew_resets_traffic": {
+            "description": "Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок",
+            "type": "boolean"
+          },
           "stars": {
             "description": "Telegram Stars: нужен только запущенный бот",
             "type": "boolean"
@@ -1628,6 +1635,7 @@
           "cryptobot_testnet",
           "cryptobot_token_set",
           "allow_new",
+          "renew_resets_traffic",
           "available",
           "webhook_yookassa",
           "webhook_cryptobot"

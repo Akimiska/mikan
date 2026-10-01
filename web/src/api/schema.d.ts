@@ -1342,6 +1342,7 @@ export interface components {
             cryptobot_testnet?: boolean;
             /** @description Пусто — удалить токен */
             cryptobot_token?: string;
+            renew_resets_traffic?: boolean;
             stars?: boolean;
             yookassa?: boolean;
             /** @description Пусто — удалить ключ */
@@ -1413,6 +1414,8 @@ export interface components {
             cryptobot: boolean;
             cryptobot_testnet: boolean;
             cryptobot_token_set: boolean;
+            /** @description Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок */
+            renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */
             stars: boolean;
             /** @description Адрес вебхуков в настройках приложения @CryptoBot */

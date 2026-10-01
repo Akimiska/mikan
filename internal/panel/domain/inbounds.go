@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -26,7 +27,16 @@ var (
 	ErrBadListen      = errors.New("bad_listen")
 	ErrAutoPortListen = errors.New("auto_port_listen") // a proxy in front would not learn the new port
 	ErrUnknownPool    = errors.New("pool_not_found")
+	// ErrInboundChanged: someone else kept changing the inbound while the change was
+	// checked; nothing was written, the caller may try again.
+	ErrInboundChanged = errors.New("inbound_changed")
 )
+
+// errStale: the inbound differs from the row the checks of this attempt ran on.
+var errStale = errors.New("inbound changed under the checks")
+
+// updateTries is how often Update checks again on a row that changed under it.
+const updateTries = 3
 
 // EditError is a form field the inbound's template does not take. Field is the field
 // ("dest", "fingerprint", "obfs", "client"); Err is the template's reason, its Field
@@ -55,9 +65,10 @@ type DryRun interface {
 // field leaves the inbound as it was. Audit entries and change notices stay with the
 // callers.
 type Inbounds struct {
-	st  *store.Store
-	dry DryRun
-	now func() time.Time
+	st      *store.Store
+	dry     DryRun
+	now     func() time.Time
+	resolve func(ctx context.Context, host string) ([]netip.Addr, error) // nil: names are not looked up
 }
 
 // NewInbounds: dry nil skips the nodes' own check, for callers that do not talk to the
@@ -150,12 +161,12 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 		if err := CheckPort(ctx, q, node, port, t.Network(), PortHolder{}); err != nil {
 			return err
 		}
-		all, err := q.ListInbounds(ctx)
+		existing, err := q.ListNodeInbounds(ctx, node.ID)
 		if err != nil {
 			return err
 		}
 		now := s.now().Unix()
-		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: FreeName(NodeInbounds(all, node.ID), base), Preset: info.ID, Port: port,
+		row, err = q.CreateInbound(ctx, db.CreateInboundParams{NodeID: node.ID, Name: FreeName(existing, base), Preset: info.ID, Port: port,
 			Config: config, CreatedAt: now, UpdatedAt: now})
 		return err
 	})
@@ -163,8 +174,22 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 }
 
 // Update changes an inbound and returns it before and after. Every field is checked
-// before anything is written, and everything is written in one transaction.
+// before anything is written, and everything is written in one transaction. The checks
+// reach the node over the network, so the patch is applied to the row they ran on and the
+// transaction writes only if the row is still that one: a change made meanwhile (the
+// automatic moves, the CLI, another admin) is checked again, never overwritten with a
+// copy of the old row.
 func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, next db.Inbound, err error) {
+	for range updateTries {
+		prev, next, err = s.update(ctx, id, p)
+		if !errors.Is(err, errStale) {
+			return prev, next, err
+		}
+	}
+	return db.Inbound{}, db.Inbound{}, ErrInboundChanged
+}
+
+func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, next db.Inbound, err error) {
 	fail := func(err error) (db.Inbound, db.Inbound, error) { return db.Inbound{}, db.Inbound{}, err }
 	prev, err = s.st.Q.GetInbound(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -180,10 +205,10 @@ func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		}
 	}
 	if p.AutoPort != nil {
-		next.AutoPort = flag(*p.AutoPort)
+		next.AutoPort = Flag(*p.AutoPort)
 	}
 	if p.AutoSNI != nil {
-		next.AutoSni = flag(*p.AutoSNI)
+		next.AutoSni = Flag(*p.AutoSNI)
 	}
 	if ListenPinsPort(next.Listen) {
 		if p.AutoPort != nil && *p.AutoPort {
@@ -210,7 +235,7 @@ func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		next.Port = *p.Port
 	}
 	if p.Enabled != nil {
-		next.Enabled = flag(*p.Enabled)
+		next.Enabled = Flag(*p.Enabled)
 	}
 	if p.Config != nil {
 		next.Config = *p.Config
@@ -244,6 +269,16 @@ func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		}
 	}
 	err = s.st.Tx(ctx, func(q *db.Queries) error {
+		cur, err := q.GetInbound(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrUnknownInbound
+		}
+		if err != nil {
+			return err
+		}
+		if cur != prev {
+			return errStale
+		}
 		// What other rows hold is checked on the transaction that writes.
 		if listens {
 			if err := CheckPort(ctx, q, node, next.Port, network, InboundHolder(prev)); err != nil {
@@ -251,12 +286,12 @@ func (s *Inbounds) Update(ctx context.Context, id int64, p InboundPatch) (prev, 
 			}
 		}
 		if p.DisplayName != nil {
-			all, err := q.ListInbounds(ctx)
+			// Names are per node: other nodes' links get their own flag prefix.
+			siblings, err := q.ListNodeInbounds(ctx, prev.NodeID)
 			if err != nil {
 				return err
 			}
-			// Names are per node: other nodes' links get their own flag prefix.
-			for _, e := range NodeInbounds(all, prev.NodeID) {
+			for _, e := range siblings {
 				if e.ID != prev.ID && strings.EqualFold(ProxyName(e), ProxyName(next)) {
 					return &NameInUseError{Owner: e.Name}
 				}
@@ -380,10 +415,55 @@ func (s *Inbounds) CheckTemplate(ctx context.Context, node db.Node, config, port
 	if fp := t.Ext().Client.Fingerprint; fp != "" && !proto.ValidFingerprint(fp) {
 		return nil, &proto.Error{Code: "config_fingerprint", Field: "mikan.client.fingerprint", Detail: fp}
 	}
+	if err := s.checkDestResolves(ctx, t); err != nil {
+		return nil, err
+	}
 	if err := s.dryRun(ctx, node, t, port, selfSteal); err != nil {
 		return nil, err
 	}
 	return t, nil
+}
+
+// SystemResolve looks a name up with the system's resolver: its IPv4 addresses.
+func SystemResolve(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
+}
+
+// SetResolver makes a REALITY target given by name be looked up when it is saved; without
+// one (tests) names are taken as they are.
+func (s *Inbounds) SetResolver(resolve func(ctx context.Context, host string) ([]netip.Addr, error)) {
+	s.resolve = resolve
+}
+
+// checkDestResolves refuses a REALITY target whose name leads to this host or its
+// network: proto.Validate reads the text, and every DNS name looks public. The node dials
+// the target for every probe of the port, past the rules that fence its users in, so such
+// a name would publish an internal service to the internet. A name that cannot be looked
+// up is let through: the node looks it up where it dials.
+func (s *Inbounds) checkDestResolves(ctx context.Context, t proto.Template) error {
+	if s.resolve == nil {
+		return nil
+	}
+	dest, _ := presets.Dest(t)
+	host, _, err := net.SplitHostPort(dest)
+	if err != nil || host == "" {
+		return nil
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return nil // a literal address: proto.Validate has judged it
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	addrs, err := s.resolve(ctx, host)
+	if err != nil {
+		return nil
+	}
+	for _, a := range addrs {
+		if !proto.PublicAddr(a) {
+			return &proto.Error{Code: "reality_dest_private", Field: "reality-config.dest", Detail: host}
+		}
+	}
+	return nil
 }
 
 // tryOnNode runs a saved template through the node's mihomo on another port.
@@ -425,11 +505,10 @@ func (s *Inbounds) Find(ctx context.Context, nodeID int64, name string) (db.Inbo
 	if _, err := s.node(ctx, nodeID); err != nil {
 		return db.Inbound{}, err
 	}
-	all, err := s.st.Q.ListInbounds(ctx)
+	existing, err := s.st.Q.ListNodeInbounds(ctx, nodeID)
 	if err != nil {
 		return db.Inbound{}, err
 	}
-	existing := NodeInbounds(all, nodeID)
 	i := slices.IndexFunc(existing, func(e db.Inbound) bool { return e.Name == name })
 	if i < 0 {
 		return db.Inbound{}, ErrUnknownInbound

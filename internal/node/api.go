@@ -99,7 +99,7 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		writeJSON(w, http.StatusOK, scan.Check(ctx, req.Dest, req.SNI))
+		writeJSON(w, http.StatusOK, scan.Check(ctx, req.Dest, req.SNI, e.TargetOptions()))
 	})
 	mux.HandleFunc("POST /v1/targets/scan", func(w http.ResponseWriter, r *http.Request) {
 		var req nodeapi.TargetScanRequest
@@ -118,7 +118,7 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		if limit <= 0 || limit > 32 {
 			limit = 12
 		}
-		res, scanned, err := scan.Neighbors(ctx, req.IP, limit)
+		res, scanned, err := scan.Neighbors(ctx, req.IP, limit, e.TargetOptions())
 		if err != nil && ctx.Err() == nil {
 			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_request", Message: err.Error()})
 			return

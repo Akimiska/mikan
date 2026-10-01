@@ -129,8 +129,9 @@ export function PasswordCard() {
   const toast = useToast();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
+  const [revokeKeys, setRevokeKeys] = useState(true);
   const change = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/v1/auth/password", { body: { current, new: next } })),
+    mutationFn: () => unwrap(api.POST("/api/v1/auth/password", { body: { current, new: next, revoke_keys: revokeKeys } })),
     onSuccess: () => {
       setCurrent("");
       setNext("");
@@ -156,6 +157,10 @@ export function PasswordCard() {
         <Field label={t("settings.newPassword")} htmlFor="p-new" hint={t("settings.newPasswordHint")} error={errors.new}>
           <input id="p-new" type="password" className="input" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} minLength={12} />
         </Field>
+        <label className="mb-4 flex items-start gap-2 text-[13px] text-[var(--ink-600)]">
+          <input type="checkbox" className="mt-0.5" checked={revokeKeys} onChange={(e) => setRevokeKeys(e.target.checked)} />
+          <span>{t("settings.revokeKeys")}</span>
+        </label>
         <Button type="submit" variant="primary" loading={change.isPending} disabled={!current || next.length < 12}>
           {t("settings.changePassword")}
         </Button>
@@ -175,7 +180,14 @@ export function TwoFactorCard() {
   const [pw, setPw] = useState("");
   const enabled = me.data?.admin.totp_enabled;
 
-  const start = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/auth/totp/setup")), onSuccess: setSetup, onError: (e) => toast.error(errorText(e)) });
+  const [startPw, setStartPw] = useState("");
+  const start = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/auth/totp/setup", { body: { password: startPw } })),
+    onSuccess: (r) => {
+      setStartPw("");
+      setSetup(r);
+    },
+  });
   const enable = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/auth/totp/enable", { body: { code } })),
     onSuccess: (r) => {
@@ -273,9 +285,20 @@ export function TwoFactorCard() {
           </Button>
         )
       ) : (
-        <Button variant="primary" loading={start.isPending} onClick={() => start.mutate()}>
-          {t("settings.twoFactorEnable")}
-        </Button>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            start.mutate();
+          }}
+          noValidate
+        >
+          <Field label={t("login.password")} htmlFor="on-pw" hint={t("settings.twoFactorPasswordHint")} error={start.error instanceof ApiError ? (start.error.fields.password ?? errorText(start.error)) : undefined}>
+            <input id="on-pw" type="password" className="input max-w-[320px]" value={startPw} onChange={(e) => setStartPw(e.target.value)} autoComplete="current-password" />
+          </Field>
+          <Button type="submit" variant="primary" loading={start.isPending} disabled={!startPw}>
+            {t("settings.twoFactorEnable")}
+          </Button>
+        </form>
       )}
     </section>
   );

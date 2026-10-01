@@ -83,7 +83,7 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 	}
 	if h.d.Online != nil {
 		// Online counts users: one with several bound devices has several slots online.
-		slots, err := h.userSlots(ctx)
+		slots, err := h.allUserSlots(ctx)
 		if err != nil {
 			return nil, err
 		}

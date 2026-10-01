@@ -75,7 +75,7 @@ func (s *Packages) Create(ctx context.Context, in PackageInput) (db.TrafficPacka
 		}
 		var err error
 		p, err = q.CreateTrafficPackage(ctx, db.CreateTrafficPackageParams{Name: in.Name, Bytes: in.Bytes, PoolID: poolRef(in.PoolID),
-			Lifetime: in.Lifetime, Days: in.Days, PriceStars: in.PriceStars, PriceRub: in.PriceRub, OnSale: flag(in.OnSale), Sort: in.Sort,
+			Lifetime: in.Lifetime, Days: in.Days, PriceStars: in.PriceStars, PriceRub: in.PriceRub, OnSale: Flag(in.OnSale), Sort: in.Sort,
 			CreatedAt: s.now().Unix()})
 		return err
 	})
@@ -94,7 +94,7 @@ func (s *Packages) Update(ctx context.Context, id int64, in PackageInput) (db.Tr
 		}
 		var err error
 		p, err = q.UpdateTrafficPackage(ctx, db.UpdateTrafficPackageParams{Name: in.Name, Bytes: in.Bytes, PoolID: poolRef(in.PoolID),
-			Lifetime: in.Lifetime, Days: in.Days, PriceStars: in.PriceStars, PriceRub: in.PriceRub, OnSale: flag(in.OnSale), Sort: in.Sort, ID: id})
+			Lifetime: in.Lifetime, Days: in.Days, PriceStars: in.PriceStars, PriceRub: in.PriceRub, OnSale: Flag(in.OnSale), Sort: in.Sort, ID: id})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -154,7 +154,8 @@ func PackagesFor(ctx context.Context, q *db.Queries, userID int64) ([]db.Traffic
 
 func poolRef(id int64) sql.NullInt64 { return sql.NullInt64{Int64: id, Valid: id != 0} }
 
-func flag(b bool) int64 {
+// Flag is a bool as the database keeps it: 1 or 0.
+func Flag(b bool) int64 {
 	if b {
 		return 1
 	}

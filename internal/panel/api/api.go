@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -53,7 +54,6 @@ type Deps struct {
 	Packages  *domain.Packages
 	Pool      *domain.Pool
 	Changes   domain.Changes
-	SubURL    func(ctx context.Context, token string) string
 	Online    func() map[string]nodeapi.Online
 	Cert      func() acme.Status
 	RenewCert func()
@@ -82,10 +82,15 @@ type Deps struct {
 	ClearCert func() error
 	// NodeCerts keeps the nodes' own certificates; nil: nodes cannot have one.
 	NodeCerts *tlscert.NodeStore
+	// ForgetNode removes the certificates and keys kept on disk for a node id; nil: none.
+	ForgetNode func(id int64) error
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
 	// Addons are the marketplace's payment adapters; nil in tests.
 	Addons *addons.Manager
+	// Resolve looks a name up for what the panel dials on the admin's word (a REALITY
+	// target); nil asks the system's resolver.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// DNS checks that a domain leads to the panel's or the node's server; nil: unchecked
 	// (tests, development).
 	DNS *dnscheck.Checker
@@ -120,6 +125,8 @@ type handlers struct {
 	d         Deps
 	api       huma.API
 	dummyHash string
+	// hashSem bounds the password hashes that run at once (see verifyPassword).
+	hashSem chan struct{}
 
 	pendingMu sync.Mutex
 	pending   map[int64]pendingTOTP
@@ -138,7 +145,7 @@ func Config(version string) huma.Config {
 	cfg.CreateHooks = nil
 	cfg.Info.Description = "REST API панели mikan. Все пути — под секретным адресом админки: https://<панель>/<секретный путь>/api/v1/…\n\n" +
 		"Скрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. " +
-		"Ключ «чтение» выполняет только GET, «полный» — всё, кроме входа, сессий и самих ключей.\n\n" +
+		"Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\n" +
 		"Админка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n" +
 		"Ошибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
@@ -176,7 +183,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	h := &handlers{d: d, api: api, dummyHash: dummy, pending: map[int64]pendingTOTP{}}
+	h := &handlers{d: d, api: api, dummyHash: dummy, hashSem: make(chan struct{}, 4), pending: map[int64]pendingTOTP{}}
 	api.UseMiddleware(h.middleware)
 	h.registerAuth()
 	h.registerUsers()
@@ -196,6 +203,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerCascade()
 	h.registerPools()
 	h.registerPackages()
+	h.registerAudit()
 	return noStore(mux), api, nil
 }
 

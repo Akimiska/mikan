@@ -30,6 +30,7 @@ import (
 	"mikan/internal/fsutil"
 	"mikan/internal/nodeapi"
 	"mikan/internal/proto"
+	"mikan/internal/scan"
 )
 
 const (
@@ -303,6 +304,15 @@ func (e *Engine) TargetAllowed(dest string) bool {
 // the panel sends those every half minute and a node that restarts gets fresh ones from
 // it at once, so there is little to lose and a fsync of the whole state to save.
 const quotaSaveEvery = time.Minute
+
+// TargetOptions is where the node connects when it tests a target: the internet, and the
+// panel's own port on loopback. A name that leads anywhere else is refused after it is
+// resolved (TargetAllowed only reads the text).
+func (e *Engine) TargetOptions() scan.Options {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return scan.Options{Any: e.allowPrivate, LoopbackPort: e.applied.SelfStealPort}
+}
 
 func (e *Engine) SetPolicies(req nodeapi.PoliciesRequest) {
 	e.mu.Lock()

@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronLeft, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { lazy, Suspense, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk } from "../../api/hooks";
+import { meQuery, qk } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
@@ -130,14 +130,20 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
   const [name, setName] = useState("");
   const [scope, setScope] = useState<Scope>("read");
   const [days, setDays] = useState<number>(0);
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const me = useQuery(meQuery);
+  const totp = !!me.data?.admin.totp_enabled;
   const create = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/v1/api-keys", { body: { name: name.trim(), scope, expire_days: days } })),
+    mutationFn: () => unwrap(api.POST("/api/v1/api-keys", { body: { name: name.trim(), scope, expire_days: days, password, totp: code || undefined } })),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: qk.apiKeys });
       onOpenChange(false);
       setName("");
       setScope("read");
       setDays(0);
+      setPassword("");
+      setCode("");
       onMade(r.key);
     },
   });
@@ -159,7 +165,7 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
-          <Button variant="primary" type="submit" form="new-key" loading={create.isPending} disabled={!name.trim()}>
+          <Button variant="primary" type="submit" form="new-key" loading={create.isPending} disabled={!name.trim() || !password || (totp && code.length !== 6)}>
             {t("apiPage.create")}
           </Button>
         </>
@@ -190,6 +196,14 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
             ))}
           </select>
         </Field>
+        <Field label={t("apiPage.password")} htmlFor="k-pw" hint={t("apiPage.passwordHint")} error={errors.password}>
+          <input id="k-pw" type="password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-invalid={!!errors.password} />
+        </Field>
+        {totp ? (
+          <Field label={t("settings.totpCode")} htmlFor="k-totp" error={errors.totp}>
+            <input id="k-totp" className="input mono max-w-[160px] tracking-[0.2em]" inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.trim())} autoComplete="one-time-code" aria-invalid={!!errors.totp} />
+          </Field>
+        ) : null}
       </form>
     </Drawer>
   );

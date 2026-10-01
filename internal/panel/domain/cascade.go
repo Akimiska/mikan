@@ -18,9 +18,10 @@ import (
 // traffic leaves B directly, through B's WARP, or goes on to a further node.
 
 var (
-	ErrExitSelf  = errors.New("exit_self")  // a node cannot be its own exit
-	ErrExitCycle = errors.New("exit_cycle") // the chain would come back to where it started
-	ErrExitOff   = errors.New("exit_off")   // the exit node is disabled
+	ErrExitSelf  = errors.New("exit_self")     // a node cannot be its own exit
+	ErrExitCycle = errors.New("exit_cycle")    // the chain would come back to where it started
+	ErrExitLong  = errors.New("exit_too_long") // the chain has more than maxChain hops
+	ErrExitOff   = errors.New("exit_off")      // the exit node is disabled
 	ErrNoPort    = errors.New("relay_no_port")
 )
 
@@ -59,7 +60,7 @@ func CheckExit(ctx context.Context, q *db.Queries, from, to int64) error {
 		}
 		cur = r.ExitNodeID.Int64
 	}
-	return ErrExitCycle
+	return ErrExitLong
 }
 
 // EnsureRelay gives node its relay listener when it has none: a free TCP port, the

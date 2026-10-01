@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -48,6 +51,8 @@ type Panel struct {
 	spa       *server.SPA
 	subPage   *server.SPA
 	sessions  *auth.Sessions
+	st        *store.Store
+	devices   *domain.Devices
 	ipLimit   *auth.Limiter
 	userLimit *auth.Limiter
 	now       func() time.Time
@@ -92,6 +97,9 @@ type Options struct {
 	// HSTS says whether browsers are told to keep to HTTPS: for a panel that serves TLS
 	// itself, while its certificate is trusted (see server.SetHSTS). nil: never.
 	HSTS func() bool
+	// Resolve looks up the names the panel is told to dial (REALITY targets); nil is the
+	// system's resolver, tests set their own.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type noChanges struct{}
@@ -103,7 +111,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	set := settings.New(st.Q)
 	p := &Panel{
 		Settings:  set,
-		sessions:  auth.NewSessions(st.Q, o.Now),
+		sessions:  auth.NewSessions(st.Q, o.Now, o.Log),
 		ipLimit:   auth.NewLimiter(10, 10*time.Minute, 15*time.Minute, 24*time.Hour),
 		userLimit: auth.NewLimiter(30, 10*time.Minute, 15*time.Minute, 24*time.Hour),
 		now:       o.Now,
@@ -138,13 +146,22 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		dryRun = p.Nodes
 	}
 	deps.Inbounds = domain.NewInbounds(st, dryRun, o.Now)
+	// A REALITY target given by name is looked up when it is saved: the node dials it past the
+	// rules that fence its users in.
+	deps.Resolve = o.Resolve
+	if deps.Resolve == nil {
+		deps.Resolve = domain.SystemResolve
+	}
+	deps.Inbounds.SetResolver(deps.Resolve)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
+	p.st, p.devices = st, deps.Devices
 	deps.Packages = domain.NewPackages(st, o.Now)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert = o.Certs.Status, o.Certs.Renew
 		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom
 	}
 	deps.NodeCerts = o.NodeCerts
+	deps.ForgetNode = forgetNodeFiles(o)
 	subBase := func(ctx context.Context) string {
 		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {
@@ -155,12 +172,6 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			return ""
 		}
 		return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + paths.Sub
-	}
-	deps.SubURL = func(ctx context.Context, token string) string {
-		if base := subBase(ctx); base != "" {
-			return base + "/" + token
-		}
-		return ""
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	deps.Addons = p.Addons
@@ -340,6 +351,7 @@ func (p *Panel) Run(ctx context.Context) {
 				}
 				p.ipLimit.Sweep(p.now())
 				p.userLimit.Sweep(p.now())
+				p.maintain(ctx)
 			})
 		})
 	runAll(ctx, workers...)
@@ -384,6 +396,21 @@ func (c *configCache) get(ctx context.Context, build func(context.Context) (subs
 	}
 	c.cfg, c.g, c.at, c.ok = cfg, g, now, true
 	return cfg, nil
+}
+
+// forgetNodeFiles removes what the panel keeps on disk for a node id: its own certificate
+// (Options.NodeCerts) and the self-signed pair its QUIC protocols use, <data>/tls/nodes/<id>.
+func forgetNodeFiles(o Options) func(id int64) error {
+	return func(id int64) error {
+		var errs []error
+		if o.NodeCerts != nil {
+			errs = append(errs, o.NodeCerts.Clear(id))
+		}
+		if o.DataDir != "" {
+			errs = append(errs, os.RemoveAll(filepath.Join(o.DataDir, "tls", "nodes", strconv.FormatInt(id, 10))))
+		}
+		return errors.Join(errs...)
+	}
 }
 
 func every(ctx context.Context, d time.Duration, fn func()) {

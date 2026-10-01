@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -18,22 +19,24 @@ import (
 )
 
 type SettingsView struct {
-	Brand        string `json:"brand"`
-	SupportURL   string `json:"support_url"`
-	PublicHost   string `json:"public_host"`
-	Domain       string `json:"domain"`
-	PanelPort    int    `json:"panel_port"`
-	SubPort      int    `json:"sub_port" doc:"Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае"`
-	SubPortError string `json:"sub_port_error,omitempty" doc:"sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели"`
-	QuietHourUTC int    `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
-	AdminURL     string `json:"admin_url"`
-	SubBaseURL   string `json:"sub_base_url"`
-	SubGroupMain string `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
-	SubGroupAuto string `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
-	SubRouting   string `json:"sub_routing" enum:"ru_direct,all" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN"`
-	Fingerprint  string `json:"client_fingerprint" doc:"Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение"`
-	AutoPort     bool   `json:"auto_port" doc:"Переносить подключение на другой порт, если клиенты перестали до него доходить"`
-	AutoSNI      bool   `json:"auto_sni" doc:"Менять сайт маскировки REALITY, если он перестал подходить"`
+	Brand        string   `json:"brand"`
+	SupportURL   string   `json:"support_url"`
+	PublicHost   string   `json:"public_host"`
+	Domain       string   `json:"domain"`
+	PanelPort    int      `json:"panel_port"`
+	SubPort      int      `json:"sub_port" doc:"Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае"`
+	SubPortError string   `json:"sub_port_error,omitempty" doc:"sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели"`
+	QuietHourUTC int      `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
+	AdminURL     string   `json:"admin_url"`
+	SubBaseURL   string   `json:"sub_base_url"`
+	SubGroupMain string   `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
+	SubGroupAuto string   `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
+	SubRules     string   `json:"sub_rules" doc:"Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий"`
+	RuleTargets  []string `json:"rule_targets" doc:"Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы"`
+	SubRouting   string   `json:"sub_routing" enum:"ru_direct,all" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN"`
+	Fingerprint  string   `json:"client_fingerprint" doc:"Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение"`
+	AutoPort     bool     `json:"auto_port" doc:"Переносить подключение на другой порт, если клиенты перестали до него доходить"`
+	AutoSNI      bool     `json:"auto_sni" doc:"Менять сайт маскировки REALITY, если он перестал подходить"`
 	// Devices: see domain.Devices.
 	DeviceBinding bool        `json:"device_binding" doc:"Привязывать подписку к устройствам: у каждого устройства свои ключи"`
 	RequireHWID   bool        `json:"device_require_hwid" doc:"Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место)"`
@@ -53,6 +56,7 @@ type patchSettingsInput struct {
 		SubGroupMain  *string `json:"sub_group_main,omitempty" maxLength:"200"`
 		SubGroupAuto  *string `json:"sub_group_auto,omitempty" maxLength:"200"`
 		SubRouting    *string `json:"sub_routing,omitempty" enum:"ru_direct,all"`
+		SubRules      *string `json:"sub_rules,omitempty" maxLength:"65536" doc:"Свои правила Clash, до 500 строк; ошибка указывает номер строки"`
 		Fingerprint   *string `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
 		AutoPort      *bool   `json:"auto_port,omitempty"`
 		AutoSNI       *bool   `json:"auto_sni,omitempty"`
@@ -100,6 +104,7 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	get(settings.KeyGroupMain, &v.SubGroupMain)
 	get(settings.KeyGroupAuto, &v.SubGroupAuto)
 	get(settings.KeyRouting, &v.SubRouting)
+	get(settings.KeyRules, &v.SubRules)
 	v.SubRouting = string(subs.ParseRouting(v.SubRouting))
 	get(settings.KeyFingerprint, &v.Fingerprint)
 	if !proto.ValidFingerprint(v.Fingerprint) {
@@ -113,6 +118,7 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	}
 	g := subs.Groups{Main: v.SubGroupMain, Auto: v.SubGroupAuto}.WithDefaults(v.DefaultLang)
 	v.SubGroupMain, v.SubGroupAuto = g.Main, g.Auto
+	v.RuleTargets = subs.RuleTargets(g)
 	if v.DefaultLang == "" {
 		v.DefaultLang = "auto"
 	}
@@ -206,7 +212,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {
 		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
 	}
-	if b.SubGroupMain != nil || b.SubGroupAuto != nil {
+	if b.SubGroupMain != nil || b.SubGroupAuto != nil || b.SubRules != nil {
 		cur, err := h.groups(ctx)
 		if err != nil {
 			return nil, err
@@ -218,7 +224,33 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		if b.SubGroupAuto != nil {
 			next.Auto = strings.TrimSpace(*b.SubGroupAuto)
 		}
-		details = append(details, h.checkGroups(ctx, next)...)
+		if b.SubGroupMain != nil || b.SubGroupAuto != nil {
+			details = append(details, h.checkGroups(ctx, next)...)
+		}
+		// The rules are checked against the groups they will meet: a renamed group must
+		// not leave a rule pointing nowhere.
+		rules := b.SubRules
+		if rules == nil {
+			saved, err := h.d.Settings.String(ctx, settings.KeyRules)
+			if err != nil {
+				return nil, err
+			}
+			rules = &saved
+		}
+		if _, err := subs.ParseRules(*rules, next); err != nil {
+			var re *subs.RuleError
+			if !errors.As(err, &re) {
+				return nil, err
+			}
+			field := "body.sub_rules"
+			if b.SubRules == nil {
+				field, re.Code = "body.sub_group_main", "group_in_rules"
+				if b.SubGroupMain == nil {
+					field = "body.sub_group_auto"
+				}
+			}
+			details = append(details, &huma.ErrorDetail{Location: field, Message: re.Code, Value: re.Line})
+		}
 	}
 	if b.SubPort != nil {
 		if d, err := h.checkSubPort(ctx, *b.SubPort); err != nil {
@@ -251,6 +283,11 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			return nil
 		}
 		return settings.Set(ctx, h.d.Settings, key, strings.TrimSpace(*v))
+	}
+	if b.SubRules != nil {
+		if err := settings.Set(ctx, h.d.Settings, settings.KeyRules, strings.TrimRight(*b.SubRules, " \n\r\t")); err != nil {
+			return nil, err
+		}
 	}
 	for key, v := range map[string]*string{"brand": b.Brand, "support_url": b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
 		settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {

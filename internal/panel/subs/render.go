@@ -132,6 +132,8 @@ type Profile struct {
 	Direct   []string     // hosts that bypass the tunnel: the panel and every node
 	// Fingerprint is the panel's default uTLS profile (proto.ClientInput.Fingerprint).
 	Fingerprint string
+	// Rules are the admin's own Clash rules (ServedRules), before the built-in routing.
+	Rules []string
 }
 
 type proxy struct {
@@ -250,7 +252,9 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
 		"nameserver":         []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"},
 	}
+	// The panel and the nodes stay out of the tunnel whatever the admin's rules say.
 	rules := append(directRules(p.Direct), "GEOIP,LAN,DIRECT,no-resolve")
+	rules = append(rules, p.Rules...)
 	cfg := map[string]any{
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning",
 		// The node has no IPv6 on most VPS: with it on, apps first try IPv6 through the

@@ -1515,6 +1515,8 @@ export interface components {
             sub_port?: number;
             /** @enum {string} */
             sub_routing?: "ru_direct" | "all";
+            /** @description Свои правила Clash, до 500 строк; ошибка указывает номер строки */
+            sub_rules?: string;
             /** @description https://… или tg://… */
             support_url?: string;
         };
@@ -1753,6 +1755,8 @@ export interface components {
              * @description Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов
              */
             quiet_hour_utc: number;
+            /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
+            rule_targets: string[];
             sub_base_url: string;
             /** @description Группа автовыбора самого быстрого подключения */
             sub_group_auto: string;
@@ -1770,6 +1774,8 @@ export interface components {
              * @enum {string}
              */
             sub_routing: "ru_direct" | "all";
+            /** @description Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий */
+            sub_rules: string;
             support_url: string;
         };
         Status: {

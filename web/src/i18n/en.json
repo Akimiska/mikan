@@ -220,7 +220,15 @@
       "sub_port_busy": "Port {value} is taken by another program on the server",
       "sub_port_unavailable": "The subscription port cannot be changed now",
       "port_sub": "The panel serves subscriptions on this port: pick another, or change the subscription port in Settings",
-      "config_obfs_sizes": "Packet sizes are for gecko only: 256 to 2048 bytes, the minimum no larger than the maximum"
+      "config_obfs_sizes": "Packet sizes are for gecko only: 256 to 2048 bytes, the minimum no larger than the maximum",
+      "rule_format": "Line {value}: TYPE,VALUE,TARGET separated by commas",
+      "rule_type": "Line {value}: this rule type is not supported",
+      "rule_value": "Line {value}: the value does not fit this type",
+      "rule_target": "Line {value}: no such group — DIRECT, REJECT, REJECT-DROP, PROXY or the subscription's groups",
+      "rule_option": "Line {value}: no-resolve is for GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX and IP-ASN only",
+      "rule_too_long": "Line {value}: too long, 512 characters at most",
+      "rules_too_many": "Line {value}: more than 500 rules",
+      "group_in_rules": "The Clash rule on line {value} sends traffic to this group: fix the rules first"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -652,7 +660,8 @@
     "exitPick": "Pick a node",
     "obfs": "Obfuscation",
     "obfsHint": "Every app with Hysteria2 knows Salamander. Gecko also cuts the handshake into pieces of random size, against DPI that tells QUIC by packet sizes.",
-    "obfsGeckoHint": "Only apps on mihomo core 1.19.26+ that say so (Koala Clash 1.4+ and others) get Gecko. The rest do not get this protocol, so keep a plain Hysteria2 next to it."
+    "obfsGeckoHint": "Only apps on mihomo core 1.19.26+ that say so (Koala Clash 1.4+ and others) get Gecko. The rest do not get this protocol, so keep a plain Hysteria2 next to it.",
+    "portHopHint": "A range such as 20000-30000 works too: clients hop between the ports, which makes blocking one port useless. Open the range over UDP in the server firewall."
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
@@ -795,7 +804,23 @@
     "subPortHeld": "Taken by the protocol “{name}”",
     "subPortNote": "The admin panel does not open on this port. Links on the panel's port keep working, so clients change nothing. The listed ports were opened in the firewall at install; open any other yourself if ufw is on: ufw allow PORT/tcp.",
     "subPortOff": "Back to the panel's port {port}",
-    "subPortPanel": "panel"
+    "subPortPanel": "panel",
+    "rules": "Clash rules",
+    "rulesSub": "Rules of your own for Koala Clash, FlClash, Clash Verge and other apps on mihomo. They go before the routing mode; the panel's and the nodes' addresses always go direct.",
+    "rulesCount": "{n, plural, one {# rule} other {# rules}}",
+    "rulesPlaceholder": "# One rule per line: TYPE,VALUE,TARGET\nDOMAIN-SUFFIX,example.com,DIRECT\nGEOSITE,youtube,PROXY",
+    "rulesExamples": "Example rules",
+    "rulesEx": {
+      "siteDirect": "A site direct",
+      "siteVpn": "A site through VPN",
+      "ads": "Block ads",
+      "app": "An app through VPN",
+      "lan": "Local network direct"
+    },
+    "rulesHint": "One rule per line; lines starting with # are comments. A rule with a mistake is not saved, so it cannot break clients' profiles. Happ, v2RayTun and Hiddify get no rules: their format has none.",
+    "rulesTargets": "Targets:",
+    "rulesTypes": "Rule types",
+    "rulesTypesText": "DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, GEOSITE, GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX, SRC-IP-CIDR, DST-PORT, SRC-PORT, NETWORK, PROCESS-NAME, PROCESS-PATH work in every mihomo app. DOMAIN-REGEX, IP-ASN, SRC-GEOIP (core 1.18+) and DOMAIN-WILDCARD (1.19.12+) reach only apps that name their core, or an older core would fail the whole profile. no-resolve is for GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX and IP-ASN."
   },
   "sub": {
     "loadFailed": "Could not load the subscription",

@@ -32,6 +32,7 @@ type Config struct {
 	Direct     []string // the panel's and nodes' hosts: kept out of the tunnel
 	Groups     Groups
 	Routing    Routing
+	Rules      []string // the admin's own Clash rules, checked (ServedRules)
 	// Fingerprint is the default uTLS profile for inbounds that set none.
 	Fingerprint string
 	// Binding gives every device that sends its id keys of its own (domain.Devices);
@@ -184,12 +185,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	prof.Inbounds = forApp(prof.Inbounds, DetectApp(r.Header.Get("User-Agent")), domain.State(u, h.now()))
+	app := DetectApp(r.Header.Get("User-Agent"))
+	prof.Inbounds = forApp(prof.Inbounds, app, domain.State(u, h.now()))
 	// The block detector trusts a device only once it took a profile with an inbound's
 	// current port and target (see autotune.Detect).
 	_ = h.st.Q.RecordSubFetch(r.Context(), db.RecordSubFetchParams{UserID: u.ID, Ip: h.clientIP(r), FetchedAt: h.now().Unix()})
 	switch format {
 	case "clash":
+		prof.Rules = RulesFor(cfg.Rules, app)
 		body, err := Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)

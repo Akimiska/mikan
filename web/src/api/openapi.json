@@ -1637,6 +1637,11 @@
             ],
             "type": "string"
           },
+          "sub_rules": {
+            "description": "Свои правила Clash, до 500 строк; ошибка указывает номер строки",
+            "maxLength": 65536,
+            "type": "string"
+          },
           "support_url": {
             "description": "https://… или tg://…",
             "maxLength": 200,
@@ -2329,6 +2334,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "rule_targets": {
+            "description": "Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "sub_base_url": {
             "type": "string"
           },
@@ -2357,6 +2369,10 @@
             ],
             "type": "string"
           },
+          "sub_rules": {
+            "description": "Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий",
+            "type": "string"
+          },
           "support_url": {
             "type": "string"
           }
@@ -2373,6 +2389,8 @@
           "sub_base_url",
           "sub_group_main",
           "sub_group_auto",
+          "sub_rules",
+          "rule_targets",
           "sub_routing",
           "client_fingerprint",
           "auto_port",

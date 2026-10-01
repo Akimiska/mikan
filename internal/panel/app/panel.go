@@ -189,16 +189,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return subs.Config{}, err
 		}
-		var domainName, publicHost, routing, fingerprint string
+		var domainName, publicHost, routing, fingerprint, rules string
 		var groups subs.Groups
 		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto,
-			settings.KeyRouting: &routing, settings.KeyFingerprint: &fingerprint} {
+			settings.KeyRouting: &routing, settings.KeyFingerprint: &fingerprint, settings.KeyRules: &rules} {
 			if *dst, err = set.String(ctx, key); err != nil {
 				return subs.Config{}, err
 			}
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing), Fingerprint: fingerprint,
-			Direct: []string{publicHost, domainName}, Lang: lang}
+			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang))}
 		if cfg.Binding, err = set.Bool(ctx, settings.KeyDeviceBinding, true); err != nil {
 			return subs.Config{}, err
 		}

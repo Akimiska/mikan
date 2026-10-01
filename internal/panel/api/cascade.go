@@ -61,9 +61,12 @@ func (h *handlers) registerCascade() {
 	huma.Register(h.api, huma.Operation{OperationID: "update-node-cascade", Method: http.MethodPatch, Path: "/api/v1/nodes/{id}/cascade", Summary: "Куда нода выпускает трафик других нод", Tags: tags}, h.patchCascade)
 }
 
+// cascadeRefusals are the domain's refusals of an exit the API reports by their own code.
+var cascadeRefusals = []error{domain.ErrExitSelf, domain.ErrExitCycle, domain.ErrExitOff, domain.ErrNoPort}
+
 // cascadeError maps the domain's refusals to the API's codes.
 func cascadeError(err error, field string) error {
-	for _, e := range []error{domain.ErrExitSelf, domain.ErrExitCycle, domain.ErrExitOff, domain.ErrNoPort} {
+	for _, e := range cascadeRefusals {
 		if errors.Is(err, e) {
 			return huma.Error422UnprocessableEntity("cascade", &huma.ErrorDetail{Location: "body." + field, Message: e.Error()})
 		}

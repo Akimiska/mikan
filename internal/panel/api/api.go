@@ -22,6 +22,7 @@ import (
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/secure"
@@ -84,6 +85,9 @@ type Deps struct {
 	Updates *updates.Checker
 	// Addons are the marketplace's payment adapters; nil in tests.
 	Addons *addons.Manager
+	// DNS checks that a domain leads to the panel's or the node's server; nil: unchecked
+	// (tests, development).
+	DNS *dnscheck.Checker
 }
 
 // NodeRuntime is what the API needs from the running nodes.

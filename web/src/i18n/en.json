@@ -255,7 +255,11 @@
       "bad_lifetime": "Pick how long it is valid",
       "bad_days": "From 1 to 3650 days",
       "bad_price": "The price is out of range",
-      "note_too_long": "Up to 200 characters"
+      "note_too_long": "Up to 200 characters",
+      "domain_elsewhere": "The domain points to another server ({value}). Point its A record at this server and wait for DNS to update.",
+      "domain_not_found": "The domain has no A or AAAA record. Point it at this server and wait for DNS to update.",
+      "server_ip_unknown": "Set the server's IP address first: there is nothing to compare the domain with.",
+      "domain_unchecked": "Could not check the domain with public DNS. Try again."
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",

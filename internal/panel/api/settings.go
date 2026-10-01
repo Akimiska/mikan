@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/acme"
+	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
@@ -240,6 +241,29 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			return nil, err
 		} else if d != nil {
 			details = append(details, d)
+		}
+	}
+	// The domain must lead to this server: checked when it or the server's address changes,
+	// after the cheap checks, since it asks public DNS.
+	if (b.Domain != nil || b.PublicHost != nil) && len(details) == 0 {
+		cur, err := h.d.Settings.String(ctx, settings.KeyDomain)
+		if err != nil {
+			return nil, err
+		}
+		dom := cur
+		if b.Domain != nil {
+			dom = strings.TrimSpace(*b.Domain)
+		}
+		if dom != "" && (dom != cur || b.PublicHost != nil) {
+			host := ""
+			if b.PublicHost != nil {
+				host = strings.TrimSpace(*b.PublicHost)
+			} else if host, err = h.d.Settings.String(ctx, settings.KeyPublicHost); err != nil {
+				return nil, err
+			}
+			if d := h.domainHere(ctx, "body.domain", dom, dnscheck.Own(host)); d != nil {
+				details = append(details, d)
+			}
 		}
 	}
 	if len(details) > 0 {

@@ -181,6 +181,11 @@ func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKe
 	if !validHost(dom) {
 		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 	}
+	if len(details) == 0 {
+		if d := h.domainHere(ctx, "body.domain", dom, h.nodeAddrs(ctx, host)); d != nil {
+			details = append(details, d)
+		}
+	}
 	if len(details) > 0 {
 		return nil, huma.Error422UnprocessableEntity("validation", details...)
 	}
@@ -246,6 +251,12 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 		}
 		n.Domain = dom
+	}
+	// The node's domain must lead to the node: checked when it or the node's address changes.
+	if n.Domain != "" && (b.Domain != nil || b.Host != nil) {
+		if d := h.domainHere(ctx, "body.domain", n.Domain, h.nodeAddrs(ctx, n.PublicHost)); d != nil {
+			return nil, huma.Error422UnprocessableEntity("validation", d)
+		}
 	}
 	if b.Enabled != nil {
 		n.Enabled = 0

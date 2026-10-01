@@ -19,6 +19,7 @@ import (
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/server"
@@ -87,6 +88,8 @@ type Options struct {
 	WarpAPI string
 	// AddonsCatalog is the marketplace's signed catalog; "" is the real one.
 	AddonsCatalog string
+	// DNS checks new domains against public DNS; nil leaves them unchecked.
+	DNS *dnscheck.Checker
 }
 
 type noChanges struct{}
@@ -153,6 +156,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	deps.Addons = p.Addons
+	deps.DNS = o.DNS
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
 		YooKassaAPI: o.YooKassaAPI, CryptoBotAPI: o.CryptoBotAPI, CryptoBotTestAPI: o.CryptoBotAPI, MaxLinks: tgbot.MaxLinks,
 		Addons: deps.Addons, SubBase: subBase})

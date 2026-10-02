@@ -51,6 +51,11 @@ type Manager struct {
 
 	nodesDirty chan struct{}
 
+	// accounting lets one background writer of users' counters run at a time: traffic
+	// batches of every node, online marks and period resets update the same rows every
+	// few seconds, and side by side their serializable transactions only abort each other.
+	accounting sync.Mutex
+
 	mu        sync.Mutex
 	running   map[int64]*running
 	lastPurge time.Time
@@ -414,7 +419,9 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 		default:
 			continue
 		}
+		m.accounting.Lock()
 		err := m.st.Tx(ctx, func(q *db.Queries) error { return domain.StartPeriod(ctx, q, u.ID, start, now) })
+		m.accounting.Unlock()
 		if err != nil {
 			return err
 		}
@@ -479,6 +486,8 @@ func (m *Manager) recordDevices(ctx context.Context, now time.Time) error {
 	for _, r := range rows {
 		owner[r.SlotName] = r.UserID
 	}
+	m.accounting.Lock()
+	defer m.accounting.Unlock()
 	return m.st.Tx(ctx, func(q *db.Queries) error {
 		for slot, on := range online {
 			uid, ok := owner[slot]

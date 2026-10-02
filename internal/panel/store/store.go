@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,7 +35,12 @@ type Store struct {
 	DB      *sql.DB
 	Q       *db.Queries
 	cleanup func() error
+
+	conflicts atomic.Uint64
 }
+
+// Conflicts counts the serialization conflicts Tx has retried since the store opened.
+func (s *Store) Conflicts() uint64 { return s.conflicts.Load() }
 
 func Open(ctx context.Context, dataDir string) (*Store, error) {
 	return OpenPostgres(ctx, dataDir, os.Getenv("MIKAN_DATABASE_URL"))
@@ -164,6 +170,7 @@ func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
 		}
 		// Exponential backoff with full jitter: writers that collided together must not
 		// all come back together, or the same conflict repeats until the attempts run out.
+		s.conflicts.Add(1)
 		window := min(5*time.Millisecond<<attempt, 250*time.Millisecond)
 		timer := time.NewTimer(rand.N(window) + time.Millisecond)
 		select {

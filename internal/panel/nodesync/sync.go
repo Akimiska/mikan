@@ -460,6 +460,7 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 	now := s.m.now()
 	c = s.vet(c, now)
 	hour, day := now.Unix()/3600, now.Unix()/86400
+	s.m.accounting.Lock()
 	err = s.m.st.Tx(ctx, func(q *db.Queries) error {
 		rows, err := q.ListSlotUsers(ctx)
 		if err != nil {
@@ -530,6 +531,7 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		}
 		return q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("counters_seq", s.id), Value: strconv.FormatInt(c.Seq, 10)})
 	})
+	s.m.accounting.Unlock()
 	if err != nil {
 		s.log.Error("store counters", "err", err)
 		return

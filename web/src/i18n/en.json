@@ -1353,7 +1353,9 @@
     },
     "back": "Settings",
     "download": "Download OpenAPI",
-    "downloadHint": "openapi.json for Postman, Insomnia, Swagger UI and client generators. It carries this panel's address, which is secret: do not publish the file."
+    "downloadHint": "openapi.json for Postman, Insomnia, Swagger UI and client generators. It carries this panel's address, which is secret: do not publish the file.",
+    "prometheus": "Prometheus and Grafana",
+    "prometheusHint": "GET /metrics gives users by state, users online, traffic, nodes, their load and protocols in the Prometheus format. Scrape it with a read key; this is the job for prometheus.yml:"
   },
   "payments": {
     "title": "Payments",

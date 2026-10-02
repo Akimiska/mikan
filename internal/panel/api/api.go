@@ -189,6 +189,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerInbounds()
 	h.registerTargets()
 	h.registerStats()
+	h.registerMetrics()
 	h.registerSettings()
 	h.registerCerts()
 	h.registerTelegram()

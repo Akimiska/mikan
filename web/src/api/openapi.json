@@ -5355,6 +5355,41 @@
         ]
       }
     },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "Пользователи по состояниям, онлайн, трафик, ноды и подключения. Для Prometheus и Grafana: ключ на чтение в заголовке Authorization: Bearer.",
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {}
+            },
+            "description": "Prometheus text format 0.0.4",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Метрики в формате Prometheus",
+        "tags": [
+          "stats"
+        ]
+      }
+    },
     "/api/v1/node": {
       "get": {
         "operationId": "node-health",

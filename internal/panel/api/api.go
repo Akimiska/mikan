@@ -28,6 +28,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
@@ -65,6 +66,8 @@ type Deps struct {
 	}
 	// Telegram is the subscription owners' bot.
 	Telegram *tgbot.Bot
+	// Backups send the database to the admin's Telegram chat; nil in tests.
+	Backups *tgbackup.Service
 	// Billing sells tariffs; SubBase is https://host:port/<sub path> ("" without an address).
 	Billing *billing.Service
 	// Warp registers WARP accounts with Cloudflare.
@@ -192,6 +195,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTargets()
 	h.registerStats()
 	h.registerMetrics()
+	h.registerBackups()
 	h.registerSettings()
 	h.registerCerts()
 	h.registerTelegram()

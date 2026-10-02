@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -77,6 +79,11 @@ func (c *Client) call(parent context.Context, method string, in, out any) error 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return c.do(parent, req, out)
+}
+
+// do sends a request made for the Bot API and reads its answer into out.
+func (c *Client) do(parent context.Context, req *http.Request, out any) error {
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		if parent.Err() != nil {
@@ -105,6 +112,42 @@ func (c *Client) call(parent context.Context, method string, in, out any) error 
 		return json.Unmarshal(r.Result, out)
 	}
 	return nil
+}
+
+// documentTimeout: a file goes up in one request, which over a slow way to Telegram (a
+// node, a proxy) takes longer than a message.
+const documentTimeout = 2 * time.Minute
+
+// MaxDocument is the largest file a bot may send.
+const MaxDocument = 50 << 20
+
+// SendDocument sends a file to a chat, with a caption under it.
+func (c *Client) SendDocument(parent context.Context, chat int64, name string, data []byte, caption string) (Message, error) {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	_ = w.WriteField("chat_id", strconv.FormatInt(chat, 10))
+	if caption != "" {
+		_ = w.WriteField("caption", caption)
+	}
+	part, err := w.CreateFormFile("document", name)
+	if err != nil {
+		return Message{}, err
+	}
+	if _, err := part.Write(data); err != nil {
+		return Message{}, err
+	}
+	if err := w.Close(); err != nil {
+		return Message{}, err
+	}
+	ctx, cancel := context.WithTimeout(parent, documentTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/sendDocument", &body)
+	if err != nil {
+		return Message{}, err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	var m Message
+	return m, c.do(parent, req, &m)
 }
 
 // User is a Telegram account.

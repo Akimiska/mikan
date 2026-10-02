@@ -32,6 +32,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
@@ -48,6 +49,7 @@ type Panel struct {
 	Billing   *billing.Service
 	Updates   *updates.Checker
 	Alerts    *infraalerts.Monitor
+	Backups   *tgbackup.Service
 	Addons    *addons.Manager
 	server    *server.Server
 	spa       *server.SPA
@@ -199,6 +201,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		certStatus = o.Certs.Status
 	}
 	p.Alerts = infraalerts.New(st, set, p.Nodes, p.Tuner, certStatus, p.Updates, p.Telegram, o.Log, o.Now)
+	// The server's name in a backup's file name: its domain, else its address.
+	serverName := func(ctx context.Context) string {
+		if d, err := set.String(ctx, settings.KeyDomain); err == nil && d != "" {
+			return d
+		}
+		h, _ := set.String(ctx, settings.KeyPublicHost)
+		return h
+	}
+	p.Backups = tgbackup.New(st.DB, set, p.Telegram, o.DataDir, serverName, o.Now, o.Log)
+	deps.Backups = p.Backups
 	deps.Warp = warp.Client{API: o.WarpAPI}
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
@@ -353,7 +365,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.Tuner != nil {
 		workers = append(workers, p.Tuner.Run)
 	}
-	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run,
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

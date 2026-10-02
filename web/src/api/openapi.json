@@ -543,6 +543,53 @@
         ],
         "type": "object"
       },
+      "BackupView": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_chat_set": {
+            "description": "Чат администратора подключён к боту (вкладка «Инфраструктура»)",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Слать базу в чат администратора раз в сутки",
+            "type": "boolean"
+          },
+          "hour": {
+            "description": "Час отправки (UTC)",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_error": {
+            "description": "Код ошибки последней попытки",
+            "type": "string"
+          },
+          "last_ok": {
+            "description": "Когда ушёл последний бэкап",
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_size": {
+            "description": "Размер последнего файла, байт",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_try": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "password_set": {
+            "description": "Пароль шифрования задан; сам пароль не возвращается",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "hour",
+          "password_set",
+          "admin_chat_set"
+        ],
+        "type": "object"
+      },
       "BoundDeviceView": {
         "additionalProperties": false,
         "properties": {
@@ -2316,6 +2363,26 @@
             "additionalProperties": {},
             "description": "Только то, что меняется; секрет пустой строкой — оставить прежний",
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "PatchBackupInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "hour": {
+            "format": "int64",
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "password": {
+            "description": "Пароль, которым шифруется файл: от 12 символов. Без него бэкап не открыть",
+            "maxLength": 128,
+            "type": "string"
           }
         },
         "type": "object"
@@ -7166,6 +7233,110 @@
           }
         },
         "summary": "Настроить Telegram-бота",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/telegram/backup": {
+      "get": {
+        "operationId": "get-telegram-backup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Бэкапы в Telegram",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      },
+      "patch": {
+        "operationId": "update-telegram-backup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchBackupInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настроить бэкапы в Telegram",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/telegram/backup/send": {
+      "post": {
+        "operationId": "send-telegram-backup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отправить бэкап сейчас",
         "tags": [
           "telegram"
         ],

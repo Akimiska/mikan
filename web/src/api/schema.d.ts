@@ -842,6 +842,41 @@ export interface paths {
         patch: operations["update-telegram"];
         trace?: never;
     };
+    "/api/v1/telegram/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Бэкапы в Telegram */
+        get: operations["get-telegram-backup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настроить бэкапы в Telegram */
+        patch: operations["update-telegram-backup"];
+        trace?: never;
+    };
+    "/api/v1/telegram/backup/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Отправить бэкап сейчас */
+        post: operations["send-telegram-backup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/telegram/broadcast": {
         parameters: {
             query?: never;
@@ -1342,6 +1377,33 @@ export interface components {
             stuck?: "off" | "waiting" | "no_port" | "no_target" | "exhausted";
             target_error?: string;
             target_ok?: boolean;
+        };
+        BackupView: {
+            /** @description Чат администратора подключён к боту (вкладка «Инфраструктура») */
+            admin_chat_set: boolean;
+            /** @description Слать базу в чат администратора раз в сутки */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Час отправки (UTC)
+             */
+            hour: number;
+            /** @description Код ошибки последней попытки */
+            last_error?: string;
+            /**
+             * Format: date-time
+             * @description Когда ушёл последний бэкап
+             */
+            last_ok?: string;
+            /**
+             * Format: int64
+             * @description Размер последнего файла, байт
+             */
+            last_size?: number;
+            /** Format: date-time */
+            last_try?: string;
+            /** @description Пароль шифрования задан; сам пароль не возвращается */
+            password_set: boolean;
         };
         BoundDeviceView: {
             app: string;
@@ -1964,6 +2026,13 @@ export interface components {
             settings?: {
                 [key: string]: unknown;
             };
+        };
+        PatchBackupInputBody: {
+            enabled?: boolean;
+            /** Format: int64 */
+            hour?: number;
+            /** @description Пароль, которым шифруется файл: от 12 символов. Без него бэкап не открыть */
+            password?: string;
         };
         PatchInboundInputBody: {
             /** @description Нельзя включить, пока у подключения свой адрес (listen) */
@@ -4820,6 +4889,97 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TelegramView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-telegram-backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-telegram-backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchBackupInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "send-telegram-backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupView"];
                 };
             };
             /** @description Error */

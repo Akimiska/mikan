@@ -123,7 +123,10 @@ function TelegramBody({ v }: { v: View }) {
         ) : tab === "notify" ? (
           <Columns wide="left" left={<OptionsCard draft={draft} setDraft={setDraft} v={v} />} right={<Preview draft={draft} v={v} />} />
         ) : tab === "infra" ? (
-          <div className="max-w-3xl"><InfrastructureCard v={v} draft={infrastructure.draft} setDraft={infrastructure.setDraft} dirty={infrastructure.dirty} /></div>
+          <div className="flex max-w-3xl flex-col gap-4">
+            <InfrastructureCard v={v} draft={infrastructure.draft} setDraft={infrastructure.setDraft} dirty={infrastructure.dirty} />
+            <BackupCard />
+          </div>
         ) : (
           <div className="max-w-3xl">
             <BroadcastCard v={v} />
@@ -218,6 +221,90 @@ function InfrastructureCard({ v, draft, setDraft, dirty }: { v: View; draft: Sch
         ] as const).map(([key, label]) => <div key={key} className="panel-soft flex items-center justify-between gap-3 rounded-xl p-3"><span className="text-sm leading-5">{t(`telegram.infra.${label}`)}</span><Switch checked={draft.events[key]} label={t(`telegram.infra.${label}`)} onChange={(on) => event(key, on)} /></div>)}
       </div>
       <div className="mt-5 flex justify-end"><Button variant="primary" loading={patch.isPending} disabled={!dirty} onClick={save}>{t("common.save")}</Button></div>
+    </section>
+  );
+}
+
+// The database to the admin chat, encrypted with the admin's password (tgbackup).
+function BackupCard() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ["telegram-backup"], queryFn: () => unwrap(api.GET("/api/v1/telegram/backup", {})) });
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const done = (r: Schemas["BackupView"], text: string) => {
+    qc.setQueryData(["telegram-backup"], r);
+    setPassword("");
+    setError("");
+    toast.ok(text);
+  };
+  const fail = (e: unknown) => {
+    if (e instanceof ApiError && Object.keys(e.fields).length) setError(Object.values(e.fields)[0] ?? "");
+    else toast.error(errorText(e));
+  };
+  const patch = useMutation({
+    mutationFn: (body: { enabled?: boolean; hour?: number; password?: string }) => unwrap(api.PATCH("/api/v1/telegram/backup", { body })),
+    onSuccess: (r) => done(r, t("telegram.infra.backupSaved")),
+    onError: fail,
+  });
+  const send = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/telegram/backup/send", {})),
+    onSuccess: (r) => done(r, t("telegram.infra.backupSent")),
+    onError: (e) => {
+      fail(e);
+      void qc.invalidateQueries({ queryKey: ["telegram-backup"] });
+    },
+  });
+  const b = q.data;
+  if (!b) return <Skeleton style={{ height: 220, borderRadius: 24 }} />;
+  const size = b.last_size ? (b.last_size >= 1 << 20 ? `${(b.last_size / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(b.last_size / 1024))} KB`) : "";
+  return (
+    <section className="card glass">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("telegram.infra.backup")}</h2>
+          <div className="card-sub">{t("telegram.infra.backupSub")}</div>
+        </div>
+      </div>
+      {!b.admin_chat_set ? (
+        <div className="banner warn mb-3">
+          <span>{t("telegram.infra.backupNoChat")}</span>
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+        <div className="text-sm font-medium">{t("telegram.infra.backupOn")}</div>
+        <Switch checked={b.enabled} label={t("telegram.infra.backupOn")} disabled={patch.isPending} onChange={(on) => patch.mutate(on && password ? { enabled: on, password } : { enabled: on })} />
+      </div>
+      <div className="grid gap-x-3 sm:grid-cols-[120px_1fr]">
+        <Field label={t("telegram.infra.backupHour")} htmlFor="backup-hour">
+          <select id="backup-hour" className="input" value={b.hour} disabled={patch.isPending} onChange={(e) => patch.mutate({ hour: Number(e.target.value) })}>
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>
+                {String(h).padStart(2, "0")}:00
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t("telegram.infra.backupPassword")} htmlFor="backup-password" hint={b.password_set ? t("telegram.infra.backupPasswordSet") : t("telegram.infra.backupPasswordHint")} error={error}>
+          <div className="flex gap-2">
+            <input id="backup-password" className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={128} aria-invalid={!!error} />
+            <Button type="button" loading={patch.isPending} disabled={password.length === 0} onClick={() => patch.mutate({ password })}>
+              {t("common.save")}
+            </Button>
+          </div>
+        </Field>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs text-[var(--ink-500)]">
+          {b.last_ok ? t("telegram.infra.backupLast", { when: ago(b.last_ok), size }) : t("telegram.infra.backupNever")}
+          {b.last_error ? <div className="text-[var(--berry-600)]">{t("telegram.infra.backupFailed", { error: tMaybe(`errors.api.${b.last_error}`) ?? b.last_error })}</div> : null}
+        </div>
+        <Button size="sm" loading={send.isPending} disabled={!b.admin_chat_set || !b.password_set} onClick={() => send.mutate()}>
+          {t("telegram.infra.backupSendNow")}
+        </Button>
+      </div>
+      <div className="mt-4 text-xs text-[var(--ink-500)]">{t("telegram.infra.backupRestore")}</div>
+      <pre className="code-block mt-1 text-xs">{"age -d -o mikan.tar.gz mikan-….tar.gz.age\nmikan restore mikan.tar.gz"}</pre>
     </section>
   );
 }

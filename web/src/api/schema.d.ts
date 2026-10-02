@@ -364,6 +364,26 @@ export interface paths {
         patch: operations["update-inbound"];
         trace?: never;
     };
+    "/api/v1/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Метрики в формате Prometheus
+         * @description Пользователи по состояниям, онлайн, трафик, ноды и подключения. Для Prometheus и Grafana: ключ на чтение в заголовке Authorization: Bearer.
+         */
+        get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/node": {
         parameters: {
             query?: never;
@@ -3450,6 +3470,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus text format 0.0.4 */
+            200: {
+                headers: {
+                    "Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
                 };
             };
             /** @description Error */

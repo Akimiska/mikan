@@ -1368,7 +1368,9 @@
     },
     "back": "Настройки",
     "download": "Скачать OpenAPI",
-    "downloadHint": "Файл openapi.json для Postman, Insomnia, Swagger UI и генераторов клиентов. В нём уже стоит адрес этой панели — он секретный, не публикуйте файл."
+    "downloadHint": "Файл openapi.json для Postman, Insomnia, Swagger UI и генераторов клиентов. В нём уже стоит адрес этой панели — он секретный, не публикуйте файл.",
+    "prometheus": "Prometheus и Grafana",
+    "prometheusHint": "GET /metrics отдаёт пользователей по состояниям, онлайн, трафик, ноды, их нагрузку и протоколы в формате Prometheus. Собирайте его ключом на чтение; задача для prometheus.yml:"
   },
   "payments": {
     "title": "Платежи",

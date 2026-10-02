@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"time"
@@ -147,6 +148,10 @@ func (s *Store) Close() error {
 	return err
 }
 
+// txAttempts bounds the retries of a serialization conflict; with the backoff below the
+// last attempt starts within about three seconds.
+const txAttempts = 16
+
 // Tx preserves read/check/write invariants (quotas, payments, ports, slot numbers) with
 // serializable transactions. Callbacks only change database state: a serialization
 // conflict retries the whole callback, never just its final statement.
@@ -154,10 +159,13 @@ func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
 	for attempt := 0; ; attempt++ {
 		err := s.txOnce(ctx, fn)
 		var pe *pgconn.PgError
-		if err == nil || attempt == 9 || !errors.As(err, &pe) || (pe.Code != "40001" && pe.Code != "40P01") {
+		if err == nil || attempt == txAttempts-1 || !errors.As(err, &pe) || (pe.Code != "40001" && pe.Code != "40P01") {
 			return err
 		}
-		timer := time.NewTimer(time.Duration(attempt+1) * 5 * time.Millisecond)
+		// Exponential backoff with full jitter: writers that collided together must not
+		// all come back together, or the same conflict repeats until the attempts run out.
+		window := min(5*time.Millisecond<<attempt, 250*time.Millisecond)
+		timer := time.NewTimer(rand.N(window) + time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

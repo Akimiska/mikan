@@ -4,6 +4,7 @@
 set -eu
 [ "${MIKAN_INSTALLER_TEST:-}" = 1 ] || { echo 'Set MIKAN_INSTALLER_TEST=1 inside a disposable container' >&2; exit 1; }
 [ ! -e /opt/mikan ] || { echo '/opt/mikan already exists; refusing to touch it' >&2; exit 1; }
+[ "$(id -u)" = 0 ] || { echo "Run as root: the updater takes its lock in /run" >&2; exit 1; }
 bin=$(realpath "${1:-target/debug/mikan}")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp" /opt/mikan' EXIT INT TERM
@@ -66,6 +67,7 @@ pg_fixture() {
 fixture
 touch "$tmp/pg-fail"
 if "$bin" update new-image >"$tmp/output" 2>&1; then echo 'startup fault must fail' >&2; exit 1; fi
+grep -q 'could not prepare the database' "$tmp/output"
 grep -q 'MIKAN_IMAGE=old-image' /opt/mikan/.env
 grep -q 'legacy compose' /opt/mikan/compose.yaml
 grep -q 'original users' /opt/mikan/data/panel/mikan.db
@@ -85,6 +87,7 @@ grep -q "MIKAN_DATABASE_URL=postgresql://mikan:${password#MIKAN_POSTGRES_PASSWOR
 pg_fixture
 touch "$tmp/pg-fail-new"
 if "$bin" update new-image >"$tmp/output" 2>&1; then echo 'database fault must fail' >&2; exit 1; fi
+grep -q 'could not prepare the database' "$tmp/output"
 grep -q 'MIKAN_IMAGE=old-image' /opt/mikan/.env
 grep -q 'MIKAN_POSTGRES_PASSWORD=livepassword' /opt/mikan/.env
 [ -e "$tmp/healthy" ]

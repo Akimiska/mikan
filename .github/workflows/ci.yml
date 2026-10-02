@@ -89,7 +89,8 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: cargo build --locked
-      - run: MIKAN_INSTALLER_TEST=1 sh test-upgrade.sh
+      # The updater takes its lock in /run, as on a server: the stand runs as root.
+      - run: sudo env MIKAN_INSTALLER_TEST=1 sh test-upgrade.sh
 
   # The installer's dependencies against the RustSec advisory database. A new advisory
   # fails the check on the next pull request; cargo audit only reads Cargo.lock.

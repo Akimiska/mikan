@@ -357,7 +357,7 @@ function SubPage() {
 
       <section className="glass rounded-3xl p-4">
         <h2 className="mb-3 text-[15px] font-semibold">{t("sub.connect")}</h2>
-        <div className="mb-3 flex gap-1 rounded-[14px] bg-[var(--hover)] p-1" role="group" aria-label={t("sub.platform")}>
+        <div className="mb-3 flex gap-1 overflow-x-auto rounded-[14px] bg-[var(--hover)] p-1" role="group" aria-label={t("sub.platform")}>
           {(
             [
               ["ios", "iPhone"],
@@ -372,7 +372,7 @@ function SubPage() {
               type="button"
               aria-pressed={platform === k}
               onClick={() => setPlatform(k)}
-              className="h-8 flex-1 rounded-[10px] text-xs font-semibold text-[var(--ink-600)] aria-pressed:bg-white aria-pressed:text-[var(--ink-900)] aria-pressed:shadow-sm"
+              className="h-8 flex-auto shrink-0 rounded-[10px] px-1.5 text-xs font-semibold whitespace-nowrap text-[var(--ink-600)] aria-pressed:bg-white aria-pressed:text-[var(--ink-900)] aria-pressed:shadow-sm"
             >
               {l}
             </button>

@@ -1,0 +1,76 @@
+package app
+
+import (
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"mikan/internal/panel/domain"
+	"mikan/internal/panel/settings"
+)
+
+// The announcement and the app branding over the API: bad values are refused by field,
+// and the next subscription carries what was saved.
+func TestOperatorHeadersOverHTTP(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if err := domain.Seed(ctx, h.st, h.now); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]any{settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355, settings.KeyBrand: "Mikan"} {
+		if err := settings.Set(ctx, settings.New(h.st.Q), k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
+		t.Fatal("login")
+	}
+	api := "/" + adminPath + "/api/v1/settings"
+	csrf := map[string]string{"X-CSRF-Token": h.csrf}
+
+	resp, body := h.do(http.MethodPatch, api, map[string]any{"brand_accent": "orange", "brand_logo_url": "http://x.example/l.png", "sub_announce_url": "ftp://x", "sub_announce": "a\nb"}, csrf)
+	for _, field := range []string{"brand_accent", "brand_logo_url", "sub_announce_url", "sub_announce"} {
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "body."+field) {
+			t.Fatalf("%s must be refused: %d %s", field, resp.StatusCode, body)
+		}
+	}
+
+	clock := func() time.Time { return h.now }
+	tariffs, _ := h.st.Q.ListTariffs(ctx)
+	u, err := domain.NewUsers(h.st, domain.NewPool(h.st, clock), noChanges{}, clock).Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetch := func() http.Header {
+		t.Helper()
+		resp, _ := h.do(http.MethodGet, "/"+subPath+"/"+u.SubToken, nil, map[string]string{"User-Agent": "mihomo/1.19.32 ClashFest/1.2.0"})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("subscription: %d", resp.StatusCode)
+		}
+		return resp.Header
+	}
+	hd := fetch()
+	if hd.Get("X-Branding-Enabled") != "" || hd.Get("Announce") != "" {
+		t.Fatalf("off by default: %v", hd)
+	}
+	if !strings.HasSuffix(hd.Get("Profile-Web-Page-Url"), "/"+subPath+"/"+u.SubToken) {
+		t.Errorf("page: %q", hd.Get("Profile-Web-Page-Url"))
+	}
+
+	resp, body = h.do(http.MethodPatch, api, map[string]any{"app_branding": true, "brand_accent": "#F07A2E", "brand_logo_url": "https://cdn.example.com/logo.png",
+		"sub_announce": "Работы ночью", "sub_announce_url": "https://t.me/news"}, csrf)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"app_branding":true`) {
+		t.Fatalf("save: %d %s", resp.StatusCode, body)
+	}
+	hd = fetch()
+	for k, v := range map[string]string{"X-Branding-Enabled": "true", "X-Brand-Desktop-Enabled": "true", "X-Brand-Name": "Mikan", "X-Brand-Accent-Color": "#F07A2E",
+		"X-Brand-Desktop-Logo-URL": "https://cdn.example.com/logo.png", "Announce-Url": "https://t.me/news"} {
+		if hd.Get(k) != v {
+			t.Errorf("%s = %q, want %q", k, hd.Get(k), v)
+		}
+	}
+	if !strings.HasPrefix(hd.Get("Announce"), "base64:") {
+		t.Errorf("announce: %q", hd.Get("Announce"))
+	}
+}

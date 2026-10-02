@@ -29,11 +29,15 @@ import (
 type Config struct {
 	Brand      string
 	SupportURL string
-	Nodes      []Node   // enabled nodes in display order
-	Direct     []string // the panel's and nodes' hosts: kept out of the tunnel
-	Groups     Groups
-	Routing    Routing
-	Rules      []string // the admin's own Clash rules, checked (ServedRules)
+	// Announce is the text apps show over the profile, AnnounceURL where a tap on it leads.
+	Announce    string
+	AnnounceURL string
+	App         AppBrand // the brand in apps that read operator headers
+	Nodes       []Node   // enabled nodes in display order
+	Direct      []string // the panel's and nodes' hosts: kept out of the tunnel
+	Groups      Groups
+	Routing     Routing
+	Rules       []string // the admin's own Clash rules, checked (ServedRules)
 	// Fingerprint is the default uTLS profile for inbounds that set none.
 	Fingerprint string
 	// Binding gives every device that sends its id keys of its own (domain.Devices);
@@ -174,6 +178,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg)
+	h.operatorHeaders(w, r, u, cfg)
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodHead {
 		return // apps peek at the traffic headers; the keys go only with a real fetch
@@ -470,6 +475,24 @@ func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64
 	}
 }
 
+// operatorHeaders: the subscription page, the announcement and the app branding
+// (OperatorHeaders). Devices are counted only for branding, which shows them.
+func (h *Handler) operatorHeaders(w http.ResponseWriter, r *http.Request, u db.User, cfg Config) {
+	devices := int64(-1)
+	var bot string
+	if cfg.App.Enabled {
+		if cfg.Binding && u.DeviceLimit.Valid {
+			if n, err := h.st.Q.CountBoundDevices(r.Context(), u.ID); err == nil {
+				devices = n
+			}
+		}
+		if h.tg != nil {
+			bot = BotURL(h.tg.LinkURL(r.Context(), u.ID))
+		}
+	}
+	OperatorHeaders(w.Header(), u, cfg, PageURL(r), bot, devices)
+}
+
 // Info is what the subscription page shows. Credentials are not included: the page
 // offers import buttons that point back at this subscription URL.
 type Info struct {
@@ -624,6 +647,7 @@ func (h *Handler) stub(w http.ResponseWriter, u db.User, cfg Config, format stri
 	default:
 		w.Header().Set("X-Hwid-Max-Devices-Reached", "true")
 	}
+	w.Header().Set("X-Hwid-Limit", "true") // v2RayTun shows the notice only with it
 	if format == "clash" {
 		main := cfg.Groups.WithDefaults(cfg.Lang).Main
 		// JSON is YAML: the same as the real profile (see Mihomo).

@@ -2000,9 +2000,14 @@ export interface components {
             stars?: boolean;
         };
         PatchSettingsInputBody: {
+            app_branding?: boolean;
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
+            /** @description #RRGGBB или пусто */
+            brand_accent?: string;
+            /** @description https://… или пусто */
+            brand_logo_url?: string;
             /** @description Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов */
             client_fingerprint?: string;
             /** @enum {string} */
@@ -2013,6 +2018,9 @@ export interface components {
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
+            sub_announce?: string;
+            /** @description https://… или tg://… */
+            sub_announce_url?: string;
             sub_group_auto?: string;
             sub_group_main?: string;
             /**
@@ -2231,11 +2239,17 @@ export interface components {
         };
         SettingsView: {
             admin_url: string;
+            /** @description Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки */
+            app_branding: boolean;
             /** @description Переносить подключение на другой порт, если клиенты перестали до него доходить */
             auto_port: boolean;
             /** @description Менять сайт маскировки REALITY, если он перестал подходить */
             auto_sni: boolean;
             brand: string;
+            /** @description Цвет бренда #RRGGBB; пусто — цвет приложения */
+            brand_accent: string;
+            /** @description Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения */
+            brand_logo_url: string;
             certificate: components["schemas"]["Status"];
             /** @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение */
             client_fingerprint: string;
@@ -2259,6 +2273,10 @@ export interface components {
             quiet_hour_utc: number;
             /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
             rule_targets: string[];
+            /** @description Объявление над профилем в приложениях (заголовок announce); пусто — нет */
+            sub_announce: string;
+            /** @description Куда ведёт нажатие на объявление */
+            sub_announce_url: string;
             sub_base_url: string;
             /** @description Группа автовыбора самого быстрого подключения */
             sub_group_auto: string;

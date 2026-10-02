@@ -480,7 +480,7 @@ func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": "init_data"})
 		return
 	}
-	rs, err := h.st.Q.ListPromoRedemptionsByTg(r.Context(), db.ListPromoRedemptionsByTgParams{TgID: tgID, Limit: 100})
+	rs, err := h.st.Q.ListPromoRedemptionsByTg(r.Context(), db.ListPromoRedemptionsByTgParams{TgID: tgID, Lim: 100})
 	if err != nil {
 		w.WriteHeader(500)
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": "internal"})

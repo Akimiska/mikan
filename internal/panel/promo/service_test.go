@@ -15,7 +15,7 @@ import (
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.Open(context.Background(), t.TempDir())
+	st, err := store.OpenTest(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,11 +24,11 @@ func newTestStore(t *testing.T) *store.Store {
 func addUser(t *testing.T, st *store.Store, id int64, tg int64, expires int64) {
 	t.Helper()
 	ctx := context.Background()
-	_, err := st.DB.ExecContext(ctx, `INSERT INTO users(id,name,period_start,sub_token,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?)`, id, "Test", 1, "token-"+string(rune(id)), 1, 1, expires)
+	_, err := st.DB.ExecContext(ctx, `INSERT INTO users(id,name,period_start,sub_token,created_at,updated_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, id, "Test", 1, "token-"+string(rune(id)), 1, 1, expires)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.DB.ExecContext(ctx, `INSERT INTO tg_links(user_id,tg_id,created_at) VALUES(?,?,?)`, id, tg, 1)
+	_, err = st.DB.ExecContext(ctx, `INSERT INTO tg_links(user_id,tg_id,created_at) VALUES($1,$2,$3)`, id, tg, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,11 +83,8 @@ func TestReserveDiscountAndLimit(t *testing.T) {
 	max := int64(1)
 	p := addPromo(t, st, "percent", 25, &max)
 	s := New(st, func() time.Time { return time.Unix(1000, 0) })
-	res, err := st.DB.ExecContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','promo-test',10,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	paymentID, err := res.LastInsertId()
+	var paymentID int64
+	err := st.DB.QueryRowContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','promo-test',10,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000) RETURNING id`).Scan(&paymentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,11 +104,8 @@ func TestReserveDiscountAndLimit(t *testing.T) {
 	if err := s.ReleasePayment(ctx, paymentID); err != nil {
 		t.Fatal(err)
 	}
-	res, err = st.DB.ExecContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','promo-test-2',11,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondPaymentID, err := res.LastInsertId()
+	var secondPaymentID int64
+	err = st.DB.QueryRowContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','promo-test-2',11,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000) RETURNING id`).Scan(&secondPaymentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +188,7 @@ func TestApplyPaymentRejectsExpiredReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := addPromo(t, st, "percent", 25, nil)
-	if _, err := st.DB.ExecContext(ctx, `UPDATE promo_codes SET discount_ttl=30 WHERE id=?`, p.ID); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `UPDATE promo_codes SET discount_ttl=$1 WHERE id=$2`, 30, p.ID); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Unix(1000, 0)
@@ -238,11 +232,8 @@ func TestReleasePaymentKeepsPaidReservation(t *testing.T) {
 	}
 	p := addPromo(t, st, "percent", 25, nil)
 	s := New(st, func() time.Time { return time.Unix(1000, 0) })
-	res, err := st.DB.ExecContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','paid-reservation',10,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	paymentID, err := res.LastInsertId()
+	var paymentID int64
+	err := st.DB.QueryRowContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','paid-reservation',10,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000) RETURNING id`).Scan(&paymentID)
 	if err != nil {
 		t.Fatal(err)
 	}

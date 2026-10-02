@@ -264,7 +264,7 @@ func boolInt(v bool) int64 {
 	return 0
 }
 func (h *handlers) listPromocodes(ctx context.Context, in *promoListInput) (*promoListOutput, error) {
-	xs, e := h.d.Store.Q.ListPromoCodes(ctx, db.ListPromoCodesParams{Limit: in.Limit, Offset: in.Offset})
+	xs, e := h.d.Store.Q.ListPromoCodes(ctx, db.ListPromoCodesParams{Lim: in.Limit, RowOffset: in.Offset})
 	if e != nil {
 		return nil, e
 	}
@@ -363,7 +363,7 @@ func (h *handlers) deletePromocode(ctx context.Context, in *struct {
 	return &struct{}{}, nil
 }
 func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemptionsInput) (*promoRedemptionsOutput, error) {
-	xs, e := h.d.Store.Q.ListPromoRedemptions(ctx, db.ListPromoRedemptionsParams{Limit: in.Limit, Offset: in.Offset})
+	xs, e := h.d.Store.Q.ListPromoRedemptions(ctx, db.ListPromoRedemptionsParams{Lim: in.Limit, RowOffset: in.Offset})
 	if e != nil {
 		return nil, e
 	}
@@ -407,7 +407,7 @@ func (h *handlers) promocodeStats(ctx context.Context, _ *struct{}) (*promoStats
 		return nil, e
 	}
 	now := sql.NullInt64{Int64: h.d.Now().Unix(), Valid: true}
-	active, e := h.d.Store.Q.CountActivePromoCodes(ctx, db.CountActivePromoCodesParams{StartsAt: now, EndsAt: now})
+	active, e := h.d.Store.Q.CountActivePromoCodes(ctx, now)
 	if e != nil {
 		return nil, e
 	}

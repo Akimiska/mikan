@@ -457,7 +457,7 @@ func (q *Queries) ListTariffsOnSale(ctx context.Context) ([]Tariff, error) {
 }
 
 const markLatePromoRefunded = `-- name: MarkLatePromoRefunded :execrows
-UPDATE payments SET status = 'refunded', refunded_at = ?, error = '' WHERE id = ? AND status = ?
+UPDATE payments SET status = 'refunded', refunded_at = $1, error = '' WHERE id = $2 AND status = $3
 `
 
 type MarkLatePromoRefundedParams struct {
@@ -564,7 +564,7 @@ func (q *Queries) PaymentTotals(ctx context.Context, appliedAt sql.NullInt64) ([
 }
 
 const setPaymentAmount = `-- name: SetPaymentAmount :execrows
-UPDATE payments SET amount = ? WHERE id = ? AND status = 'pending'
+UPDATE payments SET amount = $1 WHERE id = $2 AND status = 'pending'
 `
 
 type SetPaymentAmountParams struct {

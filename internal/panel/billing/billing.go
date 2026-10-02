@@ -267,7 +267,7 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 	}
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: req.UserID != 0}
-	userIDFilter := sql.NullInt64{Int64: req.UserID, Valid: true}
+	userIDFilter := req.UserID
 	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
 
 	var p db.Payment
@@ -552,8 +552,9 @@ func (s *Service) refundLatePromoPayment(ctx context.Context, paymentID int64, e
 	}
 	n, err := s.d.Store.Q.ClaimLatePromoRefund(ctx, db.ClaimLatePromoRefundParams{
 		RefundStartedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true},
-		ID:              r.ID, ExpiresAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true},
-		RefundStartedAt_2: sql.NullInt64{Int64: s.d.Now().Add(-2 * time.Minute).Unix(), Valid: true},
+		ID:              r.ID,
+		Now:             sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true},
+		RetryAfter:      sql.NullInt64{Int64: s.d.Now().Add(-2 * time.Minute).Unix(), Valid: true},
 	})
 	if err != nil {
 		return true, err

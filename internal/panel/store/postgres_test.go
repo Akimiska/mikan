@@ -113,6 +113,7 @@ func TestSQLiteImportKeepsDataAndIsRepeatable(t *testing.T) {
 		"INSERT INTO tariffs(id,name,duration_days,created_at) VALUES(5,'unlimited',30,1)",
 		"INSERT INTO tg_chats(tg_id,created_at,updated_at) VALUES(9000000001,1,1)",
 		"INSERT INTO traffic_pools(id,name,created_at) VALUES(2,'extra',1)",
+		"INSERT INTO promo_codes(id,code,type,value,per_user_limit,tariff_ids,pool_id,created_at) VALUES(3,'IMPORTED','traffic',100,1,'[]',2,1)",
 		"INSERT INTO api_keys(id,admin_id,name,prefix,hash,scope,created_at) VALUES(1,1,'key','prefix','existing-api-hash','full',1)",
 		"INSERT INTO inbounds(id,node_id,name,preset,port,settings,config,created_at,updated_at) VALUES(3,1,'in','vless-reality','443','{}','existing-config',1,1)",
 		"INSERT INTO node_relays(node_id,port,config,created_at) VALUES(1,'4443','existing-relay',1)",
@@ -133,6 +134,7 @@ func TestSQLiteImportKeepsDataAndIsRepeatable(t *testing.T) {
 		"INSERT INTO infrastructure_alert_state(key,value,updated_at) VALUES('monitor','{}',1)",
 		"INSERT INTO inbound_reach(slot,inbound_id,at) VALUES('s000071',3,1)",
 		"INSERT INTO payments(id,provider,payload,tg_id,kind,user_id,tariff_id,tariff_name,amount,currency,status,created_at,paid_at) VALUES(8,'stars','existing-payload',9000000001,'renew',41,5,'unlimited',100,'XTR','paid',1,2)",
+		"INSERT INTO promo_redemptions(id,promo_id,user_id,tg_id,payment_id,status,redeemed_at,bytes,original_amount,final_amount,currency) VALUES(11,3,41,9000000001,8,'applied',2,100,0,0,'')",
 		"INSERT INTO sub_fetches(user_id,ip,fetched_at) VALUES(41,'203.0.113.1',1)",
 		"INSERT INTO tg_notices(user_id,kind,period,sent_at) VALUES(41,'expire_3d',123,1)",
 		"INSERT INTO traffic_daily(user_id,day,up,down) VALUES(41,1,1099511627776,20)",
@@ -161,7 +163,7 @@ func TestSQLiteImportKeepsDataAndIsRepeatable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Tables) != 32 || report.Tables["users"].Rows != 1 {
+	if len(report.Tables) != 34 || report.Tables["users"].Rows != 1 || report.Tables["promo_codes"].Rows != 1 || report.Tables["promo_redemptions"].Rows != 1 {
 		t.Fatalf("incomplete import: %+v", report)
 	}
 	for name, proof := range report.Tables {

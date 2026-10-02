@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -84,10 +83,7 @@ func TestSkippedPostgresReleaseImportsBeforeNewSchemaChanges(t *testing.T) {
 	if err := s.DB.QueryRowContext(ctx, "SELECT name FROM users WHERE id=41").Scan(&name); err != nil || name != "changed in PostgreSQL" {
 		t.Fatal("retry replaced newer data:", name, err)
 	}
-	old, err := fs.Sub(postgresMigrations, "postgres")
-	if err != nil {
-		t.Fatal(err)
-	}
+	old := fstest.MapFS{"0001_baseline.sql": &fstest.MapFile{Data: baseline}}
 	if err := preparePostgresImport(ctx, s.DB, old); err == nil || !strings.Contains(err.Error(), "downgrade refused") {
 		t.Fatal("older binary accepted newer schema:", err)
 	}

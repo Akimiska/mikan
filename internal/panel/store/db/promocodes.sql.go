@@ -11,24 +11,24 @@ import (
 )
 
 const claimLatePromoRefund = `-- name: ClaimLatePromoRefund :execrows
-UPDATE promo_redemptions SET refund_started_at=? WHERE id=?
-  AND (status='released' OR (status='reserved' AND expires_at IS NOT NULL AND expires_at<=?))
-  AND (refund_started_at IS NULL OR refund_started_at<=?)
+UPDATE promo_redemptions SET refund_started_at=$1 WHERE id=$2
+  AND (status='released' OR (status='reserved' AND expires_at IS NOT NULL AND expires_at<=$3))
+  AND (refund_started_at IS NULL OR refund_started_at<=$4)
 `
 
 type ClaimLatePromoRefundParams struct {
-	RefundStartedAt   sql.NullInt64
-	ID                int64
-	ExpiresAt         sql.NullInt64
-	RefundStartedAt_2 sql.NullInt64
+	RefundStartedAt sql.NullInt64
+	ID              int64
+	Now             sql.NullInt64
+	RetryAfter      sql.NullInt64
 }
 
 func (q *Queries) ClaimLatePromoRefund(ctx context.Context, arg ClaimLatePromoRefundParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, claimLatePromoRefund,
 		arg.RefundStartedAt,
 		arg.ID,
-		arg.ExpiresAt,
-		arg.RefundStartedAt_2,
+		arg.Now,
+		arg.RetryAfter,
 	)
 	if err != nil {
 		return 0, err
@@ -37,7 +37,7 @@ func (q *Queries) ClaimLatePromoRefund(ctx context.Context, arg ClaimLatePromoRe
 }
 
 const clearDisabledPromoPools = `-- name: ClearDisabledPromoPools :exec
-UPDATE promo_codes SET pool_id=NULL WHERE pool_id=? AND (enabled=0 OR deleted=1)
+UPDATE promo_codes SET pool_id=NULL WHERE pool_id=$1 AND (enabled=0 OR deleted=1)
 `
 
 func (q *Queries) ClearDisabledPromoPools(ctx context.Context, poolID sql.NullInt64) error {
@@ -47,24 +47,19 @@ func (q *Queries) ClearDisabledPromoPools(ctx context.Context, poolID sql.NullIn
 
 const countActivePromoCodes = `-- name: CountActivePromoCodes :one
 SELECT COUNT(*) FROM promo_codes WHERE deleted=0 AND enabled=1
-  AND (starts_at IS NULL OR starts_at<=?) AND (ends_at IS NULL OR ends_at>?)
+  AND (starts_at IS NULL OR starts_at<=$1) AND (ends_at IS NULL OR ends_at>$1)
   AND (max_uses IS NULL OR used_count<max_uses)
 `
 
-type CountActivePromoCodesParams struct {
-	StartsAt sql.NullInt64
-	EndsAt   sql.NullInt64
-}
-
-func (q *Queries) CountActivePromoCodes(ctx context.Context, arg CountActivePromoCodesParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countActivePromoCodes, arg.StartsAt, arg.EndsAt)
+func (q *Queries) CountActivePromoCodes(ctx context.Context, now sql.NullInt64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActivePromoCodes, now)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const countEnabledPromoCodesForPool = `-- name: CountEnabledPromoCodesForPool :one
-SELECT COUNT(*) FROM promo_codes WHERE pool_id=? AND enabled=1 AND deleted=0
+SELECT COUNT(*) FROM promo_codes WHERE pool_id=$1 AND enabled=1 AND deleted=0
 `
 
 func (q *Queries) CountEnabledPromoCodesForPool(ctx context.Context, poolID sql.NullInt64) (int64, error) {
@@ -97,7 +92,7 @@ func (q *Queries) CountPromoRedemptions(ctx context.Context) (int64, error) {
 }
 
 const countPromoUser = `-- name: CountPromoUser :one
-SELECT COUNT(*) FROM promo_redemptions WHERE promo_id=? AND (tg_id=? OR user_id=?) AND status IN ('reserved','applied')
+SELECT COUNT(*) FROM promo_redemptions WHERE promo_id=$1 AND (tg_id=$2 OR user_id=$3) AND status IN ('reserved','applied')
 `
 
 type CountPromoUserParams struct {
@@ -114,7 +109,7 @@ func (q *Queries) CountPromoUser(ctx context.Context, arg CountPromoUserParams) 
 }
 
 const countUserPaidPayments = `-- name: CountUserPaidPayments :one
-SELECT COUNT(*) FROM payments WHERE tg_id=? AND status IN ('paid','applied')
+SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied')
 `
 
 func (q *Queries) CountUserPaidPayments(ctx context.Context, tgID int64) (int64, error) {
@@ -127,7 +122,7 @@ func (q *Queries) CountUserPaidPayments(ctx context.Context, tgID int64) (int64,
 const createPromoCode = `-- name: CreatePromoCode :one
 INSERT INTO promo_codes
 (code,name,description,type,value,currency,starts_at,ends_at,max_uses,per_user_limit,discount_ttl,min_order,max_discount,tariff_ids,pool_id,first_purchase_only,new_users_only,enabled,deleted,created_at,created_by)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?) RETURNING id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,0,$19,$20) RETURNING id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by
 `
 
 type CreatePromoCodeParams struct {
@@ -208,7 +203,7 @@ func (q *Queries) CreatePromoCode(ctx context.Context, arg CreatePromoCodeParams
 const createPromoRedemption = `-- name: CreatePromoRedemption :one
 INSERT INTO promo_redemptions
 (promo_id,user_id,tg_id,payment_id,status,redeemed_at,expires_at,days,bytes,discount_amount,original_amount,final_amount,currency,note)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note
 `
 
 type CreatePromoRedemptionParams struct {
@@ -268,7 +263,7 @@ func (q *Queries) CreatePromoRedemption(ctx context.Context, arg CreatePromoRede
 }
 
 const decrementPromoUse = `-- name: DecrementPromoUse :execrows
-UPDATE promo_codes SET used_count=CASE WHEN used_count>0 THEN used_count-1 ELSE 0 END WHERE id=?
+UPDATE promo_codes SET used_count=CASE WHEN used_count>0 THEN used_count-1 ELSE 0 END WHERE id=$1
 `
 
 func (q *Queries) DecrementPromoUse(ctx context.Context, id int64) (int64, error) {
@@ -280,7 +275,7 @@ func (q *Queries) DecrementPromoUse(ctx context.Context, id int64) (int64, error
 }
 
 const deletePromoCode = `-- name: DeletePromoCode :execrows
-UPDATE promo_codes SET deleted=1, enabled=0, pool_id=NULL WHERE id=? AND deleted=0
+UPDATE promo_codes SET deleted=1, enabled=0, pool_id=NULL WHERE id=$1 AND deleted=0
 `
 
 func (q *Queries) DeletePromoCode(ctx context.Context, id int64) (int64, error) {
@@ -292,7 +287,7 @@ func (q *Queries) DeletePromoCode(ctx context.Context, id int64) (int64, error) 
 }
 
 const getPromoCode = `-- name: GetPromoCode :one
-SELECT id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by FROM promo_codes WHERE id = ?
+SELECT id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by FROM promo_codes WHERE id = $1
 `
 
 func (q *Queries) GetPromoCode(ctx context.Context, id int64) (PromoCode, error) {
@@ -327,7 +322,7 @@ func (q *Queries) GetPromoCode(ctx context.Context, id int64) (PromoCode, error)
 }
 
 const getPromoCodeByCode = `-- name: GetPromoCodeByCode :one
-SELECT id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by FROM promo_codes WHERE code = ? AND deleted=0
+SELECT id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by FROM promo_codes WHERE code = $1 AND deleted=0
 `
 
 func (q *Queries) GetPromoCodeByCode(ctx context.Context, code string) (PromoCode, error) {
@@ -362,7 +357,7 @@ func (q *Queries) GetPromoCodeByCode(ctx context.Context, code string) (PromoCod
 }
 
 const getPromoRedemption = `-- name: GetPromoRedemption :one
-SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE id=?
+SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE id=$1
 `
 
 func (q *Queries) GetPromoRedemption(ctx context.Context, id int64) (PromoRedemption, error) {
@@ -390,7 +385,7 @@ func (q *Queries) GetPromoRedemption(ctx context.Context, id int64) (PromoRedemp
 }
 
 const getPromoRedemptionByPayment = `-- name: GetPromoRedemptionByPayment :one
-SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE payment_id=?
+SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE payment_id=$1
 `
 
 func (q *Queries) GetPromoRedemptionByPayment(ctx context.Context, paymentID sql.NullInt64) (PromoRedemption, error) {
@@ -418,7 +413,7 @@ func (q *Queries) GetPromoRedemptionByPayment(ctx context.Context, paymentID sql
 }
 
 const incrementPromoUse = `-- name: IncrementPromoUse :execrows
-UPDATE promo_codes SET used_count=used_count+1 WHERE id=? AND (max_uses IS NULL OR used_count < max_uses) AND deleted=0 AND enabled=1
+UPDATE promo_codes SET used_count=used_count+1 WHERE id=$1 AND (max_uses IS NULL OR used_count < max_uses) AND deleted=0 AND enabled=1
 `
 
 func (q *Queries) IncrementPromoUse(ctx context.Context, id int64) (int64, error) {
@@ -430,11 +425,11 @@ func (q *Queries) IncrementPromoUse(ctx context.Context, id int64) (int64, error
 }
 
 const listExpiredPromoPayments = `-- name: ListExpiredPromoPayments :many
-SELECT DISTINCT p.id FROM payments p JOIN promo_redemptions r ON r.payment_id=p.id WHERE p.status='expired' AND p.created_at < ? AND r.status='reserved'
+SELECT DISTINCT p.id FROM payments p JOIN promo_redemptions r ON r.payment_id=p.id WHERE p.status='expired' AND p.created_at < $1 AND r.status='reserved'
 `
 
-func (q *Queries) ListExpiredPromoPayments(ctx context.Context, createdAt int64) ([]int64, error) {
-	rows, err := q.db.QueryContext(ctx, listExpiredPromoPayments, createdAt)
+func (q *Queries) ListExpiredPromoPayments(ctx context.Context, before int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listExpiredPromoPayments, before)
 	if err != nil {
 		return nil, err
 	}
@@ -457,16 +452,16 @@ func (q *Queries) ListExpiredPromoPayments(ctx context.Context, createdAt int64)
 }
 
 const listPromoCodes = `-- name: ListPromoCodes :many
-SELECT id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by FROM promo_codes WHERE deleted = 0 ORDER BY id DESC LIMIT ? OFFSET ?
+SELECT id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by FROM promo_codes WHERE deleted = 0 ORDER BY id DESC LIMIT CAST($2 AS BIGINT) OFFSET CAST($1 AS BIGINT)
 `
 
 type ListPromoCodesParams struct {
-	Limit  int64
-	Offset int64
+	RowOffset int64
+	Lim       int64
 }
 
 func (q *Queries) ListPromoCodes(ctx context.Context, arg ListPromoCodesParams) ([]PromoCode, error) {
-	rows, err := q.db.QueryContext(ctx, listPromoCodes, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listPromoCodes, arg.RowOffset, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -513,16 +508,16 @@ func (q *Queries) ListPromoCodes(ctx context.Context, arg ListPromoCodesParams) 
 }
 
 const listPromoRedemptions = `-- name: ListPromoRedemptions :many
-SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions ORDER BY id DESC LIMIT ? OFFSET ?
+SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions ORDER BY id DESC LIMIT CAST($2 AS BIGINT) OFFSET CAST($1 AS BIGINT)
 `
 
 type ListPromoRedemptionsParams struct {
-	Limit  int64
-	Offset int64
+	RowOffset int64
+	Lim       int64
 }
 
 func (q *Queries) ListPromoRedemptions(ctx context.Context, arg ListPromoRedemptionsParams) ([]PromoRedemption, error) {
-	rows, err := q.db.QueryContext(ctx, listPromoRedemptions, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listPromoRedemptions, arg.RowOffset, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -562,16 +557,16 @@ func (q *Queries) ListPromoRedemptions(ctx context.Context, arg ListPromoRedempt
 }
 
 const listPromoRedemptionsByTg = `-- name: ListPromoRedemptionsByTg :many
-SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE tg_id=? AND status='applied' ORDER BY id DESC LIMIT ?
+SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE tg_id=$1 AND status='applied' ORDER BY id DESC LIMIT CAST($2 AS BIGINT)
 `
 
 type ListPromoRedemptionsByTgParams struct {
-	TgID  int64
-	Limit int64
+	TgID int64
+	Lim  int64
 }
 
 func (q *Queries) ListPromoRedemptionsByTg(ctx context.Context, arg ListPromoRedemptionsByTgParams) ([]PromoRedemption, error) {
-	rows, err := q.db.QueryContext(ctx, listPromoRedemptionsByTg, arg.TgID, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listPromoRedemptionsByTg, arg.TgID, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -611,7 +606,7 @@ func (q *Queries) ListPromoRedemptionsByTg(ctx context.Context, arg ListPromoRed
 }
 
 const markPromoApplied = `-- name: MarkPromoApplied :execrows
-UPDATE promo_redemptions SET status='applied', user_id=COALESCE(?,user_id) WHERE id=? AND status='reserved'
+UPDATE promo_redemptions SET status='applied', user_id=COALESCE($1,user_id) WHERE id=$2 AND status='reserved'
 `
 
 type MarkPromoAppliedParams struct {
@@ -653,7 +648,7 @@ func (q *Queries) PromoStats(ctx context.Context) (PromoStatsRow, error) {
 }
 
 const releasePromoByPayment = `-- name: ReleasePromoByPayment :execrows
-UPDATE promo_redemptions SET status='released' WHERE payment_id=? AND status='reserved'
+UPDATE promo_redemptions SET status='released' WHERE payment_id=$1 AND status='reserved'
 `
 
 func (q *Queries) ReleasePromoByPayment(ctx context.Context, paymentID sql.NullInt64) (int64, error) {
@@ -665,7 +660,7 @@ func (q *Queries) ReleasePromoByPayment(ctx context.Context, paymentID sql.NullI
 }
 
 const releasePromoRedemption = `-- name: ReleasePromoRedemption :execrows
-UPDATE promo_redemptions SET status='released' WHERE id=? AND status='reserved'
+UPDATE promo_redemptions SET status='released' WHERE id=$1 AND status='reserved'
 `
 
 func (q *Queries) ReleasePromoRedemption(ctx context.Context, id int64) (int64, error) {
@@ -678,7 +673,7 @@ func (q *Queries) ReleasePromoRedemption(ctx context.Context, id int64) (int64, 
 
 const releasePromoRedemptionForClosedPayment = `-- name: ReleasePromoRedemptionForClosedPayment :execrows
 UPDATE promo_redemptions SET status='released'
-WHERE promo_redemptions.id=? AND promo_redemptions.status='reserved' AND EXISTS (
+WHERE promo_redemptions.id=$1 AND promo_redemptions.status='reserved' AND EXISTS (
   SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('failed','expired','refunded')
 )
 `
@@ -692,7 +687,7 @@ func (q *Queries) ReleasePromoRedemptionForClosedPayment(ctx context.Context, id
 }
 
 const setPromoEnabled = `-- name: SetPromoEnabled :execrows
-UPDATE promo_codes SET enabled=? WHERE id=? AND deleted=0
+UPDATE promo_codes SET enabled=$1 WHERE id=$2 AND deleted=0
 `
 
 type SetPromoEnabledParams struct {
@@ -710,7 +705,7 @@ func (q *Queries) SetPromoEnabled(ctx context.Context, arg SetPromoEnabledParams
 
 const updatePromoCode = `-- name: UpdatePromoCode :one
 UPDATE promo_codes SET
-code=?,name=?,description=?,type=?,value=?,currency=?,starts_at=?,ends_at=?,max_uses=?,per_user_limit=?,discount_ttl=?,min_order=?,max_discount=?,tariff_ids=?,pool_id=?,first_purchase_only=?,new_users_only=?,enabled=? WHERE id=? AND deleted=0 RETURNING id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by
+code=$1,name=$2,description=$3,type=$4,value=$5,currency=$6,starts_at=$7,ends_at=$8,max_uses=$9,per_user_limit=$10,discount_ttl=$11,min_order=$12,max_discount=$13,tariff_ids=$14,pool_id=$15,first_purchase_only=$16,new_users_only=$17,enabled=$18 WHERE id=$19 AND deleted=0 RETURNING id, code, name, description, type, value, currency, starts_at, ends_at, max_uses, used_count, per_user_limit, discount_ttl, min_order, max_discount, tariff_ids, pool_id, first_purchase_only, new_users_only, enabled, deleted, created_at, created_by
 `
 
 type UpdatePromoCodeParams struct {

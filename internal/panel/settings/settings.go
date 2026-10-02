@@ -54,6 +54,15 @@ const (
 	KeyAppBranding = "app_branding"
 	KeyBrandAccent = "brand_accent"   // #RRGGBB, empty: the app's own
 	KeyBrandLogo   = "brand_logo_url" // https, empty: the app's own
+	// KeyLegacySubPath is the path of the subscription links of the panel users were
+	// imported from: "sub" for Marzban and PasarGuard, "api/sub" for Remnawave. The old
+	// tokens lead to the users (legacy_sub_tokens); empty: off.
+	KeyLegacySubPath = "legacy_sub_path"
+	// KeyLegacySubKind and KeyLegacySubSecret check the links Marzban or PasarGuard signed
+	// (panelimport.Verifier): the panel's kind and the secret from its jwt table. The
+	// secret is never shown back.
+	KeyLegacySubKind   = "legacy_sub_kind"
+	KeyLegacySubSecret = "legacy_sub_secret"
 	// KeyQuietHour is the UTC hour the slot pool is refilled, which reconnects QUIC clients.
 	KeyQuietHour = "quiet_hour_utc"
 )
@@ -160,6 +169,8 @@ func (s *Settings) Lang(ctx context.Context) (string, error) {
 type Paths struct {
 	Admin string
 	Sub   string
+	// Legacy is the old panel's subscription path, one to three segments; "" when unset.
+	Legacy string
 }
 
 func (s *Settings) Paths(ctx context.Context) (Paths, error) {
@@ -171,7 +182,11 @@ func (s *Settings) Paths(ctx context.Context) (Paths, error) {
 	if err != nil {
 		return Paths{}, err
 	}
-	return Paths{Admin: a, Sub: sub}, nil
+	legacy, err := s.String(ctx, KeyLegacySubPath)
+	if err != nil {
+		return Paths{}, err
+	}
+	return Paths{Admin: a, Sub: sub, Legacy: legacy}, nil
 }
 
 // Endpoint is how clients reach the panel: host is an IP or a domain.

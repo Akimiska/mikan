@@ -107,6 +107,12 @@ type InfrastructureAlertState struct {
 	UpdatedAt int64
 }
 
+type LegacySubToken struct {
+	Token  string
+	UserID int64
+	Source string
+}
+
 type MikanSqliteImport struct {
 	ID     int64
 	Report string

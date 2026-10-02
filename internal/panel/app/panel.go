@@ -27,6 +27,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -261,6 +262,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			return subs.Config{}, err
 		}
 		cfg.SubBase = subBase(ctx)
+		var legacyKind string
+		if legacyKind, err = set.String(ctx, settings.KeyLegacySubKind); err != nil {
+			return subs.Config{}, err
+		}
+		cfg.Legacy.Kind = panelimport.Kind(legacyKind)
+		if cfg.Legacy.Secret, err = set.String(ctx, settings.KeyLegacySubSecret); err != nil {
+			return subs.Config{}, err
+		}
 		if cfg.App.Enabled, err = set.On(ctx, settings.AppBranding); err != nil {
 			return subs.Config{}, err
 		}
@@ -316,6 +325,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	adminMux.Handle("/api/", apiHandler)
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
+	p.server.SetLegacy(subHandler.Legacy())
 	p.server.SetHSTS(o.HSTS)
 	p.Handler = p.server
 	return p, nil

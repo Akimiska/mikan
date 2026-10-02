@@ -277,6 +277,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Перенести пользователей из другой панели */
+        post: operations["import-run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/import/legacy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Старые ссылки подписки */
+        get: operations["get-legacy-links"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настроить старые ссылки подписки */
+        patch: operations["update-legacy-links"];
+        trace?: never;
+    };
+    "/api/v1/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Что перенесётся из другой панели */
+        post: operations["import-preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/inbounds": {
         parameters: {
             query?: never;
@@ -1733,6 +1785,30 @@ export interface components {
             state: "running" | "ok" | "failed";
             version: string;
         };
+        ImportRunInputBody: {
+            /** @enum {string} */
+            kind: "marzban" | "pasarguard" | "remnawave";
+            password?: string;
+            /**
+             * Format: int64
+             * @description Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели
+             */
+            tariff_id: number;
+            token?: string;
+            url: string;
+            username?: string;
+        };
+        ImportSource: {
+            /** @enum {string} */
+            kind: "marzban" | "pasarguard" | "remnawave";
+            password?: string;
+            /** @description Remnawave: API-токен; PasarGuard: API-ключ вместо логина */
+            token?: string;
+            /** @description Адрес старой панели: https://panel.example.com */
+            url: string;
+            /** @description Marzban, PasarGuard: логин администратора */
+            username?: string;
+        };
         InboundView: {
             /** @description Приложения, которым подключение попадает в подписку: mihomo, xray, singbox, stash, other */
             apps: string[];
@@ -1810,6 +1886,19 @@ export interface components {
         };
         InfrastructureConnectOutputBody: {
             url: string;
+        };
+        LegacyView: {
+            /** @description Чьи подписанные ссылки проверять: marzban или pasarguard */
+            kind: string;
+            /**
+             * Format: int64
+             * @description Сколько старых ссылок и пользователей заведено
+             */
+            links: number;
+            /** @description Путь старых ссылок подписки: sub у Marzban и PasarGuard, api/sub у Remnawave; пусто — выключено */
+            path: string;
+            /** @description Секрет старой панели задан; сам он не возвращается */
+            secret_set: boolean;
         };
         ListUsersOutputBody: {
             counts: components["schemas"]["UserCounts"];
@@ -2079,6 +2168,13 @@ export interface components {
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
         };
+        PatchLegacyInputBody: {
+            /** @enum {string} */
+            kind?: "marzban" | "pasarguard" | "remnawave" | "";
+            path?: string;
+            /** @description Секрет из таблицы jwt базы старой панели; пусто — убрать */
+            secret?: string;
+        };
         PatchNodeInputBody: {
             domain?: string;
             enabled?: boolean;
@@ -2266,6 +2362,25 @@ export interface components {
             inbounds: string[];
             name: string;
         };
+        Preview: {
+            /**
+             * Format: int64
+             * @description Будут созданы
+             */
+            new: number;
+            /**
+             * Format: int64
+             * @description Пользователи «на паузе»: в mikan их срок пойдёт с момента импорта
+             */
+            on_hold: number;
+            statuses: {
+                [key: string]: number;
+            };
+            /** @description Имена, которые уже есть в mikan */
+            taken: string[];
+            /** Format: int64 */
+            total: number;
+        };
         ProbeView: {
             /** Format: date-time */
             checked_at: string;
@@ -2278,6 +2393,19 @@ export interface components {
         RecoveryOutputBody: {
             /** @description Показываются один раз */
             recovery_codes: string[];
+        };
+        Report: {
+            /** Format: int64 */
+            created: number;
+            /** @description Имя и причина для тех, кого не удалось создать */
+            failed: string[];
+            /**
+             * Format: int64
+             * @description Пользователи, чьи старые ссылки подписки будут работать
+             */
+            links: number;
+            /** @description Имена, которые уже есть в mikan: эти пользователи не перенесены */
+            skipped: string[];
         };
         ResetPathOutputBody: {
             admin_url: string;
@@ -3320,6 +3448,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TotpSetupOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRunInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-legacy-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-legacy-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchLegacyInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportSource"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preview"];
                 };
             };
             /** @description Error */

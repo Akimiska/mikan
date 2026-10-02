@@ -374,9 +374,18 @@ CREATE INDEX users_expires ON users(expires_at);
 
 CREATE INDEX users_status ON users(status);
 
+CREATE TABLE legacy_sub_tokens (
+  token   TEXT PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source  TEXT NOT NULL
+);
+
+CREATE INDEX legacy_sub_tokens_user ON legacy_sub_tokens(user_id);
+
 CREATE TABLE mikan_sqlite_import (id BIGINT PRIMARY KEY CHECK (id = 1), report TEXT NOT NULL);
 
 -- +goose Down
+DROP TABLE legacy_sub_tokens;
 DROP TABLE infrastructure_alert_state;
 DROP TABLE mikan_sqlite_import;
 DROP TABLE traffic_grants;

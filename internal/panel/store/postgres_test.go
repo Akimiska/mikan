@@ -134,6 +134,7 @@ func TestSQLiteImportKeepsDataAndIsRepeatable(t *testing.T) {
 		"INSERT INTO inbound_reach(slot,inbound_id,at) VALUES('s000071',3,1)",
 		"INSERT INTO payments(id,provider,payload,tg_id,kind,user_id,tariff_id,tariff_name,amount,currency,status,created_at,paid_at) VALUES(8,'stars','existing-payload',9000000001,'renew',41,5,'unlimited',100,'XTR','paid',1,2)",
 		"INSERT INTO sub_fetches(user_id,ip,fetched_at) VALUES(41,'203.0.113.1',1)",
+		"INSERT INTO legacy_sub_tokens(token,user_id,source) VALUES('Abc123Def456Ghi7',41,'remnawave')",
 		"INSERT INTO tg_notices(user_id,kind,period,sent_at) VALUES(41,'expire_3d',123,1)",
 		"INSERT INTO traffic_daily(user_id,day,up,down) VALUES(41,1,1099511627776,20)",
 		"INSERT INTO traffic_hourly(user_id,hour,up,down) VALUES(41,1,1099511627776,20)",
@@ -161,7 +162,7 @@ func TestSQLiteImportKeepsDataAndIsRepeatable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Tables) != 32 || report.Tables["users"].Rows != 1 {
+	if len(report.Tables) != 33 || report.Tables["users"].Rows != 1 || report.Tables["legacy_sub_tokens"].Rows != 1 {
 		t.Fatalf("incomplete import: %+v", report)
 	}
 	for name, proof := range report.Tables {

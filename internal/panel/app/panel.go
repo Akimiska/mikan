@@ -25,6 +25,7 @@ import (
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
@@ -46,6 +47,7 @@ type Panel struct {
 	Telegram  *tgbot.Bot
 	Billing   *billing.Service
 	Updates   *updates.Checker
+	Alerts    *infraalerts.Monitor
 	Addons    *addons.Manager
 	server    *server.Server
 	spa       *server.SPA
@@ -192,6 +194,11 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Billing.SetTelegram(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
+	var certStatus infraalerts.CertificateSource
+	if o.Certs != nil {
+		certStatus = o.Certs.Status
+	}
+	p.Alerts = infraalerts.New(st, set, p.Nodes, p.Tuner, certStatus, p.Updates, p.Telegram, o.Log, o.Now)
 	deps.Warp = warp.Client{API: o.WarpAPI}
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
@@ -336,7 +343,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.Tuner != nil {
 		workers = append(workers, p.Tuner.Run)
 	}
-	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run,
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

@@ -12,5 +12,5 @@ export type SettingsSearch = { tab: (typeof SETTINGS_TABS)[number] };
 export const TARIFF_TABS = ["tariffs", "pools", "packages"] as const;
 export type TariffsSearch = { tab: (typeof TARIFF_TABS)[number] };
 
-export const TELEGRAM_TABS = ["connect", "menu", "notify", "broadcast"] as const;
+export const TELEGRAM_TABS = ["connect", "menu", "notify", "infra", "broadcast"] as const;
 export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };

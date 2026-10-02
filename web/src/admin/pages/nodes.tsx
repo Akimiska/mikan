@@ -390,11 +390,11 @@ function KeyDrawer({ joined, onClose }: { joined: Joined | null; onClose: () => 
 function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState({ name: "", host: "", domain: "", enabled: true });
+  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true });
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     if (node) {
-      setForm({ name: node.name, host: node.host, domain: node.domain, enabled: node.enabled });
+      setForm({ name: node.name, public_name: node.public_name, host: node.host, domain: node.domain, enabled: node.enabled });
       setErrors({});
     }
   }, [node]);
@@ -416,14 +416,14 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!node) return;
-    const body: Schemas["PatchNodeInputBody"] = { name: form.name.trim(), enabled: form.enabled };
+    const body: Schemas["PatchNodeInputBody"] = { name: form.name.trim(), public_name: form.public_name.trim(), enabled: form.enabled };
     if (!node.local) {
       body.host = form.host.trim();
       body.domain = form.domain.trim();
     }
     save.mutate({ id: node.id, body });
   };
-  const set = (k: "name" | "host" | "domain") => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const set = (k: "name" | "public_name" | "host" | "domain") => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [k]: e.target.value }));
     setErrors(({ [k]: _, ...rest }) => rest);
   };
@@ -447,6 +447,9 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
       <form id="edit-node" onSubmit={submit} className="pt-5" noValidate>
         <Field label={t("nodes.name")} htmlFor="e-name" hint={t("nodes.nameHint")} error={errors.name}>
           <input id="e-name" className="input" value={form.name} onChange={set("name")} placeholder={t("nodes.namePlaceholderEdit")} maxLength={48} autoComplete="off" aria-invalid={!!errors.name} />
+        </Field>
+        <Field label={t("nodes.publicName")} htmlFor="e-public-name" hint={t("nodes.publicNameHint")} error={errors.public_name}>
+          <input id="e-public-name" className="input" value={form.public_name} onChange={set("public_name")} placeholder={t("nodes.publicNamePlaceholder")} maxLength={80} autoComplete="off" aria-invalid={!!errors.public_name} />
         </Field>
         {node && !node.local ? (
           <>

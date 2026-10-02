@@ -839,6 +839,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/telegram/infrastructure/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Подключить чат администратора для уведомлений */
+        post: operations["telegram-infrastructure-connect"];
+        /** Отключить чат администратора для уведомлений */
+        delete: operations["telegram-infrastructure-disconnect"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/updates": {
         parameters: {
             query?: never;
@@ -1227,6 +1245,22 @@ export interface components {
             totp_enabled: boolean;
             username: string;
         };
+        AlertsConfig: {
+            admin_enabled: boolean;
+            events: components["schemas"]["Events"];
+            public_changes: boolean;
+            public_channel?: string;
+            public_enabled: boolean;
+            public_summary: boolean;
+        };
+        AlertsConfigPatch: {
+            admin_enabled?: boolean;
+            events?: components["schemas"]["EventsPatch"];
+            public_changes?: boolean;
+            public_channel?: string;
+            public_enabled?: boolean;
+            public_summary?: boolean;
+        };
         AuditEntry: {
             /** @description Например user.create, settings.update, auth.login_failed */
             action: string;
@@ -1528,6 +1562,26 @@ export interface components {
              */
             type: string;
         };
+        Events: {
+            autotune: boolean;
+            autotune_recovery: boolean;
+            exit: boolean;
+            inbound: boolean;
+            node: boolean;
+            tls: boolean;
+            update: boolean;
+            warp: boolean;
+        };
+        EventsPatch: {
+            autotune?: boolean;
+            autotune_recovery?: boolean;
+            exit?: boolean;
+            inbound?: boolean;
+            node?: boolean;
+            tls?: boolean;
+            update?: boolean;
+            warp?: boolean;
+        };
         ExtendInputBody: {
             /** Format: int64 */
             days?: number;
@@ -1667,6 +1721,9 @@ export interface components {
             title: string;
             type: string;
         };
+        InfrastructureConnectOutputBody: {
+            url: string;
+        };
         ListUsersOutputBody: {
             counts: components["schemas"]["UserCounts"];
             items: components["schemas"]["UserView"][];
@@ -1753,6 +1810,8 @@ export interface components {
             mem_used: number;
             /** @description Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений */
             name: string;
+            /** @description Публичное имя для канала состояния; пустое — нода скрыта из списка */
+            public_name: string;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
             version?: string;
@@ -1931,6 +1990,8 @@ export interface components {
             enabled?: boolean;
             host?: string;
             name?: string;
+            /** @description Публичное имя ноды; пустое — не публиковать её в канале */
+            public_name?: string;
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
@@ -1969,6 +2030,7 @@ export interface components {
         PatchTelegramInputBody: {
             config?: components["schemas"]["Config"];
             enabled?: boolean;
+            infrastructure?: components["schemas"]["AlertsConfigPatch"];
             /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
             route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */
@@ -2371,6 +2433,7 @@ export interface components {
              * @description Аккаунтов Telegram с подписками
              */
             accounts: number;
+            admin_chat_set: boolean;
             bot?: components["schemas"]["TelegramBot"];
             /** @description Последняя рассылка с запуска панели */
             broadcast?: components["schemas"]["TelegramBroadcast"];
@@ -2380,6 +2443,7 @@ export interface components {
             enabled: boolean;
             /** @description token_invalid, token_revoked, unreachable или ответ Telegram */
             error?: string;
+            infrastructure: components["schemas"]["AlertsConfig"];
             /**
              * Format: int64
              * @description Подписок, привязанных к Telegram
@@ -4722,6 +4786,62 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BroadcastOutputBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-infrastructure-connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InfrastructureConnectOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-infrastructure-disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

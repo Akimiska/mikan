@@ -59,3 +59,29 @@ func TestPromLabelsAreEscaped(t *testing.T) {
 		t.Fatalf("escaping:\n%s", body)
 	}
 }
+
+// Scrapes closer than a few seconds get the same text: a scrape reads every user.
+func TestMetricsAreKeptAFewSeconds(t *testing.T) {
+	k := newKeyHarness(t)
+	ctx := t.Context()
+	scrape := func() string {
+		t.Helper()
+		_, body := k.do(http.MethodGet, k.api+"/metrics", nil, map[string]string{"Authorization": "Bearer " + k.read})
+		return string(body)
+	}
+	if !strings.Contains(scrape(), `mikan_users{state="active"} 0`) {
+		t.Fatal("no users yet")
+	}
+	clock := func() time.Time { return k.now }
+	tariffs, _ := k.st.Q.ListTariffs(ctx)
+	if _, err := domain.NewUsers(k.st, domain.NewPool(k.st, clock), noChanges{}, clock).Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(scrape(), `mikan_users{state="active"} 0`) {
+		t.Fatal("a scrape right after another is made again")
+	}
+	k.now = k.now.Add(6 * time.Second)
+	if !strings.Contains(scrape(), `mikan_users{state="active"} 1`) {
+		t.Fatal("an old text is served past its time")
+	}
+}

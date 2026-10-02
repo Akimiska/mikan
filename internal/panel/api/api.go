@@ -128,6 +128,8 @@ type handlers struct {
 
 	pendingMu sync.Mutex
 	pending   map[int64]pendingTOTP
+
+	metricsCache metricsCache
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.

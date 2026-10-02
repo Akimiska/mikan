@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -37,11 +39,37 @@ func (h *handlers) registerMetrics() {
 	}, h.metrics)
 }
 
+// metricsTTL: scrapes closer together than this get the same text. A scrape reads every
+// user; at a 15 s interval on a big panel that is worth a few seconds of staleness.
+const metricsTTL = 5 * time.Second
+
+// metricsCache is the text of the last scrape and when it was made.
+type metricsCache struct {
+	mu   sync.Mutex
+	at   time.Time
+	body []byte
+}
+
 func (h *handlers) metrics(ctx context.Context, _ *struct{}) (*metricsOutput, error) {
+	c := &h.metricsCache
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := h.d.Now()
+	// A clock moved back does not keep an old text forever.
+	if c.body == nil || now.Sub(c.at) >= metricsTTL || now.Before(c.at) {
+		body, err := h.renderMetrics(ctx, now)
+		if err != nil {
+			return nil, err
+		}
+		c.at, c.body = now, body
+	}
+	return &metricsOutput{ContentType: "text/plain; version=0.0.4; charset=utf-8", Body: c.body}, nil
+}
+
+func (h *handlers) renderMetrics(ctx context.Context, now time.Time) ([]byte, error) {
 	var m promWriter
 	m.gauge("mikan_info", "The panel's version.", 1, "version", h.d.Version)
 
-	now := h.d.Now()
 	users, err := h.d.Store.Q.ListUsers(ctx)
 	if err != nil {
 		return nil, err
@@ -130,10 +158,26 @@ func (h *handlers) metrics(ctx context.Context, _ *struct{}) (*metricsOutput, er
 				m.sample(f.name, f.v(n.hv), "node_id", n.id, "node", n.name)
 			}
 		}
+		// A listener is named after its inbound, and inbound names are unique; the id goes
+		// along all the same, and a name seen twice on a node is written once: one duplicate
+		// series makes Prometheus drop the whole scrape.
+		inbounds, err := h.d.Store.Q.ListInbounds(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make(map[string]string, len(inbounds))
+		for _, in := range inbounds {
+			ids[in.Name] = strconv.FormatInt(in.ID, 10)
+		}
 		m.help("mikan_inbound_up", "1 when the inbound listens on its node.", "gauge")
 		for _, n := range live {
+			seen := map[string]bool{}
 			for _, l := range n.hv.Listeners {
-				m.sample("mikan_inbound_up", b2f(l.OK), "node_id", n.id, "node", n.name, "inbound", l.Name)
+				if seen[l.Name] {
+					continue
+				}
+				seen[l.Name] = true
+				m.sample("mikan_inbound_up", b2f(l.OK), "node_id", n.id, "node", n.name, "inbound_id", ids[l.Name], "inbound", l.Name)
 			}
 		}
 	}
@@ -142,7 +186,7 @@ func (h *handlers) metrics(ctx context.Context, _ *struct{}) (*metricsOutput, er
 	runtime.ReadMemStats(&ms)
 	m.gauge("go_goroutines", "Goroutines of the panel.", float64(runtime.NumGoroutine()))
 	m.gauge("go_memstats_heap_alloc_bytes", "Heap in use by the panel.", float64(ms.HeapAlloc))
-	return &metricsOutput{ContentType: "text/plain; version=0.0.4; charset=utf-8", Body: m.Bytes()}, nil
+	return m.Bytes(), nil
 }
 
 func b2f(b bool) float64 {

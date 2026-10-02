@@ -248,6 +248,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if cfg.RequireHWID, err = set.On(ctx, settings.RequireHWID); err != nil {
 			return subs.Config{}, err
 		}
+		cfg.SubBase = subBase(ctx)
+		if cfg.App.Enabled, err = set.On(ctx, settings.AppBranding); err != nil {
+			return subs.Config{}, err
+		}
+		for key, dst := range map[string]*string{settings.KeyAnnounce: &cfg.Announce, settings.KeyAnnounceURL: &cfg.AnnounceURL,
+			settings.KeyBrandAccent: &cfg.App.Accent, settings.KeyBrandLogo: &cfg.App.LogoURL} {
+			if *dst, err = set.String(ctx, key); err != nil {
+				return subs.Config{}, err
+			}
+		}
 		nodes, err := st.Q.ListNodes(ctx)
 		if err != nil {
 			return subs.Config{}, err

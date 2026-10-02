@@ -2449,6 +2449,9 @@
       "PatchSettingsInputBody": {
         "additionalProperties": false,
         "properties": {
+          "app_branding": {
+            "type": "boolean"
+          },
           "auto_port": {
             "type": "boolean"
           },
@@ -2457,6 +2460,16 @@
           },
           "brand": {
             "maxLength": 40,
+            "type": "string"
+          },
+          "brand_accent": {
+            "description": "#RRGGBB или пусто",
+            "maxLength": 7,
+            "type": "string"
+          },
+          "brand_logo_url": {
+            "description": "https://… или пусто",
+            "maxLength": 500,
             "type": "string"
           },
           "client_fingerprint": {
@@ -2491,6 +2504,15 @@
             "maximum": 23,
             "minimum": 0,
             "type": "integer"
+          },
+          "sub_announce": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "sub_announce_url": {
+            "description": "https://… или tg://…",
+            "maxLength": 200,
+            "type": "string"
           },
           "sub_group_auto": {
             "maxLength": 200,
@@ -3135,6 +3157,10 @@
           "admin_url": {
             "type": "string"
           },
+          "app_branding": {
+            "description": "Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки",
+            "type": "boolean"
+          },
           "auto_port": {
             "description": "Переносить подключение на другой порт, если клиенты перестали до него доходить",
             "type": "boolean"
@@ -3144,6 +3170,14 @@
             "type": "boolean"
           },
           "brand": {
+            "type": "string"
+          },
+          "brand_accent": {
+            "description": "Цвет бренда #RRGGBB; пусто — цвет приложения",
+            "type": "string"
+          },
+          "brand_logo_url": {
+            "description": "Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения",
             "type": "string"
           },
           "certificate": {
@@ -3192,6 +3226,14 @@
             },
             "type": "array"
           },
+          "sub_announce": {
+            "description": "Объявление над профилем в приложениях (заголовок announce); пусто — нет",
+            "type": "string"
+          },
+          "sub_announce_url": {
+            "description": "Куда ведёт нажатие на объявление",
+            "type": "string"
+          },
           "sub_base_url": {
             "type": "string"
           },
@@ -3231,6 +3273,11 @@
         "required": [
           "brand",
           "support_url",
+          "sub_announce",
+          "sub_announce_url",
+          "app_branding",
+          "brand_accent",
+          "brand_logo_url",
           "public_host",
           "domain",
           "panel_port",

@@ -364,6 +364,7 @@ function SubPage() {
               ["android", "Android"],
               ["windows", "Windows"],
               ["macos", "Mac"],
+              ["linux", "Linux"],
             ] as const
           ).map(([k, l]) => (
             <button

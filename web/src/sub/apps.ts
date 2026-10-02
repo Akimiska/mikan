@@ -1,4 +1,4 @@
-export type Platform = "ios" | "android" | "windows" | "macos";
+export type Platform = "ios" | "android" | "windows" | "macos" | "linux";
 
 type App = { name: string; note: "easiest" | "free" | "stable" | "openSource" | "modern" | "bestWindows" | "tun" | "oneButton" | "allProtocols"; link: (url: string, brand: string) => string };
 export const enc = encodeURIComponent;
@@ -30,6 +30,11 @@ export const APPS: Record<Platform, App[]> = {
     { name: "Happ", note: "oneButton", link: (u) => `happ://add/${u}` },
     { name: "Hiddify", note: "openSource", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },
   ],
+  linux: [
+    { name: "SlothClash", note: "tun", link: slothClash },
+    { name: "Clash Verge Rev", note: "tun", link: clash },
+    { name: "Hiddify", note: "openSource", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },
+  ],
 };
 
 export function detect(): Platform {
@@ -38,5 +43,6 @@ export function detect(): Platform {
   if (/Android/.test(ua)) return "android";
   if (/Mac OS X/.test(ua)) return "macos";
   if (/Windows/.test(ua)) return "windows";
+  if (/Linux|X11|CrOS/.test(ua)) return "linux"; // after Android: its browsers say Linux too
   return "android";
 }

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mikan/internal/nodeapi"
@@ -43,14 +44,17 @@ type UpdateSource interface {
 
 type sampleState struct {
 	Tracker
-	Checked time.Time `json:"checked"`
+	Checked time.Time `json:"-"`
 }
 
 type delivery struct {
-	Key    string `json:"key"`
-	Target string `json:"target"`
-	Chat   int64  `json:"chat,omitempty"`
-	Text   string `json:"text"`
+	Key           string `json:"key"`
+	Target        string `json:"target"`
+	Chat          int64  `json:"chat,omitempty"`
+	Text          string `json:"text"`
+	CreatedAt     int64  `json:"created_at,omitempty"`
+	Attempts      int    `json:"attempts,omitempty"`
+	NextAttemptAt int64  `json:"next_attempt_at,omitempty"`
 }
 
 type persistentState struct {
@@ -68,15 +72,18 @@ type persistentState struct {
 }
 
 type Monitor struct {
-	store    *store.Store
-	settings *settings.Settings
-	runtime  Runtime
-	tuner    Tuner
-	cert     CertificateSource
-	updates  UpdateSource
-	bot      *tgbot.Bot
-	log      *slog.Logger
-	now      func() time.Time
+	store       *store.Store
+	settings    *settings.Settings
+	runtime     Runtime
+	tuner       Tuner
+	cert        CertificateSource
+	updates     UpdateSource
+	bot         *tgbot.Bot
+	log         *slog.Logger
+	now         func() time.Time
+	roundMu     sync.Mutex
+	dispatchMu  sync.Mutex
+	dispatching bool
 }
 
 func New(st *store.Store, set *settings.Settings, runtime Runtime, tuner Tuner, cert CertificateSource, updates UpdateSource,
@@ -101,10 +108,9 @@ func (m *Monitor) Run(ctx context.Context) {
 
 func (m *Monitor) load(ctx context.Context) (persistentState, error) {
 	var st persistentState
-	var raw string
-	err := m.store.DB.QueryRowContext(ctx, `SELECT value FROM infrastructure_alert_state WHERE key = ?`, stateKey).Scan(&raw)
+	raw, err := m.store.Q.GetInfrastructureAlertState(ctx, stateKey)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = nil
+		st.AutoCursor, err = m.store.Q.MaxInboundEventID(ctx)
 	} else if err == nil {
 		err = json.Unmarshal([]byte(raw), &st)
 	}
@@ -122,9 +128,14 @@ func (m *Monitor) save(ctx context.Context, st persistentState) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.store.DB.ExecContext(ctx, `INSERT INTO infrastructure_alert_state(key, value, updated_at) VALUES(?, ?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, stateKey, string(raw), m.now().Unix())
-	return err
+	old, err := m.store.Q.GetInfrastructureAlertState(ctx, stateKey)
+	if err == nil && old == string(raw) {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return m.store.Q.SetInfrastructureAlertState(ctx, db.SetInfrastructureAlertStateParams{Key: stateKey, Value: string(raw), UpdatedAt: m.now().Unix()})
 }
 
 func (m *Monitor) config(ctx context.Context) AlertsConfig {
@@ -143,6 +154,14 @@ func (m *Monitor) logError(message string, err error) {
 }
 
 func (m *Monitor) round(ctx context.Context) {
+	m.roundMu.Lock()
+	dispatch := false
+	defer func() {
+		m.roundMu.Unlock()
+		if dispatch {
+			m.startDelivery(ctx)
+		}
+	}()
 	st, err := m.load(ctx)
 	if err != nil {
 		m.logError("infrastructure alerts: load state", err)
@@ -184,9 +203,7 @@ func (m *Monitor) round(ctx context.Context) {
 		if !hv.OK {
 			nodeLevel = Unavailable
 		}
-		if m.observe(&st, "node/"+strconv.FormatInt(n.ID, 10), nodeLevel, hv.CheckedAt, 3, 2, eventFor(cfg, "node", n.Name, nodeLevel, lang)) {
-			// Parent failures hide their derived symptoms, avoiding one alert per listener.
-		}
+		m.observe(&st, "node/"+strconv.FormatInt(n.ID, 10), nodeLevel, hv.CheckedAt, 3, 2, eventFor(cfg, "node", n.Name, nodeLevel, lang))
 		if nodeLevel == Unavailable {
 			levels[n.ID] = Unavailable
 			continue
@@ -226,10 +243,124 @@ func (m *Monitor) round(ctx context.Context) {
 	m.checkCertificate(&st, cfg, lang)
 	m.checkUpdate(&st, cfg, lang)
 	m.publicStatus(ctx, &st, cfg, nodes, byNode, lang)
-	m.deliver(ctx, &st, cfg)
+	// Samples only matter for configured infrastructure. Drop removed node and inbound
+	// state so the JSON snapshot stays bounded as installations change over time.
+	valid := make(map[string]bool, len(nodes)+len(inbounds))
+	for _, n := range nodes {
+		valid["node/"+strconv.FormatInt(n.ID, 10)] = true
+		valid["warp/"+strconv.FormatInt(n.ID, 10)] = true
+	}
+	for _, list := range byNode {
+		for _, in := range list {
+			valid["inbound/"+strconv.FormatInt(in.ID, 10)] = true
+		}
+	}
+	for key := range st.Samples {
+		if strings.HasPrefix(key, "node/") || strings.HasPrefix(key, "warp/") || strings.HasPrefix(key, "inbound/") {
+			if !valid[key] {
+				delete(st.Samples, key)
+			}
+		}
+	}
+	for key := range st.Stuck {
+		found := false
+		for nodeID, list := range byNode {
+			for _, in := range list {
+				if key == fmt.Sprintf("%d/%d", nodeID, in.ID) {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			delete(st.Stuck, key)
+		}
+	}
+	if m.bot == nil || !m.bot.InfrastructureEnabled(ctx) {
+		st.Pending = nil
+	}
 	if err := m.save(ctx, st); err != nil {
 		m.logError("infrastructure alerts: save state", err)
+	} else if m.bot != nil && m.bot.InfrastructureEnabled(ctx) && len(st.Pending) > 0 {
+		dispatch = true
 	}
+}
+
+// startDelivery runs Telegram calls separately from health sampling. State is merged only
+// after the network calls finish, so a slow Telegram API never delays the next monitor round.
+func (m *Monitor) startDelivery(ctx context.Context) {
+	m.dispatchMu.Lock()
+	if m.dispatching {
+		m.dispatchMu.Unlock()
+		return
+	}
+	m.dispatching = true
+	m.dispatchMu.Unlock()
+	go func() {
+		defer func() { m.dispatchMu.Lock(); m.dispatching = false; m.dispatchMu.Unlock() }()
+		m.roundMu.Lock()
+		st, err := m.load(ctx)
+		m.roundMu.Unlock()
+		if err != nil {
+			m.logError("infrastructure alerts: load delivery queue", err)
+			return
+		}
+		before := append([]delivery(nil), st.Pending...)
+		if len(before) == 0 {
+			return
+		}
+		cfg := m.config(ctx)
+		m.deliver(ctx, &st, cfg)
+		m.roundMu.Lock()
+		defer m.roundMu.Unlock()
+		latest, err := m.load(ctx)
+		if err != nil {
+			m.logError("infrastructure alerts: reload delivery queue", err)
+			return
+		}
+		latest.Pending = mergeDeliveryResults(latest.Pending, before, st.Pending)
+		if latest.PublicTarget == st.PublicTarget {
+			latest.PublicMessage = st.PublicMessage
+			latest.PublicPinned = st.PublicPinned
+		}
+		if err := m.save(ctx, latest); err != nil {
+			m.logError("infrastructure alerts: save delivery queue", err)
+		}
+	}()
+}
+
+func mergeDeliveryResults(latest, before, after []delivery) []delivery {
+	result := append([]delivery(nil), latest...)
+	afterByKey := make(map[string]delivery, len(after))
+	for _, d := range after {
+		afterByKey[d.Key] = d
+	}
+	for _, old := range before {
+		position := -1
+		for i := range result {
+			if result[i].Key == old.Key {
+				position = i
+				break
+			}
+		}
+		if position < 0 {
+			continue
+		}
+		updated, remains := afterByKey[old.Key]
+		if !remains {
+			result = append(result[:position], result[position+1:]...)
+			continue
+		}
+		result[position].Attempts = updated.Attempts
+		result[position].NextAttemptAt = updated.NextAttemptAt
+		if result[position].CreatedAt == 0 {
+			result[position].CreatedAt = updated.CreatedAt
+		}
+	}
+	return result
 }
 
 // observe records a new sample, with a stable failure threshold and two-sample recovery.
@@ -245,13 +376,6 @@ func (m *Monitor) observe(st *persistentState, key string, level Level, checked 
 	if tr == nil || text == "" {
 		return tr != nil
 	}
-	if tr.To == Healthy {
-		text = strings.Replace(text, "🔴", "🟢", 1)
-		text = strings.Replace(text, "Unavailable", "Recovered", 1)
-		text = strings.Replace(text, "Degraded", "Recovered", 1)
-		text = strings.Replace(text, "Недоступен", "Восстановлен", 1)
-		text = strings.Replace(text, "Есть проблемы", "Восстановлен", 1)
-	}
 	st.Pending = appendPending(st.Pending, delivery{Key: key + "/" + checked.UTC().Format(time.RFC3339Nano), Target: "admin", Text: text})
 	return true
 }
@@ -261,6 +385,13 @@ func appendPending(all []delivery, next delivery) []delivery {
 		if d.Key == next.Key {
 			return all
 		}
+	}
+	if next.CreatedAt == 0 {
+		next.CreatedAt = time.Now().Unix()
+	}
+	const maxPending = 200
+	if len(all) >= maxPending {
+		all = append([]delivery(nil), all[len(all)-maxPending+1:]...)
 	}
 	return append(all, next)
 }
@@ -380,7 +511,11 @@ func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg A
 	for rows.Next() {
 		var e db.InboundEvent
 		if err := rows.Scan(&e.ID, &e.InboundID, &e.NodeID, &e.Kind, &e.Network, &e.OldValue, &e.NewValue, &e.Reason, &e.CreatedAt); err != nil {
-			break
+			m.logError("infrastructure alerts: scan autotune event", err)
+			if e.ID > st.AutoCursor {
+				st.AutoCursor = e.ID
+			}
+			continue
 		}
 		st.AutoCursor = e.ID
 		if !cfg.Events.Autotune {
@@ -396,6 +531,9 @@ func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg A
 		}
 		st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("autotune/%d", e.ID), Target: "admin",
 			Text: "🛠 <b>" + verb + "</b>: " + html.EscapeString(n.Name) + " / " + html.EscapeString(e.Kind) + " — " + html.EscapeString(e.OldValue) + " → " + html.EscapeString(e.NewValue)})
+	}
+	if err := rows.Err(); err != nil {
+		m.logError("infrastructure alerts: iterate autotune events", err)
 	}
 }
 
@@ -568,7 +706,7 @@ func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg Ale
 			}
 		}
 		st.Pending = kept
-	} else if text != st.PublicText {
+	} else if text != st.PublicText || st.PublicMessage > 0 && !st.PublicPinned {
 		st.PublicText = text
 		updated := false
 		for i := range st.Pending {
@@ -656,16 +794,29 @@ func stateLevel(st *persistentState, key string) Level {
 }
 
 func (m *Monitor) deliver(ctx context.Context, st *persistentState, cfg AlertsConfig) {
-	if m.bot == nil {
+	if m.bot == nil || !m.bot.InfrastructureEnabled(ctx) {
+		st.Pending = nil
+		return
+	}
+	if len(st.Pending) == 0 {
 		return
 	}
 	client, err := m.bot.InfrastructureClient(ctx)
 	if err != nil {
+		m.deferPending(st, err)
 		return
 	}
 	adminID, adminSet, _ := m.bot.InfrastructureAdminChat(ctx)
 	keep := st.Pending[:0]
 	for _, d := range st.Pending {
+		now := m.now().Unix()
+		if d.CreatedAt != 0 && now-d.CreatedAt > int64(24*time.Hour/time.Second) {
+			continue
+		}
+		if d.NextAttemptAt != 0 && d.NextAttemptAt > now {
+			keep = append(keep, d)
+			continue
+		}
 		err = nil
 		if d.Target == "admin" {
 			if !cfg.AdminEnabled || !adminSet {
@@ -688,8 +839,8 @@ func (m *Monitor) deliver(ctx context.Context, st *persistentState, cfg AlertsCo
 				}
 			}
 			if err == nil && !st.PublicPinned {
-				err = client.PinTo(cctx, cfg.PublicChannel, st.PublicMessage)
-				if err == nil {
+				pinErr := client.PinTo(cctx, cfg.PublicChannel, st.PublicMessage)
+				if pinErr == nil {
 					st.PublicPinned = true
 				}
 			}
@@ -710,13 +861,51 @@ func (m *Monitor) deliver(ctx context.Context, st *persistentState, cfg AlertsCo
 			cancel()
 		}
 		if err != nil {
-			keep = append(keep, d)
+			if permanentTelegramError(err) {
+				continue
+			}
+			if retryDelivery(&d, now, err) {
+				keep = append(keep, d)
+			}
 			if m.log != nil {
 				m.log.Warn("infrastructure alerts: Telegram delivery", "target", d.Target, "err", err)
 			}
 		}
 	}
 	st.Pending = keep
+}
+
+func (m *Monitor) deferPending(st *persistentState, err error) {
+	now := m.now().Unix()
+	keep := st.Pending[:0]
+	for _, d := range st.Pending {
+		if retryDelivery(&d, now, err) {
+			keep = append(keep, d)
+		}
+	}
+	st.Pending = keep
+}
+
+func retryDelivery(d *delivery, now int64, err error) bool {
+	d.Attempts++
+	if d.Attempts >= 8 || d.CreatedAt != 0 && now-d.CreatedAt > int64(24*time.Hour/time.Second) {
+		return false
+	}
+	delay := 5 * time.Second * time.Duration(1<<min(d.Attempts-1, 10))
+	var ae *tgbot.APIError
+	if errors.As(err, &ae) && ae.Code == 429 && ae.RetryAfter > delay {
+		delay = ae.RetryAfter
+	}
+	if delay > time.Hour {
+		delay = time.Hour
+	}
+	d.NextAttemptAt = now + int64(delay/time.Second)
+	return true
+}
+
+func permanentTelegramError(err error) bool {
+	var ae *tgbot.APIError
+	return errors.As(err, &ae) && ae.Code >= 400 && ae.Code < 500 && ae.Code != 429
 }
 
 func sendAdmin(ctx context.Context, c *tgbot.Client, chat int64, text string) error {

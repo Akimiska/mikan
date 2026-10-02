@@ -32,6 +32,73 @@ type AlertsConfig struct {
 	Events        Events `json:"events"`
 }
 
+// AlertsConfigPatch preserves omitted switches when the admin UI or an API client sends
+// only the fields it wants to change.
+type AlertsConfigPatch struct {
+	AdminEnabled  *bool        `json:"admin_enabled,omitempty"`
+	PublicEnabled *bool        `json:"public_enabled,omitempty"`
+	PublicChannel *string      `json:"public_channel,omitempty"`
+	PublicSummary *bool        `json:"public_summary,omitempty"`
+	PublicChanges *bool        `json:"public_changes,omitempty"`
+	Events        *EventsPatch `json:"events,omitempty"`
+}
+
+type EventsPatch struct {
+	Node             *bool `json:"node,omitempty"`
+	Warp             *bool `json:"warp,omitempty"`
+	Exit             *bool `json:"exit,omitempty"`
+	Inbound          *bool `json:"inbound,omitempty"`
+	Autotune         *bool `json:"autotune,omitempty"`
+	AutotuneRecovery *bool `json:"autotune_recovery,omitempty"`
+	TLS              *bool `json:"tls,omitempty"`
+	Update           *bool `json:"update,omitempty"`
+}
+
+func (p AlertsConfigPatch) Merge(c AlertsConfig) AlertsConfig {
+	if p.AdminEnabled != nil {
+		c.AdminEnabled = *p.AdminEnabled
+	}
+	if p.PublicEnabled != nil {
+		c.PublicEnabled = *p.PublicEnabled
+	}
+	if p.PublicChannel != nil {
+		c.PublicChannel = *p.PublicChannel
+	}
+	if p.PublicSummary != nil {
+		c.PublicSummary = *p.PublicSummary
+	}
+	if p.PublicChanges != nil {
+		c.PublicChanges = *p.PublicChanges
+	}
+	if e := p.Events; e != nil {
+		if e.Node != nil {
+			c.Events.Node = *e.Node
+		}
+		if e.Warp != nil {
+			c.Events.Warp = *e.Warp
+		}
+		if e.Exit != nil {
+			c.Events.Exit = *e.Exit
+		}
+		if e.Inbound != nil {
+			c.Events.Inbound = *e.Inbound
+		}
+		if e.Autotune != nil {
+			c.Events.Autotune = *e.Autotune
+		}
+		if e.AutotuneRecovery != nil {
+			c.Events.AutotuneRecovery = *e.AutotuneRecovery
+		}
+		if e.TLS != nil {
+			c.Events.TLS = *e.TLS
+		}
+		if e.Update != nil {
+			c.Events.Update = *e.Update
+		}
+	}
+	return c
+}
+
 func Default() AlertsConfig {
 	return AlertsConfig{Events: Events{Node: true, Warp: true, Exit: true, Inbound: true, Autotune: true,
 		AutotuneRecovery: true, TLS: true, Update: true}, PublicSummary: true, PublicChanges: true}

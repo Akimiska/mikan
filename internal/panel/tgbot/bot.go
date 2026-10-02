@@ -278,6 +278,16 @@ func (b *Bot) InfrastructureClient(ctx context.Context) (*Client, error) {
 	return NewClient(b.d.API, token, rt), nil
 }
 
+// InfrastructureEnabled reports whether Telegram delivery is enabled and has a token.
+func (b *Bot) InfrastructureEnabled(ctx context.Context) bool {
+	enabled, err := b.d.Settings.On(ctx, settings.Switch{Key: KeyEnabled})
+	if err != nil || !enabled {
+		return false
+	}
+	token, err := b.d.Settings.String(ctx, KeyToken)
+	return err == nil && token != ""
+}
+
 func (b *Bot) claimInfrastructureAdmin(ctx context.Context, chat int64, code string) bool {
 	claimed := false
 	err := b.d.Store.Tx(ctx, func(q *db.Queries) error {
@@ -506,12 +516,13 @@ func (b *Bot) onMessage(ctx context.Context, out *Outbox, m *Message) {
 	if strings.HasPrefix(messageText, "/start infra_") {
 		code := strings.TrimSpace(strings.TrimPrefix(messageText, "/start infra_"))
 		text := "Не удалось подключить чат администратора. Создайте новую ссылку в панели."
-		if b.claimInfrastructureAdmin(ctx, chat, code) {
+		claimed := b.claimInfrastructureAdmin(ctx, chat, code)
+		if claimed {
 			text = "✅ Чат подключён. Сюда будут приходить личные уведомления о состоянии инфраструктуры."
 		}
 		if b.Config(ctx).Lang == "en" {
 			text = "Could not connect the admin chat. Create a new link in the panel."
-			if b.InfrastructureAdminChatIs(ctx, chat) {
+			if claimed {
 				text = "✅ Admin chat connected. Infrastructure alerts will be sent here."
 			}
 		}

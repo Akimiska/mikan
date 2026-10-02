@@ -64,10 +64,10 @@ type telegramOutput struct{ Body TelegramView }
 
 type patchTelegramInput struct {
 	Body struct {
-		Enabled        *bool                     `json:"enabled,omitempty"`
-		Token          *string                   `json:"token,omitempty" maxLength:"100" doc:"Токен от @BotFather; пустая строка — удалить"`
-		Config         *tgbot.Config             `json:"config,omitempty"`
-		Infrastructure *infraalerts.AlertsConfig `json:"infrastructure,omitempty"`
+		Enabled        *bool                          `json:"enabled,omitempty"`
+		Token          *string                        `json:"token,omitempty" maxLength:"100" doc:"Токен от @BotFather; пустая строка — удалить"`
+		Config         *tgbot.Config                  `json:"config,omitempty"`
+		Infrastructure *infraalerts.AlertsConfigPatch `json:"infrastructure,omitempty"`
 		Route          *struct {
 			Mode   string  `json:"mode" enum:"direct,node,proxy"`
 			NodeID int64   `json:"node_id,omitempty" minimum:"0" doc:"Удалённая нода панели (mode=node)"`
@@ -272,10 +272,17 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 		}
 		details["config"] = true
 	}
+	var infrastructure *infraalerts.AlertsConfig
 	if b.Infrastructure != nil {
-		if err := b.Infrastructure.Validate(); err != nil {
+		current, _, err := settings.GetOver(ctx, h.d.Settings, infraalerts.KeyConfig, infraalerts.Default())
+		if err != nil {
+			return nil, err
+		}
+		merged := b.Infrastructure.Merge(current)
+		if err := merged.Validate(); err != nil {
 			return nil, tgFieldErr("infrastructure", err.Error())
 		}
+		infrastructure = &merged
 		details["infrastructure"] = true
 	}
 	if b.Enabled != nil && *b.Enabled && token == "" {
@@ -308,8 +315,8 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 				return err
 			}
 		}
-		if b.Infrastructure != nil {
-			if err := settings.Set(ctx, set, infraalerts.KeyConfig, *b.Infrastructure); err != nil {
+		if infrastructure != nil {
+			if err := settings.Set(ctx, set, infraalerts.KeyConfig, *infrastructure); err != nil {
 				return err
 			}
 		}

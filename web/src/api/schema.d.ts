@@ -1253,6 +1253,14 @@ export interface components {
             public_enabled: boolean;
             public_summary: boolean;
         };
+        AlertsConfigPatch: {
+            admin_enabled?: boolean;
+            events?: components["schemas"]["EventsPatch"];
+            public_changes?: boolean;
+            public_channel?: string;
+            public_enabled?: boolean;
+            public_summary?: boolean;
+        };
         AuditEntry: {
             /** @description Например user.create, settings.update, auth.login_failed */
             action: string;
@@ -1563,6 +1571,16 @@ export interface components {
             tls: boolean;
             update: boolean;
             warp: boolean;
+        };
+        EventsPatch: {
+            autotune?: boolean;
+            autotune_recovery?: boolean;
+            exit?: boolean;
+            inbound?: boolean;
+            node?: boolean;
+            tls?: boolean;
+            update?: boolean;
+            warp?: boolean;
         };
         ExtendInputBody: {
             /** Format: int64 */
@@ -2012,7 +2030,7 @@ export interface components {
         PatchTelegramInputBody: {
             config?: components["schemas"]["Config"];
             enabled?: boolean;
-            infrastructure?: components["schemas"]["AlertsConfig"];
+            infrastructure?: components["schemas"]["AlertsConfigPatch"];
             /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
             route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */

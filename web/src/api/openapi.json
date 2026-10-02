@@ -361,6 +361,30 @@
         ],
         "type": "object"
       },
+      "AlertsConfigPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "$ref": "#/components/schemas/EventsPatch"
+          },
+          "public_changes": {
+            "type": "boolean"
+          },
+          "public_channel": {
+            "type": "string"
+          },
+          "public_enabled": {
+            "type": "boolean"
+          },
+          "public_summary": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "AuditEntry": {
         "additionalProperties": false,
         "properties": {
@@ -1235,6 +1259,36 @@
           "tls",
           "update"
         ],
+        "type": "object"
+      },
+      "EventsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "autotune": {
+            "type": "boolean"
+          },
+          "autotune_recovery": {
+            "type": "boolean"
+          },
+          "exit": {
+            "type": "boolean"
+          },
+          "inbound": {
+            "type": "boolean"
+          },
+          "node": {
+            "type": "boolean"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "update": {
+            "type": "boolean"
+          },
+          "warp": {
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "ExtendInputBody": {
@@ -2483,7 +2537,7 @@
             "type": "boolean"
           },
           "infrastructure": {
-            "$ref": "#/components/schemas/AlertsConfig"
+            "$ref": "#/components/schemas/AlertsConfigPatch"
           },
           "route": {
             "$ref": "#/components/schemas/RouteStruct",

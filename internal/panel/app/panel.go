@@ -248,6 +248,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if cfg.RequireHWID, err = set.On(ctx, settings.RequireHWID); err != nil {
 			return subs.Config{}, err
 		}
+		cfg.SubBase = subBase(ctx)
 		if cfg.App.Enabled, err = set.On(ctx, settings.AppBranding); err != nil {
 			return subs.Config{}, err
 		}

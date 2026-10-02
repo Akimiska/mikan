@@ -73,4 +73,14 @@ func TestOperatorHeadersOverHTTP(t *testing.T) {
 	if !strings.HasPrefix(hd.Get("Announce"), "base64:") {
 		t.Errorf("announce: %q", hd.Get("Announce"))
 	}
+
+	// With nothing to serve the app gets the stub, which is not about devices: v2RayTun
+	// must not show a device limit notice.
+	if _, err := h.st.DB.ExecContext(ctx, "UPDATE inbounds SET enabled = 0"); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ = h.do(http.MethodGet, "/"+subPath+"/"+u.SubToken, nil, map[string]string{"User-Agent": "v2RayTun/1.0"})
+	if resp.Header.Get("X-Hwid-Limit") != "" || resp.Header.Get("X-Hwid-Max-Devices-Reached") != "" {
+		t.Errorf("a stub without servers speaks of devices: %v", resp.Header)
+	}
 }

@@ -33,11 +33,14 @@ type Config struct {
 	Announce    string
 	AnnounceURL string
 	App         AppBrand // the brand in apps that read operator headers
-	Nodes       []Node   // enabled nodes in display order
-	Direct      []string // the panel's and nodes' hosts: kept out of the tunnel
-	Groups      Groups
-	Routing     Routing
-	Rules       []string // the admin's own Clash rules, checked (ServedRules)
+	// SubBase is https://host:port/<sub path> as the panel hands links out; "" without an
+	// address, and the request's own address is taken.
+	SubBase string
+	Nodes   []Node   // enabled nodes in display order
+	Direct  []string // the panel's and nodes' hosts: kept out of the tunnel
+	Groups  Groups
+	Routing Routing
+	Rules   []string // the admin's own Clash rules, checked (ServedRules)
 	// Fingerprint is the default uTLS profile for inbounds that set none.
 	Fingerprint string
 	// Binding gives every device that sends its id keys of its own (domain.Devices);
@@ -490,7 +493,11 @@ func (h *Handler) operatorHeaders(w http.ResponseWriter, r *http.Request, u db.U
 			bot = BotURL(h.tg.LinkURL(r.Context(), u.ID))
 		}
 	}
-	OperatorHeaders(w.Header(), u, cfg, PageURL(r), bot, devices)
+	page := PageURL(r)
+	if cfg.SubBase != "" {
+		page = cfg.SubBase + "/" + u.SubToken
+	}
+	OperatorHeaders(w.Header(), u, cfg, page, bot, devices)
 }
 
 // Info is what the subscription page shows. Credentials are not included: the page
@@ -646,8 +653,8 @@ func (h *Handler) stub(w http.ResponseWriter, u db.User, cfg Config, format stri
 		w.Header().Set("X-Hwid-Not-Supported", "true")
 	default:
 		w.Header().Set("X-Hwid-Max-Devices-Reached", "true")
+		w.Header().Set("X-Hwid-Limit", "true") // v2RayTun shows the notice only with it
 	}
-	w.Header().Set("X-Hwid-Limit", "true") // v2RayTun shows the notice only with it
 	if format == "clash" {
 		main := cfg.Groups.WithDefaults(cfg.Lang).Main
 		// JSON is YAML: the same as the real profile (see Mihomo).

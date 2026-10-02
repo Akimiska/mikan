@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -227,8 +226,8 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {
 		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
 	}
-	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !strings.HasPrefix(*b.AnnounceURL, "https://") && !strings.HasPrefix(*b.AnnounceURL, "tg://") {
-		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce_url", Message: "url_invalid"})
+	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !subs.ValidLink(strings.TrimSpace(*b.AnnounceURL), true) {
+		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce_url", Message: "support_url_invalid"})
 	}
 	if b.Announce != nil && strings.ContainsAny(*b.Announce, "\r\n") {
 		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce", Message: "one_line"})
@@ -236,10 +235,8 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if b.BrandAccent != nil && *b.BrandAccent != "" && !subs.ValidAccent(strings.TrimSpace(*b.BrandAccent)) {
 		details = append(details, &huma.ErrorDetail{Location: "body.brand_accent", Message: "color_invalid"})
 	}
-	if b.BrandLogoURL != nil && *b.BrandLogoURL != "" {
-		if u, err := url.Parse(strings.TrimSpace(*b.BrandLogoURL)); err != nil || u.Scheme != "https" || u.Host == "" {
-			details = append(details, &huma.ErrorDetail{Location: "body.brand_logo_url", Message: "url_invalid"})
-		}
+	if b.BrandLogoURL != nil && *b.BrandLogoURL != "" && !subs.ValidLink(strings.TrimSpace(*b.BrandLogoURL), false) {
+		details = append(details, &huma.ErrorDetail{Location: "body.brand_logo_url", Message: "url_invalid"})
 	}
 	if b.SubGroupMain != nil || b.SubGroupAuto != nil || b.SubRules != nil {
 		cur, err := h.groups(ctx)

@@ -116,6 +116,26 @@ func TestPageURL(t *testing.T) {
 	}
 }
 
+func TestValidLink(t *testing.T) {
+	for _, c := range []struct {
+		s      string
+		tg, ok bool
+	}{
+		{"https://t.me/news", true, true},
+		{"tg://resolve?domain=news", true, true},
+		{"tg://resolve?domain=news", false, false},
+		{"https://", true, false},
+		{"https://t.me/a b", true, false},
+		{"https://t.me/a\x00", true, false},
+		{"http://t.me/news", true, false},
+		{"javascript:alert(1)", true, false},
+	} {
+		if ValidLink(c.s, c.tg) != c.ok {
+			t.Errorf("ValidLink(%q, %v) = %v", c.s, c.tg, !c.ok)
+		}
+	}
+}
+
 func TestValidAccent(t *testing.T) {
 	for s, want := range map[string]bool{"#F07A2E": true, "#f07a2e": true, "F07A2E": false, "#F07A2": false, "#F07A2EE": false, "": false} {
 		if ValidAccent(s) != want {

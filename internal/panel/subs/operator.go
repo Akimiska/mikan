@@ -89,6 +89,25 @@ func OperatorHeaders(h http.Header, u db.User, cfg Config, page, botURL string, 
 	}
 }
 
+// ValidLink says whether s is a link the apps open: https with a host, or tg://, without
+// spaces or control characters.
+func ValidLink(s string, tg bool) bool {
+	if strings.ContainsFunc(s, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+		return false
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return u.Host != ""
+	case "tg":
+		return tg && (u.Host != "" || u.Opaque != "")
+	}
+	return false
+}
+
 // BotURL is the bot's address without a start code: the apps keep headers for days, and
 // a code ties a subscription to whoever opens it first.
 func BotURL(link string) string {
@@ -99,8 +118,9 @@ func BotURL(link string) string {
 	return "https://" + u.Host + u.Path
 }
 
-// PageURL is the address the request came to, which is also the subscription page. The
-// path is the one the app asked for: the handler sits behind a prefix that is cut off.
+// PageURL is the address the request came to, which is also the subscription page: for a
+// panel without an address of its own (Config.SubBase). The path is the one the app asked
+// for: the handler sits behind a prefix that is cut off.
 func PageURL(r *http.Request) string {
 	if r.Host == "" {
 		return ""

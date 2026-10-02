@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"mikan/internal/panel/store/db"
 )
@@ -49,6 +50,27 @@ const (
 	// KeyAutoUpdate lets the host updater install new releases on its own, once a day;
 	// off by default (internal/panel/updates).
 	KeyAutoUpdate = "auto_update"
+	// Branding and support: the bot's and the subscription page's name and the support link.
+	KeyBrand      = "brand"
+	KeySupportURL = "support_url"
+	// KeyQuietHour is the UTC hour the slot pool is refilled, which reconnects QUIC clients.
+	KeyQuietHour = "quiet_hour_utc"
+)
+
+// Switch is an on/off setting with its default: read it with On, so the default lives
+// here and nowhere else.
+type Switch struct {
+	Key string
+	Def bool
+}
+
+// The panel's switches.
+var (
+	AutoPort      = Switch{KeyAutoPort, true}
+	AutoSNI       = Switch{KeyAutoSNI, true}
+	DeviceBinding = Switch{KeyDeviceBinding, true}
+	RequireHWID   = Switch{KeyRequireHWID, false}
+	AutoUpdate    = Switch{KeyAutoUpdate, false}
 )
 
 // ValidLang says whether s is a language of the panel.
@@ -95,19 +117,31 @@ func Set[T any](ctx context.Context, s *Settings, key string, v T) error {
 	if err != nil {
 		return err
 	}
-	return s.q.SetSetting(ctx, db.SetSettingParams{Key: key, Value: string(raw)})
+	if err := s.q.SetSetting(ctx, db.SetSettingParams{Key: key, Value: string(raw)}); err != nil {
+		return err
+	}
+	generation.Add(1)
+	return nil
 }
+
+// generation counts the settings this process has written. Whoever keeps something built
+// from settings checks it, and builds again when it moved. Changes made by another
+// process (the CLI) do not move it: they are seen when what is kept expires.
+var generation atomic.Uint64
+
+// Generation is how many settings have been written by this process so far.
+func Generation() uint64 { return generation.Load() }
 
 func (s *Settings) String(ctx context.Context, key string) (string, error) {
 	v, _, err := Get[string](ctx, s, key)
 	return v, err
 }
 
-// Bool reads a switch; def when it was never set.
-func (s *Settings) Bool(ctx context.Context, key string, def bool) (bool, error) {
-	v, ok, err := Get[bool](ctx, s, key)
+// On reads a switch; its default when it was never set.
+func (s *Settings) On(ctx context.Context, sw Switch) (bool, error) {
+	v, ok, err := Get[bool](ctx, s, sw.Key)
 	if err != nil || !ok {
-		return def, err
+		return sw.Def, err
 	}
 	return v, nil
 }

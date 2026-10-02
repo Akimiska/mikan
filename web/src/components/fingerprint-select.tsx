@@ -34,7 +34,12 @@ export function FingerprintSelect({
     if (value !== "" && !isKnownFingerprint(value)) setOwnMode(true);
   }, [value]);
   const bad = ownMode && !validFingerprint(value);
-  useEffect(() => onValid?.(!bad), [bad]);
+  // The picker leaving the screen (another tab of the form) must not leave its verdict
+  // behind: a field that is not shown cannot block saving.
+  useEffect(() => {
+    onValid?.(!bad);
+    return () => onValid?.(true);
+  }, [bad]);
   return (
     <div>
       <select

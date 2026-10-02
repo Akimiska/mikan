@@ -19,7 +19,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"mikan/internal/fsutil"
 )
 
 // The admin's own certificate, instead of Let's Encrypt or the self-signed one (GitHub
@@ -186,18 +189,10 @@ func SaveCustom(dir string, c *tls.Certificate) error {
 		return err
 	}
 	// The key first: a new chain next to an old key would not load.
-	if err := writeAtomic(filepath.Join(dir, customKey), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})); err != nil {
+	if err := fsutil.WriteFileAtomic(filepath.Join(dir, customKey), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, customCert), chain.Bytes())
-}
-
-func writeAtomic(path string, data []byte) error {
-	tmp := path + ".new"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsutil.WriteFileAtomic(filepath.Join(dir, customCert), chain.Bytes(), 0o600)
 }
 
 // LoadCustom reads the certificate SaveCustom wrote; fs.ErrNotExist when there is none.
@@ -269,7 +264,12 @@ type NodeStore struct {
 
 	mu    sync.Mutex
 	cache map[int64]nodeCert
+
+	generation atomic.Uint64 // moves with every certificate set or cleared
 }
+
+// Generation moves whenever a node's own certificate is set or cleared.
+func (s *NodeStore) Generation() uint64 { return s.generation.Load() }
 
 type nodeCert struct {
 	mod     time.Time
@@ -291,10 +291,14 @@ func (s *NodeStore) Set(id int64, certPEM, keyPEM []byte) (*tls.Certificate, err
 	if err != nil {
 		return nil, err
 	}
+	defer s.generation.Add(1)
 	return c, SaveCustom(s.path(id), c)
 }
 
-func (s *NodeStore) Clear(id int64) error { return RemoveCustom(s.path(id)) }
+func (s *NodeStore) Clear(id int64) error {
+	defer s.generation.Add(1)
+	return RemoveCustom(s.path(id))
+}
 
 // Get is the node's own certificate and whether clients reach host trusting it; nil
 // without one. err says why one that is there is not used (expired, broken).

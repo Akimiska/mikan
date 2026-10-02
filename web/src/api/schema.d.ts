@@ -4,6 +4,74 @@
  */
 
 export interface paths {
+    "/api/v1/addons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Маркетплейс способов оплаты */
+        get: operations["list-addons"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addons/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настройки адаптера */
+        patch: operations["update-addon"];
+        trace?: never;
+    };
+    "/api/v1/addons/{id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Установить или обновить адаптер: заявка серверу */
+        post: operations["install-addon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addons/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Удалить адаптер: заявка серверу */
+        post: operations["remove-addon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/api-keys": {
         parameters: {
             query?: never;
@@ -34,6 +102,23 @@ export interface paths {
         post?: never;
         /** Отозвать ключ API */
         delete: operations["delete-api-key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал действий админа: хранится 180 суток */
+        get: operations["list-audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -438,6 +523,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пакеты трафика */
+        get: operations["list-packages"];
+        put?: never;
+        /** Создать пакет трафика */
+        post: operations["create-package"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/packages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Изменить пакет трафика */
+        put: operations["update-package"];
+        post?: never;
+        /** Убрать пакет в архив */
+        delete: operations["archive-package"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/payments": {
         parameters: {
             query?: never;
@@ -518,7 +639,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Удалить пул: его подключения вернутся в основной трафик */
+        /** Удалить пул: его подключения вернутся в основной трафик; пока в нём есть оплаченный трафик, пул остаётся */
         delete: operations["delete-pool"];
         options?: never;
         head?: never;
@@ -892,6 +1013,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пакеты трафика пользователя */
+        get: operations["user-grants"];
+        put?: never;
+        /** Начислить трафик */
+        post: operations["grant-traffic"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}/pools": {
         parameters: {
             query?: never;
@@ -998,6 +1137,88 @@ export interface components {
             /** @enum {string} */
             scope: "read" | "full";
         };
+        AddonCatalogEntry: {
+            description: {
+                [key: string]: string;
+            };
+            homepage: string;
+            id: string;
+            installed: boolean;
+            /** @description Название по языкам */
+            name: {
+                [key: string]: string;
+            };
+            /** @description Установлен, а в каталоге другая сборка */
+            update: boolean;
+            version: string;
+        };
+        AddonField: {
+            key: string;
+            label: {
+                [key: string]: string;
+            };
+            pattern?: string;
+            required: boolean;
+            /** @description Значение API не отдаёт; пусто при сохранении — оставить прежнее */
+            secret: boolean;
+            /** @description Значение сохранено */
+            set: boolean;
+            /** @enum {string} */
+            type: "string" | "bool";
+            /** @description Текущее значение, кроме секретов */
+            value?: unknown;
+        };
+        AddonRequest: {
+            /** @enum {string} */
+            action: "install" | "remove";
+            /** @description RFC 3339 */
+            at: string;
+            id: string;
+        };
+        AddonResult: {
+            /** @enum {string} */
+            action: "install" | "remove";
+            /** @description RFC 3339 */
+            at: string;
+            error?: string;
+            id: string;
+            /** @enum {string} */
+            state: "done" | "failed";
+        };
+        AddonView: {
+            /** @description Принимает оплату прямо сейчас: включён, настроен, работает */
+            available: boolean;
+            enabled: boolean;
+            /** @description Почему контейнер не работает */
+            error?: string;
+            help: {
+                [key: string]: string;
+            };
+            id: string;
+            /** @description Адаптер не ответил о себе: настройки недоступны */
+            info_error?: string;
+            name: {
+                [key: string]: string;
+            };
+            settings: components["schemas"]["AddonField"][];
+            /** @enum {string} */
+            status: "running" | "failed";
+            version: string;
+            /** @description Адрес для уведомлений в кабинете провайдера */
+            webhook_url: string;
+        };
+        AddonsView: {
+            catalog: components["schemas"]["AddonCatalogEntry"][];
+            /** @description catalog_unavailable — каталог не загрузился */
+            catalog_error?: string;
+            installed: components["schemas"]["AddonView"][];
+            /** @description Как сервер выполнил последнюю заявку */
+            last?: components["schemas"]["AddonResult"];
+            /** @description Заявка, которую сервер ещё не взял */
+            pending?: components["schemas"]["AddonRequest"];
+            /** @description Панель видит каталог данных сервера; иначе ставить адаптеры нельзя */
+            supported: boolean;
+        };
         AdminView: {
             /** Format: int64 */
             id: number;
@@ -1005,6 +1226,33 @@ export interface components {
             last_login_at?: string;
             totp_enabled: boolean;
             username: string;
+        };
+        AuditEntry: {
+            /** @description Например user.create, settings.update, auth.login_failed */
+            action: string;
+            /**
+             * Format: int64
+             * @description null — система, консоль сервера или неудачный вход
+             */
+            admin_id: number | null;
+            /** Format: date-time */
+            at: string;
+            /** @description Подробности действия; null — нет */
+            details: unknown;
+            /** Format: int64 */
+            id: number;
+            ip: string;
+            target_id: string;
+            target_type: string;
+        };
+        AuditOutputBody: {
+            /** @description От новых к старым */
+            items: components["schemas"]["AuditEntry"][];
+            /**
+             * Format: int64
+             * @description Передайте как before за следующей страницей; 0 — это всё
+             */
+            next: number;
         };
         AutoEvent: {
             /** Format: date-time */
@@ -1134,6 +1382,17 @@ export interface components {
             /** @description Имя для клиентов; по умолчанию — хост из dest */
             sni?: string;
         };
+        ClientEndpoint: {
+            /**
+             * Format: int64
+             * @description Порт для клиентов; 0 — порт подключения
+             */
+            port: number;
+            /** @description Адрес для клиентов; пусто — адрес ноды */
+            server: string;
+            /** @description SNI для клиентов; пусто — как обычно */
+            sni: string;
+        };
         Config: {
             /** @description Кнопки главного меню по порядку */
             buttons: components["schemas"]["MenuButton"][];
@@ -1158,11 +1417,15 @@ export interface components {
              */
             expire_days?: number;
             name: string;
+            /** @description Пароль админа: ключ не выпускается из одной лишь украденной сессии */
+            password: string;
             /**
-             * @description read — только GET-запросы, full — всё, кроме входа, сессий и ключей
+             * @description read — только GET-запросы, без ссылок подписок и секретных адресов; full — изменения, кроме входа, сессий, ключей и операций, где уходят деньги, ключи и адреса клиентов (в справочнике помечены «только сессия»)
              * @enum {string}
              */
             scope: "read" | "full";
+            /** @description Код из приложения, если включена 2FA */
+            totp?: string;
         };
         CreateAPIKeyOutputBody: {
             /** Format: date-time */
@@ -1217,7 +1480,6 @@ export interface components {
             tariff_id: number;
         };
         DeviceView: {
-            client: string;
             /** Format: date-time */
             first_seen: string;
             ip: string;
@@ -1275,6 +1537,52 @@ export interface components {
              */
             months?: number;
         };
+        GrantInputBody: {
+            /**
+             * Format: int64
+             * @description От 1 ГБ до 100 ТБ
+             */
+            bytes: number;
+            /** Format: int64 */
+            days?: number;
+            /** @enum {string} */
+            lifetime: "used" | "period" | "days";
+            /** @description За что: бонус, компенсация */
+            note?: string;
+            /**
+             * Format: int64
+             * @description Пул трафика; не передан — основной трафик
+             */
+            pool_id?: number;
+        };
+        GrantView: {
+            /** @description Ещё считается: не израсходован и не истёк */
+            active: boolean;
+            /** Format: int64 */
+            bytes: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            lifetime: "used" | "period" | "days";
+            note: string;
+            /** @description Название пакета; пусто — начислено вручную */
+            package_name: string;
+            /** Format: int64 */
+            payment_id: number | null;
+            /**
+             * Format: int64
+             * @description Пул трафика; null — основной трафик
+             */
+            pool_id: number | null;
+            /** Format: int64 */
+            remaining: number;
+            /** @enum {string} */
+            source: "purchase" | "admin";
+        };
         HostStatus: {
             /** @description RFC 3339 */
             at: string;
@@ -1292,6 +1600,10 @@ export interface components {
             auto_port: boolean;
             /** @description Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках) */
             auto_sni: boolean;
+            /** @description Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне) */
+            client: components["schemas"]["ClientEndpoint"];
+            /** @description Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки */
+            client_sni: boolean;
             /** @description Шаблон листенера (YAML) */
             config: string;
             /** @description Сайт для маскировки REALITY */
@@ -1309,6 +1621,8 @@ export interface components {
             fingerprint?: string;
             /** Format: int64 */
             id: number;
+            /** @description Адрес, на котором нода слушает: пусто — все адреса, 127.0.0.1 — только сам сервер (за nginx или HAProxy) */
+            listen: string;
             name: string;
             network: string;
             /** Format: int64 */
@@ -1492,14 +1806,92 @@ export interface components {
             /** Format: int64 */
             users_total: number;
         };
+        PackageBody: {
+            /**
+             * Format: int64
+             * @description От 1 ГБ до 100 ТБ
+             */
+            bytes: number;
+            /**
+             * Format: int64
+             * @description Для lifetime=days: 1–3650
+             */
+            days?: number;
+            /** @enum {string} */
+            lifetime: "used" | "period" | "days";
+            name: string;
+            /** @description Продавать в боте и Mini App; нужна хотя бы одна цена */
+            on_sale?: boolean;
+            /**
+             * Format: int64
+             * @description Пул трафика; не передан — основной трафик
+             */
+            pool_id?: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках: 7900 — 79 ₽
+             */
+            price_rub?: number;
+            /** Format: int64 */
+            price_stars?: number;
+            /** Format: int64 */
+            sort?: number;
+        };
+        PackageView: {
+            /** Format: int64 */
+            bytes: number;
+            /**
+             * Format: int64
+             * @description Срок в днях для lifetime=days
+             */
+            days: number;
+            /** Format: int64 */
+            id: number;
+            /**
+             * @description used — пока не израсходован, period — до конца периода, days — N дней с покупки
+             * @enum {string}
+             */
+            lifetime: "used" | "period" | "days";
+            name: string;
+            on_sale: boolean;
+            /**
+             * Format: int64
+             * @description Пул трафика; null — основной трафик
+             */
+            pool_id: number | null;
+            /**
+             * Format: int64
+             * @description Цена в копейках; null — не продаётся за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars; null — не продаётся за Stars
+             */
+            price_stars: number | null;
+            /** Format: int64 */
+            sort: number;
+        };
         PasswordInputBody: {
             current: string;
             /** @description Не короче 12 символов */
             new: string;
+            /** @description Отозвать и ключи API (по умолчанию да): другие сессии завершаются при смене пароля, ключ, выпущенный из угнанной сессии, пережил бы это */
+            revoke_keys?: boolean;
+        };
+        PatchAddonInputBody: {
+            enabled?: boolean;
+            /** @description Только то, что меняется; секрет пустой строкой — оставить прежний */
+            settings?: {
+                [key: string]: unknown;
+            };
         };
         PatchInboundInputBody: {
+            /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_port?: boolean;
             auto_sni?: boolean;
+            /** @description Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три */
+            client?: components["schemas"]["ClientEndpoint"];
             /** @description Шаблон листенера (YAML) */
             config?: string;
             dest?: string;
@@ -1513,6 +1905,8 @@ export interface components {
             exit_node_id?: number;
             /** @description Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек */
             fingerprint?: string;
+            /** @description Адрес, на котором нода слушает: пусто — все адреса, иначе один IP (127.0.0.1 — за nginx или HAProxy на том же сервере). Свой адрес выключает перенос порта */
+            listen?: string;
             /**
              * @description Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат
              * @enum {string}
@@ -1540,17 +1934,9 @@ export interface components {
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
-            cryptobot?: boolean;
-            cryptobot_testnet?: boolean;
-            /** @description Пусто — удалить токен */
-            cryptobot_token?: string;
             enabled?: boolean;
             renew_resets_traffic?: boolean;
             stars?: boolean;
-            yookassa?: boolean;
-            /** @description Пусто — удалить ключ */
-            yookassa_secret?: string;
-            yookassa_shop_id?: string;
         };
         PatchSettingsInputBody: {
             auto_port?: boolean;
@@ -1623,11 +2009,10 @@ export interface components {
             allow_new: boolean;
             /** @description Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен */
             available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
-            cryptobot: boolean;
-            cryptobot_testnet: boolean;
-            cryptobot_token_set: boolean;
             /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
             enabled: boolean;
+            /** @description Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит */
+            moving: string[];
             /**
              * Format: int64
              * @description Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату
@@ -1637,19 +2022,11 @@ export interface components {
             renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */
             stars: boolean;
-            /** @description Адрес вебхуков в настройках приложения @CryptoBot */
-            webhook_cryptobot: string;
-            /** @description Адрес для HTTP-уведомлений в личном кабинете ЮKassa */
-            webhook_yookassa: string;
-            yookassa: boolean;
-            /** @description Секретный ключ сохранён; сам ключ API не отдаёт */
-            yookassa_secret_set: boolean;
-            yookassa_shop_id: string;
         };
         PaymentSettingsViewAvailableStruct: {
-            cryptobot: boolean;
+            /** @description Адаптеры маркетплейса, которые принимают оплату прямо сейчас */
+            addons: string[];
             stars: boolean;
-            yookassa: boolean;
         };
         PaymentTotal: {
             /** Format: int64 */
@@ -1677,12 +2054,15 @@ export interface components {
             external_id?: string;
             /** Format: int64 */
             id: number;
-            /** @enum {string} */
-            kind: "new" | "renew";
+            /**
+             * @description package — пакет трафика: tariff_name — название пакета
+             * @enum {string}
+             */
+            kind: "new" | "renew" | "package";
             /** Format: date-time */
             paid_at?: string;
-            /** @enum {string} */
-            provider: "stars" | "yookassa" | "cryptobot";
+            /** @description stars или addon:<id> — адаптер маркетплейса */
+            provider: string;
             /** Format: date-time */
             refunded_at?: string;
             /** @enum {string} */
@@ -2045,6 +2425,10 @@ export interface components {
             code: string;
             password: string;
         };
+        TotpSetupInputBody: {
+            /** @description Пароль: без него украденная сессия включила бы 2FA на себя и закрыла вход владельцу */
+            password: string;
+        };
         TotpSetupOutputBody: {
             secret: string;
             uri: string;
@@ -2104,8 +2488,13 @@ export interface components {
             limited: number;
         };
         UserPoolView: {
-            /** @description Лимит пула исчерпан: его подключения не работают до сброса */
+            /** @description Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса */
             exhausted: boolean;
+            /**
+             * Format: int64
+             * @description Байты, оставшиеся в пакетах трафика пула: тратятся после лимита
+             */
+            extra: number;
             name: string;
             /** Format: int64 */
             pool_id: number;
@@ -2164,6 +2553,11 @@ export interface components {
             total_down: number;
             /** Format: int64 */
             total_up: number;
+            /**
+             * Format: int64
+             * @description Байты, оставшиеся в пакетах трафика основного лимита: тратятся после лимита тарифа
+             */
+            traffic_extra: number;
             /**
              * Format: int64
              * @description Байты за период; null — без лимита
@@ -2236,6 +2630,132 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "list-addons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchAddonInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "install-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "remove-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-api-keys": {
         parameters: {
             query?: never;
@@ -2315,6 +2835,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-audit": {
+        parameters: {
+            query?: {
+                /** @description Записи до этого номера; 0 — самые новые */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditOutputBody"];
+                };
             };
             /** @description Error */
             default: {
@@ -2578,7 +3131,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TotpSetupInputBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -3308,11 +3865,137 @@ export interface operations {
             };
         };
     };
+    "list-packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PackageBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PackageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "archive-package": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-payments": {
         parameters: {
             query?: {
                 status?: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded" | "";
-                provider?: "stars" | "yookassa" | "cryptobot" | "";
+                provider?: string;
                 user_id?: number;
                 /** @description id последнего платежа предыдущей страницы */
                 before?: number;
@@ -4480,6 +5163,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "user-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "grant-traffic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantView"];
                 };
             };
             /** @description Error */

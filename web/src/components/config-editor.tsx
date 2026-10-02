@@ -1,10 +1,11 @@
 // YAML editor for listener templates. Loaded lazily: CodeMirror is only needed when an
 // admin opens the config tab.
 import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { yaml } from "@codemirror/lang-yaml";
+import { defaultHighlightStyle, indentOnInput, syntaxHighlighting } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
-import { basicSetup } from "codemirror";
+import { drawSelection, EditorView, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import { FINGERPRINTS } from "../lib/fingerprints";
 
@@ -105,7 +106,17 @@ export default function ConfigEditor({ value, onChange, label, invalid }: { valu
       state: EditorState.create({
         doc: value,
         extensions: [
-          basicSetup,
+          // What a short YAML template needs. The "codemirror" package's basicSetup also brings
+          // search, lint, folding, bracket matching and more, and binds keys (Ctrl+F,
+          // Ctrl+Shift+M) the form has no use for.
+          lineNumbers(),
+          highlightActiveLineGutter(),
+          highlightActiveLine(),
+          history(),
+          drawSelection(),
+          indentOnInput(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          keymap.of([...defaultKeymap, ...historyKeymap]),
           yaml(),
           autocompletion({ override: [complete] }),
           theme,

@@ -167,11 +167,39 @@ pub fn port_owner(port: u16, proto: Proto) -> Option<String> {
         Proto::Udp => "-Hlnup",
     };
     let filter = format!("sport = :{port}");
-    let out = output("ss", &[flags, &filter])?;
-    if out.trim().is_empty() {
-        return None;
+    match Command::new("ss").args([flags, &filter]).stdin(Stdio::null()).stderr(Stdio::null()).output() {
+        Ok(out) if out.status.success() => {
+            let out = String::from_utf8_lossy(&out.stdout);
+            if out.trim().is_empty() {
+                return None;
+            }
+            Some(process_name(&out).unwrap_or_else(|| "?".into()))
+        }
+        // No ss (a minimal image without iproute2) is not "the port is free": the kernel's
+        // own table says the same without it.
+        _ => proc_owner(port, proto),
     }
-    Some(process_name(&out).unwrap_or_else(|| "?".into()))
+}
+
+fn proc_owner(port: u16, proto: Proto) -> Option<String> {
+    let tables = match proto {
+        Proto::Tcp => ["/proc/net/tcp", "/proc/net/tcp6"],
+        Proto::Udp => ["/proc/net/udp", "/proc/net/udp6"],
+    };
+    tables.iter().filter_map(|t| fs::read_to_string(t).ok()).any(|text| proc_listening(&text, port, proto)).then(|| "?".into())
+}
+
+/// Whether /proc/net/{tcp,udp}[6] text has a socket listening on port: state 0A for TCP,
+/// 07 (the only one a bound UDP socket has) for UDP.
+fn proc_listening(table: &str, port: u16, proto: Proto) -> bool {
+    let state = match proto {
+        Proto::Tcp => "0A",
+        Proto::Udp => "07",
+    };
+    table.lines().skip(1).any(|l| {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        f.len() > 3 && f[3] == state && f[1].rsplit(':').next().and_then(|p| u16::from_str_radix(p, 16).ok()) == Some(port)
+    })
 }
 
 fn process_name(ss: &str) -> Option<String> {
@@ -212,7 +240,21 @@ pub fn ufw_active() -> bool {
 pub const VPN_PORTS: [(u16, Proto); 4] = [(443, Proto::Tcp), (443, Proto::Udp), (8443, Proto::Tcp), (8443, Proto::Udp)];
 
 /// The checks before an install; node is an install of a node for another panel.
+const DOCKER: &str = "Docker";
+
+/// The Docker check when Docker is there but cannot run mikan (no compose v2): replacing
+/// it removes packages, so the admin is asked first.
+pub fn docker_to_replace(checks: &[Check]) -> Option<&Check> {
+    checks.iter().find(|c| c.label == DOCKER && c.level == Level::Warn)
+}
+
 pub fn checks(node: bool) -> Vec<Check> {
+    checks_for(node, false)
+}
+
+/// The checks of an install that continues (resume): the VPN ports are held by the
+/// containers of the attempt before, which is no problem.
+pub fn checks_for(node: bool, resume: bool) -> Vec<Check> {
     let mut out = Vec::new();
     out.push(if is_root() {
         Check::new("Root", Level::Ok, "running as root")
@@ -244,8 +286,11 @@ pub fn checks(node: bool) -> Vec<Check> {
         Some(false) => Check::new("Clock", Level::Warn, "not synchronized: TLS and REALITY need the right time (timedatectl set-ntp true)"),
         None => Check::new("Clock", Level::Warn, "cannot tell: keep it synchronized, TLS and REALITY need the right time"),
     });
-    let taken: Vec<String> =
-        VPN_PORTS.iter().filter_map(|&(p, proto)| port_owner(p, proto).map(|who| format!("{p}/{} ({who})", proto.name()))).collect();
+    let taken: Vec<String> = if resume {
+        Vec::new()
+    } else {
+        VPN_PORTS.iter().filter_map(|&(p, proto)| port_owner(p, proto).map(|who| format!("{p}/{} ({who})", proto.name()))).collect()
+    };
     out.push(if taken.is_empty() {
         Check::new("Ports 443, 8443", Level::Ok, "free")
     } else {
@@ -255,7 +300,7 @@ pub fn checks(node: bool) -> Vec<Check> {
             format!("taken: {}. Stop what holds them (an old panel, a web server) and check again", taken.join(", ")),
         )
     });
-    if !node {
+    if !node && !resume {
         out.push(match port_owner(80, Proto::Tcp) {
             None => Check::new("Port 80", Level::Ok, "free for Let's Encrypt"),
             Some(who) => {
@@ -264,9 +309,9 @@ pub fn checks(node: bool) -> Vec<Check> {
         });
     }
     out.push(match crate::docker::version() {
-        Some(v) if crate::docker::compose_ok() => Check::new("Docker", Level::Ok, format!("{v} with compose")),
-        Some(v) => Check::new("Docker", Level::Error, format!("{v} without compose v2: update Docker")),
-        None => Check::new("Docker", Level::Ok, "not installed: the installer sets it up (get.docker.com)"),
+        Some(v) if crate::docker::compose_ok() => Check::new(DOCKER, Level::Ok, format!("{v} with compose")),
+        Some(v) => Check::new(DOCKER, Level::Warn, format!("{v} without compose v2: replace it from get.docker.com? You are asked first")),
+        None => Check::new(DOCKER, Level::Ok, "not installed: the installer sets it up (get.docker.com)"),
     });
     if let Some(who) = dpkg_holder() {
         out.push(Check::new("Packages", Level::Warn, format!("busy, {who}: the installer waits for it")));
@@ -306,6 +351,25 @@ mod tests {
         assert!(package_process("unattended-upgr", "/usr/bin/python3\0/usr/bin/unattended-upgrade\0"));
         assert!(package_process("apt-get", "apt-get\0install\0"));
         assert!(!package_process("aptd", ""));
+    }
+
+    // Without ss the kernel's table decides: a listening socket is a taken port, a
+    // connection to a remote port 443 is not.
+    #[test]
+    fn listening_sockets_without_ss() {
+        let tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n\
+                   0: 00000000:01BB 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0\n\
+                   1: 0100007F:7A69 0100007F:C350 01 00000000:00000000 00:00000000 00000000     0        0 23456 1 0000000000000000 100 0 0 10 0\n\
+                   2: 0100007F:1F90 0100007F:01BB 01 00000000:00000000 00:00000000 00000000     0        0 34567 1 0000000000000000 100 0 0 10 0\n";
+        assert!(proc_listening(tcp, 443, Proto::Tcp));
+        assert!(!proc_listening(tcp, 31337, Proto::Tcp), "an established connection is not a listener");
+        assert!(!proc_listening(tcp, 8080, Proto::Tcp));
+        assert!(!proc_listening(tcp, 443, Proto::Udp));
+        let udp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n\
+                   0: 00000000:20FB 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 12345 2 0000000000000000 0\n";
+        assert!(proc_listening(udp, 8443, Proto::Udp));
+        assert!(!proc_listening(udp, 8443, Proto::Tcp));
+        assert!(!proc_listening("", 443, Proto::Tcp));
     }
 
     #[test]

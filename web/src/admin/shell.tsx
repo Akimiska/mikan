@@ -7,7 +7,7 @@ import { meQuery, useNode, useOverview, usePaymentSettings, useUpdates } from ".
 import { Logo } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
 import { Avatar, Bar, Pill } from "../components/ui";
-import { t } from "../i18n";
+import { t, useLocale } from "../i18n";
 import { num, uptime } from "../lib/format";
 
 const NAV = [
@@ -28,6 +28,7 @@ function useNav() {
 }
 
 export function Shell() {
+  useLocale(); // the sidebar and the bar read their texts at render time
   const nav = useNav();
   const overview = useOverview();
   return (
@@ -106,7 +107,7 @@ function UpdateChip() {
   const u = useUpdates();
   if (!u.data?.available) return null;
   return (
-    <Link to="/settings" hash="updates" className="update-chip" title={t("shell.updateHint")}>
+    <Link to="/settings" search={{ tab: "general" }} hash="updates" className="update-chip" title={t("shell.updateHint")}>
       <ArrowUpCircle size={16} aria-hidden />
       <span className="truncate">{t("shell.update", { v: u.data.latest })}</span>
     </Link>
@@ -135,10 +136,10 @@ function NodeCard() {
       {n.ok ? (
         <div className="node-bars">
           <span>CPU</span>
-          <Bar pct={n.system.cpu_percent} />
+          <Bar pct={n.system.cpu_percent} label="CPU" />
           <span className="num">{Math.round(n.system.cpu_percent)}%</span>
           <span>RAM</span>
-          <Bar pct={memPct} />
+          <Bar pct={memPct} label="RAM" />
           <span className="num">{Math.round(memPct)}%</span>
         </div>
       ) : null}

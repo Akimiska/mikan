@@ -26,6 +26,7 @@ const FAIL: Record<string, Key> = {
   not_for_sale: "sub.shopNotForSale",
   too_many_invoices: "sub.shopTooMany",
   too_many_subs: "sub.shopTooManySubs",
+  promo_refund_unsupported: "sub.promoRefundUnsupported",
 };
 
 /** What the account can buy; with token, the traffic packages of that subscription too. */
@@ -52,6 +53,7 @@ export function Shop({
   openInvoice,
   openLink,
   onRefresh,
+  promoCode = "",
 }: {
   data: ShopData;
   offers: Offer[];
@@ -64,6 +66,7 @@ export function Shop({
   openInvoice: (slug: string) => void;
   openLink: (url: string) => void;
   onRefresh: () => void;
+  promoCode?: string;
 }) {
   const [picked, setPicked] = useState<number | null>(offers.length === 1 ? offers[0]!.id : null);
   const [busy, setBusy] = useState<Provider | null>(null);
@@ -81,7 +84,7 @@ export function Shop({
       const r = await fetch(subRoot + "/tg/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ init_data: initData, [field]: offer.id, provider, token }),
+        body: JSON.stringify({ init_data: initData, [field]: offer.id, provider, token, promo_code: promoCode }),
         cache: "no-store",
       });
       const body = (await r.json().catch(() => ({}))) as { url?: string; code?: string };
@@ -111,7 +114,7 @@ export function Shop({
   return (
     <section className="glass rounded-3xl p-4" aria-label={title}>
       <h2 className="mb-1 text-[15px] font-semibold">{title}</h2>
-      <p className="mb-3 text-xs text-[var(--ink-500)]">{pick}</p>
+      <p className="mb-3 text-xs text-[var(--ink-500)]">{pick}{promoCode ? ` · промокод ${promoCode}` : ""}</p>
       <div className="flex flex-col gap-2" role="radiogroup" aria-label={pick}>
         {offers.map((o) => (
           <button key={o.id} type="button" role="radio" aria-checked={picked === o.id} className="opt" onClick={() => setPicked(o.id)}>
@@ -151,4 +154,3 @@ export function Shop({
     </section>
   );
 }
-

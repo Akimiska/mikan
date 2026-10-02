@@ -171,6 +171,16 @@ func (h *handlers) deletePool(ctx context.Context, in *userIDInput) (*struct{}, 
 		if len(details) > 0 {
 			return huma.Error409Conflict("pool_in_use", details...)
 		}
+		promos, err := q.CountEnabledPromoCodesForPool(ctx, sql.NullInt64{Int64: in.ID, Valid: true})
+		if err != nil {
+			return err
+		}
+		if promos > 0 {
+			return huma.Error409Conflict("pool_in_use", &huma.ErrorDetail{Location: "path.id", Message: "pool_has_active_promocodes", Value: promos})
+		}
+		if err := q.ClearDisabledPromoPools(ctx, sql.NullInt64{Int64: in.ID, Valid: true}); err != nil {
+			return err
+		}
 		n, err := q.DeleteTrafficPool(ctx, in.ID)
 		if err != nil {
 			return err

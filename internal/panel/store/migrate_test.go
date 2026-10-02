@@ -66,6 +66,20 @@ func TestMigration0017KeepsWhatIsThere(t *testing.T) {
 		t.Fatalf("existing node's public name: %q %v", publicName, err)
 	}
 	exec("INSERT INTO infrastructure_alert_state (key, value, updated_at) VALUES ('monitor', '{}', 1)")
+	if _, err := p.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var promoTableCount int
+	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('promo_codes', 'promo_redemptions')").Scan(&promoTableCount); err != nil || promoTableCount != 2 {
+		t.Fatalf("promocode tables after migration: %d %v", promoTableCount, err)
+	}
+	var poolColumnCount int
+	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM pragma_table_info('promo_codes') WHERE name = 'pool_id'").Scan(&poolColumnCount); err != nil || poolColumnCount != 1 {
+		t.Fatalf("promo pool target column after migration: %d %v", poolColumnCount, err)
+	}
+	if _, err := p.Down(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := p.Down(ctx); err != nil {
 		t.Fatal(err)
 	}

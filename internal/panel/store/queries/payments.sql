@@ -15,6 +15,9 @@ SELECT * FROM payments WHERE provider = $1 AND external_id = $2;
 -- name: SetPaymentInvoice :exec
 UPDATE payments SET external_id = $1, pay_url = $2 WHERE id = $3;
 
+-- name: SetPaymentAmount :execrows
+UPDATE payments SET amount = ? WHERE id = ? AND status = 'pending';
+
 -- name: MarkPaymentPaid :execrows
 UPDATE payments SET status = 'paid', external_id = $1, paid_at = $2
 WHERE id = $3 AND status IN ('pending', 'expired');
@@ -31,6 +34,9 @@ UPDATE payments SET status = sqlc.arg(new_status) WHERE id = sqlc.arg(id) AND st
 
 -- name: MarkPaymentRefunded :execrows
 UPDATE payments SET status = 'refunded', refunded_at = $1 WHERE id = $2 AND status = 'applied';
+
+-- name: MarkLatePromoRefunded :execrows
+UPDATE payments SET status = 'refunded', refunded_at = ?, error = '' WHERE id = ? AND status = ?;
 
 -- name: FindOpenPayment :one
 SELECT * FROM payments

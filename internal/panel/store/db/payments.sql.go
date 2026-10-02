@@ -456,6 +456,24 @@ func (q *Queries) ListTariffsOnSale(ctx context.Context) ([]Tariff, error) {
 	return items, nil
 }
 
+const markLatePromoRefunded = `-- name: MarkLatePromoRefunded :execrows
+UPDATE payments SET status = 'refunded', refunded_at = ?, error = '' WHERE id = ? AND status = ?
+`
+
+type MarkLatePromoRefundedParams struct {
+	RefundedAt sql.NullInt64
+	ID         int64
+	Status     string
+}
+
+func (q *Queries) MarkLatePromoRefunded(ctx context.Context, arg MarkLatePromoRefundedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markLatePromoRefunded, arg.RefundedAt, arg.ID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const markPaymentApplied = `-- name: MarkPaymentApplied :execrows
 UPDATE payments SET status = 'applied', user_id = $1, applied_at = $2, error = ''
 WHERE id = $3 AND status = 'paid'
@@ -543,6 +561,23 @@ func (q *Queries) PaymentTotals(ctx context.Context, appliedAt sql.NullInt64) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const setPaymentAmount = `-- name: SetPaymentAmount :execrows
+UPDATE payments SET amount = ? WHERE id = ? AND status = 'pending'
+`
+
+type SetPaymentAmountParams struct {
+	Amount int64
+	ID     int64
+}
+
+func (q *Queries) SetPaymentAmount(ctx context.Context, arg SetPaymentAmountParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPaymentAmount, arg.Amount, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setPaymentError = `-- name: SetPaymentError :exec

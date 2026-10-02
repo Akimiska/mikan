@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/store/db"
 )
 
@@ -144,6 +145,7 @@ func TestInvoiceFailure(t *testing.T) {
 		{fmt.Errorf("wrapped: %w", billing.ErrTooMany), http.StatusConflict, "too_many_invoices", false},
 		{billing.ErrNotYours, http.StatusConflict, "not_yours", false},
 		{billing.ErrProviderOff, http.StatusConflict, "provider_off", false},
+		{promo.ErrRefundUnsupported, http.StatusConflict, "promo_refund_unsupported", false},
 		{fmt.Errorf("%w: yookassa_unreachable", billing.ErrProviderOff), http.StatusBadGateway, "invoice_failed", false}, // billing logged it
 		{errors.New("database is locked"), http.StatusBadGateway, "invoice_failed", true},
 	} {
@@ -151,5 +153,16 @@ func TestInvoiceFailure(t *testing.T) {
 		if status != c.status || code != c.code || unexplained != c.unexplained {
 			t.Errorf("%v: %d %s %v, want %d %s %v", c.err, status, code, unexplained, c.status, c.code, c.unexplained)
 		}
+	}
+}
+
+func TestPromoUnavailableDoesNotRevealCodeExistence(t *testing.T) {
+	for _, err := range []error{promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit} {
+		if !promoUnavailable(err) || promoCode(err) != "promo_unavailable" {
+			t.Errorf("%v leaked as %q", err, promoCode(err))
+		}
+	}
+	if promoUnavailable(promo.ErrTariff) {
+		t.Fatal("tariff-specific eligibility was collapsed")
 	}
 }

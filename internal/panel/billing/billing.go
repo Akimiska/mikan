@@ -17,12 +17,14 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -85,12 +87,14 @@ type Deps struct {
 	Addons *addons.Manager
 	// SubBase is https://host:port/<sub path>, where the webhooks are; "" without an address.
 	SubBase func(ctx context.Context) string
+	Promo   *promo.Service
 }
 
 type Service struct {
-	d  Deps
-	mu sync.Mutex
-	tg Telegram
+	d             Deps
+	mu            sync.Mutex
+	promoRefundMu sync.Mutex
+	tg            Telegram
 }
 
 func New(d Deps) *Service {
@@ -217,15 +221,24 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 
 // InvoiceRequest: who buys which tariff with what. UserID 0 buys a new subscription.
 type InvoiceRequest struct {
-	TgID     int64
-	UserID   int64
-	TariffID int64
-	Provider string
+	TgID      int64
+	UserID    int64
+	TariffID  int64
+	Provider  string
+	PromoCode string
 }
 
 // Invoice opens a payment and returns it with the URL to pay at. An open invoice for the
 // same purchase made in the last minutes is returned again instead of a new one.
 func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, error) {
+	if strings.TrimSpace(req.PromoCode) != "" && s.d.Promo == nil {
+		return db.Payment{}, promo.ErrUnavailable
+	}
+	if strings.TrimSpace(req.PromoCode) != "" {
+		if err := s.validatePromoProvider(ctx, req.Provider); err != nil {
+			return db.Payment{}, err
+		}
+	}
 	q := s.d.Store.Q
 	t, err := q.GetTariff(ctx, req.TariffID)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && (t.Archived != 0 || t.OnSale == 0) {
@@ -250,27 +263,75 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 			return db.Payment{}, ErrTooManySubs
 		}
 	} else if link, err := q.GetTgLink(ctx, req.UserID); err != nil || link.TgID != req.TgID {
-		// Only the subscription's owner renews it through the bot.
 		return db.Payment{}, ErrNotYours
 	}
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: req.UserID != 0}
+	userIDFilter := sql.NullInt64{Int64: req.UserID, Valid: true}
 	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
-	if p, err := q.FindOpenPayment(ctx, db.FindOpenPaymentParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: kind,
-		UserID: req.UserID, Since: now.Add(-invoiceReuse).Unix()}); err == nil && p.Amount == amount {
-		return p, nil
-	}
-	if n, err := s.recentInvoices(ctx, req.TgID, now); err != nil {
-		return db.Payment{}, err
-	} else if n >= maxPerHour {
-		return db.Payment{}, ErrTooMany
-	}
-	p, err := q.CreatePayment(ctx, db.CreatePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID, Kind: kind, UserID: userID,
-		TariffID: tariffID, TariffName: t.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+
+	var p db.Payment
+	var disc promo.Discount
+	reused := false
+	err = s.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if existing, err := q.FindOpenPayment(ctx, db.FindOpenPaymentParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: kind, UserID: userIDFilter, Since: now.Add(-invoiceReuse).Unix()}); err == nil {
+			if s.d.Promo == nil && strings.TrimSpace(req.PromoCode) == "" && existing.Amount == amount {
+				p = existing
+				reused = true
+				return nil
+			}
+			if s.d.Promo != nil {
+				r, e := q.GetPromoRedemptionByPayment(ctx, sql.NullInt64{Int64: existing.ID, Valid: true})
+				has := e == nil && r.Status == "reserved"
+				if strings.TrimSpace(req.PromoCode) == "" && !has && existing.Amount == amount {
+					p = existing
+					reused = true
+					return nil
+				}
+				if strings.TrimSpace(req.PromoCode) != "" && has {
+					pc, e := q.GetPromoCode(ctx, r.PromoID)
+					if e == nil && pc.Code == promo.Normalize(req.PromoCode) && existing.Amount == r.FinalAmount && (!r.ExpiresAt.Valid || s.d.Now().Unix() < r.ExpiresAt.Int64) {
+						p = existing
+						reused = true
+						return nil
+					}
+				}
+			}
+		}
+		if n, err := q.CountRecentInvoices(ctx, db.CountRecentInvoicesParams{TgID: req.TgID, CreatedAt: now.Add(-time.Hour).Unix()}); err != nil {
+			return err
+		} else if n >= maxPerHour {
+			return ErrTooMany
+		}
+
+		p, err = q.CreatePayment(ctx, db.CreatePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID, Kind: kind, UserID: userID, TariffID: tariffID, TariffName: t.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+		if err != nil {
+			return err
+		}
+		if s.d.Promo != nil && strings.TrimSpace(req.PromoCode) != "" {
+			disc, err = s.d.Promo.ReserveDiscount(ctx, q, req.TgID, req.UserID, t.ID, amount, currency, req.PromoCode, p.ID)
+			if err != nil {
+				return err
+			}
+			if _, err := q.SetPaymentAmount(ctx, db.SetPaymentAmountParams{Amount: disc.Final, ID: p.ID}); err != nil {
+				return err
+			}
+			p.Amount = disc.Final
+		}
+		return nil
+	})
 	if err != nil {
 		return db.Payment{}, err
 	}
+	if reused {
+		return p, nil
+	}
 	lang, _ := s.d.Settings.Lang(ctx)
+	if disc.RedemptionID != 0 {
+		// p.Amount already contains the server-calculated discounted total.
+	} else if p.Amount == 0 {
+		p.Amount = amount
+	}
 	return s.openPayment(ctx, p, t.Name, Describe(t, lang))
 }
 
@@ -304,6 +365,9 @@ func (s *Service) openPayment(ctx context.Context, p db.Payment, title, desc str
 	ext, url, err := s.openInvoice(ctx, p, title, desc)
 	if err != nil {
 		_, _ = q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: "failed", ID: p.ID, OldStatus: "pending"})
+		if s.d.Promo != nil {
+			_ = s.d.Promo.ReleasePayment(ctx, p.ID)
+		}
 		_ = q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: errCode(err), ID: p.ID})
 		s.d.Log.Warn("billing: invoice", "provider", p.Provider, "payment", p.ID, "err", err)
 		return db.Payment{}, fmt.Errorf("%w: %s", ErrProviderOff, errCode(err))
@@ -370,6 +434,11 @@ func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency
 	if err != nil || p.Provider != Stars || p.Status != "pending" || p.TgID != tgID || p.Currency != currency || p.Amount != amount {
 		return ErrBadPayment
 	}
+	if s.d.Promo != nil {
+		if r, e := s.d.Promo.GetPaymentRedemption(ctx, p.ID); e == nil && r.ExpiresAt.Valid && s.d.Now().Unix() >= r.ExpiresAt.Int64 {
+			return ErrBadPayment
+		}
+	}
 	if p.Kind == KindPackage {
 		return s.packageOnSale(ctx, p)
 	}
@@ -392,6 +461,24 @@ func (s *Service) StarsPaid(ctx context.Context, tgID int64, payload, chargeID, 
 
 // paid marks the payment paid (once) and applies it.
 func (s *Service) paid(ctx context.Context, p db.Payment, externalID string) error {
+	if s.d.Promo != nil {
+		r, err := s.d.Promo.GetPaymentRedemption(ctx, p.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		late := err == nil && (r.Status == "released" || r.Status == "reserved" && r.ExpiresAt.Valid && s.d.Now().Unix() >= r.ExpiresAt.Int64)
+		if late {
+			handled, err := s.refundLatePromoPayment(ctx, p.ID, externalID, func(current db.Payment) error {
+				return s.refundPromoPayment(ctx, current, externalID)
+			})
+			if err != nil {
+				return err
+			}
+			if handled {
+				return nil
+			}
+		}
+	}
 	n, err := s.d.Store.Q.MarkPaymentPaid(ctx, db.MarkPaymentPaidParams{ExternalID: sql.NullString{String: externalID, Valid: true},
 		PaidAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}, ID: p.ID})
 	if err != nil {
@@ -400,7 +487,106 @@ func (s *Service) paid(ctx context.Context, p db.Payment, externalID string) err
 	if n == 1 {
 		s.d.Log.Info("billing: paid", "payment", p.ID, "provider", p.Provider, "amount", p.Amount, "currency", p.Currency)
 	}
-	return s.Apply(ctx, p.ID)
+	err = s.Apply(ctx, p.ID)
+	if errors.Is(err, promo.ErrReservationExpired) && s.d.Promo != nil {
+		handled, refundErr := s.refundLatePromoPayment(ctx, p.ID, externalID, func(current db.Payment) error {
+			return s.refundPromoPayment(ctx, current, externalID)
+		})
+		if refundErr != nil {
+			return refundErr
+		}
+		if handled {
+			return nil
+		}
+	}
+	return err
+}
+
+func (s *Service) refundPromoPayment(ctx context.Context, p db.Payment, externalID string) error {
+	switch {
+	case p.Provider == Stars:
+		tg := s.telegram()
+		if tg == nil {
+			return errors.New("cannot refund expired Stars promo payment: Telegram bot is unavailable")
+		}
+		return tg.RefundStars(ctx, p.TgID, externalID)
+	case AddonID(p.Provider) != "":
+		cl, cfg, err := s.addonClient(ctx, AddonID(p.Provider))
+		if err != nil {
+			return err
+		}
+		return cl.Refund(ctx, cfg.Values, externalID, p.Amount, "mikan-promo-late-"+strconv.FormatInt(p.ID, 10))
+	default:
+		return errors.New("cannot refund expired promo payment from this provider")
+	}
+}
+
+// refundLatePromoPayment serializes late-payment refunds within the panel process and
+// reloads persistent state after taking the lock so webhook and reconciliation cannot
+// both refund the same invoice. Addon refunds also carry a stable provider idempotency key
+// to cover retries after a process restart.
+func (s *Service) refundLatePromoPayment(ctx context.Context, paymentID int64, externalID string, refund func(db.Payment) error) (bool, error) {
+	s.promoRefundMu.Lock()
+	defer s.promoRefundMu.Unlock()
+
+	pay, err := s.d.Store.Q.GetPayment(ctx, paymentID)
+	if err != nil {
+		return false, err
+	}
+	if pay.Status == "refunded" {
+		if err := s.d.Promo.ReleasePayment(ctx, paymentID); err != nil {
+			return true, err
+		}
+		return true, nil
+	}
+	r, err := s.d.Promo.GetPaymentRedemption(ctx, paymentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	late := r.Status == "released" || r.Status == "reserved" && r.ExpiresAt.Valid && s.d.Now().Unix() >= r.ExpiresAt.Int64
+	if !late {
+		return false, nil
+	}
+	n, err := s.d.Store.Q.ClaimLatePromoRefund(ctx, db.ClaimLatePromoRefundParams{
+		RefundStartedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true},
+		ID:              r.ID, ExpiresAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true},
+		RefundStartedAt_2: sql.NullInt64{Int64: s.d.Now().Add(-2 * time.Minute).Unix(), Valid: true},
+	})
+	if err != nil {
+		return true, err
+	}
+	if n != 1 {
+		// Another panel process owns the current refund attempt. Its stable provider key
+		// makes retry after a crashed process safe once the lease expires.
+		return true, nil
+	}
+	if err := refund(pay); err != nil {
+		_ = s.d.Store.Q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: "promo_late_refund_failed", ID: paymentID})
+		return true, err
+	}
+	n, err = s.d.Store.Q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{
+		RefundedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}, ID: paymentID, Status: pay.Status,
+	})
+	if err != nil {
+		return true, err
+	}
+	if n != 1 {
+		latest, err := s.d.Store.Q.GetPayment(ctx, paymentID)
+		if err != nil {
+			return true, err
+		}
+		if latest.Status != "refunded" {
+			return true, errors.New("promo late refund completed but payment status changed")
+		}
+	}
+	if err := s.d.Promo.ReleasePayment(ctx, paymentID); err != nil {
+		return true, err
+	}
+	s.d.Log.Warn("billing: late discounted payment refunded", "payment", paymentID, "provider", pay.Provider)
+	return true, nil
 }
 
 // Apply turns a paid payment into the subscription. It runs once per payment: the status
@@ -432,6 +618,11 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			if u, err = s.applyPackage(ctx, q, pay); err != nil {
 				return err
 			}
+			if s.d.Promo != nil {
+				if err := s.d.Promo.ApplyPayment(ctx, q, id, u.ID); err != nil {
+					return err
+				}
+			}
 			return markApplied(ctx, q, id, u.ID, s.d.Now())
 		}
 		var userID int64
@@ -446,6 +637,11 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 				return err
 			}
 			_ = q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: pay.TgID})
+		}
+		if s.d.Promo != nil {
+			if err := s.d.Promo.ApplyPayment(ctx, q, id, u.ID); err != nil {
+				return err
+			}
 		}
 		return markApplied(ctx, q, id, u.ID, s.d.Now())
 	}
@@ -570,6 +766,9 @@ func (s *Service) Reconcile(ctx context.Context) {
 	}
 	if _, err := q.ExpirePayments(ctx, now.Add(-pendingTTL).Unix()); err != nil {
 		s.d.Log.Error("billing: expire", "err", err)
+	}
+	if s.d.Promo != nil {
+		_ = s.d.Promo.ReleaseExpired(ctx, now.Add(-pendingTTL).Unix())
 	}
 }
 

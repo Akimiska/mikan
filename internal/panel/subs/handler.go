@@ -19,6 +19,7 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -68,8 +69,10 @@ type Handler struct {
 	trustProxy bool
 	tg         Telegram         // nil: no bot
 	shop       *billing.Service // nil: nothing on sale
+	promos     *promo.Service
 	log        *slog.Logger
 	logged     sync.Map // what has been logged lately → when, so a standing fault is one line an hour
+	promoLimit promoLimiter
 }
 
 // Telegram is the bot's part in subscriptions: the page's "Open in Telegram" link and the
@@ -101,6 +104,7 @@ func (h *Handler) warn(key, msg string, args ...any) {
 
 // SetShop takes payments: the providers' webhooks under /pay/ and the Mini App's shop.
 func (h *Handler) SetShop(s *billing.Service) { h.shop = s }
+func (h *Handler) SetPromo(s *promo.Service)  { h.promos = s }
 
 func NewHandler(st *store.Store, cfg func(ctx context.Context) (Config, error), page http.Handler, now func() time.Time, devices Binder, trustProxy bool) *Handler {
 	return &Handler{st: st, cfg: cfg, page: page, now: now, devices: devices, trustProxy: trustProxy, log: slog.New(slog.DiscardHandler)}
@@ -276,6 +280,12 @@ func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
 		_ = json.NewEncoder(w).Encode(out)
 	case r.Method == http.MethodPost && (rest == "shop" || rest == "pay") && sameOrigin(r) && h.shop != nil:
 		h.miniAppShop(w, r, rest)
+	case r.Method == http.MethodPost && (rest == "promo" || rest == "promo-history") && sameOrigin(r) && h.promos != nil:
+		if rest == "promo-history" {
+			h.miniAppPromoHistory(w, r)
+		} else {
+			h.miniAppPromo(w, r)
+		}
 	default:
 		server.NotFound(w)
 	}
@@ -291,6 +301,7 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 		PackageID int64  `json:"package_id"`
 		Provider  string `json:"provider"`
 		Token     string `json:"token"`
+		PromoCode string `json:"promo_code"`
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
@@ -363,9 +374,9 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	}
 	var p db.Payment
 	if in.PackageID != 0 {
-		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider)})
+		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
 	} else {
-		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: billing.AdapterOf(in.Provider)})
+		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
 	}
 	if err != nil {
 		status, code, unexplained := invoiceFailure(err)
@@ -378,14 +389,173 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	_ = json.NewEncoder(w).Encode(map[string]string{"url": p.PayUrl, "provider": p.Provider})
 }
 
+// miniAppPromo validates a code or immediately redeems a bonus. Discount codes are only
+// validated here; they are reserved atomically with the payment when the order is opened.
+func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		InitData string `json:"init_data"`
+		Token    string `json:"token"`
+		Code     string `json:"code"`
+		TariffID int64  `json:"tariff_id"`
+		Amount   int64  `json:"amount"`
+		Currency string `json:"currency"`
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	fail := func(status int, code string) {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
+	}
+	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil || strings.TrimSpace(in.Code) == "" {
+		fail(http.StatusBadRequest, "bad_request")
+		return
+	}
+	tgID, users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
+	if err != nil {
+		fail(http.StatusUnauthorized, "init_data")
+		return
+	}
+	if !h.promoLimit.allow(tgID, h.now()) {
+		fail(http.StatusTooManyRequests, "promo_try_later")
+		return
+	}
+	var userID int64
+	if in.Token != "" {
+		for _, u := range users {
+			if u.SubToken == in.Token {
+				userID = u.ID
+				break
+			}
+		}
+		if userID == 0 {
+			fail(http.StatusForbidden, billing.ErrNotYours.Error())
+			return
+		}
+	}
+	p, err := h.promos.Validate(r.Context(), tgID, userID, in.TariffID, in.Amount, in.Currency, in.Code)
+	if err != nil {
+		if promoUnavailable(err) {
+			fail(http.StatusConflict, "promo_unavailable")
+			return
+		}
+		status := http.StatusConflict
+		fail(status, promoCode(err))
+		return
+	}
+	if p.Type == "days" || p.Type == "traffic" {
+		r, err := h.promos.RedeemBonus(r.Context(), tgID, userID, in.Code)
+		if err != nil {
+			if promoUnavailable(err) {
+				fail(http.StatusConflict, "promo_unavailable")
+				return
+			}
+			fail(http.StatusConflict, promoCode(err))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "days": r.Days, "bytes": r.Bytes, "message": "promo_applied"})
+		return
+	}
+	d := promo.DiscountAmount(p, in.Amount)
+	out := map[string]any{"ok": true, "type": p.Type, "code": p.Code, "expires_at": p.EndsAt}
+	if in.Amount > 0 {
+		out["discount"] = d
+		out["final_amount"] = in.Amount - d
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		InitData string `json:"init_data"`
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	tgID, _, err := h.tg.MiniAppUser(r.Context(), in.InitData)
+	if err != nil {
+		w.WriteHeader(401)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": "init_data"})
+		return
+	}
+	rs, err := h.st.Q.ListPromoRedemptionsByTg(r.Context(), db.ListPromoRedemptionsByTgParams{TgID: tgID, Limit: 100})
+	if err != nil {
+		w.WriteHeader(500)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": "internal"})
+		return
+	}
+	type item struct {
+		Code     string `json:"code"`
+		Days     int64  `json:"days"`
+		Bytes    int64  `json:"bytes"`
+		Discount int64  `json:"discount"`
+		Currency string `json:"currency"`
+		At       int64  `json:"at"`
+	}
+	out := struct {
+		Items []item `json:"items"`
+	}{Items: []item{}}
+	for _, redemption := range rs {
+		p, e := h.st.Q.GetPromoCode(r.Context(), redemption.PromoID)
+		if e != nil {
+			continue
+		}
+		out.Items = append(out.Items, item{Code: p.Code, Days: redemption.Days, Bytes: redemption.Bytes, Discount: redemption.DiscountAmount, Currency: redemption.Currency, At: redemption.RedeemedAt})
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func promoCode(err error) string {
+	if promoUnavailable(err) {
+		return "promo_unavailable"
+	}
+	switch {
+	case errors.Is(err, promo.ErrTariff):
+		return "promo_tariff"
+	case errors.Is(err, promo.ErrMinimum):
+		return "promo_minimum"
+	case errors.Is(err, promo.ErrNewUser):
+		return "promo_new_user"
+	case errors.Is(err, promo.ErrFirstPurchase):
+		return "promo_first_purchase"
+	case errors.Is(err, promo.ErrCurrency):
+		return "promo_currency"
+	case errors.Is(err, promo.ErrSubscription):
+		return "promo_subscription_required"
+	case errors.Is(err, promo.ErrNoExpiry):
+		return "promo_no_expiry"
+	case errors.Is(err, promo.ErrAlreadyApplied):
+		return "promo_already_applied"
+	case errors.Is(err, promo.ErrNotDiscount):
+		return "promo_not_discount"
+	case errors.Is(err, promo.ErrInvalidValue):
+		return "promo_invalid_value"
+	case errors.Is(err, promo.ErrRefundUnsupported):
+		return "promo_refund_unsupported"
+	default:
+		return "promo_unavailable"
+	}
+}
+
+func promoUnavailable(err error) bool {
+	return errors.Is(err, promo.ErrNotFound) || errors.Is(err, promo.ErrInactive) || errors.Is(err, promo.ErrExpired) ||
+		errors.Is(err, promo.ErrLimit) || errors.Is(err, promo.ErrUserLimit)
+}
+
 // invoiceFailure is what the Mini App answers when no invoice could be made. What the buyer
 // can act on is told as it is. A provider that is switched off is "provider_off". Anything
 // else, a provider that failed, a database that was busy, is the panel's trouble: the buyer
 // is told it did not work, not that payment is off, and unexplained says nobody has logged
 // the cause yet (billing logs a provider's failure itself).
 func invoiceFailure(err error) (status int, code string, unexplained bool) {
-	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours} {
+	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours,
+		promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit, promo.ErrTariff, promo.ErrMinimum, promo.ErrNewUser, promo.ErrFirstPurchase, promo.ErrCurrency, promo.ErrUnavailable, promo.ErrNotDiscount, promo.ErrInvalidValue, promo.ErrRefundUnsupported} {
 		if errors.Is(err, e) {
+			if strings.HasPrefix(e.Error(), "promo_") {
+				return http.StatusConflict, promoCode(err), false
+			}
 			return http.StatusConflict, e.Error(), false
 		}
 	}

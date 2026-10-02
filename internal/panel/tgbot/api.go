@@ -302,7 +302,12 @@ func (c *Client) AnswerPreCheckout(ctx context.Context, id string, ok bool, reas
 
 // RefundStars returns a Stars payment.
 func (c *Client) RefundStars(ctx context.Context, user int64, chargeID string) error {
-	return c.call(ctx, "refundStarPayment", map[string]any{"user_id": user, "telegram_payment_charge_id": chargeID}, nil)
+	err := c.call(ctx, "refundStarPayment", map[string]any{"user_id": user, "telegram_payment_charge_id": chargeID}, nil)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && strings.Contains(strings.ToUpper(apiErr.Description), "CHARGE_ALREADY_REFUNDED") {
+		return nil
+	}
+	return err
 }
 
 func truncate(s string, n int) string {

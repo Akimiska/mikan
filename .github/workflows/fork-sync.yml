@@ -1,0 +1,63 @@
+name: fork-sync
+
+# Универсальное обновление форка: раз в неделю (и вручную) тянет upstream
+# Miroshka000/mikan, пробует смержить в main. Чисто → открывает PR (CI соберёт,
+# мейнтейнер мержит). Конфликт → заводит issue со списком файлов (разрулить
+# руками). Автодеплой НЕ делает — только готовит обновление к ревью.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # понедельник ~06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/Miroshka000/mikan.git || true
+          git fetch upstream main
+          git config user.name "fork-sync[bot]"
+          git config user.email "fork-sync@users.noreply.github.com"
+      - name: Try merge
+        id: m
+        run: |
+          behind=$(git rev-list --count origin/main..upstream/main)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          if [ "$behind" = "0" ]; then echo "status=uptodate" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git checkout -B fork-sync origin/main
+          if git merge --no-edit upstream/main; then
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+            git push -f origin fork-sync
+          else
+            git diff --name-only --diff-filter=U | sort -u > /tmp/conflicts.txt
+            git merge --abort
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Open PR (clean)
+        if: steps.m.outputs.status == 'clean'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create --base main --head fork-sync \
+            --title "fork-sync: upstream mikan (${{ steps.m.outputs.behind }} commits)" \
+            --body "Автоматический мерж upstream/main — конфликтов НЕТ. CI соберёт образ. Проверить формат подписки (2 группы/bypass/порядок/SE-по-IP) и смержить." \
+          || gh pr comment fork-sync --body "Обновлено $(date -u): upstream +${{ steps.m.outputs.behind }} коммитов, чисто."
+      - name: Open issue (conflict)
+        if: steps.m.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "fork-sync: нужен ручной мерж upstream (${{ steps.m.outputs.behind }} commits)" \
+            --body "$(printf 'Автомерж upstream/main дал конфликты. Разрулить вручную, сохранив правки AoiVPN.\n\nКонфликтные файлы:\n```\n%s\n```\n\n```\ngit fetch upstream && git checkout -b sync main && git merge upstream/main\n```' "$(cat /tmp/conflicts.txt)")"

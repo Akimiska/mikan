@@ -92,6 +92,7 @@ func makeManifest(args []string) error {
 	digest := fs.String("digest", "", "sha256 digest of the pushed multi-arch image")
 	changelog := fs.String("changelog", "CHANGELOG.md", "where the release notes are")
 	out := fs.String("out", "dist", "output directory")
+	tag := fs.String("tag", "", "release tag the installers are downloaded from (default v<version>)")
 	var files assets
 	fs.Var(&files, "asset", "arch=path of an installer binary (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -104,6 +105,9 @@ func makeManifest(args []string) error {
 	log, err := os.ReadFile(*changelog)
 	if err != nil {
 		return err
+	}
+	if *tag == "" {
+		*tag = "v" + *version
 	}
 	m := release.Manifest{Version: *version, MinInstaller: *minInstaller, Published: time.Now().UTC().Truncate(time.Second), Image: *image, Digest: *digest,
 		Installer: map[string]release.Asset{}, Notes: release.Notes(log, *version)}
@@ -118,7 +122,7 @@ func makeManifest(args []string) error {
 		}
 		sum := sha256.Sum256(data)
 		m.Installer[arch] = release.Asset{
-			URL:    fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", release.Repo, *version, filepath.Base(path)),
+			URL:    fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", release.Repo, *tag, filepath.Base(path)),
 			SHA256: hex.EncodeToString(sum[:]),
 		}
 	}

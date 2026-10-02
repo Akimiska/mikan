@@ -109,7 +109,6 @@ export function uptime(iso: string, now = Date.now()): string {
   return t("time.uptimeMinutes", { m });
 }
 
-/** An app's name and version from its User-Agent: "koala-clash/2.4.0 mihomo/1.19.31" → "koala-clash 2.4.0". */
 /** The app a User-Agent names: its first product token that is not the core itself ("mihomo/1.19.32 ClashFest/1.2.0" is ClashFest). */
 export function appName(ua: string): string {
   const tokens = ua.trim().split(/\s+/).filter(Boolean);

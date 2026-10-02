@@ -6,98 +6,180 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
-	"modernc.org/sqlite"
-	sqlite3 "modernc.org/sqlite/lib"
+	"github.com/pressly/goose/v3/lock"
 
 	"mikan/internal/panel/store/db"
 )
 
+// Legacy migrations are exclusively for normalizing a COPY during SQLite import.
+//
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+//go:embed postgres/*.sql
+var postgresMigrations embed.FS
+
 type Store struct {
-	DB *sql.DB
-	Q  *db.Queries
+	DB      *sql.DB
+	Q       *db.Queries
+	cleanup func() error
 }
 
-// Open creates the data directory if needed, opens the SQLite database and applies migrations.
 func Open(ctx context.Context, dataDir string) (*Store, error) {
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return nil, fmt.Errorf("create data dir: %w", err)
-	}
-	path := filepath.Join(dataDir, "mikan.db")
-	// _txlock=immediate takes the write lock at BEGIN, so concurrent writers wait on
-	// busy_timeout instead of failing with SQLITE_BUSY on lock upgrade.
-	dsn := "file:" + filepath.ToSlash(path) +
-		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=synchronous(NORMAL)&_txlock=immediate"
-	conn, err := sql.Open("sqlite", dsn)
+	return OpenPostgres(ctx, dataDir, os.Getenv("MIKAN_DATABASE_URL"))
+}
+
+// OpenPostgres never falls back to SQLite. A legacy installation must first complete
+// database migrate while all its writers are stopped; an empty PG is not a new install.
+func OpenPostgres(ctx context.Context, dataDir, dsn string) (*Store, error) {
+	conn, err := PreparePostgresImport(ctx, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, err
 	}
-	if err := conn.PingContext(ctx); err != nil {
+	_, legacyErr := os.Stat(filepath.Join(dataDir, "mikan.db"))
+	_, markerErr := os.Stat(filepath.Join(dataDir, MigrationMarker))
+	if legacyErr == nil || markerErr == nil {
+		var report string
+		if err := conn.QueryRowContext(ctx, "SELECT report FROM mikan_sqlite_import WHERE id = 1").Scan(&report); err != nil {
+			conn.Close()
+			return nil, errors.New("SQLite data have not been imported: stop the panel and run mikan database migrate")
+		}
+		// A crash after COMMIT but before writing the marker is recovered from PostgreSQL.
+		if err := writeMigrationMarker(dataDir, []byte(report)); err != nil {
+			conn.Close()
+			return nil, err
+		}
+	} else if !errors.Is(legacyErr, fs.ErrNotExist) {
 		conn.Close()
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, fmt.Errorf("legacy database: %w", legacyErr)
 	}
-	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if markerErr != nil && !errors.Is(markerErr, fs.ErrNotExist) {
 		conn.Close()
-		return nil, fmt.Errorf("chmod db: %w", err)
+		return nil, markerErr
 	}
-	if err := migrate(ctx, conn); err != nil {
+	if err := migratePostgres(ctx, conn); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := ensureLocalNode(ctx, conn); err != nil {
 		conn.Close()
 		return nil, err
 	}
 	return &Store{DB: conn, Q: db.New(conn)}, nil
 }
 
-func migrate(ctx context.Context, conn *sql.DB) error {
-	fsys, err := fs.Sub(migrations, "migrations")
-	if err != nil {
-		return err
-	}
-	p, err := goose.NewProvider(goose.DialectSQLite3, conn, fsys)
-	if err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
-	if _, err := p.Up(ctx); err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
-	return nil
+func ensureLocalNode(ctx context.Context, conn *sql.DB) error {
+	_, err := conn.ExecContext(ctx, "INSERT INTO nodes(id,created_at,updated_at) VALUES(1,$1,$1) ON CONFLICT(id) DO NOTHING", time.Now().Unix())
+	return err
 }
 
-func (s *Store) Close() error { return s.DB.Close() }
+func connectPostgres(ctx context.Context, dsn string) (*sql.DB, error) {
+	if dsn == "" {
+		return nil, errors.New("MIKAN_DATABASE_URL is required; run the current mikan installer to set up PostgreSQL")
+	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, errors.New("invalid MIKAN_DATABASE_URL")
+	}
+	cfg.ConnectTimeout = 10 * time.Second
+	conn := stdlib.OpenDB(*cfg)
+	conn.SetMaxOpenConns(16)
+	conn.SetMaxIdleConns(4)
+	if err := conn.PingContext(ctx); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("open PostgreSQL: %w", err)
+	}
+	return conn, nil
+}
 
-// Tx runs fn inside a transaction bound to a Queries instance. The transaction takes the
-// write lock when it begins, so a panic in fn must not leave it open: the panic goes on,
-// the transaction is rolled back first (a background context would never cancel it).
-func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+func migratePostgres(ctx context.Context, conn *sql.DB) error {
+	fsys, err := fs.Sub(postgresMigrations, "postgres")
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if p := recover(); p != nil {
-			_ = tx.Rollback()
-			panic(p)
+	return finishPostgresImport(ctx, conn, fsys)
+}
+
+func postgresProvider(ctx context.Context, conn *sql.DB, fsys fs.FS) (*goose.Provider, error) {
+	var database, schema string
+	if err := conn.QueryRowContext(ctx, "SELECT current_database(),current_schema()").Scan(&database, &schema); err != nil {
+		return nil, err
+	}
+	h := fnv.New64a()
+	fmt.Fprintf(h, "mikan-goose:%s:%s", database, schema)
+	locker, err := lock.NewPostgresSessionLocker(lock.WithLockID(int64(h.Sum64())))
+	if err != nil {
+		return nil, err
+	}
+	p, err := goose.NewProvider(goose.DialectPostgres, conn, fsys, goose.WithSessionLocker(locker))
+	if err != nil {
+		return nil, fmt.Errorf("PostgreSQL migrations: %w", err)
+	}
+	// GetDBVersion initializes Goose's table under the session lock. GetVersions
+	// initializes without it and races when two fresh processes start together.
+	current, err := p.GetDBVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("PostgreSQL migration versions: %w", err)
+	}
+	sources := p.ListSources()
+	target := sources[len(sources)-1].Version
+	if current > target {
+		return nil, fmt.Errorf("PostgreSQL schema %d is newer than this binary supports (%d); downgrade refused", current, target)
+	}
+	return p, nil
+}
+
+func (s *Store) Close() error {
+	err := s.DB.Close()
+	if s.cleanup != nil {
+		err = errors.Join(err, s.cleanup())
+	}
+	return err
+}
+
+// Tx preserves read/check/write invariants (quotas, payments, ports, slot numbers) with
+// serializable transactions. Callbacks only change database state: a serialization
+// conflict retries the whole callback, never just its final statement.
+func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
+	for attempt := 0; ; attempt++ {
+		err := s.txOnce(ctx, fn)
+		var pe *pgconn.PgError
+		if err == nil || attempt == 9 || !errors.As(err, &pe) || (pe.Code != "40001" && pe.Code != "40P01") {
+			return err
 		}
-	}()
+		timer := time.NewTimer(time.Duration(attempt+1) * 5 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Store) txOnce(ctx context.Context, fn func(q *db.Queries) error) error {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	if err := fn(s.Q.WithTx(tx)); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()
 }
 
-// IsUnique says whether err is a UNIQUE (or primary key) constraint violation, so that
-// callers need not match the text of the driver's message.
 func IsUnique(err error) bool {
-	var se *sqlite.Error
-	if !errors.As(err, &se) {
-		return false
-	}
-	return se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE || se.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23505"
 }

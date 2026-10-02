@@ -11,7 +11,7 @@ import (
 )
 
 const countRecentInvoices = `-- name: CountRecentInvoices :one
-SELECT count(*) FROM payments WHERE tg_id = ? AND status IN ('pending', 'paid') AND created_at > ?
+SELECT count(*) FROM payments WHERE tg_id = $1 AND status IN ('pending', 'paid') AND created_at > $2
 `
 
 type CountRecentInvoicesParams struct {
@@ -28,7 +28,7 @@ func (q *Queries) CountRecentInvoices(ctx context.Context, arg CountRecentInvoic
 
 const createPayment = `-- name: CreatePayment :one
 INSERT INTO payments (provider, payload, tg_id, kind, user_id, tariff_id, tariff_name, amount, currency, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10)
 RETURNING id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at
 `
 
@@ -84,7 +84,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 }
 
 const expirePayments = `-- name: ExpirePayments :execrows
-UPDATE payments SET status = 'expired' WHERE status = 'pending' AND created_at < ?
+UPDATE payments SET status = 'expired' WHERE status = 'pending' AND created_at < $1
 `
 
 func (q *Queries) ExpirePayments(ctx context.Context, createdAt int64) (int64, error) {
@@ -97,8 +97,8 @@ func (q *Queries) ExpirePayments(ctx context.Context, createdAt int64) (int64, e
 
 const findOpenPayment = `-- name: FindOpenPayment :one
 SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments
-WHERE tg_id = ? AND tariff_id = ? AND provider = ? AND kind = ? AND IFNULL(user_id, 0) = ?5
-  AND status = 'pending' AND pay_url <> '' AND created_at > ?6
+WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND COALESCE(user_id, 0) = CAST($5 AS BIGINT)
+  AND status = 'pending' AND pay_url <> '' AND created_at > $6
 ORDER BY id DESC LIMIT 1
 `
 
@@ -107,7 +107,7 @@ type FindOpenPaymentParams struct {
 	TariffID sql.NullInt64
 	Provider string
 	Kind     string
-	UserID   sql.NullInt64
+	UserID   int64
 	Since    int64
 }
 
@@ -146,7 +146,7 @@ func (q *Queries) FindOpenPayment(ctx context.Context, arg FindOpenPaymentParams
 }
 
 const getPayment = `-- name: GetPayment :one
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE id = ?
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE id = $1
 `
 
 func (q *Queries) GetPayment(ctx context.Context, id int64) (Payment, error) {
@@ -177,7 +177,7 @@ func (q *Queries) GetPayment(ctx context.Context, id int64) (Payment, error) {
 }
 
 const getPaymentByExternal = `-- name: GetPaymentByExternal :one
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE provider = ? AND external_id = ?
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE provider = $1 AND external_id = $2
 `
 
 type GetPaymentByExternalParams struct {
@@ -213,7 +213,7 @@ func (q *Queries) GetPaymentByExternal(ctx context.Context, arg GetPaymentByExte
 }
 
 const getPaymentByPayload = `-- name: GetPaymentByPayload :one
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE payload = ?
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE payload = $1
 `
 
 func (q *Queries) GetPaymentByPayload(ctx context.Context, payload string) (Payment, error) {
@@ -291,22 +291,22 @@ func (q *Queries) ListPaidPayments(ctx context.Context) ([]Payment, error) {
 }
 
 const listPayments = `-- name: ListPayments :many
-SELECT payments.id, payments.provider, payments.payload, payments.external_id, payments.tg_id, payments.kind, payments.user_id, payments.tariff_id, payments.package_id, payments.tariff_name, payments.amount, payments.currency, payments.status, payments.error, payments.pay_url, payments.created_at, payments.paid_at, payments.applied_at, payments.refunded_at, CAST(IFNULL(users.name, '') AS TEXT) AS user_name, CAST(IFNULL(tg_chats.username, '') AS TEXT) AS tg_username
+SELECT payments.id, payments.provider, payments.payload, payments.external_id, payments.tg_id, payments.kind, payments.user_id, payments.tariff_id, payments.package_id, payments.tariff_name, payments.amount, payments.currency, payments.status, payments.error, payments.pay_url, payments.created_at, payments.paid_at, payments.applied_at, payments.refunded_at, CAST(COALESCE(users.name, '') AS TEXT) AS user_name, CAST(COALESCE(tg_chats.username, '') AS TEXT) AS tg_username
 FROM payments
 LEFT JOIN users ON users.id = payments.user_id
 LEFT JOIN tg_chats ON tg_chats.tg_id = payments.tg_id
-WHERE payments.id < ?1
-  AND (?2 = '' OR payments.status = ?2)
-  AND (?3 = '' OR payments.provider = ?3)
-  AND (?4 = 0 OR payments.user_id = ?4)
-ORDER BY payments.id DESC LIMIT ?5
+WHERE payments.id < $1
+  AND (CAST($2 AS TEXT) = '' OR payments.status = $2)
+  AND (CAST($3 AS TEXT) = '' OR payments.provider = $3)
+  AND (CAST($4 AS BIGINT) = 0 OR payments.user_id = $4)
+ORDER BY payments.id DESC LIMIT CAST($5 AS BIGINT)
 `
 
 type ListPaymentsParams struct {
 	BeforeID int64
-	Status   interface{}
-	Provider interface{}
-	UserID   interface{}
+	Status   string
+	Provider string
+	UserID   int64
 	Lim      int64
 }
 
@@ -368,7 +368,7 @@ func (q *Queries) ListPayments(ctx context.Context, arg ListPaymentsParams) ([]L
 }
 
 const listPendingPayments = `-- name: ListPendingPayments :many
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE status = 'pending' AND created_at > ? ORDER BY id
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments WHERE status = 'pending' AND created_at > $1 ORDER BY id
 `
 
 func (q *Queries) ListPendingPayments(ctx context.Context, createdAt int64) ([]Payment, error) {
@@ -457,8 +457,8 @@ func (q *Queries) ListTariffsOnSale(ctx context.Context) ([]Tariff, error) {
 }
 
 const markPaymentApplied = `-- name: MarkPaymentApplied :execrows
-UPDATE payments SET status = 'applied', user_id = ?, applied_at = ?, error = ''
-WHERE id = ? AND status = 'paid'
+UPDATE payments SET status = 'applied', user_id = $1, applied_at = $2, error = ''
+WHERE id = $3 AND status = 'paid'
 `
 
 type MarkPaymentAppliedParams struct {
@@ -476,8 +476,8 @@ func (q *Queries) MarkPaymentApplied(ctx context.Context, arg MarkPaymentApplied
 }
 
 const markPaymentPaid = `-- name: MarkPaymentPaid :execrows
-UPDATE payments SET status = 'paid', external_id = ?, paid_at = ?
-WHERE id = ? AND status IN ('pending', 'expired')
+UPDATE payments SET status = 'paid', external_id = $1, paid_at = $2
+WHERE id = $3 AND status IN ('pending', 'expired')
 `
 
 type MarkPaymentPaidParams struct {
@@ -495,7 +495,7 @@ func (q *Queries) MarkPaymentPaid(ctx context.Context, arg MarkPaymentPaidParams
 }
 
 const markPaymentRefunded = `-- name: MarkPaymentRefunded :execrows
-UPDATE payments SET status = 'refunded', refunded_at = ? WHERE id = ? AND status = 'applied'
+UPDATE payments SET status = 'refunded', refunded_at = $1 WHERE id = $2 AND status = 'applied'
 `
 
 type MarkPaymentRefundedParams struct {
@@ -512,8 +512,8 @@ func (q *Queries) MarkPaymentRefunded(ctx context.Context, arg MarkPaymentRefund
 }
 
 const paymentTotals = `-- name: PaymentTotals :many
-SELECT currency, count(*) AS n, CAST(IFNULL(sum(amount), 0) AS INTEGER) AS total
-FROM payments WHERE status = 'applied' AND applied_at >= ? GROUP BY currency
+SELECT currency, count(*) AS n, CAST(COALESCE(sum(amount), 0) AS BIGINT) AS total
+FROM payments WHERE status = 'applied' AND applied_at >= $1 GROUP BY currency
 `
 
 type PaymentTotalsRow struct {
@@ -546,7 +546,7 @@ func (q *Queries) PaymentTotals(ctx context.Context, appliedAt sql.NullInt64) ([
 }
 
 const setPaymentError = `-- name: SetPaymentError :exec
-UPDATE payments SET error = ? WHERE id = ?
+UPDATE payments SET error = $1 WHERE id = $2
 `
 
 type SetPaymentErrorParams struct {
@@ -560,7 +560,7 @@ func (q *Queries) SetPaymentError(ctx context.Context, arg SetPaymentErrorParams
 }
 
 const setPaymentInvoice = `-- name: SetPaymentInvoice :exec
-UPDATE payments SET external_id = ?, pay_url = ? WHERE id = ?
+UPDATE payments SET external_id = $1, pay_url = $2 WHERE id = $3
 `
 
 type SetPaymentInvoiceParams struct {
@@ -575,7 +575,7 @@ func (q *Queries) SetPaymentInvoice(ctx context.Context, arg SetPaymentInvoicePa
 }
 
 const setPaymentStatus = `-- name: SetPaymentStatus :execrows
-UPDATE payments SET status = ?1 WHERE id = ?2 AND status = ?3
+UPDATE payments SET status = $1 WHERE id = $2 AND status = $3
 `
 
 type SetPaymentStatusParams struct {

@@ -45,7 +45,7 @@ func setup(t *testing.T) (*Syncer, *fakeNode, *store.Store, *domain.Users, *time
 	t.Helper()
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0)
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

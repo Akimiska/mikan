@@ -24,7 +24,7 @@ import (
 // (six settings reads) and the whole online map 500 times each.
 func TestUserListReadsSharedStateOnce(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

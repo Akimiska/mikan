@@ -19,7 +19,7 @@ func TestSeedNamesTariffsInDefaultLang(t *testing.T) {
 		"en": {"Trial", "Standard", "Unlimited"},
 	} {
 		ctx := context.Background()
-		st, err := store.Open(ctx, t.TempDir())
+		st, err := store.OpenTest(ctx, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}

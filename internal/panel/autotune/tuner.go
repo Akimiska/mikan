@@ -409,16 +409,30 @@ func (t *Tuner) recordReach(ctx context.Context, w *world, inbounds []db.Inbound
 				if err := q.UpsertInboundReach(ctx, db.UpsertInboundReachParams{Slot: c.Slot, InboundID: id, At: at}); err != nil {
 					return err
 				}
-				if w.reach[c.Slot] == nil {
-					w.reach[c.Slot] = map[int64]int64{}
-				}
-				w.reach[c.Slot][id] = at
 			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.log.Error("autotune: record reach", "err", err)
+		return
+	}
+	// Publish the cache only after commit: a serializable retry must still write
+	// every reach observation from the rolled-back attempt.
+	for _, c := range act.Clients {
+		if _, known := w.users[c.Slot]; !known {
+			continue
+		}
+		for name, at := range c.Seen {
+			id, ok := ids[name]
+			if !ok || at-w.reach[c.Slot][id] < int64(reachStep/time.Second) {
+				continue
+			}
+			if w.reach[c.Slot] == nil {
+				w.reach[c.Slot] = map[int64]int64{}
+			}
+			w.reach[c.Slot][id] = at
+		}
 	}
 }
 

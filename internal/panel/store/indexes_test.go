@@ -7,15 +7,23 @@ import (
 )
 
 // The tables keyed by (user_id, time) are read and pruned by time alone: the primary key
-// cannot serve that, the time indexes of migration 0017 do. A plan that scans the table
-// (and a year of 10 000 users is millions of rows) fails here.
+// cannot serve that. With sequential scans disabled, PostgreSQL must have a usable
+// time index even for a fresh empty fixture (where a sequential scan is usually cheaper).
 func TestTimeQueriesUseTheirIndex(t *testing.T) {
 	ctx := context.Background()
-	st, err := Open(ctx, t.TempDir())
+	st, err := OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	conn, err := st.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "SET enable_seqscan=off"); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct{ sql, table, index string }{
 		{"DELETE FROM traffic_hourly WHERE hour < 1", "traffic_hourly", "traffic_hourly_hour"},
 		{"DELETE FROM traffic_daily WHERE day < 1", "traffic_daily", "traffic_daily_day"},
@@ -25,15 +33,14 @@ func TestTimeQueriesUseTheirIndex(t *testing.T) {
 		{"DELETE FROM devices WHERE last_seen < 1", "devices", "devices_last_seen"},
 		{"DELETE FROM audit_log WHERE ts < 1", "audit_log", "audit_log_ts"},
 	} {
-		rows, err := st.DB.QueryContext(ctx, "EXPLAIN QUERY PLAN "+c.sql)
+		rows, err := conn.QueryContext(ctx, "EXPLAIN "+c.sql)
 		if err != nil {
 			t.Fatalf("%s: %v", c.sql, err)
 		}
 		var plan []string
 		for rows.Next() {
-			var id, parent, unused int
 			var detail string
-			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			if err := rows.Scan(&detail); err != nil {
 				t.Fatal(err)
 			}
 			plan = append(plan, detail)

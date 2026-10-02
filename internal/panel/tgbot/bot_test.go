@@ -241,7 +241,7 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	t.Cleanup(cancel)
 	e.ctx = ctx
 	var err error
-	if e.st, err = store.Open(ctx, t.TempDir()); err != nil {
+	if e.st, err = store.OpenTest(ctx, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })
@@ -427,7 +427,7 @@ func TestBot(t *testing.T) {
 
 	// Notifications go once per term.
 	exp := e.clock().Add(2 * 24 * time.Hour).Unix()
-	if _, err := e.st.DB.ExecContext(e.ctx, "UPDATE users SET expires_at = ? WHERE id = ?", exp, e.user.ID); err != nil {
+	if _, err := e.st.DB.ExecContext(e.ctx, "UPDATE users SET expires_at = $1 WHERE id = $2", exp, e.user.ID); err != nil {
 		t.Fatal(err)
 	}
 	n = e.tg.count()
@@ -572,7 +572,7 @@ func TestBot(t *testing.T) {
 
 func TestConfigSavedBefore(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

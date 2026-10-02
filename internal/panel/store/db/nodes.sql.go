@@ -11,7 +11,7 @@ import (
 
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+VALUES ($1, $2, $3, $4, $5, 1, $6, $7)
 RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at
 `
 
@@ -51,7 +51,7 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 }
 
 const deleteNode = `-- name: DeleteNode :exec
-DELETE FROM nodes WHERE id = ? AND id != 1
+DELETE FROM nodes WHERE id = $1 AND id != 1
 `
 
 func (q *Queries) DeleteNode(ctx context.Context, id int64) error {
@@ -60,7 +60,7 @@ func (q *Queries) DeleteNode(ctx context.Context, id int64) error {
 }
 
 const getNode = `-- name: GetNode :one
-SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at FROM nodes WHERE id = ?
+SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at FROM nodes WHERE id = $1
 `
 
 func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
@@ -118,7 +118,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 }
 
 const setNodeCert = `-- name: SetNodeCert :exec
-UPDATE nodes SET cert_sha256 = ?, updated_at = ? WHERE id = ?
+UPDATE nodes SET cert_sha256 = $1, updated_at = $2 WHERE id = $3
 `
 
 type SetNodeCertParams struct {
@@ -133,7 +133,7 @@ func (q *Queries) SetNodeCert(ctx context.Context, arg SetNodeCertParams) error 
 }
 
 const updateNode = `-- name: UpdateNode :one
-UPDATE nodes SET name = ?, address = ?, public_host = ?, domain = ?, enabled = ?, updated_at = ? WHERE id = ? RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at
+UPDATE nodes SET name = $1, address = $2, public_host = $3, domain = $4, enabled = $5, updated_at = $6 WHERE id = $7 RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at
 `
 
 type UpdateNodeParams struct {

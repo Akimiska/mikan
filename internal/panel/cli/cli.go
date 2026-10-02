@@ -40,6 +40,9 @@ Commands:
   admin reset-path              give the panel a new secret link
   admin disable-2fa             turn off the admin's 2FA
   admin backup FILE             write a consistent copy of the database while the panel runs
+  database migrate              import legacy SQLite while the panel is stopped
+  database backup FILE          write a PostgreSQL archive (pg_dump)
+  database restore FILE         restore PostgreSQL or import a legacy SQLite backup offline
   admin inbound list            inbounds: node, name, preset, port
   admin inbound add PRESET [--port PORT] [--node NODE]
                                 add an inbound from a preset with fresh keys
@@ -79,6 +82,8 @@ func Run(ctx context.Context, args []string, version string, web fs.FS) error {
 		return app.Serve(ctx, cfg, version, web)
 	case "admin":
 		return adminCmd(ctx, args[1:])
+	case "database":
+		return databaseCmd(ctx, args[1:])
 	case "openapi":
 		_, humaAPI, err := api.New(api.Deps{Version: version, Now: time.Now})
 		if err != nil {
@@ -106,6 +111,9 @@ func Run(ctx context.Context, args []string, version string, web fs.FS) error {
 func adminCmd(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("admin needs a subcommand\n\n" + usage)
+	}
+	if args[0] == "backup" {
+		return databaseCmd(ctx, args)
 	}
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -145,15 +153,6 @@ func adminCmd(ctx context.Context, args []string) error {
 		fmt.Println("New link (the old one stops working within 5 seconds):")
 		fmt.Println(u)
 		return nil
-	case "backup":
-		if len(args) < 2 {
-			return errors.New("name the file: mikan admin backup /data/backup.db")
-		}
-		if err := backup(ctx, st, args[1]); err != nil {
-			return err
-		}
-		fmt.Println("Database copied to", args[1])
-		return nil
 	case "cert":
 		return certCmd(ctx, st, set, cfg.DataDir, args[1:], os.Stdin, os.Stdout)
 	case "node":
@@ -181,25 +180,6 @@ func adminCmd(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown admin subcommand %q\n\n%s", args[0], usage)
 	}
-}
-
-// backup writes a consistent copy of the database to path while the panel keeps running.
-// The copy holds the password hashes, the bot's token and the WARP keys: the file is made
-// private before anything is written to it, not after. VACUUM INTO takes an existing file
-// only when it is empty.
-func backup(ctx context.Context, st *store.Store, path string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("backup: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("backup: %w", err)
-	}
-	if _, err := st.DB.ExecContext(ctx, "VACUUM INTO ?", path); err != nil {
-		_ = os.Remove(path)
-		return fmt.Errorf("backup: %w", err)
-	}
-	return os.Chmod(path, 0o600)
 }
 
 func bootstrap(ctx context.Context, st *store.Store, set *settings.Settings, args []string, stdin io.Reader, stdout io.Writer) error {

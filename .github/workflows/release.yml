@@ -1,11 +1,11 @@
 name: release
 
-# A tag vX.Y.Z on main publishes a release:
+# A tag vX.Y.Z.R on main publishes a release (legacy vX.Y.Z is accepted):
 #   - the image to GitHub Packages (ghcr.io/<owner>/mikan), amd64 and arm64;
 #   - the installer for x86_64 and aarch64;
 #   - manifest.json signed with the release key (RELEASE_SIGNING_KEY), which the panel's
 #     update check and the installer trust, and install.sh for the one-line install.
-# A pre-release tag (vX.Y.Z-rc.N) is published as a pre-release and does not move :latest.
+# A pre-release tag (vX.Y.Z.R-rc.N) is published as a pre-release and does not move :latest.
 #
 # The signing key reaches a job that runs this repository's code, so the code that runs is
 # the code of main: a tag on any other commit stops at the first job (guard), before any
@@ -30,6 +30,10 @@ jobs:
           persist-credentials: false
       - name: the tagged commit is on main
         run: |
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release version: $GITHUB_REF_NAME"
+            exit 1
+          fi
           git fetch --no-tags origin main
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "::error::$GITHUB_REF_NAME is on a commit that is not on main: a release is made from main only"
@@ -39,6 +43,19 @@ jobs:
   test:
     needs: guard
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: mikan_test
+          POSTGRES_PASSWORD: mikan_test
+          POSTGRES_DB: mikan_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mikan_test -d mikan_test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      MIKAN_TEST_DATABASE_URL: postgres://mikan_test:mikan_test@localhost:5432/mikan_test?sslmode=disable
     permissions:
       contents: read
     steps:
@@ -61,6 +78,14 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+      - name: PostgreSQL 18 backup tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-18
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
       - name: go
         run: go test ./internal/...
 
@@ -93,7 +118,7 @@ jobs:
         with:
           images: ${{ steps.name.outputs.image }}
           tags: |
-            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.name.outputs.version }}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

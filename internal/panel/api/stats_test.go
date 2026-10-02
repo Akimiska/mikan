@@ -18,7 +18,7 @@ func (noChanges) SlotsChanged()    {}
 // A user online from two devices with keys of their own is one user online.
 func TestOverviewCountsUsersNotDevices(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

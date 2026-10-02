@@ -26,7 +26,7 @@ import (
 func TestCertCommand(t *testing.T) {
 	ctx := context.Background()
 	dataDir := t.TempDir()
-	st, err := store.Open(ctx, dataDir)
+	st, err := store.OpenTest(ctx, dataDir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -257,7 +257,7 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 	userID := sql.NullInt64{Int64: req.UserID, Valid: req.UserID != 0}
 	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
 	if p, err := q.FindOpenPayment(ctx, db.FindOpenPaymentParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: kind,
-		UserID: sql.NullInt64{Int64: req.UserID, Valid: true}, Since: now.Add(-invoiceReuse).Unix()}); err == nil && p.Amount == amount {
+		UserID: req.UserID, Since: now.Add(-invoiceReuse).Unix()}); err == nil && p.Amount == amount {
 		return p, nil
 	}
 	if n, err := s.recentInvoices(ctx, req.TgID, now); err != nil {

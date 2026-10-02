@@ -101,6 +101,11 @@ type InboundReach struct {
 	At        int64
 }
 
+type MikanSqliteImport struct {
+	ID     int64
+	Report string
+}
+
 type Node struct {
 	ID         int64
 	Name       string

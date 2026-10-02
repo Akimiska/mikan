@@ -369,7 +369,15 @@ fn run(plan: &Plan, tx: &Sender<Event>) -> StepResult<()> {
         Ok(api_port)
     })?;
 
-    let creds = if node { None } else { Some(step(tx, Step::Bootstrap, || bootstrap(plan, tx))?) };
+    let creds = if node {
+        None
+    } else {
+        Some(step(tx, Step::Bootstrap, || {
+            docker::postgres_ready()?;
+            docker::database(&["migrate"])?;
+            bootstrap(plan, tx)
+        })?)
+    };
     // What the admin must not lose: the password is shown once, and it exists from here on.
     let kept = |(s, e): (Step, anyhow::Error)| match creds.as_ref().and_then(|c| c.password.as_ref().map(|p| (c, p))) {
         Some((c, p)) => (
@@ -580,7 +588,23 @@ fn write_files_in(root: &Path, plan: &Plan, image: &str, version: &str, api_port
     } else {
         write_private(&root.join("compose.yaml"), docker::compose_text(node).as_bytes())?;
     }
+    if !node {
+        postgres_env(&mut env)?;
+    }
     env.save()
+}
+
+/// Credentials persist across updates and resumed installs; never rotate a live database.
+pub fn postgres_env(env: &mut EnvFile) -> Result<()> {
+    if env.get("MIKAN_POSTGRES_PASSWORD").is_none() {
+        env.set("MIKAN_POSTGRES_PASSWORD", &token(48, ALNUM))?;
+    }
+    if env.get("MIKAN_DATABASE_URL").is_none() {
+        let password = env.get("MIKAN_POSTGRES_PASSWORD").context("postgres password missing")?;
+        let url = format!("postgresql://mikan:{password}@localhost/mikan?host=/run/postgresql");
+        env.set("MIKAN_DATABASE_URL", &url)?;
+    }
+    Ok(())
 }
 
 /// Waits for the panel to answer, or for a node's API port to listen.
@@ -741,6 +765,22 @@ mod tests {
         assert!(login.as_bytes()[0].is_ascii_lowercase() && login.len() == 12);
         let p = free_port();
         assert!((20000..=60000).contains(&p));
+    }
+
+    #[test]
+    fn postgres_credentials_survive_resumes_and_updates() {
+        let mut env = EnvFile::new("unused");
+        postgres_env(&mut env).unwrap();
+        let before = env.render();
+        let password = env.get("MIKAN_POSTGRES_PASSWORD").unwrap();
+        assert_eq!(password.len(), 48);
+        assert!(password.bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert_eq!(
+            env.get("MIKAN_DATABASE_URL"),
+            Some(format!("postgresql://mikan:{password}@localhost/mikan?host=/run/postgresql").as_str())
+        );
+        postgres_env(&mut env).unwrap();
+        assert_eq!(env.render(), before, "live credentials must never rotate");
     }
 
     #[test]

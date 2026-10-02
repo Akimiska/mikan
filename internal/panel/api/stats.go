@@ -108,7 +108,7 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 		}
 	}
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Unix() / 86400
-	top, err := h.d.Store.Q.TopUsersByTraffic(ctx, db.TopUsersByTrafficParams{Day: monthStart, Limit: 5})
+	top, err := h.d.Store.Q.TopUsersByTraffic(ctx, db.TopUsersByTrafficParams{Day: monthStart, Lim: 5})
 	if err != nil {
 		return nil, err
 	}

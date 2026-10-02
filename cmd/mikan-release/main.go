@@ -86,7 +86,8 @@ func (a *assets) Set(v string) error { *a = append(*a, v); return nil }
 
 func makeManifest(args []string) error {
 	fs := flag.NewFlagSet("manifest", flag.ContinueOnError)
-	version := fs.String("version", "", "release version, e.g. 0.3.9")
+	version := fs.String("version", "", "release version, e.g. 0.5.0.1")
+	minInstaller := fs.String("min-installer", "", "minimum host installer version, only for a release that cannot run with an older one")
 	image := fs.String("image", "", "image repository, e.g. ghcr.io/miroshka000/mikan")
 	digest := fs.String("digest", "", "sha256 digest of the pushed multi-arch image")
 	changelog := fs.String("changelog", "CHANGELOG.md", "where the release notes are")
@@ -104,7 +105,7 @@ func makeManifest(args []string) error {
 	if err != nil {
 		return err
 	}
-	m := release.Manifest{Version: *version, Published: time.Now().UTC().Truncate(time.Second), Image: *image, Digest: *digest,
+	m := release.Manifest{Version: *version, MinInstaller: *minInstaller, Published: time.Now().UTC().Truncate(time.Second), Image: *image, Digest: *digest,
 		Installer: map[string]release.Asset{}, Notes: release.Notes(log, *version)}
 	for _, a := range files {
 		arch, path, ok := strings.Cut(a, "=")

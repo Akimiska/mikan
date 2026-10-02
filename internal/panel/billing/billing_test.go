@@ -68,7 +68,7 @@ func newEnv(t *testing.T) *env {
 	ctx := context.Background()
 	e := &env{t: t, now: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), logs: &bytes.Buffer{}, tg: &fakeTG{}}
 	var err error
-	if e.st, err = store.Open(ctx, t.TempDir()); err != nil {
+	if e.st, err = store.OpenTest(ctx, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })
@@ -218,7 +218,7 @@ func TestRenewal(t *testing.T) {
 	u, err := domain.NewUsers(e.st, domain.NewPool(e.st, clock), noChanges{}, clock).Create(ctx, domain.CreateInput{Name: "a", TariffID: e.sale.ID})
 	must(t, err)
 	must(t, e.st.Q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: 555, CreatedAt: e.now.Unix()}))
-	_, err = e.st.DB.ExecContext(ctx, "UPDATE users SET used_up = 1000, used_down = 2000 WHERE id = ?", u.ID)
+	_, err = e.st.DB.ExecContext(ctx, "UPDATE users SET used_up = 1000, used_down = 2000 WHERE id = $1", u.ID)
 	must(t, err)
 
 	if _, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 777, UserID: u.ID, TariffID: e.sale.ID, Provider: Stars}); !errors.Is(err, ErrNotYours) {
@@ -281,7 +281,7 @@ func TestRenewalKeepsTraffic(t *testing.T) {
 	u, err := domain.NewUsers(e.st, domain.NewPool(e.st, clock), noChanges{}, clock).Create(ctx, domain.CreateInput{Name: "a", TariffID: e.sale.ID})
 	must(t, err)
 	must(t, e.st.Q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: 555, CreatedAt: e.now.Unix()}))
-	_, err = e.st.DB.ExecContext(ctx, "UPDATE users SET used_up = 1000, used_down = 2000 WHERE id = ?", u.ID)
+	_, err = e.st.DB.ExecContext(ctx, "UPDATE users SET used_up = 1000, used_down = 2000 WHERE id = $1", u.ID)
 	must(t, err)
 	p := e.invoice(555, u.ID, Stars)
 	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-k", "XTR", 150))
@@ -321,7 +321,7 @@ func TestSalesOff(t *testing.T) {
 func TestSalesDefault(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	_, err := e.st.DB.ExecContext(ctx, "DELETE FROM settings WHERE key = ?", KeyConfig)
+	_, err := e.st.DB.ExecContext(ctx, "DELETE FROM settings WHERE key = $1", KeyConfig)
 	must(t, err)
 	if e.s.Config(ctx).Enabled || e.s.Available(ctx).Any() {
 		t.Fatal("selling on in a panel that never set it up")

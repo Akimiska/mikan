@@ -3,6 +3,17 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.5.0.0
+### en
+- The panel now uses PostgreSQL. Updating imports existing SQLite data with stable subscription links, VPN credentials, user IDs, counters, payments and settings. All tables are verified before the import commits; the original SQLite remains on disk. Backups use PostgreSQL archives and legacy SQLite backups can be restored.
+- Releases use four numbers: major.minor.patch.revision. The updater understands historical three-number versions and applies database migrations on each update. Upgrade the host installer once with install.sh before the first PostgreSQL release. Migration failures keep the panel stopped and preserve both databases for a retry.
+- From now on a panel update that does not start goes back to the previous version when the database schema stayed the same; an update that moved the schema keeps the panel stopped with its data for a retry. Restoring a backup replaces the whole database, so a backup made before a newer migration restores cleanly.
+
+### ru
+- Панель переходит на PostgreSQL. При обновлении сохраняются ссылки подписок, VPN-ключи, ID пользователей, счётчики, платежи и настройки. Перенос всех таблиц проверяется до фиксации; исходная SQLite остаётся на диске. Новые бэкапы — архивы PostgreSQL, старые SQLite-бэкапы можно восстановить.
+- Версии теперь из четырёх чисел: major.minor.patch.revision. Обновление понимает прежние версии из трёх чисел и применяет миграции БД. Перед первым переходом на PostgreSQL один раз обновите установщик на хосте через install.sh. При сбое миграции панель остаётся остановленной, обе базы сохраняются для повторного запуска.
+- Дальше обновление панели, которое не запустилось, откатывается на прежнюю версию, если схема БД не менялась; если обновление изменило схему, панель остаётся остановленной с данными для повторной попытки. Восстановление бэкапа заменяет базу целиком, поэтому бэкап, сделанный до новой миграции, восстанавливается чисто.
+
 ## 0.4.4
 ### en
 - YooKassa and CryptoBot now come from the marketplace like every other payment method. On the update the panel moves their keys into the adapters, asks the server to install the adapter that took payments (Payments shows a notice until it runs), and keeps everything working: invoices opened before the update are paid through the adapter, the notification URLs set in the YooKassa and CryptoBot dashboards stay valid, and pay buttons in old bot messages still work. Payments → Accepting payments keeps Telegram Stars and the selling switches.

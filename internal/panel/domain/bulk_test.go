@@ -30,7 +30,7 @@ func TestBulkIsAllOrNothing(t *testing.T) {
 	pushes := ch.policies
 
 	// The third user cannot be written: the first two must not stay extended.
-	if _, err := st.DB.ExecContext(ctx, "CREATE TRIGGER no_third BEFORE UPDATE ON users WHEN NEW.id = "+strconv.FormatInt(ids[2], 10)+" BEGIN SELECT RAISE(ABORT, 'refused'); END"); err != nil {
+	if _, err := st.DB.ExecContext(ctx, "ALTER TABLE users ADD CONSTRAINT no_third CHECK(id <> "+strconv.FormatInt(ids[2], 10)+" OR expires_at = "+strconv.FormatInt(before[2], 10)+")"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := users.Bulk(ctx, ids, BulkExtend, 10); err == nil {
@@ -44,7 +44,7 @@ func TestBulkIsAllOrNothing(t *testing.T) {
 	if ch.policies != pushes {
 		t.Fatal("nodes were told about a change that did not happen")
 	}
-	if _, err := st.DB.ExecContext(ctx, "DROP TRIGGER no_third"); err != nil {
+	if _, err := st.DB.ExecContext(ctx, "ALTER TABLE users DROP CONSTRAINT no_third"); err != nil {
 		t.Fatal(err)
 	}
 

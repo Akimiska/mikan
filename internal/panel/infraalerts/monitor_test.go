@@ -1,14 +1,19 @@
 package infraalerts
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/db"
 )
 
 func testMonitorStore(t *testing.T) (*store.Store, context.Context) {
@@ -82,5 +87,92 @@ func TestMergeDeliveryResultsPreservesNewItems(t *testing.T) {
 	got := mergeDeliveryResults(latest, before, after)
 	if len(got) != 2 || got[0].Key != "retry" || got[0].Text != "new text" || got[0].Attempts != 2 || got[1].Key != "new" {
 		t.Fatalf("merged queue = %+v", got)
+	}
+}
+
+func TestObserveDeduplicatesSampleAfterStateRoundTrip(t *testing.T) {
+	st, ctx := testMonitorStore(t)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	clock := now
+	m := New(st, settings.New(st.Q), nil, nil, nil, nil, nil, slog.Default(), func() time.Time { return clock })
+	state := persistentState{Samples: map[string]sampleState{"warp/1": {
+		Tracker: Tracker{Level: Healthy, BadRounds: 1}, Checked: now,
+	}}}
+	if err := m.save(ctx, state); err != nil {
+		t.Fatal(err)
+	}
+	var beforeUpdatedAt int64
+	if err := st.DB.QueryRowContext(ctx, `SELECT updated_at FROM infrastructure_alert_state WHERE key = ?`, stateKey).Scan(&beforeUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(time.Second)
+	state.Samples["warp/1"] = sampleState{Tracker: state.Samples["warp/1"].Tracker, Checked: now.Add(time.Minute)}
+	if err := m.save(ctx, state); err != nil {
+		t.Fatal(err)
+	}
+	var afterUpdatedAt int64
+	if err := st.DB.QueryRowContext(ctx, `SELECT updated_at FROM infrastructure_alert_state WHERE key = ?`, stateKey).Scan(&afterUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if afterUpdatedAt != beforeUpdatedAt {
+		t.Fatalf("CheckedAt-only change rewrote state: updated_at %d -> %d", beforeUpdatedAt, afterUpdatedAt)
+	}
+	loaded, err := m.load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Samples["warp/1"].Checked; !got.Equal(now) {
+		t.Fatalf("persisted CheckedAt = %v", got)
+	}
+	before := loaded.Samples["warp/1"].BadRounds
+	if m.observe(&loaded, "warp/1", Degraded, now, 2, 2, "") {
+		t.Fatal("same probe emitted a new transition")
+	}
+	if got := loaded.Samples["warp/1"].BadRounds; got != before {
+		t.Fatalf("duplicate probe advanced bad rounds: %d -> %d", before, got)
+	}
+}
+
+func TestFailedPublicPinDoesNotRequeueUnchangedSummary(t *testing.T) {
+	st, ctx := testMonitorStore(t)
+	m := New(st, settings.New(st.Q), nil, nil, nil, nil, nil, slog.Default(), time.Now)
+	const channel = "@mikan_status"
+	text := strings.Join([]string{"🌐 <b>Состояние серверов</b>", "Публичные серверы пока не настроены."}, "\n")
+	state := persistentState{PublicTarget: channel, PublicMessage: 42, PublicText: text, PublicPinAttempted: true, PublicLevels: map[int64]Level{}}
+	cfg := Default()
+	cfg.PublicEnabled, cfg.PublicChannel = true, channel
+	m.publicStatus(ctx, &state, cfg, nil, map[int64][]db.Inbound{}, "ru")
+	if len(state.Pending) != 0 {
+		t.Fatalf("unchanged summary was requeued after failed pin: %+v", state.Pending)
+	}
+}
+
+func TestPublicPinFailureIsRecordedAndLoggedOnce(t *testing.T) {
+	var logs bytes.Buffer
+	m := &Monitor{log: slog.New(slog.NewTextHandler(&logs, nil))}
+	state := persistentState{PublicMessage: 42}
+	pinErr := errors.New("bot is not an administrator")
+	m.recordPublicPinResult(&state, pinErr)
+	m.recordPublicPinResult(&state, pinErr)
+	if !state.PublicPinAttempted || state.PublicPinned {
+		t.Fatalf("pin state after failure: %+v", state)
+	}
+	if got := strings.Count(logs.String(), "pin public status failed"); got != 1 {
+		t.Fatalf("pin failure logged %d times", got)
+	}
+}
+
+func TestCheckedSampleIsPersistedInStateJSON(t *testing.T) {
+	checked := time.Unix(1_800_000_000, 0).UTC()
+	raw, err := json.Marshal(sampleState{Tracker: Tracker{Level: Degraded}, Checked: checked})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored sampleState
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.Checked.Equal(checked) {
+		t.Fatalf("CheckedAt after JSON roundtrip = %v", restored.Checked)
 	}
 }

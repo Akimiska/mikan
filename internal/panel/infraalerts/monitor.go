@@ -44,7 +44,7 @@ type UpdateSource interface {
 
 type sampleState struct {
 	Tracker
-	Checked time.Time `json:"-"`
+	Checked time.Time `json:"checked,omitempty"`
 }
 
 type delivery struct {
@@ -58,17 +58,18 @@ type delivery struct {
 }
 
 type persistentState struct {
-	Samples       map[string]sampleState `json:"samples"`
-	Stuck         map[string]string      `json:"stuck"`
-	AutoCursor    int64                  `json:"auto_cursor"`
-	TLSBad        bool                   `json:"tls_bad"`
-	UpdateAt      string                 `json:"update_at"`
-	PublicTarget  string                 `json:"public_target"`
-	PublicMessage int64                  `json:"public_message"`
-	PublicText    string                 `json:"public_text"`
-	PublicLevels  map[int64]Level        `json:"public_levels"`
-	PublicPinned  bool                   `json:"public_pinned"`
-	Pending       []delivery             `json:"pending"`
+	Samples            map[string]sampleState `json:"samples"`
+	Stuck              map[string]string      `json:"stuck"`
+	AutoCursor         int64                  `json:"auto_cursor"`
+	TLSBad             bool                   `json:"tls_bad"`
+	UpdateAt           string                 `json:"update_at"`
+	PublicTarget       string                 `json:"public_target"`
+	PublicMessage      int64                  `json:"public_message"`
+	PublicText         string                 `json:"public_text"`
+	PublicLevels       map[int64]Level        `json:"public_levels"`
+	PublicPinned       bool                   `json:"public_pinned"`
+	PublicPinAttempted bool                   `json:"public_pin_attempted"`
+	Pending            []delivery             `json:"pending"`
 }
 
 type Monitor struct {
@@ -129,13 +130,46 @@ func (m *Monitor) save(ctx context.Context, st persistentState) error {
 		return err
 	}
 	old, err := m.store.Q.GetInfrastructureAlertState(ctx, stateKey)
-	if err == nil && old == string(raw) {
-		return nil
+	if err == nil {
+		unchanged, err := sameStateIgnoringSampleChecks(old, st)
+		if err != nil {
+			return err
+		}
+		if unchanged {
+			return nil
+		}
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	return m.store.Q.SetInfrastructureAlertState(ctx, db.SetInfrastructureAlertStateParams{Key: stateKey, Value: string(raw), UpdatedAt: m.now().Unix()})
+}
+
+func sameStateIgnoringSampleChecks(oldRaw string, next persistentState) (bool, error) {
+	var previous persistentState
+	if err := json.Unmarshal([]byte(oldRaw), &previous); err != nil {
+		return false, err
+	}
+	normalize := func(state persistentState) persistentState {
+		if state.Samples != nil {
+			samples := make(map[string]sampleState, len(state.Samples))
+			for key, sample := range state.Samples {
+				sample.Checked = time.Time{}
+				samples[key] = sample
+			}
+			state.Samples = samples
+		}
+		return state
+	}
+	previousRaw, err := json.Marshal(normalize(previous))
+	if err != nil {
+		return false, err
+	}
+	nextRaw, err := json.Marshal(normalize(next))
+	if err != nil {
+		return false, err
+	}
+	return string(previousRaw) == string(nextRaw), nil
 }
 
 func (m *Monitor) config(ctx context.Context) AlertsConfig {
@@ -325,6 +359,7 @@ func (m *Monitor) startDelivery(ctx context.Context) {
 		if latest.PublicTarget == st.PublicTarget {
 			latest.PublicMessage = st.PublicMessage
 			latest.PublicPinned = st.PublicPinned
+			latest.PublicPinAttempted = st.PublicPinAttempted
 		}
 		if err := m.save(ctx, latest); err != nil {
 			m.logError("infrastructure alerts: save delivery queue", err)
@@ -688,7 +723,7 @@ func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg Ale
 		}
 	}
 	if st.PublicTarget != cfg.PublicChannel {
-		st.PublicTarget, st.PublicMessage, st.PublicText, st.PublicPinned = cfg.PublicChannel, 0, "", false
+		st.PublicTarget, st.PublicMessage, st.PublicText, st.PublicPinned, st.PublicPinAttempted = cfg.PublicChannel, 0, "", false, false
 		kept := st.Pending[:0]
 		for _, d := range st.Pending {
 			if d.Target != "summary" && d.Target != "public-change" {
@@ -706,7 +741,7 @@ func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg Ale
 			}
 		}
 		st.Pending = kept
-	} else if text != st.PublicText || st.PublicMessage > 0 && !st.PublicPinned {
+	} else if text != st.PublicText || st.PublicMessage > 0 && !st.PublicPinned && !st.PublicPinAttempted {
 		st.PublicText = text
 		updated := false
 		for i := range st.Pending {
@@ -835,20 +870,18 @@ func (m *Monitor) deliver(ctx context.Context, st *persistentState, cfg AlertsCo
 				msg, err = client.SendTo(cctx, cfg.PublicChannel, d.Text, true)
 				if err == nil {
 					st.PublicMessage = msg.MessageID
-					st.PublicPinned = false
+					st.PublicPinned, st.PublicPinAttempted = false, false
 				}
 			}
-			if err == nil && !st.PublicPinned {
+			if err == nil && !st.PublicPinned && !st.PublicPinAttempted {
 				pinErr := client.PinTo(cctx, cfg.PublicChannel, st.PublicMessage)
-				if pinErr == nil {
-					st.PublicPinned = true
-				}
+				m.recordPublicPinResult(st, pinErr)
 			}
 			if err == nil {
 				err = client.EditTo(cctx, cfg.PublicChannel, st.PublicMessage, d.Text)
 				var ae *tgbot.APIError
 				if errors.As(err, &ae) && strings.Contains(strings.ToLower(ae.Description), "message to edit not found") {
-					st.PublicMessage, st.PublicPinned = 0, false
+					st.PublicMessage, st.PublicPinned, st.PublicPinAttempted = 0, false, false
 				}
 			}
 			cancel()
@@ -884,6 +917,20 @@ func (m *Monitor) deferPending(st *persistentState, err error) {
 		}
 	}
 	st.Pending = keep
+}
+
+func (m *Monitor) recordPublicPinResult(st *persistentState, err error) {
+	if st.PublicPinAttempted || st.PublicPinned {
+		return
+	}
+	st.PublicPinAttempted = true
+	if err == nil {
+		st.PublicPinned = true
+		return
+	}
+	if m.log != nil {
+		m.log.Warn("infrastructure alerts: pin public status failed; will not retry until channel changes", "channel", st.PublicTarget, "err", err)
+	}
 }
 
 func retryDelivery(d *delivery, now int64, err error) bool {

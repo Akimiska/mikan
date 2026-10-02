@@ -59,7 +59,7 @@ mikan следит, доходят ли реальные клиенты до к�
 <td width="50%" valign="top">
 
 ### 📱 Каждому приложению — то, что работает
-Подписка узнаёт приложение: Happ, v2RayTun, Koala Clash, Clash Verge, FlClash, Hiddify, Shadowrocket и другие. Каждому она отдаёт только те протоколы, которые оно умеет. Никаких «у меня не работает».
+Подписка узнаёт приложение: Happ, v2RayTun, Koala Clash, SlothClash, Clash Verge, FlClash, ClashFest, Hiddify, Shadowrocket и другие. Каждому она отдаёт только те протоколы, которые оно умеет. Никаких «у меня не работает».
 
 </td>
 </tr>

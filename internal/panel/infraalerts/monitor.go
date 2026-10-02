@@ -1,0 +1,749 @@
+package infraalerts
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html"
+	"log/slog"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"mikan/internal/nodeapi"
+	"mikan/internal/panel/acme"
+	"mikan/internal/panel/autotune"
+	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/updates"
+)
+
+const stateKey = "monitor"
+
+type Runtime interface {
+	Health(id int64) (nodesync.HealthView, bool)
+	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
+	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
+}
+
+type Tuner interface {
+	Status(inboundID int64) (autotune.Status, bool)
+}
+
+type CertificateSource func() acme.Status
+type UpdateSource interface {
+	Host() (updates.HostStatus, bool)
+}
+
+type sampleState struct {
+	Tracker
+	Checked time.Time `json:"checked"`
+}
+
+type delivery struct {
+	Key    string `json:"key"`
+	Target string `json:"target"`
+	Chat   int64  `json:"chat,omitempty"`
+	Text   string `json:"text"`
+}
+
+type persistentState struct {
+	Samples       map[string]sampleState `json:"samples"`
+	Stuck         map[string]string      `json:"stuck"`
+	AutoCursor    int64                  `json:"auto_cursor"`
+	TLSBad        bool                   `json:"tls_bad"`
+	UpdateAt      string                 `json:"update_at"`
+	PublicTarget  string                 `json:"public_target"`
+	PublicMessage int64                  `json:"public_message"`
+	PublicText    string                 `json:"public_text"`
+	PublicLevels  map[int64]Level        `json:"public_levels"`
+	PublicPinned  bool                   `json:"public_pinned"`
+	Pending       []delivery             `json:"pending"`
+}
+
+type Monitor struct {
+	store    *store.Store
+	settings *settings.Settings
+	runtime  Runtime
+	tuner    Tuner
+	cert     CertificateSource
+	updates  UpdateSource
+	bot      *tgbot.Bot
+	log      *slog.Logger
+	now      func() time.Time
+}
+
+func New(st *store.Store, set *settings.Settings, runtime Runtime, tuner Tuner, cert CertificateSource, updates UpdateSource,
+	bot *tgbot.Bot, log *slog.Logger, now func() time.Time) *Monitor {
+	return &Monitor{store: st, settings: set, runtime: runtime, tuner: tuner, cert: cert, updates: updates, bot: bot, log: log, now: now}
+}
+
+func (m *Monitor) Run(ctx context.Context) {
+	// Node health arrives every five seconds. Outbound checks are cached by the node for a
+	// minute, and observe ignores an unchanged CheckedAt so this cadence adds no extra probes.
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			m.round(ctx)
+		}
+	}
+}
+
+func (m *Monitor) load(ctx context.Context) (persistentState, error) {
+	var st persistentState
+	var raw string
+	err := m.store.DB.QueryRowContext(ctx, `SELECT value FROM infrastructure_alert_state WHERE key = ?`, stateKey).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	} else if err == nil {
+		err = json.Unmarshal([]byte(raw), &st)
+	}
+	if st.Samples == nil {
+		st.Samples = map[string]sampleState{}
+	}
+	if st.Stuck == nil {
+		st.Stuck = map[string]string{}
+	}
+	return st, err
+}
+
+func (m *Monitor) save(ctx context.Context, st persistentState) error {
+	raw, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	_, err = m.store.DB.ExecContext(ctx, `INSERT INTO infrastructure_alert_state(key, value, updated_at) VALUES(?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, stateKey, string(raw), m.now().Unix())
+	return err
+}
+
+func (m *Monitor) config(ctx context.Context) AlertsConfig {
+	c, _, err := settings.GetOver(ctx, m.settings, KeyConfig, Default())
+	if err != nil {
+		m.logError("infrastructure alerts: settings", err)
+		return AlertsConfig{}
+	}
+	return c
+}
+
+func (m *Monitor) logError(message string, err error) {
+	if m.log != nil {
+		m.log.Error(message, "err", err)
+	}
+}
+
+func (m *Monitor) round(ctx context.Context) {
+	st, err := m.load(ctx)
+	if err != nil {
+		m.logError("infrastructure alerts: load state", err)
+		return
+	}
+	cfg := m.config(ctx)
+	lang := "ru"
+	if m.bot != nil {
+		lang = m.bot.Config(ctx).Lang
+	}
+	nodes, err := m.store.Q.ListNodes(ctx)
+	if err != nil {
+		m.logError("infrastructure alerts: list nodes", err)
+		return
+	}
+	inbounds, err := m.store.Q.ListInbounds(ctx)
+	if err != nil {
+		m.logError("infrastructure alerts: list inbounds", err)
+		return
+	}
+	byNode := map[int64][]db.Inbound{}
+	for _, in := range inbounds {
+		byNode[in.NodeID] = append(byNode[in.NodeID], in)
+	}
+	levels := make(map[int64]Level, len(nodes))
+	listenerHealth := make(map[int64]map[string]bool, len(nodes))
+	for _, n := range nodes {
+		if n.Enabled == 0 {
+			continue
+		}
+		hv, ok := nodesync.HealthView{}, false
+		if m.runtime != nil {
+			hv, ok = m.runtime.Health(n.ID)
+		}
+		if !ok || hv.CheckedAt.IsZero() {
+			continue
+		}
+		nodeLevel := Healthy
+		if !hv.OK {
+			nodeLevel = Unavailable
+		}
+		if m.observe(&st, "node/"+strconv.FormatInt(n.ID, 10), nodeLevel, hv.CheckedAt, 3, 2, eventFor(cfg, "node", n.Name, nodeLevel, lang)) {
+			// Parent failures hide their derived symptoms, avoiding one alert per listener.
+		}
+		if nodeLevel == Unavailable {
+			levels[n.ID] = Unavailable
+			continue
+		}
+		listenerHealth[n.ID] = make(map[string]bool, len(hv.Listeners))
+		for _, l := range hv.Listeners {
+			listenerHealth[n.ID][l.Name] = l.OK
+		}
+		for _, in := range byNode[n.ID] {
+			if in.Enabled == 0 {
+				continue
+			}
+			ok := listenerHealth[n.ID][in.Name]
+			level := Healthy
+			if !ok {
+				level = Unavailable
+			}
+			key := "inbound/" + strconv.FormatInt(in.ID, 10)
+			m.observe(&st, key, level, hv.CheckedAt, 3, 2, eventFor(cfg, "inbound", n.Name+" / "+in.Name, level, lang))
+			if level != Healthy {
+				nodeLevel = Degraded
+			}
+		}
+		levels[n.ID] = nodeLevel
+	}
+
+	// The API calls are cached by each node for one minute. Count only a new probe result,
+	// not every panel round that reads the same cached response.
+	if m.runtime != nil {
+		m.probeExits(ctx, &st, cfg, nodes, byNode, levels, lang)
+	}
+	if m.runtime != nil {
+		m.probeWarp(ctx, &st, cfg, nodes, byNode, levels, lang)
+	}
+	m.autotuneEvents(ctx, &st, cfg, lang)
+	m.checkTuner(ctx, &st, cfg, byNode, levels, lang)
+	m.checkCertificate(&st, cfg, lang)
+	m.checkUpdate(&st, cfg, lang)
+	m.publicStatus(ctx, &st, cfg, nodes, byNode, lang)
+	m.deliver(ctx, &st, cfg)
+	if err := m.save(ctx, st); err != nil {
+		m.logError("infrastructure alerts: save state", err)
+	}
+}
+
+// observe records a new sample, with a stable failure threshold and two-sample recovery.
+// A false return means no stable transition was emitted.
+func (m *Monitor) observe(st *persistentState, key string, level Level, checked time.Time, failAfter, recoverAfter int, text string) bool {
+	s := st.Samples[key]
+	if !s.Checked.IsZero() && !checked.After(s.Checked) {
+		return false
+	}
+	s.Checked = checked
+	tr := s.Tracker.Observe(level, failAfter, recoverAfter)
+	st.Samples[key] = s
+	if tr == nil || text == "" {
+		return tr != nil
+	}
+	if tr.To == Healthy {
+		text = strings.Replace(text, "🔴", "🟢", 1)
+		text = strings.Replace(text, "Unavailable", "Recovered", 1)
+		text = strings.Replace(text, "Degraded", "Recovered", 1)
+		text = strings.Replace(text, "Недоступен", "Восстановлен", 1)
+		text = strings.Replace(text, "Есть проблемы", "Восстановлен", 1)
+	}
+	st.Pending = appendPending(st.Pending, delivery{Key: key + "/" + checked.UTC().Format(time.RFC3339Nano), Target: "admin", Text: text})
+	return true
+}
+
+func appendPending(all []delivery, next delivery) []delivery {
+	for _, d := range all {
+		if d.Key == next.Key {
+			return all
+		}
+	}
+	return append(all, next)
+}
+
+func eventFor(c AlertsConfig, event, name string, level Level, lang string) string {
+	var enabled bool
+	switch event {
+	case "node":
+		enabled = c.Events.Node
+	case "warp":
+		enabled = c.Events.Warp
+	case "exit":
+		enabled = c.Events.Exit
+	case "inbound":
+		enabled = c.Events.Inbound
+	}
+	if !enabled {
+		return ""
+	}
+	icon, state := "🔴", "Недоступен"
+	if lang == "en" {
+		state = "Unavailable"
+	}
+	if level == Healthy {
+		icon = "🟢"
+		if lang == "en" {
+			state = "Recovered"
+		} else {
+			state = "Восстановлен"
+		}
+	}
+	if level == Degraded {
+		icon = "🟡"
+		if lang == "en" {
+			state = "Degraded"
+		} else {
+			state = "Есть проблемы"
+		}
+	}
+	return icon + " <b>" + html.EscapeString(name) + "</b> — " + state
+}
+
+func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
+	for _, n := range nodes {
+		if n.Enabled == 0 || levels[n.ID] == Unavailable {
+			continue
+		}
+		w, err := m.store.Q.GetNodeWarp(ctx, n.ID)
+		if err != nil || w.Enabled == 0 {
+			continue
+		}
+		s, err := m.runtime.Warp(ctx, n.ID)
+		if err != nil || s.CheckedAt.IsZero() {
+			continue
+		}
+		level := Healthy
+		if !s.OK {
+			level = Degraded
+		}
+		m.observe(st, "warp/"+strconv.FormatInt(n.ID, 10), level, s.CheckedAt, 2, 2, eventFor(cfg, "warp", n.Name+" / WARP", level, lang))
+		if level != Healthy {
+			levels[n.ID] = Degraded
+		}
+	}
+}
+
+func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
+	name := map[int64]string{}
+	for _, n := range nodes {
+		name[n.ID] = n.Name
+	}
+	seen := map[string]bool{}
+	for _, n := range nodes {
+		if n.Enabled == 0 || levels[n.ID] == Unavailable {
+			continue
+		}
+		exits := map[int64]bool{}
+		for _, in := range inbounds[n.ID] {
+			if in.Enabled != 0 && in.Outbound == "node" && in.ExitNodeID.Valid {
+				exits[in.ExitNodeID.Int64] = true
+			}
+		}
+		relay, err := m.store.Q.GetNodeRelay(ctx, n.ID)
+		if err == nil && relay.Outbound == "node" && relay.ExitNodeID.Valid {
+			exits[relay.ExitNodeID.Int64] = true
+		}
+		for exitID := range exits {
+			key := fmt.Sprintf("exit/%d/%d", n.ID, exitID)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			p, err := m.runtime.Probe(ctx, n.ID, nodeapi.ExitName(exitID))
+			if err != nil || p.CheckedAt.IsZero() {
+				continue
+			}
+			level := Healthy
+			if !p.OK {
+				level = Degraded
+			}
+			label := name[n.ID] + " → " + name[exitID]
+			m.observe(st, key, level, p.CheckedAt, 2, 2, eventFor(cfg, "exit", label, level, lang))
+			if level != Healthy {
+				levels[n.ID] = Degraded
+			}
+		}
+	}
+}
+
+func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, lang string) {
+	rows, err := m.store.DB.QueryContext(ctx, `SELECT id, inbound_id, node_id, kind, network, old_value, new_value, reason, created_at FROM inbound_events WHERE id > ? ORDER BY id LIMIT 500`, st.AutoCursor)
+	if err != nil {
+		m.logError("infrastructure alerts: autotune events", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e db.InboundEvent
+		if err := rows.Scan(&e.ID, &e.InboundID, &e.NodeID, &e.Kind, &e.Network, &e.OldValue, &e.NewValue, &e.Reason, &e.CreatedAt); err != nil {
+			break
+		}
+		st.AutoCursor = e.ID
+		if !cfg.Events.Autotune {
+			continue
+		}
+		n, nerr := m.store.Q.GetNode(ctx, e.NodeID)
+		if nerr != nil {
+			continue
+		}
+		verb := "Автонастройка изменила подключение"
+		if lang == "en" {
+			verb = "Autotune changed an inbound"
+		}
+		st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("autotune/%d", e.ID), Target: "admin",
+			Text: "🛠 <b>" + verb + "</b>: " + html.EscapeString(n.Name) + " / " + html.EscapeString(e.Kind) + " — " + html.EscapeString(e.OldValue) + " → " + html.EscapeString(e.NewValue)})
+	}
+}
+
+func (m *Monitor) checkTuner(ctx context.Context, st *persistentState, cfg AlertsConfig, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
+	if m.tuner == nil {
+		return
+	}
+	for nodeID, list := range inbounds {
+		for _, in := range list {
+			status, ok := m.tuner.Status(in.ID)
+			if !ok {
+				continue
+			}
+			key := fmt.Sprintf("%d/%d", nodeID, in.ID)
+			prev := st.Stuck[key]
+			if status.Stuck == prev {
+				continue
+			}
+			st.Stuck[key] = status.Stuck
+			if autotuneFailure(status.Stuck) && cfg.Events.AutotuneRecovery {
+				node, err := m.store.Q.GetNode(ctx, nodeID)
+				if err != nil {
+					continue
+				}
+				text := fmt.Sprintf("⚠️ <b>Автонастройка не восстановила подключение</b>: %s / %s (%s)", html.EscapeString(node.Name), html.EscapeString(in.Name), html.EscapeString(status.Stuck))
+				if lang == "en" {
+					text = fmt.Sprintf("⚠️ <b>Autotune could not restore an inbound</b>: %s / %s (%s)", html.EscapeString(node.Name), html.EscapeString(in.Name), html.EscapeString(status.Stuck))
+				}
+				st.Pending = appendPending(st.Pending, delivery{Key: "autotune-stuck/" + key + "/" + status.Stuck, Target: "admin", Text: text})
+			}
+		}
+	}
+}
+
+func (m *Monitor) checkCertificate(st *persistentState, cfg AlertsConfig, lang string) {
+	if m.cert == nil || !cfg.Events.TLS {
+		return
+	}
+	s := m.cert()
+	bad := s.Error != "" || (!s.NotAfter.IsZero() && s.NotAfter.Sub(m.now()) < 7*24*time.Hour)
+	if bad == st.TLSBad {
+		return
+	}
+	st.TLSBad = bad
+	text := "🟡 <b>Проблема с TLS-сертификатом</b>"
+	if !bad {
+		text = "🟢 <b>TLS-сертификат снова в порядке</b>"
+	}
+	if lang == "en" {
+		text = "🟡 <b>TLS certificate problem</b>"
+		if !bad {
+			text = "🟢 <b>TLS certificate is healthy again</b>"
+		}
+	}
+	if s.Error != "" {
+		text += ": " + html.EscapeString(s.Error)
+	}
+	st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("tls/%t/%d", bad, s.CheckedAt.Unix()), Target: "admin", Text: text})
+}
+
+func (m *Monitor) checkUpdate(st *persistentState, cfg AlertsConfig, lang string) {
+	if m.updates == nil || !cfg.Events.Update {
+		return
+	}
+	s, ok := m.updates.Host()
+	if !ok || s.At == "" || s.State == "running" || s.At == st.UpdateAt {
+		return
+	}
+	st.UpdateAt = s.At
+	if s.State != "failed" {
+		return
+	}
+	text := "🔴 <b>Ошибка обновления Mikan</b>"
+	if lang == "en" {
+		text = "🔴 <b>Mikan update failed</b>"
+	}
+	if s.Error != "" {
+		text += ": " + html.EscapeString(s.Error)
+	}
+	if s.From != "" {
+		text += " (" + html.EscapeString(s.From) + " → " + html.EscapeString(s.Version) + ")"
+	}
+	st.Pending = appendPending(st.Pending, delivery{Key: "update/" + s.At, Target: "admin", Text: text})
+}
+
+func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node,
+	inbounds map[int64][]db.Inbound, lang string) {
+	if !cfg.PublicEnabled {
+		st.PublicText = ""
+		st.PublicLevels = map[int64]Level{}
+		kept := st.Pending[:0]
+		for _, d := range st.Pending {
+			if d.Target != "summary" && d.Target != "public-change" {
+				kept = append(kept, d)
+			}
+		}
+		st.Pending = kept
+		return
+	}
+	if st.PublicLevels == nil {
+		st.PublicLevels = map[int64]Level{}
+	}
+	type row struct {
+		id    int64
+		name  string
+		level Level
+	}
+	var rows []row
+	for _, n := range nodes {
+		if n.Enabled == 0 || strings.TrimSpace(n.PublicName) == "" {
+			continue
+		}
+		level := publicNodeLevel(ctx, st, m.store, n.ID, inbounds[n.ID])
+		rows = append(rows, row{n.ID, n.PublicName, level})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].id < rows[j].id })
+	var lines []string
+	if lang == "en" {
+		lines = append(lines, "🌐 <b>Server status</b>")
+	} else {
+		lines = append(lines, "🌐 <b>Состояние серверов</b>")
+	}
+	if len(rows) == 0 {
+		if lang == "en" {
+			lines = append(lines, "No servers are published yet.")
+		} else {
+			lines = append(lines, "Публичные серверы пока не настроены.")
+		}
+	}
+	for _, r := range rows {
+		rowText := PublicText(html.EscapeString(r.name), r.level)
+		if lang == "en" {
+			rowText = PublicTextEN(html.EscapeString(r.name), r.level)
+		}
+		lines = append(lines, rowText)
+	}
+	text := strings.Join(lines, "\n")
+	for _, r := range rows {
+		previous, seen := st.PublicLevels[r.id]
+		if seen && previous != r.level && previous != Unknown && r.level != Unknown && cfg.PublicChanges {
+			change := PublicText(html.EscapeString(r.name), r.level)
+			if lang == "en" {
+				change = PublicTextEN(html.EscapeString(r.name), r.level)
+			}
+			st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("public/%d/%d/%d", r.id, previous, r.level), Target: "public-change", Text: change})
+		}
+		st.PublicLevels[r.id] = r.level
+	}
+	for id := range st.PublicLevels {
+		if !containsNode(nodes, id) {
+			delete(st.PublicLevels, id)
+		}
+	}
+	if st.PublicTarget != cfg.PublicChannel {
+		st.PublicTarget, st.PublicMessage, st.PublicText, st.PublicPinned = cfg.PublicChannel, 0, "", false
+		kept := st.Pending[:0]
+		for _, d := range st.Pending {
+			if d.Target != "summary" && d.Target != "public-change" {
+				kept = append(kept, d)
+			}
+		}
+		st.Pending = kept
+	}
+	if !cfg.PublicSummary {
+		st.PublicText = ""
+		kept := st.Pending[:0]
+		for _, d := range st.Pending {
+			if d.Target != "summary" {
+				kept = append(kept, d)
+			}
+		}
+		st.Pending = kept
+	} else if text != st.PublicText {
+		st.PublicText = text
+		updated := false
+		for i := range st.Pending {
+			if st.Pending[i].Target == "summary" {
+				st.Pending[i].Text = text
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			st.Pending = append(st.Pending, delivery{Key: "summary/current", Target: "summary", Text: text})
+		}
+	}
+}
+
+func publicNodeLevel(ctx context.Context, st *persistentState, store *store.Store, nodeID int64, inbounds []db.Inbound) Level {
+	node := stateLevel(st, "node/"+strconv.FormatInt(nodeID, 10))
+	if node == Unknown {
+		return Unknown
+	}
+	if node == Unavailable {
+		return Unavailable
+	}
+	total, working, unknown := 0, 0, false
+	for _, in := range inbounds {
+		if in.Enabled == 0 {
+			continue
+		}
+		total++
+		level := stateLevel(st, "inbound/"+strconv.FormatInt(in.ID, 10))
+		if level == Unknown {
+			unknown = true
+			continue
+		}
+		if level != Healthy {
+			continue
+		}
+		switch in.Outbound {
+		case "warp":
+			w, err := store.Q.GetNodeWarp(ctx, nodeID)
+			if err == nil && w.Enabled != 0 {
+				out := stateLevel(st, "warp/"+strconv.FormatInt(nodeID, 10))
+				if out == Unknown {
+					unknown = true
+					continue
+				}
+				if out != Healthy {
+					continue
+				}
+			}
+		case "node":
+			if in.ExitNodeID.Valid {
+				out := stateLevel(st, fmt.Sprintf("exit/%d/%d", nodeID, in.ExitNodeID.Int64))
+				if out == Unknown {
+					unknown = true
+					continue
+				}
+				if out != Healthy {
+					continue
+				}
+			}
+		}
+		working++
+	}
+	if total == 0 {
+		return Unavailable
+	}
+	if working == total {
+		return Healthy
+	}
+	if working > 0 {
+		return Degraded
+	}
+	if unknown {
+		return Unknown
+	}
+	return Unavailable
+}
+
+func stateLevel(st *persistentState, key string) Level {
+	if s, ok := st.Samples[key]; ok {
+		return s.Level
+	}
+	return Unknown
+}
+
+func (m *Monitor) deliver(ctx context.Context, st *persistentState, cfg AlertsConfig) {
+	if m.bot == nil {
+		return
+	}
+	client, err := m.bot.InfrastructureClient(ctx)
+	if err != nil {
+		return
+	}
+	adminID, adminSet, _ := m.bot.InfrastructureAdminChat(ctx)
+	keep := st.Pending[:0]
+	for _, d := range st.Pending {
+		err = nil
+		if d.Target == "admin" {
+			if !cfg.AdminEnabled || !adminSet {
+				continue
+			}
+			cctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			err = sendAdmin(cctx, client, adminID, d.Text)
+			cancel()
+		} else if d.Target == "summary" {
+			if !cfg.PublicEnabled || !cfg.PublicSummary {
+				continue
+			}
+			cctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			if st.PublicMessage == 0 {
+				var msg tgbot.Message
+				msg, err = client.SendTo(cctx, cfg.PublicChannel, d.Text, true)
+				if err == nil {
+					st.PublicMessage = msg.MessageID
+					st.PublicPinned = false
+				}
+			}
+			if err == nil && !st.PublicPinned {
+				err = client.PinTo(cctx, cfg.PublicChannel, st.PublicMessage)
+				if err == nil {
+					st.PublicPinned = true
+				}
+			}
+			if err == nil {
+				err = client.EditTo(cctx, cfg.PublicChannel, st.PublicMessage, d.Text)
+				var ae *tgbot.APIError
+				if errors.As(err, &ae) && strings.Contains(strings.ToLower(ae.Description), "message to edit not found") {
+					st.PublicMessage, st.PublicPinned = 0, false
+				}
+			}
+			cancel()
+		} else if d.Target == "public-change" {
+			if !cfg.PublicEnabled || !cfg.PublicChanges {
+				continue
+			}
+			cctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			_, err = client.SendTo(cctx, cfg.PublicChannel, d.Text, false)
+			cancel()
+		}
+		if err != nil {
+			keep = append(keep, d)
+			if m.log != nil {
+				m.log.Warn("infrastructure alerts: Telegram delivery", "target", d.Target, "err", err)
+			}
+		}
+	}
+	st.Pending = keep
+}
+
+func sendAdmin(ctx context.Context, c *tgbot.Client, chat int64, text string) error {
+	_, err := c.Send(ctx, chat, text, nil, false)
+	return err
+}
+
+func autotuneFailure(s string) bool { return s == "no_port" || s == "no_target" || s == "exhausted" }
+
+func containsNode(nodes []db.Node, id int64) bool {
+	for _, n := range nodes {
+		if n.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func PublicTextEN(name string, level Level) string {
+	icon, label := "⚪", "Checking"
+	switch level {
+	case Healthy:
+		icon, label = "🟢", "Working"
+	case Degraded:
+		icon, label = "🟡", "Issues"
+	case Unavailable:
+		icon, label = "🔴", "Unavailable"
+	}
+	return icon + " " + name + " — " + label
+}

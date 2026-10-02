@@ -12,7 +12,7 @@ import (
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at
+RETURNING id, name, address, public_host, domain, public_name, cert_sha256, enabled, created_at, updated_at
 `
 
 type CreateNodeParams struct {
@@ -42,6 +42,7 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.Address,
 		&i.PublicHost,
 		&i.Domain,
+		&i.PublicName,
 		&i.CertSha256,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -60,7 +61,7 @@ func (q *Queries) DeleteNode(ctx context.Context, id int64) error {
 }
 
 const getNode = `-- name: GetNode :one
-SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at FROM nodes WHERE id = ?
+SELECT id, name, address, public_host, domain, public_name, cert_sha256, enabled, created_at, updated_at FROM nodes WHERE id = ?
 `
 
 func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
@@ -72,6 +73,7 @@ func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
 		&i.Address,
 		&i.PublicHost,
 		&i.Domain,
+		&i.PublicName,
 		&i.CertSha256,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -81,7 +83,7 @@ func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at FROM nodes ORDER BY id
+SELECT id, name, address, public_host, domain, public_name, cert_sha256, enabled, created_at, updated_at FROM nodes ORDER BY id
 `
 
 func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
@@ -99,6 +101,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 			&i.Address,
 			&i.PublicHost,
 			&i.Domain,
+			&i.PublicName,
 			&i.CertSha256,
 			&i.Enabled,
 			&i.CreatedAt,
@@ -133,7 +136,7 @@ func (q *Queries) SetNodeCert(ctx context.Context, arg SetNodeCertParams) error 
 }
 
 const updateNode = `-- name: UpdateNode :one
-UPDATE nodes SET name = ?, address = ?, public_host = ?, domain = ?, enabled = ?, updated_at = ? WHERE id = ? RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at
+UPDATE nodes SET name = ?, address = ?, public_host = ?, domain = ?, public_name = ?, enabled = ?, updated_at = ? WHERE id = ? RETURNING id, name, address, public_host, domain, public_name, cert_sha256, enabled, created_at, updated_at
 `
 
 type UpdateNodeParams struct {
@@ -141,6 +144,7 @@ type UpdateNodeParams struct {
 	Address    string
 	PublicHost string
 	Domain     string
+	PublicName string
 	Enabled    int64
 	UpdatedAt  int64
 	ID         int64
@@ -152,6 +156,7 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		arg.Address,
 		arg.PublicHost,
 		arg.Domain,
+		arg.PublicName,
 		arg.Enabled,
 		arg.UpdatedAt,
 		arg.ID,
@@ -163,6 +168,7 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		&i.Address,
 		&i.PublicHost,
 		&i.Domain,
+		&i.PublicName,
 		&i.CertSha256,
 		&i.Enabled,
 		&i.CreatedAt,

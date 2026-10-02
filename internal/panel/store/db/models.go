@@ -107,6 +107,7 @@ type Node struct {
 	Address    string
 	PublicHost string
 	Domain     string
+	PublicName string
 	CertSha256 string
 	Enabled    int64
 	CreatedAt  int64

@@ -60,7 +60,16 @@ func TestMigration0017KeepsWhatIsThere(t *testing.T) {
 	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name IN ('traffic_hourly_hour', 'traffic_daily_day', 'devices_last_seen', 'audit_log_ts')").Scan(&n); err != nil || n != 4 {
 		t.Fatalf("time indexes: %d %v", n, err)
 	}
-	// And back: the rollback leaves the data.
+	// Migration 0018 adds publication metadata and the durable alert state without changing
+	// existing nodes; rolling both new migrations back keeps 0017's own rollback covered.
+	var publicName string
+	if err := conn.QueryRowContext(ctx, "SELECT public_name FROM nodes WHERE id = 1").Scan(&publicName); err != nil || publicName != "" {
+		t.Fatalf("existing node's public name: %q %v", publicName, err)
+	}
+	exec("INSERT INTO infrastructure_alert_state (key, value, updated_at) VALUES ('monitor', '{}', 1)")
+	if _, err := p.Down(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := p.Down(ctx); err != nil {
 		t.Fatal(err)
 	}

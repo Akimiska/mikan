@@ -45,7 +45,7 @@ func setup(t *testing.T) (*Syncer, *fakeNode, *store.Store, *domain.Users, *time
 	t.Helper()
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0)
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestEachNodeGetsItsOwnInbounds(t *testing.T) {
 
 	// A disabled node keeps its syncer but serves nothing.
 	n, _ := st.Q.GetNode(ctx, remote.id)
-	if _, err := st.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, Enabled: 0, ID: n.ID}); err != nil {
+	if _, err := st.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, PublicName: n.PublicName, Enabled: 0, ID: n.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ = remote.desired(ctx); len(b.Inbounds) != 0 {

@@ -24,6 +24,11 @@ import (
 type SettingsView struct {
 	Brand        string   `json:"brand"`
 	SupportURL   string   `json:"support_url"`
+	Announce     string   `json:"sub_announce" doc:"Объявление над профилем в приложениях (заголовок announce); пусто — нет"`
+	AnnounceURL  string   `json:"sub_announce_url" doc:"Куда ведёт нажатие на объявление"`
+	AppBranding  bool     `json:"app_branding" doc:"Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки"`
+	BrandAccent  string   `json:"brand_accent" doc:"Цвет бренда #RRGGBB; пусто — цвет приложения"`
+	BrandLogoURL string   `json:"brand_logo_url" doc:"Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения"`
 	PublicHost   string   `json:"public_host"`
 	Domain       string   `json:"domain"`
 	PanelPort    int      `json:"panel_port"`
@@ -53,6 +58,11 @@ type patchSettingsInput struct {
 	Body struct {
 		Brand         *string `json:"brand,omitempty" maxLength:"40"`
 		SupportURL    *string `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+		Announce      *string `json:"sub_announce,omitempty" maxLength:"200"`
+		AnnounceURL   *string `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+		AppBranding   *bool   `json:"app_branding,omitempty"`
+		BrandAccent   *string `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
+		BrandLogoURL  *string `json:"brand_logo_url,omitempty" maxLength:"500" doc:"https://… или пусто"`
 		PublicHost    *string `json:"public_host,omitempty" maxLength:"253"`
 		Domain        *string `json:"domain,omitempty" maxLength:"253"`
 		QuietHourUTC  *int    `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
@@ -102,6 +112,10 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	}
 	get(settings.KeyBrand, &v.Brand)
 	get(settings.KeySupportURL, &v.SupportURL)
+	get(settings.KeyAnnounce, &v.Announce)
+	get(settings.KeyAnnounceURL, &v.AnnounceURL)
+	get(settings.KeyBrandAccent, &v.BrandAccent)
+	get(settings.KeyBrandLogo, &v.BrandLogoURL)
 	get(settings.KeyPublicHost, &v.PublicHost)
 	get(settings.KeyDomain, &v.Domain)
 	get(settings.KeyGroupMain, &v.SubGroupMain)
@@ -149,6 +163,9 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if v.RequireHWID, err = h.d.Settings.On(ctx, settings.RequireHWID); err != nil {
 		return v, err
 	}
+	if v.AppBranding, err = h.d.Settings.On(ctx, settings.AppBranding); err != nil {
+		return v, err
+	}
 	if v.Brand == "" {
 		v.Brand = "VPN"
 	}
@@ -189,7 +206,10 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	// Where clients are sent, and what they are told to trust: a leaked API key must not
 	// move subscriptions to another server or add rules to every client.
 	for field, touched := range map[string]bool{"public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
-		"sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil} {
+		"sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil,
+		// What every subscriber's app shows: text, links and the logo it downloads.
+		"sub_announce": b.Announce != nil, "sub_announce_url": b.AnnounceURL != nil, "app_branding": b.AppBranding != nil,
+		"brand_accent": b.BrandAccent != nil, "brand_logo_url": b.BrandLogoURL != nil} {
 		if touched {
 			if err := requireSession(ctx, field); err != nil {
 				return nil, err
@@ -205,6 +225,18 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	}
 	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {
 		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
+	}
+	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !subs.ValidLink(strings.TrimSpace(*b.AnnounceURL), true) {
+		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce_url", Message: "support_url_invalid"})
+	}
+	if b.Announce != nil && strings.ContainsAny(*b.Announce, "\r\n") {
+		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce", Message: "one_line"})
+	}
+	if b.BrandAccent != nil && *b.BrandAccent != "" && !subs.ValidAccent(strings.TrimSpace(*b.BrandAccent)) {
+		details = append(details, &huma.ErrorDetail{Location: "body.brand_accent", Message: "color_invalid"})
+	}
+	if b.BrandLogoURL != nil && *b.BrandLogoURL != "" && !subs.ValidLink(strings.TrimSpace(*b.BrandLogoURL), false) {
+		details = append(details, &huma.ErrorDetail{Location: "body.brand_logo_url", Message: "url_invalid"})
 	}
 	if b.SubGroupMain != nil || b.SubGroupAuto != nil || b.SubRules != nil {
 		cur, err := h.groups(ctx)
@@ -309,6 +341,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			}
 		}
 		for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
+			settings.KeyAnnounce: b.Announce, settings.KeyAnnounceURL: b.AnnounceURL, settings.KeyBrandAccent: b.BrandAccent, settings.KeyBrandLogo: b.BrandLogoURL,
 			settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
 			if v == nil {
 				continue
@@ -323,7 +356,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			}
 		}
 		for key, v := range map[string]*bool{settings.KeyAutoPort: b.AutoPort, settings.KeyAutoSNI: b.AutoSNI,
-			settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID} {
+			settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID, settings.KeyAppBranding: b.AppBranding} {
 			if v != nil {
 				if err := settings.Set(ctx, set, key, *v); err != nil {
 					return err

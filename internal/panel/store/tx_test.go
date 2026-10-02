@@ -13,7 +13,7 @@ import (
 // the panic goes on: the next writer must not wait for a context that never ends.
 func TestTxRollsBackOnPanic(t *testing.T) {
 	ctx := context.Background()
-	st, err := Open(ctx, t.TempDir())
+	st, err := OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestTxRollsBackOnPanic(t *testing.T) {
 
 func TestTxReturnsFnsError(t *testing.T) {
 	ctx := context.Background()
-	st, err := Open(ctx, t.TempDir())
+	st, err := OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestTxReturnsFnsError(t *testing.T) {
 // A duplicate is told by the driver's code, not by the words of its message.
 func TestIsUnique(t *testing.T) {
 	ctx := context.Background()
-	st, err := Open(ctx, t.TempDir())
+	st, err := OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

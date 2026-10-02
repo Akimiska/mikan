@@ -128,6 +128,8 @@ type handlers struct {
 
 	pendingMu sync.Mutex
 	pending   map[int64]pendingTOTP
+
+	metricsCache metricsCache
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.
@@ -189,6 +191,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerInbounds()
 	h.registerTargets()
 	h.registerStats()
+	h.registerMetrics()
 	h.registerSettings()
 	h.registerCerts()
 	h.registerTelegram()

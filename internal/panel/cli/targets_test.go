@@ -19,7 +19,7 @@ import (
 // current targets, `targets apply --all` points every REALITY inbound at the chosen one.
 func TestTargetsScanAndApply(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

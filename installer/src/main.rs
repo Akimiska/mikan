@@ -97,7 +97,7 @@ enum Cmd {
         #[arg(long, short = 'y')]
         yes: bool,
     },
-    /// Update to the latest release; goes back when the new version does not start
+    /// Update to the latest release, backing up and migrating the database safely
     Update(update::UpdateArgs),
     /// Payment adapters of the marketplace: list, install, remove
     #[command(subcommand)]

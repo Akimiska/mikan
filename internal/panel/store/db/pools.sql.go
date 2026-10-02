@@ -11,7 +11,7 @@ import (
 )
 
 const addTariffPool = `-- name: AddTariffPool :exec
-INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit) VALUES (?, ?, ?)
+INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit) VALUES ($1, $2, $3)
 `
 
 type AddTariffPoolParams struct {
@@ -26,8 +26,8 @@ func (q *Queries) AddTariffPool(ctx context.Context, arg AddTariffPoolParams) er
 }
 
 const addUserPoolTraffic = `-- name: AddUserPoolTraffic :exec
-INSERT INTO user_pools (user_id, pool_id, used_up, used_down) VALUES (?, ?, ?, ?)
-ON CONFLICT (user_id, pool_id) DO UPDATE SET used_up = used_up + excluded.used_up, used_down = used_down + excluded.used_down
+INSERT INTO user_pools (user_id, pool_id, used_up, used_down) VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, pool_id) DO UPDATE SET used_up = user_pools.used_up + excluded.used_up, used_down = user_pools.used_down + excluded.used_down
 `
 
 type AddUserPoolTrafficParams struct {
@@ -48,7 +48,7 @@ func (q *Queries) AddUserPoolTraffic(ctx context.Context, arg AddUserPoolTraffic
 }
 
 const addUserTotalTraffic = `-- name: AddUserTotalTraffic :exec
-UPDATE users SET total_up = total_up + ?1, total_down = total_down + ?2 WHERE id = ?3
+UPDATE users SET total_up = total_up + $1, total_down = total_down + $2 WHERE id = $3
 `
 
 type AddUserTotalTrafficParams struct {
@@ -64,7 +64,7 @@ func (q *Queries) AddUserTotalTraffic(ctx context.Context, arg AddUserTotalTraff
 }
 
 const clearTariffPools = `-- name: ClearTariffPools :exec
-DELETE FROM tariff_pools WHERE tariff_id = ?
+DELETE FROM tariff_pools WHERE tariff_id = $1
 `
 
 func (q *Queries) ClearTariffPools(ctx context.Context, tariffID int64) error {
@@ -73,7 +73,7 @@ func (q *Queries) ClearTariffPools(ctx context.Context, tariffID int64) error {
 }
 
 const clearUserPoolLimits = `-- name: ClearUserPoolLimits :exec
-UPDATE user_pools SET traffic_limit = NULL WHERE user_id = ?
+UPDATE user_pools SET traffic_limit = NULL WHERE user_id = $1
 `
 
 func (q *Queries) ClearUserPoolLimits(ctx context.Context, userID int64) error {
@@ -82,7 +82,7 @@ func (q *Queries) ClearUserPoolLimits(ctx context.Context, userID int64) error {
 }
 
 const createTrafficPool = `-- name: CreateTrafficPool :one
-INSERT INTO traffic_pools (name, created_at) VALUES (?, ?) RETURNING id, name, created_at
+INSERT INTO traffic_pools (name, created_at) VALUES ($1, $2) RETURNING id, name, created_at
 `
 
 type CreateTrafficPoolParams struct {
@@ -98,7 +98,7 @@ func (q *Queries) CreateTrafficPool(ctx context.Context, arg CreateTrafficPoolPa
 }
 
 const deleteTrafficPool = `-- name: DeleteTrafficPool :execrows
-DELETE FROM traffic_pools WHERE id = ?
+DELETE FROM traffic_pools WHERE id = $1
 `
 
 func (q *Queries) DeleteTrafficPool(ctx context.Context, id int64) (int64, error) {
@@ -110,7 +110,7 @@ func (q *Queries) DeleteTrafficPool(ctx context.Context, id int64) (int64, error
 }
 
 const getTrafficPool = `-- name: GetTrafficPool :one
-SELECT id, name, created_at FROM traffic_pools WHERE id = ?
+SELECT id, name, created_at FROM traffic_pools WHERE id = $1
 `
 
 func (q *Queries) GetTrafficPool(ctx context.Context, id int64) (TrafficPool, error) {
@@ -181,7 +181,7 @@ func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
 }
 
 const listTariffPools = `-- name: ListTariffPools :many
-SELECT tariff_id, pool_id, traffic_limit FROM tariff_pools WHERE tariff_id = ? ORDER BY pool_id
+SELECT tariff_id, pool_id, traffic_limit FROM tariff_pools WHERE tariff_id = $1 ORDER BY pool_id
 `
 
 func (q *Queries) ListTariffPools(ctx context.Context, tariffID int64) ([]TariffPool, error) {
@@ -235,7 +235,7 @@ func (q *Queries) ListTrafficPools(ctx context.Context) ([]TrafficPool, error) {
 }
 
 const listUserPools = `-- name: ListUserPools :many
-SELECT user_id, pool_id, traffic_limit, used_up, used_down FROM user_pools WHERE user_id = ? ORDER BY pool_id
+SELECT user_id, pool_id, traffic_limit, used_up, used_down FROM user_pools WHERE user_id = $1 ORDER BY pool_id
 `
 
 func (q *Queries) ListUserPools(ctx context.Context, userID int64) ([]UserPool, error) {
@@ -270,10 +270,10 @@ func (q *Queries) ListUserPools(ctx context.Context, userID int64) ([]UserPool, 
 const poolUsage = `-- name: PoolUsage :one
 SELECT
   (SELECT COUNT(*) FROM traffic_grants g
-    WHERE g.pool_id = ?1 AND g.remaining > 0 AND (g.expires_at IS NULL OR g.expires_at > CAST(?2 AS INTEGER))) AS grants,
-  (SELECT COUNT(*) FROM traffic_packages k WHERE k.pool_id = ?1 AND k.archived = 0) AS packages,
+    WHERE g.pool_id = $1 AND g.remaining > 0 AND (g.expires_at IS NULL OR g.expires_at > CAST($2 AS BIGINT))) AS grants,
+  (SELECT COUNT(*) FROM traffic_packages k WHERE k.pool_id = $1 AND k.archived = 0) AS packages,
   (SELECT COUNT(*) FROM payments p JOIN traffic_packages k ON k.id = p.package_id
-    WHERE k.pool_id = ?1 AND p.status IN ('pending', 'paid')) AS payments
+    WHERE k.pool_id = $1 AND p.status IN ('pending', 'paid')) AS payments
 `
 
 type PoolUsageParams struct {
@@ -298,7 +298,7 @@ func (q *Queries) PoolUsage(ctx context.Context, arg PoolUsageParams) (PoolUsage
 }
 
 const renameTrafficPool = `-- name: RenameTrafficPool :execrows
-UPDATE traffic_pools SET name = ? WHERE id = ?
+UPDATE traffic_pools SET name = $1 WHERE id = $2
 `
 
 type RenameTrafficPoolParams struct {
@@ -315,7 +315,7 @@ func (q *Queries) RenameTrafficPool(ctx context.Context, arg RenameTrafficPoolPa
 }
 
 const resetUserPools = `-- name: ResetUserPools :exec
-UPDATE user_pools SET used_up = 0, used_down = 0 WHERE user_id = ?
+UPDATE user_pools SET used_up = 0, used_down = 0 WHERE user_id = $1
 `
 
 // Pools reset with the main traffic: a new period, a renewal, the admin's reset.
@@ -325,7 +325,7 @@ func (q *Queries) ResetUserPools(ctx context.Context, userID int64) error {
 }
 
 const setInboundPool = `-- name: SetInboundPool :exec
-UPDATE inbounds SET pool_id = ? WHERE id = ?
+UPDATE inbounds SET pool_id = $1 WHERE id = $2
 `
 
 type SetInboundPoolParams struct {
@@ -339,7 +339,7 @@ func (q *Queries) SetInboundPool(ctx context.Context, arg SetInboundPoolParams) 
 }
 
 const setUserPoolLimit = `-- name: SetUserPoolLimit :exec
-INSERT INTO user_pools (user_id, pool_id, traffic_limit) VALUES (?, ?, ?)
+INSERT INTO user_pools (user_id, pool_id, traffic_limit) VALUES ($1, $2, $3)
 ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit
 `
 

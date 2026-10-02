@@ -330,6 +330,61 @@
         ],
         "type": "object"
       },
+      "AlertsConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "$ref": "#/components/schemas/Events"
+          },
+          "public_changes": {
+            "type": "boolean"
+          },
+          "public_channel": {
+            "type": "string"
+          },
+          "public_enabled": {
+            "type": "boolean"
+          },
+          "public_summary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "admin_enabled",
+          "public_enabled",
+          "public_summary",
+          "public_changes",
+          "events"
+        ],
+        "type": "object"
+      },
+      "AlertsConfigPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "$ref": "#/components/schemas/EventsPatch"
+          },
+          "public_changes": {
+            "type": "boolean"
+          },
+          "public_channel": {
+            "type": "string"
+          },
+          "public_enabled": {
+            "type": "boolean"
+          },
+          "public_summary": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "AuditEntry": {
         "additionalProperties": false,
         "properties": {
@@ -1166,6 +1221,76 @@
         },
         "type": "object"
       },
+      "Events": {
+        "additionalProperties": false,
+        "properties": {
+          "autotune": {
+            "type": "boolean"
+          },
+          "autotune_recovery": {
+            "type": "boolean"
+          },
+          "exit": {
+            "type": "boolean"
+          },
+          "inbound": {
+            "type": "boolean"
+          },
+          "node": {
+            "type": "boolean"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "update": {
+            "type": "boolean"
+          },
+          "warp": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "node",
+          "warp",
+          "exit",
+          "inbound",
+          "autotune",
+          "autotune_recovery",
+          "tls",
+          "update"
+        ],
+        "type": "object"
+      },
+      "EventsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "autotune": {
+            "type": "boolean"
+          },
+          "autotune_recovery": {
+            "type": "boolean"
+          },
+          "exit": {
+            "type": "boolean"
+          },
+          "inbound": {
+            "type": "boolean"
+          },
+          "node": {
+            "type": "boolean"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "update": {
+            "type": "boolean"
+          },
+          "warp": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ExtendInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1553,6 +1678,18 @@
         ],
         "type": "object"
       },
+      "InfrastructureConnectOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
       "ListUsersOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1811,6 +1948,10 @@
             "description": "Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений",
             "type": "string"
           },
+          "public_name": {
+            "description": "Публичное имя для канала состояния; пустое — нода скрыта из списка",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "ok",
@@ -1830,6 +1971,7 @@
           "address",
           "host",
           "domain",
+          "public_name",
           "enabled",
           "inbounds",
           "status",
@@ -2277,6 +2419,11 @@
           "name": {
             "maxLength": 200,
             "type": "string"
+          },
+          "public_name": {
+            "description": "Публичное имя ноды; пустое — не публиковать её в канале",
+            "maxLength": 80,
+            "type": "string"
           }
         },
         "type": "object"
@@ -2302,6 +2449,9 @@
       "PatchSettingsInputBody": {
         "additionalProperties": false,
         "properties": {
+          "app_branding": {
+            "type": "boolean"
+          },
           "auto_port": {
             "type": "boolean"
           },
@@ -2310,6 +2460,16 @@
           },
           "brand": {
             "maxLength": 40,
+            "type": "string"
+          },
+          "brand_accent": {
+            "description": "#RRGGBB или пусто",
+            "maxLength": 7,
+            "type": "string"
+          },
+          "brand_logo_url": {
+            "description": "https://… или пусто",
+            "maxLength": 500,
             "type": "string"
           },
           "client_fingerprint": {
@@ -2344,6 +2504,15 @@
             "maximum": 23,
             "minimum": 0,
             "type": "integer"
+          },
+          "sub_announce": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "sub_announce_url": {
+            "description": "https://… или tg://…",
+            "maxLength": 200,
+            "type": "string"
           },
           "sub_group_auto": {
             "maxLength": 200,
@@ -2388,6 +2557,9 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "infrastructure": {
+            "$ref": "#/components/schemas/AlertsConfigPatch"
           },
           "route": {
             "$ref": "#/components/schemas/RouteStruct",
@@ -2985,6 +3157,10 @@
           "admin_url": {
             "type": "string"
           },
+          "app_branding": {
+            "description": "Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки",
+            "type": "boolean"
+          },
           "auto_port": {
             "description": "Переносить подключение на другой порт, если клиенты перестали до него доходить",
             "type": "boolean"
@@ -2994,6 +3170,14 @@
             "type": "boolean"
           },
           "brand": {
+            "type": "string"
+          },
+          "brand_accent": {
+            "description": "Цвет бренда #RRGGBB; пусто — цвет приложения",
+            "type": "string"
+          },
+          "brand_logo_url": {
+            "description": "Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения",
             "type": "string"
           },
           "certificate": {
@@ -3042,6 +3226,14 @@
             },
             "type": "array"
           },
+          "sub_announce": {
+            "description": "Объявление над профилем в приложениях (заголовок announce); пусто — нет",
+            "type": "string"
+          },
+          "sub_announce_url": {
+            "description": "Куда ведёт нажатие на объявление",
+            "type": "string"
+          },
           "sub_base_url": {
             "type": "string"
           },
@@ -3081,6 +3273,11 @@
         "required": [
           "brand",
           "support_url",
+          "sub_announce",
+          "sub_announce_url",
+          "app_branding",
+          "brand_accent",
+          "brand_logo_url",
           "public_host",
           "domain",
           "panel_port",
@@ -3481,6 +3678,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "admin_chat_set": {
+            "type": "boolean"
+          },
           "bot": {
             "$ref": "#/components/schemas/TelegramBot"
           },
@@ -3501,6 +3701,9 @@
           "error": {
             "description": "token_invalid, token_revoked, unreachable или ответ Telegram",
             "type": "string"
+          },
+          "infrastructure": {
+            "$ref": "#/components/schemas/AlertsConfig"
           },
           "linked": {
             "description": "Подписок, привязанных к Telegram",
@@ -3536,7 +3739,9 @@
           "mini_app_url",
           "linked",
           "accounts",
-          "route"
+          "route",
+          "infrastructure",
+          "admin_chat_set"
         ],
         "type": "object"
       },
@@ -5194,6 +5399,41 @@
         "summary": "Изменить подключение",
         "tags": [
           "inbounds"
+        ]
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "Пользователи по состояниям, онлайн, трафик, ноды и подключения. Для Prometheus и Grafana: ключ на чтение в заголовке Authorization: Bearer.",
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {}
+            },
+            "description": "Prometheus text format 0.0.4",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Метрики в формате Prometheus",
+        "tags": [
+          "stats"
         ]
       }
     },
@@ -6968,6 +7208,61 @@
           }
         },
         "summary": "Разослать сообщение всем в боте",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/telegram/infrastructure/connect": {
+      "delete": {
+        "operationId": "telegram-infrastructure-disconnect",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отключить чат администратора для уведомлений",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      },
+      "post": {
+        "operationId": "telegram-infrastructure-connect",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfrastructureConnectOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Подключить чат администратора для уведомлений",
         "tags": [
           "telegram"
         ],

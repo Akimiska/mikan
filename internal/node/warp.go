@@ -112,7 +112,10 @@ func probe(ctx context.Context, proxy string) nodeapi.WarpStatus {
 			if err != nil {
 				return nil, err
 			}
-			port, _ := strconv.Atoi(portStr)
+			port, err := strconv.ParseUint(portStr, 10, 16)
+			if err != nil {
+				return nil, err
+			}
 			return p.DialContext(ctx, &C.Metadata{NetWork: C.TCP, Host: host, DstPort: uint16(port)})
 		},
 		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},

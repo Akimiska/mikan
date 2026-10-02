@@ -81,7 +81,7 @@ func TestTrafficPoolsOnThePanel(t *testing.T) {
 		t.Fatalf("after the pool ran out: %+v", p)
 	}
 	// The main quota running out keeps the user in for the pool.
-	_, err = st.DB.ExecContext(ctx, "UPDATE users SET traffic_limit = 50 WHERE id = ?", u.ID)
+	_, err = st.DB.ExecContext(ctx, "UPDATE users SET traffic_limit = 50 WHERE id = $1", u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

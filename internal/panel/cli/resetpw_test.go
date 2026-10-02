@@ -16,7 +16,7 @@ import (
 // the server after a hijacked session, and a key made from that session would outlive it.
 func TestResetPasswordRevokesSessionsAndKeys(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

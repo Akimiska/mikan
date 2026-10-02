@@ -241,7 +241,7 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	t.Cleanup(cancel)
 	e.ctx = ctx
 	var err error
-	if e.st, err = store.Open(ctx, t.TempDir()); err != nil {
+	if e.st, err = store.OpenTest(ctx, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })
@@ -427,7 +427,7 @@ func TestBot(t *testing.T) {
 
 	// Notifications go once per term.
 	exp := e.clock().Add(2 * 24 * time.Hour).Unix()
-	if _, err := e.st.DB.ExecContext(e.ctx, "UPDATE users SET expires_at = ? WHERE id = ?", exp, e.user.ID); err != nil {
+	if _, err := e.st.DB.ExecContext(e.ctx, "UPDATE users SET expires_at = $1 WHERE id = $2", exp, e.user.ID); err != nil {
 		t.Fatal(err)
 	}
 	n = e.tg.count()
@@ -570,9 +570,35 @@ func TestBot(t *testing.T) {
 	}
 }
 
+func TestInfrastructureAdminLinkIsOneTime(t *testing.T) {
+	e := setup(t)
+	link, err := e.bot.BeginInfrastructureAdminConnect(e.ctx)
+	if err != nil || !strings.Contains(link, "https://t.me/mikan_test_bot?start=infra_") {
+		t.Fatalf("admin connect link: %q %v", link, err)
+	}
+	code := strings.TrimPrefix(link, "https://t.me/mikan_test_bot?start=infra_")
+	e.say(555, "/start infra_"+code)
+	e.tg.until(t, 0, func(cs []call) bool {
+		for _, c := range cs {
+			if c.method == "sendMessage" && c.body["chat_id"] == float64(555) && strings.Contains(text(c), "подключён") {
+				return true
+			}
+		}
+		return false
+	})
+	if id, ok, err := e.bot.InfrastructureAdminChat(e.ctx); err != nil || !ok || id != 555 {
+		t.Fatalf("connected admin: %d %v %v", id, ok, err)
+	}
+	e.say(777, "/start infra_"+code)
+	time.Sleep(80 * time.Millisecond)
+	if id, ok, err := e.bot.InfrastructureAdminChat(e.ctx); err != nil || !ok || id != 555 {
+		t.Fatalf("one-time link was reused: %d %v %v", id, ok, err)
+	}
+}
+
 func TestConfigSavedBefore(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

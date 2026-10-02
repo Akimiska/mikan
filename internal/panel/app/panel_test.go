@@ -42,7 +42,7 @@ type harness struct {
 func newHarness(t *testing.T, with ...func(*Options)) *harness {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

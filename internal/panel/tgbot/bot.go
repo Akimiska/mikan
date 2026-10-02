@@ -3,6 +3,7 @@ package tgbot
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -27,12 +28,14 @@ import (
 
 // Settings keys of the bot.
 const (
-	KeyEnabled = "tg_enabled"
-	KeyToken   = "tg_token" // never leaves the panel's API
-	KeyBot     = "tg_bot"   // the token's bot, from getMe
-	KeyConfig  = "tg_config"
-	KeySecret  = "tg_secret" // signs the link codes
-	KeyOffset  = "tg_offset" // the last update taken, so a restart does not hand them out again
+	KeyEnabled        = "tg_enabled"
+	KeyToken          = "tg_token" // never leaves the panel's API
+	KeyBot            = "tg_bot"   // the token's bot, from getMe
+	KeyConfig         = "tg_config"
+	KeySecret         = "tg_secret" // signs the link codes
+	KeyOffset         = "tg_offset" // the last update taken, so a restart does not hand them out again
+	KeyInfraAdminChat = "infrastructure_admin_chat"
+	keyInfraAdminLink = "infrastructure_admin_link"
 )
 
 // Enabled switches the bot on; off until the admin connects it.
@@ -220,6 +223,96 @@ func (b *Bot) LinkURL(ctx context.Context, userID int64) string {
 		return ""
 	}
 	return "https://t.me/" + st.Bot.Username + "?start=" + LinkCode(secret, userID, b.d.Now())
+}
+
+// BeginInfrastructureAdminConnect makes a short lived deep link that binds one private
+// Telegram chat to infrastructure alerts. The bot must be running so it can consume the
+// one-time /start code.
+func (b *Bot) BeginInfrastructureAdminConnect(ctx context.Context) (string, error) {
+	st := b.Status()
+	if !st.Running || st.Bot.Username == "" {
+		return "", ErrOff
+	}
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	code := base64.RawURLEncoding.EncodeToString(raw)
+	pending, _ := json.Marshal(struct {
+		Code  string `json:"code"`
+		Until int64  `json:"until"`
+	}{code, b.d.Now().Add(10 * time.Minute).Unix()})
+	if err := settings.Set(ctx, b.d.Settings, keyInfraAdminLink, string(pending)); err != nil {
+		return "", err
+	}
+	return "https://t.me/" + st.Bot.Username + "?start=infra_" + code, nil
+}
+
+// InfrastructureAdminChat returns the one chat connected to receive private alerts.
+func (b *Bot) InfrastructureAdminChat(ctx context.Context) (int64, bool, error) {
+	id, ok, err := settings.Get[int64](ctx, b.d.Settings, KeyInfraAdminChat)
+	return id, ok && id > 0, err
+}
+
+func (b *Bot) DisconnectInfrastructureAdmin(ctx context.Context) error {
+	return b.d.Store.Tx(ctx, func(q *db.Queries) error {
+		set := settings.New(q)
+		if err := settings.Set(ctx, set, KeyInfraAdminChat, int64(0)); err != nil {
+			return err
+		}
+		return settings.Set(ctx, set, keyInfraAdminLink, "")
+	})
+}
+
+// InfrastructureClient builds a sending client with the same bot token and route used by
+// the subscriber bot. Sending alerts does not require the subscriber bot's polling loop.
+func (b *Bot) InfrastructureClient(ctx context.Context) (*Client, error) {
+	token, err := b.d.Settings.String(ctx, KeyToken)
+	if err != nil || token == "" {
+		return nil, ErrOff
+	}
+	rt, err := b.transport(b.Route(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return NewClient(b.d.API, token, rt), nil
+}
+
+// InfrastructureEnabled reports whether Telegram delivery is enabled and has a token.
+func (b *Bot) InfrastructureEnabled(ctx context.Context) bool {
+	enabled, err := b.d.Settings.On(ctx, settings.Switch{Key: KeyEnabled})
+	if err != nil || !enabled {
+		return false
+	}
+	token, err := b.d.Settings.String(ctx, KeyToken)
+	return err == nil && token != ""
+}
+
+func (b *Bot) claimInfrastructureAdmin(ctx context.Context, chat int64, code string) bool {
+	claimed := false
+	err := b.d.Store.Tx(ctx, func(q *db.Queries) error {
+		set := settings.New(q)
+		var pending struct {
+			Code  string `json:"code"`
+			Until int64  `json:"until"`
+		}
+		raw, ok, err := settings.Get[string](ctx, set, keyInfraAdminLink)
+		if err != nil {
+			return err
+		}
+		if !ok || json.Unmarshal([]byte(raw), &pending) != nil || pending.Until < b.d.Now().Unix() || len(code) != len(pending.Code) || subtle.ConstantTimeCompare([]byte(code), []byte(pending.Code)) != 1 {
+			return nil
+		}
+		if err := settings.Set(ctx, set, KeyInfraAdminChat, chat); err != nil {
+			return err
+		}
+		if err := settings.Set(ctx, set, keyInfraAdminLink, ""); err != nil {
+			return err
+		}
+		claimed = true
+		return nil
+	})
+	return err == nil && claimed
 }
 
 func (b *Bot) poll(ctx context.Context, c *Client) {
@@ -419,6 +512,23 @@ func (b *Bot) onMessage(ctx context.Context, out *Outbox, m *Message) {
 	if b.flooding(chat) {
 		return
 	}
+	messageText := strings.TrimSpace(m.Text)
+	if strings.HasPrefix(messageText, "/start infra_") {
+		code := strings.TrimSpace(strings.TrimPrefix(messageText, "/start infra_"))
+		text := "Не удалось подключить чат администратора. Создайте новую ссылку в панели."
+		claimed := b.claimInfrastructureAdmin(ctx, chat, code)
+		if claimed {
+			text = "✅ Чат подключён. Сюда будут приходить личные уведомления о состоянии инфраструктуры."
+		}
+		if b.Config(ctx).Lang == "en" {
+			text = "Could not connect the admin chat. Create a new link in the panel."
+			if claimed {
+				text = "✅ Admin chat connected. Infrastructure alerts will be sent here."
+			}
+		}
+		out.Reply(chat, "infrastructure-admin", 1, func(ctx context.Context, c *Client) error { _, err := c.Send(ctx, chat, text, nil, false); return err })
+		return
+	}
 	_ = b.d.Store.Q.UpsertTgChat(ctx, db.UpsertTgChatParams{TgID: chat, Username: m.From.Username, FirstName: m.From.FirstName, CreatedAt: now, UpdatedAt: now})
 	cfg := b.Config(ctx)
 	w := wordsFor(cfg.Lang)
@@ -435,6 +545,11 @@ func (b *Bot) onMessage(ctx context.Context, out *Outbox, m *Message) {
 		notice = b.linkByToken(ctx, out, w, chat, who(m.From), subLink.FindStringSubmatch(text)[1])
 	}
 	b.freshMenu(out, chat, notice)
+}
+
+func (b *Bot) InfrastructureAdminChatIs(ctx context.Context, chat int64) bool {
+	id, ok, err := b.InfrastructureAdminChat(ctx)
+	return err == nil && ok && id == chat
 }
 
 // freshMenu sends the main menu as a new message and removes the previous one, so the

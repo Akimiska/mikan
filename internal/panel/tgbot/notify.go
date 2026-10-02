@@ -76,7 +76,7 @@ func (b *Bot) claimNotice(ctx context.Context, userID int64, n notice, now time.
 		return "", false
 	}
 	var one int
-	err := b.d.Store.DB.QueryRowContext(ctx, `SELECT 1 FROM tg_notices WHERE user_id = ? AND kind = ? AND period = ?`, userID, n.kind, n.period).Scan(&one)
+	err := b.d.Store.DB.QueryRowContext(ctx, `SELECT 1 FROM tg_notices WHERE user_id = $1 AND kind = $2 AND period = $3`, userID, n.kind, n.period).Scan(&one)
 	switch {
 	case err == nil:
 		return "", false // delivered

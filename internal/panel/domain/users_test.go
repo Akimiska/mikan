@@ -18,7 +18,7 @@ func (c *changes) SlotsChanged()    { c.slots++ }
 func setup(t *testing.T, now *time.Time) (*store.Store, *Users, *changes) {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

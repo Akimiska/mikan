@@ -54,12 +54,15 @@ services:
   panel:
     <<: *hardening
     command: ["serve"]
-    depends_on: [node]
+    depends_on:
+      node: {condition: service_started}
+      postgres: {condition: service_healthy}
     environment:
       MIKAN_DATA_DIR: /data/panel
       MIKAN_NODE_SOCKET: /run/mikan/node.sock
       MIKAN_PANEL_LISTEN: 0.0.0.0:${PANEL_PORT}
-    volumes: ["./data/panel:/data/panel", "run:/run/mikan"]
+      MIKAN_DATABASE_URL: ${MIKAN_DATABASE_URL}
+    volumes: ["./data/panel:/data/panel", "run:/run/mikan", "pg-run:/run/postgresql"]
     mem_limit: 1g
     pids_limit: 512
     healthcheck:
@@ -68,8 +71,33 @@ services:
       timeout: 5s
       retries: 3
 
+  postgres:
+    image: postgres:18-alpine
+    network_mode: none
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_USER: mikan
+      POSTGRES_DB: mikan
+      POSTGRES_PASSWORD: ${MIKAN_POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    command: ["postgres", "-c", "listen_addresses=", "-c", "unix_socket_directories=/run/postgresql", "-c", "unix_socket_permissions=0777"]
+    volumes: ["pg-data:/var/lib/postgresql", "pg-run:/run/postgresql"]
+    mem_limit: 1g
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "/run/postgresql", "-U", "mikan", "-d", "mikan"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
 volumes:
   run: {}
+  pg-run: {}
+  pg-data: {}
 "#;
 
 /// A node of another panel, which drives it over its API port.
@@ -363,6 +391,18 @@ pub fn admin_once(args: &[&str], stdin: Option<&str>) -> Result<Output> {
     with_stdin(compose(&full), stdin)
 }
 
+/// Database administration while the panel is stopped: no bot, API or statistics writer.
+pub fn database(args: &[&str]) -> Result<Output> {
+    let mut full = vec!["run", "--rm", "--no-deps", "-T", "panel", "database"];
+    full.extend_from_slice(args);
+    check(compose_run(&full)?)
+}
+
+pub fn postgres_ready() -> Result<()> {
+    compose_run(&["up", "-d", "--wait", "--wait-timeout", "120", "postgres"])?;
+    Ok(())
+}
+
 fn with_stdin(mut cmd: Command, stdin: Option<&str>) -> Result<Output> {
     let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     if let Some(s) = stdin {
@@ -444,6 +484,17 @@ pub fn stats() -> Vec<Stats> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn postgres_is_private_persistent_and_password_authenticated() {
+        let pg = PANEL_COMPOSE.split("\n  postgres:").nth(1).unwrap().split("\nvolumes:").next().unwrap();
+        assert!(pg.contains("network_mode: none"));
+        assert!(!pg.contains("ports:") && !pg.contains("network_mode: host"));
+        assert!(pg.contains("pg-data:/var/lib/postgresql"));
+        assert!(pg.contains("--auth-local=scram-sha-256"));
+        assert!(pg.contains("listen_addresses="));
+        assert!(!NODE_COMPOSE.contains("postgres"), "standalone nodes must not create a database");
+    }
 
     #[test]
     fn pull_progress() {

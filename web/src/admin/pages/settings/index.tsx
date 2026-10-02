@@ -10,7 +10,7 @@ import { SETTINGS_TABS } from "../../search";
 import { AutoCard, LanguageCard, SalesCard, ServerCard, UpdatesCard } from "./general";
 import { ClashRulesCard } from "./rules";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
-import { DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
+import { AppsCard, DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
 
 const ICONS = { general: Globe, subscription: Link2, rules: ListFilter, security: ShieldCheck } as const;
 
@@ -55,7 +55,12 @@ export function SettingsPage() {
                     <DevicesCard s={s} />
                   </>
                 }
-                right={<SubPortCard s={s} />}
+                right={
+                  <>
+                    <SubPortCard s={s} />
+                    <AppsCard s={s} />
+                  </>
+                }
               />
             ) : tab === "rules" ? (
               <div className="max-w-4xl">

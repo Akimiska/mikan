@@ -45,6 +45,15 @@ const (
 	// Branding and support: the bot's and the subscription page's name and the support link.
 	KeyBrand      = "brand"
 	KeySupportURL = "support_url"
+	// The announcement apps show over the profile (the announce and announce-url headers),
+	// for maintenance or news; empty: none.
+	KeyAnnounce    = "sub_announce"
+	KeyAnnounceURL = "sub_announce_url"
+	// App branding: the brand, logo and accent colour go to the apps that read operator
+	// headers (subs.OperatorHeaders); off by default.
+	KeyAppBranding = "app_branding"
+	KeyBrandAccent = "brand_accent"   // #RRGGBB, empty: the app's own
+	KeyBrandLogo   = "brand_logo_url" // https, empty: the app's own
 	// KeyQuietHour is the UTC hour the slot pool is refilled, which reconnects QUIC clients.
 	KeyQuietHour = "quiet_hour_utc"
 )
@@ -63,6 +72,7 @@ var (
 	DeviceBinding = Switch{KeyDeviceBinding, true}
 	RequireHWID   = Switch{KeyRequireHWID, false}
 	AutoUpdate    = Switch{KeyAutoUpdate, false}
+	AppBranding   = Switch{KeyAppBranding, false}
 )
 
 // ValidLang says whether s is a language of the panel.

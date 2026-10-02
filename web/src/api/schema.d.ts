@@ -364,6 +364,26 @@ export interface paths {
         patch: operations["update-inbound"];
         trace?: never;
     };
+    "/api/v1/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Метрики в формате Prometheus
+         * @description Пользователи по состояниям, онлайн, трафик, ноды и подключения. Для Prometheus и Grafana: ключ на чтение в заголовке Authorization: Bearer.
+         */
+        get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/node": {
         parameters: {
             query?: never;
@@ -839,6 +859,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/telegram/infrastructure/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Подключить чат администратора для уведомлений */
+        post: operations["telegram-infrastructure-connect"];
+        /** Отключить чат администратора для уведомлений */
+        delete: operations["telegram-infrastructure-disconnect"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/updates": {
         parameters: {
             query?: never;
@@ -1227,6 +1265,22 @@ export interface components {
             totp_enabled: boolean;
             username: string;
         };
+        AlertsConfig: {
+            admin_enabled: boolean;
+            events: components["schemas"]["Events"];
+            public_changes: boolean;
+            public_channel?: string;
+            public_enabled: boolean;
+            public_summary: boolean;
+        };
+        AlertsConfigPatch: {
+            admin_enabled?: boolean;
+            events?: components["schemas"]["EventsPatch"];
+            public_changes?: boolean;
+            public_channel?: string;
+            public_enabled?: boolean;
+            public_summary?: boolean;
+        };
         AuditEntry: {
             /** @description Например user.create, settings.update, auth.login_failed */
             action: string;
@@ -1528,6 +1582,26 @@ export interface components {
              */
             type: string;
         };
+        Events: {
+            autotune: boolean;
+            autotune_recovery: boolean;
+            exit: boolean;
+            inbound: boolean;
+            node: boolean;
+            tls: boolean;
+            update: boolean;
+            warp: boolean;
+        };
+        EventsPatch: {
+            autotune?: boolean;
+            autotune_recovery?: boolean;
+            exit?: boolean;
+            inbound?: boolean;
+            node?: boolean;
+            tls?: boolean;
+            update?: boolean;
+            warp?: boolean;
+        };
         ExtendInputBody: {
             /** Format: int64 */
             days?: number;
@@ -1667,6 +1741,9 @@ export interface components {
             title: string;
             type: string;
         };
+        InfrastructureConnectOutputBody: {
+            url: string;
+        };
         ListUsersOutputBody: {
             counts: components["schemas"]["UserCounts"];
             items: components["schemas"]["UserView"][];
@@ -1753,6 +1830,8 @@ export interface components {
             mem_used: number;
             /** @description Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений */
             name: string;
+            /** @description Публичное имя для канала состояния; пустое — нода скрыта из списка */
+            public_name: string;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
             version?: string;
@@ -1931,6 +2010,8 @@ export interface components {
             enabled?: boolean;
             host?: string;
             name?: string;
+            /** @description Публичное имя ноды; пустое — не публиковать её в канале */
+            public_name?: string;
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
@@ -1939,9 +2020,14 @@ export interface components {
             stars?: boolean;
         };
         PatchSettingsInputBody: {
+            app_branding?: boolean;
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
+            /** @description #RRGGBB или пусто */
+            brand_accent?: string;
+            /** @description https://… или пусто */
+            brand_logo_url?: string;
             /** @description Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов */
             client_fingerprint?: string;
             /** @enum {string} */
@@ -1952,6 +2038,9 @@ export interface components {
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
+            sub_announce?: string;
+            /** @description https://… или tg://… */
+            sub_announce_url?: string;
             sub_group_auto?: string;
             sub_group_main?: string;
             /**
@@ -1969,6 +2058,7 @@ export interface components {
         PatchTelegramInputBody: {
             config?: components["schemas"]["Config"];
             enabled?: boolean;
+            infrastructure?: components["schemas"]["AlertsConfigPatch"];
             /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
             route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */
@@ -2169,11 +2259,17 @@ export interface components {
         };
         SettingsView: {
             admin_url: string;
+            /** @description Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки */
+            app_branding: boolean;
             /** @description Переносить подключение на другой порт, если клиенты перестали до него доходить */
             auto_port: boolean;
             /** @description Менять сайт маскировки REALITY, если он перестал подходить */
             auto_sni: boolean;
             brand: string;
+            /** @description Цвет бренда #RRGGBB; пусто — цвет приложения */
+            brand_accent: string;
+            /** @description Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения */
+            brand_logo_url: string;
             certificate: components["schemas"]["Status"];
             /** @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение */
             client_fingerprint: string;
@@ -2197,6 +2293,10 @@ export interface components {
             quiet_hour_utc: number;
             /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
             rule_targets: string[];
+            /** @description Объявление над профилем в приложениях (заголовок announce); пусто — нет */
+            sub_announce: string;
+            /** @description Куда ведёт нажатие на объявление */
+            sub_announce_url: string;
             sub_base_url: string;
             /** @description Группа автовыбора самого быстрого подключения */
             sub_group_auto: string;
@@ -2371,6 +2471,7 @@ export interface components {
              * @description Аккаунтов Telegram с подписками
              */
             accounts: number;
+            admin_chat_set: boolean;
             bot?: components["schemas"]["TelegramBot"];
             /** @description Последняя рассылка с запуска панели */
             broadcast?: components["schemas"]["TelegramBroadcast"];
@@ -2380,6 +2481,7 @@ export interface components {
             enabled: boolean;
             /** @description token_invalid, token_revoked, unreachable или ответ Telegram */
             error?: string;
+            infrastructure: components["schemas"]["AlertsConfig"];
             /**
              * Format: int64
              * @description Подписок, привязанных к Telegram
@@ -3368,6 +3470,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus text format 0.0.4 */
+            200: {
+                headers: {
+                    "Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
                 };
             };
             /** @description Error */
@@ -4722,6 +4854,62 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BroadcastOutputBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-infrastructure-connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InfrastructureConnectOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-infrastructure-disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

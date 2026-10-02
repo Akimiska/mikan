@@ -28,6 +28,7 @@ type NodeInfo struct {
 	Address     string     `json:"address" doc:"host:port API ноды; пусто у своей ноды"`
 	Host        string     `json:"host" doc:"Адрес для клиентов"`
 	Domain      string     `json:"domain"`
+	PublicName  string     `json:"public_name" doc:"Публичное имя для канала состояния; пустое — нода скрыта из списка"`
 	Enabled     bool       `json:"enabled"`
 	Inbounds    int        `json:"inbounds"`
 	Status      string     `json:"status" enum:"ok,error,unknown"`
@@ -68,10 +69,11 @@ type createNodeInput struct {
 type patchNodeInput struct {
 	ID   int64 `path:"id" minimum:"1"`
 	Body struct {
-		Name    *string `json:"name,omitempty" maxLength:"200"`
-		Host    *string `json:"host,omitempty" maxLength:"253"`
-		Domain  *string `json:"domain,omitempty" maxLength:"253"`
-		Enabled *bool   `json:"enabled,omitempty"`
+		Name       *string `json:"name,omitempty" maxLength:"200"`
+		PublicName *string `json:"public_name,omitempty" maxLength:"80" doc:"Публичное имя ноды; пустое — не публиковать её в канале"`
+		Host       *string `json:"host,omitempty" maxLength:"253"`
+		Domain     *string `json:"domain,omitempty" maxLength:"253"`
+		Enabled    *bool   `json:"enabled,omitempty"`
 	}
 }
 
@@ -88,7 +90,7 @@ func (h *handlers) registerNodes() {
 }
 
 func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {
-	v := NodeInfo{ID: n.ID, Name: n.Name, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
+	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
 		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown"}
 	if v.Local {
 		// The panel's own node is reached at the panel's address.
@@ -233,6 +235,9 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 		}
 		n.Name = name
 	}
+	if b.PublicName != nil {
+		n.PublicName = strings.TrimSpace(*b.PublicName)
+	}
 	if local && (b.Host != nil || b.Domain != nil) {
 		// The panel's own node follows the panel's address in the settings.
 		return nil, huma.Error422UnprocessableEntity("local_node")
@@ -267,14 +272,14 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 			n.Enabled = 1
 		}
 	}
-	n, err = h.d.Store.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain,
+	n, err = h.d.Store.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, PublicName: n.PublicName,
 		Enabled: n.Enabled, UpdatedAt: h.d.Now().Unix(), ID: n.ID})
 	if err != nil {
 		return nil, err
 	}
 	h.nodesChanged()
 	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "enabled": n.Enabled != 0})
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "public_name": n.PublicName, "enabled": n.Enabled != 0})
 	return h.nodeInfo(ctx, n.ID)
 }
 

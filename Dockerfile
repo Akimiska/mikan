@@ -23,8 +23,8 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/mikan ./cmd/mikan && \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/mikan-node ./cmd/mikan-node
 
-FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata libcap && \
+FROM alpine:3.23
+RUN apk add --no-cache ca-certificates tzdata libcap postgresql18-client && \
     addgroup -S -g 65532 mikan && adduser -S -D -H -u 65532 -G mikan mikan
 COPY --from=build /out/ /usr/local/bin/
 # The binaries must be the image's own architecture: the ELF machine field says so.

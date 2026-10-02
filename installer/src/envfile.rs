@@ -78,7 +78,7 @@ impl EnvFile {
 /// A value compose reads as it stands: it interpolates `$`, strips quotes and ends a line
 /// at ` #`, so anything but plain image names, versions, ports and keys is refused.
 fn plain(value: &str) -> bool {
-    value.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:/@+=,-".contains(&b))
+    value.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:/@+=,-?&%".contains(&b))
 }
 
 /// Writes a file readable by root only, replacing it at once: a new file under its own

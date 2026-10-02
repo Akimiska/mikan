@@ -128,9 +128,17 @@ pub fn backup_as(kind: &str, say: &mut dyn FnMut(&str)) -> Result<PathBuf> {
     } else {
         let panel = Dir::open(root, "data/panel", false)?.context("data/panel is not there")?;
         // What an interrupted backup left would make the database copy fail.
-        panel.discard("backup.db")?;
-        docker::check(docker::admin(&["backup", "/data/panel/backup.db"], None)?)?;
-        members.push("data/panel/backup.db".into());
+        let name = if install.env.get("MIKAN_DATABASE_URL").is_some() {
+            docker::postgres_ready()?;
+            panel.discard("backup.dump")?;
+            docker::database(&["backup", "/data/panel/backup.dump"])?;
+            "backup.dump"
+        } else {
+            panel.discard("backup.db")?;
+            docker::check(docker::admin(&["backup", "/data/panel/backup.db"], None)?)?;
+            "backup.db"
+        };
+        members.push(format!("data/panel/{name}"));
         if exists(root, "data/panel/tls") {
             members.push("data/panel/tls".into());
         }
@@ -139,9 +147,16 @@ pub fn backup_as(kind: &str, say: &mut dyn FnMut(&str)) -> Result<PathBuf> {
     if exists(root, "data/node") {
         members.push("data/node".into());
     }
+    if exists(root, "addons/state.json") {
+        members.push("addons/state.json".into());
+    }
+    if exists(root, "data/panel/addons") {
+        members.push("data/panel/addons".into());
+    }
     let packed = pack(root, &dir, kind, &members);
     if let Some(panel) = &panel {
         let _ = panel.discard("backup.db");
+        let _ = panel.discard("backup.dump");
     }
     let file = packed?;
     match kind {
@@ -173,7 +188,10 @@ fn allowed_name(name: &str) -> bool {
     if n.is_empty() || n.split('/').any(|c| c.is_empty() || c == ".." || c == ".") {
         return false;
     }
-    TOP.contains(&n) || ["data", "data/panel", "data/node"].contains(&n) || n.starts_with("data/panel/") || n.starts_with("data/node/")
+    TOP.contains(&n)
+        || ["data", "data/panel", "data/node", "addons", "addons/state.json"].contains(&n)
+        || n.starts_with("data/panel/")
+        || n.starts_with("data/node/")
 }
 
 /// Judges the two listings of an archive (`tar -tzf`, names; `tar -tvzf`, with types).
@@ -266,7 +284,7 @@ fn verify_tree(dir: &Path, depth: usize) -> Result<()> {
 /// What an unpacked archive puts back: (where it is, where it goes below /opt/mikan).
 fn plan(stage: &Path) -> Result<Vec<(PathBuf, &'static str)>> {
     let mut items = Vec::new();
-    for rel in [".env", "compose.yaml", "data/panel/tls", "data/node"] {
+    for rel in [".env", "compose.yaml", "data/panel/tls", "data/node", "addons/state.json", "data/panel/addons"] {
         if fs::symlink_metadata(stage.join(rel)).is_ok() {
             items.push((stage.join(rel), rel));
         }
@@ -276,9 +294,14 @@ fn plan(stage: &Path) -> Result<Vec<(PathBuf, &'static str)>> {
     }
     // The panel's database comes as the consistent copy a backup makes, or as the file a
     // snapshot took with the panel stopped.
-    for db in ["data/panel/backup.db", "data/panel/mikan.db"] {
+    for db in ["data/panel/backup.dump", "data/panel/backup.db", "data/panel/mikan.db"] {
         if fs::symlink_metadata(stage.join(db)).is_ok() {
-            items.push((stage.join(db), "data/panel/mikan.db"));
+            items.push((stage.join(db), if db.ends_with(".dump") { "data/panel/restore.dump" } else { "data/panel/mikan.db" }));
+            if db == "data/panel/mikan.db" && stage.join("data/panel/mikan.db-wal").is_file() {
+                // Raw stopped snapshots can still contain committed transactions in
+                // WAL (a forced shutdown). VACUUM backup.db has no accompanying WAL.
+                items.push((stage.join("data/panel/mikan.db-wal"), "data/panel/mikan.db-wal"));
+            }
             break;
         }
     }
@@ -333,7 +356,19 @@ fn swap(root: &Path, items: &[(PathBuf, &str)]) -> Result<()> {
 
 /// The current data as it is, with the containers stopped, in a pre-restore archive.
 fn snapshot(root: &Path) -> Result<PathBuf> {
+    snapshot_stopped(root, "pre-restore")
+}
+
+/// A final SQLite snapshot taken only after its writer stopped; WAL is included.
+pub fn snapshot_stopped(root: &Path, kind: &str) -> Result<PathBuf> {
     let dir = backups_dir(root)?;
+    let pg = EnvFile::load(root.join(".env"))?.get("MIKAN_DATABASE_URL").is_some();
+    if pg {
+        docker::postgres_ready()?;
+        let panel = Dir::open(root, "data/panel", false)?.context("data/panel is missing")?;
+        panel.discard("backup.dump")?;
+        docker::database(&["backup", "/data/panel/backup.dump"])?;
+    }
     let members: Vec<String> = [
         ".env",
         "compose.yaml",
@@ -342,30 +377,21 @@ fn snapshot(root: &Path) -> Result<PathBuf> {
         "data/panel/mikan.db-shm",
         "data/panel/tls",
         "data/node",
+        "addons/state.json",
+        "data/panel/addons",
+        "data/panel/backup.dump",
     ]
     .iter()
     .filter(|m| exists(root, m))
     .map(|m| (*m).to_owned())
     .collect();
-    let file = pack(root, &dir, "pre-restore", &members)?;
-    prune(&dir, "pre-restore", KEEP_RESTORE);
+    let packed = pack(root, &dir, kind, &members);
+    if pg && let Some(panel) = Dir::open(root, "data/panel", false)? {
+        panel.discard("backup.dump")?;
+    }
+    let file = packed?;
+    prune(&dir, kind, if kind == "pre-update" { KEEP_UPDATE } else { KEEP_RESTORE });
     Ok(file)
-}
-
-/// Puts the panel's database back from an archive of this installer's own making, with the
-/// containers stopped and nothing else touched. The update uses it when the new version did
-/// not start and the old one does not run on what the new one did to the database.
-pub fn restore_database(file: &Path) -> Result<()> {
-    let root = Path::new(DIR);
-    check_archive(file)?;
-    let stage = Stage::new(root)?;
-    extract(file, &stage.0)?;
-    verify_tree(&stage.0, 0)?;
-    let db = plan(&stage.0)?.into_iter().find(|(_, to)| *to == "data/panel/mikan.db").context("the archive has no database")?;
-    docker::compose_run(&["down"])?;
-    real_data_dirs(root)?;
-    swap(root, &[db])?;
-    panelfs::own_dirs(root, true)
 }
 
 /// data/panel and data/node are directories, not links the panel put there: the swap
@@ -397,7 +423,7 @@ pub fn restore(file: &Path, say: &mut dyn FnMut(&str)) -> Result<()> {
     extract(file, &stage.0)?;
     verify_tree(&stage.0, 0)?;
     let items = plan(&stage.0)?;
-    let archived = EnvFile::load(stage.0.join(".env"))?;
+    let mut archived = EnvFile::load(stage.0.join(".env"))?;
     if (archived.get("MIKAN_MODE") == Some("node")) != install.node {
         bail!(
             "the backup is a {}'s, this server is a {}",
@@ -405,13 +431,34 @@ pub fn restore(file: &Path, say: &mut dyn FnMut(&str)) -> Result<()> {
             if install.node { "node" } else { "panel" }
         );
     }
+    if !install.node {
+        // Restore application settings, but keep the running PostgreSQL server's
+        // credentials and PostgreSQL-capable image. Changing POSTGRES_PASSWORD on an
+        // existing volume does not change that database role's password.
+        if install.env.get("MIKAN_DATABASE_URL").is_none() {
+            bail!("upgrade this SQLite installation with mikan update before restoring with the PostgreSQL installer");
+        }
+        for key in ["MIKAN_DATABASE_URL", "MIKAN_POSTGRES_PASSWORD", "MIKAN_IMAGE", "MIKAN_VERSION"] {
+            archived.set(key, install.env.get(key).unwrap_or_default())?;
+        }
+        archived.save()?;
+        if !items.iter().any(|(_, r)| ["data/panel/mikan.db", "data/panel/restore.dump"].contains(r)) {
+            bail!("the panel backup has no database");
+        }
+    }
 
     let _critical = signals::critical();
     say("Stopping mikan");
-    docker::compose_run(&["down"])?;
+    crate::addon::down();
+    docker::compose_run(&["stop"])?;
     let again = |say: &mut dyn FnMut(&str)| {
         if let Err(e) = docker::compose_run(&["up", "-d"]) {
             say(&format!("mikan did not start again: {e:#}"));
+        }
+        if !install.node
+            && let Err(e) = crate::addon::resume()
+        {
+            say(&format!("Payment adapters did not start again: {e:#}"));
         }
     };
     // With the containers down nothing can swap a directory for a link any more: this is
@@ -436,15 +483,27 @@ pub fn restore(file: &Path, say: &mut dyn FnMut(&str)) -> Result<()> {
         // The backup may carry the compose file of an older mikan: it gets the current one.
         docker::ensure_compose(root, install.node)?;
         panelfs::layout(root, !install.node)?;
+        if !install.node {
+            docker::postgres_ready()?;
+            if items.iter().any(|(_, r)| *r == "data/panel/restore.dump") {
+                docker::database(&["restore", "/data/panel/restore.dump"])?;
+            } else {
+                docker::database(&["restore", "/data/panel/mikan.db"])?;
+            }
+        }
         docker::compose_run(&["up", "-d"])?;
         setup::wait_ready(Install::load()?.node_port(), Duration::from_secs(90))
     })();
     if let Err(e) = started {
+        let _ = docker::compose_run(&["stop", "panel"]);
         return Err(e.context(format!(
             "the backup is in place but mikan does not start; the data before it are in {}: mikan restore {}",
             snap.display(),
             snap.display()
         )));
+    }
+    if !install.node {
+        crate::addon::resume()?;
     }
     Ok(())
 }
@@ -535,7 +594,7 @@ mod tests {
             ("../etc/passwd", "outside"),
             ("data/../../etc/cron.d/x", "a way out inside"),
             ("etc/passwd", "somewhere else"),
-            ("data/addons/state.json", "the root's own"),
+            ("data/unknown/state.json", "unknown data"),
             ("data/panel/../../x", "nested dots"),
             ("evil", "a stranger"),
         ] {
@@ -594,6 +653,37 @@ mod tests {
         let to: Vec<&str> = items.iter().map(|(_, r)| *r).collect();
         assert!(to.contains(&"data/panel/mikan.db") && to.contains(&"data/panel/tls"), "{to:?}");
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn postgres_archive_wins_over_preserved_sqlite_and_keeps_addons() {
+        let d = tmpdir("postgres-plan");
+        file(&d, ".env", "MIKAN_DATABASE_URL=postgresql://x\n");
+        file(&d, "data/panel/backup.dump", "pgdump");
+        file(&d, "data/panel/mikan.db", "old sqlite");
+        file(&d, "addons/state.json", "{}");
+        let items = plan(&d).unwrap();
+        let to: Vec<&str> = items.iter().map(|(_, r)| *r).collect();
+        assert!(to.contains(&"data/panel/restore.dump"));
+        assert!(!to.contains(&"data/panel/mikan.db"));
+        assert!(to.contains(&"addons/state.json"));
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn raw_sqlite_snapshots_restore_their_committed_wal() {
+        let root = tmpdir("wal-swap");
+        server(&root);
+        let stage = root.join("stage");
+        file(&stage, ".env", "RESTORED=1\n");
+        file(&stage, "data/panel/mikan.db", "checkpointed pages");
+        file(&stage, "data/panel/mikan.db-wal", "committed payment after checkpoint");
+        let items = plan(&stage).unwrap();
+        assert!(items.iter().any(|(_, to)| *to == "data/panel/mikan.db-wal"));
+        swap(&root, &items).unwrap();
+        assert_eq!(fs::read_to_string(root.join("data/panel/mikan.db-wal")).unwrap(), "committed payment after checkpoint");
+        assert_eq!(fs::read_to_string(root.join("data/panel/mikan.db")).unwrap(), "checkpointed pages");
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn server(root: &Path) {

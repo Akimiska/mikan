@@ -51,7 +51,7 @@ mikan watches whether real clients still reach each protocol. When a port gets b
 <td width="50%" valign="top">
 
 ### 📱 Every app gets what it can use
-Subscriptions detect the app — Happ, v2RayTun, Koala Clash, Clash Verge, FlClash, Hiddify, Shadowrocket and more — and hand it only the protocols it actually supports. No more “it doesn't work for me”.
+Subscriptions detect the app — Happ, v2RayTun, Koala Clash, SlothClash, Clash Verge, FlClash, ClashFest, Hiddify, Shadowrocket and more — and hand it only the protocols it actually supports. No more “it doesn't work for me”.
 
 </td>
 </tr>
@@ -73,7 +73,7 @@ Subscribers check their plan, devices and connection guides in a bot you set up 
 <td valign="top">
 
 ### 🪶 Light as a mandarin
-Go and SQLite, two small containers. On a working server with clients: **~14 MB RAM** for the panel, **~40 MB** for the VPN core, **<1% CPU**.
+Go, a separate VPN core and PostgreSQL. The database runs in its own persistent container and is available to the panel through a local Unix socket; it exposes no network port.
 
 </td>
 <td valign="top">
@@ -166,7 +166,7 @@ Run `mikan` for the menu, or use the commands directly:
 | `mikan logs [panel\|node]` | live logs |
 | `mikan url` | admin link |
 | `mikan reset-password` · `reset-path` · `disable-2fa` | regain access |
-| `mikan update` | update now (backup first, automatic rollback) |
+| `mikan update` | update now, with backup and database migration |
 | `mikan backup` · `restore FILE` | backups in `/opt/mikan/backups` |
 | `mikan node …` · `mikan inbound …` | nodes and protocols |
 | `mikan targets scan` · `apply` | REALITY camouflage sites next to the server |
@@ -176,14 +176,30 @@ Run `mikan` for the menu, or use the commands directly:
 
 ## Updates
 
-The panel checks for a new release once a day and shows what changed. Turn on **auto-update** in settings, or press **Update** — the host updater pulls the image from GitHub Packages, backs up, restarts and rolls back if the new version does not come up healthy. Every release manifest is signed.
+Releases use four numbers: `major.minor.patch.revision`, for example `0.5.0.0` → `0.5.0.1` → `0.5.0.10`. Three-number historical releases remain readable and compare as revision zero. Database migrations have their own history and apply in order, including skipped releases. Every release manifest is signed.
+
+**Existing SQLite installations must upgrade the host installer once.** Old installers and panels cannot parse four-number releases, so their Update button and daily updater cannot perform this first transition. Run on the server after the PostgreSQL release is published:
+
+```bash
+curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh | sudo bash -s -- --yes
+```
+
+This replaces the signed, checksum-verified host installer before the update. The updater backs up, stops panel writes, takes a final SQLite snapshot including its WAL, starts PostgreSQL and imports and verifies the data before starting the panel. Original SQLite files remain on disk. Users, subscription links, credentials, traffic, payments and settings keep their existing values; do not remove `/opt/mikan/data` or Docker volumes.
+
+If migration or startup fails after the import begins, the panel stays stopped and both databases are preserved. Fix the reported error and retry `mikan update`; the updater never silently resumes stale SQLite or restores a pre-update database over newer payments. An explicit `mikan restore FILE` first saves the current state, accepts historical SQLite archives and PostgreSQL archives, then restores into PostgreSQL. Restoring a backup replaces the current data with its saved state.
+
+After this first transition, turn on **auto-update** in settings or press **Update** normally. Panel and bot writes pause during migration; node data remain preserved. Backups include the database, certificates, node state and installed payment-adapter state. Keep backups outside the server too.
 
 ## Building from source
+
+Go tests require a disposable PostgreSQL 18 database and PostgreSQL 18 client tools (`pg_dump`, `pg_restore`).
+
+Add schema changes as new numbered migrations in `internal/panel/store/postgres`; keep the released baseline immutable. First-time SQLite imports run against that baseline before subsequent PostgreSQL migrations, including skipped releases. Historical SQLite backup restore is verified for the current baseline; compatibility must be checked separately after future schema changes. An incompatible import refuses to replace data.
 
 ```bash
 docker buildx build -t mikan:dev .            # panel + node image
 cd web && pnpm install && pnpm dev            # admin UI with hot reload
-go test ./...                                 # Go 1.27
+MIKAN_TEST_DATABASE_URL='postgres://USER:PASSWORD@localhost/DB?sslmode=disable' go test ./... # Go 1.27, isolated test schemas
 cd installer && cargo test                    # the installer (Rust)
 ```
 

@@ -101,6 +101,17 @@ type InboundReach struct {
 	At        int64
 }
 
+type InfrastructureAlertState struct {
+	Key       string
+	Value     string
+	UpdatedAt int64
+}
+
+type MikanSqliteImport struct {
+	ID     int64
+	Report string
+}
+
 type Node struct {
 	ID         int64
 	Name       string
@@ -111,6 +122,7 @@ type Node struct {
 	Enabled    int64
 	CreatedAt  int64
 	UpdatedAt  int64
+	PublicName string
 }
 
 type NodeRelay struct {

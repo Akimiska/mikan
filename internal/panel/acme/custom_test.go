@@ -39,7 +39,7 @@ func ownCert(t *testing.T, name string, until time.Time) (certPEM, keyPEM []byte
 func TestCustomCertificate(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("MIKAN_ACME_DIRECTORY", "http://127.0.0.1:1/directory") // Let's Encrypt is unreachable here
-	st, err := store.Open(ctx, t.TempDir())
+	st, err := store.OpenTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

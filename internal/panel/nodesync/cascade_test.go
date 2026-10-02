@@ -101,7 +101,7 @@ func TestCascadeChain(t *testing.T) {
 
 	// C switched off: B's relay still goes to "C", which cannot be reached — no leak.
 	n, _ := q.GetNode(ctx, nc.ID)
-	if _, err := q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, Enabled: 0, ID: n.ID}); err != nil {
+	if _, err := q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, PublicName: n.PublicName, Enabled: 0, ID: n.ID}); err != nil {
 		t.Fatal(err)
 	}
 	db_, _ = b.desired(ctx)

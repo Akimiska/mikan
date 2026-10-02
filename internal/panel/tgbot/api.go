@@ -191,6 +191,33 @@ func (c *Client) Send(ctx context.Context, chat int64, text string, kb *Keyboard
 	return m, err
 }
 
+// SendTo is Send for a Telegram channel target: its numeric chat id or @username.
+func (c *Client) SendTo(ctx context.Context, chat string, text string, silent bool) (Message, error) {
+	var m Message
+	in := map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	if silent {
+		in["disable_notification"] = true
+	}
+	err := c.call(ctx, "sendMessage", in, &m)
+	return m, err
+}
+
+// EditTo edits a message in a channel identified by numeric id or @username.
+func (c *Client) EditTo(ctx context.Context, chat string, msg int64, text string) error {
+	err := c.call(ctx, "editMessageText", map[string]any{"chat_id": chat, "message_id": msg, "text": text,
+		"parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}, nil)
+	var ae *APIError
+	if errors.As(err, &ae) && strings.Contains(ae.Description, "message is not modified") {
+		return nil
+	}
+	return err
+}
+
+// PinTo pins a channel message without notifying subscribers.
+func (c *Client) PinTo(ctx context.Context, chat string, msg int64) error {
+	return c.call(ctx, "pinChatMessage", map[string]any{"chat_id": chat, "message_id": msg, "disable_notification": true}, nil)
+}
+
 // Edit replaces a message's text and buttons. An edit to the same content is not an error.
 func (c *Client) Edit(ctx context.Context, chat, msg int64, text string, kb *Keyboard) error {
 	in := map[string]any{"chat_id": chat, "message_id": msg, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}

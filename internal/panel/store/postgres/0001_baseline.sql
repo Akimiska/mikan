@@ -35,7 +35,14 @@ CREATE TABLE nodes (
   cert_sha256 TEXT NOT NULL DEFAULT '',
   enabled     BIGINT NOT NULL DEFAULT 1,
   created_at  BIGINT NOT NULL,
-  updated_at  BIGINT NOT NULL
+  updated_at  BIGINT NOT NULL,
+  public_name TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE infrastructure_alert_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at BIGINT NOT NULL
 );
 
 CREATE TABLE settings (
@@ -370,6 +377,7 @@ CREATE INDEX users_status ON users(status);
 CREATE TABLE mikan_sqlite_import (id BIGINT PRIMARY KEY CHECK (id = 1), report TEXT NOT NULL);
 
 -- +goose Down
+DROP TABLE infrastructure_alert_state;
 DROP TABLE mikan_sqlite_import;
 DROP TABLE traffic_grants;
 DROP TABLE user_pools;

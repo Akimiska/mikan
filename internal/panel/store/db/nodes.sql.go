@@ -12,7 +12,7 @@ import (
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, 1, $6, $7)
-RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at
+RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name
 `
 
 type CreateNodeParams struct {
@@ -46,6 +46,7 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicName,
 	)
 	return i, err
 }
@@ -60,7 +61,7 @@ func (q *Queries) DeleteNode(ctx context.Context, id int64) error {
 }
 
 const getNode = `-- name: GetNode :one
-SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at FROM nodes WHERE id = $1
+SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name FROM nodes WHERE id = $1
 `
 
 func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
@@ -76,12 +77,13 @@ func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicName,
 	)
 	return i, err
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at FROM nodes ORDER BY id
+SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name FROM nodes ORDER BY id
 `
 
 func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
@@ -103,6 +105,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PublicName,
 		); err != nil {
 			return nil, err
 		}
@@ -133,7 +136,7 @@ func (q *Queries) SetNodeCert(ctx context.Context, arg SetNodeCertParams) error 
 }
 
 const updateNode = `-- name: UpdateNode :one
-UPDATE nodes SET name = $1, address = $2, public_host = $3, domain = $4, enabled = $5, updated_at = $6 WHERE id = $7 RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at
+UPDATE nodes SET name = $1, address = $2, public_host = $3, domain = $4, public_name = $5, enabled = $6, updated_at = $7 WHERE id = $8 RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name
 `
 
 type UpdateNodeParams struct {
@@ -141,6 +144,7 @@ type UpdateNodeParams struct {
 	Address    string
 	PublicHost string
 	Domain     string
+	PublicName string
 	Enabled    int64
 	UpdatedAt  int64
 	ID         int64
@@ -152,6 +156,7 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		arg.Address,
 		arg.PublicHost,
 		arg.Domain,
+		arg.PublicName,
 		arg.Enabled,
 		arg.UpdatedAt,
 		arg.ID,
@@ -167,6 +172,7 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublicName,
 	)
 	return i, err
 }

@@ -732,7 +732,7 @@
       "still_blocked": "a new port did not help"
     },
     "clashOnly": "Clash apps only",
-    "clashOnlyNote": "Only Clash apps on a recent mihomo core get this connection: Koala Clash, FlClash, Clash Verge. Happ, v2RayTun, Hiddify and others will not see it in their subscription.",
+    "clashOnlyNote": "Only Clash apps on a recent mihomo core get this connection: Koala Clash, SlothClash, FlClash, Clash Verge and ClashFest on Android. Happ, v2RayTun, Hiddify and others will not see it in their subscription.",
     "sharedKey": "Shared key",
     "sharedWarnTitle": "One key for all users",
     "sharedWarn": "The node cannot tell users apart, so per-user traffic, traffic and device limits, device binding and automatic fixes do not work here. A disabled or expired user keeps access until the key changes: to change it, delete the connection and add it again. Only users with active access get it in their subscription.",
@@ -755,7 +755,7 @@
     "exitPick": "Pick a node",
     "obfs": "Obfuscation",
     "obfsHint": "Every app with Hysteria2 knows Salamander. Gecko also cuts the handshake into pieces of random size, against DPI that tells QUIC by packet sizes.",
-    "obfsGeckoHint": "Only apps on mihomo core 1.19.26+ that say so (Koala Clash 1.4+ and others) get Gecko. The rest do not get this protocol, so keep a plain Hysteria2 next to it.",
+    "obfsGeckoHint": "Only apps on mihomo core 1.19.26+ that say so (Koala Clash 1.4+, ClashFest 1.2+, SlothClash 0.9.4+ and others) get Gecko. The rest do not get this protocol, so keep a plain Hysteria2 next to it.",
     "portHopHint": "A range such as 20000-30000 works too: clients hop between the ports, which makes blocking one port useless. Open the range over UDP in the server firewall."
   },
   "settings": {
@@ -826,7 +826,7 @@
     "binding": "Bind subscriptions to devices",
     "bindingSub": "Each device gets keys of its own, and the device limit becomes the number of places. An extra device sees a notice that the places are taken instead of servers. Devices are listed and unbound in the user card and on the subscription page.",
     "requireHwid": "Only apps with a device ID",
-    "requireHwidSub": "Happ, Koala Clash, INCY, v2RayTun and FlClashX send a device ID. Other apps share one place without this setting and get no subscription with it.",
+    "requireHwidSub": "Happ, Koala Clash, INCY, v2RayTun, FlClashX and ClashFest send a device ID, and SlothClash unless it is turned off in its settings. Other apps share one place without this setting and get no subscription with it.",
     "devicesNote": "A subscriber may unbind one device a day on the subscription page; you can do it any time in the user card. A device gets its own keys on the next subscription refresh.",
     "support": "Support",
     "supportHint": "A Telegram or website link — the «Contact support» button on the subscription page.",
@@ -976,7 +976,8 @@
       "modern": "Fast and modern",
       "bestWindows": "Best for Windows: all traffic and routing",
       "tun": "Routing and TUN mode",
-      "oneButton": "One button"
+      "oneButton": "One button",
+      "allProtocols": "Every protocol and routing"
     },
     "howTo": "How to connect",
     "steps": {

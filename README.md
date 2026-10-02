@@ -51,7 +51,7 @@ mikan watches whether real clients still reach each protocol. When a port gets b
 <td width="50%" valign="top">
 
 ### 📱 Every app gets what it can use
-Subscriptions detect the app — Happ, v2RayTun, Koala Clash, Clash Verge, FlClash, Hiddify, Shadowrocket and more — and hand it only the protocols it actually supports. No more “it doesn't work for me”.
+Subscriptions detect the app — Happ, v2RayTun, Koala Clash, SlothClash, Clash Verge, FlClash, ClashFest, Hiddify, Shadowrocket and more — and hand it only the protocols it actually supports. No more “it doesn't work for me”.
 
 </td>
 </tr>

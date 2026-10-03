@@ -81,8 +81,8 @@ func TestSQLiteRestoreReplacesNewerSchema(t *testing.T) {
 	if _, err := legacy.ExecContext(ctx, "UPDATE users SET used_up=500"); err != nil {
 		t.Fatal(err)
 	}
-	// More rows than one INSERT batch carries, ending in a partial batch.
-	const hours = 2*copyBatch + 7
+	// Enough rows for COPY to send them in several messages.
+	const hours = 20007
 	if _, err := legacy.ExecContext(ctx, "WITH RECURSIVE h(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM h WHERE n < ?) INSERT INTO traffic_hourly(user_id,hour,up,down) SELECT 41,n,n,2*n FROM h", hours); err != nil {
 		t.Fatal(err)
 	}

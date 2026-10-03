@@ -40,7 +40,18 @@ const workerStopTimeout = 20 * time.Second
 
 func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
-	st, err := store.Open(ctx, cfg.DataDir)
+	dsn, err := store.DatabaseURL()
+	if err != nil {
+		return err
+	}
+	// Held from before the store opens (it migrates) until the panel is down: database
+	// migrate and restore refuse to run under a live panel.
+	unlock, err := store.LockPanel(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	st, err := store.OpenPostgres(ctx, cfg.DataDir, dsn)
 	if err != nil {
 		return err
 	}

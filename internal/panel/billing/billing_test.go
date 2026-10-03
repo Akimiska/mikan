@@ -17,6 +17,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 type noChanges struct{}
@@ -68,7 +69,7 @@ func newEnv(t *testing.T) *env {
 	ctx := context.Background()
 	e := &env{t: t, now: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), logs: &bytes.Buffer{}, tg: &fakeTG{}}
 	var err error
-	if e.st, err = store.OpenTest(ctx, t.TempDir()); err != nil {
+	if e.st, err = storetest.Open(ctx, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })

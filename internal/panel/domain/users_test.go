@@ -8,6 +8,7 @@ import (
 
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 type changes struct{ policies, slots int }
@@ -18,7 +19,7 @@ func (c *changes) SlotsChanged()    { c.slots++ }
 func setup(t *testing.T, now *time.Time) (*store.Store, *Users, *changes) {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.OpenTest(ctx, t.TempDir())
+	st, err := storetest.Open(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

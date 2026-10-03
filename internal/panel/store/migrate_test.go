@@ -66,13 +66,5 @@ func TestMigration0017KeepsWhatIsThere(t *testing.T) {
 		t.Fatalf("existing node's public name: %q %v", publicName, err)
 	}
 	exec("INSERT INTO infrastructure_alert_state (key, value, updated_at) VALUES ('monitor', '{}', 1)")
-	if _, err := p.Down(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := p.Down(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := conn.QueryRowContext(ctx, "SELECT client FROM devices WHERE user_id = 1").Scan(new(string)); err != nil {
-		t.Fatalf("the column after a rollback: %v", err)
-	}
+	// Legacy migrations only ever run up, to normalize a snapshot for the import.
 }

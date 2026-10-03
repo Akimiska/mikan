@@ -97,7 +97,7 @@ func (q *Queries) ExpirePayments(ctx context.Context, createdAt int64) (int64, e
 
 const findOpenPayment = `-- name: FindOpenPayment :one
 SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments
-WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND COALESCE(user_id, 0) = CAST($5 AS BIGINT)
+WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND user_id IS NOT DISTINCT FROM NULLIF(CAST($5 AS BIGINT), 0)
   AND status = 'pending' AND pay_url <> '' AND created_at > $6
 ORDER BY id DESC LIMIT 1
 `
@@ -111,6 +111,7 @@ type FindOpenPaymentParams struct {
 	Since    int64
 }
 
+// user_id 0 asks for an invoice that has no user yet (NULL); payments_tg finds the candidates.
 func (q *Queries) FindOpenPayment(ctx context.Context, arg FindOpenPaymentParams) (Payment, error) {
 	row := q.db.QueryRowContext(ctx, findOpenPayment,
 		arg.TgID,

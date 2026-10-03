@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,8 +81,8 @@ func TestSQLiteRestoreReplacesNewerSchema(t *testing.T) {
 	if _, err := legacy.ExecContext(ctx, "UPDATE users SET used_up=500"); err != nil {
 		t.Fatal(err)
 	}
-	// More rows than one INSERT batch carries, ending in a partial batch.
-	const hours = 2*copyBatch + 7
+	// Enough rows for COPY to send them in several messages.
+	const hours = 20007
 	if _, err := legacy.ExecContext(ctx, "WITH RECURSIVE h(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM h WHERE n < ?) INSERT INTO traffic_hourly(user_id,hour,up,down) SELECT 41,n,n,2*n FROM h", hours); err != nil {
 		t.Fatal(err)
 	}
@@ -132,14 +134,14 @@ func TestInterruptedRestoreComesBack(t *testing.T) {
 	if _, err := c.ExecContext(ctx, "SELECT pg_advisory_lock($1)", lockID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PreparePostgresImport(ctx, dsn); err == nil || !strings.Contains(err.Error(), "restore is running") {
+	if _, err := openAtImportBaseline(ctx, dsn); err == nil || !strings.Contains(err.Error(), "restore is running") {
 		t.Fatal("recovered beside a running restore:", err)
 	}
 	if _, err := c.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", lockID); err != nil {
 		t.Fatal(err)
 	}
 
-	pg, err := PreparePostgresImport(ctx, dsn)
+	pg, err := openAtImportBaseline(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,5 +151,66 @@ func TestInterruptedRestoreComesBack(t *testing.T) {
 	}
 	if tableExists(t, s, "partial") || schemaExists(t, s, aside) {
 		t.Fatal("the unfinished restore was not discarded")
+	}
+}
+
+// A restore that loaded stays even when its previous schema cannot be dropped: the next
+// start must not take the leftover for an interrupted restore and bring the old data back.
+func TestFinishedRestoreSurvivesAFailedDrop(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "backup.db")
+	legacy, err := openSQLite(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateSQLite(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES('restored','yes')"); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Close()
+	s, err := OpenTest(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	dsn := fixtureDSN(t, s)
+	if err := s.Q.SetSetting(ctx, db.SetSettingParams{Key: "previous", Value: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	// A reader of the previous data holds its table: DROP SCHEMA waits for it and gives up.
+	reader, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.ExecContext(ctx, "LOCK TABLE settings IN ACCESS SHARE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(dsn)
+	query := u.Query()
+	query.Set("lock_timeout", "300ms")
+	u.RawQuery = query.Encode()
+	err = RestoreSQLite(ctx, u.String(), dir, source)
+	reader.Rollback()
+	var leftover *LeftoverSchemaError
+	if !errors.As(err, &leftover) {
+		t.Fatal("a failed drop is not reported as a leftover:", err)
+	}
+
+	pg, err := openAtImportBaseline(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg.Close()
+	if v, err := s.Q.GetSetting(ctx, "restored"); err != nil || v != "yes" {
+		t.Fatal("the next start brought the previous data back", v, err)
+	}
+	if !schemaExists(t, s, leftover.Schema) {
+		t.Fatal("the leftover schema the error names is not there")
+	}
+	if _, err := s.DB.ExecContext(ctx, "DROP SCHEMA "+quote(leftover.Schema)+" CASCADE"); err != nil {
+		t.Fatal(err)
 	}
 }

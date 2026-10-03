@@ -20,11 +20,23 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
 
 const MigrationMarker = "postgres-migration.json"
+
+// reportFormat versions the JSON of ImportReport.
+const reportFormat = 1
+
+// importLockKey is "MIKN" in ASCII: with the schema's hash, the two-key advisory lock
+// that serializes imports into one schema.
+const importLockKey = 1296649038
+
+// firstRemoteNode is where the nodes identity starts (START WITH 2): id 1 is the local
+// node, which a fresh installation creates itself.
+const firstRemoteNode = 2
 
 type TableProof struct {
 	Rows   int64  `json:"rows"`
@@ -139,175 +151,246 @@ type importTable struct {
 }
 
 func importSQLite(ctx context.Context, pg *sql.DB, dir, source string, replace bool) (*ImportReport, error) {
-	tx, err := pg.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if report, done, err := committedImport(ctx, pg, dir, source, replace); done || err != nil {
+		return report, err
+	}
+	// SQLite is snapshotted and checked before the PostgreSQL transaction opens: that can
+	// take minutes on a big database, and the transaction must not idle meanwhile.
+	snapshot, sourceSHA256, err := snapshotSQLite(ctx, dir, source)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	// Also serializes concurrent migration/restore invocations in this schema.
-	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext(current_schema()), 1296649038)"); err != nil {
-		return nil, err
+	defer snapshot.close()
+	report, encoded, err := copySQLite(ctx, pg, snapshot.db, dir, source, replace, sourceSHA256)
+	if err != nil || encoded == nil {
+		return report, err
 	}
+	if err := writeMigrationMarker(dir, encoded); err != nil {
+		return nil, fmt.Errorf("import committed; retry to recover migration marker: %w", err)
+	}
+	return report, nil
+}
+
+// committedImport decides whether there is anything to import. done with a report: an
+// import committed before (its marker is written again); done without one: a fresh
+// installation, which needs only PostgreSQL schema migrations.
+func committedImport(ctx context.Context, q queryRower, dir, source string, replace bool) (report *ImportReport, done bool, err error) {
 	var previous string
-	err = tx.QueryRowContext(ctx, "SELECT report FROM mikan_sqlite_import WHERE id=1").Scan(&previous)
+	err = q.QueryRowContext(ctx, "SELECT report FROM mikan_sqlite_import WHERE id=1").Scan(&previous)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return nil, true, err
 	}
 	if previous != "" && !replace {
-		var report ImportReport
-		if err := json.Unmarshal([]byte(previous), &report); err != nil {
-			return nil, errors.New("invalid committed migration record")
+		report = &ImportReport{}
+		if err := json.Unmarshal([]byte(previous), report); err != nil {
+			return nil, true, errors.New("invalid committed migration record")
 		}
 		if err := writeMigrationMarker(dir, []byte(previous)); err != nil {
-			return nil, err
+			return nil, true, err
 		}
-		return &report, nil
+		return report, true, nil
 	}
 	if _, err := os.Stat(filepath.Join(dir, MigrationMarker)); err == nil && !replace {
-		return nil, errors.New("migration marker exists but PostgreSQL import record is missing; restore the PostgreSQL backup before starting the panel")
+		return nil, true, errors.New("migration marker exists but PostgreSQL import record is missing; restore the PostgreSQL backup before starting the panel")
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
+		return nil, true, err
 	}
 	if _, err := os.Stat(source); errors.Is(err, fs.ErrNotExist) && !replace {
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
-		return nil, nil // Fresh installation; only PostgreSQL schema migrations are needed.
+		return nil, true, nil
 	} else if err != nil {
-		return nil, err
+		return nil, true, err
 	}
+	return nil, false, nil
+}
 
+type sqliteSnapshot struct {
+	db  *sql.DB
+	tmp string
+}
+
+func (s *sqliteSnapshot) close() {
+	s.db.Close()
+	os.RemoveAll(s.tmp)
+}
+
+// snapshotSQLite copies source aside, normalizes the copy to the final SQLite schema and
+// checks it; the hash is of the copy as taken, before normalizing.
+func snapshotSQLite(ctx context.Context, dir, source string) (*sqliteSnapshot, string, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tmp, err := os.MkdirTemp(dir, ".sqlite-import-*")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	defer os.RemoveAll(tmp)
-	snapshot := filepath.Join(tmp, "snapshot.db")
+	snapshot, sum, err := takeSnapshot(ctx, tmp, source)
+	if err != nil {
+		os.RemoveAll(tmp)
+		return nil, "", err
+	}
+	return &sqliteSnapshot{db: snapshot, tmp: tmp}, sum, nil
+}
+
+func takeSnapshot(ctx context.Context, tmp, source string) (*sql.DB, string, error) {
+	path := filepath.Join(tmp, "snapshot.db")
 	original, err := sqliteConnection(ctx, source, true)
 	if err != nil {
-		return nil, fmt.Errorf("read legacy SQLite: %w", err)
+		return nil, "", fmt.Errorf("read legacy SQLite: %w", err)
 	}
 	// VACUUM INTO is a consistent snapshot, including committed WAL pages. Opening
 	// the source read-only prevents accidental migrations or checkpoints in it.
-	_, err = original.ExecContext(ctx, "VACUUM INTO ?", snapshot)
+	_, err = original.ExecContext(ctx, "VACUUM INTO ?", path)
 	original.Close()
 	if err != nil {
-		return nil, fmt.Errorf("snapshot SQLite: %w", err)
+		return nil, "", fmt.Errorf("snapshot SQLite: %w", err)
 	}
-	if err := os.Chmod(snapshot, 0600); err != nil {
-		return nil, err
+	if err := os.Chmod(path, 0600); err != nil {
+		return nil, "", err
 	}
-	snapshotFile, err := os.Open(snapshot)
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	sourceHash := sha256.New()
-	_, hashErr := io.Copy(sourceHash, snapshotFile)
-	snapshotFile.Close()
-	if hashErr != nil {
-		return nil, hashErr
-	}
-	sqlite, err := openSQLite(ctx, snapshot)
+	sum := sha256.New()
+	_, err = io.Copy(sum, f)
+	f.Close()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	defer sqlite.Close()
+	snapshot, err := openSQLite(ctx, path)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := checkSnapshot(ctx, snapshot); err != nil {
+		snapshot.Close()
+		return nil, "", err
+	}
+	return snapshot, hex.EncodeToString(sum.Sum(nil)), nil
+}
+
+func checkSnapshot(ctx context.Context, sqlite *sql.DB) error {
 	if err := migrateSQLite(ctx, sqlite); err != nil {
-		return nil, fmt.Errorf("normalize SQLite snapshot: %w", err)
+		return fmt.Errorf("normalize SQLite snapshot: %w", err)
 	}
 	var integrity string
 	if err := sqlite.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil || integrity != "ok" {
-		return nil, errors.New("SQLite integrity check failed")
+		return errors.New("SQLite integrity check failed")
 	}
 	foreign, err := sqlite.QueryContext(ctx, "PRAGMA foreign_key_check")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	invalid := foreign.Next()
 	foreignErr := foreign.Err()
 	foreign.Close()
 	if invalid || foreignErr != nil {
-		return nil, errors.New("SQLite foreign key check failed")
+		return errors.New("SQLite foreign key check failed")
 	}
+	return nil
+}
 
+// copySQLite copies every table in one READ COMMITTED transaction: the tables are locked
+// before anything is read, so a serializable snapshot would only add aborts. encoded is
+// nil when a concurrent import committed first; its report comes back instead.
+func copySQLite(ctx context.Context, pg *sql.DB, sqlite *sql.DB, dir, source string, replace bool, sourceSHA256 string) (report *ImportReport, encoded []byte, err error) {
+	// COPY runs on the pgx connection under the transaction, so both need one session.
+	c, err := pg.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer c.Close()
+	tx, err := c.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	// Also serializes concurrent migration/restore invocations in this schema.
+	if _, err := tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(hashtext(current_schema()), $1)", importLockKey); err != nil {
+		return nil, nil, err
+	}
+	if report, done, err := committedImport(ctx, tx, dir, source, replace); done || err != nil {
+		return report, nil, err
+	}
 	tables, err := importSchema(ctx, sqlite, tx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	quoted := make([]string, len(tables))
+	names := make([]string, len(tables))
 	for i, t := range tables {
-		quoted[i] = pgx.Identifier{t.name}.Sanitize()
+		names[i] = t.name
 	}
-	if _, err := tx.ExecContext(ctx, "LOCK TABLE "+strings.Join(quoted, ",")+" IN ACCESS EXCLUSIVE MODE"); err != nil {
-		return nil, err
+	if _, err := tx.ExecContext(ctx, "LOCK TABLE "+quoteList(names)+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+		return nil, nil, err
 	}
 	if replace {
-		if _, err := tx.ExecContext(ctx, "TRUNCATE "+strings.Join(quoted, ",")+" RESTART IDENTITY CASCADE"); err != nil {
-			return nil, err
+		if _, err := tx.ExecContext(ctx, "TRUNCATE "+quoteList(names)+" RESTART IDENTITY CASCADE"); err != nil {
+			return nil, nil, err
 		}
 	} else {
 		for _, t := range tables {
 			var exists bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM "+pgx.Identifier{t.name}.Sanitize()+")").Scan(&exists); err != nil {
-				return nil, err
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM "+quote(t.name)+")").Scan(&exists); err != nil {
+				return nil, nil, err
 			}
 			if exists {
-				return nil, fmt.Errorf("PostgreSQL table %s is occupied; automatic import refused", t.name)
+				return nil, nil, fmt.Errorf("PostgreSQL table %s is occupied; automatic import refused", t.name)
 			}
 		}
 	}
-	report := &ImportReport{Format: 1, ImportedAt: time.Now().Unix(), SourceKind: "sqlite", SourceSHA256: hex.EncodeToString(sourceHash.Sum(nil)), Tables: make(map[string]TableProof)}
+	report = &ImportReport{Format: reportFormat, ImportedAt: time.Now().Unix(), SourceKind: "sqlite", SourceSHA256: sourceSHA256, Tables: make(map[string]TableProof)}
 	for _, t := range tables {
-		proof, err := copyTable(ctx, sqlite, tx, t)
+		proof, err := copyTable(ctx, sqlite, c, t)
 		if err != nil {
-			return nil, fmt.Errorf("import table %s: %w", t.name, err)
+			return nil, nil, fmt.Errorf("import table %s: %w", t.name, err)
 		}
 		report.Tables[t.name] = proof
 	}
 	for _, t := range tables {
 		actual, err := tableProof(ctx, tx, t)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if actual != report.Tables[t.name] {
-			return nil, fmt.Errorf("verification failed for table %s; import rolled back", t.name)
+			return nil, nil, fmt.Errorf("verification failed for table %s; import rolled back", t.name)
 		}
-		for _, col := range t.identities {
-			var seq string
-			if err := tx.QueryRowContext(ctx, "SELECT pg_get_serial_sequence($1,$2)", pgx.Identifier{t.name}.Sanitize(), col).Scan(&seq); err != nil {
-				return nil, err
-			}
-			var next int64
-			if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX("+pgx.Identifier{col}.Sanitize()+"),0)+1 FROM "+pgx.Identifier{t.name}.Sanitize()).Scan(&next); err != nil {
-				return nil, err
-			}
-			if t.name == "nodes" && next < 2 {
-				next = 2
-			}
-			// ALTER SEQUENCE is transactional, unlike setval: failed restores cannot move
-			// a live sequence backwards and cause subsequent ID collisions.
-			if _, err := tx.ExecContext(ctx, "ALTER SEQUENCE "+seq+" RESTART WITH "+strconv.FormatInt(next, 10)); err != nil {
-				return nil, err
-			}
+		if err := restartIdentities(ctx, tx, t); err != nil {
+			return nil, nil, err
 		}
 	}
-	encoded, err := json.MarshalIndent(report, "", "  ")
+	encoded, err = json.MarshalIndent(report, "", "  ")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, "INSERT INTO mikan_sqlite_import(id,report) VALUES(1,$1) ON CONFLICT(id) DO UPDATE SET report=excluded.report", string(encoded)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := writeMigrationMarker(dir, encoded); err != nil {
-		return nil, fmt.Errorf("import committed; retry to recover migration marker: %w", err)
+	return report, encoded, nil
+}
+
+// restartIdentities moves t's identity sequences past the imported IDs.
+func restartIdentities(ctx context.Context, tx *sql.Tx, t importTable) error {
+	for _, col := range t.identities {
+		var seq string
+		if err := tx.QueryRowContext(ctx, "SELECT pg_get_serial_sequence($1,$2)", quote(t.name), col).Scan(&seq); err != nil {
+			return err
+		}
+		var next int64
+		if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX("+quote(col)+"),0)+1 FROM "+quote(t.name)).Scan(&next); err != nil {
+			return err
+		}
+		if t.name == "nodes" {
+			next = max(next, firstRemoteNode)
+		}
+		// ALTER SEQUENCE is transactional, unlike setval: failed restores cannot move
+		// a live sequence backwards and cause subsequent ID collisions.
+		if _, err := tx.ExecContext(ctx, "ALTER SEQUENCE "+seq+" RESTART WITH "+strconv.FormatInt(next, 10)); err != nil {
+			return err
+		}
 	}
-	return report, nil
+	return nil
 }
 
 // ConfirmPostgresRestore marks the explicitly restored database as authoritative.
@@ -317,7 +400,7 @@ func ConfirmPostgresRestore(ctx context.Context, pg *sql.DB, dir string) error {
 	var report string
 	err := pg.QueryRowContext(ctx, "SELECT report FROM mikan_sqlite_import WHERE id=1").Scan(&report)
 	if errors.Is(err, sql.ErrNoRows) {
-		encoded, err := json.Marshal(ImportReport{Format: 1, ImportedAt: time.Now().Unix(), SourceKind: "postgresql-restore"})
+		encoded, err := json.Marshal(ImportReport{Format: reportFormat, ImportedAt: time.Now().Unix(), SourceKind: "postgresql-restore"})
 		if err != nil {
 			return err
 		}
@@ -383,7 +466,7 @@ func importSchema(ctx context.Context, sqlite *sql.DB, pg *sql.Tx) ([]importTabl
 		if !found[name] {
 			return nil, fmt.Errorf("SQLite table %s is missing", name)
 		}
-		cols, err := sqlite.QueryContext(ctx, "PRAGMA table_info("+pgx.Identifier{name}.Sanitize()+")")
+		cols, err := sqlite.QueryContext(ctx, "PRAGMA table_info("+quote(name)+")")
 		if err != nil {
 			return nil, err
 		}
@@ -420,7 +503,7 @@ func importSchema(ctx context.Context, sqlite *sql.DB, pg *sql.Tx) ([]importTabl
 		if len(t.keys) == 0 {
 			return nil, fmt.Errorf("missing primary key for %s", name)
 		}
-		fks, err := sqlite.QueryContext(ctx, "PRAGMA foreign_key_list("+pgx.Identifier{name}.Sanitize()+")")
+		fks, err := sqlite.QueryContext(ctx, "PRAGMA foreign_key_list("+quote(name)+")")
 		if err != nil {
 			return nil, err
 		}
@@ -475,17 +558,19 @@ type queryRows interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func selectTable(t importTable, postgres bool) string {
-	quote := func(names []string) string {
-		out := make([]string, len(names))
-		for i, n := range names {
-			out[i] = pgx.Identifier{n}.Sanitize()
-		}
-		return strings.Join(out, ",")
+// quoteList is names quoted and joined with commas.
+func quoteList(names []string) string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = quote(n)
 	}
+	return strings.Join(out, ",")
+}
+
+func selectTable(t importTable, postgres bool) string {
 	keys := make([]string, len(t.keys))
 	for i, k := range t.keys {
-		keys[i] = pgx.Identifier{k}.Sanitize()
+		keys[i] = quote(k)
 		if t.textKeys[k] {
 			if postgres {
 				keys[i] += " COLLATE \"C\""
@@ -494,7 +579,7 @@ func selectTable(t importTable, postgres bool) string {
 			}
 		}
 	}
-	return "SELECT " + quote(t.columns) + " FROM " + pgx.Identifier{t.name}.Sanitize() + " ORDER BY " + strings.Join(keys, ",")
+	return "SELECT " + quoteList(t.columns) + " FROM " + quote(t.name) + " ORDER BY " + strings.Join(keys, ",")
 }
 func hashValues(h hash.Hash, values []any) error {
 	for _, v := range values {
@@ -554,68 +639,58 @@ func tableProof(ctx context.Context, c queryRows, t importTable) (TableProof, er
 	return p, rows.Err()
 }
 
-// copyBatch bounds one multi-row INSERT: PostgreSQL takes at most 65535 parameters.
-const copyBatch = 500
+// sqliteRows feeds COPY from SQLite and hashes each row on its way, for the table proof.
+type sqliteRows struct {
+	rows   *sql.Rows
+	n      int
+	h      hash.Hash
+	count  int64
+	values []any
+	err    error
+}
 
-func copyTable(ctx context.Context, sqlite *sql.DB, pg *sql.Tx, t importTable) (TableProof, error) {
-	cols := make([]string, len(t.columns))
-	for i, c := range t.columns {
-		cols[i] = pgx.Identifier{c}.Sanitize()
+func (r *sqliteRows) Next() bool {
+	if r.err != nil || !r.rows.Next() {
+		return false
 	}
-	prefix := "INSERT INTO " + pgx.Identifier{t.name}.Sanitize() + "(" + strings.Join(cols, ",") + ") VALUES "
-	batch := min(copyBatch, 65535/len(t.columns))
-	// Full batches share one statement text, which the driver prepares once.
-	insert := func(values []any) error {
-		var b strings.Builder
-		b.WriteString(prefix)
-		for i := range values {
-			switch {
-			case i == 0:
-				b.WriteString("(")
-			case i%len(t.columns) == 0:
-				b.WriteString("),(")
-			default:
-				b.WriteString(",")
-			}
-			b.WriteString("$" + strconv.Itoa(i+1))
-		}
-		b.WriteString(")")
-		_, err := pg.ExecContext(ctx, b.String(), values...)
-		return err
+	if r.values, r.err = scanRow(r.rows, r.n); r.err == nil {
+		r.err = hashValues(r.h, r.values)
 	}
+	if r.err != nil {
+		return false
+	}
+	r.count++
+	return true
+}
+
+func (r *sqliteRows) Values() ([]any, error) { return r.values, nil }
+
+func (r *sqliteRows) Err() error {
+	if r.err != nil {
+		return r.err
+	}
+	return r.rows.Err()
+}
+
+// copyTable streams t from SQLite into PostgreSQL with COPY on pg's session, inside the
+// transaction open there.
+func copyTable(ctx context.Context, sqlite *sql.DB, pg *sql.Conn, t importTable) (TableProof, error) {
 	rows, err := sqlite.QueryContext(ctx, selectTable(t, false))
 	if err != nil {
 		return TableProof{}, err
 	}
 	defer rows.Close()
-	h := sha256.New()
-	p := TableProof{}
-	pending := make([]any, 0, batch*len(t.columns))
-	for rows.Next() {
-		values, err := scanRow(rows, len(t.columns))
-		if err != nil {
-			return p, err
-		}
-		if err := hashValues(h, values); err != nil {
-			return p, err
-		}
-		pending = append(pending, values...)
-		p.Rows++
-		if len(pending) == cap(pending) {
-			if err := insert(pending); err != nil {
-				return p, err
-			}
-			pending = pending[:0]
-		}
+	src := &sqliteRows{rows: rows, n: len(t.columns), h: sha256.New()}
+	var copied int64
+	err = pg.Raw(func(driverConn any) error {
+		copied, err = driverConn.(*stdlib.Conn).Conn().CopyFrom(ctx, pgx.Identifier{t.name}, t.columns, src)
+		return err
+	})
+	if err != nil {
+		return TableProof{}, err
 	}
-	if err := rows.Err(); err != nil {
-		return p, err
+	if copied != src.count {
+		return TableProof{}, fmt.Errorf("COPY took %d rows of %d", copied, src.count)
 	}
-	if len(pending) > 0 {
-		if err := insert(pending); err != nil {
-			return p, err
-		}
-	}
-	p.SHA256 = hex.EncodeToString(h.Sum(nil))
-	return p, nil
+	return TableProof{Rows: src.count, SHA256: hex.EncodeToString(src.h.Sum(nil))}, nil
 }

@@ -22,21 +22,6 @@ export function PromoSection({ token, activeCode, onApplied, onBonusApplied }: {
 
   const errorMessage = (code: string) => ({
     promo_try_later: t("sub.promoTryLater"),
-    promo_not_found: t("sub.promoNotFound"),
-    promo_inactive: t("sub.promoInactive"),
-    promo_expired: t("sub.promoExpired"),
-    promo_limit: t("sub.promoLimit"),
-    promo_user_limit: t("sub.promoUserLimit"),
-    promo_tariff: t("sub.promoTariff"),
-    promo_minimum: t("sub.promoMinimum"),
-    promo_new_user: t("sub.promoNewUser"),
-    promo_first_purchase: t("sub.promoFirstPurchase"),
-    promo_currency: t("sub.promoCurrency"),
-    promo_not_discount: t("sub.promoNotDiscount"),
-    promo_invalid_value: t("sub.promoUnavailable"),
-    promo_refund_unsupported: t("sub.promoRefundUnsupported"),
-    promo_subscription_required: t("sub.promoSubscription"),
-    promo_no_expiry: t("sub.promoNoExpiry"),
   } as Record<string, string>)[code] ?? t("sub.promoUnavailable");
 
   const apply = async () => {

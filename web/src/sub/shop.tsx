@@ -27,12 +27,6 @@ const FAIL: Record<string, Key> = {
   too_many_invoices: "sub.shopTooMany",
   too_many_subs: "sub.shopTooManySubs",
   promo_unavailable: "sub.promoUnavailable",
-  promo_tariff: "sub.promoTariff",
-  promo_minimum: "sub.promoMinimum",
-  promo_currency: "sub.promoCurrency",
-  promo_new_user: "sub.promoNewUser",
-  promo_first_purchase: "sub.promoFirstPurchase",
-  promo_refund_unsupported: "sub.promoRefundUnsupported",
   promo_try_later: "sub.promoTryLater",
 };
 

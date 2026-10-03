@@ -127,45 +127,12 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: true}
 	packageID := sql.NullInt64{Int64: p.ID, Valid: true}
-	var reusedPayment db.Payment
-	reused := false
-	pay, open, err := s.newPayment(ctx, req.TgID, now, amount,
-		func(q *db.Queries) (db.Payment, error) {
-			reused, reusedPayment = false, db.Payment{}
-			existing, err := q.FindOpenPackagePayment(ctx, db.FindOpenPackagePaymentParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider, UserID: userID, Since: now.Add(-invoiceReuse).Unix()})
-			if err != nil {
-				return db.Payment{}, err
-			}
-			matches := false
-			if strings.TrimSpace(req.PromoCode) == "" {
-				if s.d.Promo == nil {
-					matches = existing.Amount == amount
-				} else {
-					r, err := q.GetPromoRedemptionByPayment(ctx, sql.NullInt64{Int64: existing.ID, Valid: true})
-					if errors.Is(err, sql.ErrNoRows) || err == nil && r.Status != "reserved" {
-						matches = existing.Amount == amount
-					} else if err != nil {
-						return db.Payment{}, err
-					}
-				}
-			} else if s.d.Promo != nil {
-				r, err := q.GetPromoRedemptionByPayment(ctx, sql.NullInt64{Int64: existing.ID, Valid: true})
-				if err == nil && r.Status == "reserved" && existing.Amount == r.FinalAmount && (!r.ExpiresAt.Valid || now.Unix() < r.ExpiresAt.Int64) {
-					pc, err := q.GetPromoCode(ctx, r.PromoID)
-					if err != nil {
-						return db.Payment{}, err
-					}
-					matches = pc.Code == promo.Normalize(req.PromoCode)
-				} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-					return db.Payment{}, err
-				}
-			}
-			if !matches {
-				return db.Payment{}, sql.ErrNoRows
-			}
-			reusedPayment, reused = existing, true
-			existing.Amount = amount
-			return existing, nil
+	pay, open, err := s.newPayment(ctx, req.TgID, now,
+		func(q *db.Queries) ([]db.Payment, error) {
+			return q.FindOpenPackagePayments(ctx, db.FindOpenPackagePaymentsParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider, UserID: userID, Since: now.Add(-invoiceReuse).Unix()})
+		},
+		func(q *db.Queries, existing db.Payment) (bool, error) {
+			return s.matchesOpenPayment(ctx, q, existing, amount, req.PromoCode)
 		},
 		func(q *db.Queries) (db.Payment, error) {
 			created, err := q.CreatePackagePayment(ctx, db.CreatePackagePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID, UserID: userID, PackageID: packageID, TariffName: p.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
@@ -191,9 +158,6 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 		return db.Payment{}, err
 	}
 	if open {
-		if reused {
-			return reusedPayment, nil
-		}
 		return pay, nil
 	}
 	lang, _ := s.d.Settings.Lang(ctx)

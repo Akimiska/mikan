@@ -1730,7 +1730,7 @@
     "minOrder": "Minimum order",
     "maxDiscount": "Maximum discount",
     "discountTtl": "Discount lifetime, seconds",
-    "discountTtlHint": "0 — until the promo code ends",
+    "discountTtlHint": "0 — use the 30-minute default",
     "tariffs": "Tariff IDs, comma-separated",
     "firstPurchaseOnly": "First purchase only",
     "newUsersOnly": "New users only",

@@ -472,22 +472,13 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.promos.Validate(r.Context(), tgID, userID, in.TariffID, in.Amount, in.Currency, in.Code)
 	if err != nil {
-		if promoUnavailable(err) {
-			fail(http.StatusConflict, "promo_unavailable")
-			return
-		}
-		status := http.StatusConflict
-		fail(status, promoCode(err))
+		fail(http.StatusConflict, promoAttemptCode(err))
 		return
 	}
 	if p.Type == "days" || p.Type == "traffic" {
 		r, err := h.promos.RedeemBonus(r.Context(), tgID, userID, in.Code)
 		if err != nil {
-			if promoUnavailable(err) {
-				fail(http.StatusConflict, "promo_unavailable")
-				return
-			}
-			fail(http.StatusConflict, promoCode(err))
+			fail(http.StatusConflict, promoAttemptCode(err))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "days": r.Days, "bytes": r.Bytes, "message": "promo_applied"})
@@ -565,7 +556,7 @@ func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": "init_data"})
 		return
 	}
-	rs, err := h.st.Q.ListPromoRedemptionsByTg(r.Context(), db.ListPromoRedemptionsByTgParams{TgID: tgID, Lim: 100})
+	rs, err := h.st.Q.ListPromoRedemptionsByTgWithCode(r.Context(), db.ListPromoRedemptionsByTgWithCodeParams{TgID: tgID, Lim: 100})
 	if err != nil {
 		w.WriteHeader(500)
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": "internal"})
@@ -582,52 +573,14 @@ func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		Items []item `json:"items"`
 	}{Items: []item{}}
-	for _, redemption := range rs {
-		p, e := h.st.Q.GetPromoCode(r.Context(), redemption.PromoID)
-		if e != nil {
-			continue
-		}
-		out.Items = append(out.Items, item{Code: p.Code, Days: redemption.Days, Bytes: redemption.Bytes, Discount: redemption.DiscountAmount, Currency: redemption.Currency, At: redemption.RedeemedAt})
+	for _, row := range rs {
+		redemption := row
+		out.Items = append(out.Items, item{Code: row.Code, Days: redemption.Days, Bytes: redemption.Bytes, Discount: redemption.DiscountAmount, Currency: redemption.Currency, At: redemption.RedeemedAt})
 	}
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-func promoCode(err error) string {
-	if promoUnavailable(err) {
-		return "promo_unavailable"
-	}
-	switch {
-	case errors.Is(err, promo.ErrTariff):
-		return "promo_tariff"
-	case errors.Is(err, promo.ErrMinimum):
-		return "promo_minimum"
-	case errors.Is(err, promo.ErrNewUser):
-		return "promo_new_user"
-	case errors.Is(err, promo.ErrFirstPurchase):
-		return "promo_first_purchase"
-	case errors.Is(err, promo.ErrCurrency):
-		return "promo_currency"
-	case errors.Is(err, promo.ErrSubscription):
-		return "promo_subscription_required"
-	case errors.Is(err, promo.ErrNoExpiry):
-		return "promo_no_expiry"
-	case errors.Is(err, promo.ErrAlreadyApplied):
-		return "promo_already_applied"
-	case errors.Is(err, promo.ErrNotDiscount):
-		return "promo_not_discount"
-	case errors.Is(err, promo.ErrInvalidValue):
-		return "promo_invalid_value"
-	case errors.Is(err, promo.ErrRefundUnsupported):
-		return "promo_refund_unsupported"
-	default:
-		return "promo_unavailable"
-	}
-}
-
-func promoUnavailable(err error) bool {
-	return errors.Is(err, promo.ErrNotFound) || errors.Is(err, promo.ErrInactive) || errors.Is(err, promo.ErrExpired) ||
-		errors.Is(err, promo.ErrLimit) || errors.Is(err, promo.ErrUserLimit)
-}
+func promoAttemptCode(error) string { return "promo_unavailable" }
 
 // invoiceFailure is what the Mini App answers when no invoice could be made. What the buyer
 // can act on is told as it is. A provider that is switched off is "provider_off". Anything
@@ -639,7 +592,7 @@ func invoiceFailure(err error) (status int, code string, unexplained bool) {
 		promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit, promo.ErrTariff, promo.ErrMinimum, promo.ErrNewUser, promo.ErrFirstPurchase, promo.ErrCurrency, promo.ErrUnavailable, promo.ErrNotDiscount, promo.ErrInvalidValue, promo.ErrRefundUnsupported} {
 		if errors.Is(err, e) {
 			if strings.HasPrefix(e.Error(), "promo_") {
-				return http.StatusConflict, promoCode(err), false
+				return http.StatusConflict, "promo_unavailable", false
 			}
 			return http.StatusConflict, e.Error(), false
 		}

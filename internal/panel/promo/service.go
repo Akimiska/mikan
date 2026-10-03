@@ -39,6 +39,7 @@ var (
 const (
 	maxPromoDays          int64 = 36500
 	maxDiscountTTLSeconds int64 = 30 * 24 * 60 * 60
+	defaultDiscountTTL          = 30 * time.Minute
 )
 
 type Service struct {
@@ -251,9 +252,11 @@ func (s *Service) ReserveDiscount(ctx context.Context, q *db.Queries, tgID, user
 		return Discount{}, ErrLimit
 	}
 	expires := sql.NullInt64{}
+	ttl := defaultDiscountTTL
 	if p.DiscountTtl > 0 {
-		expires = sql.NullInt64{Int64: s.Now().Add(time.Duration(p.DiscountTtl) * time.Second).Unix(), Valid: true}
+		ttl = time.Duration(p.DiscountTtl) * time.Second
 	}
+	expires = sql.NullInt64{Int64: s.Now().Add(ttl).Unix(), Valid: true}
 	r, err := q.CreatePromoRedemption(ctx, db.CreatePromoRedemptionParams{
 		PromoID: p.ID, UserID: sql.NullInt64{Int64: userID, Valid: userID != 0}, TgID: tgID, PaymentID: sql.NullInt64{Int64: paymentID, Valid: paymentID != 0},
 		Status: "reserved", RedeemedAt: s.Now().Unix(), ExpiresAt: expires, DiscountAmount: d, OriginalAmount: amount, FinalAmount: amount - d, Currency: currency, Note: p.Description,
@@ -322,11 +325,11 @@ func (s *Service) RedeemBonus(ctx context.Context, tgID, userID int64, code stri
 				return err
 			}
 		case "traffic":
-			if p.Value < domain.MinGrantBytes {
-				return errors.New("promo_traffic_too_small")
+			if p.Value < domain.MinGrantBytes || p.Value > domain.MaxGrantBytes {
+				return ErrInvalidValue
 			}
 			// Bonus traffic uses the native grant mechanism and remains until consumed.
-			g, err := q.CreateTrafficGrant(ctx, db.CreateTrafficGrantParams{UserID: userID, PoolID: p.PoolID, Bytes: p.Value, Remaining: p.Value, Lifetime: domain.LifetimeUsed, ExpiresAt: sql.NullInt64{}, Source: domain.SourceAdmin, PaymentID: sql.NullInt64{}, PackageID: sql.NullInt64{}, Note: "promo:" + p.Code, CreatedAt: now.Unix()})
+			g, err := domain.GrantTx(ctx, q, u, domain.GrantSpec{PoolID: p.PoolID.Int64, Bytes: p.Value, Lifetime: domain.LifetimeUsed, Source: domain.SourceAdmin, Note: "promo:" + p.Code}, now)
 			if err != nil {
 				return err
 			}
@@ -399,7 +402,7 @@ func (s *Service) ReleaseExpired(ctx context.Context, before int64) error {
 			if err != nil || r.Status != "reserved" {
 				return err
 			}
-			n, err := q.ReleaseExpiredPromoRedemption(ctx, db.ReleaseExpiredPromoRedemptionParams{ID: r.ID, Before: before})
+			n, err := q.ReleaseExpiredPromoRedemption(ctx, db.ReleaseExpiredPromoRedemptionParams{ID: r.ID, Before: sql.NullInt64{Int64: before, Valid: true}})
 			if err != nil || n == 0 {
 				return err
 			}
@@ -413,6 +416,10 @@ func (s *Service) ReleaseExpired(ctx context.Context, before int64) error {
 }
 
 func (s *Service) ApplyPayment(ctx context.Context, q *db.Queries, paymentID, userID int64) error {
+	payment, err := q.GetPayment(ctx, paymentID)
+	if err != nil {
+		return err
+	}
 	r, err := q.GetPromoRedemptionByPayment(ctx, sql.NullInt64{Int64: paymentID, Valid: paymentID != 0})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -420,14 +427,20 @@ func (s *Service) ApplyPayment(ctx context.Context, q *db.Queries, paymentID, us
 	if err != nil {
 		return err
 	}
-	if r.Status == "released" {
-		return ErrReservationExpired
-	}
-	if r.Status != "reserved" {
+	if r.Status != "reserved" && r.Status != "released" {
 		return nil
 	}
-	if r.ExpiresAt.Valid && s.Now().Unix() >= r.ExpiresAt.Int64 {
+	paidAt := s.Now().Unix()
+	if payment.PaidAt.Valid {
+		paidAt = payment.PaidAt.Int64
+	}
+	if r.ExpiresAt.Valid && paidAt >= r.ExpiresAt.Int64 {
 		return ErrReservationExpired
+	}
+	if r.Status == "released" {
+		if err := q.RestorePromoUse(ctx, r.PromoID); err != nil {
+			return err
+		}
 	}
 	n, err := q.MarkPromoApplied(ctx, db.MarkPromoAppliedParams{UserID: sql.NullInt64{Int64: userID, Valid: userID != 0}, ID: r.ID})
 	if err != nil {

@@ -96,6 +96,10 @@ func TestReserveDiscountAndLimit(t *testing.T) {
 	if d.Amount != 250 || d.Final != 750 {
 		t.Fatalf("discount: %+v", d)
 	}
+	r, err := s.GetPaymentRedemption(ctx, paymentID)
+	if err != nil || !r.ExpiresAt.Valid || r.ExpiresAt.Int64 != 1000+int64(defaultDiscountTTL/time.Second) {
+		t.Fatalf("default reservation deadline=%+v err=%v", r.ExpiresAt, err)
+	}
 	if _, err := s.ReserveDiscount(ctx, st.Q, 11, 0, 7, 1000, "RUB", p.Code, 43); !errors.Is(err, ErrLimit) {
 		t.Fatalf("expected limit, got %v", err)
 	}
@@ -112,6 +116,46 @@ func TestReserveDiscountAndLimit(t *testing.T) {
 	}
 	if _, err := s.ReserveDiscount(ctx, st.Q, 11, 0, 7, 1000, "RUB", p.Code, secondPaymentID); err != nil {
 		t.Fatalf("released reservation should free use: %v", err)
+	}
+}
+
+func TestPaidBeforeReservationExpiryCanApplyLater(t *testing.T) {
+	st := newTestStore(t)
+	defer st.Close()
+	ctx := context.Background()
+	if err := domain.Seed(ctx, st, time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	addUser(t, st, 1, 10, 2000)
+	p := addPromo(t, st, "percent", 25, nil)
+	if _, err := st.DB.ExecContext(ctx, `UPDATE promo_codes SET currency='XTR' WHERE id=$1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `UPDATE promo_codes SET discount_ttl=30 WHERE id=$1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	s := New(st, func() time.Time { return now })
+	var paymentID int64
+	if err := st.DB.QueryRowContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','paid-in-time',10,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000) RETURNING id`).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReserveDiscount(ctx, st.Q, 10, 0, 1, 1000, "XTR", p.Code, paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `UPDATE payments SET status='paid', paid_at=1029 WHERE id=$1`, paymentID); err != nil {
+		t.Fatal(err)
+	}
+	now = time.Unix(1060, 0)
+	if err := s.ReleaseExpired(ctx, now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ApplyPayment(ctx, st.Q, paymentID, 1); err != nil {
+		t.Fatalf("ApplyPayment after timely capture: %v", err)
+	}
+	r, err := s.GetPaymentRedemption(ctx, paymentID)
+	if err != nil || r.Status != "applied" {
+		t.Fatalf("redemption status=%q err=%v, want applied", r.Status, err)
 	}
 }
 

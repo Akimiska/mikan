@@ -48,6 +48,13 @@ WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND user_id 
   AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
 ORDER BY id DESC LIMIT 1;
 
+-- name: FindOpenPayments :many
+SELECT * FROM payments
+WHERE tg_id = sqlc.arg(tg_id) AND tariff_id = sqlc.arg(tariff_id) AND provider = sqlc.arg(provider) AND kind = sqlc.arg(kind)
+  AND user_id IS NOT DISTINCT FROM NULLIF(CAST(sqlc.arg(user_id) AS BIGINT), 0)
+  AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
+ORDER BY id DESC;
+
 -- name: ListPendingPayments :many
 SELECT * FROM payments WHERE status = 'pending' AND created_at > $1 ORDER BY id;
 

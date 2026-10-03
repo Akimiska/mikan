@@ -309,7 +309,7 @@ func (s *Service) checkAddon(ctx context.Context, provider, ext string) error {
 		}
 		if s.d.Promo != nil {
 			r, redemptionErr := s.d.Promo.GetPaymentRedemption(ctx, pay.ID)
-			late := redemptionErr == nil && (r.Status == "released" || r.Status == "reserved" && r.ExpiresAt.Valid && s.d.Now().Unix() >= r.ExpiresAt.Int64)
+			late := redemptionErr == nil && latePromoPayment(r, paymentTime(pay, s.d.Now().Unix()))
 			if late {
 				handled, err := s.refundLatePromoPayment(ctx, pay.ID, ext, func(current db.Payment) error {
 					// This invoice already contains the discounted amount. The stable key

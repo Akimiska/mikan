@@ -461,6 +461,11 @@ func importSchema(ctx context.Context, sqlite *sql.DB, pg *sql.Tx) ([]importTabl
 	if err != nil {
 		return nil, err
 	}
+	for _, name := range []string{"promo_codes", "promo_redemptions"} {
+		if !found[name] {
+			delete(lookup, name)
+		}
+	}
 	dependencies := map[string][]string{}
 	for name, t := range lookup {
 		if !found[name] {

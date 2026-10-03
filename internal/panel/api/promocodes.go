@@ -7,12 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -54,7 +54,7 @@ type PromoBody struct {
 	EndsAt            *int64  `json:"ends_at,omitempty" doc:"Unix time в секундах; значение не может быть в прошлом"`
 	MaxUses           *int64  `json:"max_uses,omitempty" minimum:"1"`
 	PerUserLimit      int64   `json:"per_user_limit" minimum:"1"`
-	DiscountTtl       int64   `json:"discount_ttl" minimum:"0" doc:"Срок действия резерва скидки в секундах; 0 = до окончания заказа"`
+	DiscountTtl       int64   `json:"discount_ttl" minimum:"0" doc:"Срок действия резерва скидки в секундах; 0 = 30 минут"`
 	MinOrder          int64   `json:"min_order" minimum:"0" doc:"Минимальная сумма заказа в минимальных единицах оплаты: RUB — копейки, XTR — Stars"`
 	MaxDiscount       int64   `json:"max_discount" minimum:"0" doc:"Максимальная скидка в минимальных единицах оплаты: RUB — копейки, XTR — Stars"`
 	TariffIDs         []int64 `json:"tariff_ids"`
@@ -174,7 +174,7 @@ func validatePromoBody(in PromoBody, now time.Time, usedCount int64) error {
 			return errors.New("bad_promo_days")
 		}
 	case "traffic":
-		if in.Value < 1024*1024*1024 {
+		if in.Value < domain.MinGrantBytes || in.Value > domain.MaxGrantBytes {
 			return errors.New("bad_traffic")
 		}
 	case "percent":
@@ -363,7 +363,7 @@ func (h *handlers) deletePromocode(ctx context.Context, in *struct {
 	return &struct{}{}, nil
 }
 func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemptionsInput) (*promoRedemptionsOutput, error) {
-	xs, e := h.d.Store.Q.ListPromoRedemptions(ctx, db.ListPromoRedemptionsParams{Lim: in.Limit, RowOffset: in.Offset})
+	xs, e := h.d.Store.Q.ListPromoRedemptionsWithCode(ctx, db.ListPromoRedemptionsWithCodeParams{Lim: in.Limit, RowOffset: in.Offset})
 	if e != nil {
 		return nil, e
 	}
@@ -373,14 +373,8 @@ func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemp
 	}
 	o := &promoRedemptionsOutput{}
 	o.Body.Total = n
-	for _, r := range xs {
-		p, err := h.d.Store.Q.GetPromoCode(ctx, r.PromoID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			return nil, err
-		}
+	for _, row := range xs {
+		r := row
 		o.Body.Items = append(o.Body.Items, PromoRedemptionView{ID: r.ID, PromoID: r.PromoID, UserID: func() *int64 {
 			if r.UserID.Valid {
 				x := r.UserID.Int64
@@ -393,7 +387,7 @@ func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemp
 				return &x
 			}
 			return nil
-		}(), Status: r.Status, RedeemedAt: time.Unix(r.RedeemedAt, 0), ExpiresAt: ts(r.ExpiresAt), Days: r.Days, Bytes: r.Bytes, DiscountAmount: r.DiscountAmount, OriginalAmount: r.OriginalAmount, FinalAmount: r.FinalAmount, Currency: r.Currency, Code: p.Code})
+		}(), Status: r.Status, RedeemedAt: time.Unix(r.RedeemedAt, 0), ExpiresAt: ts(r.ExpiresAt), Days: r.Days, Bytes: r.Bytes, DiscountAmount: r.DiscountAmount, OriginalAmount: r.OriginalAmount, FinalAmount: r.FinalAmount, Currency: r.Currency, Code: row.Code})
 	}
 	return o, nil
 }
@@ -411,22 +405,5 @@ func (h *handlers) promocodeStats(ctx context.Context, _ *struct{}) (*promoStats
 	if e != nil {
 		return nil, e
 	}
-	return &promoStatsOutput{Body: PromoStatsView{PromoCodes: n, Active: active, SuccessfulActivations: st.Count, BonusDays: sqlValueInt64(st.Coalesce), BonusBytes: sqlValueInt64(st.Coalesce_2), DiscountAmount: sqlValueInt64(st.Coalesce_3), DiscountOrders: sqlValueInt64(st.Coalesce_4)}}, nil
-}
-
-func sqlValueInt64(v any) int64 {
-	switch n := v.(type) {
-	case int64:
-		return n
-	case int:
-		return int64(n)
-	case []byte:
-		parsed, _ := strconv.ParseInt(string(n), 10, 64)
-		return parsed
-	case string:
-		parsed, _ := strconv.ParseInt(n, 10, 64)
-		return parsed
-	default:
-		return 0
-	}
+	return &promoStatsOutput{Body: PromoStatsView{PromoCodes: n, Active: active, SuccessfulActivations: st.SuccessfulActivations, BonusDays: st.BonusDays, BonusBytes: st.BonusBytes, DiscountAmount: st.DiscountAmount, DiscountOrders: st.DiscountOrders}}, nil
 }

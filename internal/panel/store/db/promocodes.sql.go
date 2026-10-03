@@ -10,56 +10,6 @@ import (
 	"database/sql"
 )
 
-const releaseLatePromoRefundClaim = `-- name: ReleaseLatePromoRefundClaim :exec
-UPDATE promo_redemptions SET refund_started_at=NULL WHERE payment_id=$1
-`
-
-func (q *Queries) ReleaseLatePromoRefundClaim(ctx context.Context, paymentID int64) error {
-	_, err := q.db.ExecContext(ctx, releaseLatePromoRefundClaim, paymentID)
-	return err
-}
-
-const listLatePromoRefunds = `-- name: ListLatePromoRefunds :many
-SELECT id FROM payments WHERE error='promo_late_refund_failed' AND status IN ('pending','expired','paid','failed') ORDER BY id
-`
-
-func (q *Queries) ListLatePromoRefunds(ctx context.Context) ([]int64, error) {
-	rows, err := q.db.QueryContext(ctx, listLatePromoRefunds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const releaseExpiredPromoRedemption = `-- name: ReleaseExpiredPromoRedemption :execrows
-UPDATE promo_redemptions SET status='released' WHERE id=$1 AND status='reserved' AND (expires_at IS NOT NULL AND expires_at<=$2 OR EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('failed','expired','refunded') AND p.created_at<$2))
-`
-
-type ReleaseExpiredPromoRedemptionParams struct {
-	ID     int64
-	Before int64
-}
-
-func (q *Queries) ReleaseExpiredPromoRedemption(ctx context.Context, arg ReleaseExpiredPromoRedemptionParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, releaseExpiredPromoRedemption, arg.ID, arg.Before)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const claimLatePromoRefund = `-- name: ClaimLatePromoRefund :execrows
 UPDATE promo_redemptions SET refund_started_at=$1 WHERE id=$2
   AND (status='released' OR (status='reserved' AND expires_at IS NOT NULL AND expires_at<=$3))
@@ -475,11 +425,38 @@ func (q *Queries) IncrementPromoUse(ctx context.Context, id int64) (int64, error
 }
 
 const listExpiredPromoPayments = `-- name: ListExpiredPromoPayments :many
-SELECT DISTINCT p.id FROM payments p JOIN promo_redemptions r ON r.payment_id=p.id WHERE ((p.status='expired' AND p.created_at < $1) OR (r.expires_at IS NOT NULL AND r.expires_at<=$1)) AND r.status='reserved'
+SELECT DISTINCT p.id FROM payments p JOIN promo_redemptions r ON r.payment_id=p.id WHERE ((p.status='expired' AND p.created_at < $1) OR (r.expires_at IS NOT NULL AND r.expires_at<=$1 AND p.status IN ('pending','expired','failed','refunded'))) AND r.status='reserved'
 `
 
 func (q *Queries) ListExpiredPromoPayments(ctx context.Context, before int64) ([]int64, error) {
 	rows, err := q.db.QueryContext(ctx, listExpiredPromoPayments, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLatePromoRefunds = `-- name: ListLatePromoRefunds :many
+SELECT id FROM payments WHERE error='promo_late_refund_failed' AND status IN ('pending','expired','paid','failed') ORDER BY id
+`
+
+func (q *Queries) ListLatePromoRefunds(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listLatePromoRefunds)
 	if err != nil {
 		return nil, err
 	}
@@ -655,8 +632,150 @@ func (q *Queries) ListPromoRedemptionsByTg(ctx context.Context, arg ListPromoRed
 	return items, nil
 }
 
+const listPromoRedemptionsByTgWithCode = `-- name: ListPromoRedemptionsByTgWithCode :many
+SELECT r.id, r.promo_id, r.user_id, r.tg_id, r.payment_id, r.status, r.refund_started_at, r.redeemed_at, r.expires_at, r.days, r.bytes, r.discount_amount, r.original_amount, r.final_amount, r.currency, r.note, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
+WHERE r.tg_id=$1 AND r.status='applied' ORDER BY r.id DESC LIMIT CAST($2 AS BIGINT)
+`
+
+type ListPromoRedemptionsByTgWithCodeParams struct {
+	TgID int64
+	Lim  int64
+}
+
+type ListPromoRedemptionsByTgWithCodeRow struct {
+	ID              int64
+	PromoID         int64
+	UserID          sql.NullInt64
+	TgID            int64
+	PaymentID       sql.NullInt64
+	Status          string
+	RefundStartedAt sql.NullInt64
+	RedeemedAt      int64
+	ExpiresAt       sql.NullInt64
+	Days            int64
+	Bytes           int64
+	DiscountAmount  int64
+	OriginalAmount  int64
+	FinalAmount     int64
+	Currency        string
+	Note            string
+	Code            string
+}
+
+func (q *Queries) ListPromoRedemptionsByTgWithCode(ctx context.Context, arg ListPromoRedemptionsByTgWithCodeParams) ([]ListPromoRedemptionsByTgWithCodeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPromoRedemptionsByTgWithCode, arg.TgID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPromoRedemptionsByTgWithCodeRow{}
+	for rows.Next() {
+		var i ListPromoRedemptionsByTgWithCodeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PromoID,
+			&i.UserID,
+			&i.TgID,
+			&i.PaymentID,
+			&i.Status,
+			&i.RefundStartedAt,
+			&i.RedeemedAt,
+			&i.ExpiresAt,
+			&i.Days,
+			&i.Bytes,
+			&i.DiscountAmount,
+			&i.OriginalAmount,
+			&i.FinalAmount,
+			&i.Currency,
+			&i.Note,
+			&i.Code,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPromoRedemptionsWithCode = `-- name: ListPromoRedemptionsWithCode :many
+SELECT r.id, r.promo_id, r.user_id, r.tg_id, r.payment_id, r.status, r.refund_started_at, r.redeemed_at, r.expires_at, r.days, r.bytes, r.discount_amount, r.original_amount, r.final_amount, r.currency, r.note, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
+ORDER BY r.id DESC LIMIT CAST($2 AS BIGINT) OFFSET CAST($1 AS BIGINT)
+`
+
+type ListPromoRedemptionsWithCodeParams struct {
+	RowOffset int64
+	Lim       int64
+}
+
+type ListPromoRedemptionsWithCodeRow struct {
+	ID              int64
+	PromoID         int64
+	UserID          sql.NullInt64
+	TgID            int64
+	PaymentID       sql.NullInt64
+	Status          string
+	RefundStartedAt sql.NullInt64
+	RedeemedAt      int64
+	ExpiresAt       sql.NullInt64
+	Days            int64
+	Bytes           int64
+	DiscountAmount  int64
+	OriginalAmount  int64
+	FinalAmount     int64
+	Currency        string
+	Note            string
+	Code            string
+}
+
+func (q *Queries) ListPromoRedemptionsWithCode(ctx context.Context, arg ListPromoRedemptionsWithCodeParams) ([]ListPromoRedemptionsWithCodeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPromoRedemptionsWithCode, arg.RowOffset, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPromoRedemptionsWithCodeRow{}
+	for rows.Next() {
+		var i ListPromoRedemptionsWithCodeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PromoID,
+			&i.UserID,
+			&i.TgID,
+			&i.PaymentID,
+			&i.Status,
+			&i.RefundStartedAt,
+			&i.RedeemedAt,
+			&i.ExpiresAt,
+			&i.Days,
+			&i.Bytes,
+			&i.DiscountAmount,
+			&i.OriginalAmount,
+			&i.FinalAmount,
+			&i.Currency,
+			&i.Note,
+			&i.Code,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markPromoApplied = `-- name: MarkPromoApplied :execrows
-UPDATE promo_redemptions SET status='applied', user_id=COALESCE($1,user_id) WHERE id=$2 AND status='reserved'
+UPDATE promo_redemptions SET status='applied', user_id=COALESCE($1,user_id) WHERE id=$2 AND status IN ('reserved','released')
 `
 
 type MarkPromoAppliedParams struct {
@@ -673,28 +792,54 @@ func (q *Queries) MarkPromoApplied(ctx context.Context, arg MarkPromoAppliedPara
 }
 
 const promoStats = `-- name: PromoStats :one
-SELECT COUNT(CASE WHEN status='applied' THEN 1 END), CAST(COALESCE(SUM(CASE WHEN status='applied' THEN days ELSE 0 END),0) AS BIGINT), CAST(COALESCE(SUM(CASE WHEN status='applied' THEN bytes ELSE 0 END),0) AS BIGINT), CAST(COALESCE(SUM(CASE WHEN status='applied' THEN discount_amount ELSE 0 END),0) AS BIGINT), CAST(COALESCE(SUM(CASE WHEN status='applied' AND payment_id IS NOT NULL THEN 1 ELSE 0 END),0) AS BIGINT) FROM promo_redemptions
+SELECT COUNT(CASE WHEN status='applied' THEN 1 END) AS successful_activations, CAST(COALESCE(SUM(CASE WHEN status='applied' THEN days ELSE 0 END),0) AS BIGINT) AS bonus_days, CAST(COALESCE(SUM(CASE WHEN status='applied' THEN bytes ELSE 0 END),0) AS BIGINT) AS bonus_bytes, CAST(COALESCE(SUM(CASE WHEN status='applied' THEN discount_amount ELSE 0 END),0) AS BIGINT) AS discount_amount, CAST(COALESCE(SUM(CASE WHEN status='applied' AND payment_id IS NOT NULL THEN 1 ELSE 0 END),0) AS BIGINT) AS discount_orders FROM promo_redemptions
 `
 
 type PromoStatsRow struct {
-	Count      int64
-	Coalesce   int64
-	Coalesce_2 int64
-	Coalesce_3 int64
-	Coalesce_4 int64
+	SuccessfulActivations int64
+	BonusDays             int64
+	BonusBytes            int64
+	DiscountAmount        int64
+	DiscountOrders        int64
 }
 
 func (q *Queries) PromoStats(ctx context.Context) (PromoStatsRow, error) {
 	row := q.db.QueryRowContext(ctx, promoStats)
 	var i PromoStatsRow
 	err := row.Scan(
-		&i.Count,
-		&i.Coalesce,
-		&i.Coalesce_2,
-		&i.Coalesce_3,
-		&i.Coalesce_4,
+		&i.SuccessfulActivations,
+		&i.BonusDays,
+		&i.BonusBytes,
+		&i.DiscountAmount,
+		&i.DiscountOrders,
 	)
 	return i, err
+}
+
+const releaseExpiredPromoRedemption = `-- name: ReleaseExpiredPromoRedemption :execrows
+UPDATE promo_redemptions SET status='released' WHERE promo_redemptions.id=$1 AND promo_redemptions.status='reserved' AND (promo_redemptions.expires_at IS NOT NULL AND promo_redemptions.expires_at<=$2 AND EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('pending','expired','failed','refunded')) OR EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('failed','expired','refunded') AND p.created_at<$2))
+`
+
+type ReleaseExpiredPromoRedemptionParams struct {
+	ID     int64
+	Before sql.NullInt64
+}
+
+func (q *Queries) ReleaseExpiredPromoRedemption(ctx context.Context, arg ReleaseExpiredPromoRedemptionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseExpiredPromoRedemption, arg.ID, arg.Before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const releaseLatePromoRefundClaim = `-- name: ReleaseLatePromoRefundClaim :exec
+UPDATE promo_redemptions SET refund_started_at=NULL WHERE payment_id=$1
+`
+
+func (q *Queries) ReleaseLatePromoRefundClaim(ctx context.Context, paymentID sql.NullInt64) error {
+	_, err := q.db.ExecContext(ctx, releaseLatePromoRefundClaim, paymentID)
+	return err
 }
 
 const releasePromoByPayment = `-- name: ReleasePromoByPayment :execrows
@@ -734,6 +879,15 @@ func (q *Queries) ReleasePromoRedemptionForClosedPayment(ctx context.Context, id
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const restorePromoUse = `-- name: RestorePromoUse :exec
+UPDATE promo_codes SET used_count=used_count+1 WHERE id=$1
+`
+
+func (q *Queries) RestorePromoUse(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, restorePromoUse, id)
+	return err
 }
 
 const setPromoEnabled = `-- name: SetPromoEnabled :execrows

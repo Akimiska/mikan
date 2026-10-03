@@ -145,7 +145,7 @@ func TestInvoiceFailure(t *testing.T) {
 		{fmt.Errorf("wrapped: %w", billing.ErrTooMany), http.StatusConflict, "too_many_invoices", false},
 		{billing.ErrNotYours, http.StatusConflict, "not_yours", false},
 		{billing.ErrProviderOff, http.StatusConflict, "provider_off", false},
-		{promo.ErrRefundUnsupported, http.StatusConflict, "promo_refund_unsupported", false},
+		{promo.ErrRefundUnsupported, http.StatusConflict, "promo_unavailable", false},
 		{fmt.Errorf("%w: yookassa_unreachable", billing.ErrProviderOff), http.StatusBadGateway, "invoice_failed", false}, // billing logged it
 		{errors.New("database is locked"), http.StatusBadGateway, "invoice_failed", true},
 	} {
@@ -157,20 +157,26 @@ func TestInvoiceFailure(t *testing.T) {
 }
 
 func TestPromoUnavailableDoesNotRevealCodeExistence(t *testing.T) {
-	for _, err := range []error{promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit} {
-		if !promoUnavailable(err) || promoCode(err) != "promo_unavailable" {
-			t.Errorf("%v leaked as %q", err, promoCode(err))
+	for _, err := range []error{promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit, promo.ErrTariff} {
+		if got := promoAttemptCode(err); got != "promo_unavailable" {
+			t.Errorf("%v leaked as %q", err, got)
 		}
 	}
-	if promoUnavailable(promo.ErrTariff) {
-		t.Fatal("tariff-specific eligibility was collapsed")
+}
+
+func TestPromoAttemptErrorsDoNotRevealEligibility(t *testing.T) {
+	for _, err := range []error{promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit,
+		promo.ErrTariff, promo.ErrMinimum, promo.ErrNewUser, promo.ErrFirstPurchase, promo.ErrCurrency, promo.ErrNotDiscount} {
+		if got := promoAttemptCode(err); got != "promo_unavailable" {
+			t.Errorf("%v leaked as %q", err, got)
+		}
 	}
 }
 
 func TestPromoErrorsAreGenericAtCheckout(t *testing.T) {
 	for _, err := range []error{promo.ErrNotFound, promo.ErrTariff, promo.ErrMinimum, promo.ErrCurrency, promo.ErrRefundUnsupported} {
-		if !promoError(err) {
-			t.Errorf("%v is not recognized as a promo error", err)
+		if !promoError(err) || promoAttemptCode(err) != "promo_unavailable" {
+			t.Errorf("%v is not handled as a generic promo error", err)
 		}
 	}
 	if promoError(billing.ErrProviderOff) {

@@ -165,6 +165,11 @@ func TestDiscountedStarsInvoicePersistsAmountAndReusesInvoice(t *testing.T) {
 	if stored := e.payment(p.ID); stored.Amount != 113 {
 		t.Fatalf("stored amount = %d, want discounted 113", stored.Amount)
 	}
+	ordinary, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars})
+	must(t, err)
+	if ordinary.ID == p.ID {
+		t.Fatal("ordinary invoice unexpectedly reused the discounted payment")
+	}
 	calls := e.tg.invoiceCount()
 	if again, err := e.s.Invoice(ctx, req); err != nil || again.ID != p.ID || e.tg.invoiceCount() != calls {
 		t.Fatalf("invoice was not reused: payment=%+v err=%v calls=%d->%d", again, err, calls, e.tg.invoiceCount())
@@ -173,6 +178,44 @@ func TestDiscountedStarsInvoicePersistsAmountAndReusesInvoice(t *testing.T) {
 	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-discount", "XTR", 113))
 	if e.payment(p.ID).Status != "applied" {
 		t.Fatalf("discounted payment not applied: %+v", e.payment(p.ID))
+	}
+}
+
+func TestConcurrentInvoicesWithSingleUsePromoShareReservation(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "ONCE", Type: "percent", Value: 10, Currency: "XTR", MaxUses: sql.NullInt64{Int64: 1, Valid: true}, PerUserLimit: 1, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	req := InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars, PromoCode: pc.Code}
+	payments := make([]db.Payment, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range payments {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			payments[i], errs[i] = e.s.Invoice(ctx, req)
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent promo invoice: %v", err)
+		}
+	}
+	if payments[0].ID != payments[1].ID {
+		t.Fatalf("parallel calls opened payments %d and %d", payments[0].ID, payments[1].ID)
+	}
+	var uses, redemptions int
+	if err := e.st.DB.QueryRowContext(ctx, `SELECT used_count FROM promo_codes WHERE id=$1`, pc.ID).Scan(&uses); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.DB.QueryRowContext(ctx, `SELECT count(*) FROM promo_redemptions WHERE promo_id=$1 AND status='reserved'`, pc.ID).Scan(&redemptions); err != nil {
+		t.Fatal(err)
+	}
+	if uses != 1 || redemptions != 1 {
+		t.Fatalf("promo use count=%d reservations=%d, want 1 each", uses, redemptions)
 	}
 }
 
@@ -254,6 +297,7 @@ func TestStarsPaymentReleasedDuringPaymentTransitionGetsRefunded(t *testing.T) {
 	if _, err := e.st.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: "expired", ID: p.ID, OldStatus: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	e.now = e.now.Add(31 * time.Minute)
 	baseNow := e.s.d.Now
 	released := false
 	e.s.d.Now = func() time.Time {

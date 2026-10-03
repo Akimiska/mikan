@@ -28,10 +28,11 @@ type Verifier struct {
 const jwtHS256Header = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
 
 // Who returns the key the importer filed the user under ("name:<username>" or
-// "id:<PasarGuard id>"); ok is false for a token whose signature does not match.
-func (v Verifier) Who(token string) (key string, ok bool) {
+// "id:<PasarGuard id>") and when the token was made (unix seconds); ok is false for a
+// token whose signature does not match.
+func (v Verifier) Who(token string) (key string, issued int64, ok bool) {
 	if v.Secret == "" || len(token) < 15 || len(token) > 1024 {
-		return "", false
+		return "", 0, false
 	}
 	if strings.HasPrefix(token, jwtHS256Header) {
 		return v.jwt(token)
@@ -42,7 +43,7 @@ func (v Verifier) Who(token string) (key string, ok bool) {
 		mac := hmac.New(sha256.New, []byte(v.Secret))
 		mac.Write([]byte(data))
 		if !same(sig, base64.RawURLEncoding.EncodeToString(mac.Sum(nil))) {
-			return "", false
+			return "", 0, false
 		}
 		return payloadKey(data, true)
 	}
@@ -53,59 +54,62 @@ func (v Verifier) Who(token string) (key string, ok bool) {
 		good = same(sig, hex.EncodeToString(sum[:])[:10])
 	}
 	if !good {
-		return "", false
+		return "", 0, false
 	}
 	return payloadKey(data, v.Kind == PasarGuard)
 }
 
 // payloadKey reads "username,ts" (both panels) or "v2|v3,<id>,<ts>" (PasarGuard only).
-func payloadKey(b64 string, ids bool) (string, bool) {
+func payloadKey(b64 string, ids bool) (string, int64, bool) {
 	raw, err := base64.URLEncoding.DecodeString(b64 + strings.Repeat("=", (4-len(b64)%4)%4))
 	if err != nil {
-		return "", false
+		return "", 0, false
 	}
 	parts := strings.Split(string(raw), ",")
 	switch {
 	case len(parts) == 2 && parts[0] != "":
-		if _, err := strconv.ParseInt(parts[1], 10, 64); err != nil {
-			return "", false
+		ts, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return "", 0, false
 		}
-		return "name:" + parts[0], true
+		return "name:" + parts[0], ts, true
 	case ids && len(parts) == 3 && (parts[0] == "v2" || parts[0] == "v3"):
 		id, err := strconv.ParseInt(parts[1], 10, 64)
 		if err != nil || id <= 0 {
-			return "", false
+			return "", 0, false
 		}
-		if _, err := strconv.ParseInt(parts[2], 10, 64); err != nil {
-			return "", false
+		ts, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			return "", 0, false
 		}
-		return "id:" + strconv.FormatInt(id, 10), true
+		return "id:" + strconv.FormatInt(id, 10), ts, true
 	}
-	return "", false
+	return "", 0, false
 }
 
-func (v Verifier) jwt(token string) (string, bool) {
+func (v Verifier) jwt(token string) (string, int64, bool) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", false
+		return "", 0, false
 	}
 	mac := hmac.New(sha256.New, []byte(v.Secret))
 	mac.Write([]byte(parts[0] + "." + parts[1]))
 	if !same(strings.TrimRight(parts[2], "="), base64.RawURLEncoding.EncodeToString(mac.Sum(nil))) {
-		return "", false
+		return "", 0, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
 	if err != nil {
-		return "", false
+		return "", 0, false
 	}
 	var claims struct {
-		Sub    string `json:"sub"`
-		Access string `json:"access"`
+		Sub    string  `json:"sub"`
+		Access string  `json:"access"`
+		Iat    float64 `json:"iat"`
 	}
 	if json.Unmarshal(raw, &claims) != nil || claims.Access != "subscription" || claims.Sub == "" {
-		return "", false
+		return "", 0, false
 	}
-	return "name:" + claims.Sub, true
+	return "name:" + claims.Sub, int64(claims.Iat), true
 }
 
 func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }

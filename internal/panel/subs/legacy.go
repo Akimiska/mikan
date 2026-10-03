@@ -53,20 +53,25 @@ func (h *Handler) Legacy() http.Handler {
 // those are filed under ("name:…", "id:…") are never taken from the address itself.
 func (h *Handler) legacyUser(r *http.Request, token string) (db.User, bool) {
 	if !strings.Contains(token, ":") {
-		if u, err := h.st.Q.LegacySubTokenUser(r.Context(), token); err == nil {
-			return u, true
+		if row, err := h.st.Q.LegacySubTokenUser(r.Context(), token); err == nil {
+			return row.User, true
 		}
 	}
 	cfg, err := h.cfg(r.Context())
 	if err != nil || cfg.Legacy.Secret == "" {
 		return db.User{}, false
 	}
-	key, ok := cfg.Legacy.Who(token)
+	key, issued, ok := cfg.Legacy.Who(token)
 	if !ok {
 		return db.User{}, false
 	}
-	u, err := h.st.Q.LegacySubTokenUser(r.Context(), key)
-	return u, err == nil
+	row, err := h.st.Q.LegacySubTokenUser(r.Context(), key)
+	// A token made before the user was (made again under the same name) is refused, as
+	// the old panel refuses it.
+	if err != nil || issued < row.NotBefore {
+		return db.User{}, false
+	}
+	return row.User, true
 }
 
 // legacyFormat is mikan's format for an old panel's client type, "" when mikan has none

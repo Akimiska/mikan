@@ -1839,8 +1839,19 @@
             "description": "Панель и её адрес (без пути и данных для входа)",
             "type": "string"
           },
+          "mode": {
+            "enum": [
+              "preview",
+              "import"
+            ],
+            "type": "string"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/Preview"
+          },
           "report": {
-            "$ref": "#/components/schemas/Report"
+            "$ref": "#/components/schemas/Report",
+            "description": "Что сделано; при ошибке посреди импорта — сделанное до неё"
           },
           "started": {
             "format": "date-time",
@@ -1851,6 +1862,7 @@
             "enum": [
               "idle",
               "fetching",
+              "checking",
               "importing",
               "done",
               "failed"
@@ -1895,6 +1907,28 @@
           "kind",
           "secret_set",
           "links"
+        ],
+        "type": "object"
+      },
+      "List": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Сколько всего",
+            "format": "int64",
+            "type": "integer"
+          },
+          "names": {
+            "description": "Первые 50",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "names",
+          "count"
         ],
         "type": "object"
       },
@@ -3202,16 +3236,17 @@
         "additionalProperties": false,
         "properties": {
           "invalid": {
-            "description": "Пользователи, которых mikan не примет, с причиной",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+            "$ref": "#/components/schemas/List",
+            "description": "Пользователи, которых mikan не примет, с причиной"
           },
           "new": {
             "description": "Будут созданы",
             "format": "int64",
             "type": "integer"
+          },
+          "no_link": {
+            "$ref": "#/components/schemas/List",
+            "description": "Будут перенесены без старой ссылки"
           },
           "on_hold": {
             "description": "Пользователи «на паузе»: в mikan их срок пойдёт с момента импорта",
@@ -3226,11 +3261,8 @@
             "type": "object"
           },
           "taken": {
-            "description": "Имена, которые уже есть в mikan",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+            "$ref": "#/components/schemas/List",
+            "description": "Имена, которые уже есть в mikan"
           },
           "total": {
             "format": "int64",
@@ -3242,6 +3274,7 @@
           "new",
           "taken",
           "invalid",
+          "no_link",
           "statuses",
           "on_hold"
         ],
@@ -3298,29 +3331,28 @@
             "type": "integer"
           },
           "failed": {
-            "description": "Имя и причина для тех, кого не удалось создать",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+            "$ref": "#/components/schemas/List",
+            "description": "Имя и причина для тех, кого не удалось создать"
           },
           "links": {
             "description": "Старые ссылки и ключи, заведённые этим импортом",
             "format": "int64",
             "type": "integer"
           },
+          "no_link": {
+            "$ref": "#/components/schemas/List",
+            "description": "Перенесены без старой ссылки: её токен слишком короткий, чтобы быть секретом"
+          },
           "skipped": {
-            "description": "Имена, которые уже есть в mikan: эти пользователи не перенесены",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+            "$ref": "#/components/schemas/List",
+            "description": "Имена, которые уже есть в mikan: эти пользователи не перенесены"
           }
         },
         "required": [
           "created",
           "skipped",
           "links",
+          "no_link",
           "failed"
         ],
         "type": "object"
@@ -5451,6 +5483,30 @@
       }
     },
     "/api/v1/import": {
+      "delete": {
+        "description": "Уже созданные пользователи остаются, их список — в отчёте.",
+        "operationId": "import-cancel",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Остановить импорт",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
       "post": {
         "description": "Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.",
         "operationId": "import-run",
@@ -5567,6 +5623,7 @@
     },
     "/api/v1/import/preview": {
       "post": {
+        "description": "Идёт в фоне: ответ 202 сразу, итог — в GET /api/v1/import/status (preview).",
         "operationId": "import-preview",
         "requestBody": {
           "content": {
@@ -5579,15 +5636,15 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Preview"
+                  "$ref": "#/components/schemas/JobState"
                 }
               }
             },
-            "description": "OK"
+            "description": "Accepted"
           },
           "default": {
             "content": {

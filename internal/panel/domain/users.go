@@ -227,6 +227,24 @@ func (s *Users) CreateOn(ctx context.Context, q *db.Queries, in CreateInput, p P
 	return s.updateOn(ctx, q, u.ID, p)
 }
 
+// RefillFor makes sure n users can be made without running out of slots: one refill for
+// what is missing, one word to the nodes (an import, before its users).
+func (s *Users) RefillFor(ctx context.Context, n int) error {
+	ps, err := s.pool.Stats(ctx)
+	if err != nil {
+		return err
+	}
+	missing := int64(n) - ps.Free
+	if missing <= 0 {
+		return nil
+	}
+	if err := s.pool.Refill(ctx, int(missing)); err != nil {
+		return err
+	}
+	s.changes.SlotsChanged()
+	return nil
+}
+
 // Changed tells the nodes about users changed on a transaction of the caller's.
 func (s *Users) Changed() { s.changes.PoliciesChanged() }
 
@@ -479,6 +497,10 @@ func (s *Users) reissue(ctx context.Context, id int64) error {
 		}
 		// A new link: every bound device registers again with it.
 		if err := burnDevices(ctx, q, id, now); err != nil {
+			return err
+		}
+		// The old panel's links go too: a leaked one must not serve the new keys.
+		if err := q.DeleteLegacySubTokensOf(ctx, id); err != nil {
 			return err
 		}
 		return q.SetUserCredentials(ctx, db.SetUserCredentialsParams{SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, SubToken: secure.Token(24), UpdatedAt: now, ID: id})

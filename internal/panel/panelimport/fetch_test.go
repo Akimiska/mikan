@@ -88,7 +88,7 @@ func TestFetchRemnawaveCursor(t *testing.T) {
 		return map[string]any{"response": map[string]any{"users": users, "nextCursor": next, "hasMore": more}}
 	}
 	user := func(n string) map[string]any {
-		return map[string]any{"shortUuid": "S" + n, "username": n, "status": "ACTIVE", "expireAt": "2099-01-01T00:00:00Z", "userTraffic": map[string]any{"usedTrafficBytes": 1}}
+		return map[string]any{"shortUuid": "Short0Uuid0Long0" + n, "username": n, "status": "ACTIVE", "expireAt": "2099-01-01T00:00:00Z", "userTraffic": map[string]any{"usedTrafficBytes": 1}}
 	}
 	calls := 0
 	srv := serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +106,7 @@ func TestFetchRemnawaveCursor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 || got[2].Token != "Sc" || !got[0].Expires.IsZero() || calls != 3 {
+	if len(got) != 3 || got[2].Token != "Short0Uuid0Long0c" || !got[0].Expires.IsZero() || calls != 3 {
 		t.Fatalf("got %d users in %d calls", len(got), calls)
 	}
 }

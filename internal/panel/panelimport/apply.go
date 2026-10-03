@@ -70,48 +70,97 @@ func Normalize(u User) (User, error) {
 	return u, nil
 }
 
+// listCap is how many names a report or a preview lists; the rest is counted.
+const listCap = 50
+
+// List is the first names of a long list, with how many there are in all.
+type List struct {
+	Names []string `json:"names" doc:"Первые 50"`
+	Count int      `json:"count" doc:"Сколько всего"`
+}
+
+func (l *List) add(s string) {
+	l.Count++
+	if len(l.Names) < listCap {
+		l.Names = append(l.Names, s)
+	}
+}
+
+func newList() List { return List{Names: []string{}} }
+
 // Report is what an import did.
 type Report struct {
-	Created int      `json:"created"`
-	Skipped []string `json:"skipped" doc:"Имена, которые уже есть в mikan: эти пользователи не перенесены"`
-	Links   int      `json:"links" doc:"Старые ссылки и ключи, заведённые этим импортом"`
-	Failed  []string `json:"failed" doc:"Имя и причина для тех, кого не удалось создать"`
+	Created int  `json:"created"`
+	Skipped List `json:"skipped" doc:"Имена, которые уже есть в mikan: эти пользователи не перенесены"`
+	Links   int  `json:"links" doc:"Старые ссылки и ключи, заведённые этим импортом"`
+	NoLink  List `json:"no_link" doc:"Перенесены без старой ссылки: её токен слишком короткий, чтобы быть секретом"`
+	Failed  List `json:"failed" doc:"Имя и причина для тех, кого не удалось создать"`
+}
+
+func newReport() Report {
+	return Report{Skipped: newList(), NoLink: newList(), Failed: newList()}
 }
 
 // Preview is what an import would do, without doing it.
 type Preview struct {
 	Total    int            `json:"total"`
 	New      int            `json:"new" doc:"Будут созданы"`
-	Taken    []string       `json:"taken" doc:"Имена, которые уже есть в mikan"`
-	Invalid  []string       `json:"invalid" doc:"Пользователи, которых mikan не примет, с причиной"`
+	Taken    List           `json:"taken" doc:"Имена, которые уже есть в mikan"`
+	Invalid  List           `json:"invalid" doc:"Пользователи, которых mikan не примет, с причиной"`
+	NoLink   List           `json:"no_link" doc:"Будут перенесены без старой ссылки"`
 	Statuses map[string]int `json:"statuses"`
 	OnHold   int            `json:"on_hold" doc:"Пользователи «на паузе»: в mikan их срок пойдёт с момента импорта"`
 }
 
+// takenNames asks the database once per thousand names which of them mikan has.
+func takenNames(ctx context.Context, q *db.Queries, names []string) (map[string]bool, error) {
+	taken := map[string]bool{}
+	for start := 0; start < len(names); start += 1000 {
+		chunk := names[start:min(start+1000, len(names))]
+		got, err := q.TakenUserNames(ctx, chunk)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range got {
+			taken[n] = true
+		}
+	}
+	return taken, nil
+}
+
 // Check counts what Apply would do.
 func Check(ctx context.Context, q *db.Queries, list []User) (Preview, error) {
-	p := Preview{Total: len(list), Taken: []string{}, Invalid: []string{}, Statuses: map[string]int{}}
-	seen := map[string]bool{}
+	p := Preview{Total: len(list), Taken: newList(), Invalid: newList(), NoLink: newList(), Statuses: map[string]int{}}
+	var valid []User
+	var names []string
 	for _, in := range list {
 		u, err := Normalize(in)
 		if err != nil {
-			p.Invalid = append(p.Invalid, describe(in.Name)+": "+err.Error())
+			p.Invalid.add(describe(in.Name) + ": " + err.Error())
 			continue
 		}
-		p.Statuses[u.Status]++
-		if u.Status == StatusOnHold {
-			p.OnHold++
-		}
-		taken, err := q.UserNameTaken(ctx, u.Name)
-		if err != nil {
-			return p, err
-		}
-		if taken || seen[u.Name] {
-			p.Taken = append(p.Taken, u.Name)
+		valid = append(valid, u)
+		names = append(names, u.Name)
+	}
+	taken, err := takenNames(ctx, q, names)
+	if err != nil {
+		return p, err
+	}
+	seen := map[string]bool{}
+	for _, u := range valid {
+		if taken[u.Name] || seen[u.Name] {
+			p.Taken.add(u.Name)
 			continue
 		}
 		seen[u.Name] = true
 		p.New++
+		p.Statuses[u.Status]++
+		if u.Status == StatusOnHold {
+			p.OnHold++
+		}
+		if u.WeakToken {
+			p.NoLink.add(u.Name)
+		}
 	}
 	return p, nil
 }
@@ -130,10 +179,14 @@ var afterCreate func(name string) error
 // name mikan already has is skipped, never merged into someone else. progress, when not
 // nil, is told after each user. The nodes are told once, at the end.
 func Apply(ctx context.Context, st *store.Store, users *domain.Users, now time.Time, kind Kind, tariffID int64, list []User, progress func(done int)) (Report, error) {
-	r := Report{Skipped: []string{}, Failed: []string{}}
+	r := newReport()
 	if _, err := st.Q.GetTariff(ctx, tariffID); errors.Is(err, sql.ErrNoRows) {
 		return r, domain.ErrNotFound
 	} else if err != nil {
+		return r, err
+	}
+	// Slots for everyone at once: one refill, one word to the nodes.
+	if err := users.RefillFor(ctx, len(list)); err != nil {
 		return r, err
 	}
 	created := false
@@ -148,7 +201,7 @@ func Apply(ctx context.Context, st *store.Store, users *domain.Users, now time.T
 		}
 		in, err := Normalize(raw)
 		if err != nil {
-			r.Failed = append(r.Failed, describe(raw.Name)+": "+err.Error())
+			r.Failed.add(describe(raw.Name) + ": " + err.Error())
 		} else {
 			links, err := applyOne(ctx, st, users, now, kind, tariffID, in)
 			if errors.Is(err, domain.ErrNoSlots) {
@@ -158,13 +211,16 @@ func Apply(ctx context.Context, st *store.Store, users *domain.Users, now time.T
 			}
 			switch {
 			case errors.Is(err, errTaken):
-				r.Skipped = append(r.Skipped, in.Name)
+				r.Skipped.add(in.Name)
 			case err != nil:
-				r.Failed = append(r.Failed, in.Name+": "+err.Error())
+				r.Failed.add(in.Name + ": " + failure(err))
 			default:
 				r.Created++
 				r.Links += links
 				created = true
+				if in.WeakToken {
+					r.NoLink.add(in.Name)
+				}
 			}
 		}
 		if progress != nil {
@@ -237,8 +293,12 @@ func applyOne(ctx context.Context, st *store.Store, users *domain.Users, now tim
 				return fmt.Errorf("traffic: %w", err)
 			}
 		}
+		var notBefore int64
+		if !in.Created.IsZero() {
+			notBefore = in.Created.Unix()
+		}
 		for _, k := range keys {
-			n, err := q.AddLegacySubToken(ctx, db.AddLegacySubTokenParams{Token: k, UserID: u.ID, Source: string(kind)})
+			n, err := q.AddLegacySubToken(ctx, db.AddLegacySubTokenParams{Token: k, UserID: u.ID, Source: string(kind), NotBefore: notBefore})
 			if err != nil {
 				return fmt.Errorf("old link: %w", err)
 			}
@@ -247,6 +307,17 @@ func applyOne(ctx context.Context, st *store.Store, users *domain.Users, now tim
 		return nil
 	})
 	return links, err
+}
+
+// failure says why a user was not made, without the database's own text.
+func failure(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrNoSlots):
+		return "no free key slot"
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		return "the import was stopped"
+	}
+	return "could not be saved"
 }
 
 // describe names a user in a report even when the name is the problem.

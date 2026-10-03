@@ -43,8 +43,6 @@ func (s importSource) host() string {
 
 type importPreviewInput struct{ Body importSource }
 
-type importPreviewOutput struct{ Body panelimport.Preview }
-
 type importRunInput struct {
 	Body struct {
 		Kind     string `json:"kind" enum:"marzban,pasarguard,remnawave"`
@@ -77,7 +75,10 @@ type patchLegacyInput struct {
 
 func (h *handlers) registerImport() {
 	tags := []string{"settings"}
-	huma.Register(h.api, huma.Operation{OperationID: "import-preview", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/import/preview", Summary: "Что перенесётся из другой панели", Tags: tags}, h.importPreview)
+	huma.Register(h.api, huma.Operation{OperationID: "import-preview", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/import/preview", Summary: "Что перенесётся из другой панели",
+		Description: "Идёт в фоне: ответ 202 сразу, итог — в GET /api/v1/import/status (preview).", Tags: tags, DefaultStatus: http.StatusAccepted}, h.importPreview)
+	huma.Register(h.api, huma.Operation{OperationID: "import-cancel", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodDelete, Path: "/api/v1/import", Summary: "Остановить импорт",
+		Description: "Уже созданные пользователи остаются, их список — в отчёте.", Tags: tags, DefaultStatus: http.StatusNoContent}, h.importCancel)
 	huma.Register(h.api, huma.Operation{OperationID: "import-run", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/import", Summary: "Перенести пользователей из другой панели",
 		Description: "Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.", Tags: tags, DefaultStatus: http.StatusAccepted}, h.importRun)
 	huma.Register(h.api, huma.Operation{OperationID: "import-status", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodGet, Path: "/api/v1/import/status", Summary: "Ход импорта", Tags: tags}, h.importStatus)
@@ -85,57 +86,62 @@ func (h *handlers) registerImport() {
 	huma.Register(h.api, huma.Operation{OperationID: "update-legacy-links", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/import/legacy", Summary: "Настроить старые ссылки подписки", Tags: tags}, h.updateLegacy)
 }
 
-// importError turns a failed read of the old panel into the field it is about.
-func importError(src importSource, err error) error {
-	code := panelimport.Code(err)
-	field := "body.url"
-	if errors.Is(err, panelimport.ErrAuth) {
-		field = "body.password"
-		if src.Kind == string(panelimport.Remnawave) || src.Token != "" {
-			field = "body.token"
-		}
-	}
-	detail := &huma.ErrorDetail{Location: field, Message: code}
-	if errors.Is(err, panelimport.ErrAnswer) || errors.Is(err, panelimport.ErrTLS) || errors.Is(err, panelimport.ErrRedirect) || errors.Is(err, panelimport.ErrAddress) {
-		detail.Value = err.Error()
-	}
-	return huma.Error422UnprocessableEntity(code, detail)
-}
-
-func (h *handlers) importPreview(ctx context.Context, in *importPreviewInput) (*importPreviewOutput, error) {
+// start runs a job; a running one is a conflict.
+func (h *handlers) startJob(start func() error) (*importStateOutput, error) {
 	if h.d.Importer == nil {
 		return nil, huma.Error503ServiceUnavailable("import_failed")
 	}
-	users, err := panelimport.Fetch(ctx, h.d.Importer.HTTP(), in.Body.source())
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, importError(in.Body, err)
-	}
-	p, err := panelimport.Check(ctx, h.d.Store.Q, users)
-	if err != nil {
+	if err := start(); errors.Is(err, panelimport.ErrBusy) || errors.Is(err, panelimport.ErrCancelled) {
+		return nil, huma.Error409Conflict(panelimport.Code(err))
+	} else if err != nil {
 		return nil, err
 	}
-	return &importPreviewOutput{Body: p}, nil
+	return &importStateOutput{Body: h.d.Importer.State()}, nil
+}
+
+func (h *handlers) importPreview(ctx context.Context, in *importPreviewInput) (*importStateOutput, error) {
+	return h.startJob(func() error { return h.d.Importer.Preview(in.Body.source(), in.Body.host()) })
+}
+
+func (h *handlers) importCancel(ctx context.Context, _ *struct{}) (*struct{}, error) {
+	if h.d.Importer != nil {
+		h.d.Importer.Cancel()
+		h.audit(ctx, sessionOf(ctx).AdminID, "import.cancel", "users", "", nil)
+	}
+	return nil, nil
+}
+
+// signed are the panels whose links are checked with their secret: one set of them only.
+func signed(kind string) bool {
+	return kind == string(panelimport.Marzban) || kind == string(panelimport.PasarGuard)
 }
 
 func (h *handlers) importRun(ctx context.Context, in *importRunInput) (*importStateOutput, error) {
-	if h.d.Importer == nil {
-		return nil, huma.Error503ServiceUnavailable("import_failed")
-	}
 	b := in.Body
 	src := importSource{Kind: b.Kind, URL: b.URL, Username: b.Username, Password: b.Password, Token: b.Token}
 	if _, err := h.d.Store.Q.GetTariff(ctx, b.TariffID); err != nil {
 		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "tariff_not_found"})
 	}
-	if err := h.d.Importer.Start(src.source(), b.TariffID, src.host()); errors.Is(err, panelimport.ErrBusy) {
-		return nil, huma.Error409Conflict(err.Error())
-	} else if err != nil {
-		return nil, err
+	// Marzban's and PasarGuard's links are checked with one secret: users of the other one
+	// on top would turn the first one's links off without a word.
+	if signed(b.Kind) {
+		current, err := h.d.Settings.String(ctx, settings.KeyLegacySubKind)
+		if err != nil {
+			return nil, err
+		}
+		links, err := h.d.Store.Q.CountLegacySubTokens(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if signed(current) && current != b.Kind && links > 0 {
+			return nil, huma.Error409Conflict("import_kind_conflict")
+		}
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "import.run", "users", "", map[string]any{"from": src.host(), "tariff_id": b.TariffID})
-	return &importStateOutput{Body: h.d.Importer.State()}, nil
+	out, err := h.startJob(func() error { return h.d.Importer.Start(src.source(), b.TariffID, src.host()) })
+	if err == nil {
+		h.audit(ctx, sessionOf(ctx).AdminID, "import.run", "users", "", map[string]any{"from": src.host(), "tariff_id": b.TariffID})
+	}
+	return out, err
 }
 
 func (h *handlers) importStatus(ctx context.Context, _ *struct{}) (*importStateOutput, error) {

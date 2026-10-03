@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +89,9 @@ func fetchRemnawave(ctx context.Context, hc *http.Client, src Source) ([]User, e
 	}
 }
 
+// strongToken is what a Remnawave short UUID has to look like to stand as a link's secret.
+var strongToken = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
+
 // fetchRemnawavePaged reads GET /api/users?start=&size=, which Remnawave 2.x has (the
 // same user objects, with userTraffic).
 func fetchRemnawavePaged(ctx context.Context, hc *http.Client, src Source) ([]User, error) {
@@ -134,6 +138,11 @@ func (r remnawaveUser) user() (User, error) {
 		Used: r.UserTraffic.UsedTrafficBytes, Lifetime: r.UserTraffic.LifetimeUsedTrafficBytes}
 	if u.Name == "" {
 		return u, fmt.Errorf("%w: a user without a username", ErrAnswer)
+	}
+	// The short UUID is the whole secret of a Remnawave link: one too short or odd to be
+	// random is not taken over (the user comes without the old link).
+	if !strongToken.MatchString(u.Token) {
+		u.Token, u.WeakToken = "", true
 	}
 	switch r.Status {
 	case "DISABLED":

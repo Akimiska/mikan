@@ -51,6 +51,7 @@ type Panel struct {
 	Updates   *updates.Checker
 	Alerts    *infraalerts.Monitor
 	Backups   *tgbackup.Service
+	Importer  *panelimport.Importer
 	Addons    *addons.Manager
 	server    *server.Server
 	spa       *server.SPA
@@ -216,11 +217,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	importer := panelimport.NewImporter(st, deps.Users, nil, o.Now, o.Log)
 	// The old links are checked as the panel the users came from signs them.
 	importer.Done = func(ctx context.Context, kind panelimport.Kind) {
+		// Only the panels whose links need the secret; Remnawave's are looked up as they are.
+		if kind != panelimport.Marzban && kind != panelimport.PasarGuard {
+			return
+		}
 		if err := settings.Set(ctx, set, settings.KeyLegacySubKind, string(kind)); err != nil {
 			o.Log.Warn("import: the old links' kind is not saved", "err", err)
 		}
 	}
 	deps.Importer = importer
+	p.Importer = importer
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err
@@ -383,7 +389,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.Tuner != nil {
 		workers = append(workers, p.Tuner.Run)
 	}
-	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run,
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

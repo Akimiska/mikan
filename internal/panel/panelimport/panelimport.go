@@ -78,6 +78,12 @@ type User struct {
 	DeviceLimit int64
 	// Token is a subscription token that is the same every time (Remnawave's short UUID).
 	Token string
+	// WeakToken: the old panel's token is too short or odd to be a secret; the user comes
+	// over without the old link.
+	WeakToken bool
+	// Created is when the old panel made the user: its signed tokens from before are not
+	// the user's (a name used again).
+	Created time.Time
 }
 
 // Errors the admin sees.
@@ -88,6 +94,7 @@ var (
 	ErrTLS         = errors.New("import_tls")         // the old panel's certificate is not trusted
 	ErrRedirect    = errors.New("import_redirect")    // the old panel answered with a redirect
 	ErrAddress     = errors.New("import_address")     // an address the import may not reach
+	ErrIncomplete  = errors.New("import_incomplete")  // the panel gave fewer users than it said it has
 )
 
 // Limits on what an old panel may send: a broken or hostile one must not hold the
@@ -137,10 +144,25 @@ func dialControl(network, address string, _ syscall.RawConn) error {
 	return nil
 }
 
-// AddressOK says whether the import may connect to a.
+// imdsV6 is the cloud metadata service's IPv6 address (AWS), outside the link-local range.
+var imdsV6 = netip.MustParseAddr("fd00:ec2::254")
+
+// nat64 is the well-known NAT64 prefix: an IPv4 address inside it is judged as itself, so
+// 64:ff9b::a9fe:a9fe does not reach 169.254.169.254.
+var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+
+// AddressOK says whether the import may connect to a. Loopback, private and CGNAT
+// (100.64.0.0/10, where Tailscale and similar overlays put their peers) are allowed: the
+// old panel often runs on this server or next to it. Link-local (the metadata service),
+// the AWS IPv6 metadata address, unspecified, multicast and broadcast are not.
 func AddressOK(a netip.Addr) bool {
 	a = a.Unmap()
-	return !(a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() || a.IsMulticast() || a == netip.AddrFrom4([4]byte{255, 255, 255, 255}))
+	if nat64.Contains(a) {
+		b := a.As16()
+		return AddressOK(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}))
+	}
+	return !(a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() || a.IsMulticast() ||
+		a == netip.AddrFrom4([4]byte{255, 255, 255, 255}) || a == imdsV6)
 }
 
 // privateOK says whether plain http may go to a: loopback or a private address.

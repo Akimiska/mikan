@@ -13,13 +13,13 @@ func TestVerifierMarzban(t *testing.T) {
 		"YUBiLmMsMTcwMDAwMDAwMQbWYcPerydd":         "name:a@b.c",
 		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJpdmFuX3BldHJvdiIsImFjY2VzcyI6InN1YnNjcmlwdGlvbiIsImlhdCI6MTcwMDAwMDAwMH0.TZ3xx4BM_XaIEGDNJ__mG9s9DMuE29ZON8OwYqzyiqk": "name:ivan_petrov",
 	} {
-		if got, ok := v.Who(token); !ok || got != want {
-			t.Errorf("Who(%q) = %q %v, want %q", token, got, ok, want)
+		if got, issued, ok := v.Who(token); !ok || got != want || issued < 1_600_000_000 {
+			t.Errorf("Who(%q) = %q %d %v, want %q", token, got, issued, ok, want)
 		}
 	}
 	// PasarGuard's own formats are not Marzban's.
 	for _, token := range []string{"djMsNDIsMTc1OTQwMDAwMA.fa-02Knno9F0qsz39WtypLtudEubWHfKFrYoyF8skR4", "b2xnYSwxNzU5NDAwMDAw5ea3b3f821"} {
-		if _, ok := v.Who(token); ok {
+		if _, _, ok := v.Who(token); ok {
 			t.Errorf("Marzban took %q", token)
 		}
 	}
@@ -32,8 +32,8 @@ func TestVerifierPasarGuard(t *testing.T) {
 		"b2xnYSwxNzU5NDAwMDAw5ea3b3f821":                                     "name:olga", // hex signature
 		"aXZhbl9wZXRyb3YsMTc1OTQwMDAwMAUGNuNGBJks":                           "name:ivan_petrov",
 	} {
-		if got, ok := v.Who(token); !ok || got != want {
-			t.Errorf("Who(%q) = %q %v, want %q", token, got, ok, want)
+		if got, issued, ok := v.Who(token); !ok || got != want || issued != 1759400000 {
+			t.Errorf("Who(%q) = %q %d %v, want %q", token, got, issued, ok, want)
 		}
 	}
 }
@@ -42,7 +42,7 @@ func TestVerifierPasarGuard(t *testing.T) {
 func TestVerifierRefusesForgeries(t *testing.T) {
 	good := "aXZhbl9wZXRyb3YsMTc1OTQwMDAwMAUGNuNGBJks"
 	for _, v := range []Verifier{{Kind: Marzban, Secret: "another secret"}, {Kind: Marzban}} {
-		if _, ok := v.Who(good); ok {
+		if _, _, ok := v.Who(good); ok {
 			t.Errorf("%+v took a token signed with another secret", v)
 		}
 	}
@@ -54,7 +54,7 @@ func TestVerifierRefusesForgeries(t *testing.T) {
 		"short",
 		"",
 	} {
-		if got, ok := v.Who(token); ok {
+		if got, _, ok := v.Who(token); ok {
 			t.Errorf("Who(%q) = %q, a forgery passed", token, got)
 		}
 	}

@@ -62,7 +62,7 @@ func TestApplyIsAllOrNothingPerUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Created != 2 || len(r.Failed) != 1 || r.Links != 2 {
+	if r.Created != 2 || r.Failed.Count != 1 || r.Links != 2 {
 		t.Fatalf("report %+v", r)
 	}
 	if taken, _ := st.Q.UserNameTaken(ctx, "broken"); taken {
@@ -70,7 +70,7 @@ func TestApplyIsAllOrNothingPerUser(t *testing.T) {
 	}
 	afterCreate = nil
 	r, err = Apply(ctx, st, users, now, Marzban, tariff, list, nil)
-	if err != nil || r.Created != 1 || len(r.Skipped) != 2 {
+	if err != nil || r.Created != 1 || r.Skipped.Count != 2 {
 		t.Fatalf("second import %+v %v", r, err)
 	}
 	list2, _ := st.Q.ListUsers(ctx)
@@ -119,7 +119,7 @@ func TestApplyReportsInvalidUsers(t *testing.T) {
 		{Name: "ok", Status: StatusActive, Expires: time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)},
 		{Name: "fine", Status: StatusActive},
 	}, nil)
-	if err != nil || r.Created != 1 || len(r.Failed) != 2 {
+	if err != nil || r.Created != 1 || r.Failed.Count != 2 {
 		t.Fatalf("report %+v %v", r, err)
 	}
 }

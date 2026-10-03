@@ -7,21 +7,29 @@ package db
 
 import (
 	"context"
+
+	"github.com/lib/pq"
 )
 
 const addLegacySubToken = `-- name: AddLegacySubToken :execrows
-INSERT INTO legacy_sub_tokens (token, user_id, source) VALUES ($1, $2, $3)
+INSERT INTO legacy_sub_tokens (token, user_id, source, not_before) VALUES ($1, $2, $3, $4)
 ON CONFLICT (token) DO NOTHING
 `
 
 type AddLegacySubTokenParams struct {
-	Token  string
-	UserID int64
-	Source string
+	Token     string
+	UserID    int64
+	Source    string
+	NotBefore int64
 }
 
 func (q *Queries) AddLegacySubToken(ctx context.Context, arg AddLegacySubTokenParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, addLegacySubToken, arg.Token, arg.UserID, arg.Source)
+	result, err := q.db.ExecContext(ctx, addLegacySubToken,
+		arg.Token,
+		arg.UserID,
+		arg.Source,
+		arg.NotBefore,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -39,39 +47,54 @@ func (q *Queries) CountLegacySubTokens(ctx context.Context) (int64, error) {
 	return count, err
 }
 
-const legacySubTokenUser = `-- name: LegacySubTokenUser :one
-SELECT u.id, u.name, u.contact, u.note, u.tags, u.status, u.tariff_id, u.traffic_limit, u.device_limit, u.reset_strategy, u.period_days, u.period_start, u.used_up, u.used_down, u.total_up, u.total_down, u.expires_at, u.inbounds, u.sub_token, u.slot_id, u.online_at, u.created_at, u.updated_at, u.billing_day, u.unbound_at FROM legacy_sub_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = $1
+const deleteLegacySubTokensOf = `-- name: DeleteLegacySubTokensOf :exec
+DELETE FROM legacy_sub_tokens WHERE user_id = $1
 `
 
-func (q *Queries) LegacySubTokenUser(ctx context.Context, token string) (User, error) {
+func (q *Queries) DeleteLegacySubTokensOf(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteLegacySubTokensOf, userID)
+	return err
+}
+
+const legacySubTokenUser = `-- name: LegacySubTokenUser :one
+SELECT u.id, u.name, u.contact, u.note, u.tags, u.status, u.tariff_id, u.traffic_limit, u.device_limit, u.reset_strategy, u.period_days, u.period_start, u.used_up, u.used_down, u.total_up, u.total_down, u.expires_at, u.inbounds, u.sub_token, u.slot_id, u.online_at, u.created_at, u.updated_at, u.billing_day, u.unbound_at, t.not_before FROM legacy_sub_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = $1
+`
+
+type LegacySubTokenUserRow struct {
+	User      User
+	NotBefore int64
+}
+
+func (q *Queries) LegacySubTokenUser(ctx context.Context, token string) (LegacySubTokenUserRow, error) {
 	row := q.db.QueryRowContext(ctx, legacySubTokenUser, token)
-	var i User
+	var i LegacySubTokenUserRow
 	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Contact,
-		&i.Note,
-		&i.Tags,
-		&i.Status,
-		&i.TariffID,
-		&i.TrafficLimit,
-		&i.DeviceLimit,
-		&i.ResetStrategy,
-		&i.PeriodDays,
-		&i.PeriodStart,
-		&i.UsedUp,
-		&i.UsedDown,
-		&i.TotalUp,
-		&i.TotalDown,
-		&i.ExpiresAt,
-		&i.Inbounds,
-		&i.SubToken,
-		&i.SlotID,
-		&i.OnlineAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.BillingDay,
-		&i.UnboundAt,
+		&i.User.ID,
+		&i.User.Name,
+		&i.User.Contact,
+		&i.User.Note,
+		&i.User.Tags,
+		&i.User.Status,
+		&i.User.TariffID,
+		&i.User.TrafficLimit,
+		&i.User.DeviceLimit,
+		&i.User.ResetStrategy,
+		&i.User.PeriodDays,
+		&i.User.PeriodStart,
+		&i.User.UsedUp,
+		&i.User.UsedDown,
+		&i.User.TotalUp,
+		&i.User.TotalDown,
+		&i.User.ExpiresAt,
+		&i.User.Inbounds,
+		&i.User.SubToken,
+		&i.User.SlotID,
+		&i.User.OnlineAt,
+		&i.User.CreatedAt,
+		&i.User.UpdatedAt,
+		&i.User.BillingDay,
+		&i.User.UnboundAt,
+		&i.NotBefore,
 	)
 	return i, err
 }
@@ -106,6 +129,33 @@ func (q *Queries) SetImportedUsage(ctx context.Context, arg SetImportedUsagePara
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const takenUserNames = `-- name: TakenUserNames :many
+SELECT DISTINCT name FROM users WHERE name = ANY($1::text[])
+`
+
+func (q *Queries) TakenUserNames(ctx context.Context, names []string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, takenUserNames, pq.Array(names))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const userNameTaken = `-- name: UserNameTaken :one

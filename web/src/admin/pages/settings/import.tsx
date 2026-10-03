@@ -4,7 +4,7 @@ import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/cli
 import { useTariffs } from "../../../api/hooks";
 import { useToast } from "../../../components/toast";
 import { Button, Field } from "../../../components/ui";
-import { t, tMaybe } from "../../../i18n";
+import { t, tMaybe, type Key } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { fieldErrors } from "../../../lib/fields";
 
@@ -13,58 +13,51 @@ const KINDS: Kind[] = ["marzban", "pasarguard", "remnawave"];
 // Where each panel keeps its subscription links, for the old-links path.
 const OLD_PATH: Record<Kind, string> = { marzban: "sub", pasarguard: "sub", remnawave: "api/sub" };
 
-/** Users from another panel: a preview first, then the import onto a chosen plan. */
+/** Users from another panel: a preview first, then the import onto a chosen plan; both run
+ * in the background and the card follows them. */
 export function ImportCard() {
   const qc = useQueryClient();
   const toast = useToast();
   const tariffs = useTariffs();
   const [src, setSrc] = useState({ kind: "marzban" as Kind, url: "", username: "", password: "", token: "" });
   const [tariff, setTariff] = useState<number | "">("");
-  const [preview, setPreview] = useState<Schemas["Preview"] | null>(null);
-  // The import runs in the background; its state is looked at while it runs, and a report
-  // it left is shown when the tab opens again.
   const job = useQuery({
     queryKey: ["import-status"],
     queryFn: () => unwrap(api.GET("/api/v1/import/status", {})),
-    refetchInterval: (q) => (q.state.data?.state === "fetching" || q.state.data?.state === "importing" ? 1000 : false),
+    refetchInterval: (q) => (busy(q.state.data?.state) ? 1000 : false),
   });
-  const running = job.data?.state === "fetching" || job.data?.state === "importing";
+  const st = job.data;
+  const running = busy(st?.state);
+  // Once an import is over the credentials are not kept, and lists of users are refreshed.
   const [seen, setSeen] = useState<string | undefined>(undefined);
-  const finished = job.data?.finished;
-  if (finished && finished !== seen && (job.data?.state === "done" || job.data?.state === "failed")) {
-    setSeen(finished);
-    if (seen !== undefined || job.data.state === "done") {
-      // The credentials are not kept once the import is over.
+  if (st?.finished && st.finished !== seen) {
+    setSeen(st.finished);
+    if (st.mode === "import") {
       setSrc((s) => ({ ...s, password: "", token: "" }));
       void qc.invalidateQueries({ queryKey: ["users"] });
       void qc.invalidateQueries({ queryKey: ["legacy-links"] });
     }
   }
-  const report = job.data?.state === "done" ? job.data.report : undefined;
   const body = () => ({ kind: src.kind, url: src.url.trim(), username: src.username.trim(), password: src.password, token: src.token.trim() });
-  const check = useMutation({
-    mutationFn: () => unwrap(api.POST("/api/v1/import/preview", { body: body() })),
-    onSuccess: (p) => setPreview(p),
-  });
+  const started = (s: Schemas["JobState"]) => qc.setQueryData(["import-status"], s);
+  const check = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/import/preview", { body: body() })), onSuccess: started, onError: (e) => toast.error(errorText(e)) });
   const run = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/import", { body: { ...body(), tariff_id: Number(tariff) } })),
-    onSuccess: (st) => {
-      qc.setQueryData(["import-status"], st);
-      setPreview(null);
+    onSuccess: (s) => {
+      started(s);
       toast.ok(t("settings.import.started"));
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  const errors = fieldErrors(check.error ?? run.error);
-  const generic = (check.error ?? run.error) && Object.keys(errors).length === 0 ? errorText(check.error ?? run.error) : "";
-  const set = (k: keyof typeof src) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setSrc((s) => ({ ...s, [k]: e.target.value }));
-    setPreview(null);
-  };
+  const cancel = useMutation({ mutationFn: () => unwrap(api.DELETE("/api/v1/import", {})), onSuccess: () => void job.refetch() });
+  const errors = fieldErrors(run.error);
+  const set = (k: keyof typeof src) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSrc((s) => ({ ...s, [k]: e.target.value }));
   const submit = (e: FormEvent) => {
     e.preventDefault();
     check.mutate();
   };
+  const preview = st?.mode === "preview" && st.state === "done" ? st.preview : undefined;
+  const report = st?.mode === "import" ? st.report : undefined;
   const usesPassword = src.kind !== "remnawave";
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
@@ -76,7 +69,7 @@ export function ImportCard() {
           </div>
         </div>
         <Field label={t("settings.import.kind")} htmlFor="imp-kind">
-          <select id="imp-kind" className="input" value={src.kind} onChange={set("kind")}>
+          <select id="imp-kind" className="input" value={src.kind} onChange={set("kind")} disabled={running}>
             {KINDS.map((k) => (
               <option key={k} value={k}>
                 {t(`settings.import.kinds.${k}`)}
@@ -84,44 +77,44 @@ export function ImportCard() {
             ))}
           </select>
         </Field>
-        <Field label={t("settings.import.url")} htmlFor="imp-url" hint={t("settings.import.urlHint")} error={errors.url}>
-          <input id="imp-url" className="input" value={src.url} onChange={set("url")} placeholder="https://panel.example.com" autoComplete="off" aria-invalid={!!errors.url} />
+        <Field label={t("settings.import.url")} htmlFor="imp-url" hint={t("settings.import.urlHint")}>
+          <input id="imp-url" className="input" value={src.url} onChange={set("url")} placeholder="https://panel.example.com" autoComplete="off" disabled={running} />
         </Field>
         {usesPassword ? (
           <div className="grid gap-x-3 sm:grid-cols-2">
             <Field label={t("settings.import.username")} htmlFor="imp-user">
-              <input id="imp-user" className="input" value={src.username} onChange={set("username")} autoComplete="off" />
+              <input id="imp-user" className="input" value={src.username} onChange={set("username")} autoComplete="off" disabled={running} />
             </Field>
-            <Field label={t("settings.import.password")} htmlFor="imp-pass" error={errors.password}>
-              <input id="imp-pass" className="input" type="password" value={src.password} onChange={set("password")} autoComplete="new-password" aria-invalid={!!errors.password} />
+            <Field label={t("settings.import.password")} htmlFor="imp-pass">
+              <input id="imp-pass" className="input" type="password" value={src.password} onChange={set("password")} autoComplete="new-password" disabled={running} />
             </Field>
           </div>
         ) : null}
         {src.kind !== "marzban" ? (
-          <Field label={t(src.kind === "remnawave" ? "settings.import.token" : "settings.import.apiKey")} htmlFor="imp-token" hint={t(src.kind === "remnawave" ? "settings.import.tokenHint" : "settings.import.apiKeyHint")} error={errors.token}>
-            <input id="imp-token" className="input mono" type="password" value={src.token} onChange={set("token")} autoComplete="off" aria-invalid={!!errors.token} />
+          <Field label={t(src.kind === "remnawave" ? "settings.import.token" : "settings.import.apiKey")} htmlFor="imp-token" hint={t(src.kind === "remnawave" ? "settings.import.tokenHint" : "settings.import.apiKeyHint")}>
+            <input id="imp-token" className="input mono" type="password" value={src.token} onChange={set("token")} autoComplete="off" disabled={running} />
           </Field>
         ) : null}
-        {generic ? <div className="banner bad mb-3">{generic}</div> : null}
-        {!preview ? (
+        {running ? (
+          <div className="panel-soft mb-3 flex items-center justify-between gap-3 p-3 text-[13px]" role="status">
+            <span>{st?.state === "importing" ? t("settings.import.progress", { done: st.done, total: st.total }) : t("settings.import.fetching")}</span>
+            <Button type="button" size="sm" variant="ghost" loading={cancel.isPending} onClick={() => cancel.mutate()}>
+              {t("settings.import.cancel")}
+            </Button>
+          </div>
+        ) : (
           <Button type="submit" variant="primary" loading={check.isPending} disabled={!src.url.trim()}>
             {t("settings.import.check")}
           </Button>
-        ) : (
-          <div className="panel-soft mb-3 p-3 text-[13px]">
+        )}
+        {st?.state === "failed" ? <div className="banner bad mt-3">{t("settings.import.failed", { error: tMaybe(`errors.api.${st.error}`) ?? st.error ?? "" })}</div> : null}
+        {preview ? (
+          <div className="panel-soft mt-3 p-3 text-[13px]">
             <div className="font-medium">{t("settings.import.found", { total: preview.total, n: preview.new })}</div>
-            {preview.taken.length ? <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.import.taken", { list: preview.taken.slice(0, 20).join(", ") + (preview.taken.length > 20 ? "…" : "") })}</div> : null}
+            <Names label="settings.import.taken" list={preview.taken} />
             {preview.on_hold ? <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.import.onHold", { n: preview.on_hold })}</div> : null}
-            {preview.invalid.length ? (
-              <div className="mt-1 text-xs text-[var(--berry-600)]">
-                {t("settings.import.invalid", { n: preview.invalid.length })}
-                <ul>
-                  {preview.invalid.slice(0, 10).map((x) => (
-                    <li key={x}>{x}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            <Names label="settings.import.noLink" list={preview.no_link} />
+            <Names label="settings.import.invalid" list={preview.invalid} bad />
             <div className="banner warn my-2">{t("settings.import.notCarried")}</div>
             <Field label={t("settings.import.tariff")} htmlFor="imp-tariff" hint={t("settings.import.tariffHint")} error={errors.tariff_id}>
               <select id="imp-tariff" className="input" value={tariff} onChange={(e) => setTariff(e.target.value ? Number(e.target.value) : "")}>
@@ -133,37 +126,39 @@ export function ImportCard() {
                 ))}
               </select>
             </Field>
-            <div className="flex gap-2">
-              <Button type="button" variant="primary" loading={run.isPending} disabled={tariff === "" || preview.new === 0 || running} onClick={() => run.mutate()}>
-                {t("settings.import.run", { n: preview.new })}
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setPreview(null)}>
-                {t("common.cancel")}
-              </Button>
-            </div>
-          </div>
-        )}
-        {running && job.data ? (
-          <div className="panel-soft mt-3 p-3 text-[13px]" role="status">
-            {job.data.state === "fetching" ? t("settings.import.fetching") : t("settings.import.progress", { done: job.data.done, total: job.data.total })}
+            <Button type="button" variant="primary" loading={run.isPending} disabled={tariff === "" || preview.new === 0} onClick={() => run.mutate()}>
+              {t("settings.import.run", { n: preview.new })}
+            </Button>
           </div>
         ) : null}
-        {job.data?.state === "failed" ? <div className="banner bad mt-3">{t("settings.import.failed", { error: tMaybe(`errors.api.${job.data.error}`) ?? job.data.error ?? "" })}</div> : null}
         {report ? (
           <div className="panel-soft mt-3 p-3 text-[13px]">
             <div className="font-medium">{t("settings.import.report", { created: report.created, links: report.links })}</div>
-            {report.skipped.length ? <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.import.skipped", { n: report.skipped.length })}</div> : null}
-            {report.failed.length ? (
-              <ul className="mt-1 text-xs text-[var(--berry-600)]">
-                {report.failed.slice(0, 20).map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-            ) : null}
+            {report.skipped.count ? <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.import.skipped", { n: report.skipped.count })}</div> : null}
+            <Names label="settings.import.noLink" list={report.no_link} />
+            <Names label="settings.import.failedUsers" list={report.failed} bad />
           </div>
         ) : null}
       </form>
     </section>
+  );
+}
+
+const busy = (s?: string) => s === "fetching" || s === "checking" || s === "importing";
+
+/** A long list of names: the first ones, and how many there are in all. */
+function Names({ label, list, bad }: { label: Key; list: { names: string[]; count: number }; bad?: boolean }) {
+  if (!list.count) return null;
+  return (
+    <div className={`mt-1 text-xs ${bad ? "text-[var(--berry-600)]" : "text-[var(--ink-500)]"}`}>
+      {t(label, { n: list.count })}
+      <ul className="mt-0.5">
+        {list.names.slice(0, 10).map((x) => (
+          <li key={x}>{x}</li>
+        ))}
+        {list.count > 10 ? <li>{t("settings.import.more", { n: list.count - 10 })}</li> : null}
+      </ul>
+    </div>
   );
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 )
 
 // fakeMarzban answers like Marzban (or PasarGuard with ISO dates and ids) to an admin
@@ -54,11 +55,58 @@ func fakeRemnawave(t *testing.T, users []map[string]any) *httptest.Server {
 	return srv
 }
 
+type countList struct {
+	Names []string `json:"names"`
+	Count int      `json:"count"`
+}
+
 type importReport struct {
-	Created int      `json:"created"`
-	Links   int      `json:"links"`
-	Skipped []string `json:"skipped"`
-	Failed  []string `json:"failed"`
+	Created int       `json:"created"`
+	Links   int       `json:"links"`
+	Skipped countList `json:"skipped"`
+	NoLink  countList `json:"no_link"`
+	Failed  countList `json:"failed"`
+}
+
+type jobState struct {
+	Mode    string        `json:"mode"`
+	State   string        `json:"state"`
+	Error   string        `json:"error"`
+	Report  *importReport `json:"report"`
+	Preview *struct {
+		Total  int       `json:"total"`
+		New    int       `json:"new"`
+		OnHold int       `json:"on_hold"`
+		Taken  countList `json:"taken"`
+	} `json:"preview"`
+}
+
+// waitJob polls the import's state until it ends.
+func waitJob(t *testing.T, h *harness, api string, csrf map[string]string) jobState {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		_, body := h.do(http.MethodGet, api+"/import/status", nil, csrf)
+		var st jobState
+		if err := json.Unmarshal(body, &st); err != nil {
+			t.Fatal(err)
+		}
+		if st.State == "done" || st.State == "failed" {
+			return st
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("the job did not end")
+	return jobState{}
+}
+
+// runPreview starts a preview and waits for it.
+func runPreview(t *testing.T, h *harness, api string, csrf map[string]string, src map[string]any) jobState {
+	t.Helper()
+	if resp, body := h.do(http.MethodPost, api+"/import/preview", src, csrf); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("preview: %d %s", resp.StatusCode, body)
+	}
+	return waitJob(t, h, api, csrf)
 }
 
 // runImport starts an import and waits for its report: it runs in the background.
@@ -68,27 +116,11 @@ func runImport(t *testing.T, h *harness, api string, csrf map[string]string, run
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("start: %d %s", resp.StatusCode, body)
 	}
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		_, body = h.do(http.MethodGet, api+"/import/status", nil, csrf)
-		var st struct {
-			State  string        `json:"state"`
-			Error  string        `json:"error"`
-			Report *importReport `json:"report"`
-		}
-		if err := json.Unmarshal(body, &st); err != nil {
-			t.Fatal(err)
-		}
-		switch st.State {
-		case "done":
-			return *st.Report
-		case "failed":
-			t.Fatalf("the import failed: %s", st.Error)
-		}
-		time.Sleep(50 * time.Millisecond)
+	st := waitJob(t, h, api, csrf)
+	if st.State != "done" || st.Report == nil {
+		t.Fatalf("the import failed: %+v", st)
 	}
-	t.Fatal("the import did not end")
-	return importReport{}
+	return *st.Report
 }
 
 func TestImportFromMarzbanOverHTTP(t *testing.T) {
@@ -117,17 +149,11 @@ func TestImportFromMarzbanOverHTTP(t *testing.T) {
 	src := map[string]any{"kind": "marzban", "url": old.URL, "username": "admin", "password": "pw"}
 
 	bad := map[string]any{"kind": "marzban", "url": old.URL, "username": "admin", "password": "wrong"}
-	if resp, body := h.do(http.MethodPost, api+"/import/preview", bad, csrf); resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "import_auth") {
-		t.Fatalf("a wrong password: %d %s", resp.StatusCode, body)
+	if st := runPreview(t, h, api, csrf, bad); st.State != "failed" || st.Error != "import_auth" {
+		t.Fatalf("a wrong password: %+v", st)
 	}
-	var p struct {
-		Total  int `json:"total"`
-		New    int `json:"new"`
-		OnHold int `json:"on_hold"`
-	}
-	resp, body := h.do(http.MethodPost, api+"/import/preview", src, csrf)
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &p) != nil || p.Total != 3 || p.New != 3 || p.OnHold != 1 {
-		t.Fatalf("preview: %d %s", resp.StatusCode, body)
+	if st := runPreview(t, h, api, csrf, src); st.Preview == nil || st.Preview.Total != 3 || st.Preview.New != 3 || st.Preview.OnHold != 1 {
+		t.Fatalf("preview: %+v", st)
 	}
 
 	run := map[string]any{"kind": "marzban", "url": old.URL, "username": "admin", "password": "pw", "tariff_id": tariffs[1].ID}
@@ -154,7 +180,7 @@ func TestImportFromMarzbanOverHTTP(t *testing.T) {
 		t.Fatalf("an on-hold term starts at the import: %+v", pause)
 	}
 	// Again: everyone is there already, nobody is merged.
-	if r := runImport(t, h, api, csrf, run); r.Created != 0 || len(r.Skipped) != 3 {
+	if r := runImport(t, h, api, csrf, run); r.Created != 0 || r.Skipped.Count != 3 {
 		t.Fatalf("second import: %+v", r)
 	}
 
@@ -169,7 +195,7 @@ func TestImportFromMarzbanOverHTTP(t *testing.T) {
 	if sub("/sub/"+ivanToken) != http.StatusNotFound {
 		t.Fatal("an old link works without being turned on")
 	}
-	resp, body = h.do(http.MethodPatch, api+"/import/legacy", map[string]any{"path": adminPath}, csrf)
+	resp, body := h.do(http.MethodPatch, api+"/import/legacy", map[string]any{"path": adminPath}, csrf)
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "legacy_path_invalid") {
 		t.Fatalf("the admin path as the old path: %d %s", resp.StatusCode, body)
 	}
@@ -219,8 +245,9 @@ func TestImportFromRemnawaveKeepsShortUUIDLinks(t *testing.T) {
 	if r := runImport(t, h, api, csrf, run); r.Created != 1 || r.Links != 1 {
 		t.Fatalf("import: %+v", r)
 	}
-	if resp, body := h.do(http.MethodGet, api+"/import/legacy", nil, csrf); !strings.Contains(string(body), `"kind":"remnawave"`) {
-		t.Fatalf("the import did not set the old links' kind: %d %s", resp.StatusCode, body)
+	// Remnawave's links need no secret: the kind for signed links is left alone.
+	if resp, body := h.do(http.MethodGet, api+"/import/legacy", nil, csrf); !strings.Contains(string(body), `"kind":""`) {
+		t.Fatalf("a Remnawave import set the signed links' kind: %d %s", resp.StatusCode, body)
 	}
 	list, _ := h.st.Q.ListUsers(ctx)
 	var masha = list[len(list)-1]
@@ -302,12 +329,46 @@ func TestImportFromPasarGuardKeepsSignedLinks(t *testing.T) {
 func TestImportIsSessionOnly(t *testing.T) {
 	k := newKeyHarness(t)
 	for _, c := range []struct{ method, path string }{
-		{http.MethodPost, "/import/preview"}, {http.MethodPost, "/import"}, {http.MethodGet, "/import/status"},
+		{http.MethodPost, "/import/preview"}, {http.MethodPost, "/import"}, {http.MethodGet, "/import/status"}, {http.MethodDelete, "/import"},
 		{http.MethodGet, "/import/legacy"}, {http.MethodPatch, "/import/legacy"},
 	} {
 		resp, body := k.asKey(k.full, c.method, c.path, map[string]any{})
 		if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "session_only") {
 			t.Errorf("%s %s with a full key: %d %s", c.method, c.path, resp.StatusCode, body)
 		}
+	}
+}
+
+// A Marzban import on top of PasarGuard's links is refused: one secret checks the signed
+// links, and the other panel's would stop opening without a word.
+func TestImportRefusesMixingSignedPanels(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if err := domain.Seed(ctx, h.st, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
+		t.Fatal("login")
+	}
+	api := "/" + adminPath + "/api/v1"
+	csrf := map[string]string{"X-CSRF-Token": h.csrf}
+	tariffs, _ := h.st.Q.ListTariffs(ctx)
+	users, _ := h.st.Q.ListUsers(ctx)
+	if len(users) == 0 {
+		u, err := domain.NewUsers(h.st, domain.NewPool(h.st, func() time.Time { return h.now }), noChanges{}, func() time.Time { return h.now }).Create(ctx, domain.CreateInput{Name: "x", TariffID: tariffs[1].ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		users = append(users, u)
+	}
+	if _, err := h.st.Q.AddLegacySubToken(ctx, db.AddLegacySubTokenParams{Token: "name:x", UserID: users[0].ID, Source: "pasarguard"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Set(ctx, settings.New(h.st.Q), settings.KeyLegacySubKind, "pasarguard"); err != nil {
+		t.Fatal(err)
+	}
+	run := map[string]any{"kind": "marzban", "url": "https://old.example.com", "username": "a", "password": "b", "tariff_id": tariffs[1].ID}
+	if resp, body := h.do(http.MethodPost, api+"/import", run, csrf); resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "import_kind_conflict") {
+		t.Fatalf("mixing: %d %s", resp.StatusCode, body)
 	}
 }

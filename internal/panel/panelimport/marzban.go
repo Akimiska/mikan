@@ -29,6 +29,7 @@ type marzbanUser struct {
 	Expire               json.RawMessage `json:"expire"`
 	OnHoldExpireDuration *int64          `json:"on_hold_expire_duration"`
 	Note                 *string         `json:"note"`
+	CreatedAt            string          `json:"created_at"`
 	HWIDLimit            *int64          `json:"hwid_limit"` // PasarGuard only
 }
 
@@ -45,8 +46,11 @@ func fetchMarzban(ctx context.Context, hc *http.Client, src Source) ([]User, err
 		auth = func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
 	}
 	var out []User
-	for page, offset := 0, 0; ; page, offset = page+1, offset+marzbanPage {
-		if page >= maxPages {
+	total := -1
+	// The offset moves by what a page held: a panel that caps limit below ours gives short
+	// pages, and a short page is not the end.
+	for n, offset := 0, 0; ; n++ {
+		if n >= maxPages {
 			return nil, fmt.Errorf("%w: more than %d pages", ErrAnswer, maxPages)
 		}
 		q := url.Values{"offset": {strconv.Itoa(offset)}, "limit": {strconv.Itoa(marzbanPage)}, "sort": {"created_at"}}
@@ -72,10 +76,20 @@ func fetchMarzban(ctx context.Context, hc *http.Client, src Source) ([]User, err
 		if len(out) > maxUsers {
 			return nil, fmt.Errorf("%w: more than %d users", ErrAnswer, maxUsers)
 		}
-		if len(page.Users) < marzbanPage || len(out) >= page.Total {
-			return out, nil
+		if total < 0 {
+			total = page.Total
+		}
+		offset += len(page.Users)
+		if len(page.Users) == 0 || len(out) >= total {
+			break
 		}
 	}
+	// Users missing from what the panel said it has: an import must not report success
+	// with a part of them.
+	if len(out) < total {
+		return nil, fmt.Errorf("%w: the panel listed %d of the %d users it has", ErrIncomplete, len(out), total)
+	}
+	return out, nil
 }
 
 func marzbanToken(ctx context.Context, hc *http.Client, src Source) (string, error) {
@@ -120,7 +134,17 @@ func (m marzbanUser) user() (User, error) {
 	}
 	u.Expires = exp
 	if m.OnHoldExpireDuration != nil && *m.OnHoldExpireDuration > 0 {
-		u.OnHold = time.Duration(*m.OnHoldExpireDuration) * time.Second
+		// Checked before the multiplication, which would wrap a huge number into a small one.
+		if *m.OnHoldExpireDuration > int64(maxTerm/time.Second) {
+			u.OnHold = -1 // out of range: Normalize refuses it
+		} else {
+			u.OnHold = time.Duration(*m.OnHoldExpireDuration) * time.Second
+		}
+	}
+	if m.CreatedAt != "" {
+		if t, err := parseExpire(json.RawMessage(strconv.Quote(m.CreatedAt))); err == nil {
+			u.Created = t
+		}
 	}
 	if m.Note != nil {
 		u.Note = cut(*m.Note, maxNoteBytes)

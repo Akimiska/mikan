@@ -291,7 +291,11 @@ export interface paths {
          * @description Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.
          */
         post: operations["import-run"];
-        delete?: never;
+        /**
+         * Остановить импорт
+         * @description Уже созданные пользователи остаются, их список — в отчёте.
+         */
+        delete: operations["import-cancel"];
         options?: never;
         head?: never;
         patch?: never;
@@ -324,7 +328,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Что перенесётся из другой панели */
+        /**
+         * Что перенесётся из другой панели
+         * @description Идёт в фоне: ответ 202 сразу, итог — в GET /api/v1/import/status (preview).
+         */
         post: operations["import-preview"];
         delete?: never;
         options?: never;
@@ -1916,6 +1923,10 @@ export interface components {
             finished?: string;
             /** @description Панель и её адрес (без пути и данных для входа) */
             from?: string;
+            /** @enum {string} */
+            mode?: "preview" | "import";
+            preview?: components["schemas"]["Preview"];
+            /** @description Что сделано; при ошибке посреди импорта — сделанное до неё */
             report?: components["schemas"]["Report"];
             /** Format: date-time */
             started?: string;
@@ -1923,7 +1934,7 @@ export interface components {
              * @description idle — ещё не было; fetching — читается старая панель; importing — создаются пользователи
              * @enum {string}
              */
-            state: "idle" | "fetching" | "importing" | "done" | "failed";
+            state: "idle" | "fetching" | "checking" | "importing" | "done" | "failed";
             /** Format: int64 */
             total: number;
         };
@@ -1939,6 +1950,15 @@ export interface components {
             path: string;
             /** @description Секрет старой панели задан; сам он не возвращается */
             secret_set: boolean;
+        };
+        List: {
+            /**
+             * Format: int64
+             * @description Сколько всего
+             */
+            count: number;
+            /** @description Первые 50 */
+            names: string[];
         };
         ListUsersOutputBody: {
             counts: components["schemas"]["UserCounts"];
@@ -2404,12 +2424,14 @@ export interface components {
         };
         Preview: {
             /** @description Пользователи, которых mikan не примет, с причиной */
-            invalid: string[];
+            invalid: components["schemas"]["List"];
             /**
              * Format: int64
              * @description Будут созданы
              */
             new: number;
+            /** @description Будут перенесены без старой ссылки */
+            no_link: components["schemas"]["List"];
             /**
              * Format: int64
              * @description Пользователи «на паузе»: в mikan их срок пойдёт с момента импорта
@@ -2419,7 +2441,7 @@ export interface components {
                 [key: string]: number;
             };
             /** @description Имена, которые уже есть в mikan */
-            taken: string[];
+            taken: components["schemas"]["List"];
             /** Format: int64 */
             total: number;
         };
@@ -2440,14 +2462,16 @@ export interface components {
             /** Format: int64 */
             created: number;
             /** @description Имя и причина для тех, кого не удалось создать */
-            failed: string[];
+            failed: components["schemas"]["List"];
             /**
              * Format: int64
              * @description Старые ссылки и ключи, заведённые этим импортом
              */
             links: number;
+            /** @description Перенесены без старой ссылки: её токен слишком короткий, чтобы быть секретом */
+            no_link: components["schemas"]["List"];
             /** @description Имена, которые уже есть в mikan: эти пользователи не перенесены */
-            skipped: string[];
+            skipped: components["schemas"]["List"];
         };
         ResetPathOutputBody: {
             admin_url: string;
@@ -3536,6 +3560,33 @@ export interface operations {
             };
         };
     };
+    "import-cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-legacy-links": {
         parameters: {
             query?: never;
@@ -3611,13 +3662,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Preview"];
+                    "application/json": components["schemas"]["JobState"];
                 };
             };
             /** @description Error */

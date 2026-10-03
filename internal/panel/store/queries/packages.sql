@@ -33,17 +33,6 @@ RETURNING *;
 -- name: ListUserGrants :many
 SELECT * FROM traffic_grants WHERE user_id = $1 ORDER BY created_at DESC, id DESC;
 
--- name: ListSpendableGrants :many
--- The order traffic past the base quota is taken in: the soonest to expire first, then
--- the oldest. Expired and used-up grants are left out.
-SELECT * FROM traffic_grants
-WHERE user_id = sqlc.arg(user_id) AND pool_id IS NOT DISTINCT FROM sqlc.narg(pool_id) AND remaining > 0
-  AND (expires_at IS NULL OR expires_at > CAST(sqlc.arg(now) AS BIGINT))
-ORDER BY expires_at IS NULL, expires_at, created_at, id;
-
--- name: SpendGrant :exec
-UPDATE traffic_grants SET remaining = remaining - sqlc.arg(spent) WHERE id = sqlc.arg(id);
-
 -- name: SumGrantsLeft :many
 -- What is left of the active grants per user and target (pool 0: the main traffic).
 SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remaining) AS BIGINT) AS left_bytes

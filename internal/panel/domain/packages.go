@@ -69,7 +69,9 @@ func (s *Packages) Create(ctx context.Context, in PackageInput) (db.TrafficPacka
 		return db.TrafficPackage{}, err
 	}
 	var p db.TrafficPackage
-	err := s.st.Tx(ctx, func(q *db.Queries) error {
+	// No invariant across rows (a pool deleted after the check fails on its foreign key):
+	// READ COMMITTED.
+	err := s.st.TxRC(ctx, func(q *db.Queries) error {
 		if err := poolExists(ctx, q, in.PoolID); err != nil {
 			return err
 		}
@@ -88,7 +90,7 @@ func (s *Packages) Update(ctx context.Context, id int64, in PackageInput) (db.Tr
 		return db.TrafficPackage{}, err
 	}
 	var p db.TrafficPackage
-	err := s.st.Tx(ctx, func(q *db.Queries) error {
+	err := s.st.TxRC(ctx, func(q *db.Queries) error {
 		if err := poolExists(ctx, q, in.PoolID); err != nil {
 			return err
 		}

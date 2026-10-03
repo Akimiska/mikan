@@ -5,14 +5,18 @@ the signed manifest, and the panel shows the one in its language.
 
 ## 0.5.0.0
 ### en
-- The panel now uses PostgreSQL. Updating imports existing SQLite data with stable subscription links, VPN credentials, user IDs, counters, payments and settings. All tables are verified before the import commits; the original SQLite remains on disk. Backups use PostgreSQL archives and legacy SQLite backups can be restored.
-- Releases use four numbers: major.minor.patch.revision. The updater understands historical three-number versions and applies database migrations on each update. Upgrade the host installer once with install.sh before the first PostgreSQL release. Migration failures keep the panel stopped and preserve both databases for a retry.
-- From now on a panel update that does not start goes back to the previous version when the database schema stayed the same; an update that moved the schema keeps the panel stopped with its data for a retry. Restoring a backup replaces the whole database, so a backup made before a newer migration restores cleanly.
+- The panel now uses PostgreSQL. The update moves all data over: subscription links, VPN keys, user IDs, counters, payments and settings stay the same. A backup is made first, and the old SQLite database stays on disk. New backups are PostgreSQL archives; old SQLite backups can still be restored.
+- How to get it: on 0.4.4 or older, update to 0.4.5 first with the **Update** button (or `mikan update`). After that 0.5.0.0 arrives the usual way, by the **Update** button or the nightly auto-update.
+- If the move to PostgreSQL fails, the panel stays stopped and keeps both databases; run the update again.
+- Versions now have four numbers: major.minor.patch.revision.
+- From 0.5 on, an update that does not come up goes back to the previous version by itself when it did not change the database schema; otherwise the panel stays stopped with its data for another try. Restoring a backup replaces the whole database.
 
 ### ru
-- Панель переходит на PostgreSQL. При обновлении сохраняются ссылки подписок, VPN-ключи, ID пользователей, счётчики, платежи и настройки. Перенос всех таблиц проверяется до фиксации; исходная SQLite остаётся на диске. Новые бэкапы — архивы PostgreSQL, старые SQLite-бэкапы можно восстановить.
-- Версии теперь из четырёх чисел: major.minor.patch.revision. Обновление понимает прежние версии из трёх чисел и применяет миграции БД. Перед первым переходом на PostgreSQL один раз обновите установщик на хосте через install.sh. При сбое миграции панель остаётся остановленной, обе базы сохраняются для повторного запуска.
-- Дальше обновление панели, которое не запустилось, откатывается на прежнюю версию, если схема БД не менялась; если обновление изменило схему, панель остаётся остановленной с данными для повторной попытки. Восстановление бэкапа заменяет базу целиком, поэтому бэкап, сделанный до новой миграции, восстанавливается чисто.
+- Панель переходит на PostgreSQL. Обновление переносит все данные: ссылки подписок, VPN-ключи, ID пользователей, счётчики, платежи и настройки не меняются. Перед переносом делается бэкап, старая база SQLite остаётся на диске. Новые бэкапы — архивы PostgreSQL, старые SQLite-бэкапы по-прежнему можно восстановить.
+- Как обновиться: на 0.4.4 и более ранних версиях сначала обновитесь до 0.4.5 кнопкой **Обновить** (или `mikan update`). После этого 0.5.0.0 придёт как обычно — кнопкой **Обновить** или ночным автообновлением.
+- Если перенос на PostgreSQL не удался, панель остаётся остановленной и сохраняет обе базы; запустите обновление ещё раз.
+- Версии теперь из четырёх чисел: major.minor.patch.revision.
+- Начиная с 0.5 обновление, которое не поднялось, само откатывается на прежнюю версию, если не меняло схему базы; иначе панель остаётся остановленной с данными для повторной попытки. Восстановление бэкапа заменяет базу целиком.
 
 ## 0.4.4
 ### en

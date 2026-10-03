@@ -272,8 +272,12 @@ func (m *Monitor) round(ctx context.Context) {
 	if m.runtime != nil {
 		m.probeWarp(ctx, &st, cfg, nodes, byNode, levels, lang)
 	}
-	m.autotuneEvents(ctx, &st, cfg, lang)
-	m.checkTuner(ctx, &st, cfg, byNode, levels, lang)
+	nodeByID := make(map[int64]db.Node, len(nodes))
+	for _, n := range nodes {
+		nodeByID[n.ID] = n
+	}
+	m.autotuneEvents(ctx, &st, cfg, nodeByID, lang)
+	m.checkTuner(&st, cfg, byNode, nodeByID, lang)
 	m.checkCertificate(&st, cfg, lang)
 	m.checkUpdate(&st, cfg, lang)
 	m.publicStatus(ctx, &st, cfg, nodes, byNode, lang)
@@ -313,12 +317,13 @@ func (m *Monitor) round(ctx context.Context) {
 			delete(st.Stuck, key)
 		}
 	}
-	if m.bot == nil || !m.bot.InfrastructureEnabled(ctx) {
+	enabled := m.bot != nil && m.bot.InfrastructureEnabled(ctx) // read once per round
+	if !enabled {
 		st.Pending = nil
 	}
 	if err := m.save(ctx, st); err != nil {
 		m.logError("infrastructure alerts: save state", err)
-	} else if m.bot != nil && m.bot.InfrastructureEnabled(ctx) && len(st.Pending) > 0 {
+	} else if enabled && len(st.Pending) > 0 {
 		dispatch = true
 	}
 }
@@ -536,28 +541,21 @@ func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg Alert
 	}
 }
 
-func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, lang string) {
-	rows, err := m.store.DB.QueryContext(ctx, `SELECT id, inbound_id, node_id, kind, network, old_value, new_value, reason, created_at FROM inbound_events WHERE id > $1 ORDER BY id LIMIT 500`, st.AutoCursor)
+// autotuneEvents names the nodes from the round's list: an event of a node removed since
+// is passed over, as before.
+func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes map[int64]db.Node, lang string) {
+	events, err := m.store.Q.InboundEventsAfter(ctx, st.AutoCursor)
 	if err != nil {
 		m.logError("infrastructure alerts: autotune events", err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var e db.InboundEvent
-		if err := rows.Scan(&e.ID, &e.InboundID, &e.NodeID, &e.Kind, &e.Network, &e.OldValue, &e.NewValue, &e.Reason, &e.CreatedAt); err != nil {
-			m.logError("infrastructure alerts: scan autotune event", err)
-			if e.ID > st.AutoCursor {
-				st.AutoCursor = e.ID
-			}
-			continue
-		}
+	for _, e := range events {
 		st.AutoCursor = e.ID
 		if !cfg.Events.Autotune {
 			continue
 		}
-		n, nerr := m.store.Q.GetNode(ctx, e.NodeID)
-		if nerr != nil {
+		n, ok := nodes[e.NodeID]
+		if !ok {
 			continue
 		}
 		verb := "Автонастройка изменила подключение"
@@ -567,12 +565,9 @@ func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg A
 		st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("autotune/%d", e.ID), Target: "admin",
 			Text: "🛠 <b>" + verb + "</b>: " + html.EscapeString(n.Name) + " / " + html.EscapeString(e.Kind) + " — " + html.EscapeString(e.OldValue) + " → " + html.EscapeString(e.NewValue)})
 	}
-	if err := rows.Err(); err != nil {
-		m.logError("infrastructure alerts: iterate autotune events", err)
-	}
 }
 
-func (m *Monitor) checkTuner(ctx context.Context, st *persistentState, cfg AlertsConfig, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
+func (m *Monitor) checkTuner(st *persistentState, cfg AlertsConfig, inbounds map[int64][]db.Inbound, nodes map[int64]db.Node, lang string) {
 	if m.tuner == nil {
 		return
 	}
@@ -589,8 +584,8 @@ func (m *Monitor) checkTuner(ctx context.Context, st *persistentState, cfg Alert
 			}
 			st.Stuck[key] = status.Stuck
 			if autotuneFailure(status.Stuck) && cfg.Events.AutotuneRecovery {
-				node, err := m.store.Q.GetNode(ctx, nodeID)
-				if err != nil {
+				node, ok := nodes[nodeID]
+				if !ok {
 					continue
 				}
 				text := fmt.Sprintf("⚠️ <b>Автонастройка не восстановила подключение</b>: %s / %s (%s)", html.EscapeString(node.Name), html.EscapeString(in.Name), html.EscapeString(status.Stuck))

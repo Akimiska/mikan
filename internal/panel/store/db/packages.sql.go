@@ -331,57 +331,6 @@ func (q *Queries) ListAllTrafficPackages(ctx context.Context) ([]TrafficPackage,
 	return items, nil
 }
 
-const listSpendableGrants = `-- name: ListSpendableGrants :many
-SELECT id, user_id, pool_id, bytes, remaining, lifetime, expires_at, source, payment_id, package_id, note, created_at FROM traffic_grants
-WHERE user_id = $1 AND pool_id IS NOT DISTINCT FROM $2 AND remaining > 0
-  AND (expires_at IS NULL OR expires_at > CAST($3 AS BIGINT))
-ORDER BY expires_at IS NULL, expires_at, created_at, id
-`
-
-type ListSpendableGrantsParams struct {
-	UserID int64
-	PoolID sql.NullInt64
-	Now    int64
-}
-
-// The order traffic past the base quota is taken in: the soonest to expire first, then
-// the oldest. Expired and used-up grants are left out.
-func (q *Queries) ListSpendableGrants(ctx context.Context, arg ListSpendableGrantsParams) ([]TrafficGrant, error) {
-	rows, err := q.db.QueryContext(ctx, listSpendableGrants, arg.UserID, arg.PoolID, arg.Now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TrafficGrant{}
-	for rows.Next() {
-		var i TrafficGrant
-		if err := rows.Scan(
-			&i.ID,
-			&i.UserID,
-			&i.PoolID,
-			&i.Bytes,
-			&i.Remaining,
-			&i.Lifetime,
-			&i.ExpiresAt,
-			&i.Source,
-			&i.PaymentID,
-			&i.PackageID,
-			&i.Note,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listTrafficPackages = `-- name: ListTrafficPackages :many
 SELECT id, name, bytes, pool_id, lifetime, days, price_stars, price_rub, on_sale, sort, archived, created_at FROM traffic_packages WHERE archived = 0 ORDER BY sort, id
 `
@@ -500,20 +449,6 @@ func (q *Queries) ListUserGrants(ctx context.Context, userID int64) ([]TrafficGr
 		return nil, err
 	}
 	return items, nil
-}
-
-const spendGrant = `-- name: SpendGrant :exec
-UPDATE traffic_grants SET remaining = remaining - $1 WHERE id = $2
-`
-
-type SpendGrantParams struct {
-	Spent int64
-	ID    int64
-}
-
-func (q *Queries) SpendGrant(ctx context.Context, arg SpendGrantParams) error {
-	_, err := q.db.ExecContext(ctx, spendGrant, arg.Spent, arg.ID)
-	return err
 }
 
 const sumGrantsLeft = `-- name: SumGrantsLeft :many

@@ -11,11 +11,12 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, err := store.OpenTest(context.Background(), t.TempDir())
+	st, err := storetest.Open(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

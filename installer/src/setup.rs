@@ -347,6 +347,10 @@ fn run(plan: &Plan, tx: &Sender<Event>) -> StepResult<()> {
         };
         let version = image_version(&image)?;
         note(tx, Step::Image, format!("mikan {version}"));
+        if !node {
+            note(tx, Step::Image, "PostgreSQL 18");
+            docker::pull_postgres(progress)?;
+        }
         Ok((image, version))
     })?;
 
@@ -364,6 +368,14 @@ fn run(plan: &Plan, tx: &Sender<Event>) -> StepResult<()> {
             }
             None => None,
         };
+        // An uninstall keeps the database's volume; its password went with the .env, and a
+        // new one does not open it. The data are never removed for the admin.
+        if !node && !plan.resume && docker::volume_mountpoint(docker::PG_VOLUME).is_some() {
+            bail!(
+                "the Docker volume {v} holds the database of an earlier mikan, whose password was in the .env that is gone, so this install cannot open it. To keep those data, put the old .env and compose.yaml back in {DIR} (every mikan backup archive has them) and run the installer again; if they are not needed: docker volume rm {v}, then run the installer again",
+                v = docker::PG_VOLUME
+            );
+        }
         write_files(plan, &image, &version, api_port)?;
         note(tx, Step::Files, DIR);
         Ok(api_port)

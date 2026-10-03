@@ -21,6 +21,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 const (
@@ -42,7 +43,7 @@ type harness struct {
 func newHarness(t *testing.T, with ...func(*Options)) *harness {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.OpenTest(ctx, t.TempDir())
+	st, err := storetest.Open(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

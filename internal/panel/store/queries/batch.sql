@@ -171,6 +171,22 @@ WHERE d.user_id = ANY(sqlc.arg(ids)::bigint[]);
 -- Every node's counters position: counters_epoch/<node> and counters_seq/<node>.
 SELECT key, value FROM node_state WHERE key LIKE 'counters\_epoch/%' OR key LIKE 'counters\_seq/%';
 
+-- name: ListNoticeSubscriptions :many
+-- The subscriptions the bot may tell about (linked, the chat not blocked) with what is
+-- left of their main grants: one read for a round of notices.
+SELECT sqlc.embed(users), l.tg_id, CAST(COALESCE(g.left_bytes, 0) AS BIGINT) AS grants_left
+FROM tg_links l
+JOIN users ON users.id = l.user_id
+LEFT JOIN tg_chats c ON c.tg_id = l.tg_id
+LEFT JOIN (SELECT user_id, SUM(remaining) AS left_bytes FROM traffic_grants
+           WHERE pool_id IS NULL AND remaining > 0 AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::bigint)
+           GROUP BY user_id) g ON g.user_id = users.id
+WHERE COALESCE(c.blocked, 0) = 0
+ORDER BY users.id;
+
+-- name: TgNoticeSent :one
+SELECT EXISTS (SELECT 1 FROM tg_notices WHERE user_id = $1 AND kind = $2 AND period = $3);
+
 -- name: LockBuyerInvoices :exec
 -- The invoices of one Telegram account are checked and made one transaction at a time.
 SELECT pg_advisory_xact_lock(hashtextextended('mikan-invoice:' || CAST(sqlc.arg(tg_id) AS BIGINT), 0));

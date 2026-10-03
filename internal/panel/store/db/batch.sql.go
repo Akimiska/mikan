@@ -326,6 +326,77 @@ func (q *Queries) InsertSlots(ctx context.Context, arg InsertSlotsParams) error 
 	return err
 }
 
+const listNoticeSubscriptions = `-- name: ListNoticeSubscriptions :many
+SELECT users.id, users.name, users.contact, users.note, users.tags, users.status, users.tariff_id, users.traffic_limit, users.device_limit, users.reset_strategy, users.period_days, users.period_start, users.used_up, users.used_down, users.total_up, users.total_down, users.expires_at, users.inbounds, users.sub_token, users.slot_id, users.online_at, users.created_at, users.updated_at, users.billing_day, users.unbound_at, l.tg_id, CAST(COALESCE(g.left_bytes, 0) AS BIGINT) AS grants_left
+FROM tg_links l
+JOIN users ON users.id = l.user_id
+LEFT JOIN tg_chats c ON c.tg_id = l.tg_id
+LEFT JOIN (SELECT user_id, SUM(remaining) AS left_bytes FROM traffic_grants
+           WHERE pool_id IS NULL AND remaining > 0 AND (expires_at IS NULL OR expires_at > $1::bigint)
+           GROUP BY user_id) g ON g.user_id = users.id
+WHERE COALESCE(c.blocked, 0) = 0
+ORDER BY users.id
+`
+
+type ListNoticeSubscriptionsRow struct {
+	User       User
+	TgID       int64
+	GrantsLeft int64
+}
+
+// The subscriptions the bot may tell about (linked, the chat not blocked) with what is
+// left of their main grants: one read for a round of notices.
+func (q *Queries) ListNoticeSubscriptions(ctx context.Context, now int64) ([]ListNoticeSubscriptionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNoticeSubscriptions, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNoticeSubscriptionsRow{}
+	for rows.Next() {
+		var i ListNoticeSubscriptionsRow
+		if err := rows.Scan(
+			&i.User.ID,
+			&i.User.Name,
+			&i.User.Contact,
+			&i.User.Note,
+			&i.User.Tags,
+			&i.User.Status,
+			&i.User.TariffID,
+			&i.User.TrafficLimit,
+			&i.User.DeviceLimit,
+			&i.User.ResetStrategy,
+			&i.User.PeriodDays,
+			&i.User.PeriodStart,
+			&i.User.UsedUp,
+			&i.User.UsedDown,
+			&i.User.TotalUp,
+			&i.User.TotalDown,
+			&i.User.ExpiresAt,
+			&i.User.Inbounds,
+			&i.User.SubToken,
+			&i.User.SlotID,
+			&i.User.OnlineAt,
+			&i.User.CreatedAt,
+			&i.User.UpdatedAt,
+			&i.User.BillingDay,
+			&i.User.UnboundAt,
+			&i.TgID,
+			&i.GrantsLeft,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockBuyerInvoices = `-- name: LockBuyerInvoices :exec
 SELECT pg_advisory_xact_lock(hashtextextended('mikan-invoice:' || CAST($1 AS BIGINT), 0))
 `
@@ -713,6 +784,23 @@ func (q *Queries) StartPeriodIfOlder(ctx context.Context, arg StartPeriodIfOlder
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const tgNoticeSent = `-- name: TgNoticeSent :one
+SELECT EXISTS (SELECT 1 FROM tg_notices WHERE user_id = $1 AND kind = $2 AND period = $3)
+`
+
+type TgNoticeSentParams struct {
+	UserID int64
+	Kind   string
+	Period int64
+}
+
+func (q *Queries) TgNoticeSent(ctx context.Context, arg TgNoticeSentParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, tgNoticeSent, arg.UserID, arg.Kind, arg.Period)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const upsertDevices = `-- name: UpsertDevices :exec

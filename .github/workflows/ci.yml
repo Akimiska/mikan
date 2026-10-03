@@ -52,19 +52,30 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec tsc -b
           pnpm build
+      # The repository key is trusted only with the fingerprint the PostgreSQL project
+      # publishes (wiki.postgresql.org/wiki/Apt), and only as the one key in the file.
       - name: PostgreSQL 18 backup tools
         run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o "$RUNNER_TEMP/pgdg.asc"
+          fpr=$(gpg --show-keys --with-colons "$RUNNER_TEMP/pgdg.asc" | awk -F: '$1 == "pub" {n++} $1 == "fpr" && !f {f = $10} END {if (n == 1) print f}')
+          if [ "$fpr" != B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8 ]; then
+            echo "::error::unexpected PGDG signing key: ${fpr:-not exactly one key}"
+            exit 1
+          fi
+          sudo install -D -m 644 "$RUNNER_TEMP/pgdg.asc" /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y postgresql-client-18
           echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+      # Every package, with the race detector: the panel's background writers, sync and
+      # bot share state across goroutines. -race needs cgo, and the runner has gcc.
       - name: go
+        env:
+          CGO_ENABLED: "1"
         run: |
           test -z "$(gofmt -l internal cmd test)"
           go vet ./...
-          go test ./internal/...
+          go test -race ./...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 

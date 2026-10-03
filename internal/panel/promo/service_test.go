@@ -171,6 +171,9 @@ func TestValidateDiscountUsesInvoiceRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(st, func() time.Time { return time.Unix(1000, 0) })
+	if _, err := s.Validate(ctx, 77, 0, 0, 0, "", p.Code); !errors.Is(err, ErrTariff) {
+		t.Fatalf("discount accepted without an order: %v", err)
+	}
 	if _, err := s.Validate(ctx, 77, 0, 0, 1000, "RUB", p.Code); !errors.Is(err, ErrTariff) {
 		t.Fatalf("missing tariff accepted: %v", err)
 	}

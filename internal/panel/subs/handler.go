@@ -420,8 +420,6 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 		PackageID    int64  `json:"package_id"`
 		Provider     string `json:"provider"`
 		ValidateOnly bool   `json:"validate_only"`
-		Amount       int64  `json:"amount"`
-		Currency     string `json:"currency"`
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
@@ -470,7 +468,7 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "discount": discount, "final_amount": amount - discount, "currency": currency})
 		return
 	}
-	p, err := h.promos.Validate(r.Context(), tgID, userID, in.TariffID, in.Amount, in.Currency, in.Code)
+	p, err := h.promos.Validate(r.Context(), tgID, userID, 0, 0, "", in.Code)
 	if err != nil {
 		fail(http.StatusConflict, promoAttemptCode(err))
 		return
@@ -484,13 +482,7 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "days": r.Days, "bytes": r.Bytes, "message": "promo_applied"})
 		return
 	}
-	d := promo.DiscountAmount(p, in.Amount)
-	out := map[string]any{"ok": true, "type": p.Type, "code": p.Code, "expires_at": p.EndsAt}
-	if in.Amount > 0 {
-		out["discount"] = d
-		out["final_amount"] = in.Amount - d
-	}
-	_ = json.NewEncoder(w).Encode(out)
+	fail(http.StatusConflict, "promo_unavailable")
 }
 
 func (h *Handler) miniAppPromoOrder(ctx context.Context, userID, tariffID, packageID int64, provider string) (int64, int64, string, error) {

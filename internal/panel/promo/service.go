@@ -158,10 +158,8 @@ func (s *Service) Validate(ctx context.Context, tgID, userID, tariffID, amount i
 		return p, err
 	}
 	if p.Type == "percent" || p.Type == "fixed" {
-		if amount > 0 || tariffID > 0 || currency != "" {
-			if err := validateDiscount(p, tariffID, amount, currency); err != nil {
-				return p, err
-			}
+		if err := validateDiscount(p, tariffID, amount, currency); err != nil {
+			return p, err
 		}
 	}
 	return p, nil

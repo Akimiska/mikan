@@ -2338,6 +2338,11 @@ export interface components {
             enabled?: boolean;
             renew_resets_traffic?: boolean;
             stars?: boolean;
+            /**
+             * Format: int64
+             * @description Тариф пробного периода; 0 — выключить
+             */
+            trial_tariff_id?: number;
         };
         PatchSettingsInputBody: {
             app_branding?: boolean;
@@ -2432,6 +2437,16 @@ export interface components {
             renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */
             stars: boolean;
+            /**
+             * Format: int64
+             * @description Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже
+             */
+            trial_tariff_id: number | null;
+            /**
+             * Format: int64
+             * @description Сколько пробных подписок выдано
+             */
+            trials: number;
         };
         PaymentSettingsViewAvailableStruct: {
             /** @description Адаптеры маркетплейса, которые принимают оплату прямо сейчас */

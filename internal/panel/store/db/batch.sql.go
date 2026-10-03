@@ -242,6 +242,34 @@ func (q *Queries) CountUserStates(ctx context.Context, arg CountUserStatesParams
 	return i, err
 }
 
+const countersPositions = `-- name: CountersPositions :many
+SELECT key, value FROM node_state WHERE key LIKE 'counters\_epoch/%' OR key LIKE 'counters\_seq/%'
+`
+
+// Every node's counters position: counters_epoch/<node> and counters_seq/<node>.
+func (q *Queries) CountersPositions(ctx context.Context) ([]NodeState, error) {
+	rows, err := q.db.QueryContext(ctx, countersPositions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NodeState{}
+	for rows.Next() {
+		var i NodeState
+		if err := rows.Scan(&i.Key, &i.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteUsers = `-- name: DeleteUsers :exec
 DELETE FROM users WHERE id = ANY($1::bigint[])
 `

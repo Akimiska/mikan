@@ -162,10 +162,11 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 	if err != nil {
 		return st, err
 	}
-	inbounds, err := q.ListInbounds(ctx)
+	snap, err := s.m.snapshot(ctx, s.id)
 	if err != nil {
 		return st, err
 	}
+	inbounds := snap.inbounds
 	st.Inbounds = []nodeapi.Inbound{}
 	if st.Warp, err = s.warp(ctx, n, inbounds); err != nil {
 		return st, err
@@ -204,18 +205,14 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 		st.Inbounds = append(st.Inbounds, ni)
 	}
 	s.noteBadInbounds(bad)
-	slots, err := q.ListSlots(ctx)
-	if err != nil {
-		return st, err
-	}
-	for _, sl := range slots {
+	for _, sl := range snap.slots {
 		st.Slots = append(st.Slots, nodeapi.Slot{Name: sl.Name, UUID: sl.Uuid, Secret: sl.Secret})
 	}
 	if st.TLS, err = s.tls(); err != nil {
 		return st, err
 	}
-	st.Epoch, st.Policies, _, err = s.policies(ctx)
-	return st, err
+	st.Epoch, st.Policies, _ = s.policiesFrom(snap)
+	return st, nil
 }
 
 func (s *Syncer) applyState(ctx context.Context) {
@@ -348,46 +345,36 @@ func (s *Syncer) sendPolicies(ctx context.Context, epoch string, ps []nodeapi.Po
 // has the own slot and one per bound device: all of them get the user's rules, and the
 // device limit counts the user's devices under all of them.
 func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Policy, slotUser map[string]int64, err error) {
-	q := s.m.st.Q
-	epoch, seq, err := s.countersPos(ctx)
+	snap, err := s.m.snapshot(ctx, s.id)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	users, err := q.ListUsers(ctx)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	owners, err := q.ListSlotUsers(ctx)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	inbounds, err := q.ListInbounds(ctx)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	slotUser = make(map[string]int64, len(owners))
+	epoch, out, slotUser = s.policiesFrom(snap)
+	return epoch, out, slotUser, nil
+}
+
+// policiesFrom builds the policies from one snapshot: the quotas refer to the counters
+// position read with them.
+func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Policy, slotUser map[string]int64) {
+	pos := snap.counters[s.id]
+	epoch, seq := pos.epoch, pos.seq
+	slotUser = make(map[string]int64, len(snap.owners))
 	slotsOf := map[int64][]string{}
-	for _, o := range owners {
+	for _, o := range snap.owners {
 		slotUser[o.SlotName] = o.UserID
 		slotsOf[o.UserID] = append(slotsOf[o.UserID], o.SlotName)
 	}
 	here := map[int64]string{}
-	for _, in := range inbounds {
+	for _, in := range snap.inbounds {
 		if in.NodeID == s.id {
 			here[in.ID] = in.Name
 		}
 	}
 	others := s.m.otherIPs(s.id, slotUser)
 	now := s.m.now()
-	grants, err := domain.LoadGrantsLeft(ctx, q, now)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	pools, err := userPoolQuotas(ctx, q, grants)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	for _, u := range users {
+	grants := snap.grants
+	pools := userPoolQuotas(snap.pools, grants)
+	for _, u := range snap.users {
 		names := slotsOf[u.ID]
 		sort.Strings(names)
 		for _, name := range names {
@@ -396,7 +383,7 @@ func (s *Syncer) policies(ctx context.Context) (epoch string, out []nodeapi.Poli
 			out = append(out, p)
 		}
 	}
-	return epoch, out, slotUser, nil
+	return epoch, out, slotUser
 }
 
 // userPolicy is the user's rules for one of the user's slots; grants is what is left of
@@ -518,6 +505,7 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		return
 	}
 	s.lastStored = now
+	s.m.noteBatch(s.id)
 	// An idle reply has no batch behind it: there is nothing for the node to drop, and it
 	// would answer the acknowledgement with stale_ack.
 	if !c.Idle {
@@ -863,11 +851,7 @@ func (m *Manager) Tunnel(ctx context.Context, id int64, addr string) (net.Conn, 
 
 // userPoolQuotas are the users' pool quotas with a limit: what is left of each, with the
 // pool's grants.
-func userPoolQuotas(ctx context.Context, q *db.Queries, grants domain.GrantsLeft) (map[int64][]nodeapi.PoolQuota, error) {
-	rows, err := q.ListAllUserPools(ctx)
-	if err != nil {
-		return nil, err
-	}
+func userPoolQuotas(rows []db.UserPool, grants domain.GrantsLeft) map[int64][]nodeapi.PoolQuota {
 	out := map[int64][]nodeapi.PoolQuota{}
 	for _, p := range rows {
 		if !p.TrafficLimit.Valid {
@@ -876,7 +860,7 @@ func userPoolQuotas(ctx context.Context, q *db.Queries, grants domain.GrantsLeft
 		left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(p.UserID, p.PoolID))
 		out[p.UserID] = append(out[p.UserID], nodeapi.PoolQuota{Pool: strconv.FormatInt(p.PoolID, 10), Remaining: left})
 	}
-	return out, nil
+	return out
 }
 
 // poolKey: which pools have a quota, not how much is left (the node counts that down).

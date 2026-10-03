@@ -58,6 +58,14 @@ type Manager struct {
 	lastPrune time.Time
 
 	generation atomic.Uint64 // moves whenever a node is added, changed or removed
+
+	// The snapshot the syncers share (snapshot.go): changes moves with every change it
+	// may not hold any more, batches counts the traffic batches stored per node.
+	changes atomic.Uint64
+	snapMu  sync.Mutex
+	snap    *snapshot
+	batchMu sync.Mutex
+	batches map[int64]uint64
 }
 
 type running struct {
@@ -69,7 +77,7 @@ type running struct {
 
 func NewManager(st *store.Store, set *settings.Settings, pool *domain.Pool, connect Connect, log *slog.Logger, now func() time.Time) *Manager {
 	return &Manager{st: st, set: set, pool: pool, connect: connect, log: log, now: now,
-		nodesDirty: make(chan struct{}, 1), running: map[int64]*running{}}
+		nodesDirty: make(chan struct{}, 1), running: map[int64]*running{}, batches: map[int64]uint64{}}
 }
 
 func (m *Manager) Run(ctx context.Context) {
@@ -91,12 +99,14 @@ func (m *Manager) Run(ctx context.Context) {
 
 // PoliciesChanged and SlotsChanged implement domain.Changes for all nodes at once.
 func (m *Manager) PoliciesChanged() {
+	m.changes.Add(1)
 	for _, s := range m.Syncers() {
 		s.PoliciesChanged()
 	}
 }
 
 func (m *Manager) SlotsChanged() {
+	m.changes.Add(1)
 	for _, s := range m.Syncers() {
 		s.SlotsChanged()
 	}
@@ -105,6 +115,7 @@ func (m *Manager) SlotsChanged() {
 // NodesChanged restarts syncers after a node was added, removed or re-keyed.
 func (m *Manager) NodesChanged() {
 	m.generation.Add(1)
+	m.changes.Add(1)
 	signal(m.nodesDirty)
 }
 
@@ -357,6 +368,8 @@ func (m *Manager) maintain(ctx context.Context) {
 		m.log.Error("record devices", "err", err)
 	}
 	m.reconcile(ctx)
+	// One fresh snapshot for the round: it picks up what changed outside the API.
+	m.changes.Add(1)
 	for _, s := range m.Syncers() {
 		// Reconcile: picks up changes made outside the API (server CLI, restore) and pushes
 		// policies, whose key changes by time alone when a user crosses expires_at, and which

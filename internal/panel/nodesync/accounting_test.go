@@ -92,6 +92,59 @@ func TestBackgroundAccountingWritersDoNotConflict(t *testing.T) {
 	}
 }
 
+// The syncers share one snapshot until something it holds may have changed. A node's own
+// batch makes its next policies read again, and their quota and BaseSeq come from the
+// same read: the quota holds exactly the batches up to BaseSeq.
+func TestSnapshotSharedAndConsistent(t *testing.T) {
+	s1, node1, st, users, _ := setup(t)
+	ctx := context.Background()
+	tariffs, _ := st.Q.ListTariffs(ctx)
+	u, err := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot, _ := st.Q.GetSlot(ctx, u.SlotID.Int64)
+	panel, _ := nodetls.Generate("mikan-panel", x509.ExtKeyUsageClientAuth, time.Now())
+	n2, _, err := domain.AddNode(ctx, st, panel, domain.NodeInput{Name: "B", Host: "198.51.100.20", APIPort: 40000}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := s1.m.attach(t, n2.ID, Target{Node: &fakeNode{}, TLS: fakeTLS})
+	m := s1.m
+	a, _ := m.snapshot(ctx, s1.id)
+	b, _ := m.snapshot(ctx, s2.id)
+	if a != b {
+		t.Fatal("two nodes read the same tables twice")
+	}
+	quota := func(s *Syncer) (int64, int64) {
+		t.Helper()
+		_, ps, _, err := s.policies(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range ps {
+			if p.Slot == slot.Name {
+				return p.QuotaRemaining, p.BaseSeq
+			}
+		}
+		t.Fatal("no policy")
+		return 0, 0
+	}
+	before, _ := quota(s1)
+	node1.batch = nodeapi.Counters{Epoch: "e1", Seq: 1, Slots: map[string]nodeapi.Traffic{slot.Name: {Down: 1000}}}
+	s1.pullCounters(ctx)
+	if left, seq := quota(s1); seq != 1 || left != before-1000 {
+		t.Fatalf("after its batch the node gets quota %d at seq %d, want %d at 1", left, seq, before-1000)
+	}
+	if c, _ := m.snapshot(ctx, s2.id); c == b {
+		t.Fatal("the other node is still given the snapshot from before the newer read")
+	}
+	users.Changed() // what the API says after a change
+	if c, _ := m.snapshot(ctx, s2.id); c.changes != m.changes.Load() {
+		t.Fatal("a change makes the snapshot read again")
+	}
+}
+
 // Many users on two nodes at once, past their base quotas in the main traffic and in a
 // pool: every byte counts once, and the grants pay exactly what went past each base, the
 // soonest to expire first, whatever order the batches of the two nodes come in.

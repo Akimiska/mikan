@@ -167,6 +167,10 @@ UNION
 SELECT s.name AS slot_name, d.user_id AS user_id FROM slots s JOIN bound_devices d ON d.slot_id = s.id
 WHERE d.user_id = ANY(sqlc.arg(ids)::bigint[]);
 
+-- name: CountersPositions :many
+-- Every node's counters position: counters_epoch/<node> and counters_seq/<node>.
+SELECT key, value FROM node_state WHERE key LIKE 'counters\_epoch/%' OR key LIKE 'counters\_seq/%';
+
 -- name: LockBuyerInvoices :exec
 -- The invoices of one Telegram account are checked and made one transaction at a time.
 SELECT pg_advisory_xact_lock(hashtextextended('mikan-invoice:' || CAST(sqlc.arg(tg_id) AS BIGINT), 0));

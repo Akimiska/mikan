@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -110,6 +112,22 @@ func TestToolOutputMasksThePassword(t *testing.T) {
 	long := strings.Repeat("я", toolOutputLimit/2+1) + "!" // the limit falls inside a "я"
 	if got := toolOutput("postgresql://mikan:x@localhost/mikan", long); !utf8.ValidString(got) || !strings.HasSuffix(got, "я!") {
 		t.Fatalf("cut diagnostics: %q", got[:16])
+	}
+}
+
+// A panel that answers on its port is unhealthy when its database does not.
+func TestHealthChecksTheDatabase(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	t.Setenv("MIKAN_DEV", "1")
+	t.Setenv("MIKAN_PANEL_LISTEN", strings.TrimPrefix(srv.URL, "http://"))
+	t.Setenv("MIKAN_DATABASE_URL", os.Getenv("MIKAN_TEST_DATABASE_URL"))
+	if err := health(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MIKAN_DATABASE_URL", "postgresql://mikan:x@127.0.0.1:1/mikan?sslmode=disable")
+	if err := health(); err == nil || !strings.Contains(err.Error(), "database") {
+		t.Fatal("healthy without a database:", err)
 	}
 }
 

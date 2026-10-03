@@ -304,6 +304,44 @@ func (q *Queries) EndUsersPeriodGrants(ctx context.Context, arg EndUsersPeriodGr
 	return err
 }
 
+const inboundEventsAfter = `-- name: InboundEventsAfter :many
+SELECT id, inbound_id, node_id, kind, network, old_value, new_value, reason, created_at FROM inbound_events WHERE id > $1 ORDER BY id LIMIT 500
+`
+
+// The automatic changes after a cursor, oldest first, a page at a time.
+func (q *Queries) InboundEventsAfter(ctx context.Context, id int64) ([]InboundEvent, error) {
+	rows, err := q.db.QueryContext(ctx, inboundEventsAfter, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InboundEvent{}
+	for rows.Next() {
+		var i InboundEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.InboundID,
+			&i.NodeID,
+			&i.Kind,
+			&i.Network,
+			&i.OldValue,
+			&i.NewValue,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertSlots = `-- name: InsertSlots :exec
 INSERT INTO slots (name, uuid, secret, state, created_at)
 SELECT unnest($1::text[]), unnest($2::text[]), unnest($3::text[]), 'free', $4::bigint

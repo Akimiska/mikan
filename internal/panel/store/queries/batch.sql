@@ -187,6 +187,10 @@ ORDER BY users.id;
 -- name: TgNoticeSent :one
 SELECT EXISTS (SELECT 1 FROM tg_notices WHERE user_id = $1 AND kind = $2 AND period = $3);
 
+-- name: InboundEventsAfter :many
+-- The automatic changes after a cursor, oldest first, a page at a time.
+SELECT * FROM inbound_events WHERE id > $1 ORDER BY id LIMIT 500;
+
 -- name: LockBuyerInvoices :exec
 -- The invoices of one Telegram account are checked and made one transaction at a time.
 SELECT pg_advisory_xact_lock(hashtextextended('mikan-invoice:' || CAST(sqlc.arg(tg_id) AS BIGINT), 0));

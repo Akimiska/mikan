@@ -185,8 +185,13 @@ func Apply(ctx context.Context, st *store.Store, users *domain.Users, now time.T
 	} else if err != nil {
 		return r, err
 	}
-	// Slots for everyone at once: one refill, one word to the nodes.
-	if err := users.RefillFor(ctx, len(list)); err != nil {
+	// Slots for everyone who will be made, at once: one refill, one word to the nodes.
+	// Users mikan refuses or already has take none.
+	plan, err := Check(ctx, st.Q, list)
+	if err != nil {
+		return r, err
+	}
+	if err := users.RefillFor(ctx, plan.New); err != nil {
 		return r, err
 	}
 	created := false

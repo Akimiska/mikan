@@ -149,7 +149,7 @@ func TestSQLiteImportKeepsDataAndIsRepeatable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := OpenTest(ctx, t.TempDir())
+	s, err := openImportTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestSQLiteOlderSchemaAndWALImport(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s, err := OpenTest(ctx, t.TempDir())
+	s, err := openImportTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestFailedSQLiteRestoreRollsBackAndCanRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacy.Close()
-	s, err := OpenTest(ctx, t.TempDir())
+	s, err := openImportTest(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

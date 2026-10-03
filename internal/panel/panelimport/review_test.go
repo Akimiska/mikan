@@ -107,6 +107,36 @@ func TestRefillForTheImport(t *testing.T) {
 	}
 }
 
+// An import of users mikan refuses or has already takes no slots: the pool is filled for
+// the users that will be made, not for the whole list.
+func TestApplyRefillsOnlyForNewUsers(t *testing.T) {
+	st, tariff := seeded(t)
+	ctx := context.Background()
+	ch := &slotChanges{}
+	pool := domain.NewPool(st, time.Now)
+	users := domain.NewUsers(st, pool, ch, time.Now)
+	if r, err := Apply(ctx, st, users, time.Now(), Marzban, tariff, []User{{Name: "kept", Status: StatusActive}}, nil); err != nil || r.Created != 1 {
+		t.Fatalf("first import: %+v %v", r, err)
+	}
+	before, err := pool.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	told := ch.slots
+	list := []User{{Name: "kept", Status: StatusActive}}
+	for range before.Free + 3 {
+		list = append(list, User{Name: "", Status: StatusActive})
+	}
+	r, err := Apply(ctx, st, users, time.Now(), Marzban, tariff, list, nil)
+	if err != nil || r.Created != 0 || r.Skipped.Count != 1 {
+		t.Fatalf("report %+v %v", r, err)
+	}
+	after, _ := pool.Stats(ctx)
+	if after.Free != before.Free || ch.slots != told {
+		t.Fatalf("free %d → %d, nodes told %d more times", before.Free, after.Free, ch.slots-told)
+	}
+}
+
 type slotChanges struct{ slots int }
 
 func (c *slotChanges) PoliciesChanged() {}

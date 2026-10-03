@@ -133,3 +133,7 @@ DELETE FROM bound_devices WHERE user_id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: DeleteUsers :exec
 DELETE FROM users WHERE id = ANY(sqlc.arg(ids)::bigint[]);
+
+-- name: LockBuyerInvoices :exec
+-- The invoices of one Telegram account are checked and made one transaction at a time.
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-invoice:' || CAST(sqlc.arg(tg_id) AS BIGINT), 0));

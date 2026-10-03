@@ -244,6 +244,16 @@ func (q *Queries) InsertSlots(ctx context.Context, arg InsertSlotsParams) error 
 	return err
 }
 
+const lockBuyerInvoices = `-- name: LockBuyerInvoices :exec
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-invoice:' || CAST($1 AS BIGINT), 0))
+`
+
+// The invoices of one Telegram account are checked and made one transaction at a time.
+func (q *Queries) LockBuyerInvoices(ctx context.Context, tgID int64) error {
+	_, err := q.db.ExecContext(ctx, lockBuyerInvoices, tgID)
+	return err
+}
+
 const lockSpendableGrants = `-- name: LockSpendableGrants :many
 SELECT id, user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, remaining FROM traffic_grants
 WHERE user_id = ANY($1::bigint[]) AND remaining > 0

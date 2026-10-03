@@ -272,6 +272,58 @@ func TestInvoiceRefusals(t *testing.T) {
 	}
 }
 
+// Taps at once: the same purchase gives one invoice, and different ones together cannot
+// pass the hourly limit, also when two panels (services) share the database.
+func TestConcurrentInvoices(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	other := New(e.s.d)
+	other.SetTelegram(e.tg)
+	// Tap i goes through services[i % len]: across services only the database's lock holds.
+	taps := func(n int, tariff func(i int) int64, services ...*Service) []error {
+		var wg sync.WaitGroup
+		errs := make([]error, n)
+		for i := range n {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, errs[i] = services[i%len(services)].Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: tariff(i), Provider: Stars})
+			}()
+		}
+		wg.Wait()
+		return errs
+	}
+	for _, err := range taps(5, func(int) int64 { return e.sale.ID }, e.s) {
+		must(t, err)
+	}
+	all, err := e.st.Q.CountRecentInvoices(ctx, db.CountRecentInvoicesParams{TgID: 555, CreatedAt: 0})
+	if err != nil || all != 1 {
+		t.Fatalf("a double tap made %d invoices (%v), want 1", all, err)
+	}
+
+	// Different tariffs, so none is reused: only what is left of the hour's limit goes in.
+	var tariffs []int64
+	for i := range maxPerHour + 5 {
+		tr, err := e.st.Q.CreateTariff(ctx, db.CreateTariffParams{Name: "t" + strconv.Itoa(i), DurationDays: 30, ResetStrategy: "none",
+			PriceStars: sql.NullInt64{Int64: 10, Valid: true}, OnSale: 1, CreatedAt: e.now.Unix()})
+		must(t, err)
+		tariffs = append(tariffs, tr.ID)
+	}
+	tooMany := 0
+	for _, err := range taps(len(tariffs), func(i int) int64 { return tariffs[i] }, e.s, other) {
+		switch {
+		case errors.Is(err, ErrTooMany):
+			tooMany++
+		case err != nil:
+			t.Fatal(err)
+		}
+	}
+	all, _ = e.st.Q.CountRecentInvoices(ctx, db.CountRecentInvoicesParams{TgID: 555, CreatedAt: 0})
+	if all != maxPerHour || tooMany != len(tariffs)-(maxPerHour-1) {
+		t.Fatalf("%d invoices and %d refused, want %d and %d", all, tooMany, maxPerHour, len(tariffs)-(maxPerHour-1))
+	}
+}
+
 // With the reset off a renewal only adds the term: the traffic counter runs on.
 func TestRenewalKeepsTraffic(t *testing.T) {
 	e := newEnv(t)

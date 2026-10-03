@@ -56,14 +56,18 @@ func (e *grantsEnv) grant(pool, bytes int64, lifetime string, days int64) db.Tra
 
 func (e *grantsEnv) count(n int64) {
 	e.t.Helper()
-	if err := e.st.Tx(e.ctx, func(q *db.Queries) error { return CountUserTraffic(e.ctx, q, e.u.ID, 0, n, *e.now) }); err != nil {
+	if err := e.st.TxRC(e.ctx, func(q *db.Queries) error {
+		return CountTraffic(e.ctx, q, TrafficBatch{Main: map[int64]Bytes{e.u.ID: {Down: n}}}, *e.now)
+	}); err != nil {
 		e.t.Fatal(err)
 	}
 }
 
 func (e *grantsEnv) countPool(pool, n int64) {
 	e.t.Helper()
-	if err := e.st.Tx(e.ctx, func(q *db.Queries) error { return CountPoolTraffic(e.ctx, q, e.u.ID, pool, n, 0, *e.now) }); err != nil {
+	if err := e.st.TxRC(e.ctx, func(q *db.Queries) error {
+		return CountTraffic(e.ctx, q, TrafficBatch{Pools: map[[2]int64]Bytes{{e.u.ID, pool}: {Up: n}}}, *e.now)
+	}); err != nil {
 		e.t.Fatal(err)
 	}
 }

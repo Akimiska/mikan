@@ -459,10 +459,19 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 	}
 	now := s.m.now()
 	c = s.vet(c, now)
-	hour, day := now.Unix()/3600, now.Unix()/86400
-	s.m.accounting.Lock()
-	err = s.m.st.Tx(ctx, func(q *db.Queries) error {
-		rows, err := q.ListSlotUsers(ctx)
+	names := make([]string, 0, len(c.Slots)+len(c.Pools))
+	for slot := range c.Slots {
+		names = append(names, slot)
+	}
+	for slot := range c.Pools {
+		if _, ok := c.Slots[slot]; !ok {
+			names = append(names, slot)
+		}
+	}
+	// See domain.CountTraffic for why READ COMMITTED is enough: batches of different nodes
+	// take turns on the users' rows instead of aborting each other.
+	err = s.m.st.TxRC(ctx, func(q *db.Queries) error {
+		rows, err := q.SlotOwners(ctx, names)
 		if err != nil {
 			return err
 		}
@@ -470,35 +479,17 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		for _, r := range rows {
 			owner[r.SlotName] = r.UserID
 		}
+		// Slots of the same user add up. Traffic past the base quota is taken from the
+		// grants on the batch's transaction: a batch delivered again is skipped above,
+		// grants included.
+		b := domain.TrafficBatch{Main: map[int64]domain.Bytes{}, Pools: map[[2]int64]domain.Bytes{}}
 		for slot, t := range c.Slots {
-			uid, ok := owner[slot]
-			if !ok {
-				continue
-			}
-			// Traffic past the base quota is taken from the grants here, on the batch's
-			// transaction: a batch delivered again is skipped above, grants included.
-			if err := domain.CountUserTraffic(ctx, q, uid, t.Up, t.Down, now); err != nil {
-				return err
-			}
-			if err := q.AddTrafficHourly(ctx, db.AddTrafficHourlyParams{UserID: uid, Hour: hour, Up: t.Up, Down: t.Down}); err != nil {
-				return err
-			}
-			if err := q.AddTrafficDaily(ctx, db.AddTrafficDailyParams{UserID: uid, Day: day, Up: t.Up, Down: t.Down}); err != nil {
-				return err
+			if uid, ok := owner[slot]; ok {
+				cur := b.Main[uid]
+				b.Main[uid] = domain.Bytes{Up: cur.Up + t.Up, Down: cur.Down + t.Down}
 			}
 		}
 		// Pool traffic counts to the pool, not to the main quota; the statistics take all.
-		// A pool deleted meanwhile is skipped: the batch must still go through.
-		known := map[int64]bool{}
-		if len(c.Pools) > 0 {
-			ps, err := q.ListTrafficPools(ctx)
-			if err != nil {
-				return err
-			}
-			for _, p := range ps {
-				known[p.ID] = true
-			}
-		}
 		for slot, pools := range c.Pools {
 			uid, ok := owner[slot]
 			if !ok {
@@ -506,32 +497,22 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 			}
 			for pool, t := range pools {
 				id, err := strconv.ParseInt(pool, 10, 64)
-				if err == nil && !known[id] {
-					continue
-				}
 				if err != nil {
 					continue
 				}
-				if err := q.AddUserTotalTraffic(ctx, db.AddUserTotalTrafficParams{Up: t.Up, Down: t.Down, ID: uid}); err != nil {
-					return err
-				}
-				if err := domain.CountPoolTraffic(ctx, q, uid, id, t.Up, t.Down, now); err != nil {
-					return err
-				}
-				if err := q.AddTrafficHourly(ctx, db.AddTrafficHourlyParams{UserID: uid, Hour: hour, Up: t.Up, Down: t.Down}); err != nil {
-					return err
-				}
-				if err := q.AddTrafficDaily(ctx, db.AddTrafficDailyParams{UserID: uid, Day: day, Up: t.Up, Down: t.Down}); err != nil {
-					return err
-				}
+				k := [2]int64{uid, id}
+				cur := b.Pools[k]
+				b.Pools[k] = domain.Bytes{Up: cur.Up + t.Up, Down: cur.Down + t.Down}
 			}
+		}
+		if err := domain.CountTraffic(ctx, q, b, now); err != nil {
+			return err
 		}
 		if err := q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("counters_epoch", s.id), Value: c.Epoch}); err != nil {
 			return err
 		}
 		return q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("counters_seq", s.id), Value: strconv.FormatInt(c.Seq, 10)})
 	})
-	s.m.accounting.Unlock()
 	if err != nil {
 		s.log.Error("store counters", "err", err)
 		return

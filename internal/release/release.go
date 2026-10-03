@@ -55,6 +55,7 @@ var (
 	ErrSignature = errors.New("release: bad signature")
 	versionRe    = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$`)
 	digestRe     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	sha256Re     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 // Key decodes a raw Ed25519 public key in base64.
@@ -92,10 +93,27 @@ func Parse(data []byte, sig string, pub ed25519.PublicKey) (Manifest, error) {
 	if Newer(m.MinInstaller, m.Version) {
 		return m, errors.New("release: minimum installer is newer than the release")
 	}
-	if !digestRe.MatchString(m.Digest) || !strings.HasPrefix(m.Image, "ghcr.io/") {
+	if !digestRe.MatchString(m.Digest) || !validImage(m.Image) {
 		return m, fmt.Errorf("release: image %s@%s", m.Image, m.Digest)
 	}
+	for arch, a := range m.Installer {
+		if !sha256Re.MatchString(a.SHA256) || !strings.HasPrefix(a.URL, "https://") {
+			return m, fmt.Errorf("release: installer for %s", arch)
+		}
+	}
 	return m, nil
+}
+
+// imagePrefix is the project's own namespace on GitHub Packages, the only place a release
+// image comes from: ghcr.io/<owner of Repo in lowercase>/.
+var imagePrefix = "ghcr.io/" + strings.ToLower(strings.SplitN(Repo, "/", 2)[0]) + "/"
+
+// validImage checks the image as the installer does (installer/src/release.rs): the value
+// goes into the host's .env and compose file, so it holds an image name's characters only.
+func validImage(image string) bool {
+	name, ok := strings.CutPrefix(image, imagePrefix)
+	return ok && name != "" && !strings.Contains(name, "..") &&
+		strings.Trim(name, "abcdefghijklmnopqrstuvwxyz0123456789._/-") == ""
 }
 
 // Newer says whether version a is later than b. A pre-release (1.2.3-rc.1) comes before

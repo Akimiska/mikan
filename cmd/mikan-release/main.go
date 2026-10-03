@@ -4,7 +4,8 @@
 //	mikan-release keygen -out release-signing.pem
 //	RELEASE_SIGNING_KEY="$(cat key.pem)" mikan-release manifest -version 0.3.9 \
 //	    -image ghcr.io/miroshka000/mikan -digest sha256:… \
-//	    -asset x86_64=dist/mikan-x86_64 -asset aarch64=dist/mikan-aarch64 -out dist
+//	    -asset x86_64=dist/mikan-x86_64 -asset aarch64=dist/mikan-aarch64 \
+//	    -min-installer-file .github/min-installer -out dist
 //	mikan-release verify dist/manifest.json
 package main
 
@@ -20,8 +21,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -79,6 +82,37 @@ func keygen(args []string) error {
 	return nil
 }
 
+// Every release carries the installer for each architecture the installer runs on
+// (std::env::consts::ARCH) and the notes in each language the panel shows.
+var (
+	architectures = []string{"x86_64", "aarch64"}
+	languages     = []string{"en", "ru"}
+)
+
+// readMinInstaller reads the minimum installer version from a file the release workflow
+// passes on every release: absent or holding only comments, it asks for no installer.
+func readMinInstaller(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var version string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if version != "" {
+			return "", fmt.Errorf("%s: more than one version", path)
+		}
+		version = line
+	}
+	return version, nil
+}
+
 type assets []string
 
 func (a *assets) String() string     { return strings.Join(*a, ",") }
@@ -88,6 +122,7 @@ func makeManifest(args []string) error {
 	fs := flag.NewFlagSet("manifest", flag.ContinueOnError)
 	version := fs.String("version", "", "release version, e.g. 0.5.0.1")
 	minInstaller := fs.String("min-installer", "", "minimum host installer version, only for a release that cannot run with an older one")
+	minInstallerFile := fs.String("min-installer-file", "", "file with the minimum installer version (# comments allowed); a missing file asks for none")
 	image := fs.String("image", "", "image repository, e.g. ghcr.io/miroshka000/mikan")
 	digest := fs.String("digest", "", "sha256 digest of the pushed multi-arch image")
 	changelog := fs.String("changelog", "CHANGELOG.md", "where the release notes are")
@@ -109,12 +144,35 @@ func makeManifest(args []string) error {
 	if *tag == "" {
 		*tag = "v" + *version
 	}
+	if *minInstallerFile != "" {
+		v, err := readMinInstaller(*minInstallerFile)
+		if err != nil {
+			return err
+		}
+		if v != "" && *minInstaller != "" && v != *minInstaller {
+			return fmt.Errorf("-min-installer %s and %s (%s) disagree", *minInstaller, *minInstallerFile, v)
+		}
+		if v != "" {
+			*minInstaller = v
+		}
+	}
 	m := release.Manifest{Version: *version, MinInstaller: *minInstaller, Published: time.Now().UTC().Truncate(time.Second), Image: *image, Digest: *digest,
 		Installer: map[string]release.Asset{}, Notes: release.Notes(log, *version)}
+	for _, lang := range languages {
+		if m.Notes[lang] == "" {
+			return fmt.Errorf("%s has no %q notes for %s (want \"## %s\" with \"### en\" and \"### ru\")", *changelog, lang, *version, *version)
+		}
+	}
 	for _, a := range files {
 		arch, path, ok := strings.Cut(a, "=")
 		if !ok {
 			return fmt.Errorf("-asset %q: want arch=path", a)
+		}
+		if !slices.Contains(architectures, arch) {
+			return fmt.Errorf("-asset %q: unknown architecture %q, want one of %s", a, arch, strings.Join(architectures, ", "))
+		}
+		if _, dup := m.Installer[arch]; dup {
+			return fmt.Errorf("-asset %q: %s given twice", a, arch)
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -124,6 +182,13 @@ func makeManifest(args []string) error {
 		m.Installer[arch] = release.Asset{
 			URL:    fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", release.Repo, *tag, filepath.Base(path)),
 			SHA256: hex.EncodeToString(sum[:]),
+		}
+	}
+	// A server updates its installer only from the manifest: a release without one
+	// architecture would leave those servers on the old installer.
+	for _, arch := range architectures {
+		if _, ok := m.Installer[arch]; !ok {
+			return fmt.Errorf("no installer for %s: pass -asset %s=path", arch, arch)
 		}
 	}
 	data, err := json.MarshalIndent(m, "", "  ")

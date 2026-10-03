@@ -550,6 +550,11 @@ func (s *Service) refundLatePromoPayment(ctx context.Context, paymentID int64, e
 	if !late {
 		return false, nil
 	}
+	if externalID != "" {
+		if err := s.d.Store.Q.SetPaymentExternalID(ctx, db.SetPaymentExternalIDParams{ExternalID: sql.NullString{String: externalID, Valid: true}, ID: paymentID}); err != nil {
+			return true, err
+		}
+	}
 	n, err := s.d.Store.Q.ClaimLatePromoRefund(ctx, db.ClaimLatePromoRefundParams{
 		RefundStartedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true},
 		ID:              r.ID,
@@ -566,10 +571,11 @@ func (s *Service) refundLatePromoPayment(ctx context.Context, paymentID int64, e
 	}
 	if err := refund(pay); err != nil {
 		_ = s.d.Store.Q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: "promo_late_refund_failed", ID: paymentID})
+		_ = s.d.Store.Q.ReleaseLatePromoRefundClaim(ctx, paymentID)
 		return true, err
 	}
 	n, err = s.d.Store.Q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{
-		RefundedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}, ID: paymentID, Status: pay.Status,
+		RefundedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}, ID: paymentID,
 	})
 	if err != nil {
 		return true, err
@@ -749,7 +755,36 @@ func (s *Service) Reconcile(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		_ = s.Apply(ctx, p.ID)
+		if err := s.Apply(ctx, p.ID); errors.Is(err, promo.ErrReservationExpired) && s.d.Promo != nil && p.ExternalID.Valid {
+			if _, refundErr := s.refundLatePromoPayment(ctx, p.ID, p.ExternalID.String, func(current db.Payment) error {
+				return s.refundPromoPayment(ctx, current, p.ExternalID.String)
+			}); refundErr != nil {
+				s.d.Log.Error("billing: reconcile late promo refund", "payment", p.ID, "err", refundErr)
+			}
+		}
+	}
+	failedRefunds, err := q.ListLatePromoRefunds(ctx)
+	if err != nil {
+		s.d.Log.Error("billing: reconcile late promo refunds", "err", err)
+	} else if s.d.Promo != nil {
+		for _, id := range failedRefunds {
+			if ctx.Err() != nil {
+				return
+			}
+			p, err := q.GetPayment(ctx, id)
+			if err != nil {
+				s.d.Log.Error("billing: load late promo refund", "payment", id, "err", err)
+				continue
+			}
+			if !p.ExternalID.Valid {
+				continue
+			}
+			if _, err := s.refundLatePromoPayment(ctx, p.ID, p.ExternalID.String, func(current db.Payment) error {
+				return s.refundPromoPayment(ctx, current, p.ExternalID.String)
+			}); err != nil {
+				s.d.Log.Error("billing: retry late promo refund", "payment", p.ID, "err", err)
+			}
+		}
 	}
 	open, err := q.ListPendingPayments(ctx, now.Add(-pendingTTL).Unix())
 	if err != nil {
@@ -769,7 +804,7 @@ func (s *Service) Reconcile(ctx context.Context) {
 		s.d.Log.Error("billing: expire", "err", err)
 	}
 	if s.d.Promo != nil {
-		_ = s.d.Promo.ReleaseExpired(ctx, now.Add(-pendingTTL).Unix())
+		_ = s.d.Promo.ReleaseExpired(ctx, now.Unix())
 	}
 }
 

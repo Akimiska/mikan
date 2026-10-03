@@ -457,17 +457,16 @@ func (q *Queries) ListTariffsOnSale(ctx context.Context) ([]Tariff, error) {
 }
 
 const markLatePromoRefunded = `-- name: MarkLatePromoRefunded :execrows
-UPDATE payments SET status = 'refunded', refunded_at = $1, error = '' WHERE id = $2 AND status = $3
+UPDATE payments SET status = 'refunded', refunded_at = $1, error = '' WHERE id = $2 AND status IN ('pending','expired','paid','failed')
 `
 
 type MarkLatePromoRefundedParams struct {
 	RefundedAt sql.NullInt64
 	ID         int64
-	Status     string
 }
 
 func (q *Queries) MarkLatePromoRefunded(ctx context.Context, arg MarkLatePromoRefundedParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, markLatePromoRefunded, arg.RefundedAt, arg.ID, arg.Status)
+	result, err := q.db.ExecContext(ctx, markLatePromoRefunded, arg.RefundedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -606,6 +605,20 @@ type SetPaymentInvoiceParams struct {
 
 func (q *Queries) SetPaymentInvoice(ctx context.Context, arg SetPaymentInvoiceParams) error {
 	_, err := q.db.ExecContext(ctx, setPaymentInvoice, arg.ExternalID, arg.PayUrl, arg.ID)
+	return err
+}
+
+const setPaymentExternalID = `-- name: SetPaymentExternalID :exec
+UPDATE payments SET external_id = $1 WHERE id = $2
+`
+
+type SetPaymentExternalIDParams struct {
+	ExternalID sql.NullString
+	ID         int64
+}
+
+func (q *Queries) SetPaymentExternalID(ctx context.Context, arg SetPaymentExternalIDParams) error {
+	_, err := q.db.ExecContext(ctx, setPaymentExternalID, arg.ExternalID, arg.ID)
 	return err
 }
 

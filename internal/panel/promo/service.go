@@ -391,7 +391,21 @@ func (s *Service) ReleaseExpired(ctx context.Context, before int64) error {
 		return err
 	}
 	for _, id := range rows {
-		if err := s.ReleasePayment(ctx, id); err != nil {
+		if err := s.Store.Tx(ctx, func(q *db.Queries) error {
+			r, err := q.GetPromoRedemptionByPayment(ctx, sql.NullInt64{Int64: id, Valid: id != 0})
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			if err != nil || r.Status != "reserved" {
+				return err
+			}
+			n, err := q.ReleaseExpiredPromoRedemption(ctx, db.ReleaseExpiredPromoRedemptionParams{ID: r.ID, Before: before})
+			if err != nil || n == 0 {
+				return err
+			}
+			_, err = q.DecrementPromoUse(ctx, r.PromoID)
+			return err
+		}); err != nil {
 			return err
 		}
 	}

@@ -166,3 +166,14 @@ func TestPromoUnavailableDoesNotRevealCodeExistence(t *testing.T) {
 		t.Fatal("tariff-specific eligibility was collapsed")
 	}
 }
+
+func TestPromoErrorsAreGenericAtCheckout(t *testing.T) {
+	for _, err := range []error{promo.ErrNotFound, promo.ErrTariff, promo.ErrMinimum, promo.ErrCurrency, promo.ErrRefundUnsupported} {
+		if !promoError(err) {
+			t.Errorf("%v is not recognized as a promo error", err)
+		}
+	}
+	if promoError(billing.ErrProviderOff) {
+		t.Fatal("provider error was classified as a promo error")
+	}
+}

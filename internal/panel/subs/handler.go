@@ -372,6 +372,10 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 		_ = json.NewEncoder(w).Encode(out)
 		return
 	}
+	if strings.TrimSpace(in.PromoCode) != "" && !h.promoLimit.allow(tgID, h.now(), in.PromoCode) {
+		fail(http.StatusTooManyRequests, "promo_try_later")
+		return
+	}
 	var p db.Payment
 	if in.PackageID != 0 {
 		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
@@ -379,6 +383,10 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
 	}
 	if err != nil {
+		if strings.TrimSpace(in.PromoCode) != "" && promoError(err) {
+			fail(http.StatusConflict, "promo_unavailable")
+			return
+		}
 		status, code, unexplained := invoiceFailure(err)
 		if unexplained {
 			h.log.Warn("mini app: the invoice was not made", "provider", in.Provider, "err", err)
@@ -389,16 +397,31 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	_ = json.NewEncoder(w).Encode(map[string]string{"url": p.PayUrl, "provider": p.Provider})
 }
 
+func promoError(err error) bool {
+	for _, candidate := range []error{promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit,
+		promo.ErrTariff, promo.ErrMinimum, promo.ErrNewUser, promo.ErrFirstPurchase, promo.ErrCurrency, promo.ErrUnavailable,
+		promo.ErrNotDiscount, promo.ErrInvalidValue, promo.ErrRefundUnsupported, promo.ErrAlreadyApplied,
+		promo.ErrSubscription, promo.ErrNoExpiry, promo.ErrReservationExpired} {
+		if errors.Is(err, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 // miniAppPromo validates a code or immediately redeems a bonus. Discount codes are only
 // validated here; they are reserved atomically with the payment when the order is opened.
 func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		InitData string `json:"init_data"`
-		Token    string `json:"token"`
-		Code     string `json:"code"`
-		TariffID int64  `json:"tariff_id"`
-		Amount   int64  `json:"amount"`
-		Currency string `json:"currency"`
+		InitData     string `json:"init_data"`
+		Token        string `json:"token"`
+		Code         string `json:"code"`
+		TariffID     int64  `json:"tariff_id"`
+		PackageID    int64  `json:"package_id"`
+		Provider     string `json:"provider"`
+		ValidateOnly bool   `json:"validate_only"`
+		Amount       int64  `json:"amount"`
+		Currency     string `json:"currency"`
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
@@ -415,7 +438,7 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusUnauthorized, "init_data")
 		return
 	}
-	if !h.promoLimit.allow(tgID, h.now()) {
+	if !h.promoLimit.allow(tgID, h.now(), in.Code) {
 		fail(http.StatusTooManyRequests, "promo_try_later")
 		return
 	}
@@ -431,6 +454,21 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 			fail(http.StatusForbidden, billing.ErrNotYours.Error())
 			return
 		}
+	}
+	if in.ValidateOnly {
+		tariffID, amount, currency, err := h.miniAppPromoOrder(r.Context(), userID, in.TariffID, in.PackageID, billing.AdapterOf(in.Provider))
+		if err != nil {
+			fail(http.StatusConflict, "promo_unavailable")
+			return
+		}
+		p, err := h.promos.Validate(r.Context(), tgID, userID, tariffID, amount, currency, in.Code)
+		if err != nil || p.Type != "percent" && p.Type != "fixed" {
+			fail(http.StatusConflict, "promo_unavailable")
+			return
+		}
+		discount := promo.DiscountAmount(p, amount)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "discount": discount, "final_amount": amount - discount, "currency": currency})
+		return
 	}
 	p, err := h.promos.Validate(r.Context(), tgID, userID, in.TariffID, in.Amount, in.Currency, in.Code)
 	if err != nil {
@@ -462,6 +500,53 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 		out["final_amount"] = in.Amount - d
 	}
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (h *Handler) miniAppPromoOrder(ctx context.Context, userID, tariffID, packageID int64, provider string) (int64, int64, string, error) {
+	if h.shop == nil || provider == "" {
+		return 0, 0, "", promo.ErrUnavailable
+	}
+	if packageID != 0 {
+		offers, _, err := h.shop.PackageOffers(ctx, userID)
+		if err != nil {
+			return 0, 0, "", err
+		}
+		user, err := h.st.Q.GetUser(ctx, userID)
+		if err != nil || !user.TariffID.Valid {
+			return 0, 0, "", promo.ErrTariff
+		}
+		for _, offer := range offers {
+			if offer.Package.ID == packageID {
+				if amount, currency, ok := promoOrderPrice(provider, offer.Stars, offer.Rub); ok {
+					return user.TariffID.Int64, amount, currency, nil
+				}
+			}
+		}
+		return 0, 0, "", promo.ErrUnavailable
+	}
+	offers, _, err := h.shop.Offers(ctx)
+	if err != nil {
+		return 0, 0, "", err
+	}
+	for _, offer := range offers {
+		if offer.Tariff.ID == tariffID {
+			if amount, currency, ok := promoOrderPrice(provider, offer.Stars, offer.Rub); ok {
+				return offer.Tariff.ID, amount, currency, nil
+			}
+		}
+	}
+	return 0, 0, "", promo.ErrUnavailable
+}
+
+func promoOrderPrice(provider string, stars, rub int64) (int64, string, bool) {
+	switch {
+	case provider == billing.Stars && stars > 0:
+		return stars, "XTR", true
+	case strings.HasPrefix(provider, billing.AddonPrefix) && rub > 0:
+		return rub, "RUB", true
+	default:
+		return 0, "", false
+	}
 }
 
 func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {

@@ -21,6 +21,7 @@ export function PromoSection({ token, activeCode, onApplied, onBonusApplied }: {
   useEffect(() => { void load(); }, [token]);
 
   const errorMessage = (code: string) => ({
+    promo_try_later: t("sub.promoTryLater"),
     promo_not_found: t("sub.promoNotFound"),
     promo_inactive: t("sub.promoInactive"),
     promo_expired: t("sub.promoExpired"),

@@ -27,10 +27,11 @@ func (noChanges) SlotsChanged()    {}
 
 // fakeTG is the bot: Stars links, refunds and what buyers were told.
 type fakeTG struct {
-	mu       sync.Mutex
-	paid     []db.Payment
-	refunds  []string
-	invoices int
+	mu        sync.Mutex
+	paid      []db.Payment
+	refunds   []string
+	refundErr error
+	invoices  int
 }
 
 func (f *fakeTG) InvoiceLink(_ context.Context, _, _, payload string, stars int64) (string, error) {
@@ -42,6 +43,9 @@ func (f *fakeTG) InvoiceLink(_ context.Context, _, _, payload string, stars int6
 func (f *fakeTG) RefundStars(_ context.Context, _ int64, charge string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.refundErr != nil {
+		return f.refundErr
+	}
 	f.refunds = append(f.refunds, charge)
 	return nil
 }
@@ -199,6 +203,41 @@ func TestExpiredDiscountedStarsCaptureIsRefunded(t *testing.T) {
 	r, err := e.s.d.Promo.GetPaymentRedemption(ctx, p.ID)
 	if err != nil || r.Status != "released" {
 		t.Fatalf("reservation status = %q, err=%v; want released", r.Status, err)
+	}
+}
+
+func TestLateStarsRefundFailureRetriesInReconcile(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "RETRY", Type: "percent", Value: 10,
+		Currency: "XTR", PerUserLimit: 1, DiscountTtl: 30, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	p, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars, PromoCode: pc.Code})
+	must(t, err)
+	e.now = e.now.Add(31 * time.Second)
+	e.tg.refundErr = errors.New("Telegram unavailable")
+	if err := e.s.StarsPaid(ctx, 555, p.Payload, "retry-charge", p.Currency, p.Amount); err == nil {
+		t.Fatal("the first refund attempt unexpectedly succeeded")
+	}
+	failed := e.payment(p.ID)
+	if failed.Error != "promo_late_refund_failed" || failed.ExternalID.String != "retry-charge" {
+		t.Fatalf("payment after failed refund: %+v", failed)
+	}
+	r, err := e.s.d.Promo.GetPaymentRedemption(ctx, p.ID)
+	if err != nil || r.RefundStartedAt.Valid {
+		t.Fatalf("failed refund claim remains set: %+v err=%v", r.RefundStartedAt, err)
+	}
+	e.tg.refundErr = nil
+	e.s.Reconcile(ctx)
+	if got := e.payment(p.ID); got.Status != "refunded" || got.Error != "" {
+		t.Fatalf("reconciled payment status=%q error=%q", got.Status, got.Error)
+	}
+	e.tg.mu.Lock()
+	refunds := append([]string(nil), e.tg.refunds...)
+	e.tg.mu.Unlock()
+	if len(refunds) != 1 || refunds[0] != "retry-charge" {
+		t.Fatalf("refunds=%v", refunds)
 	}
 }
 

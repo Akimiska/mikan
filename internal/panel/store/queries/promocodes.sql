@@ -38,6 +38,12 @@ UPDATE promo_redemptions SET refund_started_at=sqlc.arg(refund_started_at) WHERE
   AND (status='released' OR (status='reserved' AND expires_at IS NOT NULL AND expires_at<=sqlc.arg(now)))
   AND (refund_started_at IS NULL OR refund_started_at<=sqlc.arg(retry_after));
 
+-- name: ReleaseLatePromoRefundClaim :exec
+UPDATE promo_redemptions SET refund_started_at=NULL WHERE payment_id=sqlc.arg(payment_id);
+
+-- name: ListLatePromoRefunds :many
+SELECT id FROM payments WHERE error='promo_late_refund_failed' AND status IN ('pending','expired','paid','failed') ORDER BY id;
+
 -- name: SetPromoEnabled :execrows
 UPDATE promo_codes SET enabled=sqlc.arg(enabled) WHERE id=sqlc.arg(id) AND deleted=0;
 
@@ -86,10 +92,13 @@ WHERE promo_redemptions.id=sqlc.arg(id) AND promo_redemptions.status='reserved' 
 UPDATE promo_redemptions SET status='released' WHERE payment_id=sqlc.arg(payment_id) AND status='reserved';
 
 -- name: PromoStats :one
-SELECT COUNT(CASE WHEN status='applied' THEN 1 END), COALESCE(SUM(CASE WHEN status='applied' THEN days ELSE 0 END),0), COALESCE(SUM(CASE WHEN status='applied' THEN bytes ELSE 0 END),0), COALESCE(SUM(CASE WHEN status='applied' THEN discount_amount ELSE 0 END),0), COALESCE(SUM(CASE WHEN status='applied' AND payment_id IS NOT NULL THEN 1 ELSE 0 END),0) FROM promo_redemptions;
+SELECT COUNT(CASE WHEN status='applied' THEN 1 END), CAST(COALESCE(SUM(CASE WHEN status='applied' THEN days ELSE 0 END),0) AS BIGINT), CAST(COALESCE(SUM(CASE WHEN status='applied' THEN bytes ELSE 0 END),0) AS BIGINT), CAST(COALESCE(SUM(CASE WHEN status='applied' THEN discount_amount ELSE 0 END),0) AS BIGINT), CAST(COALESCE(SUM(CASE WHEN status='applied' AND payment_id IS NOT NULL THEN 1 ELSE 0 END),0) AS BIGINT) FROM promo_redemptions;
 
 -- name: ListExpiredPromoPayments :many
-SELECT DISTINCT p.id FROM payments p JOIN promo_redemptions r ON r.payment_id=p.id WHERE p.status='expired' AND p.created_at < sqlc.arg(before) AND r.status='reserved';
+SELECT DISTINCT p.id FROM payments p JOIN promo_redemptions r ON r.payment_id=p.id WHERE ((p.status='expired' AND p.created_at < sqlc.arg(before)) OR (r.expires_at IS NOT NULL AND r.expires_at<=sqlc.arg(before))) AND r.status='reserved';
+
+-- name: ReleaseExpiredPromoRedemption :execrows
+UPDATE promo_redemptions SET status='released' WHERE id=sqlc.arg(id) AND status='reserved' AND (expires_at IS NOT NULL AND expires_at<=sqlc.arg(before) OR EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('failed','expired','refunded') AND p.created_at<sqlc.arg(before)));
 
 -- name: ListPromoRedemptionsByTg :many
 SELECT * FROM promo_redemptions WHERE tg_id=sqlc.arg(tg_id) AND status='applied' ORDER BY id DESC LIMIT CAST(sqlc.arg(lim) AS BIGINT);

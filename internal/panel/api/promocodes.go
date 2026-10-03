@@ -423,6 +423,9 @@ func sqlValueInt64(v any) int64 {
 	case []byte:
 		parsed, _ := strconv.ParseInt(string(n), 10, 64)
 		return parsed
+	case string:
+		parsed, _ := strconv.ParseInt(n, 10, 64)
+		return parsed
 	default:
 		return 0
 	}

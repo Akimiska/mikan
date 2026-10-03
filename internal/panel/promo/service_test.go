@@ -252,6 +252,41 @@ func TestReleasePaymentKeepsPaidReservation(t *testing.T) {
 	}
 }
 
+func TestReleaseExpiredReservationFreesPromoUse(t *testing.T) {
+	st := newTestStore(t)
+	defer st.Close()
+	ctx := context.Background()
+	if err := domain.Seed(ctx, st, time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	max := int64(1)
+	p := addPromo(t, st, "percent", 25, &max)
+	if _, err := st.DB.ExecContext(ctx, `UPDATE promo_codes SET discount_ttl=30 WHERE id=$1`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	var paymentID int64
+	if err := st.DB.QueryRowContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_id,tariff_name,amount,currency,status,created_at) VALUES('stars','ttl-release',10,'new',(SELECT min(id) FROM tariffs),'test',1000,'XTR','pending',1000) RETURNING id`).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1000, 0)
+	s := New(st, func() time.Time { return now })
+	if _, err := s.ReserveDiscount(ctx, st.Q, 10, 0, 7, 1000, "RUB", p.Code, paymentID); err != nil {
+		t.Fatal(err)
+	}
+	now = time.Unix(1031, 0)
+	if err := s.ReleaseExpired(ctx, now.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.GetPaymentRedemption(ctx, paymentID)
+	if err != nil || r.Status != "released" {
+		t.Fatalf("reservation status=%q err=%v; want released", r.Status, err)
+	}
+	code, err := st.Q.GetPromoCode(ctx, p.ID)
+	if err != nil || code.UsedCount != 0 {
+		t.Fatalf("used_count=%d err=%v; want zero", code.UsedCount, err)
+	}
+}
+
 func TestPerUserLimitSurvivesSubscriptionRelink(t *testing.T) {
 	st := newTestStore(t)
 	defer st.Close()

@@ -47,22 +47,6 @@ func (q *Queries) AddUserPoolTraffic(ctx context.Context, arg AddUserPoolTraffic
 	return err
 }
 
-const addUserTotalTraffic = `-- name: AddUserTotalTraffic :exec
-UPDATE users SET total_up = total_up + $1, total_down = total_down + $2 WHERE id = $3
-`
-
-type AddUserTotalTrafficParams struct {
-	Up   int64
-	Down int64
-	ID   int64
-}
-
-// Pool traffic: the all-time totals take it, the main period's counters do not.
-func (q *Queries) AddUserTotalTraffic(ctx context.Context, arg AddUserTotalTrafficParams) error {
-	_, err := q.db.ExecContext(ctx, addUserTotalTraffic, arg.Up, arg.Down, arg.ID)
-	return err
-}
-
 const clearTariffPools = `-- name: ClearTariffPools :exec
 DELETE FROM tariff_pools WHERE tariff_id = $1
 `

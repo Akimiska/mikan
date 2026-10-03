@@ -28,15 +28,9 @@ SELECT state, count(*) AS n FROM slots GROUP BY state;
 -- name: InsertSlot :exec
 INSERT INTO slots (name, uuid, secret, state, created_at) VALUES ($1, $2, $3, 'free', $4);
 
--- name: MaxSlotID :one
-SELECT CAST(coalesce(max(id), 0) AS BIGINT) FROM slots;
-
 -- name: SlotCounter :one
 -- The last slot number handed out: slots purged from the top do not give theirs back.
 SELECT last FROM slot_counter WHERE id = 1;
-
--- name: SetSlotCounter :exec
-INSERT INTO slot_counter (id, last) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET last = excluded.last;
 
 -- name: TakeFreeSlot :one
 UPDATE slots SET state = 'assigned'
@@ -100,17 +94,11 @@ UPDATE users SET slot_id = $1, sub_token = $2, updated_at = $3 WHERE id = $4;
 -- name: ResetUserTraffic :exec
 UPDATE users SET used_up = 0, used_down = 0, period_start = $1, updated_at = $2 WHERE id = $3;
 
--- name: DeleteUser :exec
-DELETE FROM users WHERE id = $1;
-
 -- name: AddUserTraffic :exec
 UPDATE users
 SET used_up = used_up + sqlc.arg(up), used_down = used_down + sqlc.arg(down),
     total_up = total_up + sqlc.arg(up), total_down = total_down + sqlc.arg(down)
 WHERE id = sqlc.arg(id);
-
--- name: SetUserOnline :exec
-UPDATE users SET online_at = $1 WHERE id = $2;
 
 -- name: AddTrafficHourly :exec
 INSERT INTO traffic_hourly (user_id, hour, up, down) VALUES ($1, $2, $3, $4)

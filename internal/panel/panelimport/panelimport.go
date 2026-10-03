@@ -12,6 +12,10 @@
 //     hold were never seen by the API. They are checked as the old panel checked them,
 //     with its secret (Verifier); without the secret those links are not taken over,
 //     since a token without a checked signature is anybody's for the asking.
+//     A token signed before the user was made in the old panel is refused (not_before).
+//     A revoke in the old panel (Marzban's sub_revoked_at) is not in either API, so links
+//     revoked there open again here: revoke them anew in mikan (a reissue drops all of a
+//     user's old links).
 package panelimport
 
 import (

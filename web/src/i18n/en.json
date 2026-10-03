@@ -1005,7 +1005,7 @@
       "progress": "Importing: {done} of {total}",
       "failed": "The import stopped: {error}",
       "invalid": "Cannot be taken as they are (too long, broken numbers): {n}",
-      "notCarried": "Not carried over: the traffic reset strategy, groups and inbounds of the old panel (users get the plan's), and an on-hold term starts at the import.",
+      "notCarried": "Not carried over: the traffic reset strategy, groups and inbounds of the old panel (users get the plan's), and an on-hold term starts at the import. Links revoked in the old panel work again: reissue those users' links after the import.",
       "report": "Created {created}, old links ready for {links}",
       "skipped": "{n} left out: the name is taken",
       "legacy": "Old subscription links",

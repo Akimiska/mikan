@@ -454,10 +454,10 @@ impl Menu {
             ),
             Act::Backup => ("Backup", job(|| backup::backup(&mut |_| {}).map(|f| format!("Saved {}", f.display())))),
             Act::Restore(f) => {
-                ("Restore", job(move || backup::restore(&f, &mut |_| {}).map(|()| format!("Restored from {}", f.display()))))
+                ("Restore", job(move || backup::restore(&f, false, &mut |_| {}).map(|()| format!("Restored from {}", f.display()))))
             }
             Act::Join => ("Join key", job(move || ops::join(&value, None).map(|()| "The node runs with the new key.".into()))),
-            Act::Uninstall => ("Uninstall", job(|| ops::uninstall().map(|()| "Done. Press Enter to leave.".into()))),
+            Act::Uninstall => ("Uninstall", job(|| ops::uninstall().map(|_| "Done. Press Enter to leave.".into()))),
         };
         self.job_title = title.to_owned();
         self.job_at = self.section();

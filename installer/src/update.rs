@@ -1,8 +1,9 @@
 //! `mikan update`: to the latest release, or to an image the admin names, with a backup
 //! first. A panel already on PostgreSQL goes back to its previous image when the new one
-//! does not start on an unchanged schema; otherwise it stays stopped with its data
-//! preserved. Nodes always go back. The daily timer, the panel's
-//! Update button and the admin's shell all come through here, one at a time (lock.rs).
+//! cannot migrate the database, or does not start on an unchanged schema; otherwise it
+//! stays stopped with its data preserved. Nodes always go back. The daily timer, the
+//! panel's Update button and the admin's shell all come through here, one at a time
+//! (lock.rs).
 //!
 //! The panel and this command talk through data/panel/update, which the panel owns, so
 //! everything read from there is small, plain-file data and everything written goes through
@@ -131,16 +132,32 @@ fn clear_update_dir(say: &mut dyn FnMut(&str)) {
     }
 }
 
+/// Whether the status the panel reads is an ending (ok, failed): the upgraded command an
+/// update handed over to has told it how it went, in its own words.
+fn status_ended() -> bool {
+    update_dir(false)
+        .ok()
+        .flatten()
+        .and_then(|d| d.read("status.json", 64 << 10).ok().flatten())
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .is_some_and(|v| v["state"] == "ok" || v["state"] == "failed")
+}
+
 /// What an update has told the panel so far.
 #[derive(Default)]
 struct Attempt {
     version: String,
     from: String,
     started: bool,
+    /// The upgraded command finished the update and reported it.
+    handed_off: bool,
+    /// Why the daily check left the update for later, for the panel to show.
+    skipped: Option<String>,
 }
 
 /// Updates to the latest release (or target), upgrading the installer first when needed.
-/// A panel goes back only from PostgreSQL to PostgreSQL on an unchanged schema; a node always can.
+/// A panel goes back only from PostgreSQL to PostgreSQL, when the migration fails or the
+/// schema did not move; a node always can.
 pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64)) -> Result<()> {
     // `--check` changes nothing, so it waits for no one.
     let _lock = if a.check {
@@ -188,12 +205,14 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
         say(&format!("Payment adapters: {e:#}"));
     }
     // The admin pressed Update and waits for an answer, and an update that began must end
-    // in one: ok, failed, never "running" for good.
-    if a.requested || at.started {
+    // in one: ok, failed, never "running" for good. What the upgraded command said about
+    // its own work stays; it is told here only when it ended before telling.
+    if (a.requested || at.started) && !(at.handed_off && status_ended()) {
         let now = Install::load().unwrap_or(install);
-        match &r {
-            Ok(()) => report(&now, Phase::Ok, &at.version, &at.from, ""),
-            Err(e) => report(&now, Phase::Failed, &at.version, &at.from, &format!("{e:#}")),
+        match (&r, &at.skipped) {
+            (Ok(()), None) => report(&now, Phase::Ok, &at.version, &at.from, ""),
+            (Ok(()), Some(why)) => report(&now, Phase::Failed, &at.version, &at.from, why),
+            (Err(e), _) => report(&now, Phase::Failed, &at.version, &at.from, &format!("{e:#}")),
         }
     }
     r
@@ -207,8 +226,8 @@ fn panel_addons(say: &mut dyn FnMut(&str)) -> Result<()> {
 
 fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64), at: &mut Attempt) -> Result<()> {
     let mut install = Install::load()?;
-    // Do not converge a legacy compose file before its SQLite backup and writer stop.
-    if a.auto && !a.requested && !auto_on(&install) {
+    let daily = a.auto && !a.requested;
+    if daily && !auto_on(&install) {
         return Ok(());
     }
     let current = install.version();
@@ -275,7 +294,14 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
         if upgrade {
             // The new installer must prepare infrastructure before the image starts.
             // The signed image was already verified above; hand off under our lock.
-            let status = Command::new(host::BIN).args(["update", &image]).env(lock::HELD_ENV, "1").status()?;
+            let mut child = Command::new(host::BIN);
+            child.args(["update", &image]).env(lock::HELD_ENV, "1");
+            if daily {
+                // so that it, too, leaves a move it has no room for to a later night
+                child.arg("--auto");
+            }
+            at.handed_off = true;
+            let status = child.status()?;
             if !status.success() {
                 bail!("the upgraded installer could not finish the update; retry mikan update");
             }
@@ -289,32 +315,54 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
         }
     }
 
+    let root = Path::new(DIR);
+    let was_postgres = install.env.get("MIKAN_DATABASE_URL").is_some();
+    // The move from SQLite cannot be undone once it imported: it starts only with room for
+    // it. The daily check leaves it for a later night, the admin is told why.
+    let moving = !install.node && !was_postgres;
+    if moving && let Err(why) = room_to_move(root) {
+        if daily {
+            let why = format!("the move to PostgreSQL waits for room: {why}");
+            say(&format!("No update tonight: {why}"));
+            at.skipped = Some(why);
+            return Ok(());
+        }
+        bail!("the move to PostgreSQL needs more room, nothing was changed: {why}");
+    }
+    if !install.node {
+        // Pulled now, not by `compose up` with the panel stopped and no limit on silence.
+        say("PostgreSQL 18 image");
+        docker::pull_postgres(&mut *progress).context("the PostgreSQL image could not be pulled; nothing was changed")?;
+    }
+
     // A backup that cannot be made stops the update before changing its image or data.
-    let saved = backup::backup_as("pre-update", say).context("the backup before the update failed; nothing was changed")?;
-    say(&format!("Backup: {}", saved.display()));
+    let kind = if moving { backup::PRE_POSTGRES } else { backup::PRE_UPDATE };
+    let gate = backup::backup_as(kind, say).context("the backup before the update failed; nothing was changed")?;
 
     // From here until the new version is up or the old one is back, nothing may cut it short.
     let _critical = signals::critical();
-    let root = Path::new(DIR);
-    let old_image = install.env.get("MIKAN_IMAGE").unwrap_or_default().to_owned();
-    let old_version = install.env.get("MIKAN_VERSION").map(str::to_owned);
     let old_compose = fs::read_to_string(root.join("compose.yaml")).context("read the current compose file")?;
     let old_env = install.env.render();
-    let was_postgres = install.env.get("MIKAN_DATABASE_URL").is_some();
-    if !install.node {
-        // The final source snapshot must include every payment and bot update accepted
-        // until the old process has shut down, including SQLite's WAL.
+    let saved = if install.node {
+        gate
+    } else {
+        // The archive to go back to holds every payment and bot update accepted until the
+        // old process shut down (SQLite with its WAL, PostgreSQL dumped now); the one above
+        // proved a backup can be made while nothing had changed yet, and goes.
         docker::compose_run(&["stop", "panel"])?;
-        if !was_postgres {
-            match backup::snapshot_stopped(root, "pre-update") {
-                Ok(final_copy) => say(&format!("Final SQLite snapshot: {}", final_copy.display())),
-                Err(e) => {
-                    docker::compose_run(&["up", "-d", "panel"])?;
-                    return Err(e.context("the stopped SQLite source could not be saved; update aborted"));
-                }
+        match backup::archive_stopped(root, kind, true) {
+            Ok(last) => {
+                let _ = fs::remove_file(&gate);
+                last
+            }
+            Err(e) => {
+                docker::compose_run(&["up", "-d", "panel"])?;
+                return Err(e.context("the data of the stopped panel could not be saved; the update stopped and the panel runs again"));
             }
         }
-    }
+    };
+    say(&format!("Backup: {}", saved.display()));
+    let before = Before { env: &old_env, compose: &old_compose, saved: &saved, current: &current };
 
     // Until the database migrates, the configuration from before can come back as it was.
     let prepared = (|| -> Result<()> {
@@ -344,10 +392,17 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
     }
     let mut schema = None;
     if !install.node {
-        // A failed command may have committed the import before losing its response.
-        // Never fall back to stale SQLite or restore a snapshot implicitly after this.
         match docker::database(&["migrate"]) {
             Ok(out) => schema = schema_change(&String::from_utf8_lossy(&out.stdout)),
+            // On PostgreSQL already the previous version is tried on what the migration
+            // left (each of its steps commits whole or not at all); one that refuses a
+            // schema moved forward leaves the panel stopped.
+            Err(e) if was_postgres => {
+                say(&format!("mikan {version} could not migrate the database: going back to {current}"));
+                return Err(roll_back(&mut install, &before, &format!("mikan {version} could not migrate the database: {e:#}")));
+            }
+            // A failed import may have committed before losing its response. Never fall
+            // back to stale SQLite or restore a snapshot implicitly after this.
             Err(e) => {
                 return Err(e.context(format!(
                     "database migration did not finish; panel stays stopped, original SQLite and PostgreSQL preserved. Run mikan update again; backup: {}",
@@ -365,8 +420,7 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
             return Err(e.context(format!("PostgreSQL is preserved and the panel is stopped. No automatic database rollback is safe; retry mikan update after fixing startup. Backup: {}", saved.display())));
         }
         say(&format!("mikan {version} did not start: going back to {current}"));
-        let before = Before { image: &old_image, version: old_version.as_deref(), saved: &saved, new: &version, current: &current };
-        return Err(roll_back(&mut install, &before, say, &format!("{e:#}")));
+        return Err(roll_back(&mut install, &before, &format!("mikan {version} did not start: {e:#}")));
     }
     seal_when_current(root, install.node, say);
     say(&format!("mikan {version} is running."));
@@ -400,51 +454,90 @@ fn schema_change(out: &str) -> Option<(u64, u64)> {
     Some((from.trim().parse().ok()?, to.trim().parse().ok()?))
 }
 
-/// Puts the configuration from before the update back and starts it. A PostgreSQL password
-/// made meanwhile stays: its volume may already be initialized with it, and another one on
-/// the next attempt would lock the panel out of its own database.
-fn restore_previous(root: &Path, now: &EnvFile, old_env: &str, old_compose: &str, was_postgres: bool) -> Result<()> {
-    crate::envfile::write_private(&root.join(".env"), old_env.as_bytes())?;
+/// The .env from before the update, to be written once. A PostgreSQL password made
+/// meanwhile stays: its volume may already be initialized with it, and another one on the
+/// next attempt would lock the panel out of its own database.
+fn previous_env(root: &Path, now: &EnvFile, old_env: &str) -> Result<EnvFile> {
+    let mut env = EnvFile::from_text(root.join(".env"), old_env);
     if let Some(password) = now.get("MIKAN_POSTGRES_PASSWORD") {
-        let mut env = EnvFile::load(root.join(".env"))?;
         env.set("MIKAN_POSTGRES_PASSWORD", password)?;
-        env.save()?;
     }
+    Ok(env)
+}
+
+/// Puts the configuration from before the update back, starts it and waits for it.
+fn restore_previous(root: &Path, now: &EnvFile, old_env: &str, old_compose: &str, was_postgres: bool) -> Result<()> {
+    previous_env(root, now, old_env)?.save()?;
     if !was_postgres {
         // The compose file from before has no database service to stop it by later.
         let _ = docker::compose_run(&["stop", "postgres"]);
     }
     docker::put_compose(root, old_compose)?;
     docker::compose_run(&["up", "-d"])?;
-    Ok(())
+    setup::wait_ready(None, Duration::from_secs(90))
 }
 
-/// The previous image and version come back: a node's always, a panel's when the schema
-/// it left is the one the previous version ran on.
-fn roll_back(install: &mut Install, before: &Before, _say: &mut dyn FnMut(&str), why: &str) -> anyhow::Error {
+/// The configuration from before comes back: a node's always, a panel's when its database
+/// is one the previous version may run on. A panel that does not start on it stays
+/// stopped. why says what failed.
+fn roll_back(install: &mut Install, before: &Before, why: &str) -> anyhow::Error {
     let root = Path::new(DIR);
-    let (new, current, saved) = (before.new, before.current, before.saved.display());
+    let (current, saved) = (before.current, before.saved.display());
     let back = (|| -> Result<()> {
-        install.env.set("MIKAN_IMAGE", before.image)?;
-        install.env.set("MIKAN_VERSION", before.version.unwrap_or(""))?;
+        install.env = previous_env(root, &install.env, before.env)?;
         install.env.save()?;
+        docker::put_compose(root, before.compose)?;
         start(install, root)
     })();
     match back {
-        Ok(()) => anyhow::anyhow!("mikan {new} did not start, {current} runs again (backup: {saved}): {why}"),
-        Err(e) => anyhow::anyhow!(
-            "mikan {new} did not start, and {current} does not start either ({e:#}). The data from before the update are in {saved}: mikan restore {saved}. {why}"
-        ),
+        Ok(()) => anyhow::anyhow!("{why}; mikan {current} runs again (backup: {saved})"),
+        Err(e) => {
+            let stopped = if install.node {
+                ""
+            } else {
+                let _ = docker::compose_run(&["stop", "panel"]);
+                ", so the panel is stopped (an older mikan refuses a schema a newer one moved forward)"
+            };
+            anyhow::anyhow!(
+                "{why}; and mikan {current} does not start either ({e:#}){stopped}. The data from before the update are in {saved}: mikan restore {saved}"
+            )
+        }
     }
 }
 
 /// What an update goes back to.
 struct Before<'a> {
-    image: &'a str,
-    version: Option<&'a str>,
+    /// .env and compose.yaml as they were.
+    env: &'a str,
+    compose: &'a str,
+    /// The archive of the data from before.
     saved: &'a Path,
-    new: &'a str,
     current: &'a str,
+}
+
+/// What the move from SQLite to PostgreSQL needs before anything stops: disk for the
+/// archives, the dump and the new database (three times the panel's data, at least
+/// 1 GiB) where mikan and Docker keep them, and memory for PostgreSQL beside the panel.
+fn room_to_move(root: &Path) -> std::result::Result<(), String> {
+    let data = crate::system::tree_bytes(&root.join("data/panel"));
+    let docker_dir = Path::new("/var/lib/docker");
+    let free = [root, docker_dir].into_iter().filter(|p| p.exists()).filter_map(crate::system::disk_free_bytes).min();
+    move_fits(free, crate::system::mem_available_mb(), data)
+}
+
+fn move_fits(free: Option<u64>, mem_mb: Option<u64>, data: u64) -> std::result::Result<(), String> {
+    let need = data.saturating_mul(3).max(1 << 30);
+    if let Some(free) = free
+        && free < need
+    {
+        return Err(format!("{} MB of free disk, {} MB needed (three times data/panel, at least 1 GB)", free >> 20, need >> 20));
+    }
+    if let Some(mb) = mem_mb
+        && mb < 512
+    {
+        return Err(format!("{mb} MB of memory available, 512 MB needed for PostgreSQL beside the panel"));
+    }
+    Ok(())
 }
 
 /// data/ becomes root's once no container can mount all of it: with the current
@@ -551,6 +644,32 @@ mod tests {
         assert_eq!(schema_change("PostgreSQL schema version: 1 -> 2\n"), Some((1, 2)));
         assert_eq!(schema_change("PostgreSQL schema is ready; no legacy SQLite database\n"), None);
         assert_eq!(schema_change("PostgreSQL schema version: one -> 2\n"), None);
+    }
+
+    // The .env goes back in one write, with the password a database volume may already
+    // have been initialized with, and without the address of a database it never used.
+    #[test]
+    fn the_previous_env_keeps_a_new_database_password() {
+        let old = "MIKAN_IMAGE=old-image\nMIKAN_VERSION=0.4.4\nPANEL_PORT=21355\n";
+        let now = EnvFile::from_text(
+            "x",
+            "MIKAN_IMAGE=new-image\nMIKAN_VERSION=0.5.0.1\nPANEL_PORT=21355\nMIKAN_POSTGRES_PASSWORD=made\nMIKAN_DATABASE_URL=postgresql://mikan:made@localhost/mikan?host=/run/postgresql\n",
+        );
+        let env = previous_env(Path::new("/opt/mikan"), &now, old).unwrap();
+        assert_eq!(env.render(), format!("{old}MIKAN_POSTGRES_PASSWORD=made\n"));
+        let unchanged = previous_env(Path::new("/opt/mikan"), &EnvFile::from_text("x", ""), old).unwrap();
+        assert_eq!(unchanged.render(), old);
+    }
+
+    #[test]
+    fn the_move_to_postgres_needs_disk_and_memory() {
+        const GIB: u64 = 1 << 30;
+        assert!(move_fits(Some(2 * GIB), Some(1024), 100 << 20).is_ok());
+        assert!(move_fits(None, None, 100 << 20).is_ok(), "what cannot be read does not stop it");
+        let small = move_fits(Some(900 << 20), Some(1024), 1 << 20).unwrap_err();
+        assert!(small.contains("1024 MB needed"), "at least 1 GiB: {small}");
+        assert!(move_fits(Some(5 * GIB), Some(1024), 2 * GIB).unwrap_err().contains("6144 MB needed"), "three times the data");
+        assert!(move_fits(Some(5 * GIB), Some(400), 1 << 20).unwrap_err().contains("400 MB of memory"));
     }
 
     #[test]

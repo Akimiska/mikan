@@ -251,9 +251,10 @@ pub fn join(key: &str, panel_ip: Option<IpAddr>) -> Result<()> {
     Ok(())
 }
 
-/// Stops mikan and removes what it put on the host; the data stays.
-pub fn uninstall() -> Result<()> {
-    Install::load()?;
+/// Stops mikan and removes what it put on the host; the data stays, a panel's database in
+/// its volume too. True for a panel.
+pub fn uninstall() -> Result<bool> {
+    let panel = !Install::load()?.node;
     let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
     docker::compose_run(&["down"])?;
     addon::down();
@@ -262,5 +263,5 @@ pub fn uninstall() -> Result<()> {
         let _ = Command::new("sysctl").arg("--system").stdout(Stdio::null()).stderr(Stdio::null()).status();
     }
     let _ = fs::remove_file(host::BIN);
-    Ok(())
+    Ok(panel)
 }

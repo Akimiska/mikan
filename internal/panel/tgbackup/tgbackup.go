@@ -308,6 +308,10 @@ func (s *Service) send(ctx context.Context, now time.Time) (int64, error) {
 	return size, nil
 }
 
+// workFactor overrides age's scrypt cost (2^18) when not zero; tests lower it, a backup
+// never does.
+var workFactor int
+
 // packOverhead is what tar, gzip and age add at most to a dump that is already compressed
 // (pg_dump's custom format): the size check before packing leaves this much room.
 const packOverhead = 1 << 20
@@ -340,6 +344,9 @@ func Make(ctx context.Context, dump Dumper, dir, password string, now time.Time)
 	r, err := age.NewScryptRecipient(password)
 	if err != nil {
 		return "", 0, err
+	}
+	if workFactor > 0 {
+		r.SetWorkFactor(workFactor)
 	}
 	path = filepath.Join(dir, "backup.tar.gz.age")
 	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)

@@ -30,6 +30,13 @@ import (
 
 const password = "correct horse battery staple"
 
+// TestMain lowers age's scrypt cost: each backup here would otherwise spend a second or
+// more of a slow CI runner on it. Decryption reads the cost from the file.
+func TestMain(m *testing.M) {
+	workFactor = 10
+	os.Exit(m.Run())
+}
+
 func open(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := storetest.Open(context.Background(), t.TempDir())
@@ -276,7 +283,7 @@ func TestStartRunsInTheBackground(t *testing.T) {
 	if err := s.Start(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for !s.Busy() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -287,6 +294,7 @@ func TestStartRunsInTheBackground(t *testing.T) {
 		t.Fatalf("a second start: %v", err)
 	}
 	close(release)
+	deadline = time.Now().Add(60 * time.Second)
 	for s.Busy() && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}

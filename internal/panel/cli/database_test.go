@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,7 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5"
 
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -81,6 +85,70 @@ func TestPostgresArchiveActuallyRestores(t *testing.T) {
 	if v, err := st.Q.GetSetting(ctx, "preserved"); err != nil || v != "42" {
 		t.Fatal("failed restore changed data", v, err)
 	}
+}
+
+// An installation in the public schema (a MIKAN_DATABASE_URL without a search path, as the
+// installer writes it) backs up and restores like a fixture's own schema does.
+func TestPublicSchemaBackupAndRestore(t *testing.T) {
+	ctx := context.Background()
+	base := os.Getenv("MIKAN_TEST_DATABASE_URL")
+	admin, err := pgx.Connect(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	name := fmt.Sprintf("mikan_public_%d", time.Now().UnixNano())
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+		t.Skip("CREATE DATABASE is not permitted here:", err)
+	}
+	defer admin.Exec(context.Background(), "DROP DATABASE "+name+" WITH (FORCE)")
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.Path = "/" + name
+	dsn := u.String()
+	dir := t.TempDir()
+	t.Setenv("MIKAN_DATABASE_URL", dsn)
+	t.Setenv("MIKAN_DATA_DIR", dir)
+	st, err := store.OpenPostgres(ctx, dir, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var schema string
+	if err := st.DB.QueryRowContext(ctx, "SELECT current_schema()").Scan(&schema); err != nil || schema != "public" {
+		t.Fatalf("schema %q %v", schema, err)
+	}
+	if err := st.Q.SetSetting(ctx, db.SetSettingParams{Key: "preserved", Value: "42"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "backup.dump")
+	if err := databaseCmd(ctx, []string{"backup", path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Q.SetSetting(ctx, db.SetSettingParams{Key: "preserved", Value: "99"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, "CREATE TABLE newer_migration (id BIGINT)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := databaseCmd(ctx, []string{"restore", path}); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := st.Q.GetSetting(ctx, "preserved"); err != nil || v != "42" {
+		t.Fatalf("restore did not replace data: %s %v", v, err)
+	}
+	var newer bool
+	var leftovers int
+	if err := st.DB.QueryRowContext(ctx, "SELECT to_regclass('newer_migration') IS NOT NULL, (SELECT count(*) FROM pg_namespace WHERE nspname LIKE 'public\\_%')").Scan(&newer, &leftovers); err != nil || newer || leftovers != 0 {
+		t.Fatal("the restore left the previous objects behind:", newer, leftovers, err)
+	}
+	live, err := store.OpenPostgres(ctx, dir, dsn)
+	if err != nil {
+		t.Fatal("restored PG cannot start:", err)
+	}
+	live.Close()
 }
 
 // schemaDSN reaches st's schema the way an installation's MIKAN_DATABASE_URL reaches its

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -93,11 +94,35 @@ func restoreSchema(ctx context.Context, dsn string, load func(context.Context) e
 		}
 		return err
 	}
-	if _, err := c.ExecContext(ctx, "DROP SCHEMA "+quote(aside)+" CASCADE"); err != nil {
-		return fmt.Errorf("restore finished, the previous data stay in schema %s: %w", aside, err)
+	// The load succeeded: the previous schema leaves the name recoverRestore reverts from
+	// before anything else can fail, or the next start would bring the old data back.
+	// Neither step may be cut short by a cancelled context.
+	bg := context.WithoutCancel(ctx)
+	replaced := fmt.Sprintf("%s_replaced_%d", schema, time.Now().Unix())
+	if err := inTx(bg, c, "ALTER SCHEMA "+quote(aside)+" RENAME TO "+quote(replaced)); err != nil {
+		if back := revertRestore(bg, c, schema, aside); back != nil {
+			return fmt.Errorf("restore not finished; the previous data come back at the next start: %w", errors.Join(err, back))
+		}
+		return fmt.Errorf("restore not finished; the previous data are back: %w", err)
+	}
+	if _, err := c.ExecContext(bg, "DROP SCHEMA "+quote(replaced)+" CASCADE"); err != nil {
+		return &LeftoverSchemaError{Schema: replaced, Err: err}
 	}
 	return nil
 }
+
+// LeftoverSchemaError is a finished restore whose previous data could not be dropped.
+// Nothing reads that schema any more; it only takes space and keeps old secrets.
+type LeftoverSchemaError struct {
+	Schema string
+	Err    error
+}
+
+func (e *LeftoverSchemaError) Error() string {
+	return fmt.Sprintf("the previous data stay in schema %s; drop it by hand: %v", e.Schema, e.Err)
+}
+
+func (e *LeftoverSchemaError) Unwrap() error { return e.Err }
 
 // recoverRestore puts back the schema an interrupted restore set aside. It refuses to
 // run beside a restore in progress.

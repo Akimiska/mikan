@@ -89,18 +89,20 @@ func databaseCmd(ctx context.Context, args []string) error {
 			return readErr
 		}
 		if string(magic) == "SQLite format 3\x00" {
-			if err := store.RestoreSQLite(ctx, dsn, cfg.DataDir, args[1]); err != nil {
-				return err
-			}
+			err = store.RestoreSQLite(ctx, dsn, cfg.DataDir, args[1])
 		} else if string(magic[:5]) == "PGDMP" {
-			err := store.RestorePostgres(ctx, dsn, cfg.DataDir, func(ctx context.Context) error {
+			err = store.RestorePostgres(ctx, dsn, cfg.DataDir, func(ctx context.Context) error {
 				return postgresTool(ctx, dsn, "pg_restore", "--dbname=", "--clean", "--if-exists", "--single-transaction", "--exit-on-error", "--no-owner", "--no-acl", args[1])
 			})
-			if err != nil {
-				return err
-			}
 		} else {
 			return errors.New("unsupported database backup format")
+		}
+		// The restored data are in place; only the old copy is left to clean up.
+		var leftover *store.LeftoverSchemaError
+		if errors.As(err, &leftover) {
+			fmt.Fprintln(os.Stderr, "Warning:", leftover)
+		} else if err != nil {
+			return err
 		}
 		fmt.Println("Database restored; start the panel after restoring its matching files")
 		return nil

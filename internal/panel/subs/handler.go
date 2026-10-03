@@ -19,6 +19,7 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -36,6 +37,8 @@ type Config struct {
 	// SubBase is https://host:port/<sub path> as the panel hands links out; "" without an
 	// address, and the request's own address is taken.
 	SubBase string
+	// Legacy checks the signed links of the panel users were imported from (Legacy).
+	Legacy  panelimport.Verifier
 	Nodes   []Node   // enabled nodes in display order
 	Direct  []string // the panel's and nodes' hosts: kept out of the tunnel
 	Groups  Groups

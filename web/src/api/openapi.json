@@ -1522,6 +1522,84 @@
         ],
         "type": "object"
       },
+      "ImportRunInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "marzban",
+              "pasarguard",
+              "remnawave"
+            ],
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "tariff_id": {
+            "description": "Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "token": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 300,
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "tariff_id"
+        ],
+        "type": "object"
+      },
+      "ImportSource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "marzban",
+              "pasarguard",
+              "remnawave"
+            ],
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "token": {
+            "description": "Remnawave: API-токен; PasarGuard: API-ключ вместо логина",
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "url": {
+            "description": "Адрес старой панели: https://panel.example.com; http:// — только для этого сервера или локальной сети",
+            "maxLength": 300,
+            "type": "string"
+          },
+          "username": {
+            "description": "Marzban, PasarGuard: логин администратора",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url"
+        ],
+        "type": "object"
+      },
       "InboundView": {
         "additionalProperties": false,
         "properties": {
@@ -1739,6 +1817,118 @@
         },
         "required": [
           "url"
+        ],
+        "type": "object"
+      },
+      "JobState": {
+        "additionalProperties": false,
+        "properties": {
+          "done": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Код ошибки, когда state = failed",
+            "type": "string"
+          },
+          "finished": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "from": {
+            "description": "Панель и её адрес (без пути и данных для входа)",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "preview",
+              "import"
+            ],
+            "type": "string"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/Preview"
+          },
+          "report": {
+            "$ref": "#/components/schemas/Report",
+            "description": "Что сделано; при ошибке посреди импорта — сделанное до неё"
+          },
+          "started": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "description": "idle — ещё не было; fetching — читается старая панель; importing — создаются пользователи",
+            "enum": [
+              "idle",
+              "fetching",
+              "checking",
+              "importing",
+              "done",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "total",
+          "done"
+        ],
+        "type": "object"
+      },
+      "LegacyView": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам",
+            "type": "string"
+          },
+          "links": {
+            "description": "Сколько старых ссылок и пользователей заведено",
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Путь старых ссылок подписки: sub у Marzban и PasarGuard, api/sub у Remnawave; пусто — выключено",
+            "type": "string"
+          },
+          "secret_set": {
+            "description": "Секрет старой панели задан; сам он не возвращается",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "secret_set",
+          "links"
+        ],
+        "type": "object"
+      },
+      "List": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Сколько всего",
+            "format": "int64",
+            "type": "integer"
+          },
+          "names": {
+            "description": "Первые 50",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "names",
+          "count"
         ],
         "type": "object"
       },
@@ -2474,6 +2664,30 @@
         },
         "type": "object"
       },
+      "PatchLegacyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "marzban",
+              "pasarguard",
+              "remnawave",
+              ""
+            ],
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "secret": {
+            "description": "Секрет из таблицы jwt базы старой панели; пусто — убрать",
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "PatchNodeInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -3018,6 +3232,54 @@
         ],
         "type": "object"
       },
+      "Preview": {
+        "additionalProperties": false,
+        "properties": {
+          "invalid": {
+            "$ref": "#/components/schemas/List",
+            "description": "Пользователи, которых mikan не примет, с причиной"
+          },
+          "new": {
+            "description": "Будут созданы",
+            "format": "int64",
+            "type": "integer"
+          },
+          "no_link": {
+            "$ref": "#/components/schemas/List",
+            "description": "Будут перенесены без старой ссылки"
+          },
+          "on_hold": {
+            "description": "Пользователи «на паузе»: в mikan их срок пойдёт с момента импорта",
+            "format": "int64",
+            "type": "integer"
+          },
+          "statuses": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "taken": {
+            "$ref": "#/components/schemas/List",
+            "description": "Имена, которые уже есть в mikan"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "new",
+          "taken",
+          "invalid",
+          "no_link",
+          "statuses",
+          "on_hold"
+        ],
+        "type": "object"
+      },
       "ProbeView": {
         "additionalProperties": false,
         "properties": {
@@ -3058,6 +3320,40 @@
         },
         "required": [
           "recovery_codes"
+        ],
+        "type": "object"
+      },
+      "Report": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed": {
+            "$ref": "#/components/schemas/List",
+            "description": "Имя и причина для тех, кого не удалось создать"
+          },
+          "links": {
+            "description": "Старые ссылки и ключи, заведённые этим импортом",
+            "format": "int64",
+            "type": "integer"
+          },
+          "no_link": {
+            "$ref": "#/components/schemas/List",
+            "description": "Перенесены без старой ссылки: её токен слишком короткий, чтобы быть секретом"
+          },
+          "skipped": {
+            "$ref": "#/components/schemas/List",
+            "description": "Имена, которые уже есть в mikan: эти пользователи не перенесены"
+          }
+        },
+        "required": [
+          "created",
+          "skipped",
+          "links",
+          "no_link",
+          "failed"
         ],
         "type": "object"
       },
@@ -5184,6 +5480,220 @@
         "tags": [
           "auth"
         ]
+      }
+    },
+    "/api/v1/import": {
+      "delete": {
+        "description": "Уже созданные пользователи остаются, их список — в отчёте.",
+        "operationId": "import-cancel",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Остановить импорт",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "post": {
+        "description": "Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.",
+        "operationId": "import-run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRunInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Перенести пользователей из другой панели",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/import/legacy": {
+      "get": {
+        "operationId": "get-legacy-links",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Старые ссылки подписки",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "patch": {
+        "operationId": "update-legacy-links",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchLegacyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настроить старые ссылки подписки",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/import/preview": {
+      "post": {
+        "description": "Идёт в фоне: ответ 202 сразу, итог — в GET /api/v1/import/status (preview).",
+        "operationId": "import-preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSource"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Что перенесётся из другой панели",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/import/status": {
+      "get": {
+        "operationId": "import-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Ход импорта",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/inbounds": {

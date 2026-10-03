@@ -27,6 +27,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -50,6 +51,7 @@ type Panel struct {
 	Updates   *updates.Checker
 	Alerts    *infraalerts.Monitor
 	Backups   *tgbackup.Service
+	Importer  *panelimport.Importer
 	Addons    *addons.Manager
 	server    *server.Server
 	spa       *server.SPA
@@ -212,6 +214,19 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Backups = tgbackup.New(selfDump, set, p.Telegram, o.DataDir, serverName, o.Now, o.Log)
 	deps.Backups = p.Backups
 	deps.Warp = warp.Client{API: o.WarpAPI}
+	importer := panelimport.NewImporter(st, deps.Users, nil, o.Now, o.Log)
+	// The old links are checked as the panel the users came from signs them.
+	importer.Done = func(ctx context.Context, kind panelimport.Kind) {
+		// Only the panels whose links need the secret; Remnawave's are looked up as they are.
+		if kind != panelimport.Marzban && kind != panelimport.PasarGuard {
+			return
+		}
+		if err := settings.Set(ctx, set, settings.KeyLegacySubKind, string(kind)); err != nil {
+			o.Log.Warn("import: the old links' kind is not saved", "err", err)
+		}
+	}
+	deps.Importer = importer
+	p.Importer = importer
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err
@@ -261,6 +276,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			return subs.Config{}, err
 		}
 		cfg.SubBase = subBase(ctx)
+		var legacyKind string
+		if legacyKind, err = set.String(ctx, settings.KeyLegacySubKind); err != nil {
+			return subs.Config{}, err
+		}
+		cfg.Legacy.Kind = panelimport.Kind(legacyKind)
+		if cfg.Legacy.Secret, err = set.String(ctx, settings.KeyLegacySubSecret); err != nil {
+			return subs.Config{}, err
+		}
 		if cfg.App.Enabled, err = set.On(ctx, settings.AppBranding); err != nil {
 			return subs.Config{}, err
 		}
@@ -316,6 +339,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	adminMux.Handle("/api/", apiHandler)
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
+	p.server.SetLegacy(subHandler.Legacy())
 	p.server.SetHSTS(o.HSTS)
 	p.Handler = p.server
 	return p, nil
@@ -365,7 +389,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.Tuner != nil {
 		workers = append(workers, p.Tuner.Run)
 	}
-	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run,
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

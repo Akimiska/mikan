@@ -1,4 +1,4 @@
--- name: AddLegacySubToken :exec
+-- name: AddLegacySubToken :execrows
 INSERT INTO legacy_sub_tokens (token, user_id, source) VALUES ($1, $2, $3)
 ON CONFLICT (token) DO NOTHING;
 
@@ -13,3 +13,8 @@ UPDATE users SET used_down = $2, total_down = $3, updated_at = $4 WHERE id = $1;
 
 -- name: UserNameTaken :one
 SELECT EXISTS (SELECT 1 FROM users WHERE name = $1);
+
+-- name: LockUserName :exec
+-- Holds a name until the transaction ends: two imports (or retries) at once cannot both
+-- find it free.
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-user-name:' || sqlc.arg(name)::text, 0));

@@ -4,27 +4,41 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"mikan/internal/panel/domain"
 	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 )
 
 // Users from another panel (panelimport). Everything here is the session's: it reads the
-// old panel with its admin's password and creates users here.
+// old panel with its admin's password and creates users here. The credentials are used
+// for the request and kept nowhere.
 
 type importSource struct {
 	Kind     string `json:"kind" enum:"marzban,pasarguard,remnawave"`
-	URL      string `json:"url" maxLength:"300" doc:"Адрес старой панели: https://panel.example.com"`
+	URL      string `json:"url" maxLength:"300" doc:"Адрес старой панели: https://panel.example.com; http:// — только для этого сервера или локальной сети"`
 	Username string `json:"username,omitempty" maxLength:"200" doc:"Marzban, PasarGuard: логин администратора"`
 	Password string `json:"password,omitempty" maxLength:"500"`
 	Token    string `json:"token,omitempty" maxLength:"4096" doc:"Remnawave: API-токен; PasarGuard: API-ключ вместо логина"`
+}
+
+func (s importSource) source() panelimport.Source {
+	return panelimport.Source{Kind: panelimport.Kind(s.Kind), URL: s.URL, Username: s.Username, Password: s.Password, Token: s.Token}
+}
+
+// host is the source's address for the audit log and the state: scheme and host, no path
+// and no credentials.
+func (s importSource) host() string {
+	u, err := url.Parse(strings.TrimSpace(s.URL))
+	if err != nil {
+		return s.Kind
+	}
+	return s.Kind + " " + u.Scheme + "://" + u.Host
 }
 
 type importPreviewInput struct{ Body importSource }
@@ -38,15 +52,15 @@ type importRunInput struct {
 		Username string `json:"username,omitempty" maxLength:"200"`
 		Password string `json:"password,omitempty" maxLength:"500"`
 		Token    string `json:"token,omitempty" maxLength:"4096"`
-		TariffID int64  `json:"tariff_id" minimum:"1" doc:"Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели"`
+		TariffID int64  `json:"tariff_id" minimum:"1" doc:"Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа"`
 	}
 }
 
-type importRunOutput struct{ Body panelimport.Report }
+type importStateOutput struct{ Body panelimport.JobState }
 
 type LegacyView struct {
 	Path      string `json:"path" doc:"Путь старых ссылок подписки: sub у Marzban и PasarGuard, api/sub у Remnawave; пусто — выключено"`
-	Kind      string `json:"kind" doc:"Чьи подписанные ссылки проверять: marzban или pasarguard"`
+	Kind      string `json:"kind" doc:"Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам"`
 	SecretSet bool   `json:"secret_set" doc:"Секрет старой панели задан; сам он не возвращается"`
 	Links     int64  `json:"links" doc:"Сколько старых ссылок и пользователей заведено"`
 }
@@ -64,37 +78,40 @@ type patchLegacyInput struct {
 func (h *handlers) registerImport() {
 	tags := []string{"settings"}
 	huma.Register(h.api, huma.Operation{OperationID: "import-preview", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/import/preview", Summary: "Что перенесётся из другой панели", Tags: tags}, h.importPreview)
-	huma.Register(h.api, huma.Operation{OperationID: "import-run", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/import", Summary: "Перенести пользователей из другой панели", Tags: tags}, h.importRun)
+	huma.Register(h.api, huma.Operation{OperationID: "import-run", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/import", Summary: "Перенести пользователей из другой панели",
+		Description: "Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.", Tags: tags, DefaultStatus: http.StatusAccepted}, h.importRun)
+	huma.Register(h.api, huma.Operation{OperationID: "import-status", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodGet, Path: "/api/v1/import/status", Summary: "Ход импорта", Tags: tags}, h.importStatus)
 	huma.Register(h.api, huma.Operation{OperationID: "get-legacy-links", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodGet, Path: "/api/v1/import/legacy", Summary: "Старые ссылки подписки", Tags: tags}, h.getLegacy)
 	huma.Register(h.api, huma.Operation{OperationID: "update-legacy-links", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/import/legacy", Summary: "Настроить старые ссылки подписки", Tags: tags}, h.updateLegacy)
 }
 
-// importClient reads the old panel. Its address is the admin's own word, and the old
-// panel often runs on this very server, so local addresses are allowed.
-var importClient = &http.Client{Timeout: 2 * time.Minute}
-
-func (h *handlers) fetchImport(ctx context.Context, src importSource) ([]panelimport.User, error) {
-	users, err := panelimport.Fetch(ctx, importClient, panelimport.Source{Kind: panelimport.Kind(src.Kind), URL: src.URL,
-		Username: src.Username, Password: src.Password, Token: src.Token})
-	switch {
-	case errors.Is(err, panelimport.ErrAuth):
-		field := "body.password"
+// importError turns a failed read of the old panel into the field it is about.
+func importError(src importSource, err error) error {
+	code := panelimport.Code(err)
+	field := "body.url"
+	if errors.Is(err, panelimport.ErrAuth) {
+		field = "body.password"
 		if src.Kind == string(panelimport.Remnawave) || src.Token != "" {
 			field = "body.token"
 		}
-		return nil, huma.Error422UnprocessableEntity("import_auth", &huma.ErrorDetail{Location: field, Message: "import_auth"})
-	case errors.Is(err, panelimport.ErrUnreachable):
-		return nil, huma.Error422UnprocessableEntity("import_unreachable", &huma.ErrorDetail{Location: "body.url", Message: "import_unreachable"})
-	case errors.Is(err, panelimport.ErrAnswer):
-		return nil, huma.Error422UnprocessableEntity("import_bad_answer", &huma.ErrorDetail{Location: "body.url", Message: "import_bad_answer", Value: err.Error()})
 	}
-	return users, err
+	detail := &huma.ErrorDetail{Location: field, Message: code}
+	if errors.Is(err, panelimport.ErrAnswer) || errors.Is(err, panelimport.ErrTLS) || errors.Is(err, panelimport.ErrRedirect) || errors.Is(err, panelimport.ErrAddress) {
+		detail.Value = err.Error()
+	}
+	return huma.Error422UnprocessableEntity(code, detail)
 }
 
 func (h *handlers) importPreview(ctx context.Context, in *importPreviewInput) (*importPreviewOutput, error) {
-	users, err := h.fetchImport(ctx, in.Body)
+	if h.d.Importer == nil {
+		return nil, huma.Error503ServiceUnavailable("import_failed")
+	}
+	users, err := panelimport.Fetch(ctx, h.d.Importer.HTTP(), in.Body.source())
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, importError(in.Body, err)
 	}
 	p, err := panelimport.Check(ctx, h.d.Store.Q, users)
 	if err != nil {
@@ -103,21 +120,29 @@ func (h *handlers) importPreview(ctx context.Context, in *importPreviewInput) (*
 	return &importPreviewOutput{Body: p}, nil
 }
 
-func (h *handlers) importRun(ctx context.Context, in *importRunInput) (*importRunOutput, error) {
-	b := in.Body
-	users, err := h.fetchImport(ctx, importSource{Kind: b.Kind, URL: b.URL, Username: b.Username, Password: b.Password, Token: b.Token})
-	if err != nil {
-		return nil, err
+func (h *handlers) importRun(ctx context.Context, in *importRunInput) (*importStateOutput, error) {
+	if h.d.Importer == nil {
+		return nil, huma.Error503ServiceUnavailable("import_failed")
 	}
-	r, err := panelimport.Apply(ctx, h.d.Store, h.d.Users, h.d.Now(), panelimport.Kind(in.Body.Kind), in.Body.TariffID, users)
-	if errors.Is(err, domain.ErrNotFound) {
+	b := in.Body
+	src := importSource{Kind: b.Kind, URL: b.URL, Username: b.Username, Password: b.Password, Token: b.Token}
+	if _, err := h.d.Store.Q.GetTariff(ctx, b.TariffID); err != nil {
 		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "tariff_not_found"})
 	}
-	if err != nil {
+	if err := h.d.Importer.Start(src.source(), b.TariffID, src.host()); errors.Is(err, panelimport.ErrBusy) {
+		return nil, huma.Error409Conflict(err.Error())
+	} else if err != nil {
 		return nil, err
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "import.run", "users", "", map[string]any{"from": in.Body.Kind, "created": r.Created, "skipped": len(r.Skipped), "failed": len(r.Failed)})
-	return &importRunOutput{Body: r}, nil
+	h.audit(ctx, sessionOf(ctx).AdminID, "import.run", "users", "", map[string]any{"from": src.host(), "tariff_id": b.TariffID})
+	return &importStateOutput{Body: h.d.Importer.State()}, nil
+}
+
+func (h *handlers) importStatus(ctx context.Context, _ *struct{}) (*importStateOutput, error) {
+	if h.d.Importer == nil {
+		return &importStateOutput{Body: panelimport.JobState{State: "idle"}}, nil
+	}
+	return &importStateOutput{Body: h.d.Importer.State()}, nil
 }
 
 func (h *handlers) getLegacy(ctx context.Context, _ *struct{}) (*legacyOutput, error) {

@@ -4,7 +4,7 @@ import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/cli
 import { useTariffs } from "../../../api/hooks";
 import { useToast } from "../../../components/toast";
 import { Button, Field } from "../../../components/ui";
-import { t } from "../../../i18n";
+import { t, tMaybe } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { fieldErrors } from "../../../lib/fields";
 
@@ -21,22 +21,37 @@ export function ImportCard() {
   const [src, setSrc] = useState({ kind: "marzban" as Kind, url: "", username: "", password: "", token: "" });
   const [tariff, setTariff] = useState<number | "">("");
   const [preview, setPreview] = useState<Schemas["Preview"] | null>(null);
-  const [report, setReport] = useState<Schemas["Report"] | null>(null);
+  // The import runs in the background; its state is looked at while it runs, and a report
+  // it left is shown when the tab opens again.
+  const job = useQuery({
+    queryKey: ["import-status"],
+    queryFn: () => unwrap(api.GET("/api/v1/import/status", {})),
+    refetchInterval: (q) => (q.state.data?.state === "fetching" || q.state.data?.state === "importing" ? 1000 : false),
+  });
+  const running = job.data?.state === "fetching" || job.data?.state === "importing";
+  const [seen, setSeen] = useState<string | undefined>(undefined);
+  const finished = job.data?.finished;
+  if (finished && finished !== seen && (job.data?.state === "done" || job.data?.state === "failed")) {
+    setSeen(finished);
+    if (seen !== undefined || job.data.state === "done") {
+      // The credentials are not kept once the import is over.
+      setSrc((s) => ({ ...s, password: "", token: "" }));
+      void qc.invalidateQueries({ queryKey: ["users"] });
+      void qc.invalidateQueries({ queryKey: ["legacy-links"] });
+    }
+  }
+  const report = job.data?.state === "done" ? job.data.report : undefined;
   const body = () => ({ kind: src.kind, url: src.url.trim(), username: src.username.trim(), password: src.password, token: src.token.trim() });
   const check = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/import/preview", { body: body() })),
-    onSuccess: (p) => {
-      setPreview(p);
-      setReport(null);
-    },
+    onSuccess: (p) => setPreview(p),
   });
   const run = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/import", { body: { ...body(), tariff_id: Number(tariff) } })),
-    onSuccess: (r) => {
-      setReport(r);
+    onSuccess: (st) => {
+      qc.setQueryData(["import-status"], st);
       setPreview(null);
-      void qc.invalidateQueries();
-      toast.ok(t("settings.import.done", { n: r.created }));
+      toast.ok(t("settings.import.started"));
     },
     onError: (e) => toast.error(errorText(e)),
   });
@@ -97,6 +112,17 @@ export function ImportCard() {
             <div className="font-medium">{t("settings.import.found", { total: preview.total, n: preview.new })}</div>
             {preview.taken.length ? <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.import.taken", { list: preview.taken.slice(0, 20).join(", ") + (preview.taken.length > 20 ? "…" : "") })}</div> : null}
             {preview.on_hold ? <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.import.onHold", { n: preview.on_hold })}</div> : null}
+            {preview.invalid.length ? (
+              <div className="mt-1 text-xs text-[var(--berry-600)]">
+                {t("settings.import.invalid", { n: preview.invalid.length })}
+                <ul>
+                  {preview.invalid.slice(0, 10).map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div className="banner warn my-2">{t("settings.import.notCarried")}</div>
             <Field label={t("settings.import.tariff")} htmlFor="imp-tariff" hint={t("settings.import.tariffHint")} error={errors.tariff_id}>
               <select id="imp-tariff" className="input" value={tariff} onChange={(e) => setTariff(e.target.value ? Number(e.target.value) : "")}>
                 <option value="">—</option>
@@ -108,7 +134,7 @@ export function ImportCard() {
               </select>
             </Field>
             <div className="flex gap-2">
-              <Button type="button" variant="primary" loading={run.isPending} disabled={tariff === "" || preview.new === 0} onClick={() => run.mutate()}>
+              <Button type="button" variant="primary" loading={run.isPending} disabled={tariff === "" || preview.new === 0 || running} onClick={() => run.mutate()}>
                 {t("settings.import.run", { n: preview.new })}
               </Button>
               <Button type="button" variant="ghost" onClick={() => setPreview(null)}>
@@ -117,6 +143,12 @@ export function ImportCard() {
             </div>
           </div>
         )}
+        {running && job.data ? (
+          <div className="panel-soft mt-3 p-3 text-[13px]" role="status">
+            {job.data.state === "fetching" ? t("settings.import.fetching") : t("settings.import.progress", { done: job.data.done, total: job.data.total })}
+          </div>
+        ) : null}
+        {job.data?.state === "failed" ? <div className="banner bad mt-3">{t("settings.import.failed", { error: tMaybe(`errors.api.${job.data.error}`) ?? job.data.error ?? "" })}</div> : null}
         {report ? (
           <div className="panel-soft mt-3 p-3 text-[13px]">
             <div className="font-medium">{t("settings.import.report", { created: report.created, links: report.links })}</div>

@@ -9,7 +9,7 @@ import (
 	"context"
 )
 
-const addLegacySubToken = `-- name: AddLegacySubToken :exec
+const addLegacySubToken = `-- name: AddLegacySubToken :execrows
 INSERT INTO legacy_sub_tokens (token, user_id, source) VALUES ($1, $2, $3)
 ON CONFLICT (token) DO NOTHING
 `
@@ -20,9 +20,12 @@ type AddLegacySubTokenParams struct {
 	Source string
 }
 
-func (q *Queries) AddLegacySubToken(ctx context.Context, arg AddLegacySubTokenParams) error {
-	_, err := q.db.ExecContext(ctx, addLegacySubToken, arg.Token, arg.UserID, arg.Source)
-	return err
+func (q *Queries) AddLegacySubToken(ctx context.Context, arg AddLegacySubTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, addLegacySubToken, arg.Token, arg.UserID, arg.Source)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const countLegacySubTokens = `-- name: CountLegacySubTokens :one
@@ -71,6 +74,17 @@ func (q *Queries) LegacySubTokenUser(ctx context.Context, token string) (User, e
 		&i.UnboundAt,
 	)
 	return i, err
+}
+
+const lockUserName = `-- name: LockUserName :exec
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-user-name:' || $1::text, 0))
+`
+
+// Holds a name until the transaction ends: two imports (or retries) at once cannot both
+// find it free.
+func (q *Queries) LockUserName(ctx context.Context, name string) error {
+	_, err := q.db.ExecContext(ctx, lockUserName, name)
+	return err
 }
 
 const setImportedUsage = `-- name: SetImportedUsage :exec

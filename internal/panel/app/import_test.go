@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
@@ -53,6 +54,43 @@ func fakeRemnawave(t *testing.T, users []map[string]any) *httptest.Server {
 	return srv
 }
 
+type importReport struct {
+	Created int      `json:"created"`
+	Links   int      `json:"links"`
+	Skipped []string `json:"skipped"`
+	Failed  []string `json:"failed"`
+}
+
+// runImport starts an import and waits for its report: it runs in the background.
+func runImport(t *testing.T, h *harness, api string, csrf map[string]string, run map[string]any) importReport {
+	t.Helper()
+	resp, body := h.do(http.MethodPost, api+"/import", run, csrf)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: %d %s", resp.StatusCode, body)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		_, body = h.do(http.MethodGet, api+"/import/status", nil, csrf)
+		var st struct {
+			State  string        `json:"state"`
+			Error  string        `json:"error"`
+			Report *importReport `json:"report"`
+		}
+		if err := json.Unmarshal(body, &st); err != nil {
+			t.Fatal(err)
+		}
+		switch st.State {
+		case "done":
+			return *st.Report
+		case "failed":
+			t.Fatalf("the import failed: %s", st.Error)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("the import did not end")
+	return importReport{}
+}
+
 func TestImportFromMarzbanOverHTTP(t *testing.T) {
 	h := newHarness(t)
 	ctx := t.Context()
@@ -93,13 +131,9 @@ func TestImportFromMarzbanOverHTTP(t *testing.T) {
 	}
 
 	run := map[string]any{"kind": "marzban", "url": old.URL, "username": "admin", "password": "pw", "tariff_id": tariffs[1].ID}
-	var r struct {
-		Created, Links int
-		Skipped        []string
-	}
-	resp, body = h.do(http.MethodPost, api+"/import", run, csrf)
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &r) != nil || r.Created != 3 || r.Links != 3 {
-		t.Fatalf("import: %d %s", resp.StatusCode, body)
+	r := runImport(t, h, api, csrf, run)
+	if r.Created != 3 || r.Links != 3 {
+		t.Fatalf("import: %+v", r)
 	}
 	byName := map[string]int64{}
 	list, _ := h.st.Q.ListUsers(ctx)
@@ -120,9 +154,8 @@ func TestImportFromMarzbanOverHTTP(t *testing.T) {
 		t.Fatalf("an on-hold term starts at the import: %+v", pause)
 	}
 	// Again: everyone is there already, nobody is merged.
-	resp, body = h.do(http.MethodPost, api+"/import", run, csrf)
-	if json.Unmarshal(body, &r) != nil || r.Created != 0 || len(r.Skipped) != 3 {
-		t.Fatalf("second import: %d %s", resp.StatusCode, body)
+	if r := runImport(t, h, api, csrf, run); r.Created != 0 || len(r.Skipped) != 3 {
+		t.Fatalf("second import: %+v", r)
 	}
 
 	// Old links: off until the path and the secret are set.
@@ -183,9 +216,11 @@ func TestImportFromRemnawaveKeepsShortUUIDLinks(t *testing.T) {
 			"telegramId": 777, "hwidDeviceLimit": 2, "userTraffic": map[string]any{"usedTrafficBytes": 100, "lifetimeUsedTrafficBytes": 1000}},
 	})
 	run := map[string]any{"kind": "remnawave", "url": old.URL, "token": "rw-token", "tariff_id": tariffs[1].ID}
-	resp, body := h.do(http.MethodPost, api+"/import", run, csrf)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"created":1`) || !strings.Contains(string(body), `"links":1`) {
-		t.Fatalf("import: %d %s", resp.StatusCode, body)
+	if r := runImport(t, h, api, csrf, run); r.Created != 1 || r.Links != 1 {
+		t.Fatalf("import: %+v", r)
+	}
+	if resp, body := h.do(http.MethodGet, api+"/import/legacy", nil, csrf); !strings.Contains(string(body), `"kind":"remnawave"`) {
+		t.Fatalf("the import did not set the old links' kind: %d %s", resp.StatusCode, body)
 	}
 	list, _ := h.st.Q.ListUsers(ctx)
 	var masha = list[len(list)-1]
@@ -211,5 +246,68 @@ func TestImportFromRemnawaveKeepsShortUUIDLinks(t *testing.T) {
 	// The client type after the token picks the format, as in Remnawave.
 	if _, body := h.do(http.MethodGet, "/api/sub/Abc123Def456Ghi7/mihomo", nil, map[string]string{"User-Agent": "Happ/3.4.1"}); !strings.Contains(string(body), "proxies") {
 		t.Errorf("/mihomo did not give a Clash profile: %.120s", body)
+	}
+}
+
+// PasarGuard: an API key instead of a login, ISO dates, and links signed with its own
+// format (v3, with the user's id) open once the secret is set.
+func TestImportFromPasarGuardKeepsSignedLinks(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	if err := domain.Seed(ctx, h.st, h.now); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]any{settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355} {
+		if err := settings.Set(ctx, settings.New(h.st.Q), k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
+		t.Fatal("login")
+	}
+	api := "/" + adminPath + "/api/v1"
+	csrf := map[string]string{"X-CSRF-Token": h.csrf}
+	tariffs, _ := h.st.Q.ListTariffs(ctx)
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "pg_key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"total": 1, "users": []map[string]any{
+			{"id": 42, "username": "olga", "status": "active", "expire": "2030-01-01T00:00:00+00:00", "hwid_limit": 2},
+		}})
+	}))
+	defer old.Close()
+	run := map[string]any{"kind": "pasarguard", "url": old.URL, "token": "pg_key", "tariff_id": tariffs[1].ID}
+	if r := runImport(t, h, api, csrf, run); r.Created != 1 || r.Links != 2 {
+		t.Fatalf("import: %+v", r)
+	}
+	// PasarGuard's own code made this token for user id 42 with this secret.
+	const token = "djMsNDIsMTc1OTQwMDAwMA.fa-02Knno9F0qsz39WtypLtudEubWHfKFrYoyF8skR4"
+	if resp, body := h.do(http.MethodPatch, api+"/import/legacy", map[string]any{"path": "sub", "secret": "s3cr3t-key-from-jwt-table"}, csrf); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"kind":"pasarguard"`) {
+		t.Fatalf("legacy: %d %s", resp.StatusCode, body)
+	}
+	if _, err := h.p.Apply(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := h.do(http.MethodGet, "/sub/"+token, nil, map[string]string{"User-Agent": "mihomo/1.19.32"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("olga's old link: %d", resp.StatusCode)
+	}
+	if resp, _ := h.do(http.MethodGet, "/sub/id:42", nil, nil); resp.StatusCode != http.StatusNotFound {
+		t.Fatal("the key a token is filed under opens a subscription")
+	}
+}
+
+// Everything about imports is the session's: an API key, even a full one, gets 403.
+func TestImportIsSessionOnly(t *testing.T) {
+	k := newKeyHarness(t)
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/import/preview"}, {http.MethodPost, "/import"}, {http.MethodGet, "/import/status"},
+		{http.MethodGet, "/import/legacy"}, {http.MethodPatch, "/import/legacy"},
+	} {
+		resp, body := k.asKey(k.full, c.method, c.path, map[string]any{})
+		if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "session_only") {
+			t.Errorf("%s %s with a full key: %d %s", c.method, c.path, resp.StatusCode, body)
+		}
 	}
 }

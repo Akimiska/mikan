@@ -213,6 +213,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Backups = tgbackup.New(selfDump, set, p.Telegram, o.DataDir, serverName, o.Now, o.Log)
 	deps.Backups = p.Backups
 	deps.Warp = warp.Client{API: o.WarpAPI}
+	importer := panelimport.NewImporter(st, deps.Users, nil, o.Now, o.Log)
+	// The old links are checked as the panel the users came from signs them.
+	importer.Done = func(ctx context.Context, kind panelimport.Kind) {
+		if err := settings.Set(ctx, set, settings.KeyLegacySubKind, string(kind)); err != nil {
+			o.Log.Warn("import: the old links' kind is not saved", "err", err)
+		}
+	}
+	deps.Importer = importer
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err

@@ -16,7 +16,8 @@ import (
 // GET /api/users?offset=&limit= for {users, total}. PasarGuard also takes an API key in
 // X-Api-Key, and gives the term as an ISO date where Marzban gives unix seconds.
 
-const marzbanPage = 500
+// marzbanPage is the page size; a variable for the tests.
+var marzbanPage = 500
 
 type marzbanUser struct {
 	ID                   int64           `json:"id"` // PasarGuard only
@@ -44,7 +45,10 @@ func fetchMarzban(ctx context.Context, hc *http.Client, src Source) ([]User, err
 		auth = func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) }
 	}
 	var out []User
-	for offset := 0; ; offset += marzbanPage {
+	for page, offset := 0, 0; ; page, offset = page+1, offset+marzbanPage {
+		if page >= maxPages {
+			return nil, fmt.Errorf("%w: more than %d pages", ErrAnswer, maxPages)
+		}
 		q := url.Values{"offset": {strconv.Itoa(offset)}, "limit": {strconv.Itoa(marzbanPage)}, "sort": {"created_at"}}
 		req, err := http.NewRequest(http.MethodGet, src.URL+"/api/users?"+q.Encode(), nil)
 		if err != nil {
@@ -94,7 +98,7 @@ func marzbanToken(ctx context.Context, hc *http.Client, src Source) (string, err
 }
 
 func (m marzbanUser) user() (User, error) {
-	u := User{Name: strings.TrimSpace(m.Username), SourceID: m.ID, Used: m.UsedTraffic, Lifetime: m.LifetimeUsedTraffic}
+	u := User{Name: cut(strings.TrimSpace(m.Username), maxNameBytes), SourceID: m.ID, Used: m.UsedTraffic, Lifetime: m.LifetimeUsedTraffic}
 	if u.Name == "" {
 		return u, fmt.Errorf("%w: a user without a username", ErrAnswer)
 	}
@@ -119,7 +123,7 @@ func (m marzbanUser) user() (User, error) {
 		u.OnHold = time.Duration(*m.OnHoldExpireDuration) * time.Second
 	}
 	if m.Note != nil {
-		u.Note = *m.Note
+		u.Note = cut(*m.Note, maxNoteBytes)
 	}
 	if m.HWIDLimit != nil && *m.HWIDLimit > 0 {
 		u.DeviceLimit = *m.HWIDLimit

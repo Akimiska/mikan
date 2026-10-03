@@ -286,7 +286,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Перенести пользователей из другой панели */
+        /**
+         * Перенести пользователей из другой панели
+         * @description Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.
+         */
         post: operations["import-run"];
         delete?: never;
         options?: never;
@@ -323,6 +326,23 @@ export interface paths {
         put?: never;
         /** Что перенесётся из другой панели */
         post: operations["import-preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/import/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ход импорта */
+        get: operations["import-status"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1791,7 +1811,7 @@ export interface components {
             password?: string;
             /**
              * Format: int64
-             * @description Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели
+             * @description Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа
              */
             tariff_id: number;
             token?: string;
@@ -1804,7 +1824,7 @@ export interface components {
             password?: string;
             /** @description Remnawave: API-токен; PasarGuard: API-ключ вместо логина */
             token?: string;
-            /** @description Адрес старой панели: https://panel.example.com */
+            /** @description Адрес старой панели: https://panel.example.com; http:// — только для этого сервера или локальной сети */
             url: string;
             /** @description Marzban, PasarGuard: логин администратора */
             username?: string;
@@ -1887,8 +1907,28 @@ export interface components {
         InfrastructureConnectOutputBody: {
             url: string;
         };
+        JobState: {
+            /** Format: int64 */
+            done: number;
+            /** @description Код ошибки, когда state = failed */
+            error?: string;
+            /** Format: date-time */
+            finished?: string;
+            /** @description Панель и её адрес (без пути и данных для входа) */
+            from?: string;
+            report?: components["schemas"]["Report"];
+            /** Format: date-time */
+            started?: string;
+            /**
+             * @description idle — ещё не было; fetching — читается старая панель; importing — создаются пользователи
+             * @enum {string}
+             */
+            state: "idle" | "fetching" | "importing" | "done" | "failed";
+            /** Format: int64 */
+            total: number;
+        };
         LegacyView: {
-            /** @description Чьи подписанные ссылки проверять: marzban или pasarguard */
+            /** @description Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам */
             kind: string;
             /**
              * Format: int64
@@ -2363,6 +2403,8 @@ export interface components {
             name: string;
         };
         Preview: {
+            /** @description Пользователи, которых mikan не примет, с причиной */
+            invalid: string[];
             /**
              * Format: int64
              * @description Будут созданы
@@ -2401,7 +2443,7 @@ export interface components {
             failed: string[];
             /**
              * Format: int64
-             * @description Пользователи, чьи старые ссылки подписки будут работать
+             * @description Старые ссылки и ключи, заведённые этим импортом
              */
             links: number;
             /** @description Имена, которые уже есть в mikan: эти пользователи не перенесены */
@@ -3474,13 +3516,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Report"];
+                    "application/json": components["schemas"]["JobState"];
                 };
             };
             /** @description Error */
@@ -3576,6 +3618,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Preview"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobState"];
                 };
             };
             /** @description Error */

@@ -215,6 +215,18 @@ func (s *Users) RefillSlots(ctx context.Context) error {
 	return nil
 }
 
+// CreateOn makes a user on q's transaction and applies p on top of the tariff's limits, so
+// a user is there whole or not at all (an import: the old panel's limit, term and status
+// come with the user). ErrNoSlots: RefillSlots, then run again. The caller calls Changed
+// after the commit.
+func (s *Users) CreateOn(ctx context.Context, q *db.Queries, in CreateInput, p Patch) (db.User, error) {
+	u, err := s.createTx(ctx, q, in, false)
+	if err != nil {
+		return u, err
+	}
+	return s.updateOn(ctx, q, u.ID, p)
+}
+
 // Changed tells the nodes about users changed on a transaction of the caller's.
 func (s *Users) Changed() { s.changes.PoliciesChanged() }
 

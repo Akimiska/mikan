@@ -155,15 +155,27 @@ func (s *Store) Close() error {
 }
 
 // txAttempts bounds the retries of a serialization conflict; with the backoff below the
-// last attempt starts within about three seconds.
+// last attempt starts within about three seconds at most.
 const txAttempts = 16
 
 // Tx preserves read/check/write invariants (quotas, payments, ports, slot numbers) with
 // serializable transactions. Callbacks only change database state: a serialization
 // conflict retries the whole callback, never just its final statement.
 func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
+	return s.retry(ctx, sql.LevelSerializable, fn)
+}
+
+// TxRC runs fn in one READ COMMITTED transaction: for writes that hold no read/check/write
+// invariant across rows (settings, catalog edits, upserts that add in place). It never
+// fails on a serialization conflict; a deadlock still retries the whole callback, so the
+// same rule holds: callbacks only change database state.
+func (s *Store) TxRC(ctx context.Context, fn func(q *db.Queries) error) error {
+	return s.retry(ctx, sql.LevelReadCommitted, fn)
+}
+
+func (s *Store) retry(ctx context.Context, level sql.IsolationLevel, fn func(q *db.Queries) error) error {
 	for attempt := 0; ; attempt++ {
-		err := s.txOnce(ctx, fn)
+		err := s.txOnce(ctx, level, fn)
 		var pe *pgconn.PgError
 		if err == nil || attempt == txAttempts-1 || !errors.As(err, &pe) || (pe.Code != "40001" && pe.Code != "40P01") {
 			return err
@@ -182,8 +194,8 @@ func (s *Store) Tx(ctx context.Context, fn func(q *db.Queries) error) error {
 	}
 }
 
-func (s *Store) txOnce(ctx context.Context, fn func(q *db.Queries) error) error {
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+func (s *Store) txOnce(ctx context.Context, level sql.IsolationLevel, fn func(q *db.Queries) error) error {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: level})
 	if err != nil {
 		return err
 	}

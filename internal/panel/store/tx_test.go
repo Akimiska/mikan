@@ -85,3 +85,30 @@ func TestIsUnique(t *testing.T) {
 		t.Fatalf("a CHECK violation is not a duplicate: %v", err)
 	}
 }
+
+// TxRC commits like Tx and rolls back when the callback fails.
+func TestTxRCCommitsAndRollsBack(t *testing.T) {
+	ctx := context.Background()
+	st, err := OpenTest(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.TxRC(ctx, func(q *db.Queries) error {
+		return q.SetSetting(ctx, db.SetSettingParams{Key: "k", Value: "kept"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	failed := errors.New("failed")
+	if err := st.TxRC(ctx, func(q *db.Queries) error {
+		if err := q.SetSetting(ctx, db.SetSettingParams{Key: "k", Value: "rolled back"}); err != nil {
+			return err
+		}
+		return failed
+	}); !errors.Is(err, failed) {
+		t.Fatal(err)
+	}
+	if v, err := st.Q.GetSetting(ctx, "k"); err != nil || v != "kept" {
+		t.Fatalf("got %q %v", v, err)
+	}
+}

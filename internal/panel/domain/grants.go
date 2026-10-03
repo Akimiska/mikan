@@ -280,6 +280,17 @@ func StartPeriodIfOlder(ctx context.Context, q *db.Queries, userID, start int64,
 	return true, endPeriod(ctx, q, userID, now)
 }
 
+// startPeriods is StartPeriod now for many users at once.
+func startPeriods(ctx context.Context, q *db.Queries, ids []int64, now time.Time) error {
+	if err := q.ResetUsersTraffic(ctx, db.ResetUsersTrafficParams{Now: now.Unix(), Ids: ids}); err != nil {
+		return err
+	}
+	if err := q.ResetUsersPools(ctx, ids); err != nil {
+		return err
+	}
+	return q.EndUsersPeriodGrants(ctx, db.EndUsersPeriodGrantsParams{Now: now.Unix(), Ids: ids})
+}
+
 func endPeriod(ctx context.Context, q *db.Queries, userID int64, now time.Time) error {
 	if err := q.ResetUserPools(ctx, userID); err != nil {
 		return err

@@ -65,3 +65,9 @@ SELECT * FROM payments
 WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
   AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
 ORDER BY id DESC LIMIT 1;
+
+-- name: FindOpenPackagePayments :many
+SELECT * FROM payments
+WHERE tg_id = sqlc.arg(tg_id) AND package_id = sqlc.arg(package_id) AND provider = sqlc.arg(provider) AND kind = 'package' AND user_id = sqlc.arg(user_id)
+  AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
+ORDER BY id DESC;

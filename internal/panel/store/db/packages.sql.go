@@ -244,6 +244,70 @@ func (q *Queries) FindOpenPackagePayment(ctx context.Context, arg FindOpenPackag
 	return i, err
 }
 
+const findOpenPackagePayments = `-- name: FindOpenPackagePayments :many
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments
+WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
+  AND status = 'pending' AND pay_url <> '' AND created_at > $5
+ORDER BY id DESC
+`
+
+type FindOpenPackagePaymentsParams struct {
+	TgID      int64
+	PackageID sql.NullInt64
+	Provider  string
+	UserID    sql.NullInt64
+	Since     int64
+}
+
+func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPackagePaymentsParams) ([]Payment, error) {
+	rows, err := q.db.QueryContext(ctx, findOpenPackagePayments,
+		arg.TgID,
+		arg.PackageID,
+		arg.Provider,
+		arg.UserID,
+		arg.Since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Payment{}
+	for rows.Next() {
+		var i Payment
+		if err := rows.Scan(
+			&i.ID,
+			&i.Provider,
+			&i.Payload,
+			&i.ExternalID,
+			&i.TgID,
+			&i.Kind,
+			&i.UserID,
+			&i.TariffID,
+			&i.PackageID,
+			&i.TariffName,
+			&i.Amount,
+			&i.Currency,
+			&i.Status,
+			&i.Error,
+			&i.PayUrl,
+			&i.CreatedAt,
+			&i.PaidAt,
+			&i.AppliedAt,
+			&i.RefundedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTrafficPackage = `-- name: GetTrafficPackage :one
 SELECT id, name, bytes, pool_id, lifetime, days, price_stars, price_rub, on_sale, sort, archived, created_at FROM traffic_packages WHERE id = $1
 `

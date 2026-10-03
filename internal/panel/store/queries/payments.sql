@@ -15,6 +15,12 @@ SELECT * FROM payments WHERE provider = $1 AND external_id = $2;
 -- name: SetPaymentInvoice :exec
 UPDATE payments SET external_id = $1, pay_url = $2 WHERE id = $3;
 
+-- name: SetPaymentExternalID :exec
+UPDATE payments SET external_id = sqlc.arg(external_id) WHERE id = sqlc.arg(id);
+
+-- name: SetPaymentAmount :execrows
+UPDATE payments SET amount = sqlc.arg(amount) WHERE id = sqlc.arg(id) AND status = 'pending';
+
 -- name: MarkPaymentPaid :execrows
 UPDATE payments SET status = 'paid', external_id = $1, paid_at = $2
 WHERE id = $3 AND status IN ('pending', 'expired');
@@ -32,12 +38,22 @@ UPDATE payments SET status = sqlc.arg(new_status) WHERE id = sqlc.arg(id) AND st
 -- name: MarkPaymentRefunded :execrows
 UPDATE payments SET status = 'refunded', refunded_at = $1 WHERE id = $2 AND status = 'applied';
 
+-- name: MarkLatePromoRefunded :execrows
+UPDATE payments SET status = 'refunded', refunded_at = sqlc.arg(refunded_at), error = '' WHERE id = sqlc.arg(id) AND status IN ('pending','expired','paid','failed');
+
 -- name: FindOpenPayment :one
 -- user_id 0 asks for an invoice that has no user yet (NULL); payments_tg finds the candidates.
 SELECT * FROM payments
 WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND user_id IS NOT DISTINCT FROM NULLIF(CAST(sqlc.arg(user_id) AS BIGINT), 0)
   AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
 ORDER BY id DESC LIMIT 1;
+
+-- name: FindOpenPayments :many
+SELECT * FROM payments
+WHERE tg_id = sqlc.arg(tg_id) AND tariff_id = sqlc.arg(tariff_id) AND provider = sqlc.arg(provider) AND kind = sqlc.arg(kind)
+  AND user_id IS NOT DISTINCT FROM NULLIF(CAST(sqlc.arg(user_id) AS BIGINT), 0)
+  AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
+ORDER BY id DESC;
 
 -- name: ListPendingPayments :many
 SELECT * FROM payments WHERE status = 'pending' AND created_at > $1 ORDER BY id;

@@ -28,6 +28,7 @@ import (
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/panelimport"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -182,9 +183,11 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
+	promos := promo.New(st, o.Now)
+	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
 		MaxLinks: tgbot.MaxLinks,
-		Addons:   deps.Addons, SubBase: subBase})
+		Addons:   deps.Addons, SubBase: subBase, Promo: promos})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
@@ -334,6 +337,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	subHandler.SetLogger(o.Log)
 	subHandler.SetTelegram(p.Telegram)
 	subHandler.SetShop(p.Billing)
+	subHandler.SetPromo(promos)
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)

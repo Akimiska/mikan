@@ -26,6 +26,8 @@ const FAIL: Record<string, Key> = {
   not_for_sale: "sub.shopNotForSale",
   too_many_invoices: "sub.shopTooMany",
   too_many_subs: "sub.shopTooManySubs",
+  promo_unavailable: "sub.promoUnavailable",
+  promo_try_later: "sub.promoTryLater",
 };
 
 /** What the account can buy; with token, the traffic packages of that subscription too. */
@@ -52,6 +54,7 @@ export function Shop({
   openInvoice,
   openLink,
   onRefresh,
+  promoCode = "",
 }: {
   data: ShopData;
   offers: Offer[];
@@ -64,12 +67,14 @@ export function Shop({
   openInvoice: (slug: string) => void;
   openLink: (url: string) => void;
   onRefresh: () => void;
+  promoCode?: string;
 }) {
   const [picked, setPicked] = useState<number | null>(offers.length === 1 ? offers[0]!.id : null);
   const [busy, setBusy] = useState<Provider | null>(null);
   const [error, setError] = useState("");
+  const [promoPreview, setPromoPreview] = useState<{ discount: number; final_amount: number; currency: string } | null>(null);
   const [opened, setOpened] = useState(false);
-  useEffect(() => setError(""), [picked]);
+  useEffect(() => { setError(""); setPromoPreview(null); }, [picked, promoCode]);
   const offer = offers.find((o) => o.id === picked);
   const failText = (code: string) => (field === "package_id" && code === "not_for_sale" ? t("sub.packageNotForSale") : t(FAIL[code] ?? "sub.shopFail"));
 
@@ -78,10 +83,26 @@ export function Shop({
     setBusy(provider);
     setError("");
     try {
+      if (promoCode) {
+        const preview = await fetch(subRoot + "/tg/promo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ init_data: initData, token, code: promoCode, [field]: offer.id, provider, validate_only: true }),
+          cache: "no-store",
+        });
+        const result = (await preview.json().catch(() => ({}))) as { code?: string; discount?: number; final_amount?: number; currency?: string };
+        if (!preview.ok) {
+          setError(failText(result.code ?? "promo_unavailable"));
+          return;
+        }
+        if (result.discount != null && result.final_amount != null && result.currency) {
+          setPromoPreview({ discount: result.discount, final_amount: result.final_amount, currency: result.currency });
+        }
+      }
       const r = await fetch(subRoot + "/tg/pay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ init_data: initData, [field]: offer.id, provider, token }),
+        body: JSON.stringify({ init_data: initData, [field]: offer.id, provider, token, promo_code: promoCode }),
         cache: "no-store",
       });
       const body = (await r.json().catch(() => ({}))) as { url?: string; code?: string };
@@ -111,7 +132,8 @@ export function Shop({
   return (
     <section className="glass rounded-3xl p-4" aria-label={title}>
       <h2 className="mb-1 text-[15px] font-semibold">{title}</h2>
-      <p className="mb-3 text-xs text-[var(--ink-500)]">{pick}</p>
+      <p className="mb-3 text-xs text-[var(--ink-500)]">{pick}{promoCode ? ` · ${t("sub.promoSelected", { code: promoCode })}` : ""}</p>
+      {promoPreview ? <p className="mb-3 text-xs text-[var(--leaf-600)]">{t("sub.promoCheckoutDiscount", { discount: promoPreview.discount, total: promoPreview.final_amount, currency: promoPreview.currency })}</p> : null}
       <div className="flex flex-col gap-2" role="radiogroup" aria-label={pick}>
         {offers.map((o) => (
           <button key={o.id} type="button" role="radio" aria-checked={picked === o.id} className="opt" onClick={() => setPicked(o.id)}>
@@ -151,4 +173,3 @@ export function Shop({
     </section>
   );
 }
-

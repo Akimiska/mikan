@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store/db"
 )
@@ -78,11 +79,20 @@ type PackageRequest struct {
 	UserID    int64
 	PackageID int64
 	Provider  string
+	PromoCode string
 }
 
 // PackageInvoice opens a payment for a package. Only the subscription's owner buys for it;
 // an open invoice for the same purchase made in the last minutes is returned again.
 func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Payment, error) {
+	if strings.TrimSpace(req.PromoCode) != "" && s.d.Promo == nil {
+		return db.Payment{}, promo.ErrUnavailable
+	}
+	if strings.TrimSpace(req.PromoCode) != "" {
+		if err := s.validatePromoProvider(ctx, req.Provider); err != nil {
+			return db.Payment{}, err
+		}
+	}
 	q := s.d.Store.Q
 	if link, err := q.GetTgLink(ctx, req.UserID); err != nil || link.TgID != req.TgID {
 		return db.Payment{}, ErrNotYours
@@ -101,6 +111,10 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 		return db.Payment{}, ErrNotForSale
 	}
 	p := offer.Package
+	user, err := q.GetUser(ctx, req.UserID)
+	if err != nil {
+		return db.Payment{}, err
+	}
 	amount, currency, ok := av.price(req.Provider, p.PriceStars, p.PriceRub)
 	if !ok {
 		return db.Payment{}, ErrProviderOff
@@ -113,17 +127,38 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: true}
 	packageID := sql.NullInt64{Int64: p.ID, Valid: true}
-	pay, open, err := s.newPayment(ctx, req.TgID, now, amount,
-		func(q *db.Queries) (db.Payment, error) {
-			return q.FindOpenPackagePayment(ctx, db.FindOpenPackagePaymentParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider,
-				UserID: userID, Since: now.Add(-invoiceReuse).Unix()})
+	pay, open, err := s.newPayment(ctx, req.TgID, now,
+		func(q *db.Queries) ([]db.Payment, error) {
+			return q.FindOpenPackagePayments(ctx, db.FindOpenPackagePaymentsParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider, UserID: userID, Since: now.Add(-invoiceReuse).Unix()})
+		},
+		func(q *db.Queries, existing db.Payment) (bool, error) {
+			return s.matchesOpenPayment(ctx, q, existing, amount, req.PromoCode)
 		},
 		func(q *db.Queries) (db.Payment, error) {
-			return q.CreatePackagePayment(ctx, db.CreatePackagePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID,
-				UserID: userID, PackageID: packageID, TariffName: p.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+			created, err := q.CreatePackagePayment(ctx, db.CreatePackagePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID, UserID: userID, PackageID: packageID, TariffName: p.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+			if err != nil {
+				return db.Payment{}, err
+			}
+			if s.d.Promo != nil && strings.TrimSpace(req.PromoCode) != "" {
+				if !user.TariffID.Valid {
+					return db.Payment{}, promo.ErrTariff
+				}
+				d, err := s.d.Promo.ReserveDiscount(ctx, q, req.TgID, req.UserID, user.TariffID.Int64, amount, currency, req.PromoCode, created.ID)
+				if err != nil {
+					return db.Payment{}, err
+				}
+				if _, err := q.SetPaymentAmount(ctx, db.SetPaymentAmountParams{Amount: d.Final, ID: created.ID}); err != nil {
+					return db.Payment{}, err
+				}
+				created.Amount = d.Final
+			}
+			return created, nil
 		})
-	if err != nil || open {
-		return pay, err
+	if err != nil {
+		return db.Payment{}, err
+	}
+	if open {
+		return pay, nil
 	}
 	lang, _ := s.d.Settings.Lang(ctx)
 	return s.openPayment(ctx, pay, p.Name, DescribePackage(p, offer.Pool, lang))

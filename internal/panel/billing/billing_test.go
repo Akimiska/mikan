@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -27,17 +28,25 @@ func (noChanges) SlotsChanged()    {}
 
 // fakeTG is the bot: Stars links, refunds and what buyers were told.
 type fakeTG struct {
-	mu      sync.Mutex
-	paid    []db.Payment
-	refunds []string
+	mu        sync.Mutex
+	paid      []db.Payment
+	refunds   []string
+	refundErr error
+	invoices  int
 }
 
 func (f *fakeTG) InvoiceLink(_ context.Context, _, _, payload string, stars int64) (string, error) {
+	f.mu.Lock()
+	f.invoices++
+	f.mu.Unlock()
 	return "https://t.me/$" + payload[:8] + "?stars=" + strconv.FormatInt(stars, 10), nil
 }
 func (f *fakeTG) RefundStars(_ context.Context, _ int64, charge string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.refundErr != nil {
+		return f.refundErr
+	}
 	f.refunds = append(f.refunds, charge)
 	return nil
 }
@@ -51,6 +60,11 @@ func (f *fakeTG) told() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.paid)
+}
+func (f *fakeTG) invoiceCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.invoices
 }
 
 type env struct {
@@ -134,6 +148,182 @@ func (e *env) hook(provider, token, ip string, body []byte, hdr map[string]strin
 	w := httptest.NewRecorder()
 	e.s.Webhook().ServeHTTP(w, r)
 	return w.Code
+}
+
+func TestDiscountedStarsInvoicePersistsAmountAndReusesInvoice(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "SALE25", Type: "percent", Value: 25, Currency: "XTR", PerUserLimit: 1, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	req := InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars, PromoCode: pc.Code}
+	p, err := e.s.Invoice(ctx, req)
+	must(t, err)
+	if p.Amount != 113 {
+		t.Fatalf("invoice amount = %d, want 113", p.Amount)
+	}
+	if stored := e.payment(p.ID); stored.Amount != 113 {
+		t.Fatalf("stored amount = %d, want discounted 113", stored.Amount)
+	}
+	ordinary, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars})
+	must(t, err)
+	if ordinary.ID == p.ID {
+		t.Fatal("ordinary invoice unexpectedly reused the discounted payment")
+	}
+	calls := e.tg.invoiceCount()
+	if again, err := e.s.Invoice(ctx, req); err != nil || again.ID != p.ID || e.tg.invoiceCount() != calls {
+		t.Fatalf("invoice was not reused: payment=%+v err=%v calls=%d->%d", again, err, calls, e.tg.invoiceCount())
+	}
+	must(t, e.s.PreCheckout(ctx, 555, p.Payload, "XTR", 113))
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-discount", "XTR", 113))
+	if e.payment(p.ID).Status != "applied" {
+		t.Fatalf("discounted payment not applied: %+v", e.payment(p.ID))
+	}
+}
+
+func TestConcurrentInvoicesWithSingleUsePromoShareReservation(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "ONCE", Type: "percent", Value: 10, Currency: "XTR", MaxUses: sql.NullInt64{Int64: 1, Valid: true}, PerUserLimit: 1, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	req := InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars, PromoCode: pc.Code}
+	payments := make([]db.Payment, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range payments {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			payments[i], errs[i] = e.s.Invoice(ctx, req)
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent promo invoice: %v", err)
+		}
+	}
+	if payments[0].ID != payments[1].ID {
+		t.Fatalf("parallel calls opened payments %d and %d", payments[0].ID, payments[1].ID)
+	}
+	var uses, redemptions int
+	if err := e.st.DB.QueryRowContext(ctx, `SELECT used_count FROM promo_codes WHERE id=$1`, pc.ID).Scan(&uses); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.DB.QueryRowContext(ctx, `SELECT count(*) FROM promo_redemptions WHERE promo_id=$1 AND status='reserved'`, pc.ID).Scan(&redemptions); err != nil {
+		t.Fatal(err)
+	}
+	if uses != 1 || redemptions != 1 {
+		t.Fatalf("promo use count=%d reservations=%d, want 1 each", uses, redemptions)
+	}
+}
+
+func TestExpiredDiscountedStarsCaptureIsRefunded(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "SHORT", Type: "percent", Value: 10,
+		Currency: "XTR", PerUserLimit: 1, DiscountTtl: 30, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	p, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars, PromoCode: pc.Code})
+	must(t, err)
+	e.now = e.now.Add(31 * time.Second)
+	if err := e.s.StarsPaid(ctx, 555, p.Payload, "late-charge", p.Currency, p.Amount); err != nil {
+		t.Fatalf("late capture should be refunded: %v", err)
+	}
+	if got := e.payment(p.ID); got.Status != "refunded" {
+		t.Fatalf("payment status = %q, want refunded", got.Status)
+	}
+	e.tg.mu.Lock()
+	refunds := append([]string(nil), e.tg.refunds...)
+	e.tg.mu.Unlock()
+	if len(refunds) != 1 || refunds[0] != "late-charge" {
+		t.Fatalf("refunds = %v", refunds)
+	}
+	if e.users() != 0 {
+		t.Fatal("late payment created a subscription")
+	}
+	r, err := e.s.d.Promo.GetPaymentRedemption(ctx, p.ID)
+	if err != nil || r.Status != "released" {
+		t.Fatalf("reservation status = %q, err=%v; want released", r.Status, err)
+	}
+}
+
+func TestLateStarsRefundFailureRetriesInReconcile(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "RETRY", Type: "percent", Value: 10,
+		Currency: "XTR", PerUserLimit: 1, DiscountTtl: 30, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	p, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars, PromoCode: pc.Code})
+	must(t, err)
+	e.now = e.now.Add(31 * time.Second)
+	e.tg.refundErr = errors.New("Telegram unavailable")
+	if err := e.s.StarsPaid(ctx, 555, p.Payload, "retry-charge", p.Currency, p.Amount); err == nil {
+		t.Fatal("the first refund attempt unexpectedly succeeded")
+	}
+	failed := e.payment(p.ID)
+	if failed.Error != "promo_late_refund_failed" || failed.ExternalID.String != "retry-charge" {
+		t.Fatalf("payment after failed refund: %+v", failed)
+	}
+	r, err := e.s.d.Promo.GetPaymentRedemption(ctx, p.ID)
+	if err != nil || r.RefundStartedAt.Valid {
+		t.Fatalf("failed refund claim remains set: %+v err=%v", r.RefundStartedAt, err)
+	}
+	e.tg.refundErr = nil
+	e.s.Reconcile(ctx)
+	if got := e.payment(p.ID); got.Status != "refunded" || got.Error != "" {
+		t.Fatalf("reconciled payment status=%q error=%q", got.Status, got.Error)
+	}
+	e.tg.mu.Lock()
+	refunds := append([]string(nil), e.tg.refunds...)
+	e.tg.mu.Unlock()
+	if len(refunds) != 1 || refunds[0] != "retry-charge" {
+		t.Fatalf("refunds=%v", refunds)
+	}
+}
+
+func TestStarsPaymentReleasedDuringPaymentTransitionGetsRefunded(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "NOEXPIRY", Type: "percent", Value: 10,
+		Currency: "XTR", PerUserLimit: 1, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	p, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars, PromoCode: pc.Code})
+	must(t, err)
+	if _, err := e.st.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: "expired", ID: p.ID, OldStatus: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	e.now = e.now.Add(31 * time.Minute)
+	baseNow := e.s.d.Now
+	released := false
+	e.s.d.Now = func() time.Time {
+		if !released {
+			released = true
+			if err := e.s.d.Promo.ReleasePayment(ctx, p.ID); err != nil {
+				t.Errorf("release during paid transition: %v", err)
+			}
+		}
+		return baseNow()
+	}
+	if err := e.s.StarsPaid(ctx, 555, p.Payload, "race-charge", p.Currency, p.Amount); err != nil {
+		t.Fatalf("late payment race should be refunded: %v", err)
+	}
+	if got := e.payment(p.ID); got.Status != "refunded" || !got.RefundedAt.Valid || got.Error != "" {
+		t.Fatalf("payment after release race = %q refunded_at=%+v error=%q", got.Status, got.RefundedAt, got.Error)
+	}
+	e.tg.mu.Lock()
+	refunds := append([]string(nil), e.tg.refunds...)
+	e.tg.mu.Unlock()
+	if len(refunds) != 1 || refunds[0] != "race-charge" {
+		t.Fatalf("refunds = %v", refunds)
+	}
+	if e.users() != 0 {
+		t.Fatal("late payment created a subscription")
+	}
 }
 
 // A new buyer pays in Stars: one subscription, linked to the account, told once — however

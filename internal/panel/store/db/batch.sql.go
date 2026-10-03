@@ -188,6 +188,60 @@ func (q *Queries) BurnUsersSlots(ctx context.Context, arg BurnUsersSlotsParams) 
 	return err
 }
 
+const countUserStates = `-- name: CountUserStates :one
+WITH g AS (
+  SELECT user_id, SUM(remaining) AS left_bytes FROM traffic_grants
+  WHERE pool_id IS NULL AND remaining > 0 AND (expires_at IS NULL OR expires_at > $1::bigint)
+  GROUP BY user_id
+), s AS (
+  SELECT CASE
+    WHEN u.status = 'disabled' THEN 'disabled'
+    WHEN u.expires_at IS NOT NULL AND u.expires_at <= $1::bigint THEN 'expired'
+    WHEN u.traffic_limit IS NOT NULL AND u.used_up + u.used_down >= u.traffic_limit AND COALESCE(g.left_bytes, 0) <= 0 THEN 'limited'
+    WHEN u.expires_at IS NOT NULL AND u.expires_at - $1::bigint <= $2::bigint THEN 'expiring'
+    ELSE 'active' END AS state
+  FROM users u LEFT JOIN g ON g.user_id = u.id
+)
+SELECT count(*) AS total,
+  count(*) FILTER (WHERE state = 'active') AS active,
+  count(*) FILTER (WHERE state = 'expiring') AS expiring,
+  count(*) FILTER (WHERE state = 'limited') AS limited,
+  count(*) FILTER (WHERE state = 'expired') AS expired,
+  count(*) FILTER (WHERE state = 'disabled') AS disabled
+FROM s
+`
+
+type CountUserStatesParams struct {
+	Now            int64
+	ExpiringWithin int64
+}
+
+type CountUserStatesRow struct {
+	Total    int64
+	Active   int64
+	Expiring int64
+	Limited  int64
+	Expired  int64
+	Disabled int64
+}
+
+// How many users are in each state as domain.State decides it (keep the two alike):
+// disabled, expired, limited (past the base quota with no main grants left), expiring
+// (the term ends within expiring_within seconds), otherwise active.
+func (q *Queries) CountUserStates(ctx context.Context, arg CountUserStatesParams) (CountUserStatesRow, error) {
+	row := q.db.QueryRowContext(ctx, countUserStates, arg.Now, arg.ExpiringWithin)
+	var i CountUserStatesRow
+	err := row.Scan(
+		&i.Total,
+		&i.Active,
+		&i.Expiring,
+		&i.Limited,
+		&i.Expired,
+		&i.Disabled,
+	)
+	return i, err
+}
+
 const deleteUsers = `-- name: DeleteUsers :exec
 DELETE FROM users WHERE id = ANY($1::bigint[])
 `
@@ -652,4 +706,41 @@ type UpsertDevicesParams struct {
 func (q *Queries) UpsertDevices(ctx context.Context, arg UpsertDevicesParams) error {
 	_, err := q.db.ExecContext(ctx, upsertDevices, arg.Now, pq.Array(arg.UserIds), pq.Array(arg.Ips))
 	return err
+}
+
+const userSlotsOf = `-- name: UserSlotsOf :many
+SELECT s.name AS slot_name, u.id AS user_id FROM slots s JOIN users u ON u.slot_id = s.id
+WHERE u.id = ANY($1::bigint[])
+UNION
+SELECT s.name AS slot_name, d.user_id AS user_id FROM slots s JOIN bound_devices d ON d.slot_id = s.id
+WHERE d.user_id = ANY($1::bigint[])
+`
+
+type UserSlotsOfRow struct {
+	SlotName string
+	UserID   int64
+}
+
+// The slots of these users: the own one and those of bound devices.
+func (q *Queries) UserSlotsOf(ctx context.Context, ids []int64) ([]UserSlotsOfRow, error) {
+	rows, err := q.db.QueryContext(ctx, userSlotsOf, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserSlotsOfRow{}
+	for rows.Next() {
+		var i UserSlotsOfRow
+		if err := rows.Scan(&i.SlotName, &i.UserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -134,6 +134,39 @@ DELETE FROM bound_devices WHERE user_id = ANY(sqlc.arg(ids)::bigint[]);
 -- name: DeleteUsers :exec
 DELETE FROM users WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
+-- name: CountUserStates :one
+-- How many users are in each state as domain.State decides it (keep the two alike):
+-- disabled, expired, limited (past the base quota with no main grants left), expiring
+-- (the term ends within expiring_within seconds), otherwise active.
+WITH g AS (
+  SELECT user_id, SUM(remaining) AS left_bytes FROM traffic_grants
+  WHERE pool_id IS NULL AND remaining > 0 AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::bigint)
+  GROUP BY user_id
+), s AS (
+  SELECT CASE
+    WHEN u.status = 'disabled' THEN 'disabled'
+    WHEN u.expires_at IS NOT NULL AND u.expires_at <= sqlc.arg(now)::bigint THEN 'expired'
+    WHEN u.traffic_limit IS NOT NULL AND u.used_up + u.used_down >= u.traffic_limit AND COALESCE(g.left_bytes, 0) <= 0 THEN 'limited'
+    WHEN u.expires_at IS NOT NULL AND u.expires_at - sqlc.arg(now)::bigint <= sqlc.arg(expiring_within)::bigint THEN 'expiring'
+    ELSE 'active' END AS state
+  FROM users u LEFT JOIN g ON g.user_id = u.id
+)
+SELECT count(*) AS total,
+  count(*) FILTER (WHERE state = 'active') AS active,
+  count(*) FILTER (WHERE state = 'expiring') AS expiring,
+  count(*) FILTER (WHERE state = 'limited') AS limited,
+  count(*) FILTER (WHERE state = 'expired') AS expired,
+  count(*) FILTER (WHERE state = 'disabled') AS disabled
+FROM s;
+
+-- name: UserSlotsOf :many
+-- The slots of these users: the own one and those of bound devices.
+SELECT s.name AS slot_name, u.id AS user_id FROM slots s JOIN users u ON u.slot_id = s.id
+WHERE u.id = ANY(sqlc.arg(ids)::bigint[])
+UNION
+SELECT s.name AS slot_name, d.user_id AS user_id FROM slots s JOIN bound_devices d ON d.slot_id = s.id
+WHERE d.user_id = ANY(sqlc.arg(ids)::bigint[]);
+
 -- name: LockBuyerInvoices :exec
 -- The invoices of one Telegram account are checked and made one transaction at a time.
 SELECT pg_advisory_xact_lock(hashtextextended('mikan-invoice:' || CAST(sqlc.arg(tg_id) AS BIGINT), 0));

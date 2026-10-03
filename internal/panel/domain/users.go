@@ -51,6 +51,11 @@ func State(u db.User, grants int64, now time.Time) string {
 
 func CanConnect(state string) bool { return state == StateActive || state == StateExpiring }
 
+// CountStates counts the users in each State in the database, without loading them.
+func CountStates(ctx context.Context, q *db.Queries, now time.Time) (db.CountUserStatesRow, error) {
+	return q.CountUserStates(ctx, db.CountUserStatesParams{Now: now.Unix(), ExpiringWithin: int64(expiringWindow / time.Second)})
+}
+
 // NextReset is when the traffic counter of the current period drops to zero.
 func NextReset(u db.User, now time.Time) (time.Time, bool) {
 	switch u.ResetStrategy {

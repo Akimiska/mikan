@@ -5,13 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
-
-	"mikan/internal/panel/store/db"
 )
 
 // OpenTest gives each fixture its own PostgreSQL schema. Reopening the same directory
@@ -21,11 +19,6 @@ func OpenTest(ctx context.Context, dataDir string) (*Store, error) {
 	if dsn == "" {
 		return nil, errors.New("tests require MIKAN_TEST_DATABASE_URL pointing to a disposable PostgreSQL database")
 	}
-	admin, err := connectPostgres(ctx, dsn)
-	if err != nil {
-		return nil, err
-	}
-	defer admin.Close()
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -43,33 +36,20 @@ func OpenTest(ctx context.Context, dataDir string) (*Store, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	schema := pgx.Identifier{string(name)}.Sanitize()
-	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA IF NOT EXISTS "+schema); err != nil {
+	exec := func(ctx context.Context, sql string) error {
+		return withConn(ctx, dsn, func(c *pgx.Conn) error { _, err := c.Exec(ctx, sql); return err })
+	}
+	if err := exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+quote(string(name))); err != nil {
 		return nil, err
 	}
-	cfg, err := pgx.ParseConfig(dsn)
+	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err
 	}
-	cfg.RuntimeParams["search_path"] = string(name)
-	conn := stdlib.OpenDB(*cfg)
-	conn.SetMaxOpenConns(16)
-	conn.SetMaxIdleConns(4)
-	if err := migratePostgres(ctx, conn); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	if err := ensureLocalNode(ctx, conn); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return &Store{DB: conn, Q: db.New(conn), cleanup: func() error {
-		c, err := connectPostgres(context.Background(), dsn)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		_, err = c.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
-		return err
-	}}, nil
+	query := u.Query()
+	query.Set("search_path", string(name))
+	u.RawQuery = query.Encode()
+	return OpenMigrated(ctx, u.String(), func() error {
+		return exec(context.Background(), "DROP SCHEMA IF EXISTS "+quote(string(name))+" CASCADE")
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -20,18 +21,7 @@ func TestPostgresArchiveActuallyRestores(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	var schema string
-	if err := st.DB.QueryRowContext(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	u, err := url.Parse(os.Getenv("MIKAN_TEST_DATABASE_URL"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	query := u.Query()
-	query.Set("options", "-csearch_path="+schema)
-	u.RawQuery = query.Encode()
-	dsn := u.String()
+	dsn := schemaDSN(t, st)
 	t.Setenv("MIKAN_DATABASE_URL", dsn)
 	t.Setenv("MIKAN_DATA_DIR", dir)
 	if err := st.Q.SetSetting(ctx, db.SetSettingParams{Key: "preserved", Value: "42"}); err != nil {
@@ -90,6 +80,24 @@ func TestPostgresArchiveActuallyRestores(t *testing.T) {
 	}
 }
 
+// schemaDSN reaches st's schema the way an installation's MIKAN_DATABASE_URL reaches its
+// own: pg_dump and pg_restore get the search path too.
+func schemaDSN(t *testing.T, st *store.Store) string {
+	t.Helper()
+	var schema string
+	if err := st.DB.QueryRowContext(context.Background(), "SELECT current_schema()").Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(os.Getenv("MIKAN_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := u.Query()
+	query.Set("options", "-csearch_path="+schema)
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
 func TestToolOutputMasksThePassword(t *testing.T) {
 	got := toolOutput("postgresql://mikan:test-secret@localhost/mikan", "pg_restore: error: test-secret rejected\n")
 	if strings.Contains(got, "test-secret") || !strings.Contains(got, "pg_restore: error: *** rejected") {
@@ -97,6 +105,23 @@ func TestToolOutputMasksThePassword(t *testing.T) {
 	}
 	if toolOutput("postgresql://mikan:x@localhost/mikan", " \n") != "" {
 		t.Fatal("empty diagnostics produce text")
+	}
+	// The tail starts on a whole character, not in the middle of one.
+	long := strings.Repeat("я", toolOutputLimit/2+1) + "!" // the limit falls inside a "я"
+	if got := toolOutput("postgresql://mikan:x@localhost/mikan", long); !utf8.ValidString(got) || !strings.HasSuffix(got, "я!") {
+		t.Fatalf("cut diagnostics: %q", got[:16])
+	}
+}
+
+func TestRestoreRefusesATooShortFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "short")
+	if err := os.WriteFile(path, []byte("PGDMP"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MIKAN_DATABASE_URL", "postgresql://mikan:x@localhost/mikan")
+	t.Setenv("MIKAN_DATA_DIR", t.TempDir())
+	if err := databaseCmd(context.Background(), []string{"restore", path}); err == nil || !strings.Contains(err.Error(), "too short") {
+		t.Fatal(err)
 	}
 }
 

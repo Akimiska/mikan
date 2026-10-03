@@ -37,7 +37,7 @@ func TestSkippedPostgresReleaseImportsBeforeNewSchemaChanges(t *testing.T) {
 		"0001_baseline.sql": &fstest.MapFile{Data: baseline},
 		"0002_future.sql":   &fstest.MapFile{Data: []byte("-- +goose Up\nALTER TABLE users ADD COLUMN future_required TEXT NOT NULL DEFAULT 'preserved-default';\nCREATE TABLE future_table (id BIGINT PRIMARY KEY);\n")},
 	}
-	if err := preparePostgresImport(ctx, s.DB, future); err != nil {
+	if err := migrateToImportBaseline(ctx, s.DB, future); err != nil {
 		t.Fatal(err)
 	}
 	var version int64
@@ -59,7 +59,7 @@ func TestSkippedPostgresReleaseImportsBeforeNewSchemaChanges(t *testing.T) {
 	if _, err := ImportSQLite(ctx, s.DB, dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := finishPostgresImport(ctx, s.DB, future); err != nil {
+	if err := migrateUp(ctx, s.DB, future); err != nil {
 		t.Fatal(err)
 	}
 	var link, added string
@@ -71,13 +71,13 @@ func TestSkippedPostgresReleaseImportsBeforeNewSchemaChanges(t *testing.T) {
 	if _, err := s.DB.ExecContext(ctx, "UPDATE users SET name='changed in PostgreSQL' WHERE id=41"); err != nil {
 		t.Fatal(err)
 	}
-	if err := preparePostgresImport(ctx, s.DB, future); err != nil {
+	if err := migrateToImportBaseline(ctx, s.DB, future); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ImportSQLite(ctx, s.DB, dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := finishPostgresImport(ctx, s.DB, future); err != nil {
+	if err := migrateUp(ctx, s.DB, future); err != nil {
 		t.Fatal(err)
 	}
 	var name string
@@ -88,7 +88,7 @@ func TestSkippedPostgresReleaseImportsBeforeNewSchemaChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := preparePostgresImport(ctx, s.DB, old); err == nil || !strings.Contains(err.Error(), "downgrade refused") {
+	if err := migrateToImportBaseline(ctx, s.DB, old); err == nil || !strings.Contains(err.Error(), "downgrade refused") {
 		t.Fatal("older binary accepted newer schema:", err)
 	}
 }

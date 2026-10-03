@@ -210,11 +210,8 @@ func TestBackupIsPrivateAndConsistent(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "backup.db")
-	var schema string
-	if err := st.DB.QueryRowContext(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if err := databaseBackup(ctx, os.Getenv("MIKAN_TEST_DATABASE_URL"), path, schema); err != nil {
+	dsn := schemaDSN(t, st)
+	if err := databaseBackup(ctx, dsn, path); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(path)
@@ -223,14 +220,14 @@ func TestBackupIsPrivateAndConsistent(t *testing.T) {
 	}
 	// An existing backup is not overwritten, and is left as it was.
 	before, _ := os.ReadFile(path)
-	if err := databaseBackup(ctx, os.Getenv("MIKAN_TEST_DATABASE_URL"), path, schema); err == nil {
+	if err := databaseBackup(ctx, dsn, path); err == nil {
 		t.Fatal("a second backup over the first")
 	}
 	if after, _ := os.ReadFile(path); !bytes.Equal(before, after) {
 		t.Fatal("the existing backup was changed")
 	}
 	// A bad path leaves nothing behind.
-	if err := databaseBackup(ctx, os.Getenv("MIKAN_TEST_DATABASE_URL"), filepath.Join(t.TempDir(), "no", "dir", "x.db"), schema); err == nil {
+	if err := databaseBackup(ctx, dsn, filepath.Join(t.TempDir(), "no", "dir", "x.db")); err == nil {
 		t.Fatal("a path that cannot be written")
 	}
 }

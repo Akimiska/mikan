@@ -77,7 +77,7 @@ func TestConcurrentFreshPostgresMigrations(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 4)
 	for range 4 {
-		wg.Go(func() { errs <- migratePostgres(ctx, s.DB) })
+		wg.Go(func() { errs <- migrateUp(ctx, s.DB, postgresFS) })
 	}
 	wg.Wait()
 	close(errs)

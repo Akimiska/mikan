@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"io/fs"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,22 +19,18 @@ const restoreSuffix = "_pre_restore"
 // imported at the SQLite baseline and then migrated, like a first upgrade.
 func RestoreSQLite(ctx context.Context, dsn, dir, source string) error {
 	return restoreSchema(ctx, dsn, func(ctx context.Context) error {
-		pg, err := connectPostgres(ctx, dsn)
+		pg, err := connectPostgres(ctx, dsn, maintenanceSession)
 		if err != nil {
 			return err
 		}
 		defer pg.Close()
-		fsys, err := fs.Sub(postgresMigrations, "postgres")
-		if err != nil {
-			return err
-		}
-		if err := preparePostgresImport(ctx, pg, fsys); err != nil {
+		if err := migrateToImportBaseline(ctx, pg, postgresFS); err != nil {
 			return err
 		}
 		if _, err := ImportSQLiteRestore(ctx, pg, dir, source); err != nil {
 			return err
 		}
-		return finishPostgresImport(ctx, pg, fsys)
+		return migrateUp(ctx, pg, postgresFS)
 	})
 }
 
@@ -47,12 +41,12 @@ func RestorePostgres(ctx context.Context, dsn, dir string, pgRestore func(contex
 		if err := pgRestore(ctx); err != nil {
 			return err
 		}
-		pg, err := connectPostgres(ctx, dsn)
+		pg, err := connectPostgres(ctx, dsn, maintenanceSession)
 		if err != nil {
 			return err
 		}
 		defer pg.Close()
-		if err := migratePostgres(ctx, pg); err != nil {
+		if err := migrateUp(ctx, pg, postgresFS); err != nil {
 			return err
 		}
 		return ConfirmPostgresRestore(ctx, pg, dir)
@@ -63,17 +57,22 @@ func RestorePostgres(ctx context.Context, dsn, dir string, pgRestore func(contex
 // The previous schema waits aside until load succeeds; a failure brings it back, and so
 // does the next start after a crash (an unfinished restore never reported success).
 func restoreSchema(ctx context.Context, dsn string, load func(context.Context) error) error {
-	conn, err := connectPostgres(ctx, dsn)
+	conn, err := connectPostgres(ctx, dsn, maintenanceSession)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	// One session holds the restore lock for the whole restore.
+	// One session holds the panel guard and the restore lock for the whole restore.
 	c, err := conn.Conn(ctx)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+	unlock, err := lockOffline(ctx, c)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	schema, aside, lockID, err := restoreNames(ctx, c)
 	if err != nil {
 		return err
@@ -151,13 +150,8 @@ func recoverRestore(ctx context.Context, conn *sql.DB) error {
 }
 
 func restoreNames(ctx context.Context, c *sql.Conn) (schema, aside string, lockID int64, err error) {
-	var database string
-	if err = c.QueryRowContext(ctx, "SELECT current_database(),current_schema()").Scan(&database, &schema); err != nil {
-		return
-	}
-	h := fnv.New64a()
-	fmt.Fprintf(h, "mikan-restore:%s:%s", database, schema)
-	return schema, schema + restoreSuffix, int64(h.Sum64()), nil
+	schema, lockID, err = schemaLock(ctx, c, "restore")
+	return schema, schema + restoreSuffix, lockID, err
 }
 
 func revertRestore(ctx context.Context, c *sql.Conn, schema, aside string) error {
@@ -186,16 +180,3 @@ func inTx(ctx context.Context, c *sql.Conn, statements ...string) error {
 }
 
 func quote(name string) string { return pgx.Identifier{name}.Sanitize() }
-
-// SchemaVersion is the applied PostgreSQL migration version.
-func SchemaVersion(ctx context.Context, conn *sql.DB) (int64, error) {
-	fsys, err := fs.Sub(postgresMigrations, "postgres")
-	if err != nil {
-		return 0, err
-	}
-	p, err := postgresProvider(ctx, conn, fsys)
-	if err != nil {
-		return 0, err
-	}
-	return p.GetDBVersion(ctx)
-}

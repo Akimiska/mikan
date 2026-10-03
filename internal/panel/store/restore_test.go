@@ -134,14 +134,14 @@ func TestInterruptedRestoreComesBack(t *testing.T) {
 	if _, err := c.ExecContext(ctx, "SELECT pg_advisory_lock($1)", lockID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PreparePostgresImport(ctx, dsn); err == nil || !strings.Contains(err.Error(), "restore is running") {
+	if _, err := openAtImportBaseline(ctx, dsn); err == nil || !strings.Contains(err.Error(), "restore is running") {
 		t.Fatal("recovered beside a running restore:", err)
 	}
 	if _, err := c.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", lockID); err != nil {
 		t.Fatal(err)
 	}
 
-	pg, err := PreparePostgresImport(ctx, dsn)
+	pg, err := openAtImportBaseline(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestFinishedRestoreSurvivesAFailedDrop(t *testing.T) {
 		t.Fatal("a failed drop is not reported as a leftover:", err)
 	}
 
-	pg, err := PreparePostgresImport(ctx, dsn)
+	pg, err := openAtImportBaseline(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}

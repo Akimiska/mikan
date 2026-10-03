@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/storetest"
 )
 
 // The store's retried transactions are a counter of the scrape, not a number for tests.
 func TestMetricsCountSerializationRetries(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.OpenTest(ctx, t.TempDir())
+	st, err := storetest.Open(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

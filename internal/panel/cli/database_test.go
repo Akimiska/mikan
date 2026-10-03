@@ -13,12 +13,13 @@ import (
 
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 func TestPostgresArchiveActuallyRestores(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	st, err := store.OpenTest(ctx, dir)
+	st, err := storetest.Open(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

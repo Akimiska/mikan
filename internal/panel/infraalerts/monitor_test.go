@@ -14,12 +14,13 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 func testMonitorStore(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.OpenTest(ctx, t.TempDir())
+	st, err := storetest.Open(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 	"mikan/internal/proto"
 )
 
@@ -77,7 +78,7 @@ func setup(t *testing.T) *env {
 	e := &env{ctx: context.Background(), now: time.Unix(1_800_000_000, 0), ch: &changes{}}
 	clock := func() time.Time { return e.now }
 	var err error
-	if e.st, err = store.OpenTest(e.ctx, t.TempDir()); err != nil {
+	if e.st, err = storetest.Open(e.ctx, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })

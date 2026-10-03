@@ -34,6 +34,7 @@ var (
 	ErrInvalidValue       = errors.New("promo_invalid_value")
 	ErrReservationExpired = errors.New("promo_reservation_expired")
 	ErrRefundUnsupported  = errors.New("promo_refund_unsupported")
+	ErrNotBonus           = errors.New("promo_not_bonus")
 )
 
 const (
@@ -284,7 +285,7 @@ func (s *Service) RedeemBonus(ctx context.Context, tgID, userID int64, code stri
 			return err
 		}
 		if p.Type != "days" && p.Type != "traffic" {
-			return errors.New("promo_not_bonus")
+			return ErrNotBonus
 		}
 		if p.Type == "days" && (p.Value < 1 || p.Value > maxPromoDays) {
 			return ErrInvalidValue
@@ -435,6 +436,9 @@ func (s *Service) ApplyPayment(ctx context.Context, q *db.Queries, paymentID, us
 	if r.ExpiresAt.Valid && paidAt >= r.ExpiresAt.Int64 {
 		return ErrReservationExpired
 	}
+	// A reservation released while its payment looked closed comes back when the payment
+	// turns out paid in time. The use is counted again even if the code filled up since:
+	// the buyer already paid the discounted price inside the window they were promised.
 	if r.Status == "released" {
 		if err := q.RestorePromoUse(ctx, r.PromoID); err != nil {
 			return err

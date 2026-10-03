@@ -25,7 +25,6 @@ CREATE TABLE promo_codes (
   created_by BIGINT REFERENCES admins(id) ON DELETE SET NULL
 );
 CREATE INDEX promo_codes_active ON promo_codes(enabled, deleted, starts_at, ends_at);
-CREATE INDEX promo_codes_type ON promo_codes(type);
 CREATE UNIQUE INDEX promo_codes_code_active ON promo_codes(code) WHERE deleted=0;
 
 CREATE TABLE promo_redemptions (

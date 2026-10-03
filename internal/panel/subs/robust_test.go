@@ -173,6 +173,15 @@ func TestPromoAttemptErrorsDoNotRevealEligibility(t *testing.T) {
 	}
 }
 
+func TestPromoAttemptInternalErrorIsNotHidden(t *testing.T) {
+	if got := promoAttemptCode(errors.New("database is down")); got != "" {
+		t.Errorf("an internal error answered as %q", got)
+	}
+	if got := promoAttemptCode(fmt.Errorf("redeem: %w", promo.ErrNotBonus)); got != "promo_unavailable" {
+		t.Errorf("a wrapped promo error answered as %q", got)
+	}
+}
+
 func TestPromoErrorsAreGenericAtCheckout(t *testing.T) {
 	for _, err := range []error{promo.ErrNotFound, promo.ErrTariff, promo.ErrMinimum, promo.ErrCurrency, promo.ErrRefundUnsupported} {
 		if !promoError(err) || promoAttemptCode(err) != "promo_unavailable" {

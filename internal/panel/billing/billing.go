@@ -276,8 +276,6 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: req.UserID != 0}
 	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
-	var p db.Payment
-	var disc promo.Discount
 	p, open, err := s.newPayment(ctx, req.TgID, now,
 		func(q *db.Queries) ([]db.Payment, error) {
 			return q.FindOpenPayments(ctx, db.FindOpenPaymentsParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: kind,
@@ -293,7 +291,7 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 				return db.Payment{}, err
 			}
 			if s.d.Promo != nil && strings.TrimSpace(req.PromoCode) != "" {
-				disc, err = s.d.Promo.ReserveDiscount(ctx, q, req.TgID, req.UserID, t.ID, amount, currency, req.PromoCode, p.ID)
+				disc, err := s.d.Promo.ReserveDiscount(ctx, q, req.TgID, req.UserID, t.ID, amount, currency, req.PromoCode, p.ID)
 				if err != nil {
 					return db.Payment{}, err
 				}

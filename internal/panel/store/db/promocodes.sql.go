@@ -534,104 +534,6 @@ func (q *Queries) ListPromoCodes(ctx context.Context, arg ListPromoCodesParams) 
 	return items, nil
 }
 
-const listPromoRedemptions = `-- name: ListPromoRedemptions :many
-SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions ORDER BY id DESC LIMIT CAST($2 AS BIGINT) OFFSET CAST($1 AS BIGINT)
-`
-
-type ListPromoRedemptionsParams struct {
-	RowOffset int64
-	Lim       int64
-}
-
-func (q *Queries) ListPromoRedemptions(ctx context.Context, arg ListPromoRedemptionsParams) ([]PromoRedemption, error) {
-	rows, err := q.db.QueryContext(ctx, listPromoRedemptions, arg.RowOffset, arg.Lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PromoRedemption{}
-	for rows.Next() {
-		var i PromoRedemption
-		if err := rows.Scan(
-			&i.ID,
-			&i.PromoID,
-			&i.UserID,
-			&i.TgID,
-			&i.PaymentID,
-			&i.Status,
-			&i.RefundStartedAt,
-			&i.RedeemedAt,
-			&i.ExpiresAt,
-			&i.Days,
-			&i.Bytes,
-			&i.DiscountAmount,
-			&i.OriginalAmount,
-			&i.FinalAmount,
-			&i.Currency,
-			&i.Note,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPromoRedemptionsByTg = `-- name: ListPromoRedemptionsByTg :many
-SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE tg_id=$1 AND status='applied' ORDER BY id DESC LIMIT CAST($2 AS BIGINT)
-`
-
-type ListPromoRedemptionsByTgParams struct {
-	TgID int64
-	Lim  int64
-}
-
-func (q *Queries) ListPromoRedemptionsByTg(ctx context.Context, arg ListPromoRedemptionsByTgParams) ([]PromoRedemption, error) {
-	rows, err := q.db.QueryContext(ctx, listPromoRedemptionsByTg, arg.TgID, arg.Lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PromoRedemption{}
-	for rows.Next() {
-		var i PromoRedemption
-		if err := rows.Scan(
-			&i.ID,
-			&i.PromoID,
-			&i.UserID,
-			&i.TgID,
-			&i.PaymentID,
-			&i.Status,
-			&i.RefundStartedAt,
-			&i.RedeemedAt,
-			&i.ExpiresAt,
-			&i.Days,
-			&i.Bytes,
-			&i.DiscountAmount,
-			&i.OriginalAmount,
-			&i.FinalAmount,
-			&i.Currency,
-			&i.Note,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPromoRedemptionsByTgWithCode = `-- name: ListPromoRedemptionsByTgWithCode :many
 SELECT r.id, r.promo_id, r.user_id, r.tg_id, r.payment_id, r.status, r.refund_started_at, r.redeemed_at, r.expires_at, r.days, r.bytes, r.discount_amount, r.original_amount, r.final_amount, r.currency, r.note, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
 WHERE r.tg_id=$1 AND r.status='applied' ORDER BY r.id DESC LIMIT CAST($2 AS BIGINT)
@@ -840,30 +742,6 @@ UPDATE promo_redemptions SET refund_started_at=NULL WHERE payment_id=$1
 func (q *Queries) ReleaseLatePromoRefundClaim(ctx context.Context, paymentID sql.NullInt64) error {
 	_, err := q.db.ExecContext(ctx, releaseLatePromoRefundClaim, paymentID)
 	return err
-}
-
-const releasePromoByPayment = `-- name: ReleasePromoByPayment :execrows
-UPDATE promo_redemptions SET status='released' WHERE payment_id=$1 AND status='reserved'
-`
-
-func (q *Queries) ReleasePromoByPayment(ctx context.Context, paymentID sql.NullInt64) (int64, error) {
-	result, err := q.db.ExecContext(ctx, releasePromoByPayment, paymentID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const releasePromoRedemption = `-- name: ReleasePromoRedemption :execrows
-UPDATE promo_redemptions SET status='released' WHERE id=$1 AND status='reserved'
-`
-
-func (q *Queries) ReleasePromoRedemption(ctx context.Context, id int64) (int64, error) {
-	result, err := q.db.ExecContext(ctx, releasePromoRedemption, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
 }
 
 const releasePromoRedemptionForClosedPayment = `-- name: ReleasePromoRedemptionForClosedPayment :execrows

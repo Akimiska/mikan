@@ -73,9 +73,6 @@ SELECT * FROM promo_redemptions WHERE id=sqlc.arg(id);
 -- name: GetPromoRedemptionByPayment :one
 SELECT * FROM promo_redemptions WHERE payment_id=sqlc.arg(payment_id);
 
--- name: ListPromoRedemptions :many
-SELECT * FROM promo_redemptions ORDER BY id DESC LIMIT CAST(sqlc.arg(lim) AS BIGINT) OFFSET CAST(sqlc.arg(row_offset) AS BIGINT);
-
 -- name: ListPromoRedemptionsWithCode :many
 SELECT r.*, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
 ORDER BY r.id DESC LIMIT CAST(sqlc.arg(lim) AS BIGINT) OFFSET CAST(sqlc.arg(row_offset) AS BIGINT);
@@ -86,17 +83,11 @@ SELECT COUNT(*) FROM promo_redemptions;
 -- name: MarkPromoApplied :execrows
 UPDATE promo_redemptions SET status='applied', user_id=COALESCE(sqlc.narg(user_id),user_id) WHERE id=sqlc.arg(id) AND status IN ('reserved','released');
 
--- name: ReleasePromoRedemption :execrows
-UPDATE promo_redemptions SET status='released' WHERE id=sqlc.arg(id) AND status='reserved';
-
 -- name: ReleasePromoRedemptionForClosedPayment :execrows
 UPDATE promo_redemptions SET status='released'
 WHERE promo_redemptions.id=sqlc.arg(id) AND promo_redemptions.status='reserved' AND EXISTS (
   SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('failed','expired','refunded')
 );
-
--- name: ReleasePromoByPayment :execrows
-UPDATE promo_redemptions SET status='released' WHERE payment_id=sqlc.arg(payment_id) AND status='reserved';
 
 -- name: PromoStats :one
 SELECT COUNT(CASE WHEN status='applied' THEN 1 END) AS successful_activations, CAST(COALESCE(SUM(CASE WHEN status='applied' THEN days ELSE 0 END),0) AS BIGINT) AS bonus_days, CAST(COALESCE(SUM(CASE WHEN status='applied' THEN bytes ELSE 0 END),0) AS BIGINT) AS bonus_bytes, CAST(COALESCE(SUM(CASE WHEN status='applied' THEN discount_amount ELSE 0 END),0) AS BIGINT) AS discount_amount, CAST(COALESCE(SUM(CASE WHEN status='applied' AND payment_id IS NOT NULL THEN 1 ELSE 0 END),0) AS BIGINT) AS discount_orders FROM promo_redemptions;
@@ -106,9 +97,6 @@ SELECT DISTINCT p.id FROM payments p JOIN promo_redemptions r ON r.payment_id=p.
 
 -- name: ReleaseExpiredPromoRedemption :execrows
 UPDATE promo_redemptions SET status='released' WHERE promo_redemptions.id=sqlc.arg(id) AND promo_redemptions.status='reserved' AND (promo_redemptions.expires_at IS NOT NULL AND promo_redemptions.expires_at<=sqlc.arg(before) AND EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('pending','expired','failed','refunded')) OR EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('failed','expired','refunded') AND p.created_at<sqlc.arg(before)));
-
--- name: ListPromoRedemptionsByTg :many
-SELECT * FROM promo_redemptions WHERE tg_id=sqlc.arg(tg_id) AND status='applied' ORDER BY id DESC LIMIT CAST(sqlc.arg(lim) AS BIGINT);
 
 -- name: ListPromoRedemptionsByTgWithCode :many
 SELECT r.*, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id

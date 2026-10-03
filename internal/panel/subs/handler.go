@@ -470,13 +470,13 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := h.promos.Validate(r.Context(), tgID, userID, 0, 0, "", in.Code)
 	if err != nil {
-		fail(http.StatusConflict, promoAttemptCode(err))
+		fail(h.promoAttempt(err))
 		return
 	}
 	if p.Type == "days" || p.Type == "traffic" {
 		r, err := h.promos.RedeemBonus(r.Context(), tgID, userID, in.Code)
 		if err != nil {
-			fail(http.StatusConflict, promoAttemptCode(err))
+			fail(h.promoAttempt(err))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "days": r.Days, "bytes": r.Bytes, "message": "promo_applied"})
@@ -572,7 +572,23 @@ func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-func promoAttemptCode(error) string { return "promo_unavailable" }
+// promoAttempt is the answer to a code that could not be used. Why a code does not apply is
+// not told: "promo_unavailable" for all of it, so codes cannot be probed. Anything else is
+// the panel's trouble, logged and answered as such.
+func (h *Handler) promoAttempt(err error) (int, string) {
+	if code := promoAttemptCode(err); code != "" {
+		return http.StatusConflict, code
+	}
+	h.log.Error("mini app: promo code failed", "err", err)
+	return http.StatusInternalServerError, "internal"
+}
+
+func promoAttemptCode(err error) string {
+	if promoError(err) || errors.Is(err, promo.ErrNotBonus) {
+		return "promo_unavailable"
+	}
+	return ""
+}
 
 // invoiceFailure is what the Mini App answers when no invoice could be made. What the buyer
 // can act on is told as it is. A provider that is switched off is "provider_off". Anything

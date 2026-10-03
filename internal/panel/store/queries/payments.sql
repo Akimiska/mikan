@@ -33,8 +33,9 @@ UPDATE payments SET status = sqlc.arg(new_status) WHERE id = sqlc.arg(id) AND st
 UPDATE payments SET status = 'refunded', refunded_at = $1 WHERE id = $2 AND status = 'applied';
 
 -- name: FindOpenPayment :one
+-- user_id 0 asks for an invoice that has no user yet (NULL); payments_tg finds the candidates.
 SELECT * FROM payments
-WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND COALESCE(user_id, 0) = CAST(sqlc.arg(user_id) AS BIGINT)
+WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND user_id IS NOT DISTINCT FROM NULLIF(CAST(sqlc.arg(user_id) AS BIGINT), 0)
   AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
 ORDER BY id DESC LIMIT 1;
 

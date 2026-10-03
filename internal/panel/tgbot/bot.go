@@ -255,7 +255,7 @@ func (b *Bot) InfrastructureAdminChat(ctx context.Context) (int64, bool, error) 
 }
 
 func (b *Bot) DisconnectInfrastructureAdmin(ctx context.Context) error {
-	return b.d.Store.Tx(ctx, func(q *db.Queries) error {
+	return b.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
 		if err := settings.Set(ctx, set, KeyInfraAdminChat, int64(0)); err != nil {
 			return err

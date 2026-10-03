@@ -396,7 +396,8 @@ func (t *Tuner) recordReach(ctx context.Context, w *world, inbounds []db.Inbound
 	for _, in := range inbounds {
 		ids[in.Name] = in.ID
 	}
-	err := t.st.Tx(ctx, func(q *db.Queries) error {
+	// Blind upserts: READ COMMITTED.
+	err := t.st.TxRC(ctx, func(q *db.Queries) error {
 		for _, c := range act.Clients {
 			if _, known := w.users[c.Slot]; !known {
 				continue
@@ -417,7 +418,7 @@ func (t *Tuner) recordReach(ctx context.Context, w *world, inbounds []db.Inbound
 		t.log.Error("autotune: record reach", "err", err)
 		return
 	}
-	// Publish the cache only after commit: a serializable retry must still write
+	// Publish the cache only after commit: a retry (deadlock) must still write
 	// every reach observation from the rolled-back attempt.
 	for _, c := range act.Clients {
 		if _, known := w.users[c.Slot]; !known {

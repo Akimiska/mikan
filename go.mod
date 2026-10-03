@@ -6,6 +6,8 @@ require (
 	github.com/danielgtaylor/huma/v2 v2.39.1
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/lib/pq v1.12.3
+	github.com/metacubex/age v0.0.0-20260603010618-28d156b4ea78
 	github.com/metacubex/mihomo v1.19.31
 	github.com/pquerna/otp v1.5.0
 	github.com/pressly/goose/v3 v3.28.0
@@ -64,7 +66,6 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mdlayher/netlink v1.7.2 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
-	github.com/metacubex/age v0.0.0-20260603010618-28d156b4ea78 // indirect
 	github.com/metacubex/amneziawg-go v0.0.0-20260908071407-0c1c6f40ecd7 // indirect
 	github.com/metacubex/ascon v0.1.0 // indirect
 	github.com/metacubex/bart v0.29.0 // indirect

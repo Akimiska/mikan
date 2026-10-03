@@ -85,6 +85,8 @@ func TestTrafficPoolsOnThePanel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.m.PoliciesChanged() // a change outside the API is picked up by the next upkeep
+
 	if p := policy(); !p.Allowed || p.QuotaRemaining != 0 {
 		t.Fatalf("main quota out: %+v", p)
 	}

@@ -31,9 +31,6 @@ SELECT u.* FROM tg_links l JOIN users u ON u.id = l.user_id WHERE l.tg_id = $1 O
 -- name: CountTgLinksOf :one
 SELECT COUNT(*) FROM tg_links WHERE tg_id = $1;
 
--- name: ListTgLinks :many
-SELECT l.user_id, l.tg_id, c.blocked FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id;
-
 -- name: TgLinkOfUser :one
 SELECT l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
 FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = $1;

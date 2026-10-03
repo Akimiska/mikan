@@ -28,14 +28,17 @@ services:
       MIKAN_AUTOTUNE_SCALE: "0.01"
     volumes: ["data:/data", "run:/run/mikan", "pg-run:/run/postgresql"]
 
+  # As the installer runs it (installer/src/docker.rs): no network, the panel talks to it
+  # over the shared unix socket with a scram-sha-256 password.
   postgres:
     image: postgres:18-alpine
     network_mode: none
+    security_opt: ["no-new-privileges:true"]
     environment:
       POSTGRES_USER: mikan
       POSTGRES_DB: mikan
       POSTGRES_PASSWORD: ${MIKAN_TEST_POSTGRES_PASSWORD:?set test database password}
-      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
     command: ["postgres", "-c", "listen_addresses=", "-c", "unix_socket_directories=/run/postgresql", "-c", "unix_socket_permissions=0777"]
     volumes: ["pg-data:/var/lib/postgresql", "pg-run:/run/postgresql"]
     healthcheck:

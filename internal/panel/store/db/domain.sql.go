@@ -350,15 +350,6 @@ func (q *Queries) DeleteNodeStateOf(ctx context.Context, nodeID string) error {
 	return err
 }
 
-const deleteUser = `-- name: DeleteUser :exec
-DELETE FROM users WHERE id = $1
-`
-
-func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, deleteUser, id)
-	return err
-}
-
 const getInbound = `-- name: GetInbound :one
 SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen FROM inbounds WHERE id = $1
 `
@@ -889,17 +880,6 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const maxSlotID = `-- name: MaxSlotID :one
-SELECT CAST(coalesce(max(id), 0) AS BIGINT) FROM slots
-`
-
-func (q *Queries) MaxSlotID(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, maxSlotID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const pruneDevices = `-- name: PruneDevices :exec
 DELETE FROM devices WHERE last_seen < $1
 `
@@ -971,15 +951,6 @@ func (q *Queries) SetNodeState(ctx context.Context, arg SetNodeStateParams) erro
 	return err
 }
 
-const setSlotCounter = `-- name: SetSlotCounter :exec
-INSERT INTO slot_counter (id, last) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET last = excluded.last
-`
-
-func (q *Queries) SetSlotCounter(ctx context.Context, last int64) error {
-	_, err := q.db.ExecContext(ctx, setSlotCounter, last)
-	return err
-}
-
 const setUserCredentials = `-- name: SetUserCredentials :exec
 UPDATE users SET slot_id = $1, sub_token = $2, updated_at = $3 WHERE id = $4
 `
@@ -998,20 +969,6 @@ func (q *Queries) SetUserCredentials(ctx context.Context, arg SetUserCredentials
 		arg.UpdatedAt,
 		arg.ID,
 	)
-	return err
-}
-
-const setUserOnline = `-- name: SetUserOnline :exec
-UPDATE users SET online_at = $1 WHERE id = $2
-`
-
-type SetUserOnlineParams struct {
-	OnlineAt sql.NullInt64
-	ID       int64
-}
-
-func (q *Queries) SetUserOnline(ctx context.Context, arg SetUserOnlineParams) error {
-	_, err := q.db.ExecContext(ctx, setUserOnline, arg.OnlineAt, arg.ID)
 	return err
 }
 

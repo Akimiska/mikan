@@ -12,7 +12,7 @@ import (
 type words struct {
 	welcome, main, renew, expiring, expired, traffic90, trafficEnd string // admin
 
-	back, yesUnbind, cancel, subscriptions, openPage, support          string
+	back, yesUnbind, cancel, subscriptions, openPage, support, promo   string
 	subTitle, devicesTitle, connectTitle, switchTitle                  string
 	stateActive, stateExpiring, stateLimited, stateExpired, stateOff   string
 	forever, termUntil, noLimit, trafficOf, trafficNoLimit, resets     string
@@ -47,7 +47,7 @@ var ru = words{
 	traffic90:  "📦 Израсходовано 90% трафика подписки «{name}»: осталось {left}.",
 	trafficEnd: "📦 Трафик подписки «{name}» на этот период закончился. Обновится {reset}.",
 
-	back: "⬅️ Назад", yesUnbind: "✅ Да, отвязать", cancel: "↩️ Отмена", subscriptions: "🔁 Подписки", openPage: "🌐 Открыть страницу подписки", support: "💬 Поддержка",
+	back: "⬅️ Назад", promo: "🎟 Промокоды", yesUnbind: "✅ Да, отвязать", cancel: "↩️ Отмена", subscriptions: "🔁 Подписки", openPage: "🌐 Открыть страницу подписки", support: "💬 Поддержка",
 	subTitle: "Подписка «%s»", devicesTitle: "Устройства", connectTitle: "Подключить устройство", switchTitle: "Какую подписку показать?",
 	stateActive: "✅ Работает", stateExpiring: "⏳ Скоро закончится", stateLimited: "📦 Трафик на этот период закончился", stateExpired: "⛔️ Подписка закончилась", stateOff: "⏸ Доступ приостановлен",
 	forever: "бессрочно", termUntil: "до %s — осталось %s", noLimit: "без лимита", trafficOf: "%s из %s", trafficNoLimit: "%s, без лимита", resets: "🔄 Обновится: %s",
@@ -110,7 +110,7 @@ var en = words{
 	traffic90:  "📦 90% of the traffic of “{name}” is used: {left} left.",
 	trafficEnd: "📦 The traffic of “{name}” for this period is used up. It renews {reset}.",
 
-	back: "⬅️ Back", yesUnbind: "✅ Yes, unbind", cancel: "↩️ Cancel", subscriptions: "🔁 Subscriptions", openPage: "🌐 Open the subscription page", support: "💬 Support",
+	back: "⬅️ Back", promo: "🎟 Promo codes", yesUnbind: "✅ Yes, unbind", cancel: "↩️ Cancel", subscriptions: "🔁 Subscriptions", openPage: "🌐 Open the subscription page", support: "💬 Support",
 	subTitle: "Subscription “%s”", devicesTitle: "Devices", connectTitle: "Connect a device", switchTitle: "Which subscription to show?",
 	stateActive: "✅ Working", stateExpiring: "⏳ Ends soon", stateLimited: "📦 Traffic for this period is used up", stateExpired: "⛔️ The subscription has ended", stateOff: "⏸ Access is paused",
 	forever: "no end date", termUntil: "until %s — %s left", noLimit: "unlimited", trafficOf: "%s of %s", trafficNoLimit: "%s, unlimited", resets: "🔄 Renews: %s",

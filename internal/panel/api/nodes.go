@@ -412,8 +412,8 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 		}
 		h.d.Nodes.NodesChanged()
 	}
-	// The row is gone, and with it the id may be given to the next node: it must not
-	// inherit this one's certificates and private keys from disk.
+	// The row is gone: its certificates and private keys go from disk too, and no node
+	// that gets this id later (see forgetNode) inherits them.
 	h.forgetNode(n.ID)
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.delete", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name})
@@ -429,8 +429,9 @@ func (h *handlers) nodesChanged() {
 }
 
 // forgetNode drops the certificates and keys the panel keeps for a node id: the admin's
-// own certificate and the node's self-signed pair. Node ids are reused (the table has no
-// AUTOINCREMENT), so a new node also clears what an id left behind.
+// own certificate and the node's self-signed pair. PostgreSQL does not hand an id out
+// twice, but files may outlive their row (a restored older backup winds the ids back, a
+// SQLite panel reused them), so a new node also clears what its id left behind.
 func (h *handlers) forgetNode(id int64) {
 	if h.d.ForgetNode == nil {
 		return

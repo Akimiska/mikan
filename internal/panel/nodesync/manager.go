@@ -1,6 +1,7 @@
 package nodesync
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -51,17 +52,20 @@ type Manager struct {
 
 	nodesDirty chan struct{}
 
-	// accounting lets one background writer of users' counters run at a time: traffic
-	// batches of every node, online marks and period resets update the same rows every
-	// few seconds, and side by side their serializable transactions only abort each other.
-	accounting sync.Mutex
-
 	mu        sync.Mutex
 	running   map[int64]*running
 	lastPurge time.Time
 	lastPrune time.Time
 
 	generation atomic.Uint64 // moves whenever a node is added, changed or removed
+
+	// The snapshot the syncers share (snapshot.go): changes moves with every change it
+	// may not hold any more, batches counts the traffic batches stored per node.
+	changes atomic.Uint64
+	snapMu  sync.Mutex
+	snap    *snapshot
+	batchMu sync.Mutex
+	batches map[int64]uint64
 }
 
 type running struct {
@@ -73,7 +77,7 @@ type running struct {
 
 func NewManager(st *store.Store, set *settings.Settings, pool *domain.Pool, connect Connect, log *slog.Logger, now func() time.Time) *Manager {
 	return &Manager{st: st, set: set, pool: pool, connect: connect, log: log, now: now,
-		nodesDirty: make(chan struct{}, 1), running: map[int64]*running{}}
+		nodesDirty: make(chan struct{}, 1), running: map[int64]*running{}, batches: map[int64]uint64{}}
 }
 
 func (m *Manager) Run(ctx context.Context) {
@@ -95,12 +99,14 @@ func (m *Manager) Run(ctx context.Context) {
 
 // PoliciesChanged and SlotsChanged implement domain.Changes for all nodes at once.
 func (m *Manager) PoliciesChanged() {
+	m.changes.Add(1)
 	for _, s := range m.Syncers() {
 		s.PoliciesChanged()
 	}
 }
 
 func (m *Manager) SlotsChanged() {
+	m.changes.Add(1)
 	for _, s := range m.Syncers() {
 		s.SlotsChanged()
 	}
@@ -109,6 +115,7 @@ func (m *Manager) SlotsChanged() {
 // NodesChanged restarts syncers after a node was added, removed or re-keyed.
 func (m *Manager) NodesChanged() {
 	m.generation.Add(1)
+	m.changes.Add(1)
 	signal(m.nodesDirty)
 }
 
@@ -361,6 +368,8 @@ func (m *Manager) maintain(ctx context.Context) {
 		m.log.Error("record devices", "err", err)
 	}
 	m.reconcile(ctx)
+	// One fresh snapshot for the round: it picks up what changed outside the API.
+	m.changes.Add(1)
 	for _, s := range m.Syncers() {
 		// Reconcile: picks up changes made outside the API (server CLI, restore) and pushes
 		// policies, whose key changes by time alone when a user crosses expires_at, and which
@@ -371,8 +380,7 @@ func (m *Manager) maintain(ctx context.Context) {
 }
 
 // How long traffic by the hour and the devices that went quiet are kept, and how often
-// the old rows are deleted: the tables are big, the delete scans them, and it holds the
-// database's one writer.
+// the old rows are deleted: the tables are big and the delete scans them.
 const (
 	hourlyKeep = 62 * 24 * time.Hour
 	deviceKeep = 30 * 24 * time.Hour
@@ -419,13 +427,17 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 		default:
 			continue
 		}
-		m.accounting.Lock()
-		err := m.st.Tx(ctx, func(q *db.Queries) error { return domain.StartPeriod(ctx, q, u.ID, start, now) })
-		m.accounting.Unlock()
+		// The row was read above, outside the transaction: the reset happens only while the
+		// period is still older than start, so one a payment began meanwhile stays.
+		var reset bool
+		err := m.st.TxRC(ctx, func(q *db.Queries) (err error) {
+			reset, err = domain.StartPeriodIfOlder(ctx, q, u.ID, start, now)
+			return err
+		})
 		if err != nil {
 			return err
 		}
-		changed = true
+		changed = changed || reset
 	}
 	if changed {
 		m.PoliciesChanged()
@@ -478,32 +490,55 @@ func (m *Manager) recordDevices(ctx context.Context, now time.Time) error {
 	if len(online) == 0 {
 		return nil
 	}
-	rows, err := m.st.Q.ListSlotUsers(ctx)
+	names := make([]string, 0, len(online))
+	for slot := range online {
+		names = append(names, slot)
+	}
+	rows, err := m.st.Q.SlotOwners(ctx, names)
 	if err != nil {
 		return err
 	}
-	owner := make(map[string]int64, len(rows))
-	for _, r := range rows {
-		owner[r.SlotName] = r.UserID
+	// A user's slots (the own one, bound devices) may report the same address.
+	type device struct {
+		user int64
+		ip   string
 	}
-	m.accounting.Lock()
-	defer m.accounting.Unlock()
-	return m.st.Tx(ctx, func(q *db.Queries) error {
-		for slot, on := range online {
-			uid, ok := owner[slot]
-			if !ok {
-				continue
-			}
-			if err := q.SetUserOnline(ctx, db.SetUserOnlineParams{OnlineAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, ID: uid}); err != nil {
-				return err
-			}
-			for _, ip := range on.IPs {
-				if err := q.UpsertDevice(ctx, db.UpsertDeviceParams{UserID: uid, Ip: ip, FirstSeen: now.Unix(), LastSeen: now.Unix()}); err != nil {
-					return err
-				}
-			}
+	seen := map[int64]bool{}
+	var users []int64
+	var devices []device
+	for _, r := range rows {
+		if !seen[r.UserID] {
+			seen[r.UserID] = true
+			users = append(users, r.UserID)
 		}
+		for _, ip := range online[r.SlotName].IPs {
+			devices = append(devices, device{r.UserID, ip})
+		}
+	}
+	if len(users) == 0 {
 		return nil
+	}
+	slices.Sort(users)
+	slices.SortFunc(devices, func(a, b device) int { return cmp.Or(cmp.Compare(a.user, b.user), strings.Compare(a.ip, b.ip)) })
+	devices = slices.Compact(devices)
+	dp := db.UpsertDevicesParams{Now: now.Unix()}
+	for _, d := range devices {
+		dp.UserIds, dp.Ips = append(dp.UserIds, d.user), append(dp.Ips, d.ip)
+	}
+	// Blind writes: READ COMMITTED. The users are locked in id order like the traffic
+	// batches lock them; a user deleted meanwhile is skipped, not an error for the rest.
+	return m.st.TxRC(ctx, func(q *db.Queries) error {
+		locked, err := q.LockUsers(ctx, users)
+		if err != nil || len(locked) == 0 {
+			return err
+		}
+		if err := q.SetUsersOnline(ctx, db.SetUsersOnlineParams{OnlineAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, Ids: locked}); err != nil {
+			return err
+		}
+		if len(dp.UserIds) == 0 {
+			return nil
+		}
+		return q.UpsertDevices(ctx, dp)
 	})
 }
 

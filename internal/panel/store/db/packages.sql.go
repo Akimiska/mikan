@@ -244,6 +244,70 @@ func (q *Queries) FindOpenPackagePayment(ctx context.Context, arg FindOpenPackag
 	return i, err
 }
 
+const findOpenPackagePayments = `-- name: FindOpenPackagePayments :many
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments
+WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
+  AND status = 'pending' AND pay_url <> '' AND created_at > $5
+ORDER BY id DESC
+`
+
+type FindOpenPackagePaymentsParams struct {
+	TgID      int64
+	PackageID sql.NullInt64
+	Provider  string
+	UserID    sql.NullInt64
+	Since     int64
+}
+
+func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPackagePaymentsParams) ([]Payment, error) {
+	rows, err := q.db.QueryContext(ctx, findOpenPackagePayments,
+		arg.TgID,
+		arg.PackageID,
+		arg.Provider,
+		arg.UserID,
+		arg.Since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Payment{}
+	for rows.Next() {
+		var i Payment
+		if err := rows.Scan(
+			&i.ID,
+			&i.Provider,
+			&i.Payload,
+			&i.ExternalID,
+			&i.TgID,
+			&i.Kind,
+			&i.UserID,
+			&i.TariffID,
+			&i.PackageID,
+			&i.TariffName,
+			&i.Amount,
+			&i.Currency,
+			&i.Status,
+			&i.Error,
+			&i.PayUrl,
+			&i.CreatedAt,
+			&i.PaidAt,
+			&i.AppliedAt,
+			&i.RefundedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getTrafficPackage = `-- name: GetTrafficPackage :one
 SELECT id, name, bytes, pool_id, lifetime, days, price_stars, price_rub, on_sale, sort, archived, created_at FROM traffic_packages WHERE id = $1
 `
@@ -316,57 +380,6 @@ func (q *Queries) ListAllTrafficPackages(ctx context.Context) ([]TrafficPackage,
 			&i.OnSale,
 			&i.Sort,
 			&i.Archived,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSpendableGrants = `-- name: ListSpendableGrants :many
-SELECT id, user_id, pool_id, bytes, remaining, lifetime, expires_at, source, payment_id, package_id, note, created_at FROM traffic_grants
-WHERE user_id = $1 AND pool_id IS NOT DISTINCT FROM $2 AND remaining > 0
-  AND (expires_at IS NULL OR expires_at > CAST($3 AS BIGINT))
-ORDER BY expires_at IS NULL, expires_at, created_at, id
-`
-
-type ListSpendableGrantsParams struct {
-	UserID int64
-	PoolID sql.NullInt64
-	Now    int64
-}
-
-// The order traffic past the base quota is taken in: the soonest to expire first, then
-// the oldest. Expired and used-up grants are left out.
-func (q *Queries) ListSpendableGrants(ctx context.Context, arg ListSpendableGrantsParams) ([]TrafficGrant, error) {
-	rows, err := q.db.QueryContext(ctx, listSpendableGrants, arg.UserID, arg.PoolID, arg.Now)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TrafficGrant{}
-	for rows.Next() {
-		var i TrafficGrant
-		if err := rows.Scan(
-			&i.ID,
-			&i.UserID,
-			&i.PoolID,
-			&i.Bytes,
-			&i.Remaining,
-			&i.Lifetime,
-			&i.ExpiresAt,
-			&i.Source,
-			&i.PaymentID,
-			&i.PackageID,
-			&i.Note,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -500,20 +513,6 @@ func (q *Queries) ListUserGrants(ctx context.Context, userID int64) ([]TrafficGr
 		return nil, err
 	}
 	return items, nil
-}
-
-const spendGrant = `-- name: SpendGrant :exec
-UPDATE traffic_grants SET remaining = remaining - $1 WHERE id = $2
-`
-
-type SpendGrantParams struct {
-	Spent int64
-	ID    int64
-}
-
-func (q *Queries) SpendGrant(ctx context.Context, arg SpendGrantParams) error {
-	_, err := q.db.ExecContext(ctx, spendGrant, arg.Spent, arg.ID)
-	return err
 }
 
 const sumGrantsLeft = `-- name: SumGrantsLeft :many

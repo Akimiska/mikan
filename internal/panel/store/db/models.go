@@ -107,6 +107,13 @@ type InfrastructureAlertState struct {
 	UpdatedAt int64
 }
 
+type LegacySubToken struct {
+	Token     string
+	UserID    int64
+	Source    string
+	NotBefore int64
+}
+
 type MikanSqliteImport struct {
 	ID     int64
 	Report string
@@ -178,6 +185,51 @@ type Payment struct {
 	PaidAt     sql.NullInt64
 	AppliedAt  sql.NullInt64
 	RefundedAt sql.NullInt64
+}
+
+type PromoCode struct {
+	ID                int64
+	Code              string
+	Name              string
+	Description       string
+	Type              string
+	Value             int64
+	Currency          string
+	StartsAt          sql.NullInt64
+	EndsAt            sql.NullInt64
+	MaxUses           sql.NullInt64
+	UsedCount         int64
+	PerUserLimit      int64
+	DiscountTtl       int64
+	MinOrder          int64
+	MaxDiscount       int64
+	TariffIds         string
+	PoolID            sql.NullInt64
+	FirstPurchaseOnly int64
+	NewUsersOnly      int64
+	Enabled           int64
+	Deleted           int64
+	CreatedAt         int64
+	CreatedBy         sql.NullInt64
+}
+
+type PromoRedemption struct {
+	ID              int64
+	PromoID         int64
+	UserID          sql.NullInt64
+	TgID            int64
+	PaymentID       sql.NullInt64
+	Status          string
+	RefundStartedAt sql.NullInt64
+	RedeemedAt      int64
+	ExpiresAt       sql.NullInt64
+	Days            int64
+	Bytes           int64
+	DiscountAmount  int64
+	OriginalAmount  int64
+	FinalAmount     int64
+	Currency        string
+	Note            string
 }
 
 type RelayUser struct {

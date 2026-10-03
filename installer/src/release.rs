@@ -15,6 +15,10 @@ pub const PUBLIC_KEY: &str = "Z3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8=";
 
 pub const REPO: &str = "Miroshka000/mikan";
 
+/// The project's own namespace on GitHub Packages: ghcr.io/<owner of REPO in lowercase>/,
+/// as internal/release checks it.
+const IMAGE_PREFIX: &str = "ghcr.io/miroshka000/";
+
 /// Installs a node of an existing panel on a fresh server (internal/release.JoinCommand).
 pub fn join_command(key: &str) -> String {
     format!("curl -fsSL https://github.com/{REPO}/releases/latest/download/install.sh | sudo bash -s -- --join {key}")
@@ -108,7 +112,7 @@ pub fn parse(data: &[u8], sig: &str, key: &VerifyingKey) -> Result<Manifest> {
 /// The release image lives in the project's own namespace on GitHub Packages; the value
 /// goes into .env and the compose file, so its characters are the image name's only.
 fn valid_image(image: &str) -> bool {
-    image.strip_prefix("ghcr.io/miroshka000/").is_some_and(|r| {
+    image.strip_prefix(IMAGE_PREFIX).is_some_and(|r| {
         !r.is_empty() && !r.contains("..") && r.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._/-".contains(&b))
     })
 }
@@ -279,6 +283,8 @@ mod tests {
         let go = std::fs::read_to_string("../internal/release/release.go").unwrap();
         assert!(go.contains(&format!("const PublicKey = \"{PUBLIC_KEY}\"")), "internal/release.PublicKey differs");
         assert!(go.contains(&format!("const Repo = \"{REPO}\"")), "internal/release.Repo differs");
+        let owner = REPO.split('/').next().unwrap().to_lowercase();
+        assert_eq!(IMAGE_PREFIX, format!("ghcr.io/{owner}/"), "the image namespace is not the repository owner's");
         assert!(
             go.contains("/releases/latest/download/install.sh | sudo bash\"") && go.contains("\" -s -- --join \""),
             "internal/release.JoinCommand differs"
@@ -306,28 +312,33 @@ mod tests {
         assert!(ok.success(), "install.sh does not parse");
     }
 
+    // testdata/versions.json is run by the panel's tests as well (internal/release): both
+    // sides order and refuse versions the same way.
     #[test]
     fn versions() {
-        assert!(newer("0.4.4.1", "0.4.4"));
-        assert!(!newer("0.4.4", "0.4.4.0"));
-        assert!(newer("0.4.4.10", "0.4.4.9"));
-        assert!(newer("0.4.5.0", "0.4.4.99"));
-        assert!(newer("0.4.4.1", "0.4.4.1-rc.1"));
-        assert!(newer("0.4.4.1-rc.10", "0.4.4.1-rc.9"));
-        assert!(newer("0.4.4.1-99999999999999999999999", "0.4.4.1-9"));
-        assert!(semver("0.4.4.1-rc..1").is_none());
-        assert!(semver("0.4.4.18446744073709551616").is_none());
-        assert!(semver("0.4.4.1.2").is_none());
-        assert!(semver("0.4.4.").is_none());
-        assert!(newer("0.3.10", "0.3.9"));
-        assert!(newer("0.4.0", "0.3.99"));
-        assert!(newer("1.0.0", "0.9.9"));
-        assert!(!newer("0.3.9", "0.3.9"));
-        assert!(newer("0.3.9", "0.3.9-rc.1"));
-        assert!(!newer("0.3.9-rc.1", "0.3.9"));
-        assert!(newer("0.3.9-rc.2", "0.3.9-rc.1"));
-        assert!(newer("0.3.9", "dev"));
-        assert!(!newer("dev", "0.3.9"));
-        assert!(!newer("0.3", "0.2.9"));
+        #[derive(Deserialize)]
+        struct Pair {
+            a: String,
+            b: String,
+            newer: bool,
+        }
+        #[derive(Deserialize)]
+        struct Table {
+            pairs: Vec<Pair>,
+            valid: Vec<String>,
+            invalid: Vec<String>,
+        }
+        let table: Table = serde_json::from_str(include_str!("../../testdata/versions.json")).unwrap();
+        assert!(!table.pairs.is_empty() && !table.valid.is_empty() && !table.invalid.is_empty());
+        for c in &table.pairs {
+            assert_eq!(newer(&c.a, &c.b), c.newer, "newer({:?}, {:?})", c.a, c.b);
+            assert!(!(c.newer && newer(&c.b, &c.a)), "newer({:?}, {:?}) and the other way round", c.a, c.b);
+        }
+        for v in &table.valid {
+            assert!(semver(v).is_some(), "{v:?} refused");
+        }
+        for v in &table.invalid {
+            assert!(semver(v).is_none(), "{v:?} accepted");
+        }
     }
 }

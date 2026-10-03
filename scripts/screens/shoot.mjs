@@ -21,7 +21,7 @@ const SUB = "demosubs0000";
 const BASE = `https://127.0.0.1:2090/${ADMIN}/`;
 // The demo stack lives for a minute on 127.0.0.1; its admin password is thrown away.
 const PASS = crypto.randomBytes(18).toString("base64url");
-const env = { ...process.env, MIKAN_IMAGE: process.env.MIKAN_IMAGE || "mikan:dev", MIKAN_TEST_POSTGRES_PASSWORD:crypto.randomBytes(32).toString("hex") };
+const env = { ...process.env, MIKAN_IMAGE: process.env.MIKAN_IMAGE || "mikan:dev", MIKAN_TEST_POSTGRES_PASSWORD: crypto.randomBytes(32).toString("hex") };
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // the demo panel's certificate is self-signed
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const compose = (args, input) =>

@@ -63,7 +63,7 @@ Commands:
                                 check a site as a REALITY camouflage from the node
   admin targets apply --dest HOST:PORT [--sni NAME] (--all | --inbound NAME) [--node NODE]
                                 point REALITY inbounds at a site; it is checked first (--force skips)
-  health                        check that the panel answers (container healthcheck)
+  health                        check that the panel and its database answer (container healthcheck)
   openapi                       print the OpenAPI spec (for the API client generator)
   version                       print the version
 `
@@ -348,6 +348,17 @@ func health() error {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	// A panel that answers but has lost its database serves nothing but errors. One bare
+	// query on a connection of its own: no pool, no migrations.
+	dsn, err := store.DatabaseURL()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := store.Ping(ctx, dsn); err != nil {
+		return fmt.Errorf("database: %w", err)
 	}
 	fmt.Println("ok")
 	return nil

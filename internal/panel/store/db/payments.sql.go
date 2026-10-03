@@ -97,7 +97,7 @@ func (q *Queries) ExpirePayments(ctx context.Context, createdAt int64) (int64, e
 
 const findOpenPayment = `-- name: FindOpenPayment :one
 SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments
-WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND COALESCE(user_id, 0) = CAST($5 AS BIGINT)
+WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND user_id IS NOT DISTINCT FROM NULLIF(CAST($5 AS BIGINT), 0)
   AND status = 'pending' AND pay_url <> '' AND created_at > $6
 ORDER BY id DESC LIMIT 1
 `
@@ -111,6 +111,7 @@ type FindOpenPaymentParams struct {
 	Since    int64
 }
 
+// user_id 0 asks for an invoice that has no user yet (NULL); payments_tg finds the candidates.
 func (q *Queries) FindOpenPayment(ctx context.Context, arg FindOpenPaymentParams) (Payment, error) {
 	row := q.db.QueryRowContext(ctx, findOpenPayment,
 		arg.TgID,
@@ -143,6 +144,73 @@ func (q *Queries) FindOpenPayment(ctx context.Context, arg FindOpenPaymentParams
 		&i.RefundedAt,
 	)
 	return i, err
+}
+
+const findOpenPayments = `-- name: FindOpenPayments :many
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at FROM payments
+WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4
+  AND user_id IS NOT DISTINCT FROM NULLIF(CAST($5 AS BIGINT), 0)
+  AND status = 'pending' AND pay_url <> '' AND created_at > $6
+ORDER BY id DESC
+`
+
+type FindOpenPaymentsParams struct {
+	TgID     int64
+	TariffID sql.NullInt64
+	Provider string
+	Kind     string
+	UserID   int64
+	Since    int64
+}
+
+func (q *Queries) FindOpenPayments(ctx context.Context, arg FindOpenPaymentsParams) ([]Payment, error) {
+	rows, err := q.db.QueryContext(ctx, findOpenPayments,
+		arg.TgID,
+		arg.TariffID,
+		arg.Provider,
+		arg.Kind,
+		arg.UserID,
+		arg.Since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Payment{}
+	for rows.Next() {
+		var i Payment
+		if err := rows.Scan(
+			&i.ID,
+			&i.Provider,
+			&i.Payload,
+			&i.ExternalID,
+			&i.TgID,
+			&i.Kind,
+			&i.UserID,
+			&i.TariffID,
+			&i.PackageID,
+			&i.TariffName,
+			&i.Amount,
+			&i.Currency,
+			&i.Status,
+			&i.Error,
+			&i.PayUrl,
+			&i.CreatedAt,
+			&i.PaidAt,
+			&i.AppliedAt,
+			&i.RefundedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getPayment = `-- name: GetPayment :one
@@ -456,6 +524,23 @@ func (q *Queries) ListTariffsOnSale(ctx context.Context) ([]Tariff, error) {
 	return items, nil
 }
 
+const markLatePromoRefunded = `-- name: MarkLatePromoRefunded :execrows
+UPDATE payments SET status = 'refunded', refunded_at = $1, error = '' WHERE id = $2 AND status IN ('pending','expired','paid','failed')
+`
+
+type MarkLatePromoRefundedParams struct {
+	RefundedAt sql.NullInt64
+	ID         int64
+}
+
+func (q *Queries) MarkLatePromoRefunded(ctx context.Context, arg MarkLatePromoRefundedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markLatePromoRefunded, arg.RefundedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const markPaymentApplied = `-- name: MarkPaymentApplied :execrows
 UPDATE payments SET status = 'applied', user_id = $1, applied_at = $2, error = ''
 WHERE id = $3 AND status = 'paid'
@@ -545,6 +630,23 @@ func (q *Queries) PaymentTotals(ctx context.Context, appliedAt sql.NullInt64) ([
 	return items, nil
 }
 
+const setPaymentAmount = `-- name: SetPaymentAmount :execrows
+UPDATE payments SET amount = $1 WHERE id = $2 AND status = 'pending'
+`
+
+type SetPaymentAmountParams struct {
+	Amount int64
+	ID     int64
+}
+
+func (q *Queries) SetPaymentAmount(ctx context.Context, arg SetPaymentAmountParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPaymentAmount, arg.Amount, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setPaymentError = `-- name: SetPaymentError :exec
 UPDATE payments SET error = $1 WHERE id = $2
 `
@@ -556,6 +658,20 @@ type SetPaymentErrorParams struct {
 
 func (q *Queries) SetPaymentError(ctx context.Context, arg SetPaymentErrorParams) error {
 	_, err := q.db.ExecContext(ctx, setPaymentError, arg.Error, arg.ID)
+	return err
+}
+
+const setPaymentExternalID = `-- name: SetPaymentExternalID :exec
+UPDATE payments SET external_id = $1 WHERE id = $2
+`
+
+type SetPaymentExternalIDParams struct {
+	ExternalID sql.NullString
+	ID         int64
+}
+
+func (q *Queries) SetPaymentExternalID(ctx context.Context, arg SetPaymentExternalIDParams) error {
+	_, err := q.db.ExecContext(ctx, setPaymentExternalID, arg.ExternalID, arg.ID)
 	return err
 }
 

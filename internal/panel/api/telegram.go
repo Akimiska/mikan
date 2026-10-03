@@ -272,17 +272,7 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 		}
 		details["config"] = true
 	}
-	var infrastructure *infraalerts.AlertsConfig
 	if b.Infrastructure != nil {
-		current, _, err := settings.GetOver(ctx, h.d.Settings, infraalerts.KeyConfig, infraalerts.Default())
-		if err != nil {
-			return nil, err
-		}
-		merged := b.Infrastructure.Merge(current)
-		if err := merged.Validate(); err != nil {
-			return nil, tgFieldErr("infrastructure", err.Error())
-		}
-		infrastructure = &merged
 		details["infrastructure"] = true
 	}
 	if b.Enabled != nil && *b.Enabled && token == "" {
@@ -290,9 +280,31 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 	}
 
 	// One transaction: a token saved without the route that reaches it, or a route without
-	// the switch that turns the bot on, is a bot that does not start.
+	// the switch that turns the bot on, is a bot that does not start. The alerts' settings
+	// are merged into what the transaction reads, so two PATCHes at once do not undo each
+	// other's fields (a serialization conflict merges again).
 	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
+		var infrastructure *infraalerts.AlertsConfig
+		if b.Infrastructure != nil {
+			current, _, err := settings.GetOver(ctx, set, infraalerts.KeyConfig, infraalerts.Default())
+			if err != nil {
+				return err
+			}
+			merged := b.Infrastructure.Merge(current)
+			if err := merged.Validate(); err != nil {
+				return tgFieldErr("infrastructure", err.Error())
+			}
+			infrastructure = &merged
+		}
+		if b.Enabled != nil && *b.Enabled && b.Token == nil {
+			// The token checked above may have been removed meanwhile.
+			if cur, err := set.String(ctx, tgbot.KeyToken); err != nil {
+				return err
+			} else if cur == "" {
+				return tgFieldErr("enabled", "tg_no_token")
+			}
+		}
 		if b.Route != nil {
 			if err := settings.Set(ctx, set, tgbot.KeyRoute, route); err != nil {
 				return err

@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 )
 
 const addTgNotice = `-- name: AddTgNotice :execrows
@@ -140,39 +139,6 @@ type LinkTgParams struct {
 func (q *Queries) LinkTg(ctx context.Context, arg LinkTgParams) error {
 	_, err := q.db.ExecContext(ctx, linkTg, arg.UserID, arg.TgID, arg.CreatedAt)
 	return err
-}
-
-const listTgLinks = `-- name: ListTgLinks :many
-SELECT l.user_id, l.tg_id, c.blocked FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id
-`
-
-type ListTgLinksRow struct {
-	UserID  int64
-	TgID    int64
-	Blocked sql.NullInt64
-}
-
-func (q *Queries) ListTgLinks(ctx context.Context) ([]ListTgLinksRow, error) {
-	rows, err := q.db.QueryContext(ctx, listTgLinks)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListTgLinksRow{}
-	for rows.Next() {
-		var i ListTgLinksRow
-		if err := rows.Scan(&i.UserID, &i.TgID, &i.Blocked); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listTgLinksOf = `-- name: ListTgLinksOf :many

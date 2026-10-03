@@ -99,6 +99,15 @@ A REST API documented right in the panel, with read-only or full-access keys for
 </tr>
 </table>
 
+## Promo codes
+
+Admins can create discount codes and codes for bonus days or traffic. Subscribers apply
+codes in the Telegram Mini App, which also shows their redemption history. Bonus traffic
+can go to the main balance or a selected pool. Discounted invoices are available only
+through payment methods that support refunds: Telegram Stars and adapters that advertise
+refund support. Mikan can then return a payment if its promo reservation expires before
+the provider confirms it.
+
 ## Screenshots
 
 <table>

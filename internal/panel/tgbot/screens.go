@@ -177,6 +177,9 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 			rows = append(rows, []Button{btn})
 		}
 	}
+	if url := b.miniAppURL(ctx, cfg); url != "" {
+		rows = append(rows, []Button{{Text: w.promo, WebApp: &WebApp{URL: url + "#promocodes"}}})
+	}
 	if subs > 1 {
 		rows = append(rows, []Button{{Text: fmt.Sprintf("%s (%d)", w.subscriptions, subs), CallbackData: "w"}})
 	}

@@ -45,10 +45,6 @@ ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_li
 INSERT INTO user_pools (user_id, pool_id, used_up, used_down) VALUES ($1, $2, $3, $4)
 ON CONFLICT (user_id, pool_id) DO UPDATE SET used_up = user_pools.used_up + excluded.used_up, used_down = user_pools.used_down + excluded.used_down;
 
--- name: AddUserTotalTraffic :exec
--- Pool traffic: the all-time totals take it, the main period's counters do not.
-UPDATE users SET total_up = total_up + sqlc.arg(up), total_down = total_down + sqlc.arg(down) WHERE id = sqlc.arg(id);
-
 -- name: ResetUserPools :exec
 -- Pools reset with the main traffic: a new period, a renewal, the admin's reset.
 UPDATE user_pools SET used_up = 0, used_down = 0 WHERE user_id = $1;

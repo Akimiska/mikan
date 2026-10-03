@@ -60,11 +60,33 @@ esac
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
+# A dead route must end in an error, not in silence: a connection that does not open in
+# 15 s or a transfer slower than 1 KB/s for 30 s is retried, then given up. curl before
+# 7.71 (Ubuntu 20.04) retries only some errors; newer ones retry every failure.
+retry="--retry 3"
+if { curl --help all || curl --help; } 2>/dev/null | grep -q -- '--retry-all-errors'; then
+  retry="$retry --retry-all-errors"
+fi
+# get URL FILE WHAT [bar]: says what it downloads; "bar" shows curl's progress bar on a
+# terminal (the installer is the only big file).
 get() {
-  curl -fsSL --proto '=https' --tlsv1.2 --retry 3 "$1" -o "$2"
+  echo "mikan: downloading $3: $1" >&2
+  shown=-s
+  if [ "${4:-}" = bar ] && [ -t 2 ]; then
+    shown=--progress-bar
+  fi
+  # shellcheck disable=SC2086 # $retry is a list of flags
+  curl -fSL $shown --proto '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 $retry "$1" -o "$2" || {
+    code=$?
+    case $code in
+      22) hint="the address answered with an HTTP error" ;;
+      *) hint="GitHub release downloads are unreachable from this server; check IPv6/proxy" ;;
+    esac
+    fail "cannot download $3 from $1 (curl exit code $code): $hint"
+  }
 }
-get "$BASE/manifest.json" "$tmp/manifest.json" || fail "cannot download the release manifest"
-get "$BASE/manifest.json.sig" "$tmp/manifest.json.sig" || fail "cannot download the manifest's signature"
+get "$BASE/manifest.json" "$tmp/manifest.json" "the release manifest"
+get "$BASE/manifest.json.sig" "$tmp/manifest.json.sig" "the manifest's signature"
 
 # The signature first: nothing in the manifest is read before it is known to be the release's.
 printf '%s\n' "$PUBKEY" >"$tmp/key.pem"
@@ -84,7 +106,7 @@ case "$url" in
   "https://github.com/$REPO/releases/download/v"*"/mikan-$arch") ;;
   *) fail "the manifest names an installer at an address outside this project's releases: $url" ;;
 esac
-get "$url" "$tmp/mikan" || fail "cannot download the installer"
+get "$url" "$tmp/mikan" "the installer for $arch" bar
 got=$(sha256sum "$tmp/mikan" | cut -d' ' -f1)
 [ "$want" = "$got" ] || fail "the installer does not match the signed release manifest"
 

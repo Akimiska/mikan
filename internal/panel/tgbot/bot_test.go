@@ -18,6 +18,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 // fakeTelegram is the Bot API for tests: it hands out queued updates and records calls.
@@ -241,7 +242,7 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	t.Cleanup(cancel)
 	e.ctx = ctx
 	var err error
-	if e.st, err = store.OpenTest(ctx, t.TempDir()); err != nil {
+	if e.st, err = storetest.Open(ctx, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })
@@ -598,7 +599,7 @@ func TestInfrastructureAdminLinkIsOneTime(t *testing.T) {
 
 func TestConfigSavedBefore(t *testing.T) {
 	ctx := context.Background()
-	st, err := store.OpenTest(ctx, t.TempDir())
+	st, err := storetest.Open(ctx, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

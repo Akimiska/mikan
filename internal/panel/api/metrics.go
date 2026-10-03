@@ -182,6 +182,10 @@ func (h *handlers) renderMetrics(ctx context.Context, now time.Time) ([]byte, er
 		}
 	}
 
+	// Retries are harmless one by one; a steady climb means writers keep colliding.
+	m.help("mikan_db_serialization_retries_total", "Database transactions retried after a serialization conflict or a deadlock since the panel started.", "counter")
+	m.sample("mikan_db_serialization_retries_total", float64(h.d.Store.Conflicts()))
+
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	m.gauge("go_goroutines", "Goroutines of the panel.", float64(runtime.NumGoroutine()))

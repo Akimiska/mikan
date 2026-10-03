@@ -420,6 +420,8 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 	}
 	reset := cfg.RenewResetsTraffic
 	run := func(q *db.Queries) error {
+		// A conflict runs this again: nothing from an attempt that rolled back may stay.
+		pay, u, created, done = db.Payment{}, db.User{}, false, false
 		var err error
 		if pay, err = q.GetPayment(ctx, id); err != nil {
 			return err
@@ -445,7 +447,10 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			if err := q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: pay.TgID, CreatedAt: s.d.Now().Unix()}); err != nil {
 				return err
 			}
-			_ = q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: pay.TgID})
+			// Not ignored: a failed statement aborts the whole PostgreSQL transaction anyway.
+			if err := q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: pay.TgID}); err != nil {
+				return err
+			}
 		}
 		return markApplied(ctx, q, id, u.ID, s.d.Now())
 	}

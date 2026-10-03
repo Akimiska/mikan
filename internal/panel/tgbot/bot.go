@@ -291,6 +291,8 @@ func (b *Bot) InfrastructureEnabled(ctx context.Context) bool {
 func (b *Bot) claimInfrastructureAdmin(ctx context.Context, chat int64, code string) bool {
 	claimed := false
 	err := b.d.Store.Tx(ctx, func(q *db.Queries) error {
+		// A conflict runs this again: an attempt that rolled back claimed nothing.
+		claimed = false
 		set := settings.New(q)
 		var pending struct {
 			Code  string `json:"code"`

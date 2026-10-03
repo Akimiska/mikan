@@ -38,7 +38,6 @@ export function SettingsPage() {
                   <>
                     <ServerCard s={s} />
                     <LanguageCard s={s} />
-                    <ThemeCard />
                     <AutoCard s={s} />
                   </>
                 }
@@ -46,6 +45,7 @@ export function SettingsPage() {
                   <>
                     <UpdatesCard />
                     <SalesCard />
+                    <ThemeCard />
                   </>
                 }
               />

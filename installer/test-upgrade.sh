@@ -243,6 +243,21 @@ grep -q 'NOT saved' "$tmp/output"
 grep -q 'live users, payment77' "$tmp/pg"
 [ ! -e /opt/mikan/data/panel/restore.dump ]
 
+# A database-only archive (what the panel sends to Telegram, after age -d) puts the dump
+# back and keeps the server's own files: .env, certificates, node data.
+pg_fixture
+env_before=$(sha256sum /opt/mikan/.env)
+mkdir -p "$tmp/dbonly/data/panel"
+echo 'telegram users, payment99' >"$tmp/dbonly/data/panel/backup.dump"
+tar -czf "$tmp/dbonly.tar.gz" -C "$tmp/dbonly" data
+"$bin" restore -y "$tmp/dbonly.tar.gz" >"$tmp/output" 2>&1
+grep -q 'telegram users, payment99' "$tmp/pg"
+grep -q "holds only the panel's database" "$tmp/output"
+[ "$(sha256sum /opt/mikan/.env)" = "$env_before" ]
+[ ! -e /opt/mikan/data/panel/restore.dump ]
+[ -e "$tmp/healthy" ]
+tar -tzf /opt/mikan/backups/pre-restore-*.tar.gz | grep -qx 'data/panel/backup.dump'
+
 # A server that went back to SQLite restores an SQLite archive and keeps its compose file.
 fixture
 "$bin" backup >"$tmp/output" 2>&1
@@ -256,4 +271,4 @@ grep -q 'MIKAN_POSTGRES_PASSWORD=kept' /opt/mikan/.env
 if grep -q 'database restore\|postgres' "$tmp/trace"; then echo 'unexpected: PostgreSQL on an SQLite restore' >&2; exit 1; fi
 [ -e "$tmp/healthy" ]
 strict
-echo 'host updater: strict docker, provisioning rollback, kept database password, PostgreSQL image pulled first, final dump after the stop, PostgreSQL rollback on a failed migration and on an unchanged schema, uncertain commit retry, preserved post-import writes and SQLite archive, startup failure and writer-stop order, restore without a dump left behind, restore without a database snapshot, SQLite restore passed'
+echo 'host updater: strict docker, provisioning rollback, kept database password, PostgreSQL image pulled first, final dump after the stop, PostgreSQL rollback on a failed migration and on an unchanged schema, uncertain commit retry, preserved post-import writes and SQLite archive, startup failure and writer-stop order, restore without a dump left behind, restore without a database snapshot, database-only restore, SQLite restore passed'

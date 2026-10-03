@@ -4,6 +4,7 @@ import { useSettings } from "../../../api/hooks";
 import { LangSwitch } from "../../../components/lang";
 import { QueryBoundary } from "../../../components/query";
 import { Columns, Tabs } from "../../../components/tabs";
+import { ThemeCard } from "../../../components/theme";
 import { PageHeader, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { SETTINGS_TABS } from "../../search";
@@ -44,6 +45,7 @@ export function SettingsPage() {
                   <>
                     <UpdatesCard />
                     <SalesCard />
+                    <ThemeCard />
                   </>
                 }
               />

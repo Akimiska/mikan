@@ -772,6 +772,13 @@
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
+    "theme": "Theme",
+    "themeSub": "The panel color scheme is saved in this browser.",
+    "themeMikan": "Mikan",
+    "themeMidnight": "Midnight",
+    "themeOcean": "Ocean",
+    "themeSakura": "Sakura",
+    "themeForest": "Forest",
     "saved": "Settings saved",
     "server": "Server",
     "host": "Server address",

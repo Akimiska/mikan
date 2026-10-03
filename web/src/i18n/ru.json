@@ -772,6 +772,13 @@
   },
   "settings": {
     "subtitle": "Адрес сервера, оформление подписки и безопасность входа",
+    "theme": "Тема",
+    "themeSub": "Цветовая схема панели сохраняется в этом браузере.",
+    "themeMikan": "Mikan",
+    "themeMidnight": "Midnight",
+    "themeOcean": "Ocean",
+    "themeSakura": "Sakura",
+    "themeForest": "Forest",
     "saved": "Настройки сохранены",
     "server": "Сервер",
     "host": "Адрес сервера",

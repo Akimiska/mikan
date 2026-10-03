@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -16,6 +16,15 @@ use serde::Deserialize;
 use crate::DIR;
 use crate::envfile::write_private;
 use crate::system::output;
+
+/// The database's image, pinned to the multi-arch index: compose.yaml and the pull before
+/// an update name the same bytes, and a moved tag never starts another PostgreSQL.
+macro_rules! postgres_image {
+    () => {
+        "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+    };
+}
+pub const POSTGRES_IMAGE: &str = postgres_image!();
 
 /// The panel with its own node. Both run as an unprivileged user on the host network with
 /// a read-only root; the panel reaches the node over a socket in a shared volume.
@@ -25,7 +34,14 @@ use crate::system::output;
 /// files root reads (update/, addons/). The limits are far above what a busy node uses
 /// (memory is cgroup-accounted; pids count threads, not connections): they stop a leak or
 /// a flood from taking the host down with the containers.
-pub const PANEL_COMPOSE: &str = r#"name: mikan
+///
+/// PostgreSQL gets time to finish its shutdown checkpoint (a SIGKILL means crash recovery
+/// on the next start) and only the capabilities its entrypoint uses to own its directories
+/// and drop to its user (checked on Docker 28: initdb, a restart, an existing volume). The
+/// panel waits up to about 30 s for its workers, so it gets 45 s; it reaches the socket
+/// through a read-only mount (connecting needs no write access to the mount).
+pub const PANEL_COMPOSE: &str = concat!(
+    r#"name: mikan
 
 x-hardening: &hardening
   image: ${MIKAN_IMAGE}
@@ -62,9 +78,10 @@ services:
       MIKAN_NODE_SOCKET: /run/mikan/node.sock
       MIKAN_PANEL_LISTEN: 0.0.0.0:${PANEL_PORT}
       MIKAN_DATABASE_URL: ${MIKAN_DATABASE_URL}
-    volumes: ["./data/panel:/data/panel", "run:/run/mikan", "pg-run:/run/postgresql"]
+    volumes: ["./data/panel:/data/panel", "run:/run/mikan", "pg-run:/run/postgresql:ro"]
     mem_limit: 1g
     pids_limit: 512
+    stop_grace_period: 45s
     healthcheck:
       test: ["CMD", "/usr/local/bin/mikan", "health"]
       interval: 30s
@@ -72,24 +89,31 @@ services:
       retries: 3
 
   postgres:
-    image: postgres:18-alpine
+    image: "#,
+    postgres_image!(),
+    r#"
     network_mode: none
     restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: ["no-new-privileges:true"]
     environment:
       POSTGRES_USER: mikan
       POSTGRES_DB: mikan
       POSTGRES_PASSWORD: ${MIKAN_POSTGRES_PASSWORD}
       POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
-    command: ["postgres", "-c", "listen_addresses=", "-c", "unix_socket_directories=/run/postgresql", "-c", "unix_socket_permissions=0777"]
+    command: ["postgres", "-c", "listen_addresses=", "-c", "unix_socket_directories=/run/postgresql", "-c", "unix_socket_permissions=0777", "-c", "max_connections=50"]
     volumes: ["pg-data:/var/lib/postgresql", "pg-run:/run/postgresql"]
+    shm_size: 256m
     mem_limit: 1g
     pids_limit: 256
+    stop_grace_period: 120s
     healthcheck:
       test: ["CMD", "pg_isready", "-h", "/run/postgresql", "-U", "mikan", "-d", "mikan"]
-      interval: 2s
+      interval: 10s
       timeout: 5s
-      retries: 60
+      start_period: 60s
+      retries: 6
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
@@ -98,7 +122,11 @@ volumes:
   run: {}
   pg-run: {}
   pg-data: {}
-"#;
+"#
+);
+
+/// The compose project's volume that holds the database (compose prefixes the project).
+pub const PG_VOLUME: &str = "mikan_pg-data";
 
 /// A node of another panel, which drives it over its API port.
 pub const NODE_COMPOSE: &str = r#"name: mikan
@@ -391,16 +419,82 @@ pub fn admin_once(args: &[&str], stdin: Option<&str>) -> Result<Output> {
     with_stdin(compose(&full), stdin)
 }
 
+/// The longest a database command may take: importing a large SQLite or dumping a large
+/// database takes minutes, and one that hangs must not hold the update unit for good.
+const DATABASE_LIMIT: Duration = Duration::from_secs(60 * 60);
+
 /// Database administration while the panel is stopped: no bot, API or statistics writer.
 pub fn database(args: &[&str]) -> Result<Output> {
-    let mut full = vec!["run", "--rm", "--no-deps", "-T", "panel", "database"];
+    database_within(args, DATABASE_LIMIT)
+}
+
+/// A database command that outlives limit is stopped with its container (killing `compose
+/// run` alone leaves the container running); PostgreSQL rolls its transaction back.
+fn database_within(args: &[&str], limit: Duration) -> Result<Output> {
+    let name = format!("mikan-database-{}-{}", std::process::id(), crate::clock::Utc::now().stamp());
+    let mut full = vec!["run", "--rm", "--no-deps", "-T", "--name", name.as_str(), "panel", "database"];
     full.extend_from_slice(args);
-    check(compose_run(&full)?)
+    let what = format!("docker compose run panel database {}", args.join(" "));
+    let child = compose(&full).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().with_context(|| what.clone())?;
+    match wait_within(child, limit)? {
+        Some(out) if out.status.success() => Ok(out),
+        Some(out) => bail!("{what}: {}", String::from_utf8_lossy(&out.stderr).trim()),
+        None => {
+            let _ =
+                Command::new("docker").args(["rm", "-f", &name]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            bail!("{what} did not finish in {} minutes and was stopped", limit.as_secs() / 60)
+        }
+    }
+}
+
+/// Waits for a child with piped output for up to limit; None when it was killed for it.
+fn wait_within(mut child: Child, limit: Duration) -> Result<Option<Output>> {
+    let collect = |mut r: Box<dyn Read + Send>| {
+        thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = r.read_to_end(&mut buf);
+            buf
+        })
+    };
+    let stdout = collect(Box::new(child.stdout.take().context("stdout")?));
+    let stderr = collect(Box::new(child.stderr.take().context("stderr")?));
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let stdout = stdout.join().unwrap_or_default();
+            let stderr = stderr.join().unwrap_or_default();
+            return Ok(Some(Output { status, stdout, stderr }));
+        }
+        if start.elapsed() > limit {
+            // Its children may still hold the pipes: the readers are not waited for.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
 }
 
 pub fn postgres_ready() -> Result<()> {
     compose_run(&["up", "-d", "--wait", "--wait-timeout", "120", "postgres"])?;
     Ok(())
+}
+
+/// Pulls the database's image unless the engine has it: before an update stops anything,
+/// with the progress and the silence limit of every pull, not inside `compose up`.
+pub fn pull_postgres(progress: impl FnMut(f64)) -> Result<()> {
+    if image_present(POSTGRES_IMAGE) {
+        return Ok(());
+    }
+    pull(POSTGRES_IMAGE, progress)
+}
+
+/// Where a volume of the engine keeps its files; None when there is no such volume.
+pub fn volume_mountpoint(name: &str) -> Option<std::path::PathBuf> {
+    output("docker", &["volume", "inspect", "--format", "{{.Mountpoint}}", name])
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
 }
 
 fn with_stdin(mut cmd: Command, stdin: Option<&str>) -> Result<Output> {
@@ -494,6 +588,27 @@ mod tests {
         assert!(pg.contains("--auth-local=scram-sha-256"));
         assert!(pg.contains("listen_addresses="));
         assert!(!NODE_COMPOSE.contains("postgres"), "standalone nodes must not create a database");
+        // one pinned image for compose and the pull before an update
+        assert!(pg.contains(&format!("image: {POSTGRES_IMAGE}\n")), "{pg}");
+        assert!(
+            POSTGRES_IMAGE.starts_with("postgres:18-alpine@sha256:") && POSTGRES_IMAGE.len() == "postgres:18-alpine@sha256:".len() + 64
+        );
+        assert!(pg.contains("cap_drop: [ALL]") && pg.contains("no-new-privileges:true"));
+        assert!(pg.contains("stop_grace_period: 120s"), "a SIGKILL mid-checkpoint means crash recovery");
+        let panel = PANEL_COMPOSE.split("\n  panel:").nth(1).unwrap().split("\n  postgres:").next().unwrap();
+        assert!(panel.contains("pg-run:/run/postgresql:ro") && panel.contains("stop_grace_period: 45s"));
+    }
+
+    #[test]
+    fn a_command_past_its_limit_is_stopped_and_one_within_it_answers() {
+        let child = |script: &str| {
+            Command::new("sh").args(["-c", script]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap()
+        };
+        let started = Instant::now();
+        assert!(wait_within(child("sleep 30"), Duration::from_millis(300)).unwrap().is_none());
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let out = wait_within(child("echo out; echo err >&2; exit 3"), Duration::from_secs(10)).unwrap().unwrap();
+        assert_eq!((out.status.code(), out.stdout.as_slice(), out.stderr.as_slice()), (Some(3), &b"out\n"[..], &b"err\n"[..]));
     }
 
     #[test]

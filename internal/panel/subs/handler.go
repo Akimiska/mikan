@@ -135,7 +135,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method != http.MethodGet && r.Method != http.MethodHead:
 		server.NotFound(w)
 		return
-	case (strings.HasPrefix(p, "assets/") || p == "favicon.svg") && h.page != nil:
+	case (strings.HasPrefix(p, "assets/") || p == "favicon.png" || p == "apple-touch-icon.png") && h.page != nil:
 		h.page.ServeHTTP(w, r)
 		return
 	case rest != "" && rest != "info":

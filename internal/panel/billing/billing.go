@@ -91,6 +91,9 @@ type Service struct {
 	d  Deps
 	mu sync.Mutex
 	tg Telegram
+
+	buyersMu sync.Mutex
+	buyers   map[int64]*buyerLock // Telegram accounts opening an invoice
 }
 
 func New(d Deps) *Service {
@@ -253,25 +256,99 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 		// Only the subscription's owner renews it through the bot.
 		return db.Payment{}, ErrNotYours
 	}
-	now := s.d.Now()
-	userID := sql.NullInt64{Int64: req.UserID, Valid: req.UserID != 0}
-	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
-	if p, err := q.FindOpenPayment(ctx, db.FindOpenPaymentParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: kind,
-		UserID: req.UserID, Since: now.Add(-invoiceReuse).Unix()}); err == nil && p.Amount == amount {
-		return p, nil
-	}
-	if n, err := s.recentInvoices(ctx, req.TgID, now); err != nil {
-		return db.Payment{}, err
-	} else if n >= maxPerHour {
-		return db.Payment{}, ErrTooMany
-	}
-	p, err := q.CreatePayment(ctx, db.CreatePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID, Kind: kind, UserID: userID,
-		TariffID: tariffID, TariffName: t.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+	unlock, err := s.lockBuyer(ctx, req.TgID)
 	if err != nil {
 		return db.Payment{}, err
 	}
+	defer unlock()
+	now := s.d.Now()
+	userID := sql.NullInt64{Int64: req.UserID, Valid: req.UserID != 0}
+	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
+	p, open, err := s.newPayment(ctx, req.TgID, now, amount,
+		func(q *db.Queries) (db.Payment, error) {
+			return q.FindOpenPayment(ctx, db.FindOpenPaymentParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: kind,
+				UserID: req.UserID, Since: now.Add(-invoiceReuse).Unix()})
+		},
+		func(q *db.Queries) (db.Payment, error) {
+			return q.CreatePayment(ctx, db.CreatePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID, Kind: kind, UserID: userID,
+				TariffID: tariffID, TariffName: t.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+		})
+	if err != nil || open {
+		return p, err
+	}
 	lang, _ := s.d.Settings.Lang(ctx)
 	return s.openPayment(ctx, p, t.Name, Describe(t, lang))
+}
+
+// lockBuyer lets one invoice of a Telegram account be opened at a time, the provider's
+// answer included: a second tap waits and gets the first invoice again instead of a new
+// one. It gives up when ctx ends.
+func (s *Service) lockBuyer(ctx context.Context, tgID int64) (unlock func(), err error) {
+	s.buyersMu.Lock()
+	if s.buyers == nil {
+		s.buyers = map[int64]*buyerLock{}
+	}
+	l := s.buyers[tgID]
+	if l == nil {
+		l = &buyerLock{turn: make(chan struct{}, 1)}
+		s.buyers[tgID] = l
+	}
+	l.waiting++
+	s.buyersMu.Unlock()
+	leave := func() {
+		s.buyersMu.Lock()
+		if l.waiting--; l.waiting == 0 {
+			delete(s.buyers, tgID)
+		}
+		s.buyersMu.Unlock()
+	}
+	select {
+	case l.turn <- struct{}{}:
+		return func() { <-l.turn; leave() }, nil
+	case <-ctx.Done():
+		leave()
+		return nil, ctx.Err()
+	}
+}
+
+// buyerLock is one Telegram account's turn at opening invoices.
+type buyerLock struct {
+	turn    chan struct{}
+	waiting int // holder and waiters: the lock goes when none is left
+}
+
+// newPayment returns an open invoice find finds for the same purchase and price (open
+// true), or makes one with create while the account is under its hourly limit. The check
+// and the insert are one transaction under a lock per account in the database, so taps at
+// once cannot pass the limit together. READ COMMITTED: after the lock each statement sees
+// what the previous holder committed (a serializable snapshot would be taken before the
+// lock is granted). The provider is asked after the commit, outside the transaction.
+func (s *Service) newPayment(ctx context.Context, tgID int64, now time.Time, amount int64,
+	find, create func(q *db.Queries) (db.Payment, error)) (p db.Payment, open bool, err error) {
+	err = s.d.Store.TxRC(ctx, func(q *db.Queries) error {
+		p, open = db.Payment{}, false
+		if err := q.LockBuyerInvoices(ctx, tgID); err != nil {
+			return err
+		}
+		found, err := find(q)
+		switch {
+		case err == nil && found.Amount == amount:
+			p, open = found, true
+			return nil
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		n, err := q.CountRecentInvoices(ctx, db.CountRecentInvoicesParams{TgID: tgID, CreatedAt: now.Add(-time.Hour).Unix()})
+		if err != nil {
+			return err
+		}
+		if n >= maxPerHour {
+			return ErrTooMany
+		}
+		p, err = create(q)
+		return err
+	})
+	return p, open, err
 }
 
 // prices are the prices of an item the available providers take: 0 where none does.
@@ -313,10 +390,6 @@ func (s *Service) openPayment(ctx context.Context, p db.Payment, title, desc str
 	}
 	p.ExternalID, p.PayUrl = ext, url
 	return p, nil
-}
-
-func (s *Service) recentInvoices(ctx context.Context, tgID int64, now time.Time) (int64, error) {
-	return s.d.Store.Q.CountRecentInvoices(ctx, db.CountRecentInvoicesParams{TgID: tgID, CreatedAt: now.Add(-time.Hour).Unix()})
 }
 
 // openInvoice asks the provider for the invoice: its id (none for Stars until paid) and
@@ -420,6 +493,8 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 	}
 	reset := cfg.RenewResetsTraffic
 	run := func(q *db.Queries) error {
+		// A conflict runs this again: nothing from an attempt that rolled back may stay.
+		pay, u, created, done = db.Payment{}, db.User{}, false, false
 		var err error
 		if pay, err = q.GetPayment(ctx, id); err != nil {
 			return err
@@ -445,7 +520,10 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			if err := q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: pay.TgID, CreatedAt: s.d.Now().Unix()}); err != nil {
 				return err
 			}
-			_ = q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: pay.TgID})
+			// Not ignored: a failed statement aborts the whole PostgreSQL transaction anyway.
+			if err := q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: pay.TgID}); err != nil {
+				return err
+			}
 		}
 		return markApplied(ctx, q, id, u.ID, s.d.Now())
 	}

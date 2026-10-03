@@ -100,7 +100,9 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 		return nil, err
 	}
 	var t db.Tariff
-	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+	// The catalog holds no invariant across rows (a pool deleted meanwhile fails on its
+	// foreign key): READ COMMITTED.
+	err := h.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		var err error
 		t, err = q.CreateTariff(ctx, db.CreateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
 			DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
@@ -123,7 +125,7 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 		return nil, err
 	}
 	var t db.Tariff
-	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+	err := h.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		var err error
 		t, err = q.UpdateTariff(ctx, db.UpdateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
 			DurationDays: b.DurationDays, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,

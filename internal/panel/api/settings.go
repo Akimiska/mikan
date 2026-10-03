@@ -327,8 +327,9 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 	}
 	// Every setting of the request is written in one transaction: a failure in the middle
-	// leaves the settings as they were, not half changed.
-	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+	// leaves the settings as they were, not half changed. The values are written as given,
+	// read from nothing: READ COMMITTED.
+	err := h.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
 		if b.SubPort != nil {
 			if err := settings.Set(ctx, set, settings.KeySubPort, *b.SubPort); err != nil {

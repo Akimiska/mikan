@@ -6,6 +6,7 @@ require (
 	github.com/danielgtaylor/huma/v2 v2.39.1
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/lib/pq v1.12.3
 	github.com/metacubex/mihomo v1.19.31
 	github.com/pquerna/otp v1.5.0
 	github.com/pressly/goose/v3 v3.28.0

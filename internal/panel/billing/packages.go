@@ -105,22 +105,25 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 	if !ok {
 		return db.Payment{}, ErrProviderOff
 	}
+	unlock, err := s.lockBuyer(ctx, req.TgID)
+	if err != nil {
+		return db.Payment{}, err
+	}
+	defer unlock()
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: true}
 	packageID := sql.NullInt64{Int64: p.ID, Valid: true}
-	if open, err := q.FindOpenPackagePayment(ctx, db.FindOpenPackagePaymentParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider,
-		UserID: userID, Since: now.Add(-invoiceReuse).Unix()}); err == nil && open.Amount == amount {
-		return open, nil
-	}
-	if n, err := s.recentInvoices(ctx, req.TgID, now); err != nil {
-		return db.Payment{}, err
-	} else if n >= maxPerHour {
-		return db.Payment{}, ErrTooMany
-	}
-	pay, err := q.CreatePackagePayment(ctx, db.CreatePackagePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID,
-		UserID: userID, PackageID: packageID, TariffName: p.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
-	if err != nil {
-		return db.Payment{}, err
+	pay, open, err := s.newPayment(ctx, req.TgID, now, amount,
+		func(q *db.Queries) (db.Payment, error) {
+			return q.FindOpenPackagePayment(ctx, db.FindOpenPackagePaymentParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider,
+				UserID: userID, Since: now.Add(-invoiceReuse).Unix()})
+		},
+		func(q *db.Queries) (db.Payment, error) {
+			return q.CreatePackagePayment(ctx, db.CreatePackagePaymentParams{Provider: req.Provider, Payload: secure.Token(32), TgID: req.TgID,
+				UserID: userID, PackageID: packageID, TariffName: p.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix()})
+		})
+	if err != nil || open {
+		return pay, err
 	}
 	lang, _ := s.d.Settings.Lang(ctx)
 	return s.openPayment(ctx, pay, p.Name, DescribePackage(p, offer.Pool, lang))

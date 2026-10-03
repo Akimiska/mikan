@@ -209,7 +209,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		h, _ := set.String(ctx, settings.KeyPublicHost)
 		return h
 	}
-	p.Backups = tgbackup.New(st.DB, set, p.Telegram, o.DataDir, serverName, o.Now, o.Log)
+	p.Backups = tgbackup.New(selfDump, set, p.Telegram, o.DataDir, serverName, o.Now, o.Log)
 	deps.Backups = p.Backups
 	deps.Warp = warp.Client{API: o.WarpAPI}
 	apiHandler, _, err := api.New(deps)

@@ -869,7 +869,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Отправить бэкап сейчас */
+        /**
+         * Отправить бэкап сейчас
+         * @description Бэкап делается в фоне: ответ 202 сразу, итог — в GET /api/v1/telegram/backup (sending, last_ok, last_error).
+         */
         post: operations["send-telegram-backup"];
         delete?: never;
         options?: never;
@@ -1404,6 +1407,8 @@ export interface components {
             last_try?: string;
             /** @description Пароль шифрования задан; сам пароль не возвращается */
             password_set: boolean;
+            /** @description Бэкап делается прямо сейчас */
+            sending: boolean;
         };
         BoundDeviceView: {
             app: string;
@@ -2031,7 +2036,7 @@ export interface components {
             enabled?: boolean;
             /** Format: int64 */
             hour?: number;
-            /** @description Пароль, которым шифруется файл: от 12 символов. Без него бэкап не открыть */
+            /** @description Пароль, которым шифруется файл: от 20 символов. Файл остаётся в истории чата навсегда; без пароля его не открыть */
             password?: string;
         };
         PatchInboundInputBody: {
@@ -4973,8 +4978,8 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK */
-            200: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -52,8 +52,14 @@ func TestTelegramBackupOverHTTP(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "no_admin_chat") {
 		t.Fatalf("send without a chat: %d %s", resp.StatusCode, body)
 	}
+	// That is said at once, before anything runs in the background.
 	resp, body = k.do(http.MethodGet, url, nil, nil)
-	if json.Unmarshal(body, &v) != nil || v.LastError != "no_admin_chat" {
-		t.Fatalf("the failed attempt is shown: %s", body)
+	if json.Unmarshal(body, &v) != nil || v.LastError != "" || strings.Contains(string(body), `"sending":true`) {
+		t.Fatalf("a refused send started a backup: %s", body)
+	}
+	// 19 characters are not enough: the file stays in the chat's history for good.
+	resp, body = k.do(http.MethodPatch, url, map[string]any{"password": strings.Repeat("x", 19)}, k.csrf)
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "backup_password_short") {
+		t.Fatalf("a 19-character password: %d %s", resp.StatusCode, body)
 	}
 }

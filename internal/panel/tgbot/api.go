@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -121,30 +122,38 @@ const documentTimeout = 2 * time.Minute
 // MaxDocument is the largest file a bot may send.
 const MaxDocument = 50 << 20
 
-// SendDocument sends a file to a chat, with a caption under it.
-func (c *Client) SendDocument(parent context.Context, chat int64, name string, data []byte, caption string) (Message, error) {
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
+// SendDocument sends size bytes from file to a chat as a document named name, with a
+// caption under it. The body is read from file as it goes up, with its exact length: the
+// file is never held in memory.
+func (c *Client) SendDocument(parent context.Context, chat int64, name string, file io.Reader, size int64, caption string) (Message, error) {
+	if size > MaxDocument {
+		return Message{}, fmt.Errorf("a document of %d bytes is over the %d a bot may send", size, MaxDocument)
+	}
+	// The parts before the file and the closing boundary after it, written by the same
+	// multipart writer so they fit together.
+	var head bytes.Buffer
+	w := multipart.NewWriter(&head)
 	_ = w.WriteField("chat_id", strconv.FormatInt(chat, 10))
 	if caption != "" {
 		_ = w.WriteField("caption", caption)
 	}
-	part, err := w.CreateFormFile("document", name)
-	if err != nil {
+	if _, err := w.CreateFormFile("document", name); err != nil {
 		return Message{}, err
 	}
-	if _, err := part.Write(data); err != nil {
-		return Message{}, err
-	}
+	prefix := append([]byte(nil), head.Bytes()...)
+	head.Reset()
 	if err := w.Close(); err != nil {
 		return Message{}, err
 	}
+	trailer := head.Bytes()
 	ctx, cancel := context.WithTimeout(parent, documentTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/sendDocument", &body)
+	body := io.MultiReader(bytes.NewReader(prefix), io.LimitReader(file, size), bytes.NewReader(trailer))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/sendDocument", body)
 	if err != nil {
 		return Message{}, err
 	}
+	req.ContentLength = int64(len(prefix)) + size + int64(len(trailer))
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	var m Message
 	return m, c.do(parent, req, &m)

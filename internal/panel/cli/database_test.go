@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -222,5 +223,87 @@ func TestPostgresToolCredentialsStayOutOfArguments(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing libpq parameter %s", want)
 		}
+	}
+}
+
+// A PostgreSQL client gets what it needs from the environment and none of the panel's
+// secrets.
+func TestPostgresToolsGetNoPanelSecrets(t *testing.T) {
+	t.Setenv("MIKAN_DATABASE_URL", "postgresql://mikan:db-secret@localhost/mikan")
+	t.Setenv("MIKAN_JOIN_KEY", "join-secret")
+	t.Setenv("PGPASSFILE", "/somewhere/else")
+	t.Setenv("PATH", "/usr/bin")
+	env, err := postgresEnv("postgresql://mikan:db-secret@localhost/mikan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(env, "\n")
+	for _, leaked := range []string{"MIKAN_", "join-secret", "PGPASSFILE"} {
+		if strings.Contains(joined, leaked) {
+			t.Errorf("%s reaches the client", leaked)
+		}
+	}
+	if !strings.Contains(joined, "PATH=/usr/bin") {
+		t.Error("the client has no PATH")
+	}
+}
+
+func TestCheckDumpList(t *testing.T) {
+	good := ";\n; Archive created at 2026-10-03\n;\n" +
+		"3557; 2615 2200 SCHEMA - public pg_database_owner\n" +
+		"3558; 0 0 COMMENT - SCHEMA public pg_database_owner\n" +
+		"220; 1259 16390 TABLE public users mikan\n" +
+		"221; 1259 16389 SEQUENCE public users_id_seq mikan\n" +
+		"3400; 0 16390 TABLE DATA public users mikan\n" +
+		"3560; 0 0 SEQUENCE SET public users_id_seq mikan\n" +
+		"3201; 2606 16420 CONSTRAINT public users users_pkey mikan\n" +
+		"3301; 1259 16430 INDEX public users_status mikan\n" +
+		"3350; 2606 16440 FK CONSTRAINT public slots slots_user_fkey mikan\n"
+	if err := checkDumpList([]byte(good)); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		"230; 1255 16500 FUNCTION public evil() mikan\n",
+		"231; 2620 16501 TRIGGER public users run_evil mikan\n",
+		"232; 3079 16502 EXTENSION - plpython3u\n",
+		"233; 0 0 ACL - SCHEMA public postgres\n",
+		"not a toc line\n",
+	} {
+		if err := checkDumpList([]byte(good + bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
+// A dump with a function in it, made by the real pg_dump, is refused before pg_restore
+// connects; the data stay as they were.
+func TestRestoreRefusesADumpWithCode(t *testing.T) {
+	if _, err := exec.LookPath("pg_dump"); err != nil {
+		t.Skip("pg_dump is not installed")
+	}
+	ctx := context.Background()
+	dsn, dir := newDatabase(t, "code"), t.TempDir()
+	st, err := store.OpenPostgres(ctx, dir, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.DB.ExecContext(ctx, "CREATE FUNCTION evil() RETURNS int LANGUAGE sql AS 'SELECT 1'"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MIKAN_DATABASE_URL", dsn)
+	t.Setenv("MIKAN_DATA_DIR", dir)
+	path := filepath.Join(t.TempDir(), "with-code.dump")
+	if err := databaseCmd(ctx, []string{"backup", path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Q.SetSetting(ctx, db.SetSettingParams{Key: "kept", Value: "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := databaseCmd(ctx, []string{"restore", path}); err == nil || !strings.Contains(err.Error(), "FUNCTION") {
+		t.Fatalf("a dump with a function was restored: %v", err)
+	}
+	if v, err := st.Q.GetSetting(ctx, "kept"); err != nil || v != "1" {
+		t.Fatal("the refused restore changed data:", v, err)
 	}
 }

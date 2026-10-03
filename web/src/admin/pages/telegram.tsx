@@ -229,14 +229,29 @@ function InfrastructureCard({ v, draft, setDraft, dirty }: { v: View; draft: Sch
 function BackupCard() {
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: ["telegram-backup"], queryFn: () => unwrap(api.GET("/api/v1/telegram/backup", {})) });
+  // While a backup is being made in the background, its end is looked for every few seconds.
+  const q = useQuery({
+    queryKey: ["telegram-backup"],
+    queryFn: () => unwrap(api.GET("/api/v1/telegram/backup", {})),
+    refetchInterval: (query) => (query.state.data?.sending ? 3000 : false),
+  });
   const [password, setPassword] = useState("");
+  const [shown, setShown] = useState(false);
   const [error, setError] = useState("");
   const done = (r: Schemas["BackupView"], text: string) => {
     qc.setQueryData(["telegram-backup"], r);
     setPassword("");
+    setShown(false);
     setError("");
     toast.ok(text);
+  };
+  // A phrase nobody will guess: 32 characters from the browser's random source, shown so
+  // the admin can keep it before it is saved.
+  const generate = () => {
+    const alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    setPassword(Array.from(bytes, (x) => alphabet[x % alphabet.length]).join(""));
+    setShown(true);
   };
   const fail = (e: unknown) => {
     if (e instanceof ApiError && Object.keys(e.fields).length) setError(Object.values(e.fields)[0] ?? "");
@@ -249,7 +264,7 @@ function BackupCard() {
   });
   const send = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/telegram/backup/send", {})),
-    onSuccess: (r) => done(r, t("telegram.infra.backupSent")),
+    onSuccess: (r) => done(r, t("telegram.infra.backupStarted")),
     onError: (e) => {
       fail(e);
       void qc.invalidateQueries({ queryKey: ["telegram-backup"] });
@@ -287,20 +302,24 @@ function BackupCard() {
         </Field>
         <Field label={t("telegram.infra.backupPassword")} htmlFor="backup-password" hint={b.password_set ? t("telegram.infra.backupPasswordSet") : t("telegram.infra.backupPasswordHint")} error={error}>
           <div className="flex gap-2">
-            <input id="backup-password" className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={128} aria-invalid={!!error} />
+            <input id="backup-password" className="input mono" type={shown ? "text" : "password"} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={256} aria-invalid={!!error} />
+            <Button type="button" variant="ghost" onClick={generate}>
+              {t("telegram.infra.backupGenerate")}
+            </Button>
             <Button type="button" loading={patch.isPending} disabled={password.length === 0} onClick={() => patch.mutate({ password })}>
               {t("common.save")}
             </Button>
           </div>
         </Field>
       </div>
+      {shown ? <div className="banner warn mb-3">{t("telegram.infra.backupKeepIt")}</div> : null}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-[var(--ink-500)]">
           {b.last_ok ? t("telegram.infra.backupLast", { when: ago(b.last_ok), size }) : t("telegram.infra.backupNever")}
           {b.last_error ? <div className="text-[var(--berry-600)]">{t("telegram.infra.backupFailed", { error: tMaybe(`errors.api.${b.last_error}`) ?? b.last_error })}</div> : null}
         </div>
-        <Button size="sm" loading={send.isPending} disabled={!b.admin_chat_set || !b.password_set} onClick={() => send.mutate()}>
-          {t("telegram.infra.backupSendNow")}
+        <Button size="sm" loading={send.isPending || b.sending} disabled={!b.admin_chat_set || !b.password_set || b.sending} onClick={() => send.mutate()}>
+          {b.sending ? t("telegram.infra.backupSending") : t("telegram.infra.backupSendNow")}
         </Button>
       </div>
       <div className="mt-4 text-xs text-[var(--ink-500)]">{t("telegram.infra.backupRestore")}</div>

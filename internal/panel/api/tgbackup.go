@@ -11,7 +11,6 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgbackup"
-	"mikan/internal/panel/tgbot"
 )
 
 // Backups of the database to the admin's Telegram chat (tgbackup). Everything here is the
@@ -26,6 +25,7 @@ type BackupView struct {
 	LastTry      *time.Time `json:"last_try,omitempty"`
 	LastError    string     `json:"last_error,omitempty" doc:"Код ошибки последней попытки"`
 	LastSize     int64      `json:"last_size,omitempty" doc:"Размер последнего файла, байт"`
+	Sending      bool       `json:"sending" doc:"Бэкап делается прямо сейчас"`
 }
 
 type backupOutput struct{ Body BackupView }
@@ -34,7 +34,7 @@ type patchBackupInput struct {
 	Body struct {
 		Enabled  *bool   `json:"enabled,omitempty"`
 		Hour     *int    `json:"hour,omitempty" minimum:"0" maximum:"23"`
-		Password *string `json:"password,omitempty" maxLength:"128" doc:"Пароль, которым шифруется файл: от 12 символов. Без него бэкап не открыть"`
+		Password *string `json:"password,omitempty" maxLength:"256" doc:"Пароль, которым шифруется файл: от 20 символов. Файл остаётся в истории чата навсегда; без пароля его не открыть"`
 	}
 }
 
@@ -42,7 +42,7 @@ func (h *handlers) registerBackups() {
 	tags := []string{"telegram"}
 	huma.Register(h.api, huma.Operation{OperationID: "get-telegram-backup", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodGet, Path: "/api/v1/telegram/backup", Summary: "Бэкапы в Telegram", Tags: tags}, h.getBackup)
 	huma.Register(h.api, huma.Operation{OperationID: "update-telegram-backup", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/telegram/backup", Summary: "Настроить бэкапы в Telegram", Tags: tags}, h.updateBackup)
-	huma.Register(h.api, huma.Operation{OperationID: "send-telegram-backup", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/telegram/backup/send", Summary: "Отправить бэкап сейчас", Tags: tags}, h.sendBackup)
+	huma.Register(h.api, huma.Operation{OperationID: "send-telegram-backup", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/telegram/backup/send", Summary: "Отправить бэкап сейчас", Description: "Бэкап делается в фоне: ответ 202 сразу, итог — в GET /api/v1/telegram/backup (sending, last_ok, last_error).", Tags: tags, DefaultStatus: http.StatusAccepted}, h.sendBackup)
 }
 
 func (h *handlers) backupView(ctx context.Context) (BackupView, error) {
@@ -79,6 +79,7 @@ func (h *handlers) backupView(ctx context.Context) (BackupView, error) {
 		return &t
 	}
 	v.LastOK, v.LastTry, v.LastError, v.LastSize = at(st.LastOK), at(st.LastTry), st.LastError, st.LastSize
+	v.Sending = h.d.Backups != nil && h.d.Backups.Busy()
 	return v, nil
 }
 
@@ -92,6 +93,10 @@ func (h *handlers) getBackup(ctx context.Context, _ *struct{}) (*backupOutput, e
 
 func (h *handlers) updateBackup(ctx context.Context, in *patchBackupInput) (*backupOutput, error) {
 	b := in.Body
+	wasOn, err := h.d.Settings.On(ctx, tgbackup.Enabled)
+	if err != nil {
+		return nil, err
+	}
 	if b.Password != nil && len(*b.Password) < tgbackup.MinPassword {
 		return nil, tgFieldErr("password", "backup_password_short")
 	}
@@ -104,7 +109,7 @@ func (h *handlers) updateBackup(ctx context.Context, in *patchBackupInput) (*bac
 			return nil, tgFieldErr("password", "no_backup_password")
 		}
 	}
-	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
 		if b.Password != nil {
 			if err := settings.Set(ctx, set, tgbackup.KeyPassword, *b.Password); err != nil {
@@ -124,6 +129,12 @@ func (h *handlers) updateBackup(ctx context.Context, in *patchBackupInput) (*bac
 	if err != nil {
 		return nil, err
 	}
+	// Switched on now: the first backup goes at the chosen hour, not within a minute.
+	if b.Enabled != nil && *b.Enabled && !wasOn && h.d.Backups != nil {
+		if err := h.d.Backups.Enabling(ctx); err != nil {
+			return nil, err
+		}
+	}
 	details := map[string]any{}
 	if b.Enabled != nil {
 		details["enabled"] = *b.Enabled
@@ -142,18 +153,23 @@ func (h *handlers) sendBackup(ctx context.Context, _ *struct{}) (*backupOutput, 
 	if h.d.Backups == nil {
 		return nil, huma.Error503ServiceUnavailable("bot_unavailable")
 	}
-	_, err := h.d.Backups.Send(ctx)
-	var ae *tgbot.APIError
+	// What is known at once is said at once; the dump and the upload go on in the background.
+	v, err := h.backupView(ctx)
+	if err != nil {
+		return nil, err
+	}
 	switch {
-	case errors.Is(err, tgbackup.ErrNoChat), errors.Is(err, tgbackup.ErrNoPassword), errors.Is(err, tgbackup.ErrTooBig), errors.Is(err, tgbackup.ErrBusy):
+	case !v.PasswordSet:
+		return nil, huma.Error409Conflict(tgbackup.ErrNoPassword.Error())
+	case !v.AdminChatSet:
+		return nil, huma.Error409Conflict(tgbackup.ErrNoChat.Error())
+	}
+	if err := h.d.Backups.Start(); errors.Is(err, tgbackup.ErrBusy) {
 		return nil, huma.Error409Conflict(err.Error())
-	case errors.Is(err, tgbot.ErrOff):
-		return nil, huma.Error409Conflict("bot_off")
-	case errors.Is(err, tgbot.ErrUnreachable), errors.As(err, &ae):
-		return nil, huma.Error502BadGateway("tg_unreachable")
-	case err != nil:
+	} else if err != nil {
 		return nil, err
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "telegram.backup.send", "telegram", "", nil)
-	return h.getBackup(ctx, nil)
+	v.Sending = true
+	return &backupOutput{Body: v}, nil
 }

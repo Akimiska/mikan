@@ -337,14 +337,30 @@ fn verify_tree(dir: &Path, depth: usize) -> Result<()> {
 
 /// What an unpacked archive puts back: (where it is, where it goes below /opt/mikan).
 fn plan(stage: &Path) -> Result<Vec<(PathBuf, &'static str)>> {
+    let items = plan_items(stage);
+    if !items.iter().any(|(_, r)| *r == ".env") {
+        bail!("the archive has no .env: it is not a mikan backup");
+    }
+    Ok(items)
+}
+
+/// What an archive without .env puts back: the panel's PostgreSQL dump alone, as the panel
+/// sends it to Telegram. The server's settings, certificates, adapters and node data stay
+/// as they are.
+fn plan_database(stage: &Path) -> Result<Vec<(PathBuf, &'static str)>> {
+    let items: Vec<_> = plan_items(stage).into_iter().filter(|(_, r)| *r == RESTORE_DUMP).collect();
+    if items.is_empty() {
+        bail!("the archive has neither .env nor the panel's PostgreSQL dump: it is not a mikan backup");
+    }
+    Ok(items)
+}
+
+fn plan_items(stage: &Path) -> Vec<(PathBuf, &'static str)> {
     let mut items = Vec::new();
     for rel in [".env", "compose.yaml", "data/panel/tls", "data/node", "addons/state.json", "data/panel/addons"] {
         if fs::symlink_metadata(stage.join(rel)).is_ok() {
             items.push((stage.join(rel), rel));
         }
-    }
-    if !items.iter().any(|(_, r)| *r == ".env") {
-        bail!("the archive has no .env: it is not a mikan backup");
     }
     // The panel's database comes as the consistent copy a backup makes, or as the file a
     // snapshot took with the panel stopped.
@@ -359,7 +375,7 @@ fn plan(stage: &Path) -> Result<Vec<(PathBuf, &'static str)>> {
             break;
         }
     }
-    Ok(items)
+    items
 }
 
 /// Fits what a panel's archive puts back to this server: its database credentials and
@@ -508,19 +524,31 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
     let stage = Stage::new(root)?;
     extract(file, &stage.0)?;
     verify_tree(&stage.0, 0)?;
-    let mut items = plan(&stage.0)?;
-    let mut archived = EnvFile::load(stage.0.join(".env"))?;
-    if (archived.get("MIKAN_MODE") == Some("node")) != install.node {
-        bail!(
-            "the backup is a {}'s, this server is a {}",
-            if install.node { "panel" } else { "node" },
-            if install.node { "node" } else { "panel" }
-        );
-    }
-    if !install.node {
-        fit_to_panel(&mut items, &mut archived, &install.env)?;
-        archived.save()?;
-    }
+    let items = if fs::symlink_metadata(stage.0.join(".env")).is_ok() {
+        let mut items = plan(&stage.0)?;
+        let mut archived = EnvFile::load(stage.0.join(".env"))?;
+        if (archived.get("MIKAN_MODE") == Some("node")) != install.node {
+            bail!(
+                "the backup is a {}'s, this server is a {}",
+                if install.node { "panel" } else { "node" },
+                if install.node { "node" } else { "panel" }
+            );
+        }
+        if !install.node {
+            fit_to_panel(&mut items, &mut archived, &install.env)?;
+            archived.save()?;
+        }
+        items
+    } else {
+        if !postgres {
+            bail!(
+                "the archive holds only a panel's PostgreSQL database; this server is a node or still runs SQLite (run mikan update first)"
+            );
+        }
+        let items = plan_database(&stage.0)?;
+        say("The archive holds only the panel's database: the settings, certificates, adapters and node data stay as they are");
+        items
+    };
 
     let _critical = signals::critical();
     say("Stopping mikan");
@@ -626,6 +654,26 @@ mod tests {
 
     // The secrets of the server are in the archive: nobody but root may see the file
     // while tar writes it, and the directory keeps the names private too.
+    #[test]
+    fn a_database_backup_puts_back_the_database_alone() {
+        let d = tmpdir("plan-db");
+        assert!(plan_database(&d).is_err(), "nothing in it");
+        file(&d, "data/panel/backup.dump", "PGDMP");
+        let items = plan_database(&d).unwrap();
+        assert_eq!(items.iter().map(|(_, r)| *r).collect::<Vec<_>>(), ["data/panel/restore.dump"]);
+        assert!(plan(&d).is_err(), "a database alone is not a full backup");
+        // Whatever else came along is not taken without the full restore.
+        file(&d, "data/node/state.json", "{}");
+        file(&d, "data/panel/tls/panel.key", "k");
+        assert_eq!(plan_database(&d).unwrap().len(), 1);
+        // A SQLite copy alone is not what the panel sends.
+        let e = tmpdir("plan-db-sqlite");
+        file(&e, "data/panel/backup.db", "db");
+        assert!(plan_database(&e).is_err());
+        fs::remove_dir_all(&d).unwrap();
+        fs::remove_dir_all(&e).unwrap();
+    }
+
     #[test]
     fn a_backup_is_private_from_its_first_byte() {
         let root = tmpdir("private");

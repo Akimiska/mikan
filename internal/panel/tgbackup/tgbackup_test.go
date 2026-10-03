@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -22,20 +24,26 @@ import (
 
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
+	"mikan/internal/panel/store/storetest"
 	"mikan/internal/panel/tgbot"
 )
 
-const password = "correct horse battery"
+const password = "correct horse battery staple"
 
-func open(t *testing.T) (*store.Store, string) {
+func open(t *testing.T) *store.Store {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := store.Open(context.Background(), dir)
+	st, err := storetest.Open(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return st, dir
+	return st
+}
+
+// fakeDump writes content as the "dump"; the real pg_dump and pg_restore are covered by
+// cli's TestTelegramBackupRestoresOnANewServer.
+func fakeDump(content []byte) Dumper {
+	return func(_ context.Context, path string) error { return os.WriteFile(path, content, 0o600) }
 }
 
 // unpack decrypts a backup and returns the archive's entries by name.
@@ -68,48 +76,78 @@ func unpack(t *testing.T, file []byte, pass string) map[string][]byte {
 	}
 }
 
-// The archive is what `mikan restore` takes: data/panel/backup.db, a whole SQLite file
-// with the panel's data, and nothing else; without the password it does not open.
-func TestMakeIsARestorableEncryptedArchive(t *testing.T) {
-	st, dir := open(t)
-	ctx := context.Background()
-	if err := settings.Set(ctx, settings.New(st.Q), settings.KeyBrand, "Mandarin"); err != nil {
-		t.Fatal(err)
-	}
-	file, err := Make(ctx, st.DB, dir, password, time.Unix(1_800_000_000, 0))
+// The archive is what `mikan restore` takes: data/panel/backup.dump and its directories,
+// encrypted; without the password it does not open, and the plain dump is gone.
+func TestMakeIsAnEncryptedArchive(t *testing.T) {
+	dir := t.TempDir()
+	dump := []byte("PGDMP" + strings.Repeat("x", 100_000))
+	path, size, err := Make(context.Background(), fakeDump(dump), dir, password, time.Unix(1_800_000_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasPrefix(file, []byte("age-encryption.org/v1")) {
-		t.Fatalf("not an age file: %.30q", file)
+	file, _ := os.ReadFile(path)
+	if int64(len(file)) != size || !bytes.HasPrefix(file, []byte("age-encryption.org/v1")) {
+		t.Fatalf("not an age file of %d bytes: %d", size, len(file))
 	}
 	entries := unpack(t, file, password)
-	if len(entries) != 3 || entries["data/"] == nil || entries["data/panel/"] == nil {
-		t.Fatalf("entries: %v", keys(entries))
+	if len(entries) != 3 || entries["data/"] == nil || entries["data/panel/"] == nil || !bytes.Equal(entries["data/panel/backup.dump"], dump) {
+		t.Fatalf("entries: %d", len(entries))
 	}
-	db := entries["data/panel/backup.db"]
-	if !bytes.HasPrefix(db, []byte("SQLite format 3\x00")) || !bytes.Contains(db, []byte("Mandarin")) {
-		t.Fatalf("the database is not in it (%d bytes)", len(db))
-	}
-	id, _ := age.NewScryptIdentity("wrong password!!")
+	id, _ := age.NewScryptIdentity("wrong password, long enough")
 	if _, err := age.Decrypt(bytes.NewReader(file), id); err == nil {
 		t.Fatal("a wrong password opens the backup")
 	}
-	// The copy made on the way is gone.
-	left, _ := os.ReadDir(dir)
-	for _, e := range left {
-		if strings.HasPrefix(e.Name(), ".telegram-backup-") {
-			t.Fatalf("left behind: %s", e.Name())
-		}
+	if _, err := os.Stat(filepath.Join(dir, "backup.dump")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the plain dump is left behind")
+	}
+	if fi, _ := os.Stat(path); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("the encrypted file is %v", fi.Mode().Perm())
 	}
 }
 
-func keys(m map[string][]byte) []string {
-	out := []string{}
-	for k := range m {
-		out = append(out, k)
+// A dump too big for a bot is refused before it is read, packed or encrypted.
+func TestMakeRefusesATooBigDumpFirst(t *testing.T) {
+	dir := t.TempDir()
+	big := func(_ context.Context, path string) error {
+		f, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		return f.Truncate(tgbot.MaxDocument) // sparse: no 50 MB written
 	}
-	return out
+	if _, _, err := Make(context.Background(), big, dir, password, time.Now()); !errors.Is(err, ErrTooBig) {
+		t.Fatalf("a 50 MB dump: %v", err)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Fatalf("left behind: %v", left)
+	}
+}
+
+func TestMakeWithAFailedDump(t *testing.T) {
+	dir := t.TempDir()
+	failing := func(context.Context, string) error {
+		return errors.New("pg_dump: could not connect to db.internal:5432")
+	}
+	_, _, err := Make(context.Background(), failing, dir, password, time.Now())
+	if !errors.Is(err, ErrDump) || Code(err) != "backup_dump_failed" {
+		t.Fatalf("a failed dump: %v", err)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Fatalf("left behind: %v", left)
+	}
+}
+
+// A dump that hangs is stopped at DumpTimeout; here the context the dump gets has a deadline.
+func TestMakeGivesTheDumpADeadline(t *testing.T) {
+	var deadline bool
+	probe := func(ctx context.Context, path string) error {
+		_, deadline = ctx.Deadline()
+		return os.WriteFile(path, []byte("PGDMP"), 0o600)
+	}
+	if _, _, err := Make(context.Background(), probe, t.TempDir(), password, time.Now()); err != nil || !deadline {
+		t.Fatalf("the dump ran without a deadline: %v", err)
+	}
 }
 
 type fakeBot struct {
@@ -130,6 +168,7 @@ func (b fakeBot) InfrastructureAdminChat(context.Context) (int64, bool, error) {
 
 type sent struct {
 	chat, name, caption string
+	length              int64
 	file                []byte
 }
 
@@ -142,9 +181,9 @@ func fakeTelegram(t *testing.T) (*tgbot.Client, func() []sent) {
 			http.NotFound(w, r)
 			return
 		}
+		s := sent{length: r.ContentLength}
 		_, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		mr := multipart.NewReader(r.Body, params["boundary"])
-		var s sent
 		for {
 			p, err := mr.NextPart()
 			if err != nil {
@@ -174,12 +213,13 @@ func fakeTelegram(t *testing.T) (*tgbot.Client, func() []sent) {
 }
 
 func TestSendGoesToTheAdminChat(t *testing.T) {
-	st, dir := open(t)
+	st := open(t)
 	ctx := context.Background()
 	set := settings.New(st.Q)
 	client, got := fakeTelegram(t)
-	now := time.Date(2026, 10, 2, 3, 30, 0, 0, time.UTC)
-	s := New(st.DB, set, fakeBot{client: client, chat: 42}, dir, func(context.Context) string { return "vpn.example.com" }, func() time.Time { return now }, nil)
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 3, 3, 30, 0, 0, time.UTC)
+	s := New(fakeDump([]byte("PGDMP-test")), set, fakeBot{client: client, chat: 42}, dir, func(context.Context) string { return "vpn.example.com" }, func() time.Time { return now }, nil)
 
 	if _, err := s.Send(ctx); !errors.Is(err, ErrNoPassword) {
 		t.Fatalf("without a password: %v", err)
@@ -192,33 +232,97 @@ func TestSendGoesToTheAdminChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := got()
-	if len(g) != 1 || g[0].chat != "42" || g[0].name != "mikan-vpn.example.com-20261002-0330.tar.gz.age" {
+	if len(g) != 1 || g[0].chat != "42" || g[0].name != "mikan-vpn.example.com-20261003-0330.tar.gz.age" {
 		t.Fatalf("sent: %+v", g)
 	}
-	if !strings.Contains(g[0].caption, "mikan restore") || unpack(t, g[0].file, password)["data/panel/backup.db"] == nil {
+	if !strings.Contains(g[0].caption, "mikan restore") || string(unpack(t, g[0].file, password)["data/panel/backup.dump"]) != "PGDMP-test" {
 		t.Fatalf("caption %q", g[0].caption)
+	}
+	if g[0].length <= int64(len(g[0].file)) {
+		t.Fatalf("the upload had no exact length: %d for a %d-byte file", g[0].length, len(g[0].file))
 	}
 	if stt.LastError != "" || stt.LastOKDay != now.Unix()/86400 || stt.LastSize != int64(len(g[0].file)) {
 		t.Fatalf("state: %+v", stt)
 	}
-	saved, _, _ := settings.Get[State](ctx, set, KeyState)
-	if saved != stt {
-		t.Fatalf("state kept: %+v", saved)
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Fatalf("left in the data directory: %v", left)
 	}
 
 	s.bot = fakeBot{client: client}
-	if stt, err := s.Send(ctx); !errors.Is(err, ErrNoChat) || stt.LastError != ErrNoChat.Error() || stt.LastOKDay == 0 {
+	if stt, err := s.Send(ctx); !errors.Is(err, ErrNoChat) || stt.LastError != "no_admin_chat" || stt.LastOKDay == 0 {
 		t.Fatalf("without a chat: %v %+v", err, stt)
+	}
+	// What the state keeps is a code, never the tool's own text.
+	s.bot = fakeBot{client: client, chat: 42}
+	s.dump = func(context.Context, string) error { return errors.New("pg_dump: db.internal:5432 refused") }
+	if stt, _ := s.Send(ctx); stt.LastError != "backup_dump_failed" {
+		t.Fatalf("a failed dump: %+v", stt)
+	}
+}
+
+// Start returns at once; the backup runs apart from the request and State tells the end.
+func TestStartRunsInTheBackground(t *testing.T) {
+	st := open(t)
+	ctx := context.Background()
+	set := settings.New(st.Q)
+	_ = settings.Set(ctx, set, KeyPassword, password)
+	client, got := fakeTelegram(t)
+	release := make(chan struct{})
+	slow := func(_ context.Context, path string) error {
+		<-release
+		return os.WriteFile(path, []byte("PGDMP"), 0o600)
+	}
+	s := New(slow, set, fakeBot{client: client, chat: 42}, t.TempDir(), func(context.Context) string { return "x" }, time.Now, nil)
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !s.Busy() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !s.Busy() {
+		t.Fatal("the background backup did not start")
+	}
+	if err := s.Start(); !errors.Is(err, ErrBusy) {
+		t.Fatalf("a second start: %v", err)
+	}
+	close(release)
+	for s.Busy() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if s.Busy() || len(got()) != 1 {
+		t.Fatalf("the background backup did not finish: busy %v, sent %d", s.Busy(), len(got()))
+	}
+	if stt, _, _ := settings.Get[State](ctx, set, KeyState); stt.LastOK == 0 {
+		t.Fatalf("state: %+v", stt)
+	}
+}
+
+// A backup cut short by a crash leaves a plain dump; the next start removes it.
+func TestCleanupRemovesLeftovers(t *testing.T) {
+	dir := t.TempDir()
+	left := filepath.Join(dir, tmpPrefix+"123")
+	if err := os.MkdirAll(left, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(left, "backup.dump"), []byte("secrets"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "keep.me"), []byte("x"), 0o600)
+	New(nil, nil, fakeBot{}, dir, nil, time.Now, nil).Cleanup()
+	if _, err := os.Stat(left); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the leftover is still there")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep.me")); err != nil {
+		t.Fatal("something else was removed")
 	}
 }
 
 // Once a day at the chosen hour; a failed one again the next hour, not every minute.
 func TestDue(t *testing.T) {
-	st, dir := open(t)
+	st := open(t)
 	ctx := context.Background()
 	set := settings.New(st.Q)
 	now := time.Date(2026, 10, 2, 2, 59, 0, 0, time.UTC)
-	s := New(st.DB, set, fakeBot{}, dir, func(context.Context) string { return "" }, func() time.Time { return now }, nil)
+	s := New(nil, set, fakeBot{}, t.TempDir(), func(context.Context) string { return "" }, func() time.Time { return now }, nil)
 	if s.due(ctx) {
 		t.Fatal("off by default")
 	}
@@ -246,6 +350,49 @@ func TestDue(t *testing.T) {
 	_ = settings.Set(ctx, set, KeyState, State{})
 	if s.due(ctx) {
 		t.Fatal("an hour of its own")
+	}
+}
+
+// Switched on at 15:00 with the hour 03: the first backup goes tomorrow at 03:00, not now.
+func TestEnablingWaitsForTheHour(t *testing.T) {
+	st := open(t)
+	ctx := context.Background()
+	set := settings.New(st.Q)
+	now := time.Date(2026, 10, 3, 15, 0, 0, 0, time.UTC)
+	s := New(nil, set, fakeBot{}, t.TempDir(), func(context.Context) string { return "" }, func() time.Time { return now }, nil)
+	_ = settings.Set(ctx, set, KeyEnabled, true)
+	if err := s.Enabling(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s.due(ctx) {
+		t.Fatal("a backup within a minute of switching on")
+	}
+	now = time.Date(2026, 10, 4, 3, 0, 0, 0, time.UTC)
+	if !s.due(ctx) {
+		t.Fatal("no backup at the hour the next day")
+	}
+	// Switched on before the hour: today's goes at the hour.
+	_ = settings.Set(ctx, set, KeyState, State{})
+	now = time.Date(2026, 10, 5, 1, 0, 0, 0, time.UTC)
+	_ = s.Enabling(ctx)
+	now = now.Add(2 * time.Hour)
+	if !s.due(ctx) {
+		t.Fatal("switched on before the hour: today's backup is skipped")
+	}
+}
+
+func TestCode(t *testing.T) {
+	for err, want := range map[error]string{
+		ErrNoChat:                     "no_admin_chat",
+		ErrTooBig:                     "backup_too_big",
+		tgbot.ErrOff:                  "bot_off",
+		tgbot.ErrUnreachable:          "tg_unreachable",
+		&tgbot.APIError{Code: 400}:    "tg_unreachable",
+		errors.New("pg: host x:5432"): "backup_failed",
+	} {
+		if got := Code(err); got != want {
+			t.Errorf("Code(%v) = %q, want %q", err, got, want)
+		}
 	}
 }
 

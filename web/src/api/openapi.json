@@ -580,13 +580,18 @@
           "password_set": {
             "description": "Пароль шифрования задан; сам пароль не возвращается",
             "type": "boolean"
+          },
+          "sending": {
+            "description": "Бэкап делается прямо сейчас",
+            "type": "boolean"
           }
         },
         "required": [
           "enabled",
           "hour",
           "password_set",
-          "admin_chat_set"
+          "admin_chat_set",
+          "sending"
         ],
         "type": "object"
       },
@@ -2380,8 +2385,8 @@
             "type": "integer"
           },
           "password": {
-            "description": "Пароль, которым шифруется файл: от 12 символов. Без него бэкап не открыть",
-            "maxLength": 128,
+            "description": "Пароль, которым шифруется файл: от 20 символов. Файл остаётся в истории чата навсегда; без пароля его не открыть",
+            "maxLength": 256,
             "type": "string"
           }
         },
@@ -7313,9 +7318,10 @@
     },
     "/api/v1/telegram/backup/send": {
       "post": {
+        "description": "Бэкап делается в фоне: ответ 202 сразу, итог — в GET /api/v1/telegram/backup (sending, last_ok, last_error).",
         "operationId": "send-telegram-backup",
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -7323,7 +7329,7 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "Accepted"
           },
           "default": {
             "content": {

@@ -75,6 +75,9 @@ func databaseCmd(ctx context.Context, args []string) error {
 		if string(magic) == "SQLite format 3\x00" {
 			err = store.RestoreSQLite(ctx, dsn, cfg.DataDir, args[1])
 		} else if string(magic[:5]) == "PGDMP" {
+			if err := checkDump(ctx, args[1]); err != nil {
+				return err
+			}
 			err = store.RestorePostgres(ctx, dsn, cfg.DataDir, func(ctx context.Context) error {
 				// An empty --dbname makes pg_restore connect (to the database PGDATABASE names,
 				// like every other parameter here) instead of printing an SQL script.
@@ -160,9 +163,13 @@ func postgresEnv(dsn string) ([]string, error) {
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
 		return nil, errors.New("database backup/restore requires a postgres:// or postgresql:// MIKAN_DATABASE_URL")
 	}
+	// Only what a PostgreSQL client needs from the panel's environment: MIKAN_* holds the
+	// panel's secrets, and no tool gets them.
 	var env []string
 	for _, value := range os.Environ() {
-		if !strings.HasPrefix(value, "PG") {
+		name, _, _ := strings.Cut(value, "=")
+		switch {
+		case name == "PATH", name == "HOME", name == "TZ", name == "TMPDIR", name == "LANG", strings.HasPrefix(name, "LC_"):
 			env = append(env, value)
 		}
 	}

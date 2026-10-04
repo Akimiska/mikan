@@ -40,7 +40,7 @@ func (h *handlers) registerSpeedTests() {
 	tags := []string{"node"}
 	huma.Register(h.api, huma.Operation{OperationID: "run-node-speedtest", Method: http.MethodPost, Path: "/api/v1/nodes/{id}/speedtest", Summary: "Проверить скорость ноды",
 		Description: "Задержка, разброс и потери по 20 DNS-запросам к 1.1.1.1, затем загрузка и отдача через speed.cloudflare.com, по 8 секунд. Занимает около 20 секунд и тратит десятки мегабайт трафика ноды; одновременно на ноде идёт один тест.",
-		Tags: tags}, h.runSpeedTest)
+		Tags:        tags}, h.runSpeedTest)
 	huma.Register(h.api, huma.Operation{OperationID: "list-node-speedtests", Method: http.MethodGet, Path: "/api/v1/nodes/{id}/speedtests", Summary: "История проверок скорости ноды", Description: "Новые сверху; хранятся последние 100.", Tags: tags}, h.listSpeedTests)
 }
 

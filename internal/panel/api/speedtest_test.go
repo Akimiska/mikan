@@ -26,7 +26,9 @@ type speedNodes struct {
 	err error
 }
 
-func (n *speedNodes) SpeedTest(context.Context, int64) (nodeapi.SpeedTest, error) { return n.res, n.err }
+func (n *speedNodes) SpeedTest(context.Context, int64) (nodeapi.SpeedTest, error) {
+	return n.res, n.err
+}
 
 // A test goes into the node's history, newest first, with what a node made up kept within
 // sense; a busy or old node gets its own code.

@@ -16,9 +16,10 @@ import (
 // fixture is a release directory: a signing key in RELEASE_SIGNING_KEY, a changelog with
 // both languages and an installer binary for each architecture.
 type fixture struct {
-	t   *testing.T
-	pub ed25519.PublicKey
-	dir string
+	t    *testing.T
+	pub  ed25519.PublicKey
+	priv ed25519.PrivateKey
+	dir  string
 }
 
 func newFixture(t *testing.T, changelog string) *fixture {
@@ -32,7 +33,7 @@ func newFixture(t *testing.T, changelog string) *fixture {
 		t.Fatal(err)
 	}
 	t.Setenv("RELEASE_SIGNING_KEY", string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})))
-	f := &fixture{t: t, pub: pub, dir: t.TempDir()}
+	f := &fixture{t: t, pub: pub, priv: private, dir: t.TempDir()}
 	f.write("CHANGELOG.md", changelog)
 	f.write("mikan-x86_64", "installer x86_64")
 	f.write("mikan-aarch64", "installer aarch64")

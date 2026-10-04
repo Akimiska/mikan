@@ -1,5 +1,6 @@
-// mikan-release makes the signed manifest of a release (used by .github/workflows/release.yml)
-// and the release signing key.
+// mikan-release makes the signed manifest of a release and the signed release index (used
+// by .github/workflows/release.yml), checks a manifest against what the clients in the
+// field read (legacy.go), and makes the release signing key.
 //
 //	mikan-release keygen -out release-signing.pem
 //	RELEASE_SIGNING_KEY="$(cat key.pem)" mikan-release manifest -version 0.3.9 \
@@ -7,6 +8,9 @@
 //	    -asset x86_64=dist/mikan-x86_64 -asset aarch64=dist/mikan-aarch64 \
 //	    -min-installer-file .github/min-installer -out dist
 //	mikan-release verify dist/manifest.json
+//	mikan-release legacy-check dist/manifest.json
+//	RELEASE_SIGNING_KEY="$(cat key.pem)" mikan-release index -version 0.5.0.1 \
+//	    -from-file .github/upgrade-from -in updates/index.json -out dist
 package main
 
 import (
@@ -40,7 +44,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: mikan-release keygen|manifest|verify …")
+		return errors.New("usage: mikan-release keygen|manifest|verify|legacy-check|index …")
 	}
 	switch args[0] {
 	case "keygen":
@@ -49,6 +53,10 @@ func run(args []string) error {
 		return makeManifest(args[1:])
 	case "verify":
 		return verify(args[1:])
+	case "legacy-check":
+		return legacyCheckFile(args[1:])
+	case "index":
+		return makeIndex(args[1:])
 	}
 	return fmt.Errorf("unknown command %q", args[0])
 }
@@ -89,9 +97,10 @@ var (
 	languages     = []string{"en", "ru"}
 )
 
-// readMinInstaller reads the minimum installer version from a file the release workflow
-// passes on every release: absent or holding only comments, it asks for no installer.
-func readMinInstaller(path string) (string, error) {
+// readVersionFile reads a version from a file the release workflow passes on every
+// release (the minimum installer, the lowest version to update from): absent or holding
+// only comments, it says none.
+func readVersionFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
@@ -145,7 +154,7 @@ func makeManifest(args []string) error {
 		*tag = "v" + *version
 	}
 	if *minInstallerFile != "" {
-		v, err := readMinInstaller(*minInstallerFile)
+		v, err := readVersionFile(*minInstallerFile)
 		if err != nil {
 			return err
 		}

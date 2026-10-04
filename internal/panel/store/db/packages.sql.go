@@ -336,7 +336,7 @@ func (q *Queries) GetTrafficPackage(ctx context.Context, id int64) (TrafficPacka
 }
 
 const getUserPool = `-- name: GetUserPool :one
-SELECT user_id, pool_id, traffic_limit, used_up, used_down FROM user_pools WHERE user_id = $1 AND pool_id = $2
+SELECT user_id, pool_id, traffic_limit, used_up, used_down, excluded FROM user_pools WHERE user_id = $1 AND pool_id = $2
 `
 
 type GetUserPoolParams struct {
@@ -353,6 +353,7 @@ func (q *Queries) GetUserPool(ctx context.Context, arg GetUserPoolParams) (UserP
 		&i.TrafficLimit,
 		&i.UsedUp,
 		&i.UsedDown,
+		&i.Excluded,
 	)
 	return i, err
 }

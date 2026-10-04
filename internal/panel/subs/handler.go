@@ -971,7 +971,7 @@ func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.Gran
 	var out []PoolInfo
 	for _, r := range rows {
 		used := r.UsedUp + r.UsedDown
-		if !r.TrafficLimit.Valid && used == 0 {
+		if r.Excluded || !r.TrafficLimit.Valid && used == 0 {
 			continue
 		}
 		pi := PoolInfo{Name: names[r.PoolID], Used: used}

@@ -1768,7 +1768,10 @@
     "edit": "Traffic pool",
     "drawerMeta": "A limit of its own for some protocols",
     "nameHint": "Subscribers see it in the bot and on the subscription page.",
-    "renamed": "Pool renamed"
+    "renamed": "Pool renamed",
+    "accessOf": "Access to {name}",
+    "closed": "closed",
+    "closeHint": "Closing or opening a pool applies at once to everyone on the tariff. Opening sets the tariff's limit for them and overwrites a limit set by hand."
   },
   "cert": {
     "panelTitle": "Own panel certificate",

@@ -3283,6 +3283,10 @@
       "PoolLimit": {
         "additionalProperties": false,
         "properties": {
+          "excluded": {
+            "description": "Пул закрыт: его подключений нет в подписке, ноды их не пускают, пакеты трафика пула не продаются; traffic_limit тогда не важен",
+            "type": "boolean"
+          },
           "pool_id": {
             "format": "int64",
             "minimum": 1,
@@ -4387,7 +4391,7 @@
             "type": "boolean"
           },
           "pools": {
-            "description": "Лимиты пулов трафика; пул не в списке — без лимита",
+            "description": "Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается",
             "items": {
               "$ref": "#/components/schemas/PoolLimit"
             },
@@ -5162,6 +5166,10 @@
       "UserPoolView": {
         "additionalProperties": false,
         "properties": {
+          "excluded": {
+            "description": "Пул закрыт для пользователя: его подключений нет в подписке, ноды их не пускают",
+            "type": "boolean"
+          },
           "exhausted": {
             "description": "Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса",
             "type": "boolean"
@@ -5202,7 +5210,8 @@
           "used_up",
           "used_down",
           "extra",
-          "exhausted"
+          "exhausted",
+          "excluded"
         ],
         "type": "object"
       },

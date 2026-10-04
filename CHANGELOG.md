@@ -9,12 +9,18 @@ the signed manifest, and the panel shows the one in its language.
 - A protocol whose port is held by another program moves to a free port by itself, on the panel's server and on nodes. You get a notice in Telegram, and subscriptions get the new port.
 - Installer screen: long links wrap instead of being cut, and output from other programs no longer stays on the screen. After you finish, the full link and login are printed to copy. The password is shown on the last screen only; get a new one with `mikan reset-password`.
 - Updates no longer depend on GitHub's "latest" release: servers read a signed list of releases. When a version cannot be reached directly, they go through the one in between by themselves. Settings → General has a switch for beta versions.
+- **Several terms in one plan**: a plan can be sold for 7, 30 or 90 days, each with its own price in Stars and rubles (Plans → a plan → More terms). The buyer picks the term in the bot and the Mini App; limits are not multiplied, traffic resets by the plan's strategy. An invoice keeps the term and price it was made for.
+- **Free trial in the bot**: pick a plan in Payments → settings, and the bot's welcome offers it once per Telegram account to people without a subscription or payments. It needs a plan with a term.
+- Confirmation dialogs are no longer cut off on phones.
 
 ### ru
 - Установщик больше не останавливается, если порты 80 или 443 заняты nginx или Caddy. Протоколы с занятым портом получают другие свободные порты. С доменом он предлагает сам добавить правило для Let's Encrypt в nginx или Caddy: делает копию конфига, проверяет его и откатывает при ошибке. Без вашего согласия только показывает, какие строки добавить.
 - Протокол, чей порт заняла другая программа, сам переезжает на свободный порт, и на сервере панели, и на нодах. Приходит уведомление в Telegram, подписки получают новый порт.
 - Экран установщика: длинные ссылки переносятся, а не обрезаются, вывод других программ больше не остаётся на экране. После завершения полная ссылка и логин печатаются для копирования. Пароль показывается только на последнем экране, новый можно получить командой `mikan reset-password`.
 - Обновления больше не зависят от релиза «latest» на GitHub: серверы читают подписанный список релизов. Если до версии нельзя дойти напрямую, они сами проходят через промежуточную. В «Настройки → Основное» появился переключатель бета-версий.
+- **Несколько сроков в одном тарифе**: тариф можно продавать на 7, 30 или 90 дней, у каждого срока своя цена в Stars и рублях («Тарифы → тариф → Другие сроки»). Покупатель выбирает срок в боте и Mini App, лимиты не умножаются, трафик сбрасывается по стратегии тарифа. Счёт сохраняет срок и цену, с которыми выставлен.
+- **Пробный период в боте**: выберите тариф в «Платежи → настройки», и приветствие бота предложит его один раз на Telegram-аккаунт тем, у кого нет подписки и оплат. Нужен тариф со сроком.
+- Диалоги подтверждения больше не обрезаются на телефонах.
 
 ## 0.5.0.0
 ### en

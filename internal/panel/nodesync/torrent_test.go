@@ -235,6 +235,17 @@ func TestTorrentHTTPTrackerNeedsRepeats(t *testing.T) {
 	if want := h.now.Unix() + 1800; h.banOf(one) != want {
 		t.Fatalf("three within the window ban: %d, want %d", h.banOf(one), want)
 	}
+	// Lifted by the admin: the lines before the lift do not count, one more is one.
+	if _, err := h.st.Q.LiftTorrentBans(context.Background(), db.LiftTorrentBansParams{UserID: one.ID, Now: h.now.Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	*h.now = now.Add(3 * time.Minute)
+	h.hit(one, "tcp", nodeapi.TorrentTracker, *h.now, 1)
+	h.pull()
+	if h.banOf(one) != 0 {
+		t.Fatalf("one tracker line after a lift bans again: %d", h.banOf(one))
+	}
+	*h.now = now.Add(2 * time.Minute)
 
 	// Three catches the node folded into one hit count as three.
 	folded := h.user("folded")

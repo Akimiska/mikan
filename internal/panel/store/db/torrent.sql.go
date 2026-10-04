@@ -256,8 +256,9 @@ func (q *Queries) TorrentHitsAfter(ctx context.Context, arg TorrentHitsAfterPara
 }
 
 const torrentTrackerCatches = `-- name: TorrentTrackerCatches :one
-SELECT COALESCE(sum(hits), 0)::BIGINT AS catches FROM torrent_hits
-WHERE user_id = $1 AND network = 'tcp' AND kind = 'tracker' AND at > $2
+SELECT COALESCE(sum(hits), 0)::BIGINT AS catches FROM torrent_hits h
+WHERE h.user_id = $1 AND h.network = 'tcp' AND h.kind = 'tracker' AND h.at > $2
+  AND h.at > COALESCE((SELECT max(l.lifted_at) FROM torrent_hits l WHERE l.user_id = $1), 0)
 `
 
 type TorrentTrackerCatchesParams struct {
@@ -266,7 +267,7 @@ type TorrentTrackerCatchesParams struct {
 }
 
 // How many HTTP tracker lines (TCP) a user was caught with since a time; a hit counts as
-// many as it stands for.
+// many as it stands for. Lines before the admin last lifted the user's ban do not count.
 func (q *Queries) TorrentTrackerCatches(ctx context.Context, arg TorrentTrackerCatchesParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, torrentTrackerCatches, arg.UserID, arg.At)
 	var catches int64

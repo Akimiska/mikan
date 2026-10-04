@@ -41,6 +41,7 @@ DELETE FROM torrent_hits WHERE at < $1 AND banned_until < $1;
 
 -- name: TorrentTrackerCatches :one
 -- How many HTTP tracker lines (TCP) a user was caught with since a time; a hit counts as
--- many as it stands for.
-SELECT COALESCE(sum(hits), 0)::BIGINT AS catches FROM torrent_hits
-WHERE user_id = $1 AND network = 'tcp' AND kind = 'tracker' AND at > $2;
+-- many as it stands for. Lines before the admin last lifted the user's ban do not count.
+SELECT COALESCE(sum(hits), 0)::BIGINT AS catches FROM torrent_hits h
+WHERE h.user_id = $1 AND h.network = 'tcp' AND h.kind = 'tracker' AND h.at > $2
+  AND h.at > COALESCE((SELECT max(l.lifted_at) FROM torrent_hits l WHERE l.user_id = $1), 0);

@@ -355,7 +355,7 @@ func (e *Engine) Health() nodeapi.Health {
 	sort.Slice(ls, func(i, j int) bool { return ls[i].Name < ls[j].Name })
 	return nodeapi.Health{
 		Version: e.version, Core: "mihomo " + mihomoVersion(), Revision: rev, StartedAt: e.started,
-		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(),
+		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(), Update: e.UpdateStatus(),
 	}
 }
 

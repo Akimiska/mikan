@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"mikan/internal/proto"
 	"mikan/internal/scan"
@@ -122,6 +123,66 @@ type Health struct {
 	Listeners []ListenerStatus `json:"listeners"`
 	Conns     int              `json:"conns"`
 	System    System           `json:"system"`
+	// Update is how the last update the panel asked for went, as the host's updater wrote
+	// it; nil while there is none. Nodes before 0.5.0.2 send nothing.
+	Update *UpdateStatus `json:"update,omitempty"`
+}
+
+// The states of an update on the node's server.
+const (
+	UpdateRunning = "running"
+	UpdateOK      = "ok"
+	UpdateFailed  = "failed"
+)
+
+// UpdateRequest asks the node to be updated to a release (POST /v1/update). The node only
+// hands the version to the updater on its server, which updates to a signed release of that
+// version or refuses: no image or address comes from here.
+type UpdateRequest struct {
+	Version string `json:"version"`
+}
+
+// UpdateStatus is what the updater on the node's server wrote about its last update:
+// {"state", "version", "from", "error", "at"}, the same file the panel's own updater writes.
+type UpdateStatus struct {
+	State   string `json:"state" enum:"running,ok,failed"`
+	Version string `json:"version"`
+	From    string `json:"from"`
+	Error   string `json:"error,omitempty"`
+	At      string `json:"at" doc:"RFC 3339"`
+}
+
+// The most a status may say: the updater's words are short, and the panel keeps and shows
+// whatever a node sends, so a damaged file or a node of somebody else's making must not
+// fill its database and pages.
+const (
+	MaxUpdateField = 64
+	MaxUpdateError = 1000
+)
+
+// Clean returns the status with a known state and fields of a sane length; false when
+// the state is none of the three.
+func (u UpdateStatus) Clean() (UpdateStatus, bool) {
+	switch u.State {
+	case UpdateRunning, UpdateOK, UpdateFailed:
+	default:
+		return UpdateStatus{}, false
+	}
+	u.Version, u.From, u.At = clip(u.Version, MaxUpdateField), clip(u.From, MaxUpdateField), clip(u.At, MaxUpdateField)
+	u.Error = clip(u.Error, MaxUpdateError)
+	return u, true
+}
+
+// clip cuts s to at most n bytes without splitting a character.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 type System struct {

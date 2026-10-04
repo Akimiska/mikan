@@ -47,6 +47,7 @@ type UserView struct {
 	SubURL        string        `json:"sub_url"`
 	Online        bool          `json:"online"`
 	OnlineIPs     []string      `json:"online_ips"`
+	BoundDevices  int64         `json:"bound_devices" doc:"Привязанные устройства: с привязкой это занятые места"`
 	OnlineAt      *time.Time    `json:"online_at"`
 	CreatedAt     time.Time     `json:"created_at"`
 }
@@ -92,7 +93,7 @@ func (h *handlers) online() map[string]nodeapi.Online {
 	return h.d.Online()
 }
 
-func (h *handlers) viewUser(u db.User, slots []string, grants domain.GrantsLeft, env userEnv) UserView {
+func (h *handlers) viewUser(u db.User, slots []string, bound int64, grants domain.GrantsLeft, env userEnv) UserView {
 	now := h.d.Now()
 	v := UserView{
 		ID: u.ID, Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: domain.DecodeTags(u.Tags),
@@ -102,7 +103,7 @@ func (h *handlers) viewUser(u db.User, slots []string, grants domain.GrantsLeft,
 		ResetStrategy: u.ResetStrategy, ExpiresAt: ptrTime(u.ExpiresAt.Int64, u.ExpiresAt.Valid),
 		BillingDay: ptrInt(u.BillingDay.Int64, u.BillingDay.Valid),
 		Inbounds:   domain.DecodeInbounds(u.Inbounds), OnlineAt: ptrTime(u.OnlineAt.Int64, u.OnlineAt.Valid),
-		CreatedAt: time.Unix(u.CreatedAt, 0).UTC(), OnlineIPs: []string{},
+		CreatedAt: time.Unix(u.CreatedAt, 0).UTC(), OnlineIPs: []string{}, BoundDevices: bound,
 	}
 	if v.Inbounds == nil {
 		v.Inbounds = []int64{}
@@ -353,9 +354,17 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 		if err != nil {
 			return nil, err
 		}
+		counts, err := h.d.Store.Q.CountBoundDevicesOf(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		bound := make(map[int64]int64, len(counts))
+		for _, c := range counts {
+			bound[c.UserID] = c.N
+		}
 		env := h.userEnv(ctx)
 		for _, u := range page {
-			out.Body.Items = append(out.Body.Items, h.viewUser(u, names[u.ID], grants, env))
+			out.Body.Items = append(out.Body.Items, h.viewUser(u, names[u.ID], bound[u.ID], grants, env))
 		}
 	}
 	return out, nil
@@ -369,11 +378,15 @@ func (h *handlers) userResult(ctx context.Context, u db.User, err error) (*userO
 	if err != nil {
 		return nil, err
 	}
+	bound, err := h.d.Store.Q.CountBoundDevices(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
 	grants, err := domain.UserGrantsLeft(ctx, h.d.Store.Q, u.ID, h.d.Now())
 	if err != nil {
 		return nil, err
 	}
-	return &userOutput{Body: h.viewUser(u, slots, grants, h.userEnv(ctx))}, nil
+	return &userOutput{Body: h.viewUser(u, slots, bound, grants, h.userEnv(ctx))}, nil
 }
 
 func (h *handlers) createUser(ctx context.Context, in *createUserInput) (*userOutput, error) {

@@ -70,6 +70,23 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Health())
 	})
+	mux.HandleFunc("POST /v1/update", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.UpdateRequest
+		// A request is one short version: nothing here is as large as the other calls' bodies.
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, nodeapi.Error{Code: "bad_request", Message: err.Error()})
+			return
+		}
+		switch err := e.RequestUpdate(req.Version); {
+		case errors.Is(err, ErrBadVersion):
+			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_version", Message: "version must be a release version like 0.5.0.2"})
+		case err != nil:
+			log.Error("update request", "err", err)
+			writeJSON(w, http.StatusInternalServerError, nodeapi.Error{Code: "update_failed", Message: "the request could not be written"})
+		default:
+			w.WriteHeader(http.StatusAccepted)
+		}
+	})
 	mux.HandleFunc("GET /v1/warp", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
 		defer cancel()

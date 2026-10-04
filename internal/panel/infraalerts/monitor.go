@@ -18,6 +18,7 @@ import (
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -42,6 +43,11 @@ type UpdateSource interface {
 	Host() (updates.HostStatus, bool)
 }
 
+// NodeUpdateSource knows the updates of the remote nodes that failed (nodeupdate.Service).
+type NodeUpdateSource interface {
+	Failures(ctx context.Context) []nodeupdate.Failure
+}
+
 type sampleState struct {
 	Tracker
 	Checked time.Time `json:"checked,omitempty"`
@@ -63,6 +69,7 @@ type persistentState struct {
 	AutoCursor         int64                  `json:"auto_cursor"`
 	TLSBad             bool                   `json:"tls_bad"`
 	UpdateAt           string                 `json:"update_at"`
+	NodeUpdateAt       map[string]int64       `json:"node_update_at,omitempty"`
 	PublicTarget       string                 `json:"public_target"`
 	PublicMessage      int64                  `json:"public_message"`
 	PublicText         string                 `json:"public_text"`
@@ -79,6 +86,7 @@ type Monitor struct {
 	tuner       Tuner
 	cert        CertificateSource
 	updates     UpdateSource
+	nodeUpdates NodeUpdateSource
 	bot         *tgbot.Bot
 	log         *slog.Logger
 	now         func() time.Time
@@ -91,6 +99,10 @@ func New(st *store.Store, set *settings.Settings, runtime Runtime, tuner Tuner, 
 	bot *tgbot.Bot, log *slog.Logger, now func() time.Time) *Monitor {
 	return &Monitor{store: st, settings: set, runtime: runtime, tuner: tuner, cert: cert, updates: updates, bot: bot, log: log, now: now}
 }
+
+// WatchNodeUpdates makes the monitor tell the admin about the updates of nodes that failed
+// (the "update" event); call it before Run.
+func (m *Monitor) WatchNodeUpdates(src NodeUpdateSource) { m.nodeUpdates = src }
 
 func (m *Monitor) Run(ctx context.Context) {
 	// Node health arrives every five seconds. Outbound checks are cached by the node for a
@@ -296,6 +308,7 @@ func (m *Monitor) round(ctx context.Context) {
 	m.checkTuner(&st, cfg, byNode, nodeByID, lang)
 	m.checkCertificate(&st, cfg, lang)
 	m.checkUpdate(&st, cfg, lang)
+	m.checkNodeUpdates(ctx, &st, cfg, nodeByID, lang)
 	m.publicStatus(ctx, &st, cfg, nodes, byNode, lang)
 	// Samples only matter for configured infrastructure. Drop removed node and inbound
 	// state so the JSON snapshot stays bounded as installations change over time.
@@ -679,6 +692,52 @@ func (m *Monitor) checkUpdate(st *persistentState, cfg AlertsConfig, lang string
 		text += " (" + html.EscapeString(s.From) + " → " + html.EscapeString(s.Version) + ")"
 	}
 	st.Pending = appendPending(st.Pending, delivery{Key: "update/" + s.At, Target: "admin", Text: text})
+}
+
+// checkNodeUpdates tells about each failed update of a node once, by the time it was asked
+// for. The panel stops its rollout at the failure; the admin decides what to do next.
+func (m *Monitor) checkNodeUpdates(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes map[int64]db.Node, lang string) {
+	if m.nodeUpdates == nil || !cfg.Events.Update {
+		return
+	}
+	failures := m.nodeUpdates.Failures(ctx)
+	for _, f := range failures {
+		n, ok := nodes[f.NodeID]
+		id := strconv.FormatInt(f.NodeID, 10)
+		if !ok || st.NodeUpdateAt[id] == f.At {
+			continue
+		}
+		if st.NodeUpdateAt == nil {
+			st.NodeUpdateAt = map[string]int64{}
+		}
+		st.NodeUpdateAt[id] = f.At
+		text := "🔴 <b>Ошибка обновления ноды</b> " + html.EscapeString(n.Name)
+		if lang == "en" {
+			text = "🔴 <b>Node update failed</b> " + html.EscapeString(n.Name)
+		}
+		if f.Error != "" {
+			text += ": " + html.EscapeString(f.Error)
+		}
+		if f.From != "" {
+			text += " (" + html.EscapeString(f.From) + " → " + html.EscapeString(f.Version) + ")"
+		}
+		if lang == "en" {
+			text += ". The rollout to the other nodes is stopped; the node can be updated again from the Nodes page."
+		} else {
+			text += ". Обновление остальных нод остановлено; ноду можно обновить снова на странице «Ноды»."
+		}
+		st.Pending = appendPending(st.Pending, delivery{Key: "node-update/" + id + "/" + strconv.FormatInt(f.At, 10), Target: "admin", Text: text})
+	}
+	// A node that was removed, or whose failure is gone, is not remembered.
+	for id := range st.NodeUpdateAt {
+		found := false
+		for _, f := range failures {
+			found = found || strconv.FormatInt(f.NodeID, 10) == id
+		}
+		if !found {
+			delete(st.NodeUpdateAt, id)
+		}
+	}
 }
 
 func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node,

@@ -46,6 +46,9 @@ const (
 	// KeyUpdateChannel is which releases the panel and the host updater take: "stable"
 	// (unset) or "beta", the pre-releases too (release.Stable, release.Beta).
 	KeyUpdateChannel = "update_channel"
+	// KeyNodesFollow lets the panel update its remote nodes to its own version, one at a
+	// time, after it updated itself; on unless switched off (internal/panel/nodeupdate).
+	KeyNodesFollow = "nodes_follow_panel"
 	// Branding and support: the bot's and the subscription page's name and the support link.
 	KeyBrand      = "brand"
 	KeySupportURL = "support_url"
@@ -85,6 +88,7 @@ var (
 	DeviceBinding = Switch{KeyDeviceBinding, true}
 	RequireHWID   = Switch{KeyRequireHWID, false}
 	AutoUpdate    = Switch{KeyAutoUpdate, false}
+	NodesFollow   = Switch{KeyNodesFollow, true}
 	AppBranding   = Switch{KeyAppBranding, false}
 )
 

@@ -2144,6 +2144,14 @@
             "description": "host:port API ноды; пусто у своей ноды",
             "type": "string"
           },
+          "behind": {
+            "description": "Нода старее панели",
+            "type": "boolean"
+          },
+          "can_update": {
+            "description": "Панель может обновить ноду сама: удалённая, отвечает, версия 0.5.0.2 или новее; старую обновляют один раз вручную командой mikan update на её сервере",
+            "type": "boolean"
+          },
           "certificate": {
             "$ref": "#/components/schemas/NodeCertView"
           },
@@ -2218,6 +2226,10 @@
             ],
             "type": "string"
           },
+          "update": {
+            "$ref": "#/components/schemas/UpdateStatus",
+            "description": "Как идёт или прошло обновление ноды"
+          },
           "version": {
             "type": "string"
           }
@@ -2238,7 +2250,9 @@
           "conns",
           "cpu_percent",
           "mem_used",
-          "mem_total"
+          "mem_total",
+          "behind",
+          "can_update"
         ],
         "type": "object"
       },
@@ -2893,6 +2907,9 @@
               "beta"
             ],
             "type": "string"
+          },
+          "nodes_follow": {
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -4800,6 +4817,39 @@
         ],
         "type": "object"
       },
+      "UpdateStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "RFC 3339",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "ok",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "version",
+          "from",
+          "at"
+        ],
+        "type": "object"
+      },
       "UpdatesView": {
         "additionalProperties": false,
         "properties": {
@@ -4843,6 +4893,10 @@
             "description": "Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто",
             "type": "string"
           },
+          "nodes_follow": {
+            "description": "Удалённые ноды следуют за панелью: после её обновления панель обновляет их до своей версии, по одной",
+            "type": "boolean"
+          },
           "notes": {
             "additionalProperties": {
               "type": "string"
@@ -4876,7 +4930,8 @@
           "channel",
           "newest",
           "unreachable",
-          "requested_at"
+          "requested_at",
+          "nodes_follow"
         ],
         "type": "object"
       },
@@ -4991,6 +5046,11 @@
               "integer",
               "null"
             ]
+          },
+          "bound_devices": {
+            "description": "Привязанные устройства: с привязкой это занятые места",
+            "format": "int64",
+            "type": "integer"
           },
           "contact": {
             "type": "string"
@@ -5146,6 +5206,7 @@
           "sub_url",
           "online",
           "online_ips",
+          "bound_devices",
           "online_at",
           "created_at"
         ],
@@ -6677,6 +6738,40 @@
         "x-session-only": true
       }
     },
+    "/api/v1/nodes/update-all": {
+      "post": {
+        "operationId": "update-nodes",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NodeInfo"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Обновить отстающие ноды до версии панели, по одной",
+        "tags": [
+          "node"
+        ]
+      }
+    },
     "/api/v1/nodes/{id}": {
       "delete": {
         "operationId": "delete-node",
@@ -6991,6 +7086,49 @@
           "node"
         ],
         "x-session-only": true
+      }
+    },
+    "/api/v1/nodes/{id}/update": {
+      "post": {
+        "operationId": "update-node-version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Обновить ноду до версии панели",
+        "tags": [
+          "node"
+        ]
       }
     },
     "/api/v1/nodes/{id}/warp": {

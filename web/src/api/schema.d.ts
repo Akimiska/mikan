@@ -498,6 +498,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/update-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Обновить отстающие ноды до версии панели, по одной */
+        post: operations["update-nodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}": {
         parameters: {
             query?: never;
@@ -563,6 +580,23 @@ export interface paths {
         put?: never;
         /** Выпустить новый ключ ноды (старый перестаёт работать) */
         post: operations["rekey-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Обновить ноду до версии панели */
+        post: operations["update-node-version"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2109,6 +2143,10 @@ export interface components {
         NodeInfo: {
             /** @description host:port API ноды; пусто у своей ноды */
             address: string;
+            /** @description Нода старее панели */
+            behind: boolean;
+            /** @description Панель может обновить ноду сама: удалённая, отвечает, версия 0.5.0.2 или новее; старую обновляют один раз вручную командой mikan update на её сервере */
+            can_update: boolean;
             certificate?: components["schemas"]["NodeCertView"];
             /** Format: date-time */
             checked_at?: string;
@@ -2141,6 +2179,8 @@ export interface components {
             public_name: string;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
+            /** @description Как идёт или прошло обновление ноды */
+            update?: components["schemas"]["UpdateStatus"];
             version?: string;
         };
         NodeKeyOutputBody: {
@@ -2394,6 +2434,7 @@ export interface components {
             auto?: boolean;
             /** @enum {string} */
             channel?: "stable" | "beta";
+            nodes_follow?: boolean;
         };
         PatchUserInputBody: {
             /**
@@ -3111,6 +3152,15 @@ export interface components {
             /** Format: int64 */
             up: number;
         };
+        UpdateStatus: {
+            /** @description RFC 3339 */
+            at: string;
+            error?: string;
+            from: string;
+            /** @enum {string} */
+            state: "running" | "ok" | "failed";
+            version: string;
+        };
         UpdatesView: {
             /** @description Сервер сам ставит новые релизы раз в сутки, ночью */
             auto: boolean;
@@ -3135,6 +3185,8 @@ export interface components {
             latest: string;
             /** @description Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто */
             newest: string;
+            /** @description Удалённые ноды следуют за панелью: после её обновления панель обновляет их до своей версии, по одной */
+            nodes_follow: boolean;
             /** @description Что изменилось: markdown по языкам, en и ru */
             notes: {
                 [key: string]: string;
@@ -3193,6 +3245,11 @@ export interface components {
              * @description День месяца, в который заканчивается срок (1–31); null — продление днями
              */
             billing_day: number | null;
+            /**
+             * Format: int64
+             * @description Привязанные устройства: с привязкой это занятые места
+             */
+            bound_devices: number;
             contact: string;
             /** Format: date-time */
             created_at: string;
@@ -4365,6 +4422,35 @@ export interface operations {
             };
         };
     };
+    "update-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "delete-node": {
         parameters: {
             query?: never;
@@ -4577,6 +4663,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-node-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"];
                 };
             };
             /** @description Error */

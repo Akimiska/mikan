@@ -23,6 +23,7 @@ import (
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/server"
@@ -90,6 +91,8 @@ type Deps struct {
 	ForgetNode func(id int64) error
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
+	// NodeUpdates updates the remote nodes to the panel's version; nil without nodes.
+	NodeUpdates *nodeupdate.Service
 	// Addons are the marketplace's payment adapters; nil in tests.
 	Addons *addons.Manager
 	// Resolve looks a name up for what the panel dials on the admin's word (a REALITY
@@ -205,6 +208,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()
+	h.registerNodeUpdates()
 	h.registerAPIKeys()
 	h.registerPayments()
 	h.registerPromocodes()

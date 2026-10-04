@@ -118,7 +118,12 @@ export function useNode() {
 }
 
 export function useNodes() {
-  return useQuery({ queryKey: qk.nodes, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/nodes", { signal })), refetchInterval: 10_000 });
+  return useQuery({
+    queryKey: qk.nodes,
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/nodes", { signal })),
+    // Closer while a node updates: it goes down and comes back on the new version.
+    refetchInterval: (q) => (q.state.data?.some((n) => n.update?.state === "running") ? 4_000 : 10_000),
+  });
 }
 
 /** Payment settings: also whether selling is on, which shows Payments in the menu. */

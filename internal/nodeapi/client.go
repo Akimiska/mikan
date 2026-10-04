@@ -148,6 +148,12 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return r, err
 }
 
+// RequestUpdate asks the node to update to a release; the updater on its server takes
+// the request. Nodes before 0.5.0.2 answer 404.
+func (c *Client) RequestUpdate(ctx context.Context, version string) error {
+	return c.do(ctx, http.MethodPost, "/v1/update", UpdateRequest{Version: version}, nil, 10*time.Second)
+}
+
 func (c *Client) Activity(ctx context.Context) (Activity, error) {
 	var r Activity
 	err := c.do(ctx, http.MethodGet, "/v1/activity", nil, &r, 10*time.Second)

@@ -168,6 +168,32 @@ func TestFourComponentManifest(t *testing.T) {
 	}
 }
 
+// Valid is what a request for a release may name: a version, nothing else of any length.
+func TestValidAndAtLeast(t *testing.T) {
+	for _, v := range []string{"0.5.0.2", "0.5.0", "1.2.3", "0.5.0.2-rc.1", "0.5.0.10"} {
+		if !Valid(v) {
+			t.Errorf("%q refused", v)
+		}
+	}
+	for _, v := range []string{"", "dev", "latest", "v0.5.0.2", "0.5", "0.5.0.2.1", " 0.5.0.2", "0.5.0.2\n", "../0.5.0.2", "0.5.0.2-", "0.5.0.2-" + strings.Repeat("x", 80)} {
+		if Valid(v) {
+			t.Errorf("%q accepted", v)
+		}
+	}
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"0.5.0.2", "0.5.0.2", true}, {"0.5.0.3", "0.5.0.2", true}, {"0.5.1.0", "0.5.0.2", true}, {"0.6.0", "0.5.0.2", true},
+		{"0.5.0.1", "0.5.0.2", false}, {"0.5.0", "0.5.0.2", false}, {"0.5.0.2-rc.1", "0.5.0.2", false}, {"0.5.0.0", "0.5.0", true},
+		{"dev", "0.5.0.2", false}, {"0.5.0.2", "dev", false}, {"", "", false},
+	} {
+		if got := AtLeast(c.a, c.b); got != c.want {
+			t.Errorf("AtLeast(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}
+
 func TestNotes(t *testing.T) {
 	log := []byte("# Changelog\n\n## 0.3.10\n### en\n- later\n\n## 0.3.9\n### en\n- one\n- two\n\n### ru\n- раз\n- два\n\n## 0.3.8\n### en\n- old\n")
 	n := Notes(log, "0.3.9")

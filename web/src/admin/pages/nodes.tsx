@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cloud, Copy, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
+import { ArrowUpCircle, Cloud, Copy, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
@@ -22,8 +22,16 @@ export function nodeLabel(n: Pick<Node, "name" | "local">): string {
   return n.name || (n.local ? t("nodes.localName") : "—");
 }
 
+/** What a server before 0.5.0.2 runs once by hand: from then on the panel updates it. */
+const OLD_NODE_COMMAND = "mikan update";
+
+/** The panel can update this node itself and it is behind. */
+const updatable = (n: Node) => !n.local && n.behind && n.can_update;
+const updating = (n: Node) => n.update?.state === "running";
+
 export function NodesPage() {
   const nodes = useNodes();
+  const toUpdate = (nodes.data ?? []).filter(updatable);
   const qc = useQueryClient();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
@@ -34,6 +42,7 @@ export function NodesPage() {
   const [warpOf, setWarpOf] = useState<Node | null>(null);
   const [cascadeOf, setCascadeOf] = useState<Node | null>(null);
   const [certOf, setCertOf] = useState<Node | null>(null);
+  const [updateOf, setUpdateOf] = useState<Node | "all" | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: qk.nodes });
     void qc.invalidateQueries({ queryKey: qk.inbounds });
@@ -46,6 +55,22 @@ export function NodesPage() {
     },
     onSettled: refresh,
     onError: (e) => toast.error(errorText(e)),
+  });
+  // The node's server does the update (a backup, the signed release, a restart): this only asks.
+  const update = useMutation({
+    mutationFn: async (id: number | "all") => {
+      if (id === "all") await unwrap(api.POST("/api/v1/nodes/update-all"));
+      else await unwrap(api.POST("/api/v1/nodes/{id}/update", { params: { path: { id } } }));
+    },
+    onSuccess: () => {
+      toast.ok(t("nodes.updateAsked"));
+      setUpdateOf(null);
+    },
+    onSettled: refresh,
+    onError: (e) => {
+      toast.error(errorText(e));
+      setUpdateOf(null);
+    },
   });
   const remove = useMutation({
     mutationFn: (id: number) => unwrap(api.DELETE("/api/v1/nodes/{id}", { params: { path: { id } } })),
@@ -65,10 +90,18 @@ export function NodesPage() {
         title={t("nav.nodes")}
         sub={t("nodes.subtitle")}
         actions={
-          <Button variant="primary" onClick={() => setAdding(true)}>
-            <Plus size={18} aria-hidden />
-            <span className="max-[760px]:hidden">{t("nodes.add")}</span>
-          </Button>
+          <>
+            {toUpdate.length > 1 ? (
+              <Button loading={update.isPending && update.variables === "all"} disabled={update.isPending || toUpdate.some(updating)} onClick={() => setUpdateOf("all")}>
+                <ArrowUpCircle size={18} aria-hidden />
+                <span className="max-[760px]:hidden">{t("nodes.updateAll", { n: toUpdate.length })}</span>
+              </Button>
+            ) : null}
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              <Plus size={18} aria-hidden />
+              <span className="max-[760px]:hidden">{t("nodes.add")}</span>
+            </Button>
+          </>
         }
       />
       <QueryBoundary
@@ -96,7 +129,7 @@ export function NodesPage() {
                 </div>
               ) : null}
               {list.map((n, idx) => (
-                <NodeCard key={n.id} n={n} idx={idx} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
+                <NodeCard key={n.id} n={n} idx={idx} updating={update.isPending && update.variables === n.id} busy={update.isPending} onUpdate={() => setUpdateOf(n)} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
               ))}
             </div>
           )
@@ -127,6 +160,15 @@ export function NodesPage() {
         clearText={t("cert.nodeClearText")}
       />
       <Confirm
+        open={!!updateOf && !update.isPending}
+        onOpenChange={(v) => !v && setUpdateOf(null)}
+        title={updateOf === "all" ? t("nodes.updateAllTitle", { n: toUpdate.length }) : t("nodes.updateTitle", { name: updateOf ? nodeLabel(updateOf) : "" })}
+        text={updateOf === "all" ? t("nodes.updateAllText") : t("nodes.updateText")}
+        confirm={t("nodes.update")}
+        loading={update.isPending}
+        onConfirm={() => updateOf && update.mutate(updateOf === "all" ? "all" : updateOf.id)}
+      />
+      <Confirm
         open={!!rekeying}
         onOpenChange={(v) => !v && setRekeying(null)}
         title={t("nodes.rekeyTitle", { name: rekeying ? nodeLabel(rekeying) : "" })}
@@ -152,6 +194,9 @@ export function NodesPage() {
 function NodeCard({
   n,
   idx,
+  updating: asking,
+  busy,
+  onUpdate,
   onEdit,
   onWarp,
   onCascade,
@@ -161,6 +206,11 @@ function NodeCard({
 }: {
   n: Node;
   idx: number;
+  /** The request for this node is on its way to the panel. */
+  updating: boolean;
+  /** Some node's request is: no second one now. */
+  busy: boolean;
+  onUpdate: () => void;
   onEdit: () => void;
   onWarp: () => void;
   onCascade: () => void;
@@ -231,7 +281,10 @@ function NodeCard({
         {n.version ? (
           <div className="col-span-2">
             <dt className="text-xs text-[var(--ink-500)]">{t("nodes.version")}</dt>
-            <dd className="num">{n.version}</dd>
+            <dd className="flex flex-wrap items-center gap-2">
+              <span className="num">{n.version}</span>
+              {n.behind ? <Pill tone="warn">{t("nodes.behind")}</Pill> : null}
+            </dd>
           </div>
         ) : null}
         {n.certificate ? (
@@ -243,7 +296,13 @@ function NodeCard({
           </div>
         ) : null}
       </dl>
+      <NodeUpdate n={n} />
       <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--hairline)] pt-4">
+        {updatable(n) ? (
+          <Button size="sm" variant="primary" loading={asking || updating(n)} disabled={busy || updating(n)} onClick={onUpdate}>
+            <ArrowUpCircle size={16} aria-hidden /> {updating(n) ? t("nodes.updatingShort") : t("nodes.update")}
+          </Button>
+        ) : null}
         <Button size="sm" onClick={onEdit}>
           <Pencil size={16} aria-hidden /> {t("nodes.configure")}
         </Button>
@@ -268,6 +327,42 @@ function NodeCard({
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * How the node's update goes, or why it did not: the updater on its server says. A node too
+ * old to be updated from the panel gets the one command to run on its server instead.
+ */
+function NodeUpdate({ n }: { n: Node }) {
+  const copyText = useCopy();
+  const u = n.update;
+  if (n.local || !n.behind) return null;
+  if (u?.state === "running") {
+    return (
+      <p className="mt-3 text-[13px] text-[var(--ink-500)]" role="status">
+        {t("nodes.updating", { v: u.version })}
+      </p>
+    );
+  }
+  if (u?.state === "failed") {
+    return (
+      <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">
+        {t("nodes.updateFailed", { v: u.version, from: u.from || n.version || "", e: (u.error ?? "").split("\n")[0] ?? "" })}
+      </p>
+    );
+  }
+  if (n.can_update || n.status !== "ok") return null;
+  return (
+    <div className="mt-3">
+      <p className="mb-2 text-[13px] text-[var(--ink-500)]">{t("nodes.oldNode")}</p>
+      <div className="link-field">
+        <span className="mono break-all text-xs">{OLD_NODE_COMMAND}</span>
+        <button type="button" className="icon-btn" onClick={() => void copyText(OLD_NODE_COMMAND, t("nodes.commandCopied"))} aria-label={t("nodes.copyCommand")}>
+          <Copy size={18} />
+        </button>
+      </div>
+    </div>
   );
 }
 

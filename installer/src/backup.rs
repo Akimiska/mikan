@@ -117,8 +117,11 @@ fn create(dir: &Path, kind: &str) -> Result<(File, PathBuf)> {
 /// tar of members (paths below root) into a new private archive in dir.
 fn pack(root: &Path, dir: &Path, kind: &str, members: &[String]) -> Result<PathBuf> {
     let (file, path) = create(dir, kind)?;
+    // What the node's panel and the updater say to each other (data/node/update) is of the
+    // moment: a restore must not bring back an old request, or a status that says an update
+    // runs. The panel's own directory is not a member at all.
     let out = Command::new("tar")
-        .args(["-czf", "-", "-C"])
+        .args(["-czf", "-", "--exclude=data/node/update", "-C"])
         .arg(root)
         .args(members)
         .stdin(Stdio::null())
@@ -698,6 +701,24 @@ mod tests {
         let before = fs::read_dir(&dir).unwrap().count();
         assert!(pack(&root, &dir, "mikan", &["no-such-file".into()]).is_err());
         assert_eq!(fs::read_dir(&dir).unwrap().count(), before, "a broken archive stayed");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    // The node's talk with the updater is no part of a backup: the pre-update backup is made
+    // while its status says "running", and a restore must not bring that back.
+    #[test]
+    fn a_backup_leaves_out_what_the_nodes_updater_and_panel_say() {
+        let root = tmpdir("node-update");
+        file(&root, ".env", "MIKAN_MODE=node\n");
+        file(&root, "data/node/state.json", "{}");
+        file(&root, "data/node/update/status.json", r#"{"state":"running"}"#);
+        file(&root, "data/node/update/request", r#"{"version":"0.5.0.2"}"#);
+        let dir = backups_dir(&root).unwrap();
+        let a = pack(&root, &dir, "mikan", &[".env".into(), "data/node".into()]).unwrap();
+        let listing = Command::new("tar").arg("-tzf").arg(&a).output().unwrap();
+        let names = String::from_utf8_lossy(&listing.stdout);
+        assert!(names.contains("data/node/state.json"), "{names}");
+        assert!(!names.contains("update"), "{names}");
         fs::remove_dir_all(&root).unwrap();
     }
 

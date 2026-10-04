@@ -430,11 +430,6 @@ impl Wizard {
     }
 }
 
-fn capitalized(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map(|first| first.to_uppercase().chain(c).collect()).unwrap_or_default()
-}
-
 /// A config snippet as it is: indents kept, tabs as four spaces, a line too long for the
 /// card cut into pieces rather than cut off.
 fn snippet_lines(text: &str, width: usize) -> Vec<Line<'static>> {
@@ -831,8 +826,12 @@ impl Wizard {
                 lines.extend(field("Email", if p.email.is_empty() { "none".into() } else { p.email.clone() }, w));
             }
             if let Some(front) = self.front {
-                let rule = if p.proxy_rule { "mikan adds it, tested before a reload" } else { "you add it: the last screen shows it" };
-                lines.extend(field("Port 80", format!("{}, a rule for Let's Encrypt: {rule}", front.name()), w));
+                let rule = if p.proxy_rule {
+                    "mikan adds a rule for Let's Encrypt, tested before a reload"
+                } else {
+                    "you add the rule for Let's Encrypt (the last screen shows it)"
+                };
+                lines.extend(field("Port 80", format!("{}: {rule}", front.name()), w));
             }
             lines.extend(field("Panel port", p.port.to_string(), w));
         }
@@ -1011,13 +1010,17 @@ impl Wizard {
             ];
             lines.extend(field("Waits on", format!("port {}", o.node_port.unwrap_or_default()), w));
             lines.push(Line::from(""));
-            lines.push(Line::from(dim("Its panel connects within 30 seconds: see the panel's Nodes page.")));
-            lines.push(Line::from(dim("On this server: mikan (menu), mikan status, mikan update.")));
+            for text in [
+                "Its panel connects within 30 seconds: see the panel's Nodes page.",
+                "On this server: mikan (menu), mikan status, mikan update.",
+            ] {
+                lines.extend(wrap(text, w).into_iter().map(|l| Line::from(dim(l))));
+            }
             Self::page(f, Card::new("The node is running", "", &keys), lines);
             return;
         }
         let keys = [("q", if self.show_qr { "hide QR" } else { "QR code" }), ("enter", "finish")];
-        let lead = "The password is shown here once and not printed after you finish: keep it in a password manager. The link and login stay in the terminal.";
+        let lead = "The password is shown here only, not after you finish: keep it in a password manager.";
         if self.show_qr {
             let code = qr(&o.url);
             let w = code.first().map_or(0, |l| l.spans.len()) as u16;
@@ -1051,20 +1054,20 @@ impl Wizard {
         lines.extend(field("Certificate", cert, w));
         if let Some((r, m)) = o.acme.as_ref().and_then(|r| r.manual.as_ref().map(|m| (r, m))).filter(|(_, m)| !m.snippet.is_empty()) {
             lines.push(Line::from(""));
-            let how = format!("{}. Add this {}, then reload {}:", capitalized(&m.why), m.place, r.front);
+            let how = format!("Add this {}, then reload {} (it is printed again when you finish):", m.place, r.front);
             lines.extend(wrap(&how, w).into_iter().map(|l| Line::from(dim(l))));
             lines.extend(snippet_lines(&m.snippet, w));
-            lines.push(Line::from(dim("It is printed in the terminal too when you finish.")));
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            dim("On this server: "),
-            "mikan".bold(),
-            dim(" for this menu, "),
-            "mikan update".bold(),
-            dim(", "),
-            "mikan status".bold(),
-        ]));
+        let head = vec![dim("On this server: "), "mikan".bold(), dim(" for this menu, ")];
+        let tail = vec!["mikan update".bold(), dim(", "), "mikan status".bold()];
+        let one: usize = head.iter().chain(&tail).map(|s| s.width()).sum();
+        if one <= w {
+            lines.push(Line::from([head, tail].concat()));
+        } else {
+            lines.push(Line::from(head));
+            lines.push(Line::from(tail));
+        }
         Self::page(f, Card::new("mikan is running", lead, &keys), lines);
     }
 }

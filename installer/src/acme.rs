@@ -202,12 +202,21 @@ fn nginx_location(port: u16, indent: &str) -> String {
     )
 }
 
-/// A server block of its own for domain on port 80: the challenge, and nothing else.
+/// A server block of its own for domain on port 80: the challenge, and nothing else. Short,
+/// so that the finish screen of a narrow terminal shows it whole.
 pub fn nginx_server(domain: &str, port: u16, ipv6: bool) -> String {
     let v6 = if ipv6 { "    listen [::]:80;\n" } else { "" };
     format!(
-        "# Written by the mikan installer: Let's Encrypt checks {domain} here for the panel's certificate.\nserver {{\n    listen 80;\n{v6}    server_name {domain};\n\n{}\n    location / {{\n        return 404;\n    }}\n}}\n",
+        "server {{\n    listen 80;\n{v6}    server_name {domain};\n{}    location / {{ return 404; }}\n}}\n",
         nginx_location(port, "    ")
+    )
+}
+
+/// The file the installer writes: the server block, and who wrote it.
+fn nginx_file(domain: &str, port: u16, ipv6: bool) -> String {
+    format!(
+        "# Written by the mikan installer: Let's Encrypt checks {domain} here for the panel's certificate.\n{}",
+        nginx_server(domain, port, ipv6)
     )
 }
 
@@ -417,43 +426,55 @@ fn nginx_dir(conf: &NginxConf, name: &str, exists: &dyn Fn(&Path) -> bool) -> Op
 
 fn nginx(run: &mut dyn Run, domain: &str, port: u16, consent: bool) -> Report {
     let report = |manual: Manual| Report { front: "nginx".into(), added: None, manual: Some(manual) };
+    // Reading the config changes nothing, and tells what to add even without consent.
+    let conf = match run.run("nginx", &["-T"]) {
+        Ok(d) => Ok(parse_nginx(&d)),
+        Err(e) => Err(short(&e)),
+    };
+    let ipv6 = conf.as_ref().is_ok_and(|c| c.ipv6);
     let own = |why: String| Manual {
         why,
         place: "as a new file in nginx's config (in conf.d, or sites-enabled)".into(),
-        snippet: nginx_server(domain, port, false),
+        snippet: nginx_server(domain, port, ipv6),
     };
-    if !consent {
-        return report(own("nginx holds port 80 and was left alone".into()));
-    }
-    let dump = match run.run("nginx", &["-T"]) {
-        Ok(d) => d,
-        Err(e) => return report(own(format!("nginx -T fails ({}), so its config was left alone", short(&e)))),
-    };
-    let conf = parse_nginx(&dump);
     let name = format!("mikan-acme-{domain}.conf");
     let ours = |f: &Path| f.file_name().is_some_and(|n| n.to_string_lossy().starts_with("mikan-acme-"));
     // A server block for the domain is there already: a second one would take its requests
     // (or be ignored), so the rule goes into it, one line of the admin's.
-    if let Some(s) = conf.servers.iter().find(|s| s.port80 && !ours(&s.file) && s.names.iter().any(|n| name_covers(n, domain))) {
-        let place = format!("inside the server block for {domain} in {}", s.file.display());
+    if let Ok(conf) = &conf
+        && let Some(s) = conf.servers.iter().find(|s| s.port80 && !ours(&s.file) && s.names.iter().any(|n| name_covers(n, domain)))
+    {
+        // A return of the server itself answers before any location is picked.
+        let place = format!(
+            "inside the server block for {domain} in {} (a return right in that block goes into location / first)",
+            s.file.display()
+        );
         let why = format!("nginx has a server block for {domain} on port 80 already");
         let dir = conf.main.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("/etc/nginx"));
         let snippet = dir.join("snippets").join(&name);
         let path = snippet.to_string_lossy().into_owned();
         // nginx would read a file some include matches on its own, where a location is wrong.
-        let written = !conf.all_includes.iter().any(|p| glob(p, &path))
+        let written = consent
+            && !conf.all_includes.iter().any(|p| glob(p, &path))
             && fs::create_dir_all(dir.join("snippets")).is_ok()
             && fs::write(&snippet, nginx_location(port, "")).is_ok();
         let text = if written { format!("include {path};\n") } else { nginx_location(port, "") };
         return report(Manual { why, place, snippet: text });
     }
+    if !consent {
+        return report(own("nginx holds port 80 and was left alone".into()));
+    }
+    let conf = match conf {
+        Ok(c) => c,
+        Err(e) => return report(own(format!("nginx -T fails ({e}), so its config was left alone"))),
+    };
     let Some(dir) = nginx_dir(&conf, &name, &|d: &Path| d.is_dir()) else {
         return report(own("nginx's config includes no conf.d or sites-enabled directory to add a file to".into()));
     };
     let path = dir.join(&name);
     // A dot keeps the copy out of nginx's `*` and `*.conf`.
     let backup = dir.join(format!(".{name}.{}.bak", stamp()));
-    let change = match Change::write(&path, &nginx_server(domain, port, conf.ipv6), &backup) {
+    let change = match Change::write(&path, &nginx_file(domain, port, conf.ipv6), &backup) {
         Ok(c) => c,
         Err(e) => return report(own(format!("{} cannot be written ({e})", path.display()))),
     };
@@ -482,10 +503,13 @@ fn caddy_end(domain: &str) -> String {
 /// with the panel, and passes only the challenge on.
 pub fn caddy_site(domain: &str, port: u16) -> String {
     format!(
-        "{}\nhttp://{domain} {{\n\thandle /.well-known/acme-challenge/* {{\n\t\treverse_proxy 127.0.0.1:{port}\n\t}}\n\thandle {{\n\t\trespond 404\n\t}}\n}}\n{}\n",
-        caddy_begin(domain),
-        caddy_end(domain)
+        "http://{domain} {{\n\thandle /.well-known/acme-challenge/* {{\n\t\treverse_proxy 127.0.0.1:{port}\n\t}}\n\thandle {{\n\t\trespond 404\n\t}}\n}}\n"
     )
+}
+
+/// The site as the installer writes it: between lines that let a later run replace it.
+fn caddy_block(domain: &str, port: u16) -> String {
+    format!("{}\n{}{}\n", caddy_begin(domain), caddy_site(domain, port), caddy_end(domain))
 }
 
 /// The Caddyfile without the installer's earlier site for domain.
@@ -616,7 +640,7 @@ fn caddy(run: &mut dyn Run, domain: &str, port: u16, consent: bool, file: Result
     if !new.is_empty() {
         new.push_str("\n\n");
     }
-    new.push_str(&caddy_site(domain, port));
+    new.push_str(&caddy_block(domain, port));
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let backup = path.with_file_name(format!("{name}.mikan-{}.bak", stamp()));
     let change = match Change::write(&path, &new, &backup) {
@@ -745,7 +769,7 @@ mod tests {
         let file = root.join("conf.d/mikan-acme-vpn.example.com.conf");
         assert_eq!(r.added.as_deref(), Some(file.as_path()), "{r:?}");
         assert!(r.manual.is_none() && r.text().is_none());
-        assert_eq!(fs::read_to_string(&file).unwrap(), nginx_server("vpn.example.com", 18081, true), "IPv6 like the others");
+        assert_eq!(fs::read_to_string(&file).unwrap(), nginx_file("vpn.example.com", 18081, true), "IPv6 like the others");
         assert_eq!(run.calls, ["nginx -T", "nginx -t", "systemctl is-active --quiet nginx", "nginx -s reload"]);
         // again: the file is replaced, the old one kept apart
         let mut run = Fake::default().on("nginx -T", Ok(&dump(&root, DEFAULT_SITE))).on("nginx -t", Ok("")).on("nginx -s reload", Ok(""));
@@ -800,8 +824,16 @@ mod tests {
     fn nginx_is_left_alone_without_consent_or_a_place() {
         let mut run = Fake::default();
         let r = nginx(&mut run, "vpn.example.com", 18081, false);
-        assert!(run.calls.is_empty());
+        assert_eq!(run.calls, ["nginx -T"], "only read");
         assert!(r.manual.unwrap().snippet.contains("server_name vpn.example.com;"));
+        // without consent a server of the domain gets its location to add, and no file
+        let root = layout("nginx-no");
+        let site = "server {\n    listen 80;\n    server_name vpn.example.com;\n}\n";
+        let mut run = Fake::default().on("nginx -T", Ok(&dump(&root, site)));
+        let m = nginx(&mut run, "vpn.example.com", 18081, false).manual.unwrap();
+        assert_eq!((m.snippet, run.calls.len()), (nginx_location(18081, ""), 1));
+        assert!(!root.join("snippets").exists());
+        fs::remove_dir_all(&root).unwrap();
         // no include of a directory: nothing is written
         let root = tmpdir("nginx-flat");
         let flat = format!("# configuration file {}/nginx.conf:\nhttp {{\n  server {{ listen 80; }}\n}}\n", root.display());
@@ -827,7 +859,7 @@ mod tests {
         assert_eq!(r.added.as_deref(), Some(file.as_path()), "{r:?}");
         let text = fs::read_to_string(&file).unwrap();
         assert!(text.starts_with(CADDYFILE_TEXT.trim_end()));
-        assert!(text.ends_with(&caddy_site("vpn.example.com", 18081)));
+        assert!(text.ends_with(&caddy_block("vpn.example.com", 18081)));
         assert!(text.contains("http://vpn.example.com {") && text.contains("reverse_proxy 127.0.0.1:18081"));
         assert_eq!(
             run.calls,
@@ -883,7 +915,7 @@ mod tests {
         assert!(caddy_has_site("*.example.com {\n}\n", "vpn.example.com"));
         assert!(!caddy_has_site("{\n\temail a@vpn.example.com\n}\n:80 {\n\trespond hi\n}\n", "vpn.example.com"));
         assert!(!caddy_has_site("(common) {\n}\nshop.example.com {\n\tvpn.example.com {\n\t}\n}\n", "vpn.example.com"));
-        let ours = format!("shop.example.com {{\n}}\n\n{}", caddy_site("vpn.example.com", 1));
+        let ours = format!("shop.example.com {{\n}}\n\n{}", caddy_block("vpn.example.com", 1));
         assert!(!caddy_has_site(&without_ours(&ours, "vpn.example.com"), "vpn.example.com"));
         assert_eq!(without_ours(&ours, "vpn.example.com"), "shop.example.com {\n}\n\n");
     }

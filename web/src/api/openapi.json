@@ -2744,6 +2744,12 @@
           },
           "stars": {
             "type": "boolean"
+          },
+          "trial_tariff_id": {
+            "description": "Тариф пробного периода; 0 — выключить",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "type": "object"
@@ -2998,6 +3004,19 @@
           "stars": {
             "description": "Telegram Stars: нужен только запущенный бот",
             "type": "boolean"
+          },
+          "trial_tariff_id": {
+            "description": "Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "trials": {
+            "description": "Сколько пробных подписок выдано",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -3005,6 +3024,8 @@
           "stars",
           "allow_new",
           "renew_resets_traffic",
+          "trial_tariff_id",
+          "trials",
           "available",
           "on_sale",
           "moving"

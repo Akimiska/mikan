@@ -40,6 +40,9 @@ pub const POSTGRES_IMAGE: &str = postgres_image!();
 /// and drop to its user (checked on Docker 28: initdb, a restart, an existing volume). The
 /// panel waits up to about 30 s for its workers, so it gets 45 s; it reaches the socket
 /// through a read-only mount (connecting needs no write access to the mount).
+///
+/// The panel answers Let's Encrypt on port 80, or where MIKAN_ACME_LISTEN says when a web
+/// server holds that port and passes the challenge on (see acme.rs).
 pub const PANEL_COMPOSE: &str = concat!(
     r#"name: mikan
 
@@ -77,6 +80,7 @@ services:
       MIKAN_DATA_DIR: /data/panel
       MIKAN_NODE_SOCKET: /run/mikan/node.sock
       MIKAN_PANEL_LISTEN: 0.0.0.0:${PANEL_PORT}
+      MIKAN_ACME_LISTEN: "${MIKAN_ACME_LISTEN:-:80}"
       MIKAN_DATABASE_URL: ${MIKAN_DATABASE_URL}
     volumes: ["./data/panel:/data/panel", "run:/run/mikan", "pg-run:/run/postgresql:ro"]
     mem_limit: 1g

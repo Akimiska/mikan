@@ -2,6 +2,7 @@
 //! server's shell. Without a command it opens the installer on a fresh server and the
 //! menu on an installed one; every menu action is a command too.
 
+mod acme;
 mod addon;
 mod backup;
 mod clock;

@@ -311,27 +311,14 @@ pub fn checks_for(node: bool, resume: bool) -> Vec<Check> {
         Some(false) => Check::new("Clock", Level::Warn, "not synchronized: TLS and REALITY need the right time (timedatectl set-ntp true)"),
         None => Check::new("Clock", Level::Warn, "cannot tell: keep it synchronized, TLS and REALITY need the right time"),
     });
-    let taken: Vec<String> = if resume {
+    let taken: Vec<(u16, Proto, String)> = if resume {
         Vec::new()
     } else {
-        VPN_PORTS.iter().filter_map(|&(p, proto)| port_owner(p, proto).map(|who| format!("{p}/{} ({who})", proto.name()))).collect()
+        VPN_PORTS.iter().filter_map(|&(p, proto)| port_owner(p, proto).map(|who| (p, proto, who))).collect()
     };
-    out.push(if taken.is_empty() {
-        Check::new("Ports 443, 8443", Level::Ok, "free")
-    } else {
-        Check::new(
-            "Ports 443, 8443",
-            Level::Error,
-            format!("taken: {}. Stop what holds them (an old panel, a web server) and check again", taken.join(", ")),
-        )
-    });
+    out.push(vpn_ports_check(&taken));
     if !node && !resume {
-        out.push(match port_owner(80, Proto::Tcp) {
-            None => Check::new("Port 80", Level::Ok, "free for Let's Encrypt"),
-            Some(who) => {
-                Check::new("Port 80", Level::Warn, format!("taken ({who}): Let's Encrypt cannot issue a certificate for a domain"))
-            }
-        });
+        out.push(port80_check(port_owner(80, Proto::Tcp)));
     }
     out.push(match crate::docker::version() {
         Some(v) if crate::docker::compose_ok() => Check::new(DOCKER, Level::Ok, format!("{v} with compose")),
@@ -342,6 +329,27 @@ pub fn checks_for(node: bool, resume: bool) -> Vec<Check> {
         out.push(Check::new("Packages", Level::Warn, format!("busy, {who}: the installer waits for it")));
     }
     out
+}
+
+/// The protocols' usual ports. Taken ones do not stop the install: the panel moves an
+/// inbound whose port is in use to a free one.
+fn vpn_ports_check(taken: &[(u16, Proto, String)]) -> Check {
+    if taken.is_empty() {
+        return Check::new("Ports 443, 8443", Level::Ok, "free");
+    }
+    let list: Vec<String> = taken.iter().map(|(p, proto, who)| format!("{p}/{} taken ({who})", proto.name())).collect();
+    Check::new("Ports 443, 8443", Level::Warn, format!("{}: those protocols get other free ports", list.join(", ")))
+}
+
+/// Let's Encrypt checks a domain on port 80; nginx and Caddy can pass that on to the panel.
+fn port80_check(owner: Option<String>) -> Check {
+    match owner {
+        None => Check::new("Port 80", Level::Ok, "free for Let's Encrypt"),
+        Some(who) if crate::acme::Front::from_process(&who).is_some() => {
+            Check::new("Port 80", Level::Warn, format!("taken ({who}): with a domain, mikan offers to pass Let's Encrypt through it"))
+        }
+        Some(who) => Check::new("Port 80", Level::Warn, format!("taken ({who}): Let's Encrypt cannot issue a certificate for a domain")),
+    }
 }
 
 #[cfg(test)]
@@ -395,6 +403,21 @@ mod tests {
         assert!(proc_listening(udp, 8443, Proto::Udp));
         assert!(!proc_listening(udp, 8443, Proto::Tcp));
         assert!(!proc_listening("", 443, Proto::Tcp));
+    }
+
+    // nginx or caddy on 443 is no reason to stop: the panel moves those inbounds.
+    #[test]
+    fn taken_ports_warn_and_do_not_stop_the_install() {
+        assert_eq!(vpn_ports_check(&[]).level, Level::Ok);
+        let c = vpn_ports_check(&[(443, Proto::Tcp, "nginx".into()), (8443, Proto::Udp, "?".into())]);
+        assert_eq!(c.level, Level::Warn);
+        assert_eq!(c.detail, "443/tcp taken (nginx), 8443/udp taken (?): those protocols get other free ports");
+        assert_eq!(port80_check(None).level, Level::Ok);
+        for who in ["nginx", "caddy", "apache2"] {
+            assert_eq!(port80_check(Some(who.into())).level, Level::Warn, "{who}");
+        }
+        assert!(port80_check(Some("caddy".into())).detail.contains("pass Let's Encrypt through it"));
+        assert!(port80_check(Some("apache2".into())).detail.contains("cannot issue"));
     }
 
     #[test]

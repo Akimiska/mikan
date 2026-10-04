@@ -105,6 +105,11 @@ type InboundPatch struct {
 	Outbound   *string // direct, warp or node
 	ExitNodeID *int64  // for Outbound node
 	PoolID     *int64  // 0: the main traffic
+
+	// FromPort, when set, applies the patch only while the inbound is on this port: an
+	// automatic move decided on what a node reported never lands on a row moved since
+	// (ErrInboundChanged).
+	FromPort *string
 }
 
 // EditsTemplate: the patch changes the listener's template.
@@ -197,6 +202,9 @@ func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, 
 	}
 	if err != nil {
 		return fail(err)
+	}
+	if p.FromPort != nil && prev.Port != *p.FromPort {
+		return fail(ErrInboundChanged)
 	}
 	next = prev
 	if p.Listen != nil {

@@ -185,6 +185,7 @@ type Payment struct {
 	PaidAt     sql.NullInt64
 	AppliedAt  sql.NullInt64
 	RefundedAt sql.NullInt64
+	TermDays   sql.NullInt64
 }
 
 type PromoCode struct {
@@ -298,6 +299,15 @@ type TariffPool struct {
 	TrafficLimit int64
 }
 
+type TariffTerm struct {
+	ID         int64
+	TariffID   int64
+	Days       int64
+	PriceStars sql.NullInt64
+	PriceRub   sql.NullInt64
+	Sort       int64
+}
+
 type TgChat struct {
 	TgID      int64
 	Username  string
@@ -369,6 +379,13 @@ type TrafficPackage struct {
 type TrafficPool struct {
 	ID        int64
 	Name      string
+	CreatedAt int64
+}
+
+type Trial struct {
+	TgID      int64
+	UserID    sql.NullInt64
+	TariffID  sql.NullInt64
 	CreatedAt int64
 }
 

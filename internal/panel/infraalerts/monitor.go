@@ -181,6 +181,16 @@ func (m *Monitor) config(ctx context.Context) AlertsConfig {
 	return c
 }
 
+// inboundFailAfter is how many failed samples make an inbound unavailable. A port held by
+// another program is moved by the tuner within seconds: such an inbound is reported only
+// when the move did not help.
+func inboundFailAfter(busy, autoPort bool) int {
+	if busy && autoPort {
+		return 24
+	}
+	return 3
+}
+
 func (m *Monitor) logError(message string, err error) {
 	if m.log != nil {
 		m.log.Error(message, "err", err)
@@ -243,8 +253,10 @@ func (m *Monitor) round(ctx context.Context) {
 			continue
 		}
 		listenerHealth[n.ID] = make(map[string]bool, len(hv.Listeners))
+		busy := map[string]bool{}
 		for _, l := range hv.Listeners {
 			listenerHealth[n.ID][l.Name] = l.OK
+			busy[l.Name] = l.Busy()
 		}
 		for _, in := range byNode[n.ID] {
 			if in.Enabled == 0 {
@@ -256,7 +268,7 @@ func (m *Monitor) round(ctx context.Context) {
 				level = Unavailable
 			}
 			key := "inbound/" + strconv.FormatInt(in.ID, 10)
-			m.observe(&st, key, level, hv.CheckedAt, 3, 2, eventFor(cfg, "inbound", n.Name+" / "+in.Name, level, lang))
+			m.observe(&st, key, level, hv.CheckedAt, inboundFailAfter(busy[in.Name], in.AutoPort != 0), 2, eventFor(cfg, "inbound", n.Name+" / "+in.Name, level, lang))
 			if level != Healthy {
 				nodeLevel = Degraded
 			}
@@ -276,7 +288,11 @@ func (m *Monitor) round(ctx context.Context) {
 	for _, n := range nodes {
 		nodeByID[n.ID] = n
 	}
-	m.autotuneEvents(ctx, &st, cfg, nodeByID, lang)
+	inboundByID := make(map[int64]db.Inbound, len(inbounds))
+	for _, in := range inbounds {
+		inboundByID[in.ID] = in
+	}
+	m.autotuneEvents(ctx, &st, cfg, nodeByID, inboundByID, lang)
 	m.checkTuner(&st, cfg, byNode, nodeByID, lang)
 	m.checkCertificate(&st, cfg, lang)
 	m.checkUpdate(&st, cfg, lang)
@@ -541,9 +557,10 @@ func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg Alert
 	}
 }
 
-// autotuneEvents names the nodes from the round's list: an event of a node removed since
-// is passed over, as before.
-func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes map[int64]db.Node, lang string) {
+// autotuneEvents names the nodes and inbounds from the round's lists: an event of a node
+// removed since is passed over, as before. A move off a port another program held is an
+// inbound's event: the inbound did not listen at all until then.
+func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes map[int64]db.Node, inbounds map[int64]db.Inbound, lang string) {
 	events, err := m.store.Q.InboundEventsAfter(ctx, st.AutoCursor)
 	if err != nil {
 		m.logError("infrastructure alerts: autotune events", err)
@@ -551,6 +568,21 @@ func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg A
 	}
 	for _, e := range events {
 		st.AutoCursor = e.ID
+		if e.Reason == autotune.ReasonBusy {
+			n, ok := nodes[e.NodeID]
+			in, known := inbounds[e.InboundID]
+			if !cfg.Events.Inbound || !ok || !known {
+				continue
+			}
+			text := fmt.Sprintf("🛠 <b>Подключение перенесено</b>: %s / %s с порта %s на %s, порт занят другой программой",
+				html.EscapeString(n.Name), html.EscapeString(in.Name), html.EscapeString(e.OldValue), html.EscapeString(e.NewValue))
+			if lang == "en" {
+				text = fmt.Sprintf("🛠 <b>Inbound moved</b>: %s / %s from port %s to %s, the port is held by another program",
+					html.EscapeString(n.Name), html.EscapeString(in.Name), html.EscapeString(e.OldValue), html.EscapeString(e.NewValue))
+			}
+			st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("autotune/%d", e.ID), Target: "admin", Text: text})
+			continue
+		}
 		if !cfg.Events.Autotune {
 			continue
 		}

@@ -5,6 +5,7 @@ package nodeapi
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"mikan/internal/proto"
@@ -136,6 +137,30 @@ type ListenerStatus struct {
 	Name  string `json:"name"`
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Code names a failure the panel acts on: ListenerAddrInUse. Nodes before 0.5 send none;
+	// AddrInUse reads their Error instead.
+	Code string `json:"code,omitempty"`
+}
+
+// ListenerAddrInUse: the listener's address is already taken on the node's server.
+const ListenerAddrInUse = "addr_in_use"
+
+// AddrInUse says whether a listen error is "address already in use": the text Go gives
+// EADDRINUSE on Linux, the BSDs and macOS, and WSAEADDRINUSE on Windows.
+func AddrInUse(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "address already in use") || strings.Contains(msg, "only one usage of each socket address")
+}
+
+// Busy says whether the listener failed because something already listens on its port.
+func (l ListenerStatus) Busy() bool {
+	if l.OK {
+		return false
+	}
+	if l.Code != "" {
+		return l.Code == ListenerAddrInUse
+	}
+	return AddrInUse(l.Error)
 }
 
 // Activity tells the panel which inbounds each device reached lately. A device that

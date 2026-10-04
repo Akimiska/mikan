@@ -30,15 +30,17 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		case "b":
 			return b.shopList(ctx, w, w.buyTitle, "tn", notice, home)
 		case "tn":
-			id, _ := strconv.ParseInt(arg, 10, 64)
-			return b.shopTariff(ctx, w, id, "pn", []Button{{Text: w.back, CallbackData: "b"}})
+			return b.shopTariff(ctx, w, arg, "tn", "pn", shopBack(w, "tn", arg, "b"))
 		case "pn":
 			id, _, _ := strings.Cut(arg, ":")
 			return b.shopInvoice(ctx, w, chat, 0, arg, []Button{{Text: w.back, CallbackData: "tn:" + id}})
 		}
 	}
+	if cmd == "tr" {
+		return b.takeTrial(ctx, w, chat)
+	}
 	if !ok {
-		return b.welcome(ctx, cfg, w, notice)
+		return b.welcome(ctx, cfg, w, chat, notice)
 	}
 	now := b.d.Now()
 	vars := b.vars(ctx, w, u, now)
@@ -51,8 +53,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	}
 	switch cmd {
 	case "t":
-		id, _ := strconv.ParseInt(arg, 10, 64)
-		return b.shopTariff(ctx, w, id, "py", []Button{{Text: w.back, CallbackData: "r"}})
+		return b.shopTariff(ctx, w, arg, "t", "py", shopBack(w, "t", arg, "r"))
 	case "py":
 		id, _, _ := strings.Cut(arg, ":")
 		return b.shopInvoice(ctx, w, chat, u.ID, arg, []Button{{Text: w.back, CallbackData: "t:" + id}})
@@ -117,13 +118,16 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	return withNotice(render(pick(cfg.Texts.Main, w.main), vars)), b.menu(ctx, cfg, w, len(list))
 }
 
-func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, notice string) (string, *Keyboard) {
+func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, notice string) (string, *Keyboard) {
 	brand := b.brand(ctx)
 	text := render(pick(cfg.Texts.Welcome, w.welcome), map[string]string{"brand": brand})
 	if notice != "" {
 		text = html.EscapeString(notice) + "\n\n" + text
 	}
 	var rows [][]Button
+	if b.d.Billing != nil && b.d.Billing.TrialOpen(ctx, chat) {
+		rows = append(rows, []Button{{Text: w.trial, CallbackData: "tr"}})
+	}
 	if b.canBuyNew(ctx) {
 		rows = append(rows, []Button{{Text: w.buy, CallbackData: "b"}})
 	}

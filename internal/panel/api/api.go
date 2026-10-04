@@ -117,6 +117,8 @@ type NodeRuntime interface {
 	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
 	// Probe checks the internet through one outbound of a node (NODE-<id> of a cascade).
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
+	// SpeedTest measures a node's own way to the internet.
+	SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error)
 }
 
 type ctxKey int
@@ -139,6 +141,9 @@ type handlers struct {
 	pending   map[int64]pendingTOTP
 
 	metricsCache metricsCache
+
+	// speedCooldown spaces the speed tests of a node.
+	speedCooldown speedCooldown
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.
@@ -209,6 +214,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerUpdates()
 	h.registerNodes()
 	h.registerTorrent()
+	h.registerSpeedTests()
 	h.registerNodeUpdates()
 	h.registerAPIKeys()
 	h.registerPayments()

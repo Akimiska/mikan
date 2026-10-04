@@ -33,6 +33,7 @@ export const qk = {
   userGrants: (id: number) => ["users", "grants", id] as const,
   torrent: ["torrent"] as const,
   torrentHits: (user: number) => ["torrent", "hits", user] as const,
+  speedTests: (node: number) => ["speedtests", node] as const,
 };
 
 export const meQuery = {

@@ -64,3 +64,39 @@ func TestBotTrial(t *testing.T) {
 		t.Fatalf("a second tap: %q", text(again))
 	}
 }
+
+// The trial's texts are plain: every one is there in both languages, and none has a dash.
+func TestTrialTexts(t *testing.T) {
+	for name, w := range map[string]*words{"ru": &ru, "en": &en} {
+		for field, s := range map[string]string{"trial": w.trial, "trialDone": w.trialDone, "trialUsed": w.trialUsed, "trialOff": w.trialOff, "trialOpen": w.trialOpen, "trialFail": w.trialFail} {
+			if s == "" || strings.ContainsAny(s, "—–") {
+				t.Errorf("%s.%s is empty or has a dash: %q", name, field, s)
+			}
+		}
+	}
+}
+
+// A trial that fails for a reason of ours says so, not "payment is not available".
+func TestBotTrialFailure(t *testing.T) {
+	var svc *billing.Service
+	e := setup(t, func(e *env, d *Deps) {
+		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+		d.Billing = svc
+	})
+	svc.SetTelegram(e.bot)
+	ts, _ := e.st.Q.ListTariffs(e.ctx)
+	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{TrialTariffID: ts[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.DB.ExecContext(e.ctx, "DROP TABLE trials"); err != nil {
+		t.Fatal(err)
+	}
+	e.later()
+	n := e.tg.count()
+	e.press(780, 1000, "tr")
+	edit, _ := find(e.tg.wait(t, n, "editMessageText"), "editMessageText")
+	if got := text(edit); got != ru.trialFail {
+		t.Fatalf("a failed trial: %q", got)
+	}
+}

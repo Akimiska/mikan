@@ -287,7 +287,7 @@ func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *Key
 		return html.EscapeString(w.trialOff), home
 	case err != nil:
 		b.d.Log.Warn("telegram: trial", "tg", chat, "err", err)
-		return html.EscapeString(w.payUnavailable), home
+		return html.EscapeString(w.trialFail), home
 	}
 	what := u.Name
 	if t, err := b.d.Store.Q.GetTariff(ctx, u.TariffID.Int64); err == nil {

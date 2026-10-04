@@ -32,7 +32,7 @@ type words struct {
 	// The shop.
 	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew string
 	notForSale, payUnavailable, tooManyInvoices, payStale, paidNew, paidRenew                                       string
-	trial, trialDone, trialUsed, trialOff, trialOpen                                                                string
+	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                     string
 	poolOut                                                                                                         string // a traffic pool used up
 
 	// Traffic packages.
@@ -91,10 +91,11 @@ var ru = words{
 	tooManyInvoices: "Слишком много счетов подряд. Попробуйте через час.",
 	payStale:        "Счёт устарел. Откройте меню бота и оплатите заново.",
 	trial:           "🎁 Попробовать бесплатно",
-	trialDone:       "🎁 Пробная подписка готова: %s.\n\nСсылка и инструкции — в меню.",
+	trialDone:       "🎁 Пробная подписка готова: %s.\n\nСсылка и инструкции в меню.",
 	trialUsed:       "Пробный период даётся один раз, и только тем, у кого ещё не было подписки.",
 	trialOff:        "Пробный период сейчас недоступен.",
 	trialOpen:       "📱 Открыть подписку",
+	trialFail:       "Не получилось выдать пробный период. Попробуйте позже или напишите в поддержку.",
 	paidNew:         "✅ Оплата получена — подписка «%s» готова (тариф «%s»).\n\nДобавьте ссылку в приложение:\n<code>%s</code>",
 	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
 	poolOut:         "закончился до сброса",
@@ -163,6 +164,7 @@ var en = words{
 	trialUsed:       "The trial is given once, and only to people who have not had a subscription.",
 	trialOff:        "The trial is not available now.",
 	trialOpen:       "📱 Open the subscription",
+	trialFail:       "Could not give the trial. Try later or message support.",
 	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
 	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
 	poolOut:         "used up until the reset",

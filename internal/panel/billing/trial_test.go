@@ -125,3 +125,38 @@ func TestTrialOnAnArchivedTariff(t *testing.T) {
 		t.Fatalf("a trial on an archived tariff: %v", err)
 	}
 }
+
+type countChanges struct{ policies, slots int }
+
+func (c *countChanges) PoliciesChanged() { c.policies++ }
+func (c *countChanges) SlotsChanged()    { c.slots++ }
+
+// The trial gets the tariff whole: reset strategy and pools too. With no free slot it
+// refills the pool and retries (as a payment does), and the nodes are told about it.
+func TestTrialIsTheTariffWhole(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	trial := e.offerTrial()
+	pool, err := e.st.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "trial-pool", CreatedAt: e.now.Unix()})
+	must(t, err)
+	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: trial.ID, PoolID: pool.ID, TrafficLimit: 1 << 20}))
+	// No free slot: the first attempt hits domain.ErrNoSlots.
+	_, err = e.st.DB.ExecContext(ctx, "UPDATE slots SET state = 'assigned' WHERE state = 'free'")
+	must(t, err)
+	clock := func() time.Time { return e.now }
+	changes := &countChanges{}
+	svc := New(Deps{Store: e.st, Settings: e.s.d.Settings, Users: domain.NewUsers(e.st, domain.NewPool(e.st, clock), changes, clock),
+		Log: e.s.d.Log, Now: clock})
+	u, err := svc.Trial(ctx, 906)
+	must(t, err)
+	if u.ResetStrategy != trial.ResetStrategy || u.SlotID.Int64 == 0 {
+		t.Fatalf("trial user %+v on %+v", u, trial)
+	}
+	ups, err := e.st.Q.ListUserPools(ctx, u.ID)
+	if err != nil || len(ups) != 1 || ups[0].PoolID != pool.ID || ups[0].TrafficLimit.Int64 != 1<<20 {
+		t.Fatalf("the trial's pools: %+v %v", ups, err)
+	}
+	if changes.slots == 0 || changes.policies == 0 {
+		t.Fatalf("the nodes were not told: %+v", changes)
+	}
+}

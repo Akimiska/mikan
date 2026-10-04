@@ -179,17 +179,23 @@ export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   );
 }
 
+// The variables the title and the announcement take (subs.TitleVars).
+const TITLE_VARS = ["brand", "name", "date", "days", "used", "left", "total"] as const;
+
 // What the apps show besides the servers: an announcement for every app that reads one,
 // and the brand for the apps that read operator headers (ClashFest, SlothClash).
 export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
-  const { draft: form, setDraft: setForm } = useDraft({ sub_announce: s.sub_announce, sub_announce_url: s.sub_announce_url, brand_accent: s.brand_accent, brand_logo_url: s.brand_logo_url });
+  const { draft: form, setDraft: setForm } = useDraft({ sub_title: s.sub_title, sub_announce: s.sub_announce, sub_announce_url: s.sub_announce_url, brand_accent: s.brand_accent, brand_logo_url: s.brand_logo_url });
   const errors = fieldErrors(save.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate({ sub_announce: form.sub_announce.trim(), sub_announce_url: form.sub_announce_url.trim(), brand_accent: form.brand_accent.trim(), brand_logo_url: form.brand_logo_url.trim() });
+    save.mutate({ sub_title: form.sub_title.trim(), sub_announce: form.sub_announce.trim(), sub_announce_url: form.sub_announce_url.trim(), brand_accent: form.brand_accent.trim(), brand_logo_url: form.brand_logo_url.trim() });
   };
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  // A variable chip goes into the field last typed in: the title until the announcement is.
+  const [target, setTarget] = useState<"sub_title" | "sub_announce">("sub_title");
+  const insert = (v: string) => setForm((f) => ({ ...f, [target]: (f[target] ? f[target].replace(/\s*$/, " ") : "") + `{${v}}` }));
   const accent = /^#[0-9A-Fa-f]{6}$/.test(form.brand_accent.trim()) ? form.brand_accent.trim() : "";
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
@@ -200,9 +206,37 @@ export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
             <div className="card-sub">{t("settings.appsSub")}</div>
           </div>
         </div>
-        <Field label={t("settings.announce")} htmlFor="s-announce" hint={t("settings.announceHint")} error={errors.sub_announce}>
-          <input id="s-announce" className="input" value={form.sub_announce} onChange={set("sub_announce")} maxLength={200} aria-invalid={!!errors.sub_announce} />
+        <Field label={t("settings.subTitle")} htmlFor="s-sub-title" hint={t("settings.subTitleHint")} error={errors.sub_title}>
+          <input
+            id="s-sub-title"
+            className="input"
+            value={form.sub_title}
+            onChange={set("sub_title")}
+            onFocus={() => setTarget("sub_title")}
+            maxLength={200}
+            placeholder={s.brand || "{brand}"}
+            aria-invalid={!!errors.sub_title}
+          />
         </Field>
+        <Field label={t("settings.announce")} htmlFor="s-announce" hint={t("settings.announceHint")} error={errors.sub_announce}>
+          <input
+            id="s-announce"
+            className="input"
+            value={form.sub_announce}
+            onChange={set("sub_announce")}
+            onFocus={() => setTarget("sub_announce")}
+            maxLength={200}
+            aria-invalid={!!errors.sub_announce}
+          />
+        </Field>
+        <div className="-mt-1 mb-3 flex flex-wrap items-center gap-2" role="group" aria-label={t("settings.titleVars")}>
+          <span className="text-xs text-[var(--ink-500)]">{t("settings.titleVars")}</span>
+          {TITLE_VARS.map((v) => (
+            <button key={v} type="button" className="chip-btn" title={t(`settings.titleVar.${v}`)} onClick={() => insert(v)}>
+              <span className="mono">{`{${v}}`}</span>
+            </button>
+          ))}
+        </div>
         <Field label={t("settings.announceUrl")} htmlFor="s-announce-url" hint={t("settings.announceUrlHint")} error={errors.sub_announce_url}>
           <input id="s-announce-url" className="input" value={form.sub_announce_url} onChange={set("sub_announce_url")} placeholder="https://t.me/your_channel" aria-invalid={!!errors.sub_announce_url} />
         </Field>

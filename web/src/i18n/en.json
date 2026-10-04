@@ -363,7 +363,8 @@
       "promo_invalid_value": "Promo code settings are invalid",
       "promo_late_refund_failed": "A late promo payment could not be refunded automatically. Check the provider and refund it manually if needed.",
       "bad_value": "Value must be positive and limits/lifetimes cannot be negative",
-      "bad_tariff_ids": "Tariff IDs must be positive numbers"
+      "bad_tariff_ids": "Tariff IDs must be positive numbers",
+      "unknown_variable": "There is no variable {value}"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -931,7 +932,7 @@
     "apps": "In the apps",
     "appsSub": "What subscribers see in their VPN apps besides the servers",
     "announce": "Announcement",
-    "announceHint": "A line over the profile in Happ, v2RayTun, ClashFest and other apps that show announcements: maintenance, news. Empty — none.",
+    "announceHint": "A line over the profile, or under its name in Happ and v2RayTun: maintenance, news, or the term and traffic left with the variables below. Empty: none.",
     "announceUrl": "Announcement link",
     "announceUrlHint": "Where a tap on the announcement leads: https:// or tg://",
     "appBranding": "Your brand in the apps",
@@ -1084,6 +1085,18 @@
       "secretSet": "The secret is set. Type a new one to change it.",
       "legacyCount": "Old links and users on file: {n}",
       "legacySaved": "Saved"
+    },
+    "subTitle": "Subscription name in apps",
+    "subTitleHint": "What Happ, v2RayTun, Hiddify and Clash apps call the profile. Empty: the brand.",
+    "titleVars": "Variables:",
+    "titleVar": {
+      "brand": "The brand",
+      "name": "The user's name",
+      "date": "When the term ends, DD.MM.YYYY (Moscow time); ∞ without one",
+      "days": "Days left; ∞ without a term",
+      "used": "Traffic used",
+      "left": "Traffic left; ∞ without a limit",
+      "total": "The traffic limit with packages; ∞ without one"
     }
   },
   "sub": {

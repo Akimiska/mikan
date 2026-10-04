@@ -141,6 +141,9 @@ type handlers struct {
 	pending   map[int64]pendingTOTP
 
 	metricsCache metricsCache
+
+	// speedCooldown spaces the speed tests of a node.
+	speedCooldown speedCooldown
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.

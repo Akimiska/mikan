@@ -370,7 +370,7 @@ type PoolQuota struct {
 // server. A test that broke off keeps what it measured and says where in Error.
 type SpeedTest struct {
 	At       time.Time `json:"at"`
-	PingMs   float64   `json:"ping_ms" doc:"Медиана задержки, мс; -1 — ответов не было"`
+	PingMs   float64   `json:"ping_ms" doc:"Медиана задержки, мс; -1 если ответов не было"`
 	JitterMs float64   `json:"jitter_ms" doc:"Средний разброс задержки, мс"`
 	LossPct  float64   `json:"loss_pct" doc:"Потери, %"`
 	DownBps  int64     `json:"down_bps" doc:"Загрузка, бит/с"`

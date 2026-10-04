@@ -14,7 +14,7 @@ import { bits, dateShort, time } from "../../lib/format";
 
 type SpeedTest = Schemas["SpeedTestView"];
 
-const ms = (v: number) => (v < 0 ? "—" : t("speed.ms", { n: v < 10 ? v.toFixed(1) : Math.round(v) }));
+const ms = (v: number) => (v < 0 ? "-" : t("speed.ms", { n: v < 10 ? v.toFixed(1) : Math.round(v) }));
 const pct = (v: number) => `${v % 1 ? v.toFixed(1) : v}%`;
 
 export function SpeedDrawer({ node, onClose }: { node: { id: number; name: string } | null; onClose: () => void }) {
@@ -68,8 +68,8 @@ export function SpeedDrawer({ node, onClose }: { node: { id: number; name: strin
                           </td>
                           <td className="py-1.5 pr-3 whitespace-nowrap">{ms(r.ping_ms)}</td>
                           <td className={`py-1.5 pr-3 ${r.loss_pct > 0 ? "text-[var(--berry-600)]" : ""}`}>{pct(r.loss_pct)}</td>
-                          <td className="py-1.5 pr-3 whitespace-nowrap">{r.down_bps ? bits(r.down_bps) : "—"}</td>
-                          <td className="py-1.5 whitespace-nowrap">{r.up_bps ? bits(r.up_bps) : "—"}</td>
+                          <td className="py-1.5 pr-3 whitespace-nowrap">{r.down_bps ? bits(r.down_bps) : "-"}</td>
+                          <td className="py-1.5 whitespace-nowrap">{r.up_bps ? bits(r.up_bps) : "-"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -86,8 +86,8 @@ export function SpeedDrawer({ node, onClose }: { node: { id: number; name: strin
 
 function Latest({ r }: { r: SpeedTest }) {
   const stats = [
-    { label: t("speed.down"), value: r.down_bps ? bits(r.down_bps) : "—" },
-    { label: t("speed.up"), value: r.up_bps ? bits(r.up_bps) : "—" },
+    { label: t("speed.down"), value: r.down_bps ? bits(r.down_bps) : "-" },
+    { label: t("speed.up"), value: r.up_bps ? bits(r.up_bps) : "-" },
     { label: t("speed.ping"), value: ms(r.ping_ms) },
     { label: t("speed.jitter"), value: ms(r.jitter_ms) },
     { label: t("speed.loss"), value: pct(r.loss_pct) },

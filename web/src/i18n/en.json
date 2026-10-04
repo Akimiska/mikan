@@ -365,6 +365,7 @@
       "bad_value": "Value must be positive and limits/lifetimes cannot be negative",
       "bad_tariff_ids": "Tariff IDs must be positive numbers",
       "speed_test_busy": "A speed test is already running on this node",
+      "speed_test_cooldown": "This node was tested less than 5 minutes ago: wait a little and try again",
       "node_too_old": "The node's version is too old for this: update the node"
     },
     "acme": {
@@ -1912,7 +1913,7 @@
   "speed": {
     "button": "Speed",
     "title": "Speed test",
-    "intro": "The node's own way to the internet: latency, jitter and loss of 20 DNS queries to 1.1.1.1, then download and upload through speed.cloudflare.com, 8 seconds each. Takes about 20 seconds and a few tens of megabytes of the node's traffic.",
+    "intro": "The node's own way to the internet: latency, jitter and loss of 20 DNS queries to 1.1.1.1, then download and upload through speed.cloudflare.com, up to 8 seconds each. One test can use up to 250 MB down and 100 MB up of the node's traffic, takes about 20 seconds, and users on the node may feel it for those seconds. A node can be tested once per 5 minutes.",
     "run": "Run the test",
     "running": "Testing…",
     "none": "No tests yet.",

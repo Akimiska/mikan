@@ -9,6 +9,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -23,6 +24,12 @@ type fakeNodes struct {
 	found    []nodeapi.TargetResult
 	checks   int
 	onScan   func() // runs while a scan is under way: the admin edits meanwhile
+	health   map[int64]nodesync.HealthView
+}
+
+func (f *fakeNodes) Health(id int64) (nodesync.HealthView, bool) {
+	h, ok := f.health[id]
+	return h, ok
 }
 
 func (f *fakeNodes) Activity(_ context.Context, id int64) (nodeapi.Activity, error) {

@@ -190,9 +190,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	vars := titleValues(u, grants.Main(u.ID), cfg, h.now())
-	if cfg.Announce != "" {
-		cfg.Announce = fillTitle(cfg.Announce, vars)
+	// The values are worked out only when a title or an announcement can use them.
+	var vars map[string]string
+	if cfg.Title != "" || cfg.Announce != "" {
+		vars = titleValues(u, grants.Main(u.ID), cfg, h.now())
+		if cfg.Announce != "" {
+			cfg.Announce = fillTitle(cfg.Announce, vars)
+		}
 	}
 	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg, vars)
 	h.operatorHeaders(w, r, u, cfg)
@@ -720,11 +724,7 @@ func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64
 		"; total="+strconv.FormatInt(total, 10)+"; expire="+strconv.FormatInt(expire, 10))
 	// Hourly: a port or target the panel changed on its own reaches clients soon.
 	hd.Set("Profile-Update-Interval", "1")
-	title := cfg.Brand
-	if cfg.Title != "" {
-		title = fillTitle(cfg.Title, vars)
-	}
-	hd.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(title)))
+	hd.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(profileTitle(cfg, vars))))
 	if cfg.SupportURL != "" {
 		hd.Set("Support-Url", cfg.SupportURL)
 	}

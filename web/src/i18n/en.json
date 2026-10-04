@@ -363,8 +363,7 @@
       "promo_invalid_value": "Promo code settings are invalid",
       "promo_late_refund_failed": "A late promo payment could not be refunded automatically. Check the provider and refund it manually if needed.",
       "bad_value": "Value must be positive and limits/lifetimes cannot be negative",
-      "bad_tariff_ids": "Tariff IDs must be positive numbers",
-      "unknown_variable": "There is no variable {value}"
+      "bad_tariff_ids": "Tariff IDs must be positive numbers"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -1087,8 +1086,9 @@
       "legacySaved": "Saved"
     },
     "subTitle": "Subscription name in apps",
-    "subTitleHint": "What Happ, v2RayTun, Hiddify and Clash apps call the profile. Empty: the brand.",
+    "subTitleHint": "The profile name (the profile-title header) in the apps that read it: Happ, v2RayTun, Hiddify. Clash apps may name the profile after the file instead. Empty: the brand.",
     "titleVars": "Variables:",
+    "unknownVars": "Not a variable, it stays as text: {vars}",
     "titleVar": {
       "brand": "The brand",
       "name": "The user's name",

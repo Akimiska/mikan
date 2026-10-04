@@ -232,14 +232,13 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !subs.ValidLink(strings.TrimSpace(*b.AnnounceURL), true) {
 		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce_url", Message: "support_url_invalid"})
 	}
+	// A {word} that is no variable stays as text: an old announcement may hold one.
 	for field, v := range map[string]*string{"sub_title": b.SubTitle, "sub_announce": b.Announce} {
 		if v == nil {
 			continue
 		}
 		if strings.ContainsAny(*v, "\r\n") {
 			details = append(details, &huma.ErrorDetail{Location: "body." + field, Message: "one_line"})
-		} else if name := subs.UnknownVar(*v); name != "" {
-			details = append(details, &huma.ErrorDetail{Location: "body." + field, Message: "unknown_variable", Value: "{" + name + "}"})
 		}
 	}
 	if b.BrandAccent != nil && *b.BrandAccent != "" && !subs.ValidAccent(strings.TrimSpace(*b.BrandAccent)) {

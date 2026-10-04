@@ -11,52 +11,11 @@ import (
 )
 
 // TitleVars are the variables the profile title and the announcement may hold, the same
-// way the bot's texts do: {brand} · {name} · until {date}.
+// way the bot's texts do: {brand} · {name} · until {date}. Any other {word} stays as text.
 var TitleVars = []string{"brand", "name", "date", "days", "used", "left", "total"}
 
 // TitleMax bounds a filled title or announcement: apps show one line.
 const TitleMax = 200
-
-// UnknownVar returns the first {variable} of s that is not one of TitleVars, "" when
-// there is none. Braces that hold no name ("{}", "{ x }") are left as text.
-func UnknownVar(s string) string {
-	for {
-		i := strings.IndexByte(s, '{')
-		if i < 0 {
-			return ""
-		}
-		j := strings.IndexByte(s[i:], '}')
-		if j < 0 {
-			return ""
-		}
-		name := s[i+1 : i+j]
-		if varName(name) && !isTitleVar(name) {
-			return name
-		}
-		s = s[i+1:]
-	}
-}
-
-func isTitleVar(name string) bool {
-	for _, v := range TitleVars {
-		if v == name {
-			return true
-		}
-	}
-	return false
-}
-
-func varName(s string) bool {
-	if s == "" || len(s) > 32 {
-		return false
-	}
-	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r == '_') {
-			return false
-		}
-	}
-	return true
-}
 
 // msk is the zone dates are written in, as the bot writes them: most users live there.
 var msk = time.FixedZone("MSK", 3*60*60)
@@ -118,6 +77,17 @@ func fillTitle(s string, vars map[string]string) string {
 		return r
 	}, out.String())
 	return cut(line, TitleMax)
+}
+
+// profileTitle is the name the apps show for the profile: the title filled for the user,
+// the brand when there is none or it fills to nothing (just {name} of a user without one).
+func profileTitle(cfg Config, vars map[string]string) string {
+	if cfg.Title != "" {
+		if filled := fillTitle(cfg.Title, vars); strings.TrimSpace(filled) != "" {
+			return filled
+		}
+	}
+	return cfg.Brand
 }
 
 // sizeText writes bytes the way the bot does: 12,5 ГБ or 12.5 GB.

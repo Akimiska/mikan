@@ -9,17 +9,33 @@ import (
 	"mikan/internal/panel/store/db"
 )
 
-func TestUnknownVar(t *testing.T) {
-	for in, want := range map[string]string{
-		"":                           "",
-		"{brand} · до {date}":        "",
-		"{brand} {nmae}":             "nmae",
-		"скидка {}  и { x } и {ABC}": "",
-		"{left} из {total} {days} {used} {name}": "",
-		"{brand": "",
+func TestTitleValuesHoldTitleVars(t *testing.T) {
+	vars := titleValues(db.User{}, 0, Config{}, time.Now())
+	if len(vars) != len(TitleVars) {
+		t.Fatalf("%d values, %d variables", len(vars), len(TitleVars))
+	}
+	for _, name := range TitleVars {
+		if _, ok := vars[name]; !ok {
+			t.Errorf("no value for {%s}", name)
+		}
+	}
+}
+
+func TestProfileTitle(t *testing.T) {
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	cfg := Config{Brand: "Mikan"}
+	for _, tc := range []struct{ title, name, want string }{
+		{"", "Вася", "Mikan"},
+		{"{name}", "Вася", "Вася"},
+		{"{name}", "", "Mikan"},
+		{"{name}", "   ", "Mikan"},
+		{" {name} ", "", "Mikan"},
+		{"{brand} {name}", "", "Mikan"},
+		{"{nope}", "Вася", "{nope}"},
 	} {
-		if got := UnknownVar(in); got != want {
-			t.Errorf("UnknownVar(%q) = %q, want %q", in, got, want)
+		cfg.Title = tc.title
+		if got := profileTitle(cfg, titleValues(db.User{Name: tc.name}, 0, cfg, now)); got != tc.want {
+			t.Errorf("title %q, name %q: %q, want %q", tc.title, tc.name, got, tc.want)
 		}
 	}
 }

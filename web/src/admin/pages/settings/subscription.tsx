@@ -182,6 +182,16 @@ export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
 // The variables the title and the announcement take (subs.TitleVars).
 const TITLE_VARS = ["brand", "name", "date", "days", "used", "left", "total"] as const;
 
+// The {words} of a text that are no variable: they stay as text in the apps, so this only
+// warns (same case-sensitive match as the panel's substitution).
+function unknownVars(text: string): string[] {
+  const found = new Set<string>();
+  for (const m of text.matchAll(/\{([A-Za-z0-9_-]+)\}/g)) {
+    if (!(TITLE_VARS as readonly string[]).includes(m[1] ?? "")) found.add(m[0]);
+  }
+  return [...found];
+}
+
 // What the apps show besides the servers: an announcement for every app that reads one,
 // and the brand for the apps that read operator headers (ClashFest, SlothClash).
 export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
@@ -196,6 +206,16 @@ export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
   // A variable chip goes into the field last typed in: the title until the announcement is.
   const [target, setTarget] = useState<"sub_title" | "sub_announce">("sub_title");
   const insert = (v: string) => setForm((f) => ({ ...f, [target]: (f[target] ? f[target].replace(/\s*$/, " ") : "") + `{${v}}` }));
+  const unknownTitle = unknownVars(form.sub_title);
+  const unknownAnnounce = unknownVars(form.sub_announce);
+  const withUnknown = (hint: string, unknown: string[]) =>
+    unknown.length === 0 ? (
+      hint
+    ) : (
+      <>
+        {hint} <span className="font-medium">{t("settings.unknownVars", { vars: unknown.join(" ") })}</span>
+      </>
+    );
   const accent = /^#[0-9A-Fa-f]{6}$/.test(form.brand_accent.trim()) ? form.brand_accent.trim() : "";
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
@@ -206,7 +226,7 @@ export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
             <div className="card-sub">{t("settings.appsSub")}</div>
           </div>
         </div>
-        <Field label={t("settings.subTitle")} htmlFor="s-sub-title" hint={t("settings.subTitleHint")} error={errors.sub_title}>
+        <Field label={t("settings.subTitle")} htmlFor="s-sub-title" hint={withUnknown(t("settings.subTitleHint"), unknownTitle)} error={errors.sub_title}>
           <input
             id="s-sub-title"
             className="input"
@@ -218,7 +238,7 @@ export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
             aria-invalid={!!errors.sub_title}
           />
         </Field>
-        <Field label={t("settings.announce")} htmlFor="s-announce" hint={t("settings.announceHint")} error={errors.sub_announce}>
+        <Field label={t("settings.announce")} htmlFor="s-announce" hint={withUnknown(t("settings.announceHint"), unknownAnnounce)} error={errors.sub_announce}>
           <input
             id="s-announce"
             className="input"

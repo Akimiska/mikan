@@ -10,6 +10,10 @@ the signed manifest, and the panel shows the one in its language.
 - Nodes on 0.5.0.1 and older need `mikan update` on their server once; the panel shows the command. After that they update from the panel.
 - With device binding, the places taken are the bound devices: a phone moving from Wi-Fi to mobile data no longer looks like two devices. Connection addresses are shown separately and take no places.
 - "What changed" in Settings → Updates shows bold text, code and links properly.
+- **Torrent blocker** (Settings → Clash rules): nodes recognise BitTorrent and drop it; a caught user can be banned on every node for a chosen time. The ban is per user, not per IP. A plain tracker request alone bans nobody: it takes three within ten minutes, since a web page can make a browser send one. Users can be exempted, and bans lifted in their card.
+- **Speed test of a node** (Nodes → a node): latency, loss, download and upload, with the history. One test uses up to 250 MB down and 100 MB up; a node can be tested once in 5 minutes.
+- **Subscription name in apps** (Settings → Subscription): the profile name Happ, v2RayTun and Hiddify show, with variables like `{name}`, `{days}` and `{left}`; the announcement takes them too.
+- **Close a traffic pool on a plan**: the plan's users lose that pool at once, and its packages are not sold to them. Opening it again puts the plan's limit back on them.
 
 ### ru
 - **Ноды обновляются из панели.** На странице «Ноды» видна версия каждой ноды и отмечены отстающие от панели, есть кнопки **Обновить** и **Обновить все**. По умолчанию ноды сами следуют за панелью: после её обновления они подтягиваются до её версии по одной, следующая начинает, когда предыдущая заработала. Нода, которая не обновилась, возвращается на свою версию, приходит уведомление, и обновление останавливается. Переключатель в «Настройки → Основное → Обновления».
@@ -17,6 +21,10 @@ the signed manifest, and the panel shows the one in its language.
 - Нодам на 0.5.0.1 и раньше один раз нужен `mikan update` на их сервере, панель показывает команду. Дальше они обновляются из панели.
 - С привязкой устройств места считаются по привязанным устройствам: телефон, перешедший с Wi-Fi на мобильную сеть, больше не выглядит как два устройства. Адреса подключений показаны отдельно и мест не занимают.
 - «Что изменилось» в «Настройки → Обновления» показывает жирный текст, код и ссылки как надо.
+- **Блокировка торрентов** («Настройки → Правила Clash»): ноды узнают BitTorrent и не пропускают его, пойманного пользователя можно забанить на всех нодах на выбранное время. Бан вешается на пользователя, а не на IP. Один простой запрос к трекеру никого не банит: нужно три за десять минут, ведь такой запрос может отправить и обычная веб-страница. Пользователей можно исключить, а бан снять в их карточке.
+- **Проверка скорости ноды** («Ноды → нода»): задержка, потери, загрузка и отдача, с историей. Один тест расходует до 250 МБ на загрузку и 100 МБ на отдачу, ноду можно проверять раз в 5 минут.
+- **Название подписки в приложениях** («Настройки → Подписка»): имя профиля, которое показывают Happ, v2RayTun и Hiddify, с переменными вроде `{name}`, `{days}` и `{left}`, объявление тоже их понимает.
+- **Закрыть пул трафика на тарифе**: пользователи тарифа сразу теряют этот пул, пакеты для него им не продаются. При открытии им снова ставится лимит тарифа.
 
 ## 0.5.0.1
 ### en

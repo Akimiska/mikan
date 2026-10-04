@@ -62,12 +62,190 @@ impl Manifest {
     }
 }
 
-/// The newest release, verified.
+/// The newest release of this server's channel (stable on a fresh server), verified: from
+/// the release index, or GitHub's latest release when the index cannot be had.
 pub fn latest() -> Result<Manifest> {
+    Ok(find(None, crate::update::channel_here())?.manifest)
+}
+
+/// GitHub's latest release, verified: what every updater read before the index, and what
+/// it falls back to.
+fn latest_with(key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Manifest> {
     let url = latest_url();
-    let data = crate::net::get_opt(&url, 1 << 20).context("download the release manifest")?.context("no release is published yet")?;
-    let sig = crate::net::get(&format!("{url}.sig"), 4096).context("download the manifest's signature")?;
-    parse(&data, &String::from_utf8_lossy(&sig), &key()?)
+    let data = fetch(&url, 1 << 20).context("download the release manifest")?.context("no release is published yet")?;
+    let sig = fetch(&format!("{url}.sig"), 4096).context("download the manifest's signature")?.context("the manifest has no signature")?;
+    parse(&data, &String::from_utf8_lossy(&sig), key)
+}
+
+/// Downloads a URL whole, at most limit bytes; None when it is not there (net::get_opt).
+/// Tests hand in files of their own.
+pub type Fetch<'a> = &'a dyn Fn(&str, u64) -> Result<Option<Vec<u8>>>;
+
+/// The release index (internal/release/index.go has the whole story): every release an
+/// updater may go to, each pointing to its own signed manifest, signed itself with the
+/// release key. Its address does not depend on GitHub's "latest": it is an asset of the
+/// pre-release tagged "updates", which never becomes the latest release.
+///
+/// The format only grows: unknown fields are ignored; an entry with an unparsable version,
+/// an unknown channel or a missing field is skipped, never fatal; a format older readers
+/// cannot read goes to a new file name, never a new meaning of index.json. "rollout" (a
+/// share of servers that take a release) is reserved: an entry may carry it, and it is
+/// ignored for now. testdata/index.json is run by the panel's tests too.
+pub fn index_url() -> String {
+    format!("https://github.com/{REPO}/releases/download/updates/index.json")
+}
+
+/// Which releases a server takes: stable ones, or the pre-releases (vX-rc.N) too.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Channel {
+    Stable,
+    Beta,
+}
+
+impl Channel {
+    /// Only the exact words count: whatever else is written is no channel.
+    pub fn parse(s: &str) -> Option<Channel> {
+        match s {
+            "stable" => Some(Channel::Stable),
+            "beta" => Some(Channel::Beta),
+            _ => None,
+        }
+    }
+}
+
+/// A release the index lists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    pub version: String,
+    pub channel: String,
+    pub manifest: String,
+    /// The lowest installed version that updates to this release directly.
+    pub from: String,
+}
+
+impl Entry {
+    /// Whether a reader can use the entry; the others are skipped. A pre-release is never
+    /// stable; a beta entry may be a release version (one tried on beta first).
+    fn valid(&self) -> bool {
+        let pre = matches!(semver(&self.version), Some((_, Some(_))));
+        semver(&self.version).is_some()
+            && Channel::parse(&self.channel).is_some_and(|c| c == Channel::Beta || !pre)
+            && self.manifest.starts_with("https://")
+            && semver(&self.from).is_some()
+            && !newer(&self.from, &self.version)
+    }
+}
+
+/// Reads an index whose signature was checked: the entries a reader cannot use are left
+/// out. The keys are matched exactly and the last of a repeated key wins, as the panel
+/// reads it.
+pub fn decode_index(data: &[u8]) -> Result<Vec<Entry>> {
+    let doc: serde_json::Value = serde_json::from_slice(data).context("the release index is malformed")?;
+    let releases =
+        doc.as_object().and_then(|o| o.get("releases")).and_then(|r| r.as_array()).context("the release index has no list of releases")?;
+    let text = |v: &serde_json::Value, key: &str| v.get(key).and_then(|s| s.as_str()).unwrap_or_default().to_owned();
+    Ok(releases
+        .iter()
+        .filter(|r| r.is_object())
+        .map(|r| Entry { version: text(r, "version"), channel: text(r, "channel"), manifest: text(r, "manifest"), from: text(r, "from") })
+        .filter(Entry::valid)
+        .collect())
+}
+
+/// Checks the signature over the index's exact bytes, then reads it.
+pub fn parse_index(data: &[u8], sig: &str, key: &VerifyingKey) -> Result<Vec<Entry>> {
+    verify(data, sig, key, "release index")?;
+    decode_index(data)
+}
+
+/// What a server of some version finds in the index.
+#[derive(Debug, Default)]
+pub struct Choice {
+    /// The release to update to now: the highest one of the channels newer than the server
+    /// that it updates to directly.
+    pub target: Option<Entry>,
+    /// The highest release of the channels, newer than the server or not. Newer than the
+    /// target: the target is a hop on the way to it.
+    pub newest: Option<Entry>,
+}
+
+/// Picks the release a server running current takes (internal/release.Choose): among the
+/// entries of the allowed channels (stable, and beta too when beta) with a version newer
+/// than current and from at or below it, the highest. A current that is not a release
+/// version (a fresh server, "dev") has no from to meet. The first of equal versions wins.
+pub fn choose(entries: &[Entry], current: &str, beta: bool) -> Choice {
+    let known = semver(current).is_some();
+    let mut c = Choice::default();
+    for e in entries.iter().filter(|e| e.valid() && (beta || e.channel != "beta")) {
+        if c.newest.as_ref().is_none_or(|n| newer(&e.version, &n.version)) {
+            c.newest = Some(e.clone());
+        }
+        if !newer(&e.version, current) || (known && newer(&e.from, current)) {
+            continue;
+        }
+        if c.target.as_ref().is_none_or(|t| newer(&e.version, &t.version)) {
+            c.target = Some(e.clone());
+        }
+    }
+    c
+}
+
+/// The release found for a server.
+#[derive(Debug)]
+pub struct Found {
+    /// The release to update to now; when there is none, the newest one.
+    pub manifest: Manifest,
+    /// The newest release of the channel, when the update goes through manifest on the way
+    /// to it or this version cannot reach it.
+    pub newest: Option<String>,
+    /// newest is out, but no release this version updates to leads there.
+    pub unreachable: bool,
+    /// Why the index was not used, when the answer is GitHub's latest release instead.
+    pub fallback: Option<String>,
+}
+
+/// The release for a server of version current (None: a fresh server, which takes the
+/// newest) on a channel: from the index, or GitHub's latest release when the index cannot
+/// be had or believed, so a broken index never stops an update.
+pub fn find(current: Option<&str>, channel: Channel) -> Result<Found> {
+    find_with(current, channel, &key()?, &crate::net::get_opt)
+}
+
+pub fn find_with(current: Option<&str>, channel: Channel, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
+    match from_index(current.unwrap_or_default(), channel, key, fetch) {
+        Ok(found) => Ok(found),
+        Err(e) => {
+            let manifest = latest_with(key, fetch)?;
+            Ok(Found { manifest, newest: None, unreachable: false, fallback: Some(format!("{e:#}")) })
+        }
+    }
+}
+
+fn from_index(current: &str, channel: Channel, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
+    let url = index_url();
+    let data = fetch(&url, 1 << 20).context("download the release index")?.context("no release index is published")?;
+    let sig =
+        fetch(&format!("{url}.sig"), 4096).context("download the index's signature")?.context("the release index has no signature")?;
+    let entries = parse_index(&data, &String::from_utf8_lossy(&sig), key)?;
+    let c = choose(&entries, current, channel == Channel::Beta);
+    let newest = c.newest.context("the release index lists no release of the channel")?;
+    let (entry, later, unreachable) = match c.target {
+        Some(t) if newer(&newest.version, &t.version) => (t, Some(newest.version), false),
+        Some(t) => (t, None, false),
+        None if newer(&newest.version, current) => (newest.clone(), Some(newest.version), true),
+        None => (newest, None, false),
+    };
+    let what = format!("the manifest of {}", entry.version);
+    let data =
+        fetch(&entry.manifest, 1 << 20).with_context(|| format!("download {what}"))?.with_context(|| format!("{what} is not there"))?;
+    let sig = fetch(&format!("{}.sig", entry.manifest), 4096)
+        .with_context(|| format!("download {what}'s signature"))?
+        .with_context(|| format!("{what} has no signature"))?;
+    let manifest = parse(&data, &String::from_utf8_lossy(&sig), key)?;
+    if manifest.version != entry.version {
+        bail!("the release index says {}, its manifest is of {}", entry.version, manifest.version);
+    }
+    Ok(Found { manifest, newest: later, unreachable, fallback: None })
 }
 
 pub fn key() -> Result<VerifyingKey> {
@@ -283,6 +461,12 @@ mod tests {
         let go = std::fs::read_to_string("../internal/release/release.go").unwrap();
         assert!(go.contains(&format!("const PublicKey = \"{PUBLIC_KEY}\"")), "internal/release.PublicKey differs");
         assert!(go.contains(&format!("const Repo = \"{REPO}\"")), "internal/release.Repo differs");
+        let index = std::fs::read_to_string("../internal/release/index.go").unwrap();
+        assert!(
+            index.contains("const IndexURL = \"https://github.com/\" + Repo + \"/releases/download/updates/index.json\"")
+                && index_url().ends_with("/releases/download/updates/index.json"),
+            "internal/release.IndexURL differs"
+        );
         let owner = REPO.split('/').next().unwrap().to_lowercase();
         assert_eq!(IMAGE_PREFIX, format!("ghcr.io/{owner}/"), "the image namespace is not the repository owner's");
         assert!(
@@ -310,6 +494,191 @@ mod tests {
         assert!(sh.contains("nothing is installed"));
         let ok = std::process::Command::new("sh").arg("-n").arg(concat!(env!("CARGO_MANIFEST_DIR"), "/install.sh")).status().unwrap();
         assert!(ok.success(), "install.sh does not parse");
+    }
+
+    #[derive(Deserialize)]
+    struct DecodeCase {
+        name: String,
+        doc: String,
+        #[serde(default)]
+        versions: Vec<String>,
+        #[serde(default)]
+        error: bool,
+    }
+    #[derive(Deserialize)]
+    struct RawEntry {
+        version: String,
+        channel: String,
+        manifest: String,
+        from: String,
+    }
+    #[derive(Deserialize)]
+    struct ChooseCase {
+        current: String,
+        beta: bool,
+        target: String,
+        newest: String,
+        #[serde(default)]
+        manifest: String,
+    }
+    #[derive(Deserialize)]
+    struct ChooseTable {
+        releases: Vec<RawEntry>,
+        cases: Vec<ChooseCase>,
+    }
+    #[derive(Deserialize)]
+    struct IndexTable {
+        decode: Vec<DecodeCase>,
+        choose: Vec<ChooseTable>,
+    }
+
+    fn index_table() -> IndexTable {
+        let t: IndexTable = serde_json::from_str(include_str!("../../testdata/index.json")).unwrap();
+        assert!(!t.decode.is_empty() && !t.choose.is_empty());
+        t
+    }
+
+    // testdata/index.json is run by the panel's tests as well (internal/release): both sides
+    // keep, skip and choose the same entries.
+    #[test]
+    fn index_decode_table() {
+        for c in index_table().decode {
+            match decode_index(c.doc.as_bytes()) {
+                Ok(entries) => {
+                    assert!(!c.error, "{}: decoded {entries:?}", c.name);
+                    let got: Vec<&str> = entries.iter().map(|e| e.version.as_str()).collect();
+                    assert_eq!(got, c.versions, "{}", c.name);
+                }
+                Err(e) => assert!(c.error, "{}: {e:#}", c.name),
+            }
+        }
+    }
+
+    #[test]
+    fn index_choose_table() {
+        for (i, t) in index_table().choose.into_iter().enumerate() {
+            let entries: Vec<Entry> = t
+                .releases
+                .into_iter()
+                .map(|r| Entry { version: r.version, channel: r.channel, manifest: r.manifest, from: r.from })
+                .collect();
+            for c in t.cases {
+                let got = choose(&entries, &c.current, c.beta);
+                let version = |e: &Option<Entry>| e.as_ref().map(|e| e.version.clone()).unwrap_or_default();
+                assert_eq!(
+                    (version(&got.target), version(&got.newest)),
+                    (c.target.clone(), c.newest.clone()),
+                    "table {i}, {:?} beta={}",
+                    c.current,
+                    c.beta
+                );
+                if !c.manifest.is_empty() {
+                    assert_eq!(got.target.unwrap().manifest, c.manifest, "table {i}, {:?}", c.current);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn channels_are_exact_words() {
+        assert_eq!(Channel::parse("stable"), Some(Channel::Stable));
+        assert_eq!(Channel::parse("beta"), Some(Channel::Beta));
+        for bad in ["", "Beta", "STABLE", " beta", "beta\n", "nightly", "beta\0"] {
+            assert_eq!(Channel::parse(bad), None, "{bad:?}");
+        }
+    }
+
+    /// A GitHub of signed files for find_with: the index, the releases' manifests and
+    /// "latest".
+    struct Files {
+        signer: SigningKey,
+        files: std::cell::RefCell<BTreeMap<String, Vec<u8>>>,
+    }
+
+    impl Files {
+        fn new() -> Self {
+            Files { signer: SigningKey::from_bytes(&[7; 32]), files: Default::default() }
+        }
+        fn put(&self, url: &str, data: Vec<u8>) {
+            let sig = STANDARD.encode(self.signer.sign(&data).to_bytes()).into_bytes();
+            self.files.borrow_mut().insert(format!("{url}.sig"), sig);
+            self.files.borrow_mut().insert(url.to_owned(), data);
+        }
+        fn release(&self, version: &str) -> String {
+            let url = format!("https://github.com/{REPO}/releases/download/v{version}/manifest.json");
+            self.put(&url, manifest(version, "ghcr.io/miroshka000/mikan"));
+            url
+        }
+        /// An index of "version channel from" entries.
+        fn index(&self, entries: &[&str]) {
+            let list: Vec<String> = entries
+                .iter()
+                .map(|e| {
+                    let f: Vec<&str> = e.split(' ').collect();
+                    let url = format!("https://github.com/{REPO}/releases/download/v{}/manifest.json", f[0]);
+                    format!(r#"{{"version":"{}","channel":"{}","from":"{}","manifest":"{url}"}}"#, f[0], f[1], f[2])
+                })
+                .collect();
+            self.put(&index_url(), format!(r#"{{"schema":1,"releases":[{}]}}"#, list.join(",")).into_bytes());
+        }
+        fn find(&self, current: Option<&str>, channel: Channel) -> Result<Found> {
+            let fetch = |url: &str, _limit: u64| -> Result<Option<Vec<u8>>> { Ok(self.files.borrow().get(url).cloned()) };
+            find_with(current, channel, &self.signer.verifying_key(), &fetch)
+        }
+    }
+
+    #[test]
+    fn find_takes_the_index_then_falls_back_to_latest() {
+        let f = Files::new();
+        for v in ["0.4.5", "0.5.0.0", "0.5.0.1", "0.5.0.2-rc.1", "0.6.0.0"] {
+            f.release(v);
+        }
+        let latest = manifest("0.5.0.0", "ghcr.io/miroshka000/mikan");
+        f.put(&latest_url(), latest);
+        f.index(&[
+            "0.4.5 stable 0.4.0",
+            "0.5.0.0 stable 0.4.5",
+            "0.5.0.1 stable 0.4.5",
+            "0.5.0.2-rc.1 beta 0.5.0.0",
+            "0.6.0.0 stable 0.5.0.1",
+        ]);
+        for (current, channel, version, newest, unreachable) in [
+            (Some("0.4.5"), Channel::Stable, "0.5.0.1", Some("0.6.0.0"), false),
+            (Some("0.5.0.0"), Channel::Beta, "0.5.0.2-rc.1", Some("0.6.0.0"), false),
+            (Some("0.5.0.1"), Channel::Stable, "0.6.0.0", None, false),
+            (Some("0.6.0.0"), Channel::Stable, "0.6.0.0", None, false),
+            (Some("0.3.9"), Channel::Stable, "0.6.0.0", Some("0.6.0.0"), true),
+            (None, Channel::Stable, "0.6.0.0", None, false),
+        ] {
+            let got = f.find(current, channel).unwrap();
+            assert_eq!(got.manifest.version, version, "{current:?}");
+            assert_eq!(got.newest.as_deref(), newest, "{current:?}");
+            assert_eq!(got.unreachable, unreachable, "{current:?}");
+            assert!(got.fallback.is_none(), "{current:?}: {:?}", got.fallback);
+        }
+
+        let fallback = |what: &str| {
+            let got = f.find(Some("0.4.5"), Channel::Stable).unwrap();
+            assert_eq!(got.manifest.version, "0.5.0.0", "{what}");
+            assert!(got.fallback.is_some(), "{what}");
+        };
+        // Another key's index.
+        let other = SigningKey::from_bytes(&[9; 32]);
+        let data = f.files.borrow()[&index_url()].clone();
+        f.files.borrow_mut().insert(format!("{}.sig", index_url()), STANDARD.encode(other.sign(&data).to_bytes()).into_bytes());
+        fallback("another key's index");
+        f.put(&index_url(), b"{not json".to_vec());
+        fallback("a malformed index");
+        f.index(&["0.5.0.1 nightly 0.4.5"]);
+        fallback("no release of the channel");
+        f.index(&["0.5.0.1 stable 0.4.5"]);
+        f.put(
+            &format!("https://github.com/{REPO}/releases/download/v0.5.0.1/manifest.json"),
+            manifest("0.5.0.2", "ghcr.io/miroshka000/mikan"),
+        );
+        fallback("a manifest of another version");
+        f.files.borrow_mut().clear();
+        assert!(f.find(Some("0.4.5"), Channel::Stable).is_err(), "nothing at all");
     }
 
     // testdata/versions.json is run by the panel's tests as well (internal/release): both

@@ -171,9 +171,22 @@ pub fn status() -> Result<()> {
     } else {
         crate::out("The panel does not answer: mikan logs panel");
     }
-    match release::latest() {
-        Ok(m) if release::newer(&m.version, &version) => crate::out(&format!("mikan {} is out: mikan update", m.version)),
-        Ok(_) => crate::out("This is the latest release."),
+    match release::find(Some(&version), crate::update::channel(&install)) {
+        Ok(found) => {
+            // Where the answer came from is worth a line only when it is not the index.
+            if let Some(why) = &found.fallback {
+                crate::out(&format!("The release index is unavailable ({why}): the latest release on GitHub answers instead."));
+            }
+            let m = &found.manifest;
+            match &found.newest {
+                Some(newest) if found.unreachable => {
+                    crate::out(&format!("mikan {newest} is out, but this version cannot update to it directly."))
+                }
+                Some(newest) => crate::out(&format!("mikan {newest} is out: mikan update (through mikan {} first)", m.version)),
+                None if release::newer(&m.version, &version) => crate::out(&format!("mikan {} is out: mikan update", m.version)),
+                None => crate::out("This is the latest release."),
+            }
+        }
         Err(e) => crate::out(&format!("Cannot check for updates: {e:#}")),
     }
     Ok(())

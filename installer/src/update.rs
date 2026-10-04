@@ -9,7 +9,9 @@
 //! everything read from there is small, plain-file data and everything written goes through
 //! panelfs (no link followed, no directory trusted):
 //!
-//!   update/policy.json  the panel: {"auto": true} when automatic updates are on
+//!   update/policy.json  the panel: {"auto": true} when automatic updates are on, and
+//!                       "channel": "beta" when it takes pre-releases (only these exact
+//!                       words count; anything else is stable)
 //!   update/request      the panel: its Update button (a path unit starts `update --requested`)
 //!   update/status.json  this: {"state": "running" | "ok" | "failed", "version", "from", "error", "at"}
 
@@ -26,6 +28,7 @@ use crate::envfile::EnvFile;
 use crate::lock::{self, Wait};
 use crate::ops::Install;
 use crate::panelfs::{self, Dir};
+use crate::release::Channel;
 use crate::{DIR, addon, backup, clock, docker, host, net, release, setup, signals};
 
 /// What `mikan update` was asked for.
@@ -88,6 +91,90 @@ pub fn policy_on() -> bool {
 
 fn policy_says_on(data: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(data).is_ok_and(|v| v["auto"] == true)
+}
+
+/// The channel of releases this server takes. A node has no panel on its host: its .env
+/// says (MIKAN_UPDATE_CHANNEL), stable unless it says beta. A panel's comes from the
+/// panel's policy file, which the panel writes and so is not trusted with more than the
+/// two exact words: anything else there, or no file, is stable.
+pub fn channel(install: &Install) -> Channel {
+    if install.node {
+        return install.env.get("MIKAN_UPDATE_CHANNEL").and_then(Channel::parse).unwrap_or(Channel::Stable);
+    }
+    update_dir(false)
+        .ok()
+        .flatten()
+        .and_then(|d| d.read("policy.json", 4096).ok().flatten())
+        .map_or(Channel::Stable, |b| policy_channel(&b))
+}
+
+fn policy_channel(data: &[u8]) -> Channel {
+    serde_json::from_slice::<serde_json::Value>(data)
+        .ok()
+        .and_then(|v| v.get("channel").and_then(|c| c.as_str()).and_then(Channel::parse))
+        .unwrap_or(Channel::Stable)
+}
+
+/// This server's channel; stable on a server mikan is not installed on yet.
+pub fn channel_here() -> Channel {
+    Install::load().map_or(Channel::Stable, |i| channel(&i))
+}
+
+/// How many releases one `mikan update` goes through at most, one after another.
+const MAX_HOPS: u32 = 5;
+
+/// Which hop of an update this command is (0 for the first): set by the update that
+/// started it.
+const HOP_ENV: &str = "MIKAN_UPDATE_HOP";
+
+/// What comes after a hop to a release that is not the newest one.
+#[derive(Debug, PartialEq, Eq)]
+enum After {
+    /// The newest release is here: nothing more.
+    Done,
+    /// The next hop, with its number.
+    Next(u32),
+    /// As many hops as one update makes: the rest waits for the next one.
+    Stop,
+}
+
+/// What comes after hop number hop, when newest is still ahead (None: it is not).
+fn after_hop(newest: Option<&str>, hop: u32) -> After {
+    match newest {
+        None => After::Done,
+        Some(_) if hop + 1 >= MAX_HOPS => After::Stop,
+        Some(_) => After::Next(hop + 1),
+    }
+}
+
+fn hop_number() -> u32 {
+    std::env::var(HOP_ENV).ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+/// Goes on to the next release after a hop. The command on the disk does it: the newer one
+/// when this hop replaced it, so a chain survives each handover to a newer installer. It
+/// chooses again from the version now running, under this command's lock, and tells the
+/// panel how it went itself.
+fn next_hop(newest: Option<&str>, daily: bool, at: &mut Attempt, say: &mut dyn FnMut(&str)) -> Result<()> {
+    let hop = match after_hop(newest, hop_number()) {
+        After::Done => return Ok(()),
+        After::Stop => {
+            say(&format!("mikan {} is out still: run mikan update again to go on.", newest.unwrap_or_default()));
+            return Ok(());
+        }
+        After::Next(n) => n,
+    };
+    say(&format!("mikan {} runs; going on towards mikan {}.", at.version, newest.unwrap_or_default()));
+    let mut child = Command::new(host::BIN);
+    child.arg("update").env(lock::HELD_ENV, "1").env(HOP_ENV, hop.to_string());
+    if daily {
+        child.arg("--auto");
+    }
+    at.handed_off = true;
+    if !child.status()?.success() {
+        bail!("mikan {} runs, the update to the next release did not finish; retry mikan update", at.version);
+    }
+    Ok(())
 }
 
 /// What the panel put at update/request.
@@ -234,6 +321,8 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
     at.from.clone_from(&current);
     at.version.clone_from(&current);
     let mut manifest = None;
+    // The newest release, when this update is a hop on the way to it.
+    let mut ahead = None;
     let (image, version) = match a.target.as_deref() {
         Some(t) if Path::new(t).is_file() => {
             say(&format!("Loading {t}"));
@@ -247,7 +336,21 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
             (t.to_owned(), setup::image_version(t)?)
         }
         None => {
-            let m = release::latest()?;
+            let found = release::find(Some(&current), channel(&install))?;
+            if let Some(why) = &found.fallback {
+                say(&format!("The release index is unavailable ({why}): the latest release on GitHub answers instead."));
+            }
+            let m = found.manifest;
+            if found.unreachable {
+                let newest = found.newest.unwrap_or_default();
+                if a.check {
+                    say(&format!(
+                        "mikan {newest} is out, but mikan {current} cannot update to it directly and no release in between is listed."
+                    ));
+                    return Ok(());
+                }
+                bail!("mikan {newest} is out, but mikan {current} cannot update to it directly and no release in between is listed");
+            }
             if already_current(&m.version, &current, a.check || install.node || docker::panel_healthy()) {
                 say(&format!("mikan {current} is the latest release."));
                 if !a.check && self_update(&m, say) {
@@ -256,12 +359,18 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
                 return Ok(());
             }
             if a.check {
-                say(&format!("mikan {} is out, this server runs {current}.", m.version));
+                match &found.newest {
+                    Some(newest) => {
+                        say(&format!("mikan {newest} is out, this server runs {current}: it updates through mikan {} first.", m.version))
+                    }
+                    None => say(&format!("mikan {} is out, this server runs {current}.", m.version)),
+                }
                 if let Some(notes) = m.notes.get("en") {
                     say(notes);
                 }
                 return Ok(());
             }
+            ahead = found.newest;
             say(&format!("Updating mikan {current} → {}", m.version));
             at.version.clone_from(&m.version);
             at.started = true;
@@ -305,7 +414,7 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
             if !status.success() {
                 bail!("the upgraded installer could not finish the update; retry mikan update");
             }
-            return Ok(());
+            return next_hop(ahead.as_deref(), daily, at, say);
         }
         if !m.min_installer.is_empty() && release::newer(&m.min_installer, crate::version()) {
             bail!(
@@ -431,7 +540,7 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
     } else if let Err(e) = host::install_units(!install.node) {
         say(&format!("No automatic updates: {e:#}"));
     }
-    Ok(())
+    next_hop(ahead.as_deref(), daily, at, say)
 }
 
 /// Retry an unhealthy release with the same version, but never turn a stale signed
@@ -766,6 +875,128 @@ mod tests {
         }
         assert!(go.contains("enum:\"running,ok,failed\""));
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    // The panel writes the channel; only the two exact words get through, and nothing the
+    // panel plants instead of the file (a link, a FIFO, a huge file) is followed or waited for.
+    #[test]
+    fn the_channel_from_the_panel_is_untrusted() {
+        for (body, want) in [
+            (r#"{"auto":true,"channel":"beta"}"#, Channel::Beta),
+            (r#"{"auto":true,"channel":"stable"}"#, Channel::Stable),
+            (r#"{"auto":true}"#, Channel::Stable),
+            (r#"{"channel":"Beta"}"#, Channel::Stable),
+            (r#"{"channel":"beta "}"#, Channel::Stable),
+            (r#"{"channel":["beta"]}"#, Channel::Stable),
+            (r#"{"channel":true}"#, Channel::Stable),
+            (r#"{"channel":"nightly"}"#, Channel::Stable),
+            (r#"{"channel":"stable","channel":"beta"}"#, Channel::Beta),
+            ("not json", Channel::Stable),
+            ("", Channel::Stable),
+        ] {
+            assert_eq!(policy_channel(body.as_bytes()), want, "{body}");
+        }
+        let d = tmpdir("channel");
+        let dir = open(&d);
+        let read = |dir: &Dir| dir.read("policy.json", 4096).ok().flatten().map_or(Channel::Stable, |b| policy_channel(&b));
+        fs::write(d.join("beta.json"), r#"{"channel":"beta"}"#).unwrap();
+        symlink(d.join("beta.json"), d.join("policy.json")).unwrap();
+        assert_eq!(read(&dir), Channel::Stable, "a link is no policy");
+        fs::remove_file(d.join("policy.json")).unwrap();
+        fs::write(d.join("policy.json"), format!(r#"{{"channel":"beta","x":"{}"}}"#, "x".repeat(8192))).unwrap();
+        assert_eq!(read(&dir), Channel::Stable, "a file larger than the panel writes");
+        fs::remove_file(d.join("policy.json")).unwrap();
+        rustix::fs::mknodat(rustix::fs::CWD, d.join("policy.json"), rustix::fs::FileType::Fifo, rustix::fs::Mode::from_raw_mode(0o600), 0)
+            .unwrap();
+        assert_eq!(read(&dir), Channel::Stable, "a FIFO is not waited for");
+        fs::remove_file(d.join("policy.json")).unwrap();
+        fs::write(d.join("policy.json"), r#"{"auto":false,"channel":"beta"}"#).unwrap();
+        assert_eq!(read(&dir), Channel::Beta);
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    // A node has no panel: its .env says, stable unless it says beta exactly.
+    #[test]
+    fn a_node_takes_its_channel_from_its_env() {
+        let node = |env: &str| Install { env: EnvFile::from_text("x", &format!("MIKAN_MODE=node\n{env}")), node: true };
+        assert_eq!(channel(&node("")), Channel::Stable);
+        assert_eq!(channel(&node("MIKAN_UPDATE_CHANNEL=beta\n")), Channel::Beta);
+        assert_eq!(channel(&node("MIKAN_UPDATE_CHANNEL=Beta\n")), Channel::Stable);
+    }
+
+    #[test]
+    fn hops_are_bounded() {
+        assert_eq!(after_hop(None, 0), After::Done);
+        assert_eq!(after_hop(Some("0.6.0.0"), 0), After::Next(1));
+        assert_eq!(after_hop(Some("0.6.0.0"), MAX_HOPS - 2), After::Next(MAX_HOPS - 1));
+        assert_eq!(after_hop(Some("0.6.0.0"), MAX_HOPS - 1), After::Stop);
+        assert_eq!(after_hop(None, MAX_HOPS + 3), After::Done);
+    }
+
+    /// A GitHub of signed files: the releases' manifests, the index and "latest".
+    fn signed_files(signer: &ed25519_dalek::SigningKey, releases: &[&str], index: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
+        use base64::Engine;
+        use ed25519_dalek::Signer;
+        let mut files = std::collections::BTreeMap::new();
+        let mut put = |url: String, data: Vec<u8>| {
+            let sig = base64::engine::general_purpose::STANDARD.encode(signer.sign(&data).to_bytes());
+            files.insert(format!("{url}.sig"), sig.into_bytes());
+            files.insert(url, data);
+        };
+        for v in releases {
+            let body = format!(
+                r#"{{"version":"{v}","published":"2026-10-04T10:00:00Z","image":"ghcr.io/miroshka000/mikan","digest":"sha256:{}","installer":{{}}}}"#,
+                "a".repeat(64)
+            );
+            put(format!("https://github.com/{}/releases/download/v{v}/manifest.json", release::REPO), body.into_bytes());
+        }
+        put(release::index_url(), index.as_bytes().to_vec());
+        files
+    }
+
+    // The chain the hops make, each choosing again from the version the last one left
+    // (as the command on the disk does after a handover): 0.4.4 goes through 0.4.5 and
+    // 0.5.0.1 to 0.6.0.0, and a chain longer than MAX_HOPS stops for the next update.
+    #[test]
+    fn hop_by_hop_to_the_newest() {
+        let signer = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let entry = |v: &str, from: &str| {
+            format!(
+                r#"{{"version":"{v}","channel":"stable","from":"{from}","manifest":"https://github.com/{}/releases/download/v{v}/manifest.json"}}"#,
+                release::REPO
+            )
+        };
+        let chain = |releases: &[(&str, &str)]| -> (Vec<String>, After) {
+            let list: Vec<String> = releases.iter().map(|(v, from)| entry(v, from)).collect();
+            let versions: Vec<&str> = releases.iter().map(|(v, _)| *v).collect();
+            let files = signed_files(&signer, &versions, &format!(r#"{{"schema":1,"releases":[{}]}}"#, list.join(",")));
+            let fetch = |url: &str, _: u64| -> Result<Option<Vec<u8>>> { Ok(files.get(url).cloned()) };
+            let mut current = "0.4.4".to_owned();
+            let mut went = Vec::new();
+            for hop in 0.. {
+                let found = release::find_with(Some(&current), Channel::Stable, &signer.verifying_key(), &fetch).unwrap();
+                assert!(found.fallback.is_none(), "{:?}", found.fallback);
+                if !release::newer(&found.manifest.version, &current) {
+                    return (went, After::Done);
+                }
+                current.clone_from(&found.manifest.version);
+                went.push(current.clone());
+                match after_hop(found.newest.as_deref(), hop) {
+                    After::Next(n) => assert_eq!(n, hop + 1),
+                    other => return (went, other),
+                }
+            }
+            unreachable!()
+        };
+        let (went, end) = chain(&[("0.4.5", "0.4.0"), ("0.5.0.0", "0.4.5"), ("0.5.0.1", "0.4.5"), ("0.6.0.0", "0.5.0.1")]);
+        assert_eq!(went, ["0.4.5", "0.5.0.1", "0.6.0.0"]);
+        assert_eq!(end, After::Done);
+        let steps: Vec<String> = (0..8).map(|i| format!("0.4.{}", 5 + i)).collect();
+        let long: Vec<(&str, &str)> =
+            steps.iter().enumerate().map(|(i, v)| (v.as_str(), if i == 0 { "0.4.0" } else { steps[i - 1].as_str() })).collect();
+        let (went, end) = chain(&long);
+        assert_eq!(went.len() as u32, MAX_HOPS, "{went:?}");
+        assert_eq!(end, After::Stop);
     }
 
     #[test]

@@ -4,7 +4,11 @@ name: release
 #   - the image to GitHub Packages (ghcr.io/<owner>/mikan), amd64 and arm64;
 #   - the installer for x86_64 and aarch64;
 #   - manifest.json signed with the release key (RELEASE_SIGNING_KEY), which the panel's
-#     update check and the installer trust, and install.sh for the one-line install.
+#     update check and the installer trust, and install.sh for the one-line install;
+#   - the release's entry in the signed release index (index.json on the "updates"
+#     pre-release), where updaters look first; "from" comes from .github/upgrade-from.
+# A stable manifest must pass the legacy contract (mikan-release legacy-check) before it
+# is published: mikan 0.4.5 and 0.5.0.0 read "latest" and nothing else.
 # The image is pushed under its version only; :latest moves to it after the release is
 # published (job latest), so a failed installer build or signature leaves :latest where it
 # was. A pre-release tag (vX.Y.Z.R-rc.N) is published as a pre-release and does not move it.
@@ -189,6 +193,10 @@ jobs:
   publish:
     needs: [image, installer]
     runs-on: ubuntu-24.04
+    # One release at a time writes the index: the second waits and carries the first on.
+    concurrency:
+      group: release-index
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
@@ -213,6 +221,12 @@ jobs:
             -asset x86_64=dist/mikan-x86_64 -asset aarch64=dist/mikan-aarch64 \
             -min-installer-file .github/min-installer -out dist
           go run ./cmd/mikan-release verify dist/manifest.json
+          # A stable release becomes "latest", which mikan 0.4.5 and 0.5.0.0 read for as
+          # long as they run: one they would refuse stops here, before it is published.
+          case "$GITHUB_REF_NAME" in
+            *-*) ;;
+            *) go run ./cmd/mikan-release legacy-check dist/manifest.json ;;
+          esac
           cp installer/install.sh dist/install.sh
       - name: release
         env:
@@ -222,6 +236,37 @@ jobs:
           case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" $pre --verify-tag --title "mikan ${GITHUB_REF_NAME#v}" --notes-file dist/notes.md \
             dist/install.sh dist/mikan-x86_64 dist/mikan-aarch64 dist/manifest.json dist/manifest.json.sig
+      # The release index (internal/release/index.go) lives on the "updates" pre-release,
+      # which never becomes "latest". The current index is carried on only with a valid
+      # signature; when there is none yet, it starts from the releases before it. A
+      # pre-release goes in as beta and leaves "latest" alone.
+      - name: index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/updates" --jq '[.assets[].name] | join(" ")' 2>"$RUNNER_TEMP/err"); then
+            :
+          elif grep -q 'HTTP 404' "$RUNNER_TEMP/err"; then
+            # Never made yet; a creation that fails (it exists after all) stops the job
+            # before anything is overwritten.
+            gh release create updates --prerelease --latest=false --target main --title "Release index" \
+              --notes "The signed list of releases the mikan updaters read. Not a release: nothing to install here."
+            assets=""
+          else
+            cat "$RUNNER_TEMP/err" >&2
+            exit 1
+          fi
+          case " $assets " in
+            *" index.json "*)
+              gh release download updates -p index.json -p index.json.sig -D updates
+              current="-in updates/index.json" ;;
+            *) current="-seed" ;;
+          esac
+          # shellcheck disable=SC2086 # $current is two words or one
+          go run ./cmd/mikan-release index -version "$version" -from-file .github/upgrade-from $current -out dist
+          gh release upload updates dist/index.json dist/index.json.sig --clobber
 
   # :latest names the image of the newest published release: it moves only once the
   # release exists, and never to a pre-release. The tag points at the pushed digest, so

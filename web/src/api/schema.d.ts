@@ -1095,7 +1095,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Включить или выключить автообновление */
+        /** Автообновление и канал релизов */
         patch: operations["update-updates"];
         trace?: never;
     };
@@ -1520,7 +1520,7 @@ export interface components {
             new: string;
             old: string;
             /** @enum {string} */
-            reason: "blocked" | "target_down" | "still_blocked";
+            reason: "blocked" | "target_down" | "still_blocked" | "busy";
         };
         AutoView: {
             /**
@@ -2060,6 +2060,7 @@ export interface components {
             total: number;
         };
         ListenerStatus: {
+            code?: string;
             error?: string;
             name: string;
             ok: boolean;
@@ -2386,6 +2387,8 @@ export interface components {
         };
         PatchUpdatesInputBody: {
             auto?: boolean;
+            /** @enum {string} */
+            channel?: "stable" | "beta";
         };
         PatchUserInputBody: {
             /**
@@ -3099,6 +3102,11 @@ export interface components {
             /** @description Вышла версия новее этой */
             available: boolean;
             /**
+             * @description Какие релизы ставить: stable — только релизы, beta — и пре-релизы (vX-rc.N)
+             * @enum {string}
+             */
+            channel: "stable" | "beta";
+            /**
              * Format: int64
              * @description Unix-время последней проверки; 0 — ещё не проверяли
              */
@@ -3110,6 +3118,8 @@ export interface components {
             host?: components["schemas"]["HostStatus"];
             /** @description Последний релиз; пусто, пока проверки не было */
             latest: string;
+            /** @description Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто */
+            newest: string;
             /** @description Что изменилось: markdown по языкам, en и ru */
             notes: {
                 [key: string]: string;
@@ -3121,6 +3131,8 @@ export interface components {
              * @description Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял
              */
             requested_at: number;
+            /** @description Вышел newest, но с этой версии к нему не ведёт ни одно обновление */
+            unreachable: boolean;
         };
         UserCounts: {
             /** Format: int64 */

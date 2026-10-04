@@ -363,7 +363,9 @@
       "promo_invalid_value": "Promo code settings are invalid",
       "promo_late_refund_failed": "A late promo payment could not be refunded automatically. Check the provider and refund it manually if needed.",
       "bad_value": "Value must be positive and limits/lifetimes cannot be negative",
-      "bad_tariff_ids": "Tariff IDs must be positive numbers"
+      "bad_tariff_ids": "Tariff IDs must be positive numbers",
+      "speed_test_busy": "A speed test is already running on this node",
+      "node_too_old": "The node's version is too old for this: update the node"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -1906,5 +1908,23 @@
       "released": "released"
     },
     "telegramId": "Telegram ID"
+  },
+  "speed": {
+    "button": "Speed",
+    "title": "Speed test",
+    "intro": "The node's own way to the internet: latency, jitter and loss of 20 DNS queries to 1.1.1.1, then download and upload through speed.cloudflare.com, 8 seconds each. Takes about 20 seconds and a few tens of megabytes of the node's traffic.",
+    "run": "Run the test",
+    "running": "Testing…",
+    "none": "No tests yet.",
+    "latest": "Last test, {date}",
+    "history": "History",
+    "when": "When",
+    "ping": "Ping",
+    "jitter": "Jitter",
+    "loss": "Loss",
+    "down": "Download",
+    "up": "Upload",
+    "ms": "{n} ms",
+    "broke": "The test broke off: {error}"
   }
 }

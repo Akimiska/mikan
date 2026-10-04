@@ -364,3 +364,16 @@ type PoolQuota struct {
 	Pool      string `json:"pool"`
 	Remaining int64  `json:"remaining"` // bytes; -1 = unlimited
 }
+
+// SpeedTest is the node's own way to the internet (POST /v1/speedtest): latency, jitter
+// and loss of small UDP DNS queries, then download and upload against a speed test
+// server. A test that broke off keeps what it measured and says where in Error.
+type SpeedTest struct {
+	At       time.Time `json:"at"`
+	PingMs   float64   `json:"ping_ms" doc:"Медиана задержки, мс; -1 — ответов не было"`
+	JitterMs float64   `json:"jitter_ms" doc:"Средний разброс задержки, мс"`
+	LossPct  float64   `json:"loss_pct" doc:"Потери, %"`
+	DownBps  int64     `json:"down_bps" doc:"Загрузка, бит/с"`
+	UpBps    int64     `json:"up_bps" doc:"Отдача, бит/с"`
+	Error    string    `json:"error,omitempty"`
+}

@@ -31,6 +31,7 @@ export const qk = {
   promocodes: ["promocodes"] as const,
   promocodeRedemptions: ["promocodes", "redemptions"] as const,
   userGrants: (id: number) => ["users", "grants", id] as const,
+  speedTests: (node: number) => ["speedtests", node] as const,
 };
 
 export const meQuery = {

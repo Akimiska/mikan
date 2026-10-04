@@ -154,6 +154,14 @@ func (c *Client) RequestUpdate(ctx context.Context, version string) error {
 	return c.do(ctx, http.MethodPost, "/v1/update", UpdateRequest{Version: version}, nil, 10*time.Second)
 }
 
+// SpeedTest runs the node's speed test, about twenty seconds. Nodes that predate it
+// answer 404; one running a test answers 409 speed_test_busy.
+func (c *Client) SpeedTest(ctx context.Context) (SpeedTest, error) {
+	var r SpeedTest
+	err := c.do(ctx, http.MethodPost, "/v1/speedtest", nil, &r, 90*time.Second)
+	return r, err
+}
+
 func (c *Client) Activity(ctx context.Context) (Activity, error) {
 	var r Activity
 	err := c.do(ctx, http.MethodGet, "/v1/activity", nil, &r, 10*time.Second)

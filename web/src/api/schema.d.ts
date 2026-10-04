@@ -586,6 +586,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/speedtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Проверить скорость ноды
+         * @description Задержка, разброс и потери по 20 DNS-запросам к 1.1.1.1, затем загрузка и отдача через speed.cloudflare.com, по 8 секунд. Занимает около 20 секунд и тратит десятки мегабайт трафика ноды; одновременно на ноде идёт один тест.
+         */
+        post: operations["run-node-speedtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/speedtests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * История проверок скорости ноды
+         * @description Новые сверху; хранятся последние 100.
+         */
+        get: operations["list-node-speedtests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/update": {
         parameters: {
             query?: never;
@@ -2886,6 +2926,39 @@ export interface components {
             sub_rules: string;
             support_url: string;
         };
+        SpeedTestView: {
+            /** Format: date-time */
+            at: string;
+            /**
+             * Format: int64
+             * @description Загрузка, бит/с
+             */
+            down_bps: number;
+            /** @description Где тест оборвался; измеренное до того сохранено */
+            error?: string;
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: double
+             * @description Средний разброс задержки, мс
+             */
+            jitter_ms: number;
+            /**
+             * Format: double
+             * @description Потери, %
+             */
+            loss_pct: number;
+            /**
+             * Format: double
+             * @description Медиана задержки, мс; -1 — ответов не было
+             */
+            ping_ms: number;
+            /**
+             * Format: int64
+             * @description Отдача, бит/с
+             */
+            up_bps: number;
+        };
         Status: {
             /** Format: date-time */
             checked_at: string;
@@ -4663,6 +4736,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "run-node-speedtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeedTestView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-node-speedtests": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeedTestView"][];
                 };
             };
             /** @description Error */

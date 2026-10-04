@@ -2522,6 +2522,8 @@ export interface components {
             sub_routing?: "ru_direct" | "all";
             /** @description Свои правила Clash, до 500 строк; ошибка указывает номер строки */
             sub_rules?: string;
+            /** @description Переменные — см. SettingsView.sub_title */
+            sub_title?: string;
             /** @description https://… или tg://… */
             support_url?: string;
         };
@@ -2974,7 +2976,7 @@ export interface components {
             quiet_hour_utc: number;
             /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
             rule_targets: string[];
-            /** @description Объявление над профилем в приложениях (заголовок announce); пусто — нет */
+            /** @description Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title */
             sub_announce: string;
             /** @description Куда ведёт нажатие на объявление */
             sub_announce_url: string;
@@ -2997,6 +2999,8 @@ export interface components {
             sub_routing: "ru_direct" | "all";
             /** @description Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий */
             sub_rules: string;
+            /** @description Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего; без срока или лимита — ∞ */
+            sub_title: string;
             support_url: string;
         };
         SpeedTestView: {

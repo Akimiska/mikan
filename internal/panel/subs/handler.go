@@ -31,6 +31,9 @@ import (
 type Config struct {
 	Brand      string
 	SupportURL string
+	// Title is the profile's name in the apps (Profile-Title); "" names it Brand. Title and
+	// Announce may hold TitleVars, filled for each user.
+	Title string
 	// Announce is the text apps show over the profile, AnnounceURL where a tap on it leads.
 	Announce    string
 	AnnounceURL string
@@ -187,7 +190,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg)
+	// The values are worked out only when a title or an announcement can use them.
+	var vars map[string]string
+	if cfg.Title != "" || cfg.Announce != "" {
+		vars = titleValues(u, grants.Main(u.ID), cfg, h.now())
+		if cfg.Announce != "" {
+			cfg.Announce = fillTitle(cfg.Announce, vars)
+		}
+	}
+	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg, vars)
 	h.operatorHeaders(w, r, u, cfg)
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodHead {
@@ -697,7 +708,7 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 
 // userInfoHeaders: the traffic and term apps show. With traffic packages left the total
 // is what the user can reach: what is used plus what is left.
-func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64, cfg Config) {
+func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64, cfg Config, vars map[string]string) {
 	var total, expire int64
 	if u.TrafficLimit.Valid {
 		total = u.TrafficLimit.Int64
@@ -713,7 +724,7 @@ func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64
 		"; total="+strconv.FormatInt(total, 10)+"; expire="+strconv.FormatInt(expire, 10))
 	// Hourly: a port or target the panel changed on its own reaches clients soon.
 	hd.Set("Profile-Update-Interval", "1")
-	hd.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(cfg.Brand)))
+	hd.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(profileTitle(cfg, vars))))
 	if cfg.SupportURL != "" {
 		hd.Set("Support-Url", cfg.SupportURL)
 	}

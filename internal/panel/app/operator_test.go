@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/base64"
 	"net/http"
 	"strings"
 	"testing"
@@ -72,6 +73,36 @@ func TestOperatorHeadersOverHTTP(t *testing.T) {
 	}
 	if !strings.HasPrefix(hd.Get("Announce"), "base64:") {
 		t.Errorf("announce: %q", hd.Get("Announce"))
+	}
+
+	decode := func(v string) string {
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(v, "base64:"))
+		if err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+		return string(raw)
+	}
+	// The title and the announcement with variables: filled per user; a {word} that is no
+	// variable saves and stays as text, so an old announcement does not block the card.
+	if resp, body := h.do(http.MethodPatch, api, map[string]any{"sub_title": "{brand} {nmae}", "sub_announce": "Работы {ночью}"}, csrf); resp.StatusCode != http.StatusOK {
+		t.Fatalf("an unknown variable must save: %d %s", resp.StatusCode, body)
+	}
+	hd = fetch()
+	if got := decode(hd.Get("Profile-Title")); got != "Mikan {nmae}" {
+		t.Errorf("unknown variable stays text: %q", got)
+	}
+	if got := decode(hd.Get("Announce")); got != "Работы {ночью}" {
+		t.Errorf("announce keeps its text: %q", got)
+	}
+	if resp, body := h.do(http.MethodPatch, api, map[string]any{"sub_title": "{brand} · {name}", "sub_announce": "Осталось {left} до {date}"}, csrf); resp.StatusCode != http.StatusOK {
+		t.Fatalf("save the title: %d %s", resp.StatusCode, body)
+	}
+	hd = fetch()
+	if got := decode(hd.Get("Profile-Title")); got != "Mikan · a" {
+		t.Errorf("title: %q", got)
+	}
+	if got := decode(hd.Get("Announce")); !strings.HasPrefix(got, "Осталось ") || strings.Contains(got, "{") {
+		t.Errorf("announce: %q", got)
 	}
 
 	// With nothing to serve the app gets the stub, which is not about devices: v2RayTun

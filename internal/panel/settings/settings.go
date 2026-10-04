@@ -56,6 +56,8 @@ const (
 	// for maintenance or news; empty: none.
 	KeyAnnounce    = "sub_announce"
 	KeyAnnounceURL = "sub_announce_url"
+	// KeySubTitle is the profile's name in the apps (subs.Config.Title); empty: the brand.
+	KeySubTitle = "sub_title"
 	// App branding: the brand, logo and accent colour go to the apps that read operator
 	// headers (subs.OperatorHeaders); off by default.
 	KeyAppBranding = "app_branding"

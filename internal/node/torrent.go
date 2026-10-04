@@ -53,6 +53,14 @@ func (r *Registry) SetTorrent(cfg *nodeapi.TorrentBlock) {
 		cfg = &c
 	}
 	r.torrentCfg.Store(cfg)
+	if cfg == nil {
+		// Off: nothing is held out any more, the node's own short bans included.
+		r.mu.RLock()
+		for _, s := range r.byName {
+			s.localBan.Store(0)
+		}
+		r.mu.RUnlock()
+	}
 }
 
 // torrentWatch says whether the slot's traffic is to be looked at.
@@ -77,7 +85,9 @@ func (r *Registry) caught(s *slot, ip, inName, network, kind, dest string) {
 	now := r.now()
 	hit := nodeapi.TorrentHit{Slot: s.name, IP: ip, Inbound: inName, Network: network, Kind: kind, Dest: dest,
 		At: now.Unix(), Count: 1}
-	if cfg.BanSeconds > 0 {
+	// An HTTP tracker line is plain text: a web page can make the victim's browser send one,
+	// so it is dropped and reported but never bans by itself. The panel bans on repeats.
+	if cfg.BanSeconds > 0 && !(network == "tcp" && kind == nodeapi.TorrentTracker) {
 		hit.BannedUntil = now.Unix() + cfg.BanSeconds
 		s.localBan.Store(now.Add(min(torrentLocalBan, time.Duration(cfg.BanSeconds)*time.Second)).Unix())
 		s.mu.Lock()

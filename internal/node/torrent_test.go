@@ -154,6 +154,71 @@ func TestTorrentBanAndHits(t *testing.T) {
 	}
 }
 
+// A ban the admin lifted in the panel also ends the node's own short ban: the slot is let
+// back in at once, not after torrentLocalBan.
+func TestTorrentLiftClearsLocalBan(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	r := torrentRegistry(&now, 3600)
+	s1 := r.admit("u1", "vless", "203.0.113.1", false)
+	r.caught(s1, "203.0.113.1", "vless", "tcp", nodeapi.TorrentHandshake, "198.51.100.9:6881")
+	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, BannedUntil: now.Unix() + 3600}})
+	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+		t.Fatal("caught and banned by the panel")
+	}
+	now = now.Add(10 * time.Second)
+	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
+	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+		t.Fatal("a lifted ban must not leave the node's local ban holding")
+	}
+
+	// A policy push before the panel has read the catch must not undo the local ban.
+	now = now.Add(time.Minute)
+	s1 = r.admit("u1", "vless", "203.0.113.1", false)
+	r.caught(s1, "203.0.113.1", "vless", "tcp", nodeapi.TorrentHandshake, "198.51.100.9:6881")
+	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
+	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+		t.Fatal("no ban was lifted: the local ban holds")
+	}
+}
+
+// Switched off, the blocker lets the slot in at once, the node's own ban included.
+func TestTorrentOffClearsLocalBan(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	r := torrentRegistry(&now, 3600)
+	s1 := r.admit("u1", "vless", "203.0.113.1", false)
+	r.caught(s1, "203.0.113.1", "vless", "udp", nodeapi.TorrentDHT, "198.51.100.9:6881")
+	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+		t.Fatal("caught")
+	}
+	r.SetTorrent(nil)
+	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+		t.Fatal("the blocker is off: the local ban must go")
+	}
+}
+
+// An HTTP tracker line is plain text a web page can make the victim's browser send, so it
+// is dropped and reported but bans nothing on the node; the panel bans on repeats.
+func TestTorrentHTTPTrackerNoLocalBan(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	r := torrentRegistry(&now, 3600)
+	s1 := r.admit("u1", "vless", "203.0.113.1", false)
+	r.caught(s1, "203.0.113.1", "vless", "tcp", nodeapi.TorrentTracker, "198.51.100.9:80")
+	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+		t.Fatal("one HTTP tracker line must not keep the slot out")
+	}
+	h := r.TorrentHits("", 0).Hits
+	if len(h) != 1 || h[0].Kind != nodeapi.TorrentTracker || h[0].BannedUntil != 0 {
+		t.Fatalf("the line is still reported, without a ban: %+v", h)
+	}
+
+	// A UDP tracker connect cannot be forged by a browser: it bans at once.
+	now = now.Add(time.Minute)
+	r.caught(s1, "203.0.113.1", "vless", "udp", nodeapi.TorrentTracker, "198.51.100.9:6969")
+	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+		t.Fatal("a UDP tracker connect bans at once")
+	}
+}
+
 func TestTorrentWithoutBanOnlyDrops(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	r := torrentRegistry(&now, 0)

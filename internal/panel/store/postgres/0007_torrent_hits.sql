@@ -17,6 +17,8 @@ CREATE TABLE torrent_hits (
 );
 CREATE INDEX torrent_hits_at ON torrent_hits (at DESC, id DESC);
 CREATE INDEX torrent_hits_user ON torrent_hits (user_id, at DESC);
+-- ActiveTorrentBans: the rows whose ban is still running, found without reading the whole log.
+CREATE INDEX torrent_hits_active ON torrent_hits (banned_until) WHERE lifted_at IS NULL;
 
 -- +goose Down
 DROP TABLE torrent_hits;

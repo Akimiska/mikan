@@ -38,3 +38,9 @@ SELECT COALESCE(max(id), 0)::BIGINT FROM torrent_hits;
 
 -- name: PruneTorrentHits :exec
 DELETE FROM torrent_hits WHERE at < $1 AND banned_until < $1;
+
+-- name: TorrentTrackerCatches :one
+-- How many HTTP tracker lines (TCP) a user was caught with since a time; a hit counts as
+-- many as it stands for.
+SELECT COALESCE(sum(hits), 0)::BIGINT AS catches FROM torrent_hits
+WHERE user_id = $1 AND network = 'tcp' AND kind = 'tracker' AND at > $2;

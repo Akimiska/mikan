@@ -398,7 +398,10 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, others[name])
 			p.Pools = pools[u.ID]
 			p.TorrentExempt = snap.torrent.IsExempt(u.ID)
-			p.BannedUntil = snap.bans[u.ID]
+			if !p.TorrentExempt {
+				// A user added to the exemptions after a catch is let in at once.
+				p.BannedUntil = snap.bans[u.ID]
+			}
 			out = append(out, p)
 		}
 	}

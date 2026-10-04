@@ -149,6 +149,12 @@ func (r *Registry) SetPolicies(epoch string, list []nodeapi.Policy) {
 		s.exhausted = false
 		s.quotaOn.Store(false)
 		s.torrentExempt.Store(ok && p.TorrentExempt)
+		now := r.now().Unix()
+		// A ban the panel held and no longer does was lifted there: the node's own short ban
+		// for the same catch goes with it.
+		if s.policyBan.Load() > now && (!ok || p.BannedUntil <= now) {
+			s.localBan.Store(0)
+		}
 		s.policyBan.Store(0)
 		if ok {
 			s.policyBan.Store(p.BannedUntil)

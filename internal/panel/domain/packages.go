@@ -115,14 +115,28 @@ func (s *Packages) Archive(ctx context.Context, id int64) error {
 }
 
 // PackageFits: the package adds to a quota the user has. Unlimited traffic (the main or a
-// pool's) never uses grants, so packages for it are not offered.
+// pool's) never uses grants, so packages for it are not offered, and nothing is sold for a
+// pool closed on the user's tariff, whatever its limit row holds.
 func PackageFits(u db.User, pools []db.UserPool, p db.TrafficPackage) bool {
 	if !p.PoolID.Valid {
 		return u.TrafficLimit.Valid
 	}
 	for _, up := range pools {
 		if up.PoolID == p.PoolID.Int64 {
-			return up.TrafficLimit.Valid
+			return !up.Excluded && up.TrafficLimit.Valid
+		}
+	}
+	return false
+}
+
+// PackagePoolClosed: the package is for a pool that is closed for the user.
+func PackagePoolClosed(pools []db.UserPool, p db.TrafficPackage) bool {
+	if !p.PoolID.Valid {
+		return false
+	}
+	for _, up := range pools {
+		if up.PoolID == p.PoolID.Int64 {
+			return up.Excluded
 		}
 	}
 	return false

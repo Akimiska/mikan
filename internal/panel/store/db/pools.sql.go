@@ -11,17 +11,23 @@ import (
 )
 
 const addTariffPool = `-- name: AddTariffPool :exec
-INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit) VALUES ($1, $2, $3)
+INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4)
 `
 
 type AddTariffPoolParams struct {
 	TariffID     int64
 	PoolID       int64
 	TrafficLimit int64
+	Excluded     bool
 }
 
 func (q *Queries) AddTariffPool(ctx context.Context, arg AddTariffPoolParams) error {
-	_, err := q.db.ExecContext(ctx, addTariffPool, arg.TariffID, arg.PoolID, arg.TrafficLimit)
+	_, err := q.db.ExecContext(ctx, addTariffPool,
+		arg.TariffID,
+		arg.PoolID,
+		arg.TrafficLimit,
+		arg.Excluded,
+	)
 	return err
 }
 
@@ -57,7 +63,7 @@ func (q *Queries) ClearTariffPools(ctx context.Context, tariffID int64) error {
 }
 
 const clearUserPoolLimits = `-- name: ClearUserPoolLimits :exec
-UPDATE user_pools SET traffic_limit = NULL WHERE user_id = $1
+UPDATE user_pools SET traffic_limit = NULL, excluded = false WHERE user_id = $1
 `
 
 func (q *Queries) ClearUserPoolLimits(ctx context.Context, userID int64) error {
@@ -105,7 +111,7 @@ func (q *Queries) GetTrafficPool(ctx context.Context, id int64) (TrafficPool, er
 }
 
 const listAllTariffPools = `-- name: ListAllTariffPools :many
-SELECT tariff_id, pool_id, traffic_limit FROM tariff_pools ORDER BY tariff_id, pool_id
+SELECT tariff_id, pool_id, traffic_limit, excluded FROM tariff_pools ORDER BY tariff_id, pool_id
 `
 
 func (q *Queries) ListAllTariffPools(ctx context.Context) ([]TariffPool, error) {
@@ -117,7 +123,12 @@ func (q *Queries) ListAllTariffPools(ctx context.Context) ([]TariffPool, error) 
 	items := []TariffPool{}
 	for rows.Next() {
 		var i TariffPool
-		if err := rows.Scan(&i.TariffID, &i.PoolID, &i.TrafficLimit); err != nil {
+		if err := rows.Scan(
+			&i.TariffID,
+			&i.PoolID,
+			&i.TrafficLimit,
+			&i.Excluded,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -132,7 +143,7 @@ func (q *Queries) ListAllTariffPools(ctx context.Context) ([]TariffPool, error) 
 }
 
 const listAllUserPools = `-- name: ListAllUserPools :many
-SELECT user_id, pool_id, traffic_limit, used_up, used_down FROM user_pools ORDER BY user_id, pool_id
+SELECT user_id, pool_id, traffic_limit, used_up, used_down, excluded FROM user_pools ORDER BY user_id, pool_id
 `
 
 func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
@@ -150,6 +161,7 @@ func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
 			&i.TrafficLimit,
 			&i.UsedUp,
 			&i.UsedDown,
+			&i.Excluded,
 		); err != nil {
 			return nil, err
 		}
@@ -165,7 +177,7 @@ func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
 }
 
 const listTariffPools = `-- name: ListTariffPools :many
-SELECT tariff_id, pool_id, traffic_limit FROM tariff_pools WHERE tariff_id = $1 ORDER BY pool_id
+SELECT tariff_id, pool_id, traffic_limit, excluded FROM tariff_pools WHERE tariff_id = $1 ORDER BY pool_id
 `
 
 func (q *Queries) ListTariffPools(ctx context.Context, tariffID int64) ([]TariffPool, error) {
@@ -177,7 +189,12 @@ func (q *Queries) ListTariffPools(ctx context.Context, tariffID int64) ([]Tariff
 	items := []TariffPool{}
 	for rows.Next() {
 		var i TariffPool
-		if err := rows.Scan(&i.TariffID, &i.PoolID, &i.TrafficLimit); err != nil {
+		if err := rows.Scan(
+			&i.TariffID,
+			&i.PoolID,
+			&i.TrafficLimit,
+			&i.Excluded,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -219,7 +236,7 @@ func (q *Queries) ListTrafficPools(ctx context.Context) ([]TrafficPool, error) {
 }
 
 const listUserPools = `-- name: ListUserPools :many
-SELECT user_id, pool_id, traffic_limit, used_up, used_down FROM user_pools WHERE user_id = $1 ORDER BY pool_id
+SELECT user_id, pool_id, traffic_limit, used_up, used_down, excluded FROM user_pools WHERE user_id = $1 ORDER BY pool_id
 `
 
 func (q *Queries) ListUserPools(ctx context.Context, userID int64) ([]UserPool, error) {
@@ -237,6 +254,7 @@ func (q *Queries) ListUserPools(ctx context.Context, userID int64) ([]UserPool, 
 			&i.TrafficLimit,
 			&i.UsedUp,
 			&i.UsedDown,
+			&i.Excluded,
 		); err != nil {
 			return nil, err
 		}
@@ -322,18 +340,51 @@ func (q *Queries) SetInboundPool(ctx context.Context, arg SetInboundPoolParams) 
 	return err
 }
 
+const setTariffUsersPool = `-- name: SetTariffUsersPool :exec
+INSERT INTO user_pools (user_id, pool_id, traffic_limit, excluded)
+SELECT u.id, $1::BIGINT, $2::BIGINT, $3::BOOLEAN
+FROM users u WHERE u.tariff_id = $4::BIGINT
+ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit, excluded = excluded.excluded
+`
+
+type SetTariffUsersPoolParams struct {
+	PoolID       int64
+	TrafficLimit sql.NullInt64
+	Excluded     bool
+	TariffID     int64
+}
+
+// The users of a tariff follow a pool it closed or opened again at once; the limit of a
+// pool opened again is the tariff's (NULL: none).
+func (q *Queries) SetTariffUsersPool(ctx context.Context, arg SetTariffUsersPoolParams) error {
+	_, err := q.db.ExecContext(ctx, setTariffUsersPool,
+		arg.PoolID,
+		arg.TrafficLimit,
+		arg.Excluded,
+		arg.TariffID,
+	)
+	return err
+}
+
 const setUserPoolLimit = `-- name: SetUserPoolLimit :exec
-INSERT INTO user_pools (user_id, pool_id, traffic_limit) VALUES ($1, $2, $3)
-ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit
+INSERT INTO user_pools (user_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit, excluded = excluded.excluded
 `
 
 type SetUserPoolLimitParams struct {
 	UserID       int64
 	PoolID       int64
 	TrafficLimit sql.NullInt64
+	Excluded     bool
 }
 
+// An excluded pool has no limit: nothing of it is sold or shown, the user cannot use it.
 func (q *Queries) SetUserPoolLimit(ctx context.Context, arg SetUserPoolLimitParams) error {
-	_, err := q.db.ExecContext(ctx, setUserPoolLimit, arg.UserID, arg.PoolID, arg.TrafficLimit)
+	_, err := q.db.ExecContext(ctx, setUserPoolLimit,
+		arg.UserID,
+		arg.PoolID,
+		arg.TrafficLimit,
+		arg.Excluded,
+	)
 	return err
 }

@@ -297,6 +297,7 @@ type TariffPool struct {
 	TariffID     int64
 	PoolID       int64
 	TrafficLimit int64
+	Excluded     bool
 }
 
 type TariffTerm struct {
@@ -438,4 +439,5 @@ type UserPool struct {
 	TrafficLimit sql.NullInt64
 	UsedUp       int64
 	UsedDown     int64
+	Excluded     bool
 }

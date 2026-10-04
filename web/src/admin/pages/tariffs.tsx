@@ -39,11 +39,11 @@ export function tariffSummary(tr: Tariff): string {
 
 const TAB_ICONS = { tariffs: Tag, pools: Layers, packages: Package } as const;
 
-/** A tariff's pool limits by pool name: "WL 100 GB"; pools without a limit are left out. */
+/** A tariff's pool limits by pool name: "WL 100 GB", "Premium closed"; pools without a limit are left out. */
 function poolLimitsText(tr: Tariff, names: Map<number, string>): string {
   return tr.pools
-    .filter((p) => p.traffic_limit != null && names.has(p.pool_id))
-    .map((p) => `${names.get(p.pool_id)} ${bytes(p.traffic_limit!)}`)
+    .filter((p) => (p.excluded || p.traffic_limit != null) && names.has(p.pool_id))
+    .map((p) => `${names.get(p.pool_id)} ${p.excluded ? t("pools.closed") : bytes(p.traffic_limit!)}`)
     .join(" · ");
 }
 
@@ -206,6 +206,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   // With selling off the sale block is hidden; its values stay as they were.
   const selling = usePaymentSettings().data?.enabled === true;
   const [poolGB, setPoolGB] = useState<Record<number, string>>({});
+  const [poolClosed, setPoolClosed] = useState<Record<number, boolean>>({});
   const [stars, setStars] = useState("");
   const [rub, setRub] = useState("");
   // The terms after the first: days, or months with a billing day, and their prices.
@@ -228,6 +229,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setPrice(tr?.price_label ?? "");
     setOnSale(tr?.on_sale ?? false);
     setPoolGB(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / GiB).toFixed(2)) : ""])));
+    setPoolClosed(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, !!p.excluded])));
     setStars(tr?.price_stars != null ? String(tr.price_stars) : "");
     setRub(tr?.price_rub != null ? String(tr.price_rub / 100) : "");
     setMore(
@@ -265,6 +267,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     const dayN = Number(billingDay);
     const devN = Number(devices);
     const poolLimits = (allPools.data ?? []).map((p) => {
+      if (poolClosed[p.id]) return { pool_id: p.id, traffic_limit: null, excluded: true };
       const v = (poolGB[p.id] ?? "").trim().replace(",", ".");
       return { pool_id: p.id, traffic_limit: v ? Math.round(Number(v) * GiB) : null };
     });
@@ -411,8 +414,8 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
           </Field>
         ) : null}
         {allPools.data?.length ? (
-          <Field label={t("pools.tariffLimits")} hint={t("pools.tariffLimitsHint")} error={errors.pools}>
-            <PoolLimitsField pools={allPools.data} value={poolGB} onChange={setPoolGB} />
+          <Field label={t("pools.tariffLimits")} hint={`${t("pools.tariffLimitsHint")} ${t("pools.closeHint")}`} error={errors.pools}>
+            <PoolLimitsField pools={allPools.data} value={poolGB} onChange={setPoolGB} closed={poolClosed} onClosed={setPoolClosed} />
           </Field>
         ) : null}
         <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("tariffs.sale")}>

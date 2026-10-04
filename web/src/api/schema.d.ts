@@ -2629,6 +2629,8 @@ export interface components {
             name: string;
         };
         PoolLimit: {
+            /** @description Пул закрыт: его подключений нет в подписке, ноды их не пускают, пакеты трафика пула не продаются; traffic_limit тогда не важен */
+            excluded?: boolean;
             /** Format: int64 */
             pool_id: number;
             /**
@@ -3041,7 +3043,7 @@ export interface components {
             name: string;
             /** @description Продаётся в боте и Mini App */
             on_sale: boolean;
-            /** @description Лимиты пулов трафика; пул не в списке — без лимита */
+            /** @description Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается */
             pools: components["schemas"]["PoolLimit"][];
             price_label: string;
             /**
@@ -3345,6 +3347,8 @@ export interface components {
             limited: number;
         };
         UserPoolView: {
+            /** @description Пул закрыт для пользователя: его подключений нет в подписке, ноды их не пускают */
+            excluded: boolean;
             /** @description Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса */
             exhausted: boolean;
             /**

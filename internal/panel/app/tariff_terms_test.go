@@ -117,3 +117,35 @@ func TestTariffTermsAPI(t *testing.T) {
 		t.Fatalf("the new tariff's terms: %s", body)
 	}
 }
+
+// With a billing day a term is whole months (30 days each, rounded): two lengths that round
+// to the same number of months are one term sold twice, with the same label on two buttons.
+func TestTariffTermsBillingDay(t *testing.T) {
+	h := newHarness(t)
+	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
+		t.Fatal("login")
+	}
+	csrf := map[string]string{"X-CSRF-Token": h.csrf}
+	api := "/" + adminPath + "/api/v1"
+	create := func(terms []map[string]any) (int, string) {
+		resp, raw := h.do(http.MethodPost, api+"/tariffs", map[string]any{"name": "Monthly", "duration_days": 30, "reset_strategy": "none",
+			"billing_day": 5, "terms": terms}, csrf)
+		return resp.StatusCode, string(raw)
+	}
+	if code, raw := create([]map[string]any{{"days": 30, "price_stars": 100}, {"days": 40, "price_stars": 130}}); code != http.StatusUnprocessableEntity ||
+		!strings.Contains(raw, "term_days_repeat") || !strings.Contains(raw, `"location":"body.terms[1].days"`) {
+		t.Fatalf("30 and 40 days are both one month: %d %s", code, raw)
+	}
+	code, raw := create([]map[string]any{{"days": 30, "price_stars": 100}, {"days": 90, "price_stars": 250}, {"days": 0, "price_stars": 900}})
+	if code != http.StatusCreated {
+		t.Fatalf("months: %d %s", code, raw)
+	}
+	var v tariffWithTerms
+	_ = json.Unmarshal([]byte(raw), &v)
+	// A client that does not know terms moves the first one onto a month another has.
+	resp, body := h.do(http.MethodPut, api+"/tariffs/"+strconv.FormatInt(v.ID, 10), map[string]any{"name": "Monthly", "duration_days": 85,
+		"reset_strategy": "none", "billing_day": 5, "price_stars": 100}, csrf)
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "term_days_repeat") {
+		t.Fatalf("85 days is 3 months, the second term's: %d %s", resp.StatusCode, body)
+	}
+}

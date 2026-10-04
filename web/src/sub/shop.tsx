@@ -85,7 +85,10 @@ export function Shop({
   const term = terms ? (terms.find((x) => x.days === termDays) ?? terms[0]!) : null;
   // What is paid for: the chosen term's prices, or the offer's own.
   const price = term ?? offer;
-  const order = { [field]: offer?.id, ...(term ? { term_days: term.days } : {}) };
+  // A single term the providers take now is named too: it may not be the plan's first,
+  // which a request without days is for.
+  const sold = term ?? offer?.terms?.[0];
+  const order = { [field]: offer?.id, ...(sold ? { term_days: sold.days } : {}) };
   const failText = (code: string) => (field === "package_id" && code === "not_for_sale" ? t("sub.packageNotForSale") : t(FAIL[code] ?? "sub.shopFail"));
 
   const pay = async (provider: Provider) => {

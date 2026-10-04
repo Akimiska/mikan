@@ -80,3 +80,49 @@ func TestShopTerms(t *testing.T) {
 		t.Fatalf("callback data of %d bytes", n)
 	}
 }
+
+// A plan whose first term is for rubles only while only Stars are on sells its other term:
+// the pay buttons name that term, so the invoice is not for the first one (which Stars
+// cannot buy).
+func TestShopOnlyALaterTerm(t *testing.T) {
+	var sale db.Tariff
+	var svc *billing.Service
+	e := setup(t, func(e *env, d *Deps) {
+		ts, _ := e.st.Q.ListTariffs(e.ctx)
+		var err error
+		sale, err = e.st.Q.UpdateTariff(e.ctx, db.UpdateTariffParams{Name: "Std", TrafficLimit: ts[1].TrafficLimit, DurationDays: 30, DeviceLimit: ts[1].DeviceLimit,
+			ResetStrategy: ts[1].ResetStrategy, PriceRub: sql.NullInt64{Int64: 19900, Valid: true}, OnSale: 1, ID: ts[1].ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := domain.SetTariffTerms(e.ctx, e.st.Q, sale.ID, []domain.Term{
+			{Days: 30, PriceRub: sql.NullInt64{Int64: 19900, Valid: true}}, {Days: 90, PriceStars: sql.NullInt64{Int64: 400, Valid: true}}}); err != nil {
+			t.Fatal(err)
+		}
+		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+		d.Billing = svc
+	})
+	svc.SetTelegram(e.bot)
+	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{Enabled: true, Stars: true, AllowNew: true}); err != nil {
+		t.Fatal(err)
+	}
+	const buyer, menu = 779, int64(1000)
+	step := func(data string) call {
+		t.Helper()
+		e.later()
+		n := e.tg.count()
+		e.press(buyer, menu, data)
+		edit, _ := find(e.tg.wait(t, n, "editMessageText"), "editMessageText")
+		return edit
+	}
+	id := strconv.FormatInt(sale.ID, 10)
+	plan := step("tn:" + id)
+	if b := buttons(plan); b["⭐ Telegram Stars — ⭐ 400"] != "pn:"+id+".90:s" {
+		t.Fatalf("the plan: %q %v", text(plan), b)
+	}
+	inv := step("pn:" + id + ".90:s")
+	if !strings.Contains(text(inv), "Std · 90 дн.") || buttons(inv)["Оплатить ⭐ 400"] == "" {
+		t.Fatalf("invoice: %q %v", text(inv), buttons(inv))
+	}
+}

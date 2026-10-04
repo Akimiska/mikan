@@ -207,8 +207,9 @@ func (h *handlers) archiveTariff(ctx context.Context, in *userIDInput) (*struct{
 
 // terms are the tariff's terms after this body: the body's own, or the first from its
 // duration and prices followed by kept (the tariff's stored terms) after their first.
-// Days tell the terms apart; with several, each needs a price, and a tariff on sale needs
-// one at all.
+// Days tell the terms apart (months, with a billing day: lengths that round to the same
+// number of months are one term); with several, each needs a price, and a tariff on sale
+// needs one at all.
 func (b tariffBody) terms(kept []domain.Term) ([]domain.Term, error) {
 	bad := func(loc, msg string) error {
 		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: loc, Message: msg})
@@ -237,10 +238,14 @@ func (b tariffBody) terms(kept []domain.Term) ([]domain.Term, error) {
 	}
 	seen := map[int64]bool{}
 	for i, t := range terms {
-		if seen[t.Days] {
+		key := t.Days
+		if b.BillingDay != nil && t.Days > 0 {
+			key = int64(domain.TermMonths(t.Days))
+		}
+		if seen[key] {
 			return nil, bad(at(i, "days"), "term_days_repeat")
 		}
-		seen[t.Days] = true
+		seen[key] = true
 		if len(terms) > 1 && !t.PriceStars.Valid && !t.PriceRub.Valid {
 			return nil, bad(at(i, "price_rub"), "term_no_price")
 		}

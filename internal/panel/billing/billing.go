@@ -195,10 +195,11 @@ func (s *Service) Available(ctx context.Context) Available {
 }
 
 // Offer is a tariff on sale with the terms a buyer can pay for now. Stars and Rub are
-// the first term's.
+// those of the first of Terms.
 type Offer struct {
 	Tariff db.Tariff
 	Terms  []OfferTerm // at least one
+	First  int64       // days of the tariff's first term, which Terms may not hold
 	Stars  int64       // 0: not for Stars
 	Rub    int64       // kopecks; 0: not for rubles
 }
@@ -228,7 +229,9 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 	var out []Offer
 	for _, t := range ts {
 		o := Offer{Tariff: t}
-		for _, term := range domain.TariffTerms(t, rows) {
+		terms := domain.TariffTerms(t, rows)
+		o.First = terms[0].Days
+		for _, term := range terms {
 			ot := OfferTerm{Days: term.Days}
 			ot.Stars, ot.Rub = av.prices(term.PriceStars, term.PriceRub)
 			if ot.Stars > 0 || ot.Rub > 0 {
@@ -243,10 +246,12 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 	return out, av, nil
 }
 
-// Term is the offer's term of so many days; nil days: the first one.
+// Term is the offer's term of so many days; nil days: the tariff's first term, the one an
+// invoice without days is for (not there when no available provider takes its price).
 func (o Offer) Term(days *int64) (OfferTerm, bool) {
+	first := o.First
 	if days == nil {
-		return o.Terms[0], true
+		days = &first
 	}
 	for _, t := range o.Terms {
 		if t.Days == *days {
@@ -556,7 +561,7 @@ func TermLabel(t db.Tariff, days int64, lang string) string {
 	case days <= 0:
 		return pick("бессрочно", "no end date")
 	case t.BillingDay.Valid:
-		n := max(1, (days+15)/30) // domain.termMonths
+		n := domain.TermMonths(days)
 		if n == 1 {
 			return pick("1 мес.", "1 month")
 		}
@@ -568,8 +573,11 @@ func TermLabel(t db.Tariff, days int64, lang string) string {
 // DescribeOffer is a tariff on sale in a line: Describe with its one term, or the range
 // of its terms, "7 days – 90 days · 100 GB · 3 devices".
 func DescribeOffer(o Offer, lang string) string {
-	if len(o.Terms) < 2 {
+	switch len(o.Terms) {
+	case 0:
 		return Describe(o.Tariff, o.Tariff.DurationDays, lang)
+	case 1:
+		return Describe(o.Tariff, o.Terms[0].Days, lang)
 	}
 	var lo, hi int64 = -1, -1
 	forever := false

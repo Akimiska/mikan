@@ -177,3 +177,38 @@ func TestTermLabel(t *testing.T) {
 		}
 	}
 }
+
+// When the providers take only a later term (the first one is for rubles and none is
+// there), the offer is that term: its line says so, and the term asked for by default stays
+// the tariff's first, which is not for sale, rather than quietly being another one.
+func TestOfferOfOnlyALaterTerm(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	must(t, domain.SetTariffTerms(ctx, e.st.Q, e.sale.ID, []domain.Term{
+		{Days: 30, PriceRub: sql.NullInt64{Int64: 19900, Valid: true}},
+		{Days: 90, PriceStars: sql.NullInt64{Int64: 400, Valid: true}},
+	}))
+	offers, _, err := e.s.Offers(ctx)
+	must(t, err)
+	if len(offers) != 1 || len(offers[0].Terms) != 1 || offers[0].Terms[0].Days != 90 {
+		t.Fatalf("offers %+v", offers)
+	}
+	o := offers[0]
+	if got := DescribeOffer(o, "en"); got != "90 days · 150 GB · devices: 3" {
+		t.Fatalf("offer line %q", got)
+	}
+	if term, ok := o.Term(nil); ok {
+		t.Fatalf("the default term is the first, which is not sold now: got %+v", term)
+	}
+	if term, ok := o.Term(days(90)); !ok || term.Stars != 400 {
+		t.Fatalf("the 90-day term: %+v %v", term, ok)
+	}
+	if _, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, Provider: Stars}); !errors.Is(err, ErrProviderOff) {
+		t.Fatalf("the first term has no Stars price: %v", err)
+	}
+	p, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, TermDays: days(90), Provider: Stars})
+	must(t, err)
+	if p.Amount != 400 || p.TermDays.Int64 != 90 {
+		t.Fatalf("payment %+v", p)
+	}
+}

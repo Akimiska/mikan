@@ -160,6 +160,12 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 		}
 		name := "<b>" + html.EscapeString(o.Tariff.Name) + "</b>\n"
 		ref := strconv.FormatInt(id, 10)
+		if days == nil && len(o.Terms) == 1 && o.Terms[0].Days != o.First {
+			// The first term is not sold now (no provider takes its price): the buttons name
+			// the one that is, as an invoice without days would be for the first.
+			only := o.Terms[0].Days
+			days = &only
+		}
 		if days == nil && len(o.Terms) > 1 {
 			rows := [][]Button{}
 			for _, t := range o.Terms {

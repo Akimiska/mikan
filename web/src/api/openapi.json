@@ -330,6 +330,61 @@
         ],
         "type": "object"
       },
+      "AlertsConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "$ref": "#/components/schemas/Events"
+          },
+          "public_changes": {
+            "type": "boolean"
+          },
+          "public_channel": {
+            "type": "string"
+          },
+          "public_enabled": {
+            "type": "boolean"
+          },
+          "public_summary": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "admin_enabled",
+          "public_enabled",
+          "public_summary",
+          "public_changes",
+          "events"
+        ],
+        "type": "object"
+      },
+      "AlertsConfigPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "$ref": "#/components/schemas/EventsPatch"
+          },
+          "public_changes": {
+            "type": "boolean"
+          },
+          "public_channel": {
+            "type": "string"
+          },
+          "public_enabled": {
+            "type": "boolean"
+          },
+          "public_summary": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "AuditEntry": {
         "additionalProperties": false,
         "properties": {
@@ -424,7 +479,8 @@
             "enum": [
               "blocked",
               "target_down",
-              "still_blocked"
+              "still_blocked",
+              "busy"
             ],
             "type": "string"
           }
@@ -485,6 +541,58 @@
           "cut_off",
           "blocked",
           "reached"
+        ],
+        "type": "object"
+      },
+      "BackupView": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_chat_set": {
+            "description": "Чат администратора подключён к боту (вкладка «Инфраструктура»)",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Слать базу в чат администратора раз в сутки",
+            "type": "boolean"
+          },
+          "hour": {
+            "description": "Час отправки (UTC)",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_error": {
+            "description": "Код ошибки последней попытки",
+            "type": "string"
+          },
+          "last_ok": {
+            "description": "Когда ушёл последний бэкап",
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_size": {
+            "description": "Размер последнего файла, байт",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_try": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "password_set": {
+            "description": "Пароль шифрования задан; сам пароль не возвращается",
+            "type": "boolean"
+          },
+          "sending": {
+            "description": "Бэкап делается прямо сейчас",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "hour",
+          "password_set",
+          "admin_chat_set",
+          "sending"
         ],
         "type": "object"
       },
@@ -1097,6 +1205,18 @@
         ],
         "type": "object"
       },
+      "Enable-promocodeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "ErrorDetail": {
         "additionalProperties": false,
         "properties": {
@@ -1162,6 +1282,76 @@
             ],
             "format": "uri",
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Events": {
+        "additionalProperties": false,
+        "properties": {
+          "autotune": {
+            "type": "boolean"
+          },
+          "autotune_recovery": {
+            "type": "boolean"
+          },
+          "exit": {
+            "type": "boolean"
+          },
+          "inbound": {
+            "type": "boolean"
+          },
+          "node": {
+            "type": "boolean"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "update": {
+            "type": "boolean"
+          },
+          "warp": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "node",
+          "warp",
+          "exit",
+          "inbound",
+          "autotune",
+          "autotune_recovery",
+          "tls",
+          "update"
+        ],
+        "type": "object"
+      },
+      "EventsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "autotune": {
+            "type": "boolean"
+          },
+          "autotune_recovery": {
+            "type": "boolean"
+          },
+          "exit": {
+            "type": "boolean"
+          },
+          "inbound": {
+            "type": "boolean"
+          },
+          "node": {
+            "type": "boolean"
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "update": {
+            "type": "boolean"
+          },
+          "warp": {
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -1342,6 +1532,84 @@
           "from",
           "error",
           "at"
+        ],
+        "type": "object"
+      },
+      "ImportRunInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "marzban",
+              "pasarguard",
+              "remnawave"
+            ],
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "tariff_id": {
+            "description": "Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "token": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "url": {
+            "maxLength": 300,
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "tariff_id"
+        ],
+        "type": "object"
+      },
+      "ImportSource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "marzban",
+              "pasarguard",
+              "remnawave"
+            ],
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "token": {
+            "description": "Remnawave: API-токен; PasarGuard: API-ключ вместо логина",
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "url": {
+            "description": "Адрес старой панели: https://panel.example.com; http:// — только для этого сервера или локальной сети",
+            "maxLength": 300,
+            "type": "string"
+          },
+          "username": {
+            "description": "Marzban, PasarGuard: логин администратора",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url"
         ],
         "type": "object"
       },
@@ -1553,6 +1821,130 @@
         ],
         "type": "object"
       },
+      "InfrastructureConnectOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "JobState": {
+        "additionalProperties": false,
+        "properties": {
+          "done": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Код ошибки, когда state = failed",
+            "type": "string"
+          },
+          "finished": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "from": {
+            "description": "Панель и её адрес (без пути и данных для входа)",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "preview",
+              "import"
+            ],
+            "type": "string"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/Preview"
+          },
+          "report": {
+            "$ref": "#/components/schemas/Report",
+            "description": "Что сделано; при ошибке посреди импорта — сделанное до неё"
+          },
+          "started": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "description": "idle — ещё не было; fetching — читается старая панель; importing — создаются пользователи",
+            "enum": [
+              "idle",
+              "fetching",
+              "checking",
+              "importing",
+              "done",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "total",
+          "done"
+        ],
+        "type": "object"
+      },
+      "LegacyView": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам",
+            "type": "string"
+          },
+          "links": {
+            "description": "Сколько старых ссылок и пользователей заведено",
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Путь старых ссылок подписки: sub у Marzban и PasarGuard, api/sub у Remnawave; пусто — выключено",
+            "type": "string"
+          },
+          "secret_set": {
+            "description": "Секрет старой панели задан; сам он не возвращается",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "secret_set",
+          "links"
+        ],
+        "type": "object"
+      },
+      "List": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Сколько всего",
+            "format": "int64",
+            "type": "integer"
+          },
+          "names": {
+            "description": "Первые 50",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "names",
+          "count"
+        ],
+        "type": "object"
+      },
       "ListUsersOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1581,6 +1973,9 @@
       "ListenerStatus": {
         "additionalProperties": false,
         "properties": {
+          "code": {
+            "type": "string"
+          },
           "error": {
             "type": "string"
           },
@@ -1811,6 +2206,10 @@
             "description": "Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений",
             "type": "string"
           },
+          "public_name": {
+            "description": "Публичное имя для канала состояния; пустое — нода скрыта из списка",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "ok",
@@ -1830,6 +2229,7 @@
           "address",
           "host",
           "domain",
+          "public_name",
           "enabled",
           "inbounds",
           "status",
@@ -2178,6 +2578,26 @@
         },
         "type": "object"
       },
+      "PatchBackupInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "hour": {
+            "format": "int64",
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "password": {
+            "description": "Пароль, которым шифруется файл: от 20 символов. Файл остаётся в истории чата навсегда; без пароля его не открыть",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "PatchInboundInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2260,6 +2680,30 @@
         },
         "type": "object"
       },
+      "PatchLegacyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "marzban",
+              "pasarguard",
+              "remnawave",
+              ""
+            ],
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "secret": {
+            "description": "Секрет из таблицы jwt базы старой панели; пусто — убрать",
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "PatchNodeInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2276,6 +2720,11 @@
           },
           "name": {
             "maxLength": 200,
+            "type": "string"
+          },
+          "public_name": {
+            "description": "Публичное имя ноды; пустое — не публиковать её в канале",
+            "maxLength": 80,
             "type": "string"
           }
         },
@@ -2295,6 +2744,12 @@
           },
           "stars": {
             "type": "boolean"
+          },
+          "trial_tariff_id": {
+            "description": "Тариф пробного периода; 0 — выключить",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "type": "object"
@@ -2302,6 +2757,9 @@
       "PatchSettingsInputBody": {
         "additionalProperties": false,
         "properties": {
+          "app_branding": {
+            "type": "boolean"
+          },
           "auto_port": {
             "type": "boolean"
           },
@@ -2310,6 +2768,16 @@
           },
           "brand": {
             "maxLength": 40,
+            "type": "string"
+          },
+          "brand_accent": {
+            "description": "#RRGGBB или пусто",
+            "maxLength": 7,
+            "type": "string"
+          },
+          "brand_logo_url": {
+            "description": "https://… или пусто",
+            "maxLength": 500,
             "type": "string"
           },
           "client_fingerprint": {
@@ -2344,6 +2812,15 @@
             "maximum": 23,
             "minimum": 0,
             "type": "integer"
+          },
+          "sub_announce": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "sub_announce_url": {
+            "description": "https://… или tg://…",
+            "maxLength": 200,
+            "type": "string"
           },
           "sub_group_auto": {
             "maxLength": 200,
@@ -2389,6 +2866,9 @@
           "enabled": {
             "type": "boolean"
           },
+          "infrastructure": {
+            "$ref": "#/components/schemas/AlertsConfigPatch"
+          },
           "route": {
             "$ref": "#/components/schemas/RouteStruct",
             "description": "Перед сохранением панель проверяет, что Telegram отвечает этим путём"
@@ -2406,6 +2886,13 @@
         "properties": {
           "auto": {
             "type": "boolean"
+          },
+          "channel": {
+            "enum": [
+              "stable",
+              "beta"
+            ],
+            "type": "string"
           }
         },
         "type": "object"
@@ -2517,6 +3004,19 @@
           "stars": {
             "description": "Telegram Stars: нужен только запущенный бот",
             "type": "boolean"
+          },
+          "trial_tariff_id": {
+            "description": "Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "trials": {
+            "description": "Сколько пробных подписок выдано",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -2524,6 +3024,8 @@
           "stars",
           "allow_new",
           "renew_resets_traffic",
+          "trial_tariff_id",
+          "trials",
           "available",
           "on_sale",
           "moving"
@@ -2645,6 +3147,11 @@
           },
           "tariff_name": {
             "type": "string"
+          },
+          "term_days": {
+            "description": "Купленный срок в днях (0 — бессрочно); нет у пакетов и у платежей до сроков в тарифах",
+            "format": "int64",
+            "type": "integer"
           },
           "tg_id": {
             "format": "int64",
@@ -2774,6 +3281,54 @@
         ],
         "type": "object"
       },
+      "Preview": {
+        "additionalProperties": false,
+        "properties": {
+          "invalid": {
+            "$ref": "#/components/schemas/List",
+            "description": "Пользователи, которых mikan не примет, с причиной"
+          },
+          "new": {
+            "description": "Будут созданы",
+            "format": "int64",
+            "type": "integer"
+          },
+          "no_link": {
+            "$ref": "#/components/schemas/List",
+            "description": "Будут перенесены без старой ссылки"
+          },
+          "on_hold": {
+            "description": "Пользователи «на паузе»: в mikan их срок пойдёт с момента импорта",
+            "format": "int64",
+            "type": "integer"
+          },
+          "statuses": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "taken": {
+            "$ref": "#/components/schemas/List",
+            "description": "Имена, которые уже есть в mikan"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "new",
+          "taken",
+          "invalid",
+          "no_link",
+          "statuses",
+          "on_hold"
+        ],
+        "type": "object"
+      },
       "ProbeView": {
         "additionalProperties": false,
         "properties": {
@@ -2801,6 +3356,398 @@
         ],
         "type": "object"
       },
+      "PromoBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "currency": {
+            "description": "Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется.",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "discount_ttl": {
+            "description": "Срок действия резерва скидки в секундах; 0 = 30 минут",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "ends_at": {
+            "description": "Unix time в секундах; значение не может быть в прошлом",
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_purchase_only": {
+            "type": "boolean"
+          },
+          "max_discount": {
+            "description": "Максимальная скидка в минимальных единицах оплаты: RUB — копейки, XTR — Stars",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_uses": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "min_order": {
+            "description": "Минимальная сумма заказа в минимальных единицах оплаты: RUB — копейки, XTR — Stars",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 120,
+            "type": "string"
+          },
+          "new_users_only": {
+            "type": "boolean"
+          },
+          "per_user_limit": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "pool_id": {
+            "description": "Пул для бонусного трафика; без значения — основной трафик",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "starts_at": {
+            "description": "Unix time в секундах",
+            "format": "int64",
+            "type": "integer"
+          },
+          "tariff_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "days",
+              "traffic",
+              "percent",
+              "fixed"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "days: дни; traffic: байты (минимум 1 GiB); percent: проценты 1-100; fixed: сумма в минимальных единицах оплаты",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "type",
+          "value",
+          "currency",
+          "per_user_limit",
+          "discount_ttl",
+          "min_order",
+          "max_discount",
+          "tariff_ids",
+          "first_purchase_only",
+          "new_users_only",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "PromoCodeView": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "discount_ttl": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "first_purchase_only": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_discount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_uses": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "min_order": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "new_users_only": {
+            "type": "boolean"
+          },
+          "per_user_limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pool_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tariff_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "days",
+              "traffic",
+              "percent",
+              "fixed"
+            ],
+            "type": "string"
+          },
+          "used_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "value": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "description",
+          "type",
+          "value",
+          "currency",
+          "used_count",
+          "per_user_limit",
+          "discount_ttl",
+          "min_order",
+          "max_discount",
+          "tariff_ids",
+          "first_purchase_only",
+          "new_users_only",
+          "enabled",
+          "status",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PromoListOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PromoCodeView"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "PromoRedemptionView": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "discount_amount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "final_amount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "original_amount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "payment_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "promo_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "redeemed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tg_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "promo_id",
+          "tg_id",
+          "status",
+          "redeemed_at",
+          "days",
+          "bytes",
+          "discount_amount",
+          "original_amount",
+          "final_amount",
+          "currency",
+          "code"
+        ],
+        "type": "object"
+      },
+      "PromoRedemptionsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PromoRedemptionView"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "PromoStatsView": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bonus_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "bonus_days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "discount_amount": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "discount_orders": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "promo_codes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "successful_activations": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "promo_codes",
+          "active",
+          "successful_activations",
+          "bonus_days",
+          "bonus_bytes",
+          "discount_orders",
+          "discount_amount"
+        ],
+        "type": "object"
+      },
       "RecoveryOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2814,6 +3761,40 @@
         },
         "required": [
           "recovery_codes"
+        ],
+        "type": "object"
+      },
+      "Report": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed": {
+            "$ref": "#/components/schemas/List",
+            "description": "Имя и причина для тех, кого не удалось создать"
+          },
+          "links": {
+            "description": "Старые ссылки и ключи, заведённые этим импортом",
+            "format": "int64",
+            "type": "integer"
+          },
+          "no_link": {
+            "$ref": "#/components/schemas/List",
+            "description": "Перенесены без старой ссылки: её токен слишком короткий, чтобы быть секретом"
+          },
+          "skipped": {
+            "$ref": "#/components/schemas/List",
+            "description": "Имена, которые уже есть в mikan: эти пользователи не перенесены"
+          }
+        },
+        "required": [
+          "created",
+          "skipped",
+          "links",
+          "no_link",
+          "failed"
         ],
         "type": "object"
       },
@@ -2985,6 +3966,10 @@
           "admin_url": {
             "type": "string"
           },
+          "app_branding": {
+            "description": "Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки",
+            "type": "boolean"
+          },
           "auto_port": {
             "description": "Переносить подключение на другой порт, если клиенты перестали до него доходить",
             "type": "boolean"
@@ -2994,6 +3979,14 @@
             "type": "boolean"
           },
           "brand": {
+            "type": "string"
+          },
+          "brand_accent": {
+            "description": "Цвет бренда #RRGGBB; пусто — цвет приложения",
+            "type": "string"
+          },
+          "brand_logo_url": {
+            "description": "Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения",
             "type": "string"
           },
           "certificate": {
@@ -3042,6 +4035,14 @@
             },
             "type": "array"
           },
+          "sub_announce": {
+            "description": "Объявление над профилем в приложениях (заголовок announce); пусто — нет",
+            "type": "string"
+          },
+          "sub_announce_url": {
+            "description": "Куда ведёт нажатие на объявление",
+            "type": "string"
+          },
           "sub_base_url": {
             "type": "string"
           },
@@ -3081,6 +4082,11 @@
         "required": [
           "brand",
           "support_url",
+          "sub_announce",
+          "sub_announce_url",
+          "app_branding",
+          "brand_accent",
+          "brand_logo_url",
           "public_host",
           "domain",
           "panel_port",
@@ -3263,6 +4269,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "terms": {
+            "description": "Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений",
+            "items": {
+              "$ref": "#/components/schemas/TermBody"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
           "traffic_limit": {
             "format": "int64",
             "minimum": 1,
@@ -3348,6 +4362,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "terms": {
+            "description": "Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub",
+            "items": {
+              "$ref": "#/components/schemas/TermView"
+            },
+            "type": "array"
+          },
           "traffic_limit": {
             "description": "Байты; null — без лимита",
             "format": "int64",
@@ -3369,6 +4390,7 @@
           "price_stars",
           "price_rub",
           "on_sale",
+          "terms",
           "pools",
           "sort"
         ],
@@ -3481,6 +4503,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "admin_chat_set": {
+            "type": "boolean"
+          },
           "bot": {
             "$ref": "#/components/schemas/TelegramBot"
           },
@@ -3501,6 +4526,9 @@
           "error": {
             "description": "token_invalid, token_revoked, unreachable или ответ Telegram",
             "type": "string"
+          },
+          "infrastructure": {
+            "$ref": "#/components/schemas/AlertsConfig"
           },
           "linked": {
             "description": "Подписок, привязанных к Telegram",
@@ -3536,7 +4564,71 @@
           "mini_app_url",
           "linked",
           "accounts",
-          "route"
+          "route",
+          "infrastructure",
+          "admin_chat_set"
+        ],
+        "type": "object"
+      },
+      "TermBody": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "0 — бессрочно; с днём оплаты — месяцы по 30 дней",
+            "format": "int64",
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "price_rub": {
+            "description": "Цена в копейках: 19900 — 199 ₽",
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "price_stars": {
+            "description": "Цена в Telegram Stars",
+            "format": "int64",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days"
+        ],
+        "type": "object"
+      },
+      "TermView": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "0 — бессрочно; с днём оплаты — месяцы по 30 дней",
+            "format": "int64",
+            "type": "integer"
+          },
+          "price_rub": {
+            "description": "Цена в копейках; null — не за рубли",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "price_stars": {
+            "description": "Цена в Telegram Stars; null — не за Stars",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "days",
+          "price_stars",
+          "price_rub"
         ],
         "type": "object"
       },
@@ -3719,6 +4811,14 @@
             "description": "Вышла версия новее этой",
             "type": "boolean"
           },
+          "channel": {
+            "description": "Какие релизы ставить: stable — только релизы, beta — и пре-релизы (vX-rc.N)",
+            "enum": [
+              "stable",
+              "beta"
+            ],
+            "type": "string"
+          },
           "checked_at": {
             "description": "Unix-время последней проверки; 0 — ещё не проверяли",
             "format": "int64",
@@ -3739,6 +4839,10 @@
             "description": "Последний релиз; пусто, пока проверки не было",
             "type": "string"
           },
+          "newest": {
+            "description": "Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто",
+            "type": "string"
+          },
           "notes": {
             "additionalProperties": {
               "type": "string"
@@ -3754,6 +4858,10 @@
             "description": "Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял",
             "format": "int64",
             "type": "integer"
+          },
+          "unreachable": {
+            "description": "Вышел newest, но с этой версии к нему не ведёт ни одно обновление",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3765,6 +4873,9 @@
           "checked_at",
           "error",
           "auto",
+          "channel",
+          "newest",
+          "unreachable",
           "requested_at"
         ],
         "type": "object"
@@ -4909,6 +6020,220 @@
         ]
       }
     },
+    "/api/v1/import": {
+      "delete": {
+        "description": "Уже созданные пользователи остаются, их список — в отчёте.",
+        "operationId": "import-cancel",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Остановить импорт",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "post": {
+        "description": "Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.",
+        "operationId": "import-run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRunInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Перенести пользователей из другой панели",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/import/legacy": {
+      "get": {
+        "operationId": "get-legacy-links",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Старые ссылки подписки",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "patch": {
+        "operationId": "update-legacy-links",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchLegacyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настроить старые ссылки подписки",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/import/preview": {
+      "post": {
+        "description": "Идёт в фоне: ответ 202 сразу, итог — в GET /api/v1/import/status (preview).",
+        "operationId": "import-preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportSource"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Что перенесётся из другой панели",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/import/status": {
+      "get": {
+        "operationId": "import-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Ход импорта",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/inbounds": {
       "get": {
         "operationId": "list-inbounds",
@@ -5194,6 +6519,41 @@
         "summary": "Изменить подключение",
         "tags": [
           "inbounds"
+        ]
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "Пользователи по состояниям, онлайн, трафик, ноды и подключения. Для Prometheus и Grafana: ключ на чтение в заголовке Authorization: Bearer.",
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {}
+            },
+            "description": "Prometheus text format 0.0.4",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Метрики в формате Prometheus",
+        "tags": [
+          "stats"
         ]
       }
     },
@@ -6432,6 +7792,325 @@
         ]
       }
     },
+    "/api/v1/promocodes": {
+      "get": {
+        "operationId": "list-promocodes",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoListOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Промокоды",
+        "tags": [
+          "promocodes"
+        ]
+      },
+      "post": {
+        "operationId": "create-promocode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoCodeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Создать промокод",
+        "tags": [
+          "promocodes"
+        ]
+      }
+    },
+    "/api/v1/promocodes/redemptions": {
+      "get": {
+        "operationId": "list-promocode-redemptions",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoRedemptionsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "История промокодов",
+        "tags": [
+          "promocodes"
+        ]
+      }
+    },
+    "/api/v1/promocodes/stats": {
+      "get": {
+        "operationId": "promocode-stats",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoStatsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Статистика промокодов",
+        "tags": [
+          "promocodes"
+        ]
+      }
+    },
+    "/api/v1/promocodes/{id}": {
+      "delete": {
+        "operationId": "delete-promocode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить промокод",
+        "tags": [
+          "promocodes"
+        ]
+      },
+      "put": {
+        "operationId": "update-promocode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoCodeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить промокод",
+        "tags": [
+          "promocodes"
+        ]
+      }
+    },
+    "/api/v1/promocodes/{id}/enabled": {
+      "post": {
+        "operationId": "enable-promocode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Enable-promocodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoCodeView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Включить или выключить промокод",
+        "tags": [
+          "promocodes"
+        ]
+      }
+    },
     "/api/v1/settings": {
       "get": {
         "operationId": "get-settings",
@@ -6932,6 +8611,111 @@
         "x-session-only": true
       }
     },
+    "/api/v1/telegram/backup": {
+      "get": {
+        "operationId": "get-telegram-backup",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Бэкапы в Telegram",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      },
+      "patch": {
+        "operationId": "update-telegram-backup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchBackupInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настроить бэкапы в Telegram",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/telegram/backup/send": {
+      "post": {
+        "description": "Бэкап делается в фоне: ответ 202 сразу, итог — в GET /api/v1/telegram/backup (sending, last_ok, last_error).",
+        "operationId": "send-telegram-backup",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отправить бэкап сейчас",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/telegram/broadcast": {
       "post": {
         "operationId": "telegram-broadcast",
@@ -6968,6 +8752,61 @@
           }
         },
         "summary": "Разослать сообщение всем в боте",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/telegram/infrastructure/connect": {
+      "delete": {
+        "operationId": "telegram-infrastructure-disconnect",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отключить чат администратора для уведомлений",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      },
+      "post": {
+        "operationId": "telegram-infrastructure-connect",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfrastructureConnectOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Подключить чат администратора для уведомлений",
         "tags": [
           "telegram"
         ],
@@ -7038,7 +8877,7 @@
             "description": "Error"
           }
         },
-        "summary": "Включить или выключить автообновление",
+        "summary": "Автообновление и канал релизов",
         "tags": [
           "settings"
         ],

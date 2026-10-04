@@ -26,12 +26,16 @@ import (
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/panelimport"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
@@ -47,6 +51,9 @@ type Panel struct {
 	Telegram  *tgbot.Bot
 	Billing   *billing.Service
 	Updates   *updates.Checker
+	Alerts    *infraalerts.Monitor
+	Backups   *tgbackup.Service
+	Importer  *panelimport.Importer
 	Addons    *addons.Manager
 	server    *server.Server
 	spa       *server.SPA
@@ -87,7 +94,7 @@ type Options struct {
 	SubPortError func() string
 	// DataDir is where the host updater and the panel meet (update/); "" turns that off.
 	DataDir string
-	// Releases fetches the newest release; nil never checks.
+	// Releases finds the release to update to; nil never checks.
 	Releases updates.Source
 	// WarpAPI is Cloudflare's WARP client API; "" is the real one.
 	WarpAPI string
@@ -177,9 +184,11 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
+	promos := promo.New(st, o.Now)
+	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
 		MaxLinks: tgbot.MaxLinks,
-		Addons:   deps.Addons, SubBase: subBase})
+		Addons:   deps.Addons, SubBase: subBase, Promo: promos})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
@@ -193,7 +202,35 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Billing.SetTelegram(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
+	var certStatus infraalerts.CertificateSource
+	if o.Certs != nil {
+		certStatus = o.Certs.Status
+	}
+	p.Alerts = infraalerts.New(st, set, p.Nodes, p.Tuner, certStatus, p.Updates, p.Telegram, o.Log, o.Now)
+	// The server's name in a backup's file name: its domain, else its address.
+	serverName := func(ctx context.Context) string {
+		if d, err := set.String(ctx, settings.KeyDomain); err == nil && d != "" {
+			return d
+		}
+		h, _ := set.String(ctx, settings.KeyPublicHost)
+		return h
+	}
+	p.Backups = tgbackup.New(selfDump, set, p.Telegram, o.DataDir, serverName, o.Now, o.Log)
+	deps.Backups = p.Backups
 	deps.Warp = warp.Client{API: o.WarpAPI}
+	importer := panelimport.NewImporter(st, deps.Users, nil, o.Now, o.Log)
+	// The old links are checked as the panel the users came from signs them.
+	importer.Done = func(ctx context.Context, kind panelimport.Kind) {
+		// Only the panels whose links need the secret; Remnawave's are looked up as they are.
+		if kind != panelimport.Marzban && kind != panelimport.PasarGuard {
+			return
+		}
+		if err := settings.Set(ctx, set, settings.KeyLegacySubKind, string(kind)); err != nil {
+			o.Log.Warn("import: the old links' kind is not saved", "err", err)
+		}
+	}
+	deps.Importer = importer
+	p.Importer = importer
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err
@@ -262,6 +299,24 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if cfg.RequireHWID, err = set.On(ctx, settings.RequireHWID); err != nil {
 			return subs.Config{}, err
 		}
+		cfg.SubBase = subBase(ctx)
+		var legacyKind string
+		if legacyKind, err = set.String(ctx, settings.KeyLegacySubKind); err != nil {
+			return subs.Config{}, err
+		}
+		cfg.Legacy.Kind = panelimport.Kind(legacyKind)
+		if cfg.Legacy.Secret, err = set.String(ctx, settings.KeyLegacySubSecret); err != nil {
+			return subs.Config{}, err
+		}
+		if cfg.App.Enabled, err = set.On(ctx, settings.AppBranding); err != nil {
+			return subs.Config{}, err
+		}
+		for key, dst := range map[string]*string{settings.KeyAnnounce: &cfg.Announce, settings.KeyAnnounceURL: &cfg.AnnounceURL,
+			settings.KeyBrandAccent: &cfg.App.Accent, settings.KeyBrandLogo: &cfg.App.LogoURL} {
+			if *dst, err = set.String(ctx, key); err != nil {
+				return subs.Config{}, err
+			}
+		}
 		nodes, err := st.Q.ListNodes(ctx)
 		if err != nil {
 			return subs.Config{}, err
@@ -312,11 +367,13 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	subHandler.SetLogger(o.Log)
 	subHandler.SetTelegram(p.Telegram)
 	subHandler.SetShop(p.Billing)
+	subHandler.SetPromo(promos)
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
+	p.server.SetLegacy(subHandler.Legacy())
 	p.server.SetHSTS(o.HSTS)
 	p.Handler = p.server
 	return p, nil
@@ -353,11 +410,16 @@ func (p *Panel) Run(ctx context.Context) {
 	if err := p.Billing.MoveBuiltin(ctx); err != nil {
 		p.log.Error("billing: move the built-in providers", "err", err)
 	}
-	// The host reads the switch from a file; the setting is what the admin chose.
-	if auto, err := p.Settings.On(ctx, settings.AutoUpdate); err == nil {
-		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {
+	// The host reads the switch and the channel from a file; the settings are what the
+	// admin chose. The channel is the panel's own check's too.
+	auto, err := p.Settings.On(ctx, settings.AutoUpdate)
+	channel, cerr := p.Settings.UpdateChannel(ctx)
+	if err = errors.Join(err, cerr); err == nil {
+		if err := p.Updates.SetPolicy(updates.Policy{Auto: auto, Channel: channel}); err != nil && !errors.Is(err, updates.ErrUnavailable) {
 			p.log.Error("update policy", "err", err)
 		}
+	} else {
+		p.log.Error("update policy", "err", err)
 	}
 	var workers []func(context.Context)
 	if p.Nodes != nil {
@@ -366,7 +428,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.Tuner != nil {
 		workers = append(workers, p.Tuner.Run)
 	}
-	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run,
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

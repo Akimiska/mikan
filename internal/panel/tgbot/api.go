@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -77,6 +80,11 @@ func (c *Client) call(parent context.Context, method string, in, out any) error 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return c.do(parent, req, out)
+}
+
+// do sends a request made for the Bot API and reads its answer into out.
+func (c *Client) do(parent context.Context, req *http.Request, out any) error {
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		if parent.Err() != nil {
@@ -105,6 +113,50 @@ func (c *Client) call(parent context.Context, method string, in, out any) error 
 		return json.Unmarshal(r.Result, out)
 	}
 	return nil
+}
+
+// documentTimeout: a file goes up in one request, which over a slow way to Telegram (a
+// node, a proxy) takes longer than a message.
+const documentTimeout = 2 * time.Minute
+
+// MaxDocument is the largest file a bot may send.
+const MaxDocument = 50 << 20
+
+// SendDocument sends size bytes from file to a chat as a document named name, with a
+// caption under it. The body is read from file as it goes up, with its exact length: the
+// file is never held in memory.
+func (c *Client) SendDocument(parent context.Context, chat int64, name string, file io.Reader, size int64, caption string) (Message, error) {
+	if size > MaxDocument {
+		return Message{}, fmt.Errorf("a document of %d bytes is over the %d a bot may send", size, MaxDocument)
+	}
+	// The parts before the file and the closing boundary after it, written by the same
+	// multipart writer so they fit together.
+	var head bytes.Buffer
+	w := multipart.NewWriter(&head)
+	_ = w.WriteField("chat_id", strconv.FormatInt(chat, 10))
+	if caption != "" {
+		_ = w.WriteField("caption", caption)
+	}
+	if _, err := w.CreateFormFile("document", name); err != nil {
+		return Message{}, err
+	}
+	prefix := append([]byte(nil), head.Bytes()...)
+	head.Reset()
+	if err := w.Close(); err != nil {
+		return Message{}, err
+	}
+	trailer := head.Bytes()
+	ctx, cancel := context.WithTimeout(parent, documentTimeout)
+	defer cancel()
+	body := io.MultiReader(bytes.NewReader(prefix), io.LimitReader(file, size), bytes.NewReader(trailer))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/sendDocument", body)
+	if err != nil {
+		return Message{}, err
+	}
+	req.ContentLength = int64(len(prefix)) + size + int64(len(trailer))
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	var m Message
+	return m, c.do(parent, req, &m)
 }
 
 // User is a Telegram account.
@@ -191,6 +243,33 @@ func (c *Client) Send(ctx context.Context, chat int64, text string, kb *Keyboard
 	return m, err
 }
 
+// SendTo is Send for a Telegram channel target: its numeric chat id or @username.
+func (c *Client) SendTo(ctx context.Context, chat string, text string, silent bool) (Message, error) {
+	var m Message
+	in := map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	if silent {
+		in["disable_notification"] = true
+	}
+	err := c.call(ctx, "sendMessage", in, &m)
+	return m, err
+}
+
+// EditTo edits a message in a channel identified by numeric id or @username.
+func (c *Client) EditTo(ctx context.Context, chat string, msg int64, text string) error {
+	err := c.call(ctx, "editMessageText", map[string]any{"chat_id": chat, "message_id": msg, "text": text,
+		"parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}, nil)
+	var ae *APIError
+	if errors.As(err, &ae) && strings.Contains(ae.Description, "message is not modified") {
+		return nil
+	}
+	return err
+}
+
+// PinTo pins a channel message without notifying subscribers.
+func (c *Client) PinTo(ctx context.Context, chat string, msg int64) error {
+	return c.call(ctx, "pinChatMessage", map[string]any{"chat_id": chat, "message_id": msg, "disable_notification": true}, nil)
+}
+
 // Edit replaces a message's text and buttons. An edit to the same content is not an error.
 func (c *Client) Edit(ctx context.Context, chat, msg int64, text string, kb *Keyboard) error {
 	in := map[string]any{"chat_id": chat, "message_id": msg, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
@@ -275,7 +354,12 @@ func (c *Client) AnswerPreCheckout(ctx context.Context, id string, ok bool, reas
 
 // RefundStars returns a Stars payment.
 func (c *Client) RefundStars(ctx context.Context, user int64, chargeID string) error {
-	return c.call(ctx, "refundStarPayment", map[string]any{"user_id": user, "telegram_payment_charge_id": chargeID}, nil)
+	err := c.call(ctx, "refundStarPayment", map[string]any{"user_id": user, "telegram_payment_charge_id": chargeID}, nil)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && strings.Contains(strings.ToUpper(apiErr.Description), "CHARGE_ALREADY_REFUNDED") {
+		return nil
+	}
+	return err
 }
 
 func truncate(s string, n int) string {

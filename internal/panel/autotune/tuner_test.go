@@ -9,10 +9,12 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 	"mikan/internal/proto"
 )
 
@@ -22,6 +24,12 @@ type fakeNodes struct {
 	found    []nodeapi.TargetResult
 	checks   int
 	onScan   func() // runs while a scan is under way: the admin edits meanwhile
+	health   map[int64]nodesync.HealthView
+}
+
+func (f *fakeNodes) Health(id int64) (nodesync.HealthView, bool) {
+	h, ok := f.health[id]
+	return h, ok
 }
 
 func (f *fakeNodes) Activity(_ context.Context, id int64) (nodeapi.Activity, error) {
@@ -77,7 +85,7 @@ func setup(t *testing.T) *env {
 	e := &env{ctx: context.Background(), now: time.Unix(1_800_000_000, 0), ch: &changes{}}
 	clock := func() time.Time { return e.now }
 	var err error
-	if e.st, err = store.Open(e.ctx, t.TempDir()); err != nil {
+	if e.st, err = storetest.Open(e.ctx, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { e.st.Close() })

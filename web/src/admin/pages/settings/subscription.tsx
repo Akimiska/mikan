@@ -179,6 +179,61 @@ export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   );
 }
 
+// What the apps show besides the servers: an announcement for every app that reads one,
+// and the brand for the apps that read operator headers (ClashFest, SlothClash).
+export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const { draft: form, setDraft: setForm } = useDraft({ sub_announce: s.sub_announce, sub_announce_url: s.sub_announce_url, brand_accent: s.brand_accent, brand_logo_url: s.brand_logo_url });
+  const errors = fieldErrors(save.error);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    save.mutate({ sub_announce: form.sub_announce.trim(), sub_announce_url: form.sub_announce_url.trim(), brand_accent: form.brand_accent.trim(), brand_logo_url: form.brand_logo_url.trim() });
+  };
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const accent = /^#[0-9A-Fa-f]{6}$/.test(form.brand_accent.trim()) ? form.brand_accent.trim() : "";
+  return (
+    <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+      <form onSubmit={submit} noValidate>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t("settings.apps")}</h2>
+            <div className="card-sub">{t("settings.appsSub")}</div>
+          </div>
+        </div>
+        <Field label={t("settings.announce")} htmlFor="s-announce" hint={t("settings.announceHint")} error={errors.sub_announce}>
+          <input id="s-announce" className="input" value={form.sub_announce} onChange={set("sub_announce")} maxLength={200} aria-invalid={!!errors.sub_announce} />
+        </Field>
+        <Field label={t("settings.announceUrl")} htmlFor="s-announce-url" hint={t("settings.announceUrlHint")} error={errors.sub_announce_url}>
+          <input id="s-announce-url" className="input" value={form.sub_announce_url} onChange={set("sub_announce_url")} placeholder="https://t.me/your_channel" aria-invalid={!!errors.sub_announce_url} />
+        </Field>
+        <div className="flex items-start justify-between gap-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium">{t("settings.appBranding")}</div>
+            <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.appBrandingSub")}</div>
+          </div>
+          <Switch checked={s.app_branding} label={t("settings.appBranding")} disabled={save.isPending} onChange={(v) => save.mutate({ app_branding: v })} />
+        </div>
+        {s.app_branding ? (
+          <div className="grid gap-x-3 sm:grid-cols-[160px_1fr]">
+            <Field label={t("settings.brandAccent")} htmlFor="s-accent" hint={t("settings.brandAccentHint")} error={errors.brand_accent}>
+              <div className="flex items-center gap-2">
+                <span className="h-9 w-9 shrink-0 rounded-lg border border-[var(--hairline)]" style={{ background: accent || "transparent" }} aria-hidden />
+                <input id="s-accent" className="input mono" value={form.brand_accent} onChange={set("brand_accent")} maxLength={7} placeholder="#F07A2E" autoComplete="off" aria-invalid={!!errors.brand_accent} />
+              </div>
+            </Field>
+            <Field label={t("settings.brandLogo")} htmlFor="s-logo" hint={t("settings.brandLogoHint")} error={errors.brand_logo_url}>
+              <input id="s-logo" className="input" value={form.brand_logo_url} onChange={set("brand_logo_url")} placeholder="https://example.com/logo-256.png" aria-invalid={!!errors.brand_logo_url} />
+            </Field>
+          </div>
+        ) : null}
+        <Button type="submit" variant="primary" loading={save.isPending}>
+          {t("common.save")}
+        </Button>
+      </form>
+    </section>
+  );
+}
+
 export function DevicesCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   return (

@@ -277,6 +277,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перенести пользователей из другой панели
+         * @description Импорт идёт в фоне: ответ 202 сразу, ход и итог — в GET /api/v1/import/status.
+         */
+        post: operations["import-run"];
+        /**
+         * Остановить импорт
+         * @description Уже созданные пользователи остаются, их список — в отчёте.
+         */
+        delete: operations["import-cancel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/import/legacy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Старые ссылки подписки */
+        get: operations["get-legacy-links"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настроить старые ссылки подписки */
+        patch: operations["update-legacy-links"];
+        trace?: never;
+    };
+    "/api/v1/import/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Что перенесётся из другой панели
+         * @description Идёт в фоне: ответ 202 сразу, итог — в GET /api/v1/import/status (preview).
+         */
+        post: operations["import-preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/import/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ход импорта */
+        get: operations["import-status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/inbounds": {
         parameters: {
             query?: never;
@@ -362,6 +441,26 @@ export interface paths {
         head?: never;
         /** Изменить подключение */
         patch: operations["update-inbound"];
+        trace?: never;
+    };
+    "/api/v1/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Метрики в формате Prometheus
+         * @description Пользователи по состояниям, онлайн, трафик, ноды и подключения. Для Prometheus и Grafana: ключ на чтение в заголовке Authorization: Bearer.
+         */
+        get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/node": {
@@ -664,6 +763,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/promocodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Промокоды */
+        get: operations["list-promocodes"];
+        put?: never;
+        /** Создать промокод */
+        post: operations["create-promocode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/promocodes/redemptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** История промокодов */
+        get: operations["list-promocode-redemptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/promocodes/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Статистика промокодов */
+        get: operations["promocode-stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/promocodes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Изменить промокод */
+        put: operations["update-promocode"];
+        post?: never;
+        /** Удалить промокод */
+        delete: operations["delete-promocode"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/promocodes/{id}/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Включить или выключить промокод */
+        post: operations["enable-promocode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -822,6 +1008,44 @@ export interface paths {
         patch: operations["update-telegram"];
         trace?: never;
     };
+    "/api/v1/telegram/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Бэкапы в Telegram */
+        get: operations["get-telegram-backup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настроить бэкапы в Telegram */
+        patch: operations["update-telegram-backup"];
+        trace?: never;
+    };
+    "/api/v1/telegram/backup/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отправить бэкап сейчас
+         * @description Бэкап делается в фоне: ответ 202 сразу, итог — в GET /api/v1/telegram/backup (sending, last_ok, last_error).
+         */
+        post: operations["send-telegram-backup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/telegram/broadcast": {
         parameters: {
             query?: never;
@@ -834,6 +1058,24 @@ export interface paths {
         /** Разослать сообщение всем в боте */
         post: operations["telegram-broadcast"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/telegram/infrastructure/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Подключить чат администратора для уведомлений */
+        post: operations["telegram-infrastructure-connect"];
+        /** Отключить чат администратора для уведомлений */
+        delete: operations["telegram-infrastructure-disconnect"];
         options?: never;
         head?: never;
         patch?: never;
@@ -853,7 +1095,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Включить или выключить автообновление */
+        /** Автообновление и канал релизов */
         patch: operations["update-updates"];
         trace?: never;
     };
@@ -1227,6 +1469,22 @@ export interface components {
             totp_enabled: boolean;
             username: string;
         };
+        AlertsConfig: {
+            admin_enabled: boolean;
+            events: components["schemas"]["Events"];
+            public_changes: boolean;
+            public_channel?: string;
+            public_enabled: boolean;
+            public_summary: boolean;
+        };
+        AlertsConfigPatch: {
+            admin_enabled?: boolean;
+            events?: components["schemas"]["EventsPatch"];
+            public_changes?: boolean;
+            public_channel?: string;
+            public_enabled?: boolean;
+            public_summary?: boolean;
+        };
         AuditEntry: {
             /** @description Например user.create, settings.update, auth.login_failed */
             action: string;
@@ -1262,7 +1520,7 @@ export interface components {
             new: string;
             old: string;
             /** @enum {string} */
-            reason: "blocked" | "target_down" | "still_blocked";
+            reason: "blocked" | "target_down" | "still_blocked" | "busy";
         };
         AutoView: {
             /**
@@ -1288,6 +1546,35 @@ export interface components {
             stuck?: "off" | "waiting" | "no_port" | "no_target" | "exhausted";
             target_error?: string;
             target_ok?: boolean;
+        };
+        BackupView: {
+            /** @description Чат администратора подключён к боту (вкладка «Инфраструктура») */
+            admin_chat_set: boolean;
+            /** @description Слать базу в чат администратора раз в сутки */
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Час отправки (UTC)
+             */
+            hour: number;
+            /** @description Код ошибки последней попытки */
+            last_error?: string;
+            /**
+             * Format: date-time
+             * @description Когда ушёл последний бэкап
+             */
+            last_ok?: string;
+            /**
+             * Format: int64
+             * @description Размер последнего файла, байт
+             */
+            last_size?: number;
+            /** Format: date-time */
+            last_try?: string;
+            /** @description Пароль шифрования задан; сам пароль не возвращается */
+            password_set: boolean;
+            /** @description Бэкап делается прямо сейчас */
+            sending: boolean;
         };
         BoundDeviceView: {
             app: string;
@@ -1487,6 +1774,9 @@ export interface components {
             last_seen: string;
             online: boolean;
         };
+        "Enable-promocodeRequest": {
+            enabled: boolean;
+        };
         ErrorDetail: {
             /** @description Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id' */
             location?: string;
@@ -1527,6 +1817,26 @@ export interface components {
              * @example https://example.com/errors/example
              */
             type: string;
+        };
+        Events: {
+            autotune: boolean;
+            autotune_recovery: boolean;
+            exit: boolean;
+            inbound: boolean;
+            node: boolean;
+            tls: boolean;
+            update: boolean;
+            warp: boolean;
+        };
+        EventsPatch: {
+            autotune?: boolean;
+            autotune_recovery?: boolean;
+            exit?: boolean;
+            inbound?: boolean;
+            node?: boolean;
+            tls?: boolean;
+            update?: boolean;
+            warp?: boolean;
         };
         ExtendInputBody: {
             /** Format: int64 */
@@ -1591,6 +1901,30 @@ export interface components {
             /** @enum {string} */
             state: "running" | "ok" | "failed";
             version: string;
+        };
+        ImportRunInputBody: {
+            /** @enum {string} */
+            kind: "marzban" | "pasarguard" | "remnawave";
+            password?: string;
+            /**
+             * Format: int64
+             * @description Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа
+             */
+            tariff_id: number;
+            token?: string;
+            url: string;
+            username?: string;
+        };
+        ImportSource: {
+            /** @enum {string} */
+            kind: "marzban" | "pasarguard" | "remnawave";
+            password?: string;
+            /** @description Remnawave: API-токен; PasarGuard: API-ключ вместо логина */
+            token?: string;
+            /** @description Адрес старой панели: https://panel.example.com; http:// — только для этого сервера или локальной сети */
+            url: string;
+            /** @description Marzban, PasarGuard: логин администратора */
+            username?: string;
         };
         InboundView: {
             /** @description Приложения, которым подключение попадает в подписку: mihomo, xray, singbox, stash, other */
@@ -1667,6 +2001,55 @@ export interface components {
             title: string;
             type: string;
         };
+        InfrastructureConnectOutputBody: {
+            url: string;
+        };
+        JobState: {
+            /** Format: int64 */
+            done: number;
+            /** @description Код ошибки, когда state = failed */
+            error?: string;
+            /** Format: date-time */
+            finished?: string;
+            /** @description Панель и её адрес (без пути и данных для входа) */
+            from?: string;
+            /** @enum {string} */
+            mode?: "preview" | "import";
+            preview?: components["schemas"]["Preview"];
+            /** @description Что сделано; при ошибке посреди импорта — сделанное до неё */
+            report?: components["schemas"]["Report"];
+            /** Format: date-time */
+            started?: string;
+            /**
+             * @description idle — ещё не было; fetching — читается старая панель; importing — создаются пользователи
+             * @enum {string}
+             */
+            state: "idle" | "fetching" | "checking" | "importing" | "done" | "failed";
+            /** Format: int64 */
+            total: number;
+        };
+        LegacyView: {
+            /** @description Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам */
+            kind: string;
+            /**
+             * Format: int64
+             * @description Сколько старых ссылок и пользователей заведено
+             */
+            links: number;
+            /** @description Путь старых ссылок подписки: sub у Marzban и PasarGuard, api/sub у Remnawave; пусто — выключено */
+            path: string;
+            /** @description Секрет старой панели задан; сам он не возвращается */
+            secret_set: boolean;
+        };
+        List: {
+            /**
+             * Format: int64
+             * @description Сколько всего
+             */
+            count: number;
+            /** @description Первые 50 */
+            names: string[];
+        };
         ListUsersOutputBody: {
             counts: components["schemas"]["UserCounts"];
             items: components["schemas"]["UserView"][];
@@ -1677,6 +2060,7 @@ export interface components {
             total: number;
         };
         ListenerStatus: {
+            code?: string;
             error?: string;
             name: string;
             ok: boolean;
@@ -1753,6 +2137,8 @@ export interface components {
             mem_used: number;
             /** @description Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений */
             name: string;
+            /** @description Публичное имя для канала состояния; пустое — нода скрыта из списка */
+            public_name: string;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
             version?: string;
@@ -1886,6 +2272,13 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        PatchBackupInputBody: {
+            enabled?: boolean;
+            /** Format: int64 */
+            hour?: number;
+            /** @description Пароль, которым шифруется файл: от 20 символов. Файл остаётся в истории чата навсегда; без пароля его не открыть */
+            password?: string;
+        };
         PatchInboundInputBody: {
             /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_port?: boolean;
@@ -1926,22 +2319,41 @@ export interface components {
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
         };
+        PatchLegacyInputBody: {
+            /** @enum {string} */
+            kind?: "marzban" | "pasarguard" | "remnawave" | "";
+            path?: string;
+            /** @description Секрет из таблицы jwt базы старой панели; пусто — убрать */
+            secret?: string;
+        };
         PatchNodeInputBody: {
             domain?: string;
             enabled?: boolean;
             host?: string;
             name?: string;
+            /** @description Публичное имя ноды; пустое — не публиковать её в канале */
+            public_name?: string;
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
             enabled?: boolean;
             renew_resets_traffic?: boolean;
             stars?: boolean;
+            /**
+             * Format: int64
+             * @description Тариф пробного периода; 0 — выключить
+             */
+            trial_tariff_id?: number;
         };
         PatchSettingsInputBody: {
+            app_branding?: boolean;
             auto_port?: boolean;
             auto_sni?: boolean;
             brand?: string;
+            /** @description #RRGGBB или пусто */
+            brand_accent?: string;
+            /** @description https://… или пусто */
+            brand_logo_url?: string;
             /** @description Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов */
             client_fingerprint?: string;
             /** @enum {string} */
@@ -1952,6 +2364,9 @@ export interface components {
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
+            sub_announce?: string;
+            /** @description https://… или tg://… */
+            sub_announce_url?: string;
             sub_group_auto?: string;
             sub_group_main?: string;
             /**
@@ -1969,6 +2384,7 @@ export interface components {
         PatchTelegramInputBody: {
             config?: components["schemas"]["Config"];
             enabled?: boolean;
+            infrastructure?: components["schemas"]["AlertsConfigPatch"];
             /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
             route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */
@@ -1976,6 +2392,8 @@ export interface components {
         };
         PatchUpdatesInputBody: {
             auto?: boolean;
+            /** @enum {string} */
+            channel?: "stable" | "beta";
         };
         PatchUserInputBody: {
             /**
@@ -2022,6 +2440,16 @@ export interface components {
             renew_resets_traffic: boolean;
             /** @description Telegram Stars: нужен только запущенный бот */
             stars: boolean;
+            /**
+             * Format: int64
+             * @description Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже
+             */
+            trial_tariff_id: number | null;
+            /**
+             * Format: int64
+             * @description Сколько пробных подписок выдано
+             */
+            trials: number;
         };
         PaymentSettingsViewAvailableStruct: {
             /** @description Адаптеры маркетплейса, которые принимают оплату прямо сейчас */
@@ -2068,6 +2496,11 @@ export interface components {
             /** @enum {string} */
             status: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded";
             tariff_name: string;
+            /**
+             * Format: int64
+             * @description Купленный срок в днях (0 — бессрочно); нет у пакетов и у платежей до сроков в тарифах
+             */
+            term_days?: number;
             /** Format: int64 */
             tg_id: number;
             tg_username?: string;
@@ -2102,6 +2535,29 @@ export interface components {
             inbounds: string[];
             name: string;
         };
+        Preview: {
+            /** @description Пользователи, которых mikan не примет, с причиной */
+            invalid: components["schemas"]["List"];
+            /**
+             * Format: int64
+             * @description Будут созданы
+             */
+            new: number;
+            /** @description Будут перенесены без старой ссылки */
+            no_link: components["schemas"]["List"];
+            /**
+             * Format: int64
+             * @description Пользователи «на паузе»: в mikan их срок пойдёт с момента импорта
+             */
+            on_hold: number;
+            statuses: {
+                [key: string]: number;
+            };
+            /** @description Имена, которые уже есть в mikan */
+            taken: components["schemas"]["List"];
+            /** Format: int64 */
+            total: number;
+        };
         ProbeView: {
             /** Format: date-time */
             checked_at: string;
@@ -2111,9 +2567,170 @@ export interface components {
             ip?: string;
             ok: boolean;
         };
+        PromoBody: {
+            code: string;
+            /** @description Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется. */
+            currency: string;
+            description: string;
+            /**
+             * Format: int64
+             * @description Срок действия резерва скидки в секундах; 0 = 30 минут
+             */
+            discount_ttl: number;
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Unix time в секундах; значение не может быть в прошлом
+             */
+            ends_at?: number;
+            first_purchase_only: boolean;
+            /**
+             * Format: int64
+             * @description Максимальная скидка в минимальных единицах оплаты: RUB — копейки, XTR — Stars
+             */
+            max_discount: number;
+            /** Format: int64 */
+            max_uses?: number;
+            /**
+             * Format: int64
+             * @description Минимальная сумма заказа в минимальных единицах оплаты: RUB — копейки, XTR — Stars
+             */
+            min_order: number;
+            name: string;
+            new_users_only: boolean;
+            /** Format: int64 */
+            per_user_limit: number;
+            /**
+             * Format: int64
+             * @description Пул для бонусного трафика; без значения — основной трафик
+             */
+            pool_id?: number;
+            /**
+             * Format: int64
+             * @description Unix time в секундах
+             */
+            starts_at?: number;
+            tariff_ids: number[];
+            /** @enum {string} */
+            type: "days" | "traffic" | "percent" | "fixed";
+            /**
+             * Format: int64
+             * @description days: дни; traffic: байты (минимум 1 GiB); percent: проценты 1-100; fixed: сумма в минимальных единицах оплаты
+             */
+            value: number;
+        };
+        PromoCodeView: {
+            code: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            created_by?: number;
+            currency: string;
+            description: string;
+            /** Format: int64 */
+            discount_ttl: number;
+            enabled: boolean;
+            /** Format: date-time */
+            ends_at?: string;
+            first_purchase_only: boolean;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            max_discount: number;
+            /** Format: int64 */
+            max_uses?: number;
+            /** Format: int64 */
+            min_order: number;
+            name: string;
+            new_users_only: boolean;
+            /** Format: int64 */
+            per_user_limit: number;
+            /** Format: int64 */
+            pool_id?: number;
+            /** Format: date-time */
+            starts_at?: string;
+            status: string;
+            tariff_ids: number[];
+            /** @enum {string} */
+            type: "days" | "traffic" | "percent" | "fixed";
+            /** Format: int64 */
+            used_count: number;
+            /** Format: int64 */
+            value: number;
+        };
+        PromoListOutputBody: {
+            items: components["schemas"]["PromoCodeView"][];
+            /** Format: int64 */
+            total: number;
+        };
+        PromoRedemptionView: {
+            /** Format: int64 */
+            bytes: number;
+            code: string;
+            currency: string;
+            /** Format: int64 */
+            days: number;
+            /** Format: int64 */
+            discount_amount: number;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: int64 */
+            final_amount: number;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            original_amount: number;
+            /** Format: int64 */
+            payment_id?: number;
+            /** Format: int64 */
+            promo_id: number;
+            /** Format: date-time */
+            redeemed_at: string;
+            status: string;
+            /** Format: int64 */
+            tg_id: number;
+            /** Format: int64 */
+            user_id?: number;
+        };
+        PromoRedemptionsOutputBody: {
+            items: components["schemas"]["PromoRedemptionView"][];
+            /** Format: int64 */
+            total: number;
+        };
+        PromoStatsView: {
+            /** Format: int64 */
+            active: number;
+            /** Format: int64 */
+            bonus_bytes: number;
+            /** Format: int64 */
+            bonus_days: number;
+            /** Format: int64 */
+            discount_amount: number;
+            /** Format: int64 */
+            discount_orders: number;
+            /** Format: int64 */
+            promo_codes: number;
+            /** Format: int64 */
+            successful_activations: number;
+        };
         RecoveryOutputBody: {
             /** @description Показываются один раз */
             recovery_codes: string[];
+        };
+        Report: {
+            /** Format: int64 */
+            created: number;
+            /** @description Имя и причина для тех, кого не удалось создать */
+            failed: components["schemas"]["List"];
+            /**
+             * Format: int64
+             * @description Старые ссылки и ключи, заведённые этим импортом
+             */
+            links: number;
+            /** @description Перенесены без старой ссылки: её токен слишком короткий, чтобы быть секретом */
+            no_link: components["schemas"]["List"];
+            /** @description Имена, которые уже есть в mikan: эти пользователи не перенесены */
+            skipped: components["schemas"]["List"];
         };
         ResetPathOutputBody: {
             admin_url: string;
@@ -2169,11 +2786,17 @@ export interface components {
         };
         SettingsView: {
             admin_url: string;
+            /** @description Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки */
+            app_branding: boolean;
             /** @description Переносить подключение на другой порт, если клиенты перестали до него доходить */
             auto_port: boolean;
             /** @description Менять сайт маскировки REALITY, если он перестал подходить */
             auto_sni: boolean;
             brand: string;
+            /** @description Цвет бренда #RRGGBB; пусто — цвет приложения */
+            brand_accent: string;
+            /** @description Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения */
+            brand_logo_url: string;
             certificate: components["schemas"]["Status"];
             /** @description Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение */
             client_fingerprint: string;
@@ -2197,6 +2820,10 @@ export interface components {
             quiet_hour_utc: number;
             /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
             rule_targets: string[];
+            /** @description Объявление над профилем в приложениях (заголовок announce); пусто — нет */
+            sub_announce: string;
+            /** @description Куда ведёт нажатие на объявление */
+            sub_announce_url: string;
             sub_base_url: string;
             /** @description Группа автовыбора самого быстрого подключения */
             sub_group_auto: string;
@@ -2279,6 +2906,8 @@ export interface components {
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort?: number;
+            /** @description Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений */
+            terms?: components["schemas"]["TermBody"][];
             /** Format: int64 */
             traffic_limit?: number;
         };
@@ -2317,6 +2946,8 @@ export interface components {
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort: number;
+            /** @description Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub */
+            terms: components["schemas"]["TermView"][];
             /**
              * Format: int64
              * @description Байты; null — без лимита
@@ -2371,6 +3002,7 @@ export interface components {
              * @description Аккаунтов Telegram с подписками
              */
             accounts: number;
+            admin_chat_set: boolean;
             bot?: components["schemas"]["TelegramBot"];
             /** @description Последняя рассылка с запуска панели */
             broadcast?: components["schemas"]["TelegramBroadcast"];
@@ -2380,6 +3012,7 @@ export interface components {
             enabled: boolean;
             /** @description token_invalid, token_revoked, unreachable или ответ Telegram */
             error?: string;
+            infrastructure: components["schemas"]["AlertsConfig"];
             /**
              * Format: int64
              * @description Подписок, привязанных к Telegram
@@ -2394,6 +3027,40 @@ export interface components {
             token_hint?: string;
             /** @description Токен сохранён */
             token_set: boolean;
+        };
+        TermBody: {
+            /**
+             * Format: int64
+             * @description 0 — бессрочно; с днём оплаты — месяцы по 30 дней
+             */
+            days: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках: 19900 — 199 ₽
+             */
+            price_rub?: number;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars
+             */
+            price_stars?: number;
+        };
+        TermView: {
+            /**
+             * Format: int64
+             * @description 0 — бессрочно; с днём оплаты — месяцы по 30 дней
+             */
+            days: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках; null — не за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars; null — не за Stars
+             */
+            price_stars: number | null;
         };
         Texts: {
             /** @description Уведомление: подписка закончилась */
@@ -2450,6 +3117,11 @@ export interface components {
             /** @description Вышла версия новее этой */
             available: boolean;
             /**
+             * @description Какие релизы ставить: stable — только релизы, beta — и пре-релизы (vX-rc.N)
+             * @enum {string}
+             */
+            channel: "stable" | "beta";
+            /**
              * Format: int64
              * @description Unix-время последней проверки; 0 — ещё не проверяли
              */
@@ -2461,6 +3133,8 @@ export interface components {
             host?: components["schemas"]["HostStatus"];
             /** @description Последний релиз; пусто, пока проверки не было */
             latest: string;
+            /** @description Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто */
+            newest: string;
             /** @description Что изменилось: markdown по языкам, en и ru */
             notes: {
                 [key: string]: string;
@@ -2472,6 +3146,8 @@ export interface components {
              * @description Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял
              */
             requested_at: number;
+            /** @description Вышел newest, но с этой версии к нему не ведёт ни одно обновление */
+            unreachable: boolean;
         };
         UserCounts: {
             /** Format: int64 */
@@ -3157,6 +3833,190 @@ export interface operations {
             };
         };
     };
+    "import-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRunInputBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobState"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-legacy-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-legacy-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchLegacyInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportSource"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobState"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "import-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobState"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-inbounds": {
         parameters: {
             query?: never;
@@ -3368,6 +4228,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus text format 0.0.4 */
+            200: {
+                headers: {
+                    "Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
                 };
             };
             /** @description Error */
@@ -4275,6 +5165,231 @@ export interface operations {
             };
         };
     };
+    "list-promocodes": {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoListOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-promocode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoCodeView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-promocode-redemptions": {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoRedemptionsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "promocode-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoStatsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-promocode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoCodeView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-promocode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "enable-promocode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Enable-promocodeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoCodeView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-settings": {
         parameters: {
             query?: never;
@@ -4701,6 +5816,97 @@ export interface operations {
             };
         };
     };
+    "get-telegram-backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-telegram-backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchBackupInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "send-telegram-backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "telegram-broadcast": {
         parameters: {
             query?: never;
@@ -4722,6 +5928,62 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BroadcastOutputBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-infrastructure-connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InfrastructureConnectOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-infrastructure-disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

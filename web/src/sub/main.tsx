@@ -14,6 +14,7 @@ import { APPS, detect, enc, type Platform } from "./apps";
 import { Devices } from "./devices";
 import { initData, json, openOutside, outside, pageURL, request, subRoot, tgEvent, tgMode, tokenOf } from "./net";
 import { loadShop, Shop, type ShopData } from "./shop";
+import { PromoSection } from "./promo";
 import type { Info, TgSub } from "./types";
 
 /** Pauses between the reloads after a payment: the panel applies a paid one within seconds. */
@@ -34,6 +35,7 @@ function SubPage() {
   const [tg, setTg] = useState<{ state: "loading" | "none" | "failed" | "ok"; subs: TgSub[] }>({ state: tgMode ? "loading" : "ok", subs: [] });
   const [shop, setShop] = useState<ShopData | null>(null);
   const [packages, setPackages] = useState<{ token: string; data: ShopData } | null>(null);
+  const [promoCode, setPromoCode] = useState("");
   const current = info && info.url === subURL ? info.data : null;
   const failed = !current && failedURL === subURL;
 
@@ -183,6 +185,7 @@ function SubPage() {
         openInvoice={(slug) => tgEvent("web_app_open_invoice", { slug })}
         openLink={openOutside}
         onRefresh={refresh}
+        promoCode={promoCode}
       />
     ) : null;
   // Traffic packages are for the subscription on screen.
@@ -201,6 +204,7 @@ function SubPage() {
         openInvoice={(slug) => tgEvent("web_app_open_invoice", { slug })}
         openLink={openOutside}
         onRefresh={refresh}
+        promoCode={promoCode}
       />
     ) : null;
 
@@ -211,6 +215,7 @@ function SubPage() {
           <h1 className="font-display text-xl font-medium">{t("sub.tgNoSubTitle")}</h1>
           <p className="mt-2 text-[13px] text-[var(--ink-500)]">{t("sub.tgNoSubText")}</p>
         </section>
+        <PromoSection token="" activeCode={promoCode} onApplied={(c) => setPromoCode(c)} onBonusApplied={refresh} />
         {shopFor("", t("sub.shopNew"))}
       </Shell>
     );
@@ -310,6 +315,7 @@ function SubPage() {
         ) : null}
       </section>
 
+      {tgMode ? <PromoSection token={subURL} activeCode={promoCode} onApplied={(c) => setPromoCode(c)} onBonusApplied={refresh} /> : null}
       {tgMode ? shopFor(token, t("sub.shop")) : null}
       {tgMode ? packagesShop : null}
 
@@ -357,13 +363,14 @@ function SubPage() {
 
       <section className="glass rounded-3xl p-4">
         <h2 className="mb-3 text-[15px] font-semibold">{t("sub.connect")}</h2>
-        <div className="mb-3 flex gap-1 rounded-[14px] bg-[var(--hover)] p-1" role="group" aria-label={t("sub.platform")}>
+        <div className="mb-3 flex gap-1 overflow-x-auto rounded-[14px] bg-[var(--hover)] p-1" role="group" aria-label={t("sub.platform")}>
           {(
             [
               ["ios", "iPhone"],
               ["android", "Android"],
               ["windows", "Windows"],
               ["macos", "Mac"],
+              ["linux", "Linux"],
             ] as const
           ).map(([k, l]) => (
             <button
@@ -371,7 +378,7 @@ function SubPage() {
               type="button"
               aria-pressed={platform === k}
               onClick={() => setPlatform(k)}
-              className="h-8 flex-1 rounded-[10px] text-xs font-semibold text-[var(--ink-600)] aria-pressed:bg-white aria-pressed:text-[var(--ink-900)] aria-pressed:shadow-sm"
+              className="h-8 flex-auto shrink-0 rounded-[10px] px-1.5 text-xs font-semibold whitespace-nowrap text-[var(--ink-600)] aria-pressed:bg-white aria-pressed:text-[var(--ink-900)] aria-pressed:shadow-sm"
             >
               {l}
             </button>

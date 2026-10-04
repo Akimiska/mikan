@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/store/db"
 )
 
@@ -25,6 +26,46 @@ func packageEnv(t *testing.T) (*env, db.User, db.TrafficPackage) {
 		Lifetime: domain.LifetimeUsed, PriceStars: sql.NullInt64{Int64: 75, Valid: true}, PriceRub: sql.NullInt64{Int64: 7900, Valid: true}, OnSale: true})
 	must(t, err)
 	return e, u, pk
+}
+
+func TestDiscountedPackageInvoicePersistsAmountAndReusesInvoice(t *testing.T) {
+	e, u, pk := packageEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "PK25", Type: "percent", Value: 25, Currency: "XTR", PerUserLimit: 1, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	req := PackageRequest{TgID: 555, UserID: u.ID, PackageID: pk.ID, Provider: Stars, PromoCode: pc.Code}
+	p, err := e.s.PackageInvoice(ctx, req)
+	must(t, err)
+	if p.Amount != 57 {
+		t.Fatalf("invoice amount = %d, want 57", p.Amount)
+	}
+	if stored := e.payment(p.ID); stored.Amount != 57 {
+		t.Fatalf("stored amount = %d, want discounted 57", stored.Amount)
+	}
+	calls := e.tg.invoiceCount()
+	if again, err := e.s.PackageInvoice(ctx, req); err != nil || again.ID != p.ID || e.tg.invoiceCount() != calls {
+		t.Fatalf("invoice was not reused: payment=%+v err=%v calls=%d->%d", again, err, calls, e.tg.invoiceCount())
+	}
+	must(t, e.s.PreCheckout(ctx, 555, p.Payload, "XTR", 57))
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-discount-pkg", "XTR", 57))
+	if e.payment(p.ID).Status != "applied" {
+		t.Fatalf("discounted payment not applied: %+v", e.payment(p.ID))
+	}
+}
+
+func TestDiscountedPackagePreCheckoutHonorsReservationExpiry(t *testing.T) {
+	e, u, pk := packageEnv(t)
+	ctx := context.Background()
+	pc, err := e.st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "SHORT", Type: "percent", Value: 10, Currency: "XTR", PerUserLimit: 1, DiscountTtl: 1, TariffIds: "[]", Enabled: 1, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.s.d.Promo = promo.New(e.st, func() time.Time { return e.now })
+	p, err := e.s.PackageInvoice(ctx, PackageRequest{TgID: 555, UserID: u.ID, PackageID: pk.ID, Provider: Stars, PromoCode: pc.Code})
+	must(t, err)
+	e.now = e.now.Add(2 * time.Second)
+	if err := e.s.PreCheckout(ctx, 555, p.Payload, "XTR", p.Amount); !errors.Is(err, ErrBadPayment) {
+		t.Fatalf("expired discounted package passed pre-checkout: %v", err)
+	}
 }
 
 // Buying a package with Stars gives the subscription one grant, however many times and

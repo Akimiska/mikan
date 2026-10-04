@@ -132,9 +132,22 @@ func (e userEnv) liveIPs(slots []string) []string {
 	return out
 }
 
-// allUserSlots maps every user to the names of all their slots: for a list.
+// allUserSlots maps every user to the names of all their slots.
 func (h *handlers) allUserSlots(ctx context.Context) (map[int64][]string, error) {
 	rows, err := h.d.Store.Q.ListSlotUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := map[int64][]string{}
+	for _, r := range rows {
+		m[r.UserID] = append(m[r.UserID], r.SlotName)
+	}
+	return m, nil
+}
+
+// userSlots maps the users of ids to the names of all their slots: for a list's page.
+func (h *handlers) userSlots(ctx context.Context, ids []int64) (map[int64][]string, error) {
+	rows, err := h.d.Store.Q.UserSlotsOf(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -287,11 +300,10 @@ func mapDomainErr(err error) error {
 }
 
 func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUsersOutput, error) {
+	// The filters stay in Go: the search lowercases as Go does (PostgreSQL's lower() follows
+	// the database's locale, and a C locale leaves Cyrillic as it is), and the states are
+	// domain.State. Only the page's users get their slots read.
 	users, err := h.d.Store.Q.ListUsers(ctx)
-	if err != nil {
-		return nil, err
-	}
-	names, err := h.allUserSlots(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -332,8 +344,17 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 	end := min(in.Offset+in.Limit, len(matched))
 	out.Body.Items = []UserView{}
 	if in.Offset < len(matched) {
+		page := matched[in.Offset:end]
+		ids := make([]int64, len(page))
+		for i, u := range page {
+			ids[i] = u.ID
+		}
+		names, err := h.userSlots(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
 		env := h.userEnv(ctx)
-		for _, u := range matched[in.Offset:end] {
+		for _, u := range page {
 			out.Body.Items = append(out.Body.Items, h.viewUser(u, names[u.ID], grants, env))
 		}
 	}

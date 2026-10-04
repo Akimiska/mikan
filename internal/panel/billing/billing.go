@@ -636,16 +636,8 @@ func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency
 	if err != nil || t.Archived != 0 || t.OnSale == 0 {
 		return ErrNotForSale
 	}
-	// A term taken off the tariff since the invoice is no longer sold either.
-	if p.TermDays.Valid {
-		terms, err := domain.TermsOf(ctx, s.d.Store.Q, t)
-		if err != nil {
-			return err
-		}
-		if _, ok := domain.FindTerm(terms, p.TermDays.Int64); !ok {
-			return ErrNotForSale
-		}
-	}
+	// The invoice keeps the term and the price it was made for, as with every other
+	// provider: a term edited or taken off since then is still the one paid for.
 	return nil
 }
 

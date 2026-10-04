@@ -118,16 +118,22 @@ func TestOpenInvoiceIsPerTerm(t *testing.T) {
 	}
 }
 
-// Telegram's last question refuses a term taken off the tariff since the invoice.
-func TestPreCheckoutRefusesARemovedTerm(t *testing.T) {
+// An invoice keeps its term when the tariff changes before it is paid, in Stars as with
+// the other providers: Telegram's last question passes and the buyer gets what they paid
+// for.
+func TestPreCheckoutKeepsTheInvoicedTerm(t *testing.T) {
 	e := newEnv(t)
 	e.sellTerms()
 	ctx := context.Background()
 	p, err := e.s.Invoice(ctx, InvoiceRequest{TgID: 555, TariffID: e.sale.ID, TermDays: days(90), Provider: Stars})
 	must(t, err)
 	must(t, domain.SetTariffTerms(ctx, e.st.Q, e.sale.ID, nil))
-	if err := e.s.PreCheckout(ctx, 555, p.Payload, "XTR", p.Amount); !errors.Is(err, ErrNotForSale) {
-		t.Fatalf("a removed term: %v", err)
+	must(t, e.s.PreCheckout(ctx, 555, p.Payload, "XTR", p.Amount))
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-kept", "XTR", p.Amount))
+	u, err := e.st.Q.GetUser(ctx, e.payment(p.ID).UserID.Int64)
+	must(t, err)
+	if want := e.now.Add(90 * 24 * time.Hour).Unix(); u.ExpiresAt.Int64 != want {
+		t.Fatalf("expires %v, want the 90 days paid for", time.Unix(u.ExpiresAt.Int64, 0).UTC())
 	}
 }
 

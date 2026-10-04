@@ -185,9 +185,9 @@ function PoolDrawer({ pool, onClose }: { pool: Pool | "new" | null; onClose: () 
   );
 }
 
-/** Pool limits of a tariff or a user: GB per pool, empty = unlimited. */
-/** Limits per pool, and with closed/onClosed a switch per pool: a closed pool is left out
- * of the subscription and the nodes turn the user away from it, so it has no limit. */
+/** Pool limits of a tariff or a user: GB per pool, empty = unlimited. With closed/onClosed
+ * each pool has an access switch: a closed pool is left out of the subscription and the
+ * nodes turn the user away from it, so it has no limit. */
 export function PoolLimitsField({
   pools,
   value,

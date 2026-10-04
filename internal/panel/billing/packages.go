@@ -115,6 +115,14 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 	if err != nil {
 		return db.Payment{}, err
 	}
+	// Checked again on the user's own rows: a pool closed on the tariff sells nothing.
+	userPools, err := q.ListUserPools(ctx, req.UserID)
+	if err != nil {
+		return db.Payment{}, err
+	}
+	if domain.PackagePoolClosed(userPools, p) {
+		return db.Payment{}, ErrNotForSale
+	}
 	amount, currency, ok := av.price(req.Provider, p.PriceStars, p.PriceRub)
 	if !ok {
 		return db.Payment{}, ErrProviderOff
@@ -164,10 +172,19 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 	return s.openPayment(ctx, pay, p.Name, DescribePackage(p, offer.Pool, lang))
 }
 
-// packageOnSale: the package of a payment can still be bought (Telegram's pre-checkout).
+// packageOnSale: the package of a payment can still be bought (Telegram's pre-checkout):
+// on sale, and its pool not closed for the subscription since the invoice.
 func (s *Service) packageOnSale(ctx context.Context, pay db.Payment) error {
-	p, err := s.d.Store.Q.GetTrafficPackage(ctx, pay.PackageID.Int64)
+	q := s.d.Store.Q
+	p, err := q.GetTrafficPackage(ctx, pay.PackageID.Int64)
 	if err != nil || !pay.PackageID.Valid || p.Archived != 0 || p.OnSale == 0 {
+		return ErrNotForSale
+	}
+	pools, err := q.ListUserPools(ctx, pay.UserID.Int64)
+	if err != nil {
+		return err
+	}
+	if domain.PackagePoolClosed(pools, p) {
 		return ErrNotForSale
 	}
 	return nil
@@ -175,6 +192,9 @@ func (s *Service) packageOnSale(ctx context.Context, pay db.Payment) error {
 
 // applyPackage gives the paid package to the payment's subscription on q's transaction.
 // A package archived or taken off sale since the invoice still applies: it is paid for.
+// So does one for a pool closed on the tariff since then (the provider took the money, and
+// refusing it here would lose it): the grant waits in the pool until the pool is opened
+// again or the grant expires, and the warning tells the operator to refund or reopen.
 func (s *Service) applyPackage(ctx context.Context, q *db.Queries, pay db.Payment) (db.User, error) {
 	if !pay.UserID.Valid {
 		return db.User{}, errUserGone
@@ -195,6 +215,9 @@ func (s *Service) applyPackage(ctx context.Context, q *db.Queries, pay db.Paymen
 	}
 	if err != nil {
 		return u, err
+	}
+	if pools, err := q.ListUserPools(ctx, u.ID); err == nil && domain.PackagePoolClosed(pools, p) {
+		s.d.Log.Warn("billing: a paid package is for a pool closed for the subscription", "payment", pay.ID, "user", u.ID, "package", p.ID, "pool", p.PoolID.Int64)
 	}
 	_, err = domain.GrantTx(ctx, q, u, domain.GrantOf(p, pay.ID), s.d.Now())
 	return u, err

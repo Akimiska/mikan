@@ -122,6 +122,25 @@ export function PoolsSection({ u }: { u: User }) {
   const pools = useQuery({ queryKey: qk.userPools(u.id), queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/pools", { params: { path: { id: u.id } }, signal })) });
   const [edit, setEdit] = useState<Record<number, string> | null>(null);
   const [closed, setClosed] = useState<Record<number, boolean>>({});
+  const tariffs = useTariffs();
+  // Access turned back on: the limit of the user's tariff for that pool comes back with it
+  // (empty, unlimited, when the tariff has none), not an open pool without a limit.
+  const reopen = (next: Record<number, boolean>) => {
+    const tariffPools = tariffs.data?.find((x) => x.id === u.tariff_id)?.pools ?? [];
+    const back = Object.keys(next).map(Number).filter((id) => closed[id] && !next[id]);
+    if (back.length) {
+      setEdit((cur) => {
+        if (!cur) return cur;
+        const filled = { ...cur };
+        for (const id of back) {
+          const limit = tariffPools.find((p) => p.pool_id === id && !p.excluded)?.traffic_limit;
+          if (limit != null && (filled[id] ?? "").trim() === "") filled[id] = String(+(limit / 2 ** 30).toFixed(2));
+        }
+        return filled;
+      });
+    }
+    setClosed(next);
+  };
   const save = useMutation({
     mutationFn: (limits: Record<number, string>) =>
       unwrap(
@@ -165,7 +184,7 @@ export function PoolsSection({ u }: { u: User }) {
     >
       {edit ? (
         <>
-          <PoolLimitsField pools={pools.data.map((p) => ({ id: p.pool_id, name: p.name, inbounds: [] }))} value={edit} onChange={setEdit} closed={closed} onClosed={setClosed} />
+          <PoolLimitsField pools={pools.data.map((p) => ({ id: p.pool_id, name: p.name, inbounds: [] }))} value={edit} onChange={setEdit} closed={closed} onClosed={reopen} />
           {bad ? (
             <p className="mt-2 text-xs text-[var(--berry-600)]" role="alert">
               {t("pools.errLimit")}

@@ -414,7 +414,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
           </Field>
         ) : null}
         {allPools.data?.length ? (
-          <Field label={t("pools.tariffLimits")} hint={t("pools.tariffLimitsHint")} error={errors.pools}>
+          <Field label={t("pools.tariffLimits")} hint={`${t("pools.tariffLimitsHint")} ${t("pools.closeHint")}`} error={errors.pools}>
             <PoolLimitsField pools={allPools.data} value={poolGB} onChange={setPoolGB} closed={poolClosed} onClosed={setPoolClosed} />
           </Field>
         ) : null}

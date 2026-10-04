@@ -1115,6 +1115,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/torrent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Блокировка торрентов */
+        get: operations["get-torrent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настроить блокировку торрентов */
+        patch: operations["update-torrent"];
+        trace?: never;
+    };
+    "/api/v1/torrent/hits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Пойманные торренты
+         * @description Новые сверху; следующая страница — before=id последней записи.
+         */
+        get: operations["list-torrent-hits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/updates": {
         parameters: {
             query?: never;
@@ -1371,6 +1409,23 @@ export interface paths {
         post?: never;
         /** Отвязать подписку от Telegram */
         delete: operations["unlink-telegram"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/torrent-ban/lift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Снять торрент-бан пользователя */
+        post: operations["lift-torrent-ban"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1859,6 +1914,7 @@ export interface components {
             inbound: boolean;
             node: boolean;
             tls: boolean;
+            torrent: boolean;
             update: boolean;
             warp: boolean;
         };
@@ -1869,6 +1925,7 @@ export interface components {
             inbound?: boolean;
             node?: boolean;
             tls?: boolean;
+            torrent?: boolean;
             update?: boolean;
             warp?: boolean;
         };
@@ -2074,6 +2131,13 @@ export interface components {
             path: string;
             /** @description Секрет старой панели задан; сам он не возвращается */
             secret_set: boolean;
+        };
+        LiftTorrentOutputBody: {
+            /**
+             * Format: int64
+             * @description Сколько банов снято
+             */
+            lifted: number;
         };
         List: {
             /**
@@ -2429,6 +2493,13 @@ export interface components {
             route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */
             token?: string;
+        };
+        PatchTorrentInputBody: {
+            /** Format: int64 */
+            ban_minutes?: number;
+            enabled?: boolean;
+            /** @description Весь список id пользователей-исключений */
+            exempt?: number[];
         };
         PatchUpdatesInputBody: {
             auto?: boolean;
@@ -3126,6 +3197,64 @@ export interface components {
             id: number;
             name: string;
         };
+        TorrentHitView: {
+            /** Format: date-time */
+            at: string;
+            /**
+             * Format: date-time
+             * @description До какого времени бан; null — без бана
+             */
+            banned_until: string | null;
+            /** @description Куда шло соединение */
+            dest: string;
+            /**
+             * Format: int32
+             * @description Сколько попыток за раз: нода сообщает о пользователе не чаще раза в минуту
+             */
+            hits: number;
+            /** Format: int64 */
+            id: number;
+            inbound: string;
+            /** @description Адрес, с которого подключался пользователь */
+            ip: string;
+            /**
+             * @description Что распознано
+             * @enum {string}
+             */
+            kind: "handshake" | "tracker" | "dht" | "utp";
+            /**
+             * Format: date-time
+             * @description Когда администратор снял бан
+             */
+            lifted_at: string | null;
+            /** @enum {string} */
+            network: "tcp" | "udp";
+            /**
+             * Format: int64
+             * @description null — нода удалена
+             */
+            node_id: number | null;
+            node_name: string;
+            /** Format: int64 */
+            user_id: number;
+            user_name: string;
+        };
+        TorrentUser: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        TorrentView: {
+            /**
+             * Format: int64
+             * @description На сколько минут пойманный пользователь теряет доступ ко всем нодам; 0 — только сбросить соединение
+             */
+            ban_minutes: number;
+            /** @description Ноды распознают BitTorrent (рукопожатие, DHT, uTP, трекеры) и не пропускают его. Зашифрованный торрент не распознаётся */
+            enabled: boolean;
+            /** @description Пользователи, которых блокировщик не трогает */
+            exempt: components["schemas"]["TorrentUser"][];
+        };
         TotpCodeInputBody: {
             code: string;
         };
@@ -3282,6 +3411,11 @@ export interface components {
             tariff_id: number | null;
             /** @description Только в карточке пользователя */
             telegram?: components["schemas"]["TelegramLink"];
+            /**
+             * Format: date-time
+             * @description До какого времени действует бан блокировщика торрентов; null — бана нет
+             */
+            torrent_ban: string | null;
             /** Format: int64 */
             total_down: number;
             /** Format: int64 */
@@ -6113,6 +6247,103 @@ export interface operations {
             };
         };
     };
+    "get-torrent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TorrentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-torrent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchTorrentInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TorrentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-torrent-hits": {
+        parameters: {
+            query?: {
+                /** @description Только этого пользователя */
+                user_id?: number;
+                /** @description Страница: записи с id меньше этого */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TorrentHitView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-updates": {
         parameters: {
             query?: never;
@@ -6766,6 +6997,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "lift-torrent-ban": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiftTorrentOutputBody"];
+                };
             };
             /** @description Error */
             default: {

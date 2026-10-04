@@ -363,7 +363,9 @@
       "promo_invalid_value": "Promo code settings are invalid",
       "promo_late_refund_failed": "A late promo payment could not be refunded automatically. Check the provider and refund it manually if needed.",
       "bad_value": "Value must be positive and limits/lifetimes cannot be negative",
-      "bad_tariff_ids": "Tariff IDs must be positive numbers"
+      "bad_tariff_ids": "Tariff IDs must be positive numbers",
+      "user_not_found": "No such user",
+      "torrent_config": "Check the ban length: from 0 to 30 days"
     },
     "acme": {
       "port80_busy": "Port 80 is used by another program — Let's Encrypt checks the server through it",
@@ -590,7 +592,17 @@
     "saving": "saving…",
     "noteLabel": "Note about the user",
     "notePlaceholder": "E.g.: pays via Telegram, renew on the 1st",
-    "noteSaved": "Note saved"
+    "noteSaved": "Note saved",
+    "torrent": {
+      "title": "Torrents",
+      "banned": "Banned for torrents until {date}",
+      "lift": "Lift the ban",
+      "lifted": "Ban lifted",
+      "exempt": "Do not check for torrents",
+      "exemptHint": "The torrent blocker leaves this user alone.",
+      "recent": "Latest catches",
+      "none": "No torrents caught."
+    }
   },
   "tariffs": {
     "subtitle": "Templates for granting access in one click. Changing a plan does not touch subscriptions already issued.",
@@ -1084,6 +1096,34 @@
       "secretSet": "The secret is set. Type a new one to change it.",
       "legacyCount": "Old links and users on file: {n}",
       "legacySaved": "Saved"
+    },
+    "torrent": {
+      "title": "Torrent blocker",
+      "sub": "Nodes recognise BitTorrent and do not let it through: the handshake, DHT, uTP and trackers.",
+      "enable": "Block torrents",
+      "enableHint": "Every node looks at the first bytes of each connection. Encrypted BitTorrent looks like noise and gets through: the blocker catches most clients, not all.",
+      "ban": "On a catch",
+      "banHint": "A ban cuts the user's connections and keeps them off every node for that long.",
+      "banNone": "Only drop the connection",
+      "banMinutes": "Ban for {n} min",
+      "banHours": "Ban for {n} h",
+      "banDays": "Ban for {n} d",
+      "exempt": "Not checked",
+      "exemptNone": "Nobody. Switch the check off for a user in their card.",
+      "exemptRemove": "Check {name} again",
+      "saved": "Torrent blocker saved",
+      "hits": "Caught",
+      "hitsSub": "The latest catches. A node reports a user at most once a minute; ×N is how many attempts that stands for.",
+      "hitsEmpty": "Nothing caught yet.",
+      "more": "Show more",
+      "bannedUntil": "banned until {date}",
+      "lifted": "ban lifted",
+      "kinds": {
+        "handshake": "peer handshake",
+        "tracker": "tracker",
+        "dht": "DHT",
+        "utp": "uTP"
+      }
     }
   },
   "sub": {
@@ -1476,7 +1516,8 @@
       "backupLast": "Last sent {when}, {size}",
       "backupNever": "No backup sent yet",
       "backupFailed": "Last attempt failed: {error}",
-      "backupRestore": "To restore on the server:"
+      "backupRestore": "To restore on the server:",
+      "eventTorrent": "Torrent caught"
     },
     "tabs": {
       "connect": "Connection",

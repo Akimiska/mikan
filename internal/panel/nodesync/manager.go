@@ -410,6 +410,10 @@ func (m *Manager) prune(ctx context.Context, now time.Time) {
 		m.log.Error("prune devices", "err", err)
 		return
 	}
+	if err := m.st.Q.PruneTorrentHits(ctx, now.Add(-torrentKeep).Unix()); err != nil {
+		m.log.Error("prune torrent hits", "err", err)
+		return
+	}
 	m.lastPrune = now
 }
 

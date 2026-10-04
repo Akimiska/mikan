@@ -67,6 +67,7 @@ type persistentState struct {
 	Samples            map[string]sampleState `json:"samples"`
 	Stuck              map[string]string      `json:"stuck"`
 	AutoCursor         int64                  `json:"auto_cursor"`
+	TorrentCursor      int64                  `json:"torrent_cursor,omitempty"`
 	TLSBad             bool                   `json:"tls_bad"`
 	UpdateAt           string                 `json:"update_at"`
 	NodeUpdateAt       map[string]int64       `json:"node_update_at,omitempty"`
@@ -124,6 +125,9 @@ func (m *Monitor) load(ctx context.Context) (persistentState, error) {
 	raw, err := m.store.Q.GetInfrastructureAlertState(ctx, stateKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		st.AutoCursor, err = m.store.Q.MaxInboundEventID(ctx)
+		if err == nil {
+			st.TorrentCursor, err = m.store.Q.LastTorrentHitID(ctx)
+		}
 	} else if err == nil {
 		err = json.Unmarshal([]byte(raw), &st)
 	}
@@ -305,6 +309,7 @@ func (m *Monitor) round(ctx context.Context) {
 		inboundByID[in.ID] = in
 	}
 	m.autotuneEvents(ctx, &st, cfg, nodeByID, inboundByID, lang)
+	m.torrentEvents(ctx, &st, cfg, lang)
 	m.checkTuner(&st, cfg, byNode, nodeByID, lang)
 	m.checkCertificate(&st, cfg, lang)
 	m.checkUpdate(&st, cfg, lang)
@@ -1068,4 +1073,48 @@ func PublicTextEN(name string, level Level) string {
 		icon, label = "🔴", "Unavailable"
 	}
 	return icon + " " + name + " — " + label
+}
+
+// torrentShown is how many catches one message lists; the rest are counted.
+const torrentShown = 10
+
+// torrentEvents tells the admin about the torrent blocker's new catches: one message a
+// round, so a wave of them does not flood the chat.
+func (m *Monitor) torrentEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, lang string) {
+	hits, err := m.store.Q.TorrentHitsAfter(ctx, db.TorrentHitsAfterParams{ID: st.TorrentCursor, Limit: 200})
+	if err != nil {
+		m.logError("infrastructure alerts: torrent hits", err)
+		return
+	}
+	if len(hits) == 0 {
+		return
+	}
+	st.TorrentCursor = hits[len(hits)-1].ID
+	if !cfg.Events.Torrent {
+		return
+	}
+	title, banned, more := "🧲 <b>Пойман торрент</b>", "бан до %s UTC", "и ещё %d"
+	if lang == "en" {
+		title, banned, more = "🧲 <b>Torrent caught</b>", "banned until %s UTC", "and %d more"
+	}
+	var b strings.Builder
+	b.WriteString(title)
+	for i, h := range hits {
+		if i == torrentShown {
+			b.WriteString("\n" + fmt.Sprintf(more, len(hits)-torrentShown))
+			break
+		}
+		b.WriteString("\n• <b>" + html.EscapeString(h.UserName) + "</b>: ")
+		if h.NodeName != "" {
+			b.WriteString(html.EscapeString(h.NodeName) + ", ")
+		}
+		b.WriteString(html.EscapeString(h.Kind) + " → " + html.EscapeString(h.Dest) + " (" + html.EscapeString(h.Ip) + ")")
+		if h.Hits > 1 {
+			b.WriteString(" ×" + strconv.Itoa(int(h.Hits)))
+		}
+		if h.BannedUntil > 0 {
+			b.WriteString(", " + fmt.Sprintf(banned, time.Unix(h.BannedUntil, 0).UTC().Format("02.01 15:04")))
+		}
+	}
+	st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("torrent/%d", st.TorrentCursor), Target: "admin", Text: b.String()})
 }

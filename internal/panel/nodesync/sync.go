@@ -116,10 +116,14 @@ func (s *Syncer) Online() map[string]nodeapi.Online { return *s.online.Load() }
 func (s *Syncer) run(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		every(ctx, 2*time.Second, s.pullCounters)
+	}()
+	go func() {
+		defer wg.Done()
+		every(ctx, torrentPullEvery, s.pullTorrents)
 	}()
 	go func() {
 		defer wg.Done()
@@ -218,6 +222,7 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 	if st.TLS, err = s.tls(); err != nil {
 		return st, err
 	}
+	st.Torrent = snap.torrent.Block()
 	st.Epoch, st.Policies, _ = s.policiesFrom(snap)
 	return st, nil
 }
@@ -392,6 +397,8 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 		for _, name := range names {
 			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, others[name])
 			p.Pools = pools[u.ID]
+			p.TorrentExempt = snap.torrent.IsExempt(u.ID)
+			p.BannedUntil = snap.bans[u.ID]
 			out = append(out, p)
 		}
 	}
@@ -658,7 +665,8 @@ func stateKey(st nodeapi.DesiredState) string {
 		W *nodeapi.Warp
 		R *nodeapi.Relay
 		E []nodeapi.Exit
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits})
+		B *nodeapi.TorrentBlock
+	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -668,7 +676,8 @@ func stateKey(st nodeapi.DesiredState) string {
 func policyKey(ps []nodeapi.Policy) string {
 	h := sha256.New()
 	for _, p := range ps {
-		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, poolKey(p.Pools)})
+		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, poolKey(p.Pools),
+			p.TorrentExempt, p.BannedUntil})
 		h.Write(raw)
 	}
 	return hex.EncodeToString(h.Sum(nil))

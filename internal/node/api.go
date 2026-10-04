@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -104,6 +105,11 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Reg.Activity())
+	})
+	mux.HandleFunc("GET /v1/torrents", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
+		writeJSON(w, http.StatusOK, e.Reg.TorrentHits(q.Get("epoch"), after))
 	})
 	mux.HandleFunc("POST /v1/targets/check", func(w http.ResponseWriter, r *http.Request) {
 		var req nodeapi.TargetCheckRequest

@@ -102,6 +102,8 @@ jobs:
       - run: cargo build --locked
       # The updater takes its lock in /run, as on a server: the stand runs as root.
       - run: sudo env MIKAN_INSTALLER_TEST=1 sh test-upgrade.sh
+      # The one-line install against a stand-in GitHub: the release index and its fallback.
+      - run: sudo env MIKAN_INSTALLER_TEST=1 sh test-install.sh
 
   # The installer's dependencies against the RustSec advisory database. A new advisory
   # fails the check on the next pull request; cargo audit only reads Cargo.lock.

@@ -141,6 +141,18 @@ type NodeRelay struct {
 	CreatedAt  int64
 }
 
+type NodeSpeedtest struct {
+	ID       int64
+	NodeID   int64
+	At       int64
+	PingMs   float64
+	JitterMs float64
+	LossPct  float64
+	DownBps  int64
+	UpBps    int64
+	Error    string
+}
+
 type NodeState struct {
 	Key   string
 	Value string

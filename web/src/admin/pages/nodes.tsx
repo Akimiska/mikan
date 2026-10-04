@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpCircle, Cloud, Copy, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
+import { ArrowUpCircle, Cloud, Copy, Gauge, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
@@ -13,6 +13,7 @@ import { t, tMaybe } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { bytes, num } from "../../lib/format";
 import { CascadeDrawer } from "./node-cascade";
+import { SpeedDrawer } from "./node-speed";
 import { WarpDrawer } from "./node-warp";
 
 type Node = Schemas["NodeInfo"];
@@ -40,6 +41,7 @@ export function NodesPage() {
   const [removing, setRemoving] = useState<Node | null>(null);
   const [joined, setJoined] = useState<Joined | null>(null);
   const [warpOf, setWarpOf] = useState<Node | null>(null);
+  const [speedOf, setSpeedOf] = useState<Node | null>(null);
   const [cascadeOf, setCascadeOf] = useState<Node | null>(null);
   const [certOf, setCertOf] = useState<Node | null>(null);
   const [updateOf, setUpdateOf] = useState<Node | "all" | null>(null);
@@ -129,7 +131,7 @@ export function NodesPage() {
                 </div>
               ) : null}
               {list.map((n, idx) => (
-                <NodeCard key={n.id} n={n} idx={idx} updating={update.isPending && update.variables === n.id} busy={update.isPending} onUpdate={() => setUpdateOf(n)} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
+                <NodeCard key={n.id} n={n} idx={idx} updating={update.isPending && update.variables === n.id} busy={update.isPending} onUpdate={() => setUpdateOf(n)} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onSpeed={() => setSpeedOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
               ))}
             </div>
           )
@@ -146,6 +148,7 @@ export function NodesPage() {
       <EditNodeDrawer node={editing} onClose={() => setEditing(null)} />
       <KeyDrawer joined={joined} onClose={() => setJoined(null)} />
       <WarpDrawer node={warpOf ? { id: warpOf.id, name: nodeLabel(warpOf) } : null} onClose={() => setWarpOf(null)} />
+      <SpeedDrawer node={speedOf ? { id: speedOf.id, name: nodeLabel(speedOf) } : null} onClose={() => setSpeedOf(null)} />
       <CascadeDrawer node={cascadeOf ? { id: cascadeOf.id, name: nodeLabel(cascadeOf) } : null} onClose={() => setCascadeOf(null)} />
       <CertDrawer
         open={!!certOf}
@@ -199,6 +202,7 @@ function NodeCard({
   onUpdate,
   onEdit,
   onWarp,
+  onSpeed,
   onCascade,
   onCert,
   onRekey,
@@ -213,6 +217,7 @@ function NodeCard({
   onUpdate: () => void;
   onEdit: () => void;
   onWarp: () => void;
+  onSpeed: () => void;
   onCascade: () => void;
   onCert: () => void;
   onRekey: () => void;
@@ -308,6 +313,9 @@ function NodeCard({
         </Button>
         <Button size="sm" onClick={onWarp}>
           <Cloud size={16} aria-hidden /> WARP
+        </Button>
+        <Button size="sm" onClick={onSpeed}>
+          <Gauge size={16} aria-hidden /> {t("speed.button")}
         </Button>
         <Button size="sm" onClick={onCascade}>
           <Waypoints size={16} aria-hidden /> {t("cascade.title")}

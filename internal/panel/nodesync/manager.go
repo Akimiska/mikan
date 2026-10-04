@@ -336,6 +336,17 @@ func (m *Manager) ScanTargets(ctx context.Context, id int64, req nodeapi.TargetS
 	return c.ScanTargets(ctx, req)
 }
 
+// SpeedTest runs a node's speed test of its own way to the internet.
+func (m *Manager) SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error) {
+	c, err := clientOf[interface {
+		SpeedTest(context.Context) (nodeapi.SpeedTest, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.SpeedTest{}, err
+	}
+	return c.SpeedTest(ctx)
+}
+
 // clientOf returns a node's client as T: methods beyond Node are optional, and tests
 // stand in for nodes with fakes that have only some of them.
 func clientOf[T any](m *Manager, id int64) (T, error) {

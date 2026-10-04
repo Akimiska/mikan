@@ -57,6 +57,17 @@ func NewTLSClient(address string, cfg *tls.Config) *Client {
 
 var ErrUnavailable = errors.New("node unavailable")
 
+// StatusError is a node's failure answer without an Error body, such as the 404 of a node
+// that predates an endpoint.
+type StatusError struct {
+	Method, Path string
+	Status       int
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("node %s %s: status %d", e.Method, e.Path, e.Status)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -85,7 +96,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 		if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&e) == nil && e.Code != "" {
 			return &e
 		}
-		return fmt.Errorf("node %s %s: status %d", method, path, resp.StatusCode)
+		return &StatusError{Method: method, Path: path, Status: resp.StatusCode}
 	}
 	if out != nil {
 		return json.NewDecoder(&cappedReader{r: resp.Body, left: MaxResponse}).Decode(out)
@@ -161,6 +172,14 @@ func (c *Client) Torrents(ctx context.Context, epoch string, after int64) (Torre
 	var r TorrentHits
 	q := url.Values{"epoch": {epoch}, "after": {strconv.FormatInt(after, 10)}}
 	err := c.do(ctx, http.MethodGet, "/v1/torrents?"+q.Encode(), nil, &r, 10*time.Second)
+	return r, err
+}
+
+// SpeedTest runs the node's speed test, about twenty seconds. Nodes that predate it
+// answer 404 (a *StatusError); one running a test answers 409 speed_test_busy.
+func (c *Client) SpeedTest(ctx context.Context) (SpeedTest, error) {
+	var r SpeedTest
+	err := c.do(ctx, http.MethodPost, "/v1/speedtest", nil, &r, 90*time.Second)
 	return r, err
 }
 

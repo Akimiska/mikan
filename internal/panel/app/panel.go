@@ -93,7 +93,7 @@ type Options struct {
 	SubPortError func() string
 	// DataDir is where the host updater and the panel meet (update/); "" turns that off.
 	DataDir string
-	// Releases fetches the newest release; nil never checks.
+	// Releases finds the release to update to; nil never checks.
 	Releases updates.Source
 	// WarpAPI is Cloudflare's WARP client API; "" is the real one.
 	WarpAPI string
@@ -380,11 +380,16 @@ func (p *Panel) Run(ctx context.Context) {
 	if err := p.Billing.MoveBuiltin(ctx); err != nil {
 		p.log.Error("billing: move the built-in providers", "err", err)
 	}
-	// The host reads the switch from a file; the setting is what the admin chose.
-	if auto, err := p.Settings.On(ctx, settings.AutoUpdate); err == nil {
-		if err := p.Updates.SetAuto(auto); err != nil && !errors.Is(err, updates.ErrUnavailable) {
+	// The host reads the switch and the channel from a file; the settings are what the
+	// admin chose. The channel is the panel's own check's too.
+	auto, err := p.Settings.On(ctx, settings.AutoUpdate)
+	channel, cerr := p.Settings.UpdateChannel(ctx)
+	if err = errors.Join(err, cerr); err == nil {
+		if err := p.Updates.SetPolicy(updates.Policy{Auto: auto, Channel: channel}); err != nil && !errors.Is(err, updates.ErrUnavailable) {
 			p.log.Error("update policy", "err", err)
 		}
+	} else {
+		p.log.Error("update policy", "err", err)
 	}
 	var workers []func(context.Context)
 	if p.Nodes != nil {

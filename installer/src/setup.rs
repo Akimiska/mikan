@@ -959,14 +959,14 @@ mod tests {
         assert!(summary(&shown, true).contains("Password  p4ssw0rd"));
         // after the installer's screen the terminal gets the link and login, not the password
         let after_tui = summary(&shown, false);
-        assert!(after_tui.contains("  Panel     https://h:1/x/\n  Login     l\n"), "{after_tui}");
+        assert!(after_tui.contains("  Panel     https://h:1/x/\n  Login     l\n"), "no link and login after the screen");
         assert!(!after_tui.contains("p4ssw0rd") && after_tui.contains("last screen only"));
         let lost = Outcome { password: String::new(), ..shown.clone() };
         assert!(summary(&lost, true).contains("mikan reset-password") && !summary(&lost, true).contains("shown once"));
         // a rule for Let's Encrypt left to the admin comes last
         let report = acme::Report::other("apache2");
         let with_acme = summary(&Outcome { acme: Some(report.clone()), ..shown }, false);
-        assert!(with_acme.ends_with(&report.text().unwrap()), "{with_acme}");
+        assert!(with_acme.ends_with(&report.text().unwrap()), "the rule is not last");
     }
 
     #[test]

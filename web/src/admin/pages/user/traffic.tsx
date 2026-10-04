@@ -121,6 +121,7 @@ export function PoolsSection({ u }: { u: User }) {
   const toast = useToast();
   const pools = useQuery({ queryKey: qk.userPools(u.id), queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/pools", { params: { path: { id: u.id } }, signal })) });
   const [edit, setEdit] = useState<Record<number, string> | null>(null);
+  const [closed, setClosed] = useState<Record<number, boolean>>({});
   const save = useMutation({
     mutationFn: (limits: Record<number, string>) =>
       unwrap(
@@ -128,6 +129,7 @@ export function PoolsSection({ u }: { u: User }) {
           params: { path: { id: u.id } },
           body: {
             pools: Object.entries(limits).map(([id, gb]) => {
+              if (closed[Number(id)]) return { pool_id: Number(id), traffic_limit: null, excluded: true };
               const v = gb.trim().replace(",", ".");
               return { pool_id: Number(id), traffic_limit: v ? Math.round(Number(v) * 2 ** 30) : null };
             }),
@@ -142,7 +144,7 @@ export function PoolsSection({ u }: { u: User }) {
     onError: (e) => toast.error(errorText(e)),
   });
   if (!pools.data?.length) return null;
-  const bad = edit && Object.values(edit).some((v) => v.trim() !== "" && !(Number(v.replace(",", ".")) > 0));
+  const bad = edit && Object.entries(edit).some(([id, v]) => !closed[Number(id)] && v.trim() !== "" && !(Number(v.replace(",", ".")) > 0));
   return (
     <Section
       title={t("pools.title")}
@@ -151,7 +153,10 @@ export function PoolsSection({ u }: { u: User }) {
           <button
             type="button"
             className="link-btn text-xs"
-            onClick={() => setEdit(Object.fromEntries(pools.data.map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / 2 ** 30).toFixed(2)) : ""])))}
+            onClick={() => {
+              setEdit(Object.fromEntries(pools.data.map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / 2 ** 30).toFixed(2)) : ""])));
+              setClosed(Object.fromEntries(pools.data.map((p) => [p.pool_id, p.excluded])));
+            }}
           >
             {t("pools.editLimits")}
           </button>
@@ -160,7 +165,7 @@ export function PoolsSection({ u }: { u: User }) {
     >
       {edit ? (
         <>
-          <PoolLimitsField pools={pools.data.map((p) => ({ id: p.pool_id, name: p.name, inbounds: [] }))} value={edit} onChange={setEdit} />
+          <PoolLimitsField pools={pools.data.map((p) => ({ id: p.pool_id, name: p.name, inbounds: [] }))} value={edit} onChange={setEdit} closed={closed} onClosed={setClosed} />
           {bad ? (
             <p className="mt-2 text-xs text-[var(--berry-600)]" role="alert">
               {t("pools.errLimit")}
@@ -184,12 +189,14 @@ export function PoolsSection({ u }: { u: User }) {
                 <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
                   <span className="font-medium">{p.name}</span>
                   <span className="num text-xs text-[var(--ink-600)]">
-                    {p.traffic_limit != null
+                    {p.excluded
+                      ? t("pools.closed")
+                      : p.traffic_limit != null
                       ? `${bytes(used)} ${t("users.of", { total: p.extra > 0 ? t("grants.plusPackages", { limit: bytes(p.traffic_limit), extra: bytes(p.extra) }) : bytes(p.traffic_limit) })}`
                       : `${bytes(used)} · ${t("users.unlimited")}`}
                   </span>
                 </div>
-                {p.traffic_limit != null ? <Bar pct={Math.min(100, (used / p.traffic_limit) * 100)} /> : null}
+                {p.traffic_limit != null && !p.excluded ? <Bar pct={Math.min(100, (used / p.traffic_limit) * 100)} /> : null}
                 {p.exhausted ? <div className="mt-1 text-xs text-[var(--berry-600)]">{t("pools.exhausted")}</div> : null}
               </li>
             );

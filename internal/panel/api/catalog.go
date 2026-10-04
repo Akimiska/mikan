@@ -28,7 +28,7 @@ type TariffView struct {
 	PriceRub      *int64      `json:"price_rub" doc:"Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли"`
 	OnSale        bool        `json:"on_sale" doc:"Продаётся в боте и Mini App"`
 	Terms         []TermView  `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub"`
-	Pools         []PoolLimit `json:"pools" doc:"Лимиты пулов трафика; пул не в списке — без лимита"`
+	Pools         []PoolLimit `json:"pools" doc:"Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Действует на новых пользователей и при продлении или смене тарифа"`
 	Sort          int64       `json:"sort"`
 }
 
@@ -188,6 +188,9 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 	}
 	if err != nil {
 		return nil, err
+	}
+	if in.Body.Pools != nil {
+		h.d.Changes.PoliciesChanged() // a pool closed or opened for the tariff's users
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.update", "tariff", strconv.FormatInt(t.ID, 10), nil)
 	return h.tariffOut(ctx, t)

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -377,9 +378,26 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 		slotsOf[o.UserID] = append(slotsOf[o.UserID], o.SlotName)
 	}
 	here := map[int64]string{}
+	inPool := map[int64][]int64{} // pool → its inbounds on this node
 	for _, in := range snap.inbounds {
 		if in.NodeID == s.id {
 			here[in.ID] = in.Name
+			if in.PoolID.Valid {
+				inPool[in.PoolID.Int64] = append(inPool[in.PoolID.Int64], in.ID)
+			}
+		}
+	}
+	// The inbounds here each user's tariff leaves out, through the pools they are in.
+	shut := map[int64]map[int64]bool{}
+	for _, up := range snap.pools {
+		if !up.Excluded {
+			continue
+		}
+		for _, id := range inPool[up.PoolID] {
+			if shut[up.UserID] == nil {
+				shut[up.UserID] = map[int64]bool{}
+			}
+			shut[up.UserID][id] = true
 		}
 	}
 	others := s.m.otherIPs(s.id, slotUser)
@@ -390,7 +408,7 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 		names := slotsOf[u.ID]
 		sort.Strings(names)
 		for _, name := range names {
-			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, others[name])
+			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, shut[u.ID], others[name])
 			p.Pools = pools[u.ID]
 			out = append(out, p)
 		}
@@ -399,8 +417,9 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 }
 
 // userPolicy is the user's rules for one of the user's slots; grants is what is left of
-// the user's main grants, added to the quota.
-func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here map[int64]string, otherIPs []string) nodeapi.Policy {
+// the user's main grants, added to the quota, and shut the inbounds here the user's tariff
+// leaves out (an excluded pool).
+func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here map[int64]string, shut map[int64]bool, otherIPs []string) nodeapi.Policy {
 	// A user whose main traffic ran out still gets in: the node turns away the inbounds
 	// outside every pool (QuotaRemaining 0) and keeps the pools that have traffic left.
 	state := domain.State(u, grants, now)
@@ -409,9 +428,17 @@ func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, 
 	if u.DeviceLimit.Valid {
 		p.DeviceLimit = int(u.DeviceLimit.Int64)
 	}
-	if allowed := domain.DecodeInbounds(u.Inbounds); len(allowed) > 0 {
+	allowed := domain.DecodeInbounds(u.Inbounds)
+	if len(allowed) == 0 && len(shut) > 0 {
+		// "All" but the excluded: the list is spelled out.
+		for id := range here {
+			allowed = append(allowed, id)
+		}
+		slices.Sort(allowed)
+	}
+	if len(allowed) > 0 {
 		for _, id := range allowed {
-			if n, ok := here[id]; ok {
+			if n, ok := here[id]; ok && !shut[id] {
 				p.Inbounds = append(p.Inbounds, n)
 			}
 		}

@@ -1727,7 +1727,9 @@
     "edit": "Traffic pool",
     "drawerMeta": "A limit of its own for some protocols",
     "nameHint": "Subscribers see it in the bot and on the subscription page.",
-    "renamed": "Pool renamed"
+    "renamed": "Pool renamed",
+    "accessOf": "Access to {name}",
+    "closed": "closed"
   },
   "cert": {
     "panelTitle": "Own panel certificate",

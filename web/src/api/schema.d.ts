@@ -2481,6 +2481,11 @@ export interface components {
             /** @enum {string} */
             status: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded";
             tariff_name: string;
+            /**
+             * Format: int64
+             * @description Купленный срок в днях (0 — бессрочно); нет у пакетов и у платежей до сроков в тарифах
+             */
+            term_days?: number;
             /** Format: int64 */
             tg_id: number;
             tg_username?: string;
@@ -2886,6 +2891,8 @@ export interface components {
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort?: number;
+            /** @description Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений */
+            terms?: components["schemas"]["TermBody"][];
             /** Format: int64 */
             traffic_limit?: number;
         };
@@ -2924,6 +2931,8 @@ export interface components {
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort: number;
+            /** @description Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub */
+            terms: components["schemas"]["TermView"][];
             /**
              * Format: int64
              * @description Байты; null — без лимита
@@ -3003,6 +3012,40 @@ export interface components {
             token_hint?: string;
             /** @description Токен сохранён */
             token_set: boolean;
+        };
+        TermBody: {
+            /**
+             * Format: int64
+             * @description 0 — бессрочно; с днём оплаты — месяцы по 30 дней
+             */
+            days: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках: 19900 — 199 ₽
+             */
+            price_rub?: number;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars
+             */
+            price_stars?: number;
+        };
+        TermView: {
+            /**
+             * Format: int64
+             * @description 0 — бессрочно; с днём оплаты — месяцы по 30 дней
+             */
+            days: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках; null — не за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars; null — не за Stars
+             */
+            price_stars: number | null;
         };
         Texts: {
             /** @description Уведомление: подписка закончилась */

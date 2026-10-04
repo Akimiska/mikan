@@ -3127,6 +3127,11 @@
           "tariff_name": {
             "type": "string"
           },
+          "term_days": {
+            "description": "Купленный срок в днях (0 — бессрочно); нет у пакетов и у платежей до сроков в тарифах",
+            "format": "int64",
+            "type": "integer"
+          },
           "tg_id": {
             "format": "int64",
             "type": "integer"
@@ -4243,6 +4248,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "terms": {
+            "description": "Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений",
+            "items": {
+              "$ref": "#/components/schemas/TermBody"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
           "traffic_limit": {
             "format": "int64",
             "minimum": 1,
@@ -4328,6 +4341,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "terms": {
+            "description": "Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub",
+            "items": {
+              "$ref": "#/components/schemas/TermView"
+            },
+            "type": "array"
+          },
           "traffic_limit": {
             "description": "Байты; null — без лимита",
             "format": "int64",
@@ -4349,6 +4369,7 @@
           "price_stars",
           "price_rub",
           "on_sale",
+          "terms",
           "pools",
           "sort"
         ],
@@ -4525,6 +4546,68 @@
           "route",
           "infrastructure",
           "admin_chat_set"
+        ],
+        "type": "object"
+      },
+      "TermBody": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "0 — бессрочно; с днём оплаты — месяцы по 30 дней",
+            "format": "int64",
+            "maximum": 3650,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "price_rub": {
+            "description": "Цена в копейках: 19900 — 199 ₽",
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "price_stars": {
+            "description": "Цена в Telegram Stars",
+            "format": "int64",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "days"
+        ],
+        "type": "object"
+      },
+      "TermView": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "0 — бессрочно; с днём оплаты — месяцы по 30 дней",
+            "format": "int64",
+            "type": "integer"
+          },
+          "price_rub": {
+            "description": "Цена в копейках; null — не за рубли",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "price_stars": {
+            "description": "Цена в Telegram Stars; null — не за Stars",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "days",
+          "price_stars",
+          "price_rub"
         ],
         "type": "object"
       },

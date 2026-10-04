@@ -5047,6 +5047,11 @@
               "null"
             ]
           },
+          "bound_devices": {
+            "description": "Привязанные устройства: с привязкой это занятые места",
+            "format": "int64",
+            "type": "integer"
+          },
           "contact": {
             "type": "string"
           },
@@ -5201,6 +5206,7 @@
           "sub_url",
           "online",
           "online_ips",
+          "bound_devices",
           "online_at",
           "created_at"
         ],

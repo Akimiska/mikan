@@ -56,6 +56,9 @@ type Syncer struct {
 	stateKey    string
 	policyKey   string
 	lastApplied nodeapi.ApplyResult
+	// ports are the inbounds' ports in the state of lastApplied, by name; replaced, never
+	// changed in place: health views share it.
+	ports       map[string]string
 	lastPush    time.Time // when the policies last reached the node
 	failedKey   string    // the state key the last failed Apply was for
 	retry       retry     // the pace of attempts at a node that does not answer
@@ -76,6 +79,10 @@ type HealthView struct {
 	Error     string
 	Health    nodeapi.Health
 	Listeners []nodeapi.ListenerStatus
+	// Ports are the inbounds' ports in the state the node runs, by name, when that is the
+	// state this panel last applied; nil otherwise. A listener's failure is about this port,
+	// not about the inbound's row, which may have moved since.
+	Ports     map[string]string
 	CheckedAt time.Time
 }
 
@@ -261,11 +268,16 @@ func (s *Syncer) applyState(ctx context.Context) {
 			s.log.Error("listener failed", "name", l.Name, "err", l.Error)
 		}
 	}
+	ports := make(map[string]string, len(st.Inbounds))
+	for _, in := range st.Inbounds {
+		ports[in.Name] = in.Port
+	}
 	s.mu.Lock()
 	s.stateKey = key
 	s.policyKey = policyKey(st.Policies)
 	s.lastPush = now
 	s.lastApplied = res
+	s.ports = ports
 	s.failedKey = ""
 	recovered := s.retry.ok()
 	s.mu.Unlock()
@@ -612,9 +624,12 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 		return
 	}
 	view.OK, view.Health, view.Listeners = true, h, h.Listeners
-	s.health.Store(view)
 	s.mu.Lock()
 	applied := s.lastApplied.Revision
+	if applied != 0 && h.Revision == applied {
+		view.Ports = s.ports
+	}
+	s.health.Store(view)
 	// The node is back: what was held off for it goes out now.
 	back := s.retry.down
 	if back {

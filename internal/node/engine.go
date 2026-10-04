@@ -240,7 +240,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	for name, l := range cfg.Listeners {
 		ls := nodeapi.ListenerStatus{Name: name, OK: true}
 		if msg, bad := e.errs[name]; bad {
-			ls.OK, ls.Error = false, msg
+			ls = listenFailed(name, msg)
 		} else {
 			failed[name] = l
 		}
@@ -447,6 +447,16 @@ func parseListenErr(msg string) (name, reason string, ok bool) {
 	}
 	name, reason, ok = strings.Cut(msg[len(p):], mid)
 	return name, reason, ok
+}
+
+// listenFailed is the status of a listener that could not bind. A port another program
+// holds is named by a code, not left to the OS's wording: the panel moves such an inbound.
+func listenFailed(name, msg string) nodeapi.ListenerStatus {
+	ls := nodeapi.ListenerStatus{Name: name, Error: msg}
+	if nodeapi.AddrInUse(msg) {
+		ls.Code = nodeapi.ListenerAddrInUse
+	}
+	return ls
 }
 
 func withoutRejected(names []string, rejected []nodeapi.ListenerStatus) []string {

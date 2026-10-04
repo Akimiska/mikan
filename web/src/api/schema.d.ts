@@ -1433,7 +1433,7 @@ export interface components {
             new: string;
             old: string;
             /** @enum {string} */
-            reason: "blocked" | "target_down" | "still_blocked";
+            reason: "blocked" | "target_down" | "still_blocked" | "busy";
         };
         AutoView: {
             /**
@@ -1970,6 +1970,7 @@ export interface components {
             total: number;
         };
         ListenerStatus: {
+            code?: string;
             error?: string;
             name: string;
             ok: boolean;

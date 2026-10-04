@@ -276,7 +276,11 @@ func (m *Monitor) round(ctx context.Context) {
 	for _, n := range nodes {
 		nodeByID[n.ID] = n
 	}
-	m.autotuneEvents(ctx, &st, cfg, nodeByID, lang)
+	inboundByID := make(map[int64]db.Inbound, len(inbounds))
+	for _, in := range inbounds {
+		inboundByID[in.ID] = in
+	}
+	m.autotuneEvents(ctx, &st, cfg, nodeByID, inboundByID, lang)
 	m.checkTuner(&st, cfg, byNode, nodeByID, lang)
 	m.checkCertificate(&st, cfg, lang)
 	m.checkUpdate(&st, cfg, lang)
@@ -541,9 +545,10 @@ func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg Alert
 	}
 }
 
-// autotuneEvents names the nodes from the round's list: an event of a node removed since
-// is passed over, as before.
-func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes map[int64]db.Node, lang string) {
+// autotuneEvents names the nodes and inbounds from the round's lists: an event of a node
+// removed since is passed over, as before. A move off a port another program held is an
+// inbound's event: the inbound did not listen at all until then.
+func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes map[int64]db.Node, inbounds map[int64]db.Inbound, lang string) {
 	events, err := m.store.Q.InboundEventsAfter(ctx, st.AutoCursor)
 	if err != nil {
 		m.logError("infrastructure alerts: autotune events", err)
@@ -551,6 +556,21 @@ func (m *Monitor) autotuneEvents(ctx context.Context, st *persistentState, cfg A
 	}
 	for _, e := range events {
 		st.AutoCursor = e.ID
+		if e.Reason == autotune.ReasonBusy {
+			n, ok := nodes[e.NodeID]
+			in, known := inbounds[e.InboundID]
+			if !cfg.Events.Inbound || !ok || !known {
+				continue
+			}
+			text := fmt.Sprintf("🛠 <b>Подключение перенесено</b>: %s / %s с порта %s на %s, порт занят другой программой",
+				html.EscapeString(n.Name), html.EscapeString(in.Name), html.EscapeString(e.OldValue), html.EscapeString(e.NewValue))
+			if lang == "en" {
+				text = fmt.Sprintf("🛠 <b>Inbound moved</b>: %s / %s from port %s to %s, the port is held by another program",
+					html.EscapeString(n.Name), html.EscapeString(in.Name), html.EscapeString(e.OldValue), html.EscapeString(e.NewValue))
+			}
+			st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("autotune/%d", e.ID), Target: "admin", Text: text})
+			continue
+		}
 		if !cfg.Events.Autotune {
 			continue
 		}

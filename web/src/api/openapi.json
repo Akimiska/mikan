@@ -479,7 +479,8 @@
             "enum": [
               "blocked",
               "target_down",
-              "still_blocked"
+              "still_blocked",
+              "busy"
             ],
             "type": "string"
           }
@@ -1960,6 +1961,9 @@
       "ListenerStatus": {
         "additionalProperties": false,
         "properties": {
+          "code": {
+            "type": "string"
+          },
           "error": {
             "type": "string"
           },

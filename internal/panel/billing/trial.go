@@ -24,7 +24,8 @@ func (s *Service) TrialTariff(ctx context.Context) (db.Tariff, bool) {
 		return db.Tariff{}, false
 	}
 	t, err := s.d.Store.Q.GetTariff(ctx, id)
-	if err != nil || t.Archived != 0 {
+	// A tariff that lost its term since it was chosen would give a subscription with no end.
+	if err != nil || t.Archived != 0 || t.DurationDays <= 0 {
 		return db.Tariff{}, false
 	}
 	return t, true

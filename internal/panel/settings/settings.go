@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"mikan/internal/panel/store/db"
+	"mikan/internal/release"
 )
 
 const (
@@ -42,6 +43,9 @@ const (
 	// KeyAutoUpdate lets the host updater install new releases on its own, once a day;
 	// off by default (internal/panel/updates).
 	KeyAutoUpdate = "auto_update"
+	// KeyUpdateChannel is which releases the panel and the host updater take: "stable"
+	// (unset) or "beta", the pre-releases too (release.Stable, release.Beta).
+	KeyUpdateChannel = "update_channel"
 	// Branding and support: the bot's and the subscription page's name and the support link.
 	KeyBrand      = "brand"
 	KeySupportURL = "support_url"
@@ -162,6 +166,15 @@ func (s *Settings) Lang(ctx context.Context) (string, error) {
 	v, err := s.String(ctx, KeyDefaultLang)
 	if err != nil || !ValidLang(v) {
 		return "", err
+	}
+	return v, nil
+}
+
+// UpdateChannel is the channel of updates: release.Beta when chosen, release.Stable otherwise.
+func (s *Settings) UpdateChannel(ctx context.Context) (string, error) {
+	v, err := s.String(ctx, KeyUpdateChannel)
+	if err != nil || !release.ValidChannel(v) {
+		return release.Stable, err
 	}
 	return v, nil
 }

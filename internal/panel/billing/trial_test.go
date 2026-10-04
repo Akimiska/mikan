@@ -126,6 +126,19 @@ func TestTrialOnAnArchivedTariff(t *testing.T) {
 	}
 }
 
+// A trial tariff that lost its term would give a subscription with no end: the trial is
+// off until the tariff has a term again.
+func TestTrialOnATariffWithoutTerm(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	trial := e.offerTrial()
+	_, err := e.st.DB.ExecContext(ctx, "UPDATE tariffs SET duration_days = 0 WHERE id = $1", trial.ID)
+	must(t, err)
+	if _, err := e.s.Trial(ctx, 906); !errors.Is(err, ErrTrialOff) || e.s.TrialOpen(ctx, 906) {
+		t.Fatalf("a trial on a tariff without a term: %v", err)
+	}
+}
+
 type countChanges struct{ policies, slots int }
 
 func (c *countChanges) PoliciesChanged() { c.policies++ }

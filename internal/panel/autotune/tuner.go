@@ -12,6 +12,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -25,6 +26,7 @@ type Nodes interface {
 	Activity(ctx context.Context, id int64) (nodeapi.Activity, error)
 	CheckTarget(ctx context.Context, id int64, req nodeapi.TargetCheckRequest) (nodeapi.TargetResult, error)
 	ScanTargets(ctx context.Context, id int64, req nodeapi.TargetScanRequest) (nodeapi.TargetScan, error)
+	Health(id int64) (nodesync.HealthView, bool)
 }
 
 // Options are the tuner's timings. The windows are long on purpose: a server whose
@@ -43,18 +45,19 @@ type Options struct {
 	MaxChanges    int
 	ChangesWindow time.Duration
 	Abandon       time.Duration // a port given up on a node is not picked again for this long
+	Busy          time.Duration // the nodes' listeners are looked at for a port another program holds
 }
 
 func DefaultOptions() Options {
 	return Options{Tick: 5 * time.Minute, Window: 30 * time.Minute, Hold: 30 * time.Minute, Cooldown: 6 * time.Hour,
 		Escalate: time.Hour, CheckEvery: 15 * time.Minute, TargetFails: 3, MaxChanges: 3, ChangesWindow: 48 * time.Hour,
-		Abandon: 7 * 24 * time.Hour}
+		Abandon: 7 * 24 * time.Hour, Busy: 15 * time.Second}
 }
 
 // Scaled shortens every timing by f, for tests on a real stack.
 func (o Options) Scaled(f float64) Options {
 	s := func(d *time.Duration) { *d = time.Duration(float64(*d) * f) }
-	for _, d := range []*time.Duration{&o.Tick, &o.Window, &o.Hold, &o.Cooldown, &o.Escalate, &o.CheckEvery, &o.ChangesWindow, &o.Abandon} {
+	for _, d := range []*time.Duration{&o.Tick, &o.Window, &o.Hold, &o.Cooldown, &o.Escalate, &o.CheckEvery, &o.ChangesWindow, &o.Abandon, &o.Busy} {
 		s(d)
 	}
 	return o
@@ -93,6 +96,9 @@ type Tuner struct {
 
 	mu    sync.Mutex
 	state map[int64]*state // by inbound id
+	busy  map[int64]string // by inbound id: why a busy inbound stays, as last logged
+
+	busyMu sync.Mutex // one MoveBusy at a time
 
 	// What only a round touches: its own timings, and the targets that failed a check lately
 	// (not picked again). The target checks of a round run side by side and note failures
@@ -109,7 +115,7 @@ type state struct {
 
 func New(st *store.Store, set *settings.Settings, nodes Nodes, changes domain.Changes, log *slog.Logger, now func() time.Time, o Options) *Tuner {
 	return &Tuner{st: st, inbounds: domain.NewInbounds(st, nil, now), set: set, nodes: nodes, changes: changes, log: log, now: now, o: o, pick: rand.IntN,
-		state: map[int64]*state{}, failed: map[string]time.Time{}}
+		state: map[int64]*state{}, busy: map[int64]string{}, failed: map[string]time.Time{}}
 }
 
 // Status returns the tuner's view of an inbound; false before its first round.
@@ -124,6 +130,11 @@ func (t *Tuner) Status(id int64) (Status, bool) {
 }
 
 func (t *Tuner) Run(ctx context.Context) {
+	if t.o.Busy > 0 {
+		var wg sync.WaitGroup
+		defer wg.Wait()
+		wg.Go(func() { t.runBusy(ctx) })
+	}
 	tick := time.NewTicker(t.o.Tick)
 	defer tick.Stop()
 	for {
@@ -456,7 +467,9 @@ func (t *Tuner) history(w *world, id int64) history {
 		case "sni":
 			h.lastSNI = at
 		}
-		if w.now.Sub(at) < t.o.ChangesWindow {
+		// A move off a port another program held gives clients the same time to catch up,
+		// but it is no sign of a blocked protocol: it does not count against MaxChanges.
+		if w.now.Sub(at) < t.o.ChangesWindow && e.Reason != ReasonBusy {
 			h.recent++
 		}
 	}
@@ -518,12 +531,8 @@ func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound,
 		t.log.Error("autotune: node ports", "node", n.ID, "err", err)
 		return
 	}
-	abandoned := map[string]bool{x.Port: true}
-	for _, e := range w.events {
-		if e.NodeID == n.ID && e.Kind == "port" && e.Network == network && w.now.Sub(time.Unix(e.CreatedAt, 0)) < t.o.Abandon {
-			abandoned[e.OldValue] = true
-		}
-	}
+	abandoned := t.leftPorts(w.events, n.ID, network, w.now)
+	abandoned[x.Port] = true
 	free := FreePorts(ports, network, abandoned)
 	if len(free) == 0 {
 		t.setStuck(x.ID, "no_port")
@@ -728,24 +737,29 @@ func (t *Tuner) nodeIP(ctx context.Context, w *world, n db.Node) (string, error)
 	return scan.ResolveIPv4(ctx, host)
 }
 
-// changed records an automatic change and pushes it to the node. Clients get it with
-// their next subscription update; until then the url-test groups route around.
+// changed records an automatic change of a round and updates the round's view.
 func (t *Tuner) changed(ctx context.Context, w *world, n db.Node, next db.Inbound, e db.AddInboundEventParams) {
-	e.InboundID, e.NodeID, e.CreatedAt = next.ID, n.ID, w.now.Unix()
-	if err := t.st.Q.AddInboundEvent(ctx, e); err != nil {
-		t.log.Error("autotune: record event", "err", err)
-	}
-	_ = audit.Write(ctx, t.st.Q, w.now, audit.Entry{Action: "auto.inbound_" + e.Kind, TargetType: "inbound", TargetID: next.Name,
-		Details: map[string]any{"node": n.ID, "old": e.OldValue, "new": e.NewValue, "reason": e.Reason}})
-	t.log.Warn("autotune: inbound changed", "node", n.ID, "inbound", next.Name, "kind", e.Kind, "old", e.OldValue, "new", e.NewValue, "reason", e.Reason)
+	ev := t.record(ctx, w.now, n, next, e)
 	list := w.inbounds[n.ID]
 	for i := range list {
 		if list[i].ID == next.ID {
 			list[i] = next
 		}
 	}
-	w.events = append(w.events, db.InboundEvent{InboundID: e.InboundID, NodeID: e.NodeID, Kind: e.Kind, Network: e.Network,
-		OldValue: e.OldValue, NewValue: e.NewValue, Reason: e.Reason, CreatedAt: e.CreatedAt})
+	w.events = append(w.events, ev)
+}
+
+// record writes down an automatic change (the event the admin's alerts read, the audit
+// entry) and pushes it to the node. Clients get it with their next subscription update;
+// until then the url-test groups route around.
+func (t *Tuner) record(ctx context.Context, now time.Time, n db.Node, next db.Inbound, e db.AddInboundEventParams) db.InboundEvent {
+	e.InboundID, e.NodeID, e.CreatedAt = next.ID, n.ID, now.Unix()
+	if err := t.st.Q.AddInboundEvent(ctx, e); err != nil {
+		t.log.Error("autotune: record event", "err", err)
+	}
+	_ = audit.Write(ctx, t.st.Q, now, audit.Entry{Action: "auto.inbound_" + e.Kind, TargetType: "inbound", TargetID: next.Name,
+		Details: map[string]any{"node": n.ID, "old": e.OldValue, "new": e.NewValue, "reason": e.Reason}})
+	t.log.Warn("autotune: inbound changed", "node", n.ID, "inbound", next.Name, "kind", e.Kind, "old", e.OldValue, "new", e.NewValue, "reason", e.Reason)
 	t.mu.Lock()
 	s := t.stateLocked(next.ID)
 	s.CutOff, s.Since, s.Stuck, s.fails = false, time.Time{}, "", 0
@@ -754,4 +768,6 @@ func (t *Tuner) changed(ctx context.Context, w *world, n db.Node, next db.Inboun
 	}
 	t.mu.Unlock()
 	t.changes.SlotsChanged()
+	return db.InboundEvent{InboundID: e.InboundID, NodeID: e.NodeID, Kind: e.Kind, Network: e.Network,
+		OldValue: e.OldValue, NewValue: e.NewValue, Reason: e.Reason, CreatedAt: e.CreatedAt}
 }

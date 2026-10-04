@@ -54,6 +54,13 @@ func TestTrialSetting(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || v.TrialTariffID == nil {
 		t.Fatalf("the trial after another change: %d %s", resp.StatusCode, body)
 	}
+	// A tariff without a term would make the free trial a subscription with no end.
+	if _, err := h.st.DB.ExecContext(ctx, "UPDATE tariffs SET duration_days = 0 WHERE id = $1", ts[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if resp, body := h.do(http.MethodPatch, path, map[string]any{"trial_tariff_id": ts[0].ID}, csrf); resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "trial_no_term") {
+		t.Fatalf("a tariff without a term: %d %s", resp.StatusCode, body)
+	}
 	if _, err := h.st.Q.ArchiveTariff(ctx, ts[1].ID); err != nil {
 		t.Fatal(err)
 	}

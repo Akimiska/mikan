@@ -1095,7 +1095,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Включить или выключить автообновление */
+        /** Автообновление и канал релизов */
         patch: operations["update-updates"];
         trace?: never;
     };
@@ -1520,7 +1520,7 @@ export interface components {
             new: string;
             old: string;
             /** @enum {string} */
-            reason: "blocked" | "target_down" | "still_blocked";
+            reason: "blocked" | "target_down" | "still_blocked" | "busy";
         };
         AutoView: {
             /**
@@ -2060,6 +2060,7 @@ export interface components {
             total: number;
         };
         ListenerStatus: {
+            code?: string;
             error?: string;
             name: string;
             ok: boolean;
@@ -2391,6 +2392,8 @@ export interface components {
         };
         PatchUpdatesInputBody: {
             auto?: boolean;
+            /** @enum {string} */
+            channel?: "stable" | "beta";
         };
         PatchUserInputBody: {
             /**
@@ -2493,6 +2496,11 @@ export interface components {
             /** @enum {string} */
             status: "pending" | "paid" | "applied" | "expired" | "failed" | "refunded";
             tariff_name: string;
+            /**
+             * Format: int64
+             * @description Купленный срок в днях (0 — бессрочно); нет у пакетов и у платежей до сроков в тарифах
+             */
+            term_days?: number;
             /** Format: int64 */
             tg_id: number;
             tg_username?: string;
@@ -2898,6 +2906,8 @@ export interface components {
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort?: number;
+            /** @description Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений */
+            terms?: components["schemas"]["TermBody"][];
             /** Format: int64 */
             traffic_limit?: number;
         };
@@ -2936,6 +2946,8 @@ export interface components {
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort: number;
+            /** @description Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub */
+            terms: components["schemas"]["TermView"][];
             /**
              * Format: int64
              * @description Байты; null — без лимита
@@ -3016,6 +3028,40 @@ export interface components {
             /** @description Токен сохранён */
             token_set: boolean;
         };
+        TermBody: {
+            /**
+             * Format: int64
+             * @description 0 — бессрочно; с днём оплаты — месяцы по 30 дней
+             */
+            days: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках: 19900 — 199 ₽
+             */
+            price_rub?: number;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars
+             */
+            price_stars?: number;
+        };
+        TermView: {
+            /**
+             * Format: int64
+             * @description 0 — бессрочно; с днём оплаты — месяцы по 30 дней
+             */
+            days: number;
+            /**
+             * Format: int64
+             * @description Цена в копейках; null — не за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена в Telegram Stars; null — не за Stars
+             */
+            price_stars: number | null;
+        };
         Texts: {
             /** @description Уведомление: подписка закончилась */
             expired: string;
@@ -3071,6 +3117,11 @@ export interface components {
             /** @description Вышла версия новее этой */
             available: boolean;
             /**
+             * @description Какие релизы ставить: stable — только релизы, beta — и пре-релизы (vX-rc.N)
+             * @enum {string}
+             */
+            channel: "stable" | "beta";
+            /**
              * Format: int64
              * @description Unix-время последней проверки; 0 — ещё не проверяли
              */
@@ -3082,6 +3133,8 @@ export interface components {
             host?: components["schemas"]["HostStatus"];
             /** @description Последний релиз; пусто, пока проверки не было */
             latest: string;
+            /** @description Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто */
+            newest: string;
             /** @description Что изменилось: markdown по языкам, en и ru */
             notes: {
                 [key: string]: string;
@@ -3093,6 +3146,8 @@ export interface components {
              * @description Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял
              */
             requested_at: number;
+            /** @description Вышел newest, но с этой версии к нему не ведёт ни одно обновление */
+            unreachable: boolean;
         };
         UserCounts: {
             /** Format: int64 */

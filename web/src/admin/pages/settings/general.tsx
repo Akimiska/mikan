@@ -13,6 +13,7 @@ import { Switch } from "../../../components/switch";
 import { getLocale, LOCALES, t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { fieldErrors } from "../../../lib/fields";
+import { inlineMarkdown } from "../../../lib/inline-md";
 import { ago } from "../../../lib/format";
 import { useSaveSettings } from "./shared";
 
@@ -244,7 +245,7 @@ export function UpdatesCard() {
               .split("\n")
               .filter((l) => l.trim())
               .map((l, i) => (
-                <li key={i}>{l.replace(/^[-*]\s*/, "")}</li>
+                <li key={i}>{inlineMarkdown(l.replace(/^[-*]\s*/, ""))}</li>
               ))}
           </ul>
         </div>

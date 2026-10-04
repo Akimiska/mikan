@@ -98,3 +98,14 @@ func TestBusyPortMoveAlertsTheAdmin(t *testing.T) {
 		t.Fatalf("inbound events off: pending %+v, cursor %d of %d", off.Pending, off.AutoCursor, state.AutoCursor)
 	}
 }
+
+// A busy port the tuner may move is given time to move before the admin hears of it; a
+// port it may not move is reported as quickly as any other failure.
+func TestBusyInboundWaitsForTheMove(t *testing.T) {
+	if inboundFailAfter(true, true) <= inboundFailAfter(false, true) {
+		t.Fatal("a movable busy port is reported as fast as any failure")
+	}
+	if inboundFailAfter(true, false) != inboundFailAfter(false, false) {
+		t.Fatal("a busy port with automatic moves off waits for a move that never comes")
+	}
+}

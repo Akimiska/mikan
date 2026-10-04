@@ -181,6 +181,16 @@ func (m *Monitor) config(ctx context.Context) AlertsConfig {
 	return c
 }
 
+// inboundFailAfter is how many failed samples make an inbound unavailable. A port held by
+// another program is moved by the tuner within seconds: such an inbound is reported only
+// when the move did not help.
+func inboundFailAfter(busy, autoPort bool) int {
+	if busy && autoPort {
+		return 24
+	}
+	return 3
+}
+
 func (m *Monitor) logError(message string, err error) {
 	if m.log != nil {
 		m.log.Error(message, "err", err)
@@ -243,8 +253,10 @@ func (m *Monitor) round(ctx context.Context) {
 			continue
 		}
 		listenerHealth[n.ID] = make(map[string]bool, len(hv.Listeners))
+		busy := map[string]bool{}
 		for _, l := range hv.Listeners {
 			listenerHealth[n.ID][l.Name] = l.OK
+			busy[l.Name] = l.Busy()
 		}
 		for _, in := range byNode[n.ID] {
 			if in.Enabled == 0 {
@@ -256,7 +268,7 @@ func (m *Monitor) round(ctx context.Context) {
 				level = Unavailable
 			}
 			key := "inbound/" + strconv.FormatInt(in.ID, 10)
-			m.observe(&st, key, level, hv.CheckedAt, 3, 2, eventFor(cfg, "inbound", n.Name+" / "+in.Name, level, lang))
+			m.observe(&st, key, level, hv.CheckedAt, inboundFailAfter(busy[in.Name], in.AutoPort != 0), 2, eventFor(cfg, "inbound", n.Name+" / "+in.Name, level, lang))
 			if level != Healthy {
 				nodeLevel = Degraded
 			}

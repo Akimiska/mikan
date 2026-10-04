@@ -292,6 +292,17 @@ func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRe
 	return v.Validate(ctx, req)
 }
 
+// RequestUpdate asks a node to update to a release (nodeupdate has the rules).
+func (m *Manager) RequestUpdate(ctx context.Context, id int64, version string) error {
+	c, err := clientOf[interface {
+		RequestUpdate(context.Context, string) error
+	}](m, id)
+	if err != nil {
+		return err
+	}
+	return c.RequestUpdate(ctx, version)
+}
+
 // Activity reports which inbounds of a node each device reached lately.
 func (m *Manager) Activity(ctx context.Context, id int64) (nodeapi.Activity, error) {
 	c, err := clientOf[interface {

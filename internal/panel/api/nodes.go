@@ -13,7 +13,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/hostname"
+	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
@@ -41,6 +43,13 @@ type NodeInfo struct {
 	MemUsed     uint64     `json:"mem_used"`
 	MemTotal    uint64     `json:"mem_total"`
 	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+	// Behind: the node runs an older version than the panel.
+	Behind bool `json:"behind" doc:"Нода старее панели"`
+	// CanUpdate: the panel can update the node itself (a remote node that answers and has
+	// the update endpoint, version 0.5.0.2 or later). An older node is updated once by hand.
+	CanUpdate bool `json:"can_update" doc:"Панель может обновить ноду сама: удалённая, отвечает, версия 0.5.0.2 или новее; старую обновляют один раз вручную командой mikan update на её сервере"`
+	// Update is how the last update of the node goes or went.
+	Update *nodeapi.UpdateStatus `json:"update,omitempty" doc:"Как идёт или прошло обновление ноды"`
 	// Certificate is the node's own one for its protocols on the node's TLS; nil: the
 	// node uses its self-signed certificate.
 	Certificate *NodeCertView `json:"certificate,omitempty"`
@@ -120,6 +129,7 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 			v.ListenersOK++
 		}
 	}
+	h.nodeUpdateView(ctx, &v, nodeupdate.Reported(hv.Health.Update))
 	return v
 }
 

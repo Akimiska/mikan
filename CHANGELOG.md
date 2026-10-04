@@ -3,6 +3,21 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.5.0.2
+### en
+- **Nodes update from the panel.** The Nodes page shows each node's version and marks the ones behind the panel, with **Update** and **Update all**. By default nodes follow the panel by themselves: after the panel updates, they are brought to its version one at a time, the next one starting when the previous one works. A node that fails goes back to its version, you get a notice, and the rollout stops. The switch is in Settings → General → Updates.
+- A node installs only signed releases and never goes back to an older one. Its nightly timer no longer moves it ahead of the panel.
+- Nodes on 0.5.0.1 and older need `mikan update` on their server once; the panel shows the command. After that they update from the panel.
+- With device binding, the places taken are the bound devices: a phone moving from Wi-Fi to mobile data no longer looks like two devices. Connection addresses are shown separately and take no places.
+- "What changed" in Settings → Updates shows bold text, code and links properly.
+
+### ru
+- **Ноды обновляются из панели.** На странице «Ноды» видна версия каждой ноды и отмечены отстающие от панели, есть кнопки **Обновить** и **Обновить все**. По умолчанию ноды сами следуют за панелью: после её обновления они подтягиваются до её версии по одной, следующая начинает, когда предыдущая заработала. Нода, которая не обновилась, возвращается на свою версию, приходит уведомление, и обновление останавливается. Переключатель в «Настройки → Основное → Обновления».
+- Нода ставит только подписанные релизы и никогда не откатывается на старую версию. Её ночной таймер больше не обгоняет панель.
+- Нодам на 0.5.0.1 и раньше один раз нужен `mikan update` на их сервере, панель показывает команду. Дальше они обновляются из панели.
+- С привязкой устройств места считаются по привязанным устройствам: телефон, перешедший с Wi-Fi на мобильную сеть, больше не выглядит как два устройства. Адреса подключений показаны отдельно и мест не занимают.
+- «Что изменилось» в «Настройки → Обновления» показывает жирный текст, код и ссылки как надо.
+
 ## 0.5.0.1
 ### en
 - The installer no longer stops when nginx or Caddy holds ports 80 or 443. The protocols whose port is taken get other free ports. With a domain, it offers to add the Let's Encrypt rule to nginx or Caddy: it backs up the config, checks it and rolls back on an error. Without your consent it only shows the lines to add.

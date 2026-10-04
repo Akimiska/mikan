@@ -14,6 +14,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/torrent"
 )
 
 // TelegramLink is the Telegram account that manages a subscription in the bot.
@@ -49,6 +50,7 @@ type UserView struct {
 	OnlineIPs     []string      `json:"online_ips"`
 	BoundDevices  int64         `json:"bound_devices" doc:"Привязанные устройства: с привязкой это занятые места"`
 	OnlineAt      *time.Time    `json:"online_at"`
+	TorrentBan    *time.Time    `json:"torrent_ban" doc:"До какого времени действует бан блокировщика торрентов; null — бана нет"`
 	CreatedAt     time.Time     `json:"created_at"`
 }
 
@@ -73,6 +75,7 @@ func ptrTime(v int64, ok bool) *time.Time {
 type userEnv struct {
 	subBase string // "": no address yet, or the caller may not see links
 	online  map[string]nodeapi.Online
+	bans    map[int64]int64 // user → when the torrent ban ends; nil while the blocker is off
 }
 
 func (h *handlers) userEnv(ctx context.Context) userEnv {
@@ -82,6 +85,18 @@ func (h *handlers) userEnv(ctx context.Context) userEnv {
 		e.subBase = h.d.SubBase(ctx)
 	}
 	e.online = h.online()
+	// The list still shows without them: a ban is a note on a user, not the user.
+	if h.d.Settings == nil {
+		return e
+	}
+	if c, err := torrent.Load(ctx, h.d.Settings); err == nil && c.Enabled {
+		if rows, err := h.d.Store.Q.ActiveTorrentBans(ctx, h.d.Now().Unix()); err == nil {
+			e.bans = make(map[int64]int64, len(rows))
+			for _, r := range rows {
+				e.bans[r.UserID] = r.BannedUntil
+			}
+		}
+	}
 	return e
 }
 
@@ -113,6 +128,9 @@ func (h *handlers) viewUser(u db.User, slots []string, bound int64, grants domai
 	}
 	if env.subBase != "" {
 		v.SubURL = env.subBase + "/" + u.SubToken
+	}
+	if until, ok := env.bans[u.ID]; ok {
+		v.TorrentBan = ptrTime(until, true)
 	}
 	v.OnlineIPs = env.liveIPs(slots)
 	v.Online = len(v.OnlineIPs) > 0

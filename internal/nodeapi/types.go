@@ -37,6 +37,8 @@ type DesiredState struct {
 	// Exits are the other nodes this one sends chosen inbounds through (a cascade).
 	Relay *Relay `json:"relay,omitempty"`
 	Exits []Exit `json:"exits,omitempty"`
+	// Torrent turns the torrent blocker on; nil: off. Nodes older than the blocker ignore it.
+	Torrent *TorrentBlock `json:"torrent,omitempty"`
 }
 
 type Inbound struct {
@@ -74,6 +76,11 @@ type Policy struct {
 	// Pools are the slot's quotas in traffic pools; a pool not listed has no limit.
 	// QuotaRemaining is then the quota of the inbounds outside every pool.
 	Pools []PoolQuota `json:"pools,omitempty"`
+	// TorrentExempt: the torrent blocker leaves the slot alone.
+	TorrentExempt bool `json:"torrent_exempt,omitempty"`
+	// BannedUntil (unix seconds) keeps the slot out until then: the torrent blocker
+	// caught it on some node of the panel. 0: no ban.
+	BannedUntil int64 `json:"banned_until,omitempty"`
 }
 
 type PoliciesRequest struct {
@@ -363,4 +370,46 @@ type ProbeResult = WarpStatus
 type PoolQuota struct {
 	Pool      string `json:"pool"`
 	Remaining int64  `json:"remaining"` // bytes; -1 = unlimited
+}
+
+// TorrentBlock is the torrent blocker: the node looks at the first bytes a user sends
+// on each connection and UDP packet, and drops BitTorrent it recognises (the handshake,
+// DHT, uTP, tracker requests). Encrypted BitTorrent (MSE/PE) looks like noise and goes
+// through: the blocker is a deterrent, not a wall.
+type TorrentBlock struct {
+	// BanSeconds keeps a caught user out of the node for so long, every connection cut;
+	// 0: only what was caught is dropped.
+	BanSeconds int64 `json:"ban_seconds"`
+}
+
+// Kinds of BitTorrent traffic the node recognises.
+const (
+	TorrentHandshake = "handshake" // the peer wire protocol over TCP
+	TorrentTracker   = "tracker"   // an HTTP or UDP tracker announce
+	TorrentDHT       = "dht"
+	TorrentUTP       = "utp"
+)
+
+// TorrentHit is one catch of the torrent blocker. A slot is reported at most once a
+// minute; Count says how many catches the hit stands for.
+type TorrentHit struct {
+	Seq     int64  `json:"seq"`
+	Slot    string `json:"slot"`
+	IP      string `json:"ip"`
+	Inbound string `json:"inbound"`
+	Network string `json:"network" enum:"tcp,udp"`
+	Kind    string `json:"kind" enum:"handshake,tracker,dht,utp"`
+	Dest    string `json:"dest"`
+	At      int64  `json:"at"` // unix seconds
+	Count   int    `json:"count"`
+	// BannedUntil is when the node lets the slot in again (unix seconds); 0: no ban.
+	BannedUntil int64 `json:"banned_until,omitempty"`
+}
+
+// TorrentHits are the catches after a sequence number (GET /v1/torrents?after=N). The
+// node keeps the last few hundred in memory; Epoch changes when it restarts, and the
+// sequence starts over.
+type TorrentHits struct {
+	Epoch string       `json:"epoch"`
+	Hits  []TorrentHit `json:"hits"`
 }

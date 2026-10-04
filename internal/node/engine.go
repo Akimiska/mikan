@@ -217,6 +217,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	e.Reg.SetSlots(st.Slots)
 	e.Reg.SetPolicies(st.Epoch, st.Policies)
 	e.Reg.SetShared(sharedListeners(st))
+	e.Reg.SetTorrent(st.Torrent)
 	pools := map[string]string{}
 	for _, in := range st.Inbounds {
 		if in.Pool != "" {
@@ -339,7 +340,8 @@ func policyShape(ps []nodeapi.Policy) string {
 		for _, q := range p.Pools {
 			pools = append(pools, q.Pool+strconv.FormatBool(q.Remaining < 0))
 		}
-		_ = enc.Encode([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, pools})
+		_ = enc.Encode([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, pools,
+			p.TorrentExempt, p.BannedUntil})
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

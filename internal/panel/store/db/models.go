@@ -332,6 +332,21 @@ type TgNotice struct {
 	SentAt int64
 }
 
+type TorrentHit struct {
+	ID          int64
+	UserID      int64
+	NodeID      sql.NullInt64
+	Ip          string
+	Inbound     string
+	Network     string
+	Kind        string
+	Dest        string
+	Hits        int32
+	At          int64
+	BannedUntil int64
+	LiftedAt    sql.NullInt64
+}
+
 type TrafficDaily struct {
 	UserID int64
 	Day    int64

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -152,6 +153,15 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 // the request. Nodes before 0.5.0.2 answer 404.
 func (c *Client) RequestUpdate(ctx context.Context, version string) error {
 	return c.do(ctx, http.MethodPost, "/v1/update", UpdateRequest{Version: version}, nil, 10*time.Second)
+}
+
+// Torrents returns the torrent blocker's hits after seq of epoch. Nodes that predate the
+// blocker answer 404.
+func (c *Client) Torrents(ctx context.Context, epoch string, after int64) (TorrentHits, error) {
+	var r TorrentHits
+	q := url.Values{"epoch": {epoch}, "after": {strconv.FormatInt(after, 10)}}
+	err := c.do(ctx, http.MethodGet, "/v1/torrents?"+q.Encode(), nil, &r, 10*time.Second)
+	return r, err
 }
 
 func (c *Client) Activity(ctx context.Context) (Activity, error) {

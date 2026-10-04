@@ -208,6 +208,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()
+	h.registerTorrent()
 	h.registerNodeUpdates()
 	h.registerAPIKeys()
 	h.registerPayments()

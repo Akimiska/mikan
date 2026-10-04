@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, rawApi, unwrap, type Schemas, type User } from "./client";
 
 export const qk = {
@@ -31,6 +31,8 @@ export const qk = {
   promocodes: ["promocodes"] as const,
   promocodeRedemptions: ["promocodes", "redemptions"] as const,
   userGrants: (id: number) => ["users", "grants", id] as const,
+  torrent: ["torrent"] as const,
+  torrentHits: (user: number) => ["torrent", "hits", user] as const,
 };
 
 export const meQuery = {
@@ -129,6 +131,22 @@ export function useNodes() {
 /** Payment settings: also whether selling is on, which shows Payments in the menu. */
 export function usePaymentSettings() {
   return useQuery({ queryKey: qk.paymentSettings, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/payments/settings", { signal })) });
+}
+
+export function useTorrent() {
+  return useQuery({ queryKey: qk.torrent, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/torrent", { signal })) });
+}
+
+/** The torrent blocker's catches, newest first, a page at a time; user 0: everyone's. */
+export function useTorrentHits(user = 0, limit = 50) {
+  return useInfiniteQuery({
+    queryKey: [...qk.torrentHits(user), limit],
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(api.GET("/api/v1/torrent/hits", { params: { query: { user_id: user || undefined, before: pageParam || undefined, limit } }, signal })),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.length < limit ? undefined : last[last.length - 1]!.id),
+    refetchInterval: 30_000,
+  });
 }
 
 export function useSettings() {

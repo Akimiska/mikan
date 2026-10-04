@@ -10,6 +10,14 @@ the signed manifest, and the panel shows the one in its language.
 - If the move to PostgreSQL fails, the panel stays stopped and keeps both databases; run the update again.
 - Versions now have four numbers: major.minor.patch.revision.
 - From 0.5 on, an update that does not come up goes back to the previous version by itself when it did not change the database schema; otherwise the panel stays stopped with its data for another try. Restoring a backup replaces the whole database.
+- **Promo codes**, a new page: bonus days, extra traffic into the main limit or a traffic pool, and percent or fixed discounts on plans and traffic packages. Limits by dates, total uses, uses per person, new users or first purchase only, and chosen plans. Buyers enter a code in the Mini App; every activation is kept in the history.
+- **Import from another panel**: Settings → Import moves users from Marzban, PasarGuard or Remnawave onto a chosen plan, with their traffic used, term, device limit and note. A check shows what will happen first; the import runs in the background. The old subscription links keep working once the old domain points to this panel.
+- **Server alerts in Telegram** (Telegram → Infrastructure): private notices to the admin about nodes, WARP, cascade exits, protocols, autotune, the TLS certificate and updates, and a public server status in a channel. A node's public name is set in its settings; without one the node is not shown.
+- **Daily database backups to the admin's Telegram chat**, encrypted with your password, at the hour you choose (Telegram → Infrastructure).
+- **Five themes**: Mikan, Midnight, Ocean, Sakura and Forest, in Settings → General. The choice is kept in the browser.
+- **Subscription page and apps**: a Linux tab (SlothClash, Clash Verge Rev, Hiddify), ClashFest and SlothClash among the apps, an announcement shown inside Happ, v2RayTun and ClashFest, and your brand in ClashFest and SlothClash (Settings → Subscription).
+- **Prometheus metrics** at `/api/v1/metrics` with a read key; the API page (Settings → Security) shows a ready scrape job.
+- A new logo: the painted mandarin in the panel, the browser tab and on the subscription page.
 
 ### ru
 - Панель переходит на PostgreSQL. Обновление переносит все данные: ссылки подписок, VPN-ключи, ID пользователей, счётчики, платежи и настройки не меняются. Перед переносом делается бэкап, старая база SQLite остаётся на диске. Новые бэкапы — архивы PostgreSQL, старые SQLite-бэкапы по-прежнему можно восстановить.
@@ -17,6 +25,23 @@ the signed manifest, and the panel shows the one in its language.
 - Если перенос на PostgreSQL не удался, панель остаётся остановленной и сохраняет обе базы; запустите обновление ещё раз.
 - Версии теперь из четырёх чисел: major.minor.patch.revision.
 - Начиная с 0.5 обновление, которое не поднялось, само откатывается на прежнюю версию, если не меняло схему базы; иначе панель остаётся остановленной с данными для повторной попытки. Восстановление бэкапа заменяет базу целиком.
+- **Промокоды**, новая страница: бонусные дни, дополнительный трафик в основной лимит или в пул трафика, скидки в процентах или фиксированной суммой на тарифы и пакеты трафика. Ограничения по датам, общему числу активаций, активациям на человека, только для новых или для первой покупки и по тарифам. Покупатель вводит код в Mini App, все активации видны в истории.
+- **Импорт из другой панели**: «Настройки → Импорт» переносит пользователей из Marzban, PasarGuard или Remnawave на выбранный тариф вместе с израсходованным трафиком, сроком, лимитом устройств и заметкой. Сначала проверка показывает, что будет, импорт идёт в фоне. Старые ссылки подписок продолжают работать, когда старый домен направлен на эту панель.
+- **Уведомления о серверах в Telegram** («Telegram → Инфраструктура»): личные сообщения админу о нодах, WARP, выходах каскадов, протоколах, autotune, TLS-сертификате и обновлениях, и публичный статус серверов в канале. Публичное имя ноды задаётся в её настройках, без него нода в статусе не показывается.
+- **Ежедневные бэкапы базы в Telegram-чат админа**, зашифрованные вашим паролем, в выбранный час («Telegram → Инфраструктура»).
+- **Пять тем оформления**: Mikan, Midnight, Ocean, Sakura и Forest, в «Настройки → Основное». Выбор сохраняется в браузере.
+- **Страница подписки и приложения**: вкладка Linux (SlothClash, Clash Verge Rev, Hiddify), ClashFest и SlothClash в списке приложений, объявление внутри Happ, v2RayTun и ClashFest и ваш бренд в ClashFest и SlothClash («Настройки → Подписка»).
+- **Метрики Prometheus** на `/api/v1/metrics` по ключу на чтение; на странице API («Настройки → Безопасность») есть готовый job для сбора.
+- Новый логотип: нарисованный мандарин в панели, на вкладке браузера и на странице подписки.
+
+## 0.4.5
+### en
+- Prepares the move to 0.5: the panel and the mikan command understand versions with four numbers (0.5.0.0), and the command updates itself before the panel when a release needs a newer one. Nothing else changes; the database stays as it is.
+- After this update, 0.5.0.0 arrives the usual way: the Update button in Settings → Updates, or the nightly automatic update. It moves the panel to PostgreSQL with a backup first.
+
+### ru
+- Подготовка к переходу на 0.5: панель и команда mikan понимают версии из четырёх чисел (0.5.0.0), а команда сама обновляется раньше панели, если релизу нужна новая. Больше ничего не меняется, база остаётся прежней.
+- После этого обновления 0.5.0.0 придёт обычным путём: кнопкой «Обновить» в «Настройки → Обновления» или ночным автообновлением. Оно переведёт панель на PostgreSQL, сначала сделав бэкап.
 
 ## 0.4.4
 ### en

@@ -2864,6 +2864,13 @@
         "properties": {
           "auto": {
             "type": "boolean"
+          },
+          "channel": {
+            "enum": [
+              "stable",
+              "beta"
+            ],
+            "type": "string"
           }
         },
         "type": "object"
@@ -4292,6 +4299,14 @@
             "description": "Вышла версия новее этой",
             "type": "boolean"
           },
+          "channel": {
+            "description": "Какие релизы ставить: stable — только релизы, beta — и пре-релизы (vX-rc.N)",
+            "enum": [
+              "stable",
+              "beta"
+            ],
+            "type": "string"
+          },
           "checked_at": {
             "description": "Unix-время последней проверки; 0 — ещё не проверяли",
             "format": "int64",
@@ -4312,6 +4327,10 @@
             "description": "Последний релиз; пусто, пока проверки не было",
             "type": "string"
           },
+          "newest": {
+            "description": "Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто",
+            "type": "string"
+          },
           "notes": {
             "additionalProperties": {
               "type": "string"
@@ -4327,6 +4346,10 @@
             "description": "Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял",
             "format": "int64",
             "type": "integer"
+          },
+          "unreachable": {
+            "description": "Вышел newest, но с этой версии к нему не ведёт ни одно обновление",
+            "type": "boolean"
           }
         },
         "required": [
@@ -4338,6 +4361,9 @@
           "checked_at",
           "error",
           "auto",
+          "channel",
+          "newest",
+          "unreachable",
           "requested_at"
         ],
         "type": "object"

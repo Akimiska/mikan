@@ -19,6 +19,8 @@ type words struct {
 	devicesNone, devicesOff, devicesNote, confirmUnbind, unbound, wait string
 	connectText, linked, alreadyLinked, linkExpired, linkInvalid       string
 	linkLimit, noSub, sharedPlace, device, justNow                     string
+	// Taking a subscription off the Telegram account: it keeps working in the apps.
+	removeSub, confirmRemove, yesRemove, removed string
 	// A subscription already linked to another account is moved only if its owner agrees.
 	transferAsk, transferAllow, transferDeny, transferAsked, transferBusy, transferDone string
 	transferDenied, transferDeniedNew, transferStale, transferNotice                    string
@@ -58,6 +60,10 @@ var ru = words{
 	devicesNote:       "Отвязанное устройство сразу отключается, а место освобождается. Отвязывать можно одно устройство в сутки.",
 	confirmUnbind:     "Отвязать «%s»? Оно сразу отключится.",
 	unbound:           "✅ «%s» отвязано.",
+	removeSub:         "🗑 Убрать из бота",
+	confirmRemove:     "Убрать подписку «%s» из этого Telegram?\n\nОна продолжит работать в приложениях, но уведомления о ней сюда приходить перестанут. Чтобы вернуть её, пришлите сюда ссылку на подписку.",
+	yesRemove:         "✅ Да, убрать",
+	removed:           "✅ Подписка «%s» убрана из бота.",
 	wait:              "⏳ Следующее устройство можно отвязать %s.",
 	connectText:       "1. Установите приложение: Happ (iPhone, Android), ClashFest (Android), Koala Clash (Windows), SlothClash (Windows, Mac, Linux) или другое со страницы подписки.\n2. Добавьте в него ссылку:\n<code>%s</code>\n\nНа странице подписки — кнопки «Добавить» для всех приложений.",
 	linked:            "✅ Подписка «%s» подключена.",
@@ -129,6 +135,10 @@ var en = words{
 	devicesNote:       "An unbound device is disconnected at once and its place frees up. You can unbind one device a day.",
 	confirmUnbind:     "Unbind “%s”? It disconnects at once.",
 	unbound:           "✅ “%s” is unbound.",
+	removeSub:         "🗑 Remove from the bot",
+	confirmRemove:     "Remove the subscription “%s” from this Telegram account?\n\nIt keeps working in the apps, but its notices stop coming here. To bring it back, send its subscription link here.",
+	yesRemove:         "✅ Yes, remove",
+	removed:           "✅ The subscription “%s” is removed from the bot.",
 	wait:              "⏳ You can unbind the next device %s.",
 	connectText:       "1. Install an app: Happ (iPhone, Android), ClashFest (Android), Koala Clash (Windows), SlothClash (Windows, Mac, Linux) or another from the subscription page.\n2. Add this link to it:\n<code>%s</code>\n\nThe subscription page has “Add” buttons for every app.",
 	linked:            "✅ Subscription “%s” is connected.",

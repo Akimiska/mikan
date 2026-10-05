@@ -238,6 +238,10 @@ func (h *handlers) refundPayment(ctx context.Context, in *userIDInput) (*payment
 		return nil, huma.Error404NotFound("not_found")
 	case errors.Is(err, billing.ErrNotRefunable):
 		return nil, huma.Error409Conflict("not_refundable")
+	case errors.Is(err, billing.ErrRefundNotApplied):
+		// The Stars are back with the buyer; the subscription is not yet taken back.
+		h.d.Log.Warn("refund returned by Telegram but not applied", "payment", in.ID, "err", err)
+		return nil, huma.Error502BadGateway("refund_not_applied")
 	case err != nil:
 		h.d.Log.Warn("refund", "payment", in.ID, "err", err)
 		return nil, huma.Error502BadGateway("refund_failed")

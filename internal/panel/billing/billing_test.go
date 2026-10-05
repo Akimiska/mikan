@@ -34,6 +34,7 @@ type fakeTG struct {
 	refundErr error
 	invoices  int
 	refunded  []refundNote
+	onRefund  func() // runs after Telegram accepted a refund
 }
 
 // refundNote is what the buyer was told about a refund.
@@ -54,6 +55,9 @@ func (f *fakeTG) RefundStars(_ context.Context, _ int64, charge string) error {
 	defer f.mu.Unlock()
 	if f.refundErr != nil {
 		return f.refundErr
+	}
+	if f.onRefund != nil {
+		f.onRefund()
 	}
 	f.refunds = append(f.refunds, charge)
 	return nil

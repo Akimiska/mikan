@@ -71,9 +71,10 @@ func eqPtr(a, b *int64) bool {
 // purchaseRevert is what Apply records for a tariff payment: prior is the user before the
 // purchase (hadPrior false: there was none, the payment created u).
 func purchaseRevert(created, hadPrior bool, prior, u db.User) string {
-	ri := revertInfo{Created: created}
+	// Set is kept for a created user too: a later renewal may build on that term.
+	ri := revertInfo{Created: created, Set: stateOf(u)}
 	if !created && hadPrior {
-		ri.Prior, ri.Set = stateOf(prior), stateOf(u)
+		ri.Prior = stateOf(prior)
 	}
 	b, _ := json.Marshal(ri)
 	return string(b)
@@ -210,29 +211,35 @@ func userParams(u db.User, now int64) db.UpdateUserParams {
 }
 
 // rolledBack is the end of the user's access (cur) with the term the payment added taken
-// back: what it added is its end minus the later of the old end and its time. Never below
-// now: access that would end earlier ends now. Unlimited (null) ends are left alone when
-// the term cannot be worked out. days is the payment's term, used when nothing was
-// recorded.
+// back: what it added is its end minus the later of the old end and its time (just its
+// time when there was no old end, or it was unlimited). Never below now: access that would
+// end earlier ends now. Unlimited (null) ends are left alone when the term cannot be worked
+// out. days is the payment's term, used when nothing was recorded.
+//
+// When a payment or an edit came after this one, the added span is subtracted in seconds.
+// For a term counted in months (billing_day) that is an approximation: the later payment
+// may have counted its months from a different day.
 func rolledBack(cur sql.NullInt64, ri revertInfo, appliedAt, days, now int64) sql.NullInt64 {
 	var next sql.NullInt64
 	switch {
 	case ri.Set != nil:
 		set := ptrNull(ri.Set.ExpiresAt)
-		prior := sql.NullInt64{Int64: appliedAt, Valid: true}
-		if ri.Prior != nil {
-			prior = ptrNull(ri.Prior.ExpiresAt)
-		}
-		if prior.Valid && set.Valid {
-			prior.Int64 = max(prior.Int64, appliedAt)
+		base := appliedAt
+		if ri.Prior != nil && ri.Prior.ExpiresAt != nil {
+			base = max(*ri.Prior.ExpiresAt, appliedAt)
 		}
 		switch {
+		case cur == set && ri.Prior != nil && ri.Prior.ExpiresAt == nil:
+			// Unlimited before: unlimited again.
+		case cur == set && ri.Prior != nil && !set.Valid:
+			// The payment made it unlimited: the old end comes back as it was.
+			next = ptrNull(ri.Prior.ExpiresAt)
 		case cur == set && ri.Prior != nil:
-			next = prior
+			next = sql.NullInt64{Int64: base, Valid: true}
 		case !cur.Valid || !set.Valid:
 			return cur
 		default:
-			next = sql.NullInt64{Int64: cur.Int64 - (set.Int64 - prior.Int64), Valid: true}
+			next = sql.NullInt64{Int64: cur.Int64 - (set.Int64 - base), Valid: true}
 		}
 	case cur.Valid && days > 0:
 		next = sql.NullInt64{Int64: cur.Int64 - days*day, Valid: true}

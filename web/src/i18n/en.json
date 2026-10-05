@@ -232,6 +232,7 @@
       "terms_empty": "At least one term is needed",
       "not_refundable": "Only a Stars payment applied to a subscription can be refunded",
       "refund_failed": "Telegram did not accept the refund — try later",
+      "refund_not_applied": "The Stars were returned, but the subscription was not taken back yet — press Refund again",
       "no_slots": "Out of free slots — the panel refills them and applies the payment on its own",
       "timeout": "The payment system did not answer in time",
       "user_gone": "The subscription was deleted after the invoice",

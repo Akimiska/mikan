@@ -136,6 +136,9 @@ var (
 	ErrTooMany      = errors.New("too_many_invoices")
 	ErrBadPayment   = errors.New("bad_payment")
 	ErrNotRefunable = errors.New("not_refundable")
+	// ErrRefundNotApplied: Telegram returned the Stars, but taking back what the payment
+	// gave failed; refunding again finishes it.
+	ErrRefundNotApplied = errors.New("refund_not_applied")
 )
 
 // LoadConfig reads the payment settings. A read error is returned, never replaced by the
@@ -985,7 +988,11 @@ func (s *Service) Refund(ctx context.Context, id int64) (Reverted, error) {
 	if err := tg.RefundStars(ctx, p.TgID, p.ExternalID.String); err != nil {
 		return Reverted{}, err
 	}
-	return s.refunded(ctx, id)
+	rv, err := s.refunded(ctx, id)
+	if err != nil {
+		return Reverted{}, fmt.Errorf("%w: %w", ErrRefundNotApplied, err)
+	}
+	return rv, nil
 }
 
 // StarsRefunded takes Telegram's word that a Stars payment was refunded (refunded_payment:

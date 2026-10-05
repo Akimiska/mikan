@@ -265,6 +265,26 @@ func TestRefundTelegramDidNotConfirmChangesNothing(t *testing.T) {
 	}
 }
 
+// Telegram returned the Stars but taking the subscription back failed: the error says so,
+// the payment stays applied, and pressing again finishes it.
+func TestRefundTelegramAcceptedButNotApplied(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := e.buy(0, "ch-half")
+	e.tg.onRefund = cancel
+	if _, err := e.s.Refund(ctx, p.ID); !errors.Is(err, ErrRefundNotApplied) {
+		t.Fatalf("refund: %v", err)
+	}
+	if e.payment(p.ID).Status != "applied" || e.user(p.UserID.Int64).Status != "active" {
+		t.Fatalf("payment %q, user %q", e.payment(p.ID).Status, e.user(p.UserID.Int64).Status)
+	}
+	e.tg.onRefund = nil
+	if _, err := e.s.Refund(context.Background(), p.ID); err != nil || e.user(p.UserID.Int64).Status != "disabled" {
+		t.Fatalf("retry: %v", err)
+	}
+}
+
 // Telegram says a payment was refunded (the buyer asked it, or the bot's own refund comes
 // back as an update): the same is taken back, once, and no refund is asked of Telegram.
 func TestStarsRefundedByTelegram(t *testing.T) {
@@ -306,18 +326,87 @@ func TestStarsRefundedBeforeItWasApplied(t *testing.T) {
 	}
 }
 
-// The admin's button and Telegram's update about the same refund together take back once.
+// The admin's button and Telegram's update about the same refund together take back once:
+// on a renewal the term returns exactly to where it was, not twice as far.
 func TestRefundAndTelegramUpdateTogether(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
-	p := e.buy(0, "ch-both")
+	prior := e.subscriber(10 * 24 * time.Hour)
+	p := e.buy(prior.ID, "ch-both")
+	e.now = e.now.Add(time.Hour)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); _, _ = e.s.Refund(ctx, p.ID) }()
 	go func() { defer wg.Done(); _ = e.s.StarsRefunded(ctx, 555, "ch-both") }()
 	wg.Wait()
-	if e.payment(p.ID).Status != "refunded" || e.user(p.UserID.Int64).Status != "disabled" || len(e.tg.refundNotes()) != 1 {
-		t.Fatalf("payment %q, told %d times", e.payment(p.ID).Status, len(e.tg.refundNotes()))
+	if got := e.user(prior.ID); e.payment(p.ID).Status != "refunded" || got.ExpiresAt != prior.ExpiresAt || got.TariffID != prior.TariffID || len(e.tg.refundNotes()) != 1 {
+		t.Fatalf("payment %q, user %+v (was %+v), told %d times", e.payment(p.ID).Status, got, prior, len(e.tg.refundNotes()))
+	}
+}
+
+// A subscription bought and then renewed, both refunded: each takes back its own term.
+func TestRefundChainNewThenRenewal(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	first := e.buy(0, "ch-new")
+	uid := first.UserID.Int64
+	e.now = e.now.Add(time.Hour)
+	second := e.buy(uid, "ch-renew")
+	_, err := e.s.Refund(ctx, first.ID)
+	must(t, err)
+	_, err = e.s.Refund(ctx, second.ID)
+	must(t, err)
+	if got := e.user(uid); got.ExpiresAt.Int64 != e.now.Unix() {
+		t.Fatalf("both refunded: expires %d, want now %d", got.ExpiresAt.Int64, e.now.Unix())
+	}
+}
+
+// With a tariff restored the pools of the prior tariff come back with it.
+func TestRefundRestoresThePoolsOfThePriorTariff(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	ts, _ := e.st.Q.ListTariffs(ctx)
+	pool, err := e.st.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})
+	must(t, err)
+	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: ts[0].ID, PoolID: pool.ID, TrafficLimit: 7 << 30}))
+	prior := e.subscriber(10 * 24 * time.Hour)
+	limit := func() sql.NullInt64 {
+		up, err := e.st.Q.GetUserPool(ctx, db.GetUserPoolParams{UserID: prior.ID, PoolID: pool.ID})
+		must(t, err)
+		return up.TrafficLimit
+	}
+	want := sql.NullInt64{Int64: 7 << 30, Valid: true}
+	if limit() != want {
+		t.Fatalf("before: %+v", limit())
+	}
+	p := e.buy(prior.ID, "ch-pool")
+	if limit().Valid {
+		t.Fatalf("the sale tariff leaves the pool unlimited: %+v", limit())
+	}
+	rv, err := e.s.Refund(ctx, p.ID)
+	must(t, err)
+	if !rv.TariffRestored || limit() != want {
+		t.Fatalf("reverted %+v, pool limit %+v", rv, limit())
+	}
+}
+
+// A term counted in months is taken back in seconds when something came after it: pinned
+// as an approximation (see rolledBack).
+func TestRefundOfAMonthlyTermBehindALaterRenewal(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	_, err := e.st.DB.ExecContext(ctx, "UPDATE tariffs SET billing_day = 15 WHERE id = $1", e.sale.ID)
+	must(t, err)
+	prior := e.subscriber(10 * 24 * time.Hour)
+	first := e.buy(prior.ID, "ch-m1")
+	end1 := e.user(prior.ID).ExpiresAt.Int64
+	e.now = e.now.Add(time.Hour)
+	e.buy(prior.ID, "ch-m2")
+	end2 := e.user(prior.ID).ExpiresAt.Int64
+	_, err = e.s.Refund(ctx, first.ID)
+	must(t, err)
+	if want := end2 - (end1 - prior.ExpiresAt.Int64); e.user(prior.ID).ExpiresAt.Int64 != want {
+		t.Fatalf("expires %d, want %d", e.user(prior.ID).ExpiresAt.Int64, want)
 	}
 }
 
@@ -338,6 +427,9 @@ func TestRolledBack(t *testing.T) {
 		{"unlimited before: unlimited again", n(5000), revertInfo{Prior: &userState{}, Set: &userState{ExpiresAt: p(5000)}}, 0, sql.NullInt64{}},
 		{"made unlimited since: left alone", sql.NullInt64{}, revertInfo{Prior: &userState{ExpiresAt: p(3000)}, Set: &userState{ExpiresAt: p(5000)}}, 0, sql.NullInt64{}},
 		{"already over: left alone", n(500), revertInfo{Prior: &userState{ExpiresAt: p(100)}, Set: &userState{ExpiresAt: p(5000)}}, 0, n(500)},
+		{"unlimited before, a later change: only this term", n(8000), revertInfo{Prior: &userState{}, Set: &userState{ExpiresAt: p(5000)}}, 0, n(3900)},
+		{"created, a later renewal: only this term", n(8000), revertInfo{Created: true, Set: &userState{ExpiresAt: p(5000)}}, 0, n(3900)},
+		{"created, nothing since: ends now", n(5000), revertInfo{Created: true, Set: &userState{ExpiresAt: p(5000)}}, 0, n(now)},
 		{"not recorded: the term's days", n(3 * day), revertInfo{}, 2, n(day)},
 		{"not recorded, no days: left alone", n(3 * day), revertInfo{}, 0, n(3 * day)},
 	} {

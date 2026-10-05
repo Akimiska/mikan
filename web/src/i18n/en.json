@@ -1981,7 +1981,7 @@
     "historySearch": "Code or user ID",
     "noHistory": "No activations yet.",
     "user": "user",
-    "createHint": "Fixed discounts use the smallest payment unit: RUB — kopecks, XTR — Stars. Minimum order and maximum discount use the same unit.",
+    "createHint": "A bonus is added at once, a discount applies at checkout. Sums are in the code's currency: rubles or Stars.",
     "trafficUnit": "GB",
     "daysUnit": "days",
     "status": {

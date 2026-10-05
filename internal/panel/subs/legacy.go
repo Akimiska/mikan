@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/store/db"
 )
@@ -23,7 +24,7 @@ func (h *Handler) Legacy() http.Handler {
 			return
 		}
 		token, rest, _ := strings.Cut(strings.TrimPrefix(path.Clean(r.URL.Path), "/"), "/")
-		if token == "" || len(token) > 512 {
+		if token == "" || len(token) > panelimport.MaxToken {
 			server.NotFound(w)
 			return
 		}
@@ -47,31 +48,11 @@ func (h *Handler) Legacy() http.Handler {
 	})
 }
 
-// legacyUser finds whose an old link is. A token the old panel gave out unchanged
-// (Remnawave's short UUID) is looked up as it is; a token Marzban or PasarGuard signed is
-// checked with the old panel's secret, and the name or id inside it is looked up. The keys
-// those are filed under ("name:…", "id:…") are never taken from the address itself.
+// legacyUser finds whose an old link is (panelimport.Verifier.User; the bot asks the same).
 func (h *Handler) legacyUser(r *http.Request, token string) (db.User, bool) {
-	if !strings.Contains(token, ":") {
-		if row, err := h.st.Q.LegacySubTokenUser(r.Context(), token); err == nil {
-			return row.User, true
-		}
-	}
-	cfg, err := h.cfg(r.Context())
-	if err != nil || cfg.Legacy.Secret == "" {
-		return db.User{}, false
-	}
-	key, issued, ok := cfg.Legacy.Who(token)
-	if !ok {
-		return db.User{}, false
-	}
-	row, err := h.st.Q.LegacySubTokenUser(r.Context(), key)
-	// A token made before the user was (made again under the same name) is refused, as
-	// the old panel refuses it.
-	if err != nil || issued < row.NotBefore {
-		return db.User{}, false
-	}
-	return row.User, true
+	// Without the settings the tokens kept as they are can still be told, the signed ones not.
+	cfg, _ := h.cfg(r.Context())
+	return cfg.Legacy.User(r.Context(), h.st.Q, token)
 }
 
 // legacyFormat is mikan's format for an old panel's client type, "" when mikan has none

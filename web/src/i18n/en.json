@@ -1743,6 +1743,13 @@
     "relay": "Other nodes' traffic through this one",
     "sources": "Leaving through this node: {list}. The relay listens on {port}/tcp.",
     "sourcesNone": "No node leaves through this one yet. Once one does, the panel opens the relay itself.",
+    "listener": {
+      "ok": "listening on {port}",
+      "busy": "port {port} is taken",
+      "failed": "did not start",
+      "busyText": "Another program on the server holds port {port}/tcp, so other nodes cannot leave through this one. With “Move to another port when it is blocked” on, the panel moves the relay to a free port itself, and the other nodes get the new port right away.",
+      "failedText": "The relay did not start, so other nodes cannot leave through this one."
+    },
     "route": "Where other nodes' traffic goes next",
     "routeHint": {
       "direct": "To the internet from this server.",

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -197,9 +198,9 @@ func (m *Monitor) config(ctx context.Context) AlertsConfig {
 	return c
 }
 
-// inboundFailAfter is how many failed samples make an inbound unavailable. A port held by
-// another program is moved by the tuner within seconds: such an inbound is reported only
-// when the move did not help.
+// inboundFailAfter is how many failed samples make an inbound or the cascade relay
+// unavailable. A port held by another program is moved by the tuner within seconds: such a
+// listener is reported only when the move did not help.
 func inboundFailAfter(busy, autoPort bool) int {
 	if busy && autoPort {
 		return 24
@@ -248,6 +249,15 @@ func (m *Monitor) round(ctx context.Context) {
 	}
 	levels := make(map[int64]Level, len(nodes))
 	listenerHealth := make(map[int64]map[string]bool, len(nodes))
+	// Whether the tuner moves a busy relay by itself: there is no switch for one relay.
+	relayMoves := false
+	if m.settings != nil {
+		on, err := m.settings.On(ctx, settings.AutoPort)
+		if err != nil {
+			m.logError("infrastructure alerts: settings", err)
+		}
+		relayMoves = on && err == nil
+	}
 	for _, n := range nodes {
 		if n.Enabled == 0 {
 			continue
@@ -289,6 +299,9 @@ func (m *Monitor) round(ctx context.Context) {
 				nodeLevel = Degraded
 			}
 		}
+		if m.checkRelay(&st, cfg, n, hv, relayMoves, lang) != Healthy {
+			nodeLevel = Degraded
+		}
 		levels[n.ID] = nodeLevel
 	}
 
@@ -321,6 +334,7 @@ func (m *Monitor) round(ctx context.Context) {
 	for _, n := range nodes {
 		valid["node/"+strconv.FormatInt(n.ID, 10)] = true
 		valid["warp/"+strconv.FormatInt(n.ID, 10)] = true
+		valid["relay/"+strconv.FormatInt(n.ID, 10)] = true
 	}
 	for _, list := range byNode {
 		for _, in := range list {
@@ -328,7 +342,7 @@ func (m *Monitor) round(ctx context.Context) {
 		}
 	}
 	for key := range st.Samples {
-		if strings.HasPrefix(key, "node/") || strings.HasPrefix(key, "warp/") || strings.HasPrefix(key, "inbound/") {
+		if strings.HasPrefix(key, "node/") || strings.HasPrefix(key, "warp/") || strings.HasPrefix(key, "relay/") || strings.HasPrefix(key, "inbound/") {
 			if !valid[key] {
 				delete(st.Samples, key)
 			}
@@ -506,6 +520,32 @@ func eventFor(c AlertsConfig, event, name string, level Level, lang string) stri
 		}
 	}
 	return icon + " <b>" + html.EscapeString(name) + "</b> — " + state
+}
+
+// checkRelay watches the cascade relay's listener: other nodes leave through it, and a port
+// another program holds keeps it down without a word. A node without a relay has no such
+// listener and is Healthy here. moves says whether the tuner moves a busy relay by itself,
+// which is given time to, as an inbound's move is.
+func (m *Monitor) checkRelay(st *persistentState, cfg AlertsConfig, n db.Node, hv nodesync.HealthView, moves bool, lang string) Level {
+	i := slices.IndexFunc(hv.Listeners, func(l nodeapi.ListenerStatus) bool { return l.Name == nodeapi.RelayListener })
+	if i < 0 {
+		return Healthy
+	}
+	l, level := hv.Listeners[i], Healthy
+	if !l.OK {
+		level = Unavailable
+	}
+	label := n.Name + " / " + relayLabel(lang)
+	m.observe(st, "relay/"+strconv.FormatInt(n.ID, 10), level, hv.CheckedAt, inboundFailAfter(l.Busy(), moves), 2, eventFor(cfg, "exit", label, level, lang))
+	return level
+}
+
+// relayLabel names the cascade relay in an alert, as the Nodes page does.
+func relayLabel(lang string) string {
+	if lang == "en" {
+		return "cascade relay"
+	}
+	return "служебный вход каскада"
 }
 
 func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {

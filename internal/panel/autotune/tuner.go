@@ -96,7 +96,10 @@ type Tuner struct {
 
 	mu    sync.Mutex
 	state map[int64]*state // by inbound id
-	busy  map[int64]string // by inbound id: why a busy inbound stays, as last logged
+	busy  map[int64]string // by inbound id (a relay: minus the node's id): why a busy listener stays, as last logged
+	// relayLeft are the ports each node's relay left lately, by node id: there is no event
+	// table for them as there is for inbounds, so a restart forgets them.
+	relayLeft map[int64]map[string]time.Time
 
 	busyMu sync.Mutex // one MoveBusy at a time
 
@@ -115,7 +118,7 @@ type state struct {
 
 func New(st *store.Store, set *settings.Settings, nodes Nodes, changes domain.Changes, log *slog.Logger, now func() time.Time, o Options) *Tuner {
 	return &Tuner{st: st, inbounds: domain.NewInbounds(st, nil, now), set: set, nodes: nodes, changes: changes, log: log, now: now, o: o, pick: rand.IntN,
-		state: map[int64]*state{}, busy: map[int64]string{}, failed: map[string]time.Time{}}
+		state: map[int64]*state{}, busy: map[int64]string{}, relayLeft: map[int64]map[string]time.Time{}, failed: map[string]time.Time{}}
 }
 
 // Status returns the tuner's view of an inbound; false before its first round.
@@ -524,9 +527,21 @@ func (t *Tuner) remedy(ctx context.Context, w *world, n db.Node, x db.Inbound) {
 	t.setStuck(x.ID, "exhausted")
 }
 
+// nodePorts is node's port map with what its server listens on, as the node last said.
+func (t *Tuner) nodePorts(ctx context.Context, n db.Node) (domain.PortMap, error) {
+	ports, err := domain.NodePorts(ctx, t.st.Q, n)
+	if err != nil {
+		return ports, err
+	}
+	if hv, ok := t.nodes.Health(n.ID); ok {
+		ports = ports.WithHost(hv.HostPorts())
+	}
+	return ports, nil
+}
+
 func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound, reason string) {
 	network := domain.InboundNetwork(x)
-	ports, err := domain.NodePorts(ctx, t.st.Q, n)
+	ports, err := t.nodePorts(ctx, n)
 	if err != nil {
 		t.log.Error("autotune: node ports", "node", n.ID, "err", err)
 		return

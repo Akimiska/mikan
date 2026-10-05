@@ -281,6 +281,15 @@ func (m *Manager) Health(id int64) (HealthView, bool) {
 	return s.Health(), true
 }
 
+// HostPorts is what the node last said listens on its server; nil when it has not (domain.HostLookup).
+func (m *Manager) HostPorts(id int64) *nodeapi.HostPorts {
+	hv, ok := m.Health(id)
+	if !ok {
+		return nil
+	}
+	return hv.HostPorts()
+}
+
 // Validate runs mihomo's parser on an inbound on the node that will run it.
 func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRequest) error {
 	v, err := clientOf[interface {

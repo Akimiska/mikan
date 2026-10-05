@@ -5,7 +5,8 @@
 // What does not come over: the old panel's traffic reset strategy, groups and inbounds
 // (users get the plan's), and an on-hold term, which starts at the import.
 //
-// The links people already have can keep working (subs.Handler.Legacy):
+// The links people already have can keep working (subs.Handler.Legacy; the bot takes them
+// to sign in too, both through Verifier.User):
 //
 //   - Remnawave's link is the user's short UUID, the same every time: it is kept as is.
 //   - Marzban and PasarGuard sign a new token for every request, so the tokens people

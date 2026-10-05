@@ -1916,6 +1916,28 @@
         ],
         "type": "object"
       },
+      "LegacyLinks": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "Старые ссылки сейчас открываются: задан их путь, а для подписанных ещё и секрет старой панели",
+            "type": "boolean"
+          },
+          "source": {
+            "description": "Из какой панели: marzban, pasarguard или remnawave",
+            "type": "string"
+          },
+          "url": {
+            "description": "Ссылка целиком. Только у Remnawave: токен Marzban и PasarGuard подписан, импорт его не видел и не хранит, а ссылки, что уже у людей, проверяются по подписи",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "active"
+        ],
+        "type": "object"
+      },
       "LegacyView": {
         "additionalProperties": false,
         "properties": {
@@ -5357,6 +5379,10 @@
               "type": "integer"
             },
             "type": "array"
+          },
+          "legacy": {
+            "$ref": "#/components/schemas/LegacyLinks",
+            "description": "Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка"
           },
           "name": {
             "type": "string"

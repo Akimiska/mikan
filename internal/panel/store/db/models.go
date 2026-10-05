@@ -130,6 +130,7 @@ type Node struct {
 	CreatedAt  int64
 	UpdatedAt  int64
 	PublicName string
+	Sort       int64
 }
 
 type NodeRelay struct {
@@ -198,6 +199,7 @@ type Payment struct {
 	AppliedAt  sql.NullInt64
 	RefundedAt sql.NullInt64
 	TermDays   sql.NullInt64
+	Revert     string
 }
 
 type PromoCode struct {

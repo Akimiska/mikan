@@ -25,7 +25,7 @@ func (q *Queries) ArchiveTrafficPackage(ctx context.Context, id int64) (int64, e
 const createPackagePayment = `-- name: CreatePackagePayment :one
 INSERT INTO payments (provider, payload, tg_id, kind, user_id, package_id, tariff_name, amount, currency, status, created_at)
 VALUES ($1, $2, $3, 'package', $4, $5, $6, $7, $8, 'pending', $9)
-RETURNING id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days
+RETURNING id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert
 `
 
 type CreatePackagePaymentParams struct {
@@ -74,6 +74,7 @@ func (q *Queries) CreatePackagePayment(ctx context.Context, arg CreatePackagePay
 		&i.AppliedAt,
 		&i.RefundedAt,
 		&i.TermDays,
+		&i.Revert,
 	)
 	return i, err
 }
@@ -180,6 +181,18 @@ func (q *Queries) CreateTrafficPackage(ctx context.Context, arg CreateTrafficPac
 	return i, err
 }
 
+const deleteGrantByPayment = `-- name: DeleteGrantByPayment :execrows
+DELETE FROM traffic_grants WHERE payment_id = $1
+`
+
+func (q *Queries) DeleteGrantByPayment(ctx context.Context, paymentID sql.NullInt64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteGrantByPayment, paymentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const endPeriodGrants = `-- name: EndPeriodGrants :exec
 UPDATE traffic_grants SET expires_at = CAST($1 AS BIGINT)
 WHERE user_id = $2 AND lifetime = 'period' AND remaining > 0
@@ -198,7 +211,7 @@ func (q *Queries) EndPeriodGrants(ctx context.Context, arg EndPeriodGrantsParams
 }
 
 const findOpenPackagePayment = `-- name: FindOpenPackagePayment :one
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days FROM payments
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert FROM payments
 WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
   AND status = 'pending' AND pay_url <> '' AND created_at > $5
 ORDER BY id DESC LIMIT 1
@@ -242,12 +255,13 @@ func (q *Queries) FindOpenPackagePayment(ctx context.Context, arg FindOpenPackag
 		&i.AppliedAt,
 		&i.RefundedAt,
 		&i.TermDays,
+		&i.Revert,
 	)
 	return i, err
 }
 
 const findOpenPackagePayments = `-- name: FindOpenPackagePayments :many
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days FROM payments
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert FROM payments
 WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
   AND status = 'pending' AND pay_url <> '' AND created_at > $5
 ORDER BY id DESC
@@ -297,6 +311,7 @@ func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPacka
 			&i.AppliedAt,
 			&i.RefundedAt,
 			&i.TermDays,
+			&i.Revert,
 		); err != nil {
 			return nil, err
 		}

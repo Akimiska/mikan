@@ -498,6 +498,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Порядок серверов в подписке */
+        put: operations["order-nodes"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/update-all": {
         parameters: {
             query?: never;
@@ -1768,15 +1785,16 @@ export interface components {
              */
             outbound: "direct" | "warp" | "node";
         };
-        CascadeView: {
-            /** @description Ноды, через которые эта нода выпускает трафик */
-            exits: components["schemas"]["CascadeExit"][];
-            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
-            relay?: components["schemas"]["CascadeViewRelayStruct"];
-        };
-        CascadeViewRelayStruct: {
+        CascadeRelay: {
+            /** @description Почему служебный вход не запустился, как сказала нода */
+            error?: string;
             /** Format: int64 */
             exit_node_id?: number;
+            /**
+             * @description Слушает ли нода порт служебного входа: busy, если порт занят другой программой
+             * @enum {string}
+             */
+            listener: "ok" | "busy" | "failed" | "unknown";
             /**
              * @description Куда эта нода выпускает их трафик
              * @enum {string}
@@ -1785,6 +1803,12 @@ export interface components {
             port: string;
             /** @description Ноды, которые выходят через эту */
             sources: components["schemas"]["CascadeHop"][];
+        };
+        CascadeView: {
+            /** @description Ноды, через которые эта нода выпускает трафик */
+            exits: components["schemas"]["CascadeExit"][];
+            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
+            relay?: components["schemas"]["CascadeRelay"];
         };
         CertInputBody: {
             /** @description Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem) */
@@ -2159,6 +2183,14 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        LegacyLinks: {
+            /** @description Старые ссылки сейчас открываются: задан их путь, а для подписанных ещё и секрет старой панели */
+            active: boolean;
+            /** @description Из какой панели: marzban, pasarguard или remnawave */
+            source: string;
+            /** @description Ссылка целиком. Только у Remnawave: токен Marzban и PasarGuard подписан, импорт его не видел и не хранит, а ссылки, что уже у людей, проверяются по подписи */
+            url?: string;
+        };
         LegacyView: {
             /** @description Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам */
             kind: string;
@@ -2315,6 +2347,10 @@ export interface components {
             traffic_100: boolean;
             traffic_90: boolean;
         };
+        OrderNodesInputBody: {
+            /** @description Все ноды панели, каждая один раз, в том порядке, в каком их серверы идут в подписках */
+            ids: number[];
+        };
         OverviewOutputBody: {
             /** Format: int64 */
             expiring_7d: number;
@@ -2426,6 +2462,7 @@ export interface components {
         PatchInboundInputBody: {
             /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_port?: boolean;
+            /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_sni?: boolean;
             /** @description Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три */
             client?: components["schemas"]["ClientEndpoint"];
@@ -2725,7 +2762,7 @@ export interface components {
         };
         PromoBody: {
             code: string;
-            /** @description Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется. */
+            /** @description Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для percent: пусто — любая валюта, тогда min_order и max_discount равны 0. Для остальных типов не используется. */
             currency: string;
             description: string;
             /**
@@ -3471,6 +3508,8 @@ export interface components {
             id: number;
             /** @description Разрешённые подключения; пусто — все */
             inbounds: number[];
+            /** @description Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка */
+            legacy?: components["schemas"]["LegacyLinks"];
             name: string;
             note: string;
             online: boolean;
@@ -3526,6 +3565,20 @@ export interface components {
             network: string;
             type: string;
         };
+        WarpCheck: {
+            /** Format: date-time */
+            checked_at: string;
+            colo?: string;
+            /** @description Причина словами, без секретов; на английском */
+            detail?: string;
+            /** @description Причина: timeout | dns | tls | refused | not_loaded | bad_answer | https_timeout | failed; node_unreachable — нода не ответила панели; unreachable — старая нода */
+            error?: string;
+            /** @description Адрес, который видят сайты */
+            ip?: string;
+            ok: boolean;
+            /** @description on | plus | off — как отвечает Cloudflare */
+            warp?: string;
+        };
         WarpImportInputBody: {
             /** @description WireGuard-конфиг WARP: wgcf, warp-plus или экспорт приложения */
             config: string;
@@ -3549,25 +3602,16 @@ export interface components {
             inbounds: string[];
             ipv4?: string;
             ipv6?: string;
+            /** @description Свой конфиг без Reserved: на части endpoint'ов Cloudflare молча не отвечает на handshake */
+            no_reserved?: boolean;
             /** @description Аккаунт WARP+ */
             plus: boolean;
             /** @description Домены и сети, которые идут через WARP у всех подключений ноды */
             routes: string[];
             /** @enum {string} */
             source?: "register" | "import" | "";
-            /** @description Последняя проверка выхода через WARP с ноды; нет — нода недоступна */
-            status?: components["schemas"]["WarpViewStatusStruct"];
-        };
-        WarpViewStatusStruct: {
-            /** Format: date-time */
-            checked_at: string;
-            colo?: string;
-            error?: string;
-            /** @description Адрес, который видят сайты */
-            ip?: string;
-            ok: boolean;
-            /** @description on | plus | off — как отвечает Cloudflare */
-            warp?: string;
+            /** @description Последняя проверка выхода через WARP с ноды; нет — у ноды ещё нет настроенного WARP */
+            status?: components["schemas"]["WarpCheck"];
         };
     };
     responses: never;
@@ -4637,6 +4681,37 @@ export interface operations {
             };
         };
     };
+    "order-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderNodesInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "update-nodes": {
         parameters: {
             query?: never;
@@ -4988,7 +5063,10 @@ export interface operations {
     };
     "get-node-warp": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд) */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 id: number;

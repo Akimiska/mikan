@@ -2,11 +2,15 @@ package autotune
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"mikan/internal/nodeapi"
+	"mikan/internal/panel/audit"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -15,7 +19,9 @@ import (
 // A port another program holds on a node's server (nginx or caddy on 443, say) keeps an
 // inbound from listening at all. The node names such a listener (nodeapi.ListenerStatus
 // Busy), and the tuner moves the inbound to the next free port of domain.PortPool, as it
-// moves a blocked one: the same rules, event, audit entry and alert.
+// moves a blocked one: the same rules, event, audit entry and alert. The cascade relay
+// moves the same way, to the pool's next free port, with an audit entry only: events
+// belong to inbounds.
 
 // ReasonBusy is the reason of a port change made because another program held the port.
 const ReasonBusy = "busy"
@@ -53,6 +59,32 @@ func BusyMove(ports domain.PortMap, x db.Inbound, failed string, portOn bool, le
 		return "", BusyNoPort
 	}
 	return free[0], ""
+}
+
+// BusyRelayMove decides where node's relay, on relay, goes when its listener failed on
+// failed, a port that something already holds on the node's server: the first port of
+// domain.RelayPort's choice, not in left, the ports the relay left lately. It returns the
+// port, or "" and why the relay stays.
+func BusyRelayMove(ports domain.PortMap, relay, failed string, portOn bool, left map[string]bool) (port, why string) {
+	switch {
+	case relay != failed:
+		return "", BusyStale
+	case !portOn:
+		return "", BusyOff
+	}
+	self := domain.PortHolder{Kind: domain.PortRelay}
+	if _, mine := ports.Busy(relay, "tcp", self); mine {
+		return "", BusyMikan
+	}
+	skip := map[string]bool{relay: true}
+	for p := range left {
+		skip[p] = true
+	}
+	p, ok := domain.RelayPort(ports, skip)
+	if !ok {
+		return "", BusyNoPort
+	}
+	return strconv.Itoa(p), ""
 }
 
 // leftPorts are the ports inbounds of node left over network within Abandon: blocked on
@@ -126,7 +158,12 @@ func (t *Tuner) MoveBusy(ctx context.Context) {
 	for _, n := range nodes {
 		for _, f := range busy[n.ID] {
 			// Read again for every listener: a move just made takes its new port.
-			ports, err := domain.NodePorts(ctx, t.st.Q, n)
+			if f.name == nodeapi.RelayListener {
+				t.moveBusyRelay(ctx, n, f.port, portOn, now)
+				seen[-n.ID] = true
+				continue
+			}
+			ports, err := t.nodePorts(ctx, n)
 			if err != nil {
 				t.log.Error("autotune: busy ports: node ports", "node", n.ID, "err", err)
 				break
@@ -145,7 +182,7 @@ func (t *Tuner) MoveBusy(ctx context.Context) {
 			network := domain.InboundNetwork(x)
 			port, why := BusyMove(ports, x, f.port, portOn, t.leftPorts(events, n.ID, network, now))
 			if why != "" {
-				t.noteBusy(n, x, f.port, why)
+				t.noteBusy(n, x.ID, x.Name, f.port, why)
 				continue
 			}
 			// The admin or a detector round may move it meanwhile: then their port stands.
@@ -164,20 +201,78 @@ func (t *Tuner) MoveBusy(ctx context.Context) {
 	t.forgetBusy(seen)
 }
 
-// noteBusy logs once why a busy inbound stays: the node reports it every few seconds.
-func (t *Tuner) noteBusy(n db.Node, x db.Inbound, port, why string) {
+// moveBusyRelay moves node's relay off port failed, which another program holds. The
+// admin or an earlier move may have changed the row since: then it stays as it is.
+func (t *Tuner) moveBusyRelay(ctx context.Context, n db.Node, failed string, portOn bool, now time.Time) {
+	r, err := t.st.Q.GetNodeRelay(ctx, n.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return
+	}
+	if err != nil {
+		t.log.Error("autotune: busy ports: relay", "node", n.ID, "err", err)
+		return
+	}
+	ports, err := t.nodePorts(ctx, n)
+	if err != nil {
+		t.log.Error("autotune: busy ports: node ports", "node", n.ID, "err", err)
+		return
+	}
+	port, why := BusyRelayMove(ports, r.Port, failed, portOn, t.relayLeftPorts(n.ID, now))
+	if why != "" {
+		t.noteBusy(n, -n.ID, nodeapi.RelayListener, failed, why)
+		return
+	}
+	err = domain.MoveRelay(ctx, t.st, n, failed, port)
+	if errors.Is(err, domain.ErrRelayChanged) {
+		return
+	}
+	if err != nil {
+		t.log.Error("autotune: busy ports: move relay", "node", n.ID, "err", err)
+		return
+	}
+	t.mu.Lock()
+	if t.relayLeft[n.ID] == nil {
+		t.relayLeft[n.ID] = map[string]time.Time{}
+	}
+	t.relayLeft[n.ID][failed] = now
+	t.mu.Unlock()
+	_ = audit.Write(ctx, t.st.Q, now, audit.Entry{Action: "auto.relay_port", TargetType: "node", TargetID: strconv.FormatInt(n.ID, 10),
+		Details: map[string]any{"node": n.ID, "old": failed, "new": port, "reason": ReasonBusy}})
+	t.log.Warn("autotune: relay port changed", "node", n.ID, "old", failed, "new", port, "reason", ReasonBusy)
+	// Every node reads the port from the row: the sources of the relay follow.
+	t.changes.SlotsChanged()
+}
+
+// relayLeftPorts are the ports node's relay left within Abandon.
+func (t *Tuner) relayLeftPorts(node int64, now time.Time) map[string]bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	left := map[string]bool{}
+	for p, at := range t.relayLeft[node] {
+		if now.Sub(at) < t.o.Abandon {
+			left[p] = true
+		} else {
+			delete(t.relayLeft[node], p)
+		}
+	}
+	return left
+}
+
+// noteBusy logs once why a busy listener stays: the node reports it every few seconds.
+// id is the inbound's, or minus the node's for its relay.
+func (t *Tuner) noteBusy(n db.Node, id int64, name, port, why string) {
 	key := port + "/" + why
 	t.mu.Lock()
-	same := t.busy[x.ID] == key
-	t.busy[x.ID] = key
+	same := t.busy[id] == key
+	t.busy[id] = key
 	t.mu.Unlock()
 	if same || why == BusyStale {
 		return
 	}
-	t.log.Warn("autotune: the inbound's port is held by another program; it stays", "node", n.ID, "inbound", x.Name, "port", port, "why", why)
+	t.log.Warn("autotune: the listener's port is held by another program; it stays", "node", n.ID, "listener", name, "port", port, "why", why)
 }
 
-// forgetBusy drops what noteBusy logged for inbounds that are no longer busy.
+// forgetBusy drops what noteBusy logged for listeners that are no longer busy.
 func (t *Tuner) forgetBusy(busy map[int64]bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

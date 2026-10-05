@@ -4,6 +4,7 @@ package nodeapi
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -133,6 +134,30 @@ type Health struct {
 	// Update is how the last update the panel asked for went, as the host's updater wrote
 	// it; nil while there is none. Nodes before 0.5.0.2 send nothing.
 	Update *UpdateStatus `json:"update,omitempty"`
+	// Host is what listens on the node's server, whoever runs it; nil when the node does not
+	// say (before 0.5.0.2, or it cannot read the kernel's tables).
+	Host *HostPorts `json:"host,omitempty"`
+}
+
+// HostPorts are the ports something listens on at the node's server: TCP sockets in the
+// listen state and bound UDP ports, sorted. The panel keeps its automatic picks off them,
+// as a port another program holds keeps a listener from starting.
+type HostPorts struct {
+	TCP []int `json:"tcp"`
+	UDP []int `json:"udp"`
+}
+
+// Listens says whether port is among the ones held over network (tcp or udp).
+func (h *HostPorts) Listens(network string, port int) bool {
+	if h == nil {
+		return false
+	}
+	list := h.TCP
+	if network == "udp" {
+		list = h.UDP
+	}
+	_, found := slices.BinarySearch(list, port)
+	return found
 }
 
 // The states of an update on the node's server.
@@ -328,13 +353,17 @@ type Warp struct {
 
 // WarpStatus is the node's last look at the internet through WARP.
 type WarpStatus struct {
-	Configured bool      `json:"configured"`
-	OK         bool      `json:"ok"`
-	IP         string    `json:"ip,omitempty"`   // the address sites see
-	Warp       string    `json:"warp,omitempty"` // on | plus | off, as Cloudflare says
-	Colo       string    `json:"colo,omitempty"` // Cloudflare's data center
-	Error      string    `json:"error,omitempty"`
-	CheckedAt  time.Time `json:"checked_at"`
+	Configured bool   `json:"configured"`
+	OK         bool   `json:"ok"`
+	IP         string `json:"ip,omitempty"`   // the address sites see
+	Warp       string `json:"warp,omitempty"` // on | plus | off, as Cloudflare says
+	Colo       string `json:"colo,omitempty"` // Cloudflare's data center
+	// Error is a stable code: timeout | dns | tls | refused | not_loaded | bad_answer |
+	// https_timeout | failed. Detail says the same in words for the admin (no secrets).
+	// Older nodes send the code "unreachable" and no detail.
+	Error     string    `json:"error,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
 }
 
 // RelayListener names the relay's listener. It cannot clash with an inbound: their

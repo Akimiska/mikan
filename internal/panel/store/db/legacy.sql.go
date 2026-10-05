@@ -99,6 +99,38 @@ func (q *Queries) LegacySubTokenUser(ctx context.Context, token string) (LegacyS
 	return i, err
 }
 
+const listLegacySubTokensOf = `-- name: ListLegacySubTokensOf :many
+SELECT token, source FROM legacy_sub_tokens WHERE user_id = $1 ORDER BY token
+`
+
+type ListLegacySubTokensOfRow struct {
+	Token  string
+	Source string
+}
+
+func (q *Queries) ListLegacySubTokensOf(ctx context.Context, userID int64) ([]ListLegacySubTokensOfRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLegacySubTokensOf, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLegacySubTokensOfRow{}
+	for rows.Next() {
+		var i ListLegacySubTokensOfRow
+		if err := rows.Scan(&i.Token, &i.Source); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockUserName = `-- name: LockUserName :exec
 SELECT pg_advisory_xact_lock(hashtextextended('mikan-user-name:' || $1::text, 0))
 `

@@ -101,3 +101,6 @@ UPDATE promo_redemptions SET status='released' WHERE promo_redemptions.id=sqlc.a
 -- name: ListPromoRedemptionsByTgWithCode :many
 SELECT r.*, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
 WHERE r.tg_id=sqlc.arg(tg_id) AND r.status='applied' ORDER BY r.id DESC LIMIT CAST(sqlc.arg(lim) AS BIGINT);
+
+-- name: ReleaseAppliedPromoRedemption :execrows
+UPDATE promo_redemptions SET status='released' WHERE id=sqlc.arg(id) AND status='applied';

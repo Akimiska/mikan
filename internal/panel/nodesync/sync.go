@@ -80,11 +80,21 @@ type HealthView struct {
 	Error     string
 	Health    nodeapi.Health
 	Listeners []nodeapi.ListenerStatus
-	// Ports are the inbounds' ports in the state the node runs, by name, when that is the
-	// state this panel last applied; nil otherwise. A listener's failure is about this port,
-	// not about the inbound's row, which may have moved since.
+	// Ports are the listeners' ports in the state the node runs, by name (the relay's too,
+	// as nodeapi.RelayListener), when that is the state this panel last applied; nil
+	// otherwise. A listener's failure is about this port, not about the row's, which may
+	// have moved since.
 	Ports     map[string]string
 	CheckedAt time.Time
+}
+
+// HostPorts is what the node reported as listening on its server in this check; nil when
+// the node did not answer or does not say.
+func (v HealthView) HostPorts() *nodeapi.HostPorts {
+	if !v.OK {
+		return nil
+	}
+	return v.Health.Host
 }
 
 func newSyncer(m *Manager, id int64, t Target) *Syncer {
@@ -274,9 +284,12 @@ func (s *Syncer) applyState(ctx context.Context) {
 			s.log.Error("listener failed", "name", l.Name, "err", l.Error)
 		}
 	}
-	ports := make(map[string]string, len(st.Inbounds))
+	ports := make(map[string]string, len(st.Inbounds)+1)
 	for _, in := range st.Inbounds {
 		ports[in.Name] = in.Port
+	}
+	if st.Relay != nil {
+		ports[nodeapi.RelayListener] = st.Relay.Port
 	}
 	s.mu.Lock()
 	s.stateKey = key
@@ -744,19 +757,20 @@ func (s *Syncer) warp(ctx context.Context, n db.Node, inbounds []db.Inbound) (*n
 	return out, nil
 }
 
-// Warp asks the node how it reaches the internet through WARP.
-func (m *Manager) Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error) {
+// Warp asks the node how it reaches the internet through WARP; force skips the node's
+// minute-old answer.
+func (m *Manager) Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error) {
 	s, ok := m.Syncer(id)
 	if !ok {
 		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
 	}
 	c, ok := s.node.(interface {
-		Warp(ctx context.Context) (nodeapi.WarpStatus, error)
+		Warp(ctx context.Context, force bool) (nodeapi.WarpStatus, error)
 	})
 	if !ok {
 		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
 	}
-	return c.Warp(ctx)
+	return c.Warp(ctx, force)
 }
 
 // cascade is the node's part in cascades: its relay listener when other nodes leave

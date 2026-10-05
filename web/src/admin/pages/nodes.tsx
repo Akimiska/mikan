@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpCircle, Cloud, Copy, Gauge, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpCircle, Cloud, Copy, Gauge, KeyRound, LoaderCircle, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
@@ -74,6 +74,35 @@ export function NodesPage() {
       setUpdateOf(null);
     },
   });
+  // The order of the servers in the subscriptions. The page shows the new order at once;
+  // when the panel refuses, the old one comes back.
+  const order = useMutation({
+    mutationFn: ({ ids }: { ids: number[]; moved: number }) => unwrap(api.PUT("/api/v1/nodes/order", { body: { ids } })),
+    onMutate: async ({ ids }) => {
+      await qc.cancelQueries({ queryKey: qk.nodes });
+      const prev = qc.getQueryData<Node[]>(qk.nodes);
+      if (prev) {
+        const byId = new Map(prev.map((n) => [n.id, n]));
+        qc.setQueryData<Node[]>(
+          qk.nodes,
+          ids.flatMap((id) => byId.get(id) ?? []),
+        );
+      }
+      return { prev };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(qk.nodes, ctx.prev);
+      toast.error(errorText(e));
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: qk.nodes }),
+  });
+  const move = (list: Node[], idx: number, by: -1 | 1) => {
+    const ids = list.map((n) => n.id);
+    const to = idx + by;
+    if (order.isPending || to < 0 || to >= ids.length) return;
+    [ids[idx], ids[to]] = [ids[to]!, ids[idx]!];
+    order.mutate({ ids, moved: list[idx]!.id });
+  };
   const remove = useMutation({
     mutationFn: (id: number) => unwrap(api.DELETE("/api/v1/nodes/{id}", { params: { path: { id } } })),
     onSuccess: () => {
@@ -130,8 +159,11 @@ export function NodesPage() {
                   <span>{t("nodes.nameLocalHint")}</span>
                 </div>
               ) : null}
+              {list.length > 1 ? (
+                <p className="text-[13px] text-[var(--ink-500)] lg:col-span-2">{t("nodes.orderHint")}</p>
+              ) : null}
               {list.map((n, idx) => (
-                <NodeCard key={n.id} n={n} idx={idx} updating={update.isPending && update.variables === n.id} busy={update.isPending} onUpdate={() => setUpdateOf(n)} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onSpeed={() => setSpeedOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
+                <NodeCard key={n.id} n={n} idx={idx} total={list.length} sorting={order.isPending} moving={order.isPending && order.variables.moved === n.id} onMove={(by) => move(list, idx, by)} updating={update.isPending && update.variables === n.id} busy={update.isPending} onUpdate={() => setUpdateOf(n)} onEdit={() => setEditing(n)} onWarp={() => setWarpOf(n)} onSpeed={() => setSpeedOf(n)} onCascade={() => setCascadeOf(n)} onCert={() => setCertOf(n)} onRekey={() => setRekeying(n)} onRemove={() => setRemoving(n)} />
               ))}
             </div>
           )
@@ -197,6 +229,10 @@ export function NodesPage() {
 function NodeCard({
   n,
   idx,
+  total,
+  sorting,
+  moving,
+  onMove,
   updating: asking,
   busy,
   onUpdate,
@@ -210,6 +246,13 @@ function NodeCard({
 }: {
   n: Node;
   idx: number;
+  /** How many nodes there are: with one there is nothing to order. */
+  total: number;
+  /** The new order is on its way to the panel: no second move now. */
+  sorting: boolean;
+  /** This node is the one being moved. */
+  moving: boolean;
+  onMove: (by: -1 | 1) => void;
   /** The request for this node is on its way to the panel. */
   updating: boolean;
   /** Some node's request is: no second one now. */
@@ -235,7 +278,22 @@ function NodeCard({
             <span>{n.local ? t("nodes.kindLocal") : t("nodes.kindRemote")}</span>
           </div>
         </div>
-        <NodeStatus n={n} />
+        <div className="flex shrink-0 items-center gap-1">
+          <NodeStatus n={n} />
+          {total > 1 ? (
+            <>
+              <span className="num w-6 text-center text-xs text-[var(--ink-500)]" role="img" aria-label={t("nodes.position", { n: idx + 1, total })}>
+                {moving ? <LoaderCircle size={14} className="spin inline" aria-hidden /> : idx + 1}
+              </span>
+              <button type="button" className="icon-btn" disabled={sorting || idx === 0} aria-busy={moving || undefined} aria-label={t("nodes.moveUp", { name: nodeLabel(n) })} title={t("nodes.moveUp", { name: nodeLabel(n) })} onClick={() => onMove(-1)}>
+                <ArrowUp size={18} aria-hidden />
+              </button>
+              <button type="button" className="icon-btn" disabled={sorting || idx === total - 1} aria-busy={moving || undefined} aria-label={t("nodes.moveDown", { name: nodeLabel(n) })} title={t("nodes.moveDown", { name: nodeLabel(n) })} onClick={() => onMove(1)}>
+                <ArrowDown size={18} aria-hidden />
+              </button>
+            </>
+          ) : null}
+        </div>
       </div>
       {n.status === "error" && n.enabled ? (
         <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">

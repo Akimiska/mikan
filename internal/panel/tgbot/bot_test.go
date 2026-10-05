@@ -2,7 +2,9 @@ package tgbot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -648,5 +650,58 @@ func TestConfigValidate(t *testing.T) {
 		if err := c.Validate(); err == nil {
 			t.Errorf("%s must be refused", name)
 		}
+	}
+}
+
+// A subscription can be taken off the Telegram account after a confirmation: only its link
+// goes, the subscription keeps working, and nobody else can remove it.
+func TestRemoveSubscriptionFromTheBot(t *testing.T) {
+	e := setup(t)
+	const anna, other = 555, 777
+	secret, err := e.bot.secret(e.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := e.tg.count()
+	e.say(anna, "/start "+LinkCode(secret, e.user.ID, e.clock()))
+	e.tg.wait(t, n, "sendMessage")
+	chat, _ := e.st.Q.GetTgChat(e.ctx, anna)
+	menu := chat.MenuMsgID
+	uid := strconv.FormatInt(e.user.ID, 10)
+
+	tap := func(from int64, data string) call {
+		t.Helper()
+		e.later()
+		n := e.tg.count()
+		e.press(from, menu, data)
+		calls := e.tg.until(t, n, func(cs []call) bool { _, ok := find(cs, "editMessageText"); return ok })
+		edit, _ := find(calls, "editMessageText")
+		return edit
+	}
+	if got := buttons(tap(anna, "s"))["🗑 Убрать из бота"]; got != "rm" {
+		t.Fatalf("the subscription screen offers removing it: %q", got)
+	}
+	confirm := tap(anna, "rm")
+	if !strings.Contains(text(confirm), "Убрать подписку «Анна»") || buttons(confirm)["✅ Да, убрать"] != "rd:"+uid || buttons(confirm)["↩️ Отмена"] != "s" {
+		t.Fatalf("confirm: %q %v", text(confirm), buttons(confirm))
+	}
+
+	// Someone else's tap with the same data changes nothing.
+	e.later()
+	e.press(other, menu, "rd:"+uid)
+	time.Sleep(100 * time.Millisecond)
+	if l, err := e.st.Q.GetTgLink(e.ctx, e.user.ID); err != nil || l.TgID != anna {
+		t.Fatalf("another account removed the link: %+v %v", l, err)
+	}
+
+	done := tap(anna, "rd:"+uid)
+	if !strings.Contains(text(done), "Подписка «Анна» убрана из бота") || !strings.Contains(text(done), "пришлите сюда ссылку на подписку") {
+		t.Fatalf("after removing: %q", text(done))
+	}
+	if _, err := e.st.Q.GetTgLink(e.ctx, e.user.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("the link stays: %v", err)
+	}
+	if u, err := e.st.Q.GetUser(e.ctx, e.user.ID); err != nil || u.Status != e.user.Status || u.SubToken != e.user.SubToken {
+		t.Fatalf("the subscription itself changed: %+v %v", u, err)
 	}
 }

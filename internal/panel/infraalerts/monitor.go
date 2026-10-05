@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,7 +31,7 @@ const stateKey = "monitor"
 
 type Runtime interface {
 	Health(id int64) (nodesync.HealthView, bool)
-	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
+	Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error)
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 }
 
@@ -197,9 +198,9 @@ func (m *Monitor) config(ctx context.Context) AlertsConfig {
 	return c
 }
 
-// inboundFailAfter is how many failed samples make an inbound unavailable. A port held by
-// another program is moved by the tuner within seconds: such an inbound is reported only
-// when the move did not help.
+// inboundFailAfter is how many failed samples make an inbound or the cascade relay
+// unavailable. A port held by another program is moved by the tuner within seconds: such a
+// listener is reported only when the move did not help.
 func inboundFailAfter(busy, autoPort bool) int {
 	if busy && autoPort {
 		return 24
@@ -248,6 +249,15 @@ func (m *Monitor) round(ctx context.Context) {
 	}
 	levels := make(map[int64]Level, len(nodes))
 	listenerHealth := make(map[int64]map[string]bool, len(nodes))
+	// Whether the tuner moves a busy relay by itself: there is no switch for one relay.
+	relayMoves := false
+	if m.settings != nil {
+		on, err := m.settings.On(ctx, settings.AutoPort)
+		if err != nil {
+			m.logError("infrastructure alerts: settings", err)
+		}
+		relayMoves = on && err == nil
+	}
 	for _, n := range nodes {
 		if n.Enabled == 0 {
 			continue
@@ -289,6 +299,9 @@ func (m *Monitor) round(ctx context.Context) {
 				nodeLevel = Degraded
 			}
 		}
+		if m.checkRelay(&st, cfg, n, hv, relayMoves, lang) != Healthy {
+			nodeLevel = Degraded
+		}
 		levels[n.ID] = nodeLevel
 	}
 
@@ -321,6 +334,7 @@ func (m *Monitor) round(ctx context.Context) {
 	for _, n := range nodes {
 		valid["node/"+strconv.FormatInt(n.ID, 10)] = true
 		valid["warp/"+strconv.FormatInt(n.ID, 10)] = true
+		valid["relay/"+strconv.FormatInt(n.ID, 10)] = true
 	}
 	for _, list := range byNode {
 		for _, in := range list {
@@ -328,7 +342,7 @@ func (m *Monitor) round(ctx context.Context) {
 		}
 	}
 	for key := range st.Samples {
-		if strings.HasPrefix(key, "node/") || strings.HasPrefix(key, "warp/") || strings.HasPrefix(key, "inbound/") {
+		if strings.HasPrefix(key, "node/") || strings.HasPrefix(key, "warp/") || strings.HasPrefix(key, "relay/") || strings.HasPrefix(key, "inbound/") {
 			if !valid[key] {
 				delete(st.Samples, key)
 			}
@@ -508,6 +522,92 @@ func eventFor(c AlertsConfig, event, name string, level Level, lang string) stri
 	return icon + " <b>" + html.EscapeString(name) + "</b> — " + state
 }
 
+// checkRelay watches the cascade relay's listener: other nodes leave through it, and a port
+// another program holds keeps it down without a word. A node without a relay has no such
+// listener and is Healthy here. moves says whether the tuner moves a busy relay by itself,
+// which is given time to, as an inbound's move is.
+func (m *Monitor) checkRelay(st *persistentState, cfg AlertsConfig, n db.Node, hv nodesync.HealthView, moves bool, lang string) Level {
+	i := slices.IndexFunc(hv.Listeners, func(l nodeapi.ListenerStatus) bool { return l.Name == nodeapi.RelayListener })
+	if i < 0 {
+		return Healthy
+	}
+	l, level := hv.Listeners[i], Healthy
+	if !l.OK {
+		level = Unavailable
+	}
+	label := n.Name + " / " + relayLabel(lang)
+	m.observe(st, "relay/"+strconv.FormatInt(n.ID, 10), level, hv.CheckedAt, inboundFailAfter(l.Busy(), moves), 2, eventFor(cfg, "exit", label, level, lang))
+	return level
+}
+
+// relayLabel names the cascade relay in an alert, as the Nodes page does.
+func relayLabel(lang string) string {
+	if lang == "en" {
+		return "cascade relay"
+	}
+	return "служебный вход каскада"
+}
+
+// warpReason says in a line why the node's WARP check failed, so the alert is not just
+// "down". Codes come from the node (nodeapi.WarpStatus); the node's own detail is
+// English only, so it is the fallback for codes this panel does not know.
+func warpReason(s nodeapi.WarpStatus, endpoint, lang string) string {
+	ru := lang != "en"
+	var text string
+	switch s.Error {
+	case "timeout":
+		text = "no answer from the WARP endpoint " + endpoint + " over UDP: the host may block UDP, try another endpoint"
+		if ru {
+			text = "нет ответа от endpoint " + endpoint + " по UDP: возможно, хостер блокирует UDP, попробуйте другой endpoint"
+		}
+	case "https_timeout":
+		text = "the tunnel is up, but cloudflare.com did not answer in time"
+		if ru {
+			text = "туннель поднят, но cloudflare.com не ответил вовремя"
+		}
+	case "dns":
+		text = "WARP could not resolve a name"
+		if ru {
+			text = "WARP не смог разрешить имя"
+		}
+	case "tls":
+		text = "TLS error through WARP"
+		if ru {
+			text = "ошибка TLS через WARP"
+		}
+	case "refused":
+		text = "the connection was refused"
+		if ru {
+			text = "соединение отклонено"
+		}
+	case "not_loaded":
+		text = "WARP is not loaded on the node yet"
+		if ru {
+			text = "WARP ещё не загружен на ноде"
+		}
+	case "bad_answer":
+		text = "Cloudflare answered something unexpected"
+		if ru {
+			text = "Cloudflare ответил непонятно"
+		}
+	default:
+		text = s.Detail
+		if text == "" {
+			text = s.Error
+		}
+		if text == "" {
+			text = "check failed"
+			if ru {
+				text = "проверка не прошла"
+			}
+		}
+	}
+	if ru {
+		return "Причина: " + text
+	}
+	return "Reason: " + text
+}
+
 func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
 	for _, n := range nodes {
 		if n.Enabled == 0 || levels[n.ID] == Unavailable {
@@ -517,7 +617,7 @@ func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg Alerts
 		if err != nil || w.Enabled == 0 {
 			continue
 		}
-		s, err := m.runtime.Warp(ctx, n.ID)
+		s, err := m.runtime.Warp(ctx, n.ID, false)
 		if err != nil || s.CheckedAt.IsZero() {
 			continue
 		}
@@ -525,7 +625,11 @@ func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg Alerts
 		if !s.OK {
 			level = Degraded
 		}
-		m.observe(st, "warp/"+strconv.FormatInt(n.ID, 10), level, s.CheckedAt, 2, 2, eventFor(cfg, "warp", n.Name+" / WARP", level, lang))
+		text := eventFor(cfg, "warp", n.Name+" / WARP", level, lang)
+		if text != "" && level == Degraded {
+			text += "\n" + html.EscapeString(warpReason(s, w.Endpoint, lang))
+		}
+		m.observe(st, "warp/"+strconv.FormatInt(n.ID, 10), level, s.CheckedAt, 2, 2, text)
 		if level != Healthy {
 			levels[n.ID] = Degraded
 		}

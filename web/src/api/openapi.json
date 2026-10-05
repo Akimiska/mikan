@@ -799,32 +799,26 @@
         ],
         "type": "object"
       },
-      "CascadeView": {
+      "CascadeRelay": {
         "additionalProperties": false,
         "properties": {
-          "exits": {
-            "description": "Ноды, через которые эта нода выпускает трафик",
-            "items": {
-              "$ref": "#/components/schemas/CascadeExit"
-            },
-            "type": "array"
+          "error": {
+            "description": "Почему служебный вход не запустился, как сказала нода",
+            "type": "string"
           },
-          "relay": {
-            "$ref": "#/components/schemas/CascadeViewRelayStruct",
-            "description": "Служебный вход для других нод; есть, когда кто-то выходит через эту ноду"
-          }
-        },
-        "required": [
-          "exits"
-        ],
-        "type": "object"
-      },
-      "CascadeViewRelayStruct": {
-        "additionalProperties": false,
-        "properties": {
           "exit_node_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "listener": {
+            "description": "Слушает ли нода порт служебного входа: busy, если порт занят другой программой",
+            "enum": [
+              "ok",
+              "busy",
+              "failed",
+              "unknown"
+            ],
+            "type": "string"
           },
           "outbound": {
             "description": "Куда эта нода выпускает их трафик",
@@ -849,7 +843,28 @@
         "required": [
           "port",
           "sources",
-          "outbound"
+          "outbound",
+          "listener"
+        ],
+        "type": "object"
+      },
+      "CascadeView": {
+        "additionalProperties": false,
+        "properties": {
+          "exits": {
+            "description": "Ноды, через которые эта нода выпускает трафик",
+            "items": {
+              "$ref": "#/components/schemas/CascadeExit"
+            },
+            "type": "array"
+          },
+          "relay": {
+            "$ref": "#/components/schemas/CascadeRelay",
+            "description": "Служебный вход для других нод; есть, когда кто-то выходит через эту ноду"
+          }
+        },
+        "required": [
+          "exits"
         ],
         "type": "object"
       },
@@ -1901,6 +1916,28 @@
         ],
         "type": "object"
       },
+      "LegacyLinks": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "Старые ссылки сейчас открываются: задан их путь, а для подписанных ещё и секрет старой панели",
+            "type": "boolean"
+          },
+          "source": {
+            "description": "Из какой панели: marzban, pasarguard или remnawave",
+            "type": "string"
+          },
+          "url": {
+            "description": "Ссылка целиком. Только у Remnawave: токен Marzban и PasarGuard подписан, импорт его не видел и не хранит, а ссылки, что уже у людей, проверяются по подписи",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "active"
+        ],
+        "type": "object"
+      },
       "LegacyView": {
         "additionalProperties": false,
         "properties": {
@@ -2375,6 +2412,25 @@
         ],
         "type": "object"
       },
+      "OrderNodesInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Все ноды панели, каждая один раз, в том порядке, в каком их серверы идут в подписках",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "OverviewOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2641,6 +2697,7 @@
             "type": "boolean"
           },
           "auto_sni": {
+            "description": "Нельзя включить, пока у подключения свой адрес (listen)",
             "type": "boolean"
           },
           "client": {
@@ -3436,7 +3493,7 @@
             "type": "string"
           },
           "currency": {
-            "description": "Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется.",
+            "description": "Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для percent: пусто — любая валюта, тогда min_order и max_discount равны 0. Для остальных типов не используется.",
             "type": "string"
           },
           "description": {
@@ -5342,6 +5399,10 @@
             },
             "type": "array"
           },
+          "legacy": {
+            "$ref": "#/components/schemas/LegacyLinks",
+            "description": "Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка"
+          },
           "name": {
             "type": "string"
           },
@@ -5516,6 +5577,42 @@
         ],
         "type": "object"
       },
+      "WarpCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "colo": {
+            "type": "string"
+          },
+          "detail": {
+            "description": "Причина словами, без секретов; на английском",
+            "type": "string"
+          },
+          "error": {
+            "description": "Причина: timeout | dns | tls | refused | not_loaded | bad_answer | https_timeout | failed; node_unreachable — нода не ответила панели; unreachable — старая нода",
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес, который видят сайты",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "warp": {
+            "description": "on | plus | off — как отвечает Cloudflare",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "checked_at"
+        ],
+        "type": "object"
+      },
       "WarpImportInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5589,6 +5686,10 @@
           "ipv6": {
             "type": "string"
           },
+          "no_reserved": {
+            "description": "Свой конфиг без Reserved: на части endpoint'ов Cloudflare молча не отвечает на handshake",
+            "type": "boolean"
+          },
           "plus": {
             "description": "Аккаунт WARP+",
             "type": "boolean"
@@ -5609,8 +5710,8 @@
             "type": "string"
           },
           "status": {
-            "$ref": "#/components/schemas/WarpViewStatusStruct",
-            "description": "Последняя проверка выхода через WARP с ноды; нет — нода недоступна"
+            "$ref": "#/components/schemas/WarpCheck",
+            "description": "Последняя проверка выхода через WARP с ноды; нет — у ноды ещё нет настроенного WARP"
           }
         },
         "required": [
@@ -5619,37 +5720,6 @@
           "plus",
           "routes",
           "inbounds"
-        ],
-        "type": "object"
-      },
-      "WarpViewStatusStruct": {
-        "additionalProperties": false,
-        "properties": {
-          "checked_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "colo": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          },
-          "ip": {
-            "description": "Адрес, который видят сайты",
-            "type": "string"
-          },
-          "ok": {
-            "type": "boolean"
-          },
-          "warp": {
-            "description": "on | plus | off — как отвечает Cloudflare",
-            "type": "string"
-          }
-        },
-        "required": [
-          "ok",
-          "checked_at"
         ],
         "type": "object"
       }
@@ -7004,6 +7074,40 @@
         "x-session-only": true
       }
     },
+    "/api/v1/nodes/order": {
+      "put": {
+        "operationId": "order-nodes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderNodesInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Порядок серверов в подписке",
+        "tags": [
+          "node"
+        ]
+      }
+    },
     "/api/v1/nodes/update-all": {
       "post": {
         "operationId": "update-nodes",
@@ -7546,6 +7650,16 @@
               "format": "int64",
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд)",
+            "explode": false,
+            "in": "query",
+            "name": "force",
+            "schema": {
+              "description": "Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд)",
+              "type": "boolean"
             }
           }
         ],

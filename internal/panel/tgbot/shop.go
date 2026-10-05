@@ -292,6 +292,22 @@ func (b *Bot) starsPaid(ctx context.Context, m *Message) error {
 	return err
 }
 
+// starsRefunded takes Telegram's refunded_payment: the billing takes back what the payment
+// gave and calls Refunded. A refund that is not a payment of ours is only logged; an error
+// that may go away is returned, as for starsPaid, so the update comes again.
+func (b *Bot) starsRefunded(ctx context.Context, m *Message) error {
+	rp := m.RefundedPayment
+	if b.d.Billing == nil {
+		return nil
+	}
+	// The private chat is the buyer's: its id is their Telegram id.
+	if err := b.d.Billing.StarsRefunded(ctx, m.Chat.ID, rp.ChargeID); err != nil {
+		b.d.Log.Error("telegram: stars refund", "err", err, "charge", rp.ChargeID)
+		return err
+	}
+	return nil
+}
+
 // InvoiceLink implements billing.Telegram.
 func (b *Bot) InvoiceLink(ctx context.Context, title, description, payload string, stars int64) (string, error) {
 	c := b.client.Load()
@@ -342,6 +358,37 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	}
 	chat := p.TgID
 	_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: chat})
+	out.Notice(chat, func(ctx context.Context, c *Client) error {
+		_, err := c.Send(ctx, chat, text, nil, false)
+		return err
+	}, nil)
+	b.freshMenu(out, chat, "")
+}
+
+// Refunded implements billing.Telegram: the buyer learns the payment was refunded and what
+// it gave is taken back.
+func (b *Bot) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool) {
+	out := b.out.Load()
+	if out == nil {
+		return
+	}
+	w := wordsFor(b.lang(ctx))
+	var text string
+	switch {
+	case u.ID == 0:
+		text = fmt.Sprintf(w.refundedGone, html.EscapeString(p.TariffName))
+	case p.Kind == billing.KindPackage:
+		text = fmt.Sprintf(w.refundedPackage, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+	case disabled:
+		text = fmt.Sprintf(w.refundedNew, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+	default:
+		until := w.forever
+		if u.ExpiresAt.Valid {
+			until = w.date(time.Unix(u.ExpiresAt.Int64, 0).UTC())
+		}
+		text = fmt.Sprintf(w.refundedRenew, html.EscapeString(p.TariffName), html.EscapeString(u.Name), html.EscapeString(until))
+	}
+	chat := p.TgID
 	out.Notice(chat, func(ctx context.Context, c *Client) error {
 		_, err := c.Send(ctx, chat, text, nil, false)
 		return err

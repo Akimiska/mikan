@@ -64,3 +64,17 @@ func TestFillTitle(t *testing.T) {
 		t.Fatalf("one line of %d letters at most: %d", TitleMax, n)
 	}
 }
+
+func TestFileName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Mikan · Вася":   "Mikan · Вася",
+		"VPN/RU: 30 дн.": "VPN RU  30 дн.",
+		`a\b*c?"d"<e>|`:  "a b c  d  e",
+		" \t\n":          "mikan",
+		"":               "mikan",
+	} {
+		if got := fileName(in); got != want {
+			t.Errorf("fileName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

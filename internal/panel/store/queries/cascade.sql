@@ -9,6 +9,9 @@ INSERT INTO node_relays (node_id, port, config, created_at) VALUES ($1, $2, $3, 
 ON CONFLICT (node_id) DO UPDATE SET node_id = excluded.node_id
 RETURNING *;
 
+-- name: SetNodeRelayPort :exec
+UPDATE node_relays SET port = $1 WHERE node_id = $2;
+
 -- name: SetNodeRelayRoute :exec
 UPDATE node_relays SET outbound = $1, exit_node_id = $2 WHERE node_id = $3;
 

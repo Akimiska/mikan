@@ -90,6 +90,21 @@ func profileTitle(cfg Config, vars map[string]string) string {
 	return cfg.Brand
 }
 
+// fileName makes a profile title a file name: no path separators or characters Windows
+// refuses, and never empty.
+func fileName(title string) string {
+	name := strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r < ' ' || r == 0x7f || strings.ContainsRune(`/\:*?"<>|`, r) {
+			return ' '
+		}
+		return r
+	}, title))
+	if name == "" {
+		return "mikan"
+	}
+	return name
+}
+
 // sizeText writes bytes the way the bot does: 12,5 ГБ or 12.5 GB.
 func sizeText(n int64, en bool) string {
 	units, sep := []string{"Б", "КБ", "МБ", "ГБ", "ТБ"}, ","

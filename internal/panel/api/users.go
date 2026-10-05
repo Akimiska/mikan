@@ -26,6 +26,7 @@ type TelegramLink struct {
 
 type UserView struct {
 	Telegram      *TelegramLink `json:"telegram,omitempty" doc:"Только в карточке пользователя"`
+	Legacy        *LegacyLinks  `json:"legacy,omitempty" doc:"Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка"`
 	ID            int64         `json:"id"`
 	Name          string        `json:"name"`
 	Contact       string        `json:"contact"`
@@ -424,6 +425,10 @@ func (h *handlers) getUser(ctx context.Context, in *userIDInput) (*userOutput, e
 	if err == nil {
 		if l, lerr := h.d.Store.Q.TgLinkOfUser(ctx, u.ID); lerr == nil {
 			out.Body.Telegram = &TelegramLink{ID: l.TgID, Username: l.Username, Name: l.FirstName}
+		}
+		// An old link is a credential like the own one: not for a key that may only read.
+		if !hidesSecrets(ctx) {
+			out.Body.Legacy = h.legacyLinks(ctx, u.ID)
 		}
 	}
 	return out, err

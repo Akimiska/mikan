@@ -12,7 +12,7 @@ import { bytes, dateLong, dateShort, days, daysUntil } from "../lib/format";
 import { safeHref } from "../lib/url";
 import { APPS, detect, enc, type Platform } from "./apps";
 import { Devices } from "./devices";
-import { initData, json, openOutside, outside, pageURL, request, subRoot, tgEvent, tgMode, tokenOf } from "./net";
+import { hashParams, initData, json, openOutside, outside, pageURL, request, subRoot, tgEvent, tgMode, tokenOf } from "./net";
 import { loadShop, Shop, type ShopData } from "./shop";
 import { PromoSection } from "./promo";
 import type { Info, TgSub } from "./types";
@@ -153,7 +153,7 @@ function SubPage() {
   const launched = useRef(false);
   useEffect(() => {
     if (tgMode || !current || launched.current) return;
-    const want = new URLSearchParams(location.hash.slice(1)).get("open");
+    const want = hashParams.get("open");
     if (!want) return;
     launched.current = true;
     history.replaceState(null, "", location.pathname + location.search);

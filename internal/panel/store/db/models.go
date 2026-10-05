@@ -130,6 +130,7 @@ type Node struct {
 	CreatedAt  int64
 	UpdatedAt  int64
 	PublicName string
+	Sort       int64
 }
 
 type NodeRelay struct {
@@ -139,6 +140,18 @@ type NodeRelay struct {
 	Outbound   string
 	ExitNodeID sql.NullInt64
 	CreatedAt  int64
+}
+
+type NodeSpeedtest struct {
+	ID       int64
+	NodeID   int64
+	At       int64
+	PingMs   float64
+	JitterMs float64
+	LossPct  float64
+	DownBps  int64
+	UpBps    int64
+	Error    string
 }
 
 type NodeState struct {
@@ -186,6 +199,7 @@ type Payment struct {
 	AppliedAt  sql.NullInt64
 	RefundedAt sql.NullInt64
 	TermDays   sql.NullInt64
+	Revert     string
 }
 
 type PromoCode struct {
@@ -297,6 +311,7 @@ type TariffPool struct {
 	TariffID     int64
 	PoolID       int64
 	TrafficLimit int64
+	Excluded     bool
 }
 
 type TariffTerm struct {
@@ -330,6 +345,21 @@ type TgNotice struct {
 	Kind   string
 	Period int64
 	SentAt int64
+}
+
+type TorrentHit struct {
+	ID          int64
+	UserID      int64
+	NodeID      sql.NullInt64
+	Ip          string
+	Inbound     string
+	Network     string
+	Kind        string
+	Dest        string
+	Hits        int32
+	At          int64
+	BannedUntil int64
+	LiftedAt    sql.NullInt64
 }
 
 type TrafficDaily struct {
@@ -423,4 +453,5 @@ type UserPool struct {
 	TrafficLimit sql.NullInt64
 	UsedUp       int64
 	UsedDown     int64
+	Excluded     bool
 }

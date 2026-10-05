@@ -232,17 +232,21 @@ func (h *handlers) listPayments(ctx context.Context, in *listPaymentsInput) (*pa
 }
 
 func (h *handlers) refundPayment(ctx context.Context, in *userIDInput) (*paymentOutput, error) {
-	err := h.d.Billing.Refund(ctx, in.ID)
+	reverted, err := h.d.Billing.Refund(ctx, in.ID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, huma.Error404NotFound("not_found")
 	case errors.Is(err, billing.ErrNotRefunable):
 		return nil, huma.Error409Conflict("not_refundable")
+	case errors.Is(err, billing.ErrRefundNotApplied):
+		// The Stars are back with the buyer; the subscription is not yet taken back.
+		h.d.Log.Warn("refund returned by Telegram but not applied", "payment", in.ID, "err", err)
+		return nil, huma.Error502BadGateway("refund_not_applied")
 	case err != nil:
 		h.d.Log.Warn("refund", "payment", in.ID, "err", err)
 		return nil, huma.Error502BadGateway("refund_failed")
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "payment.refund", "payment", "", map[string]any{"id": in.ID})
+	h.audit(ctx, sessionOf(ctx).AdminID, "payment.refund", "payment", "", map[string]any{"id": in.ID, "reverted": reverted})
 	p, err := h.d.Store.Q.GetPayment(ctx, in.ID)
 	if err != nil {
 		return nil, err

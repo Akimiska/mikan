@@ -59,7 +59,7 @@ Subscriptions detect the app — Happ, v2RayTun, Koala Clash, SlothClash, Clash 
 <td valign="top">
 
 ### 📊 Byte-exact accounting
-mihomo is embedded as a library, so traffic is counted per user on every connection — not sampled. Plans by time and gigabytes, billing days, device limits and device binding against key sharing.
+mihomo is embedded as a library, so traffic is counted per user on every connection — not sampled. Plans by time and gigabytes, billing days, device limits and device binding against key sharing. Since every connection is known by its user, the torrent blocker bans the one who torrents on every node, not a shared IP.
 
 </td>
 <td valign="top">

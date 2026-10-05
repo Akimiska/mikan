@@ -11,6 +11,7 @@ import { SETTINGS_TABS } from "../../search";
 import { AutoCard, LanguageCard, SalesCard, ServerCard, UpdatesCard } from "./general";
 import { ImportCard, LegacyLinksCard } from "./import";
 import { ClashRulesCard } from "./rules";
+import { TorrentCard, TorrentHitsCard } from "./torrent";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
 import { AppsCard, DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
 
@@ -68,8 +69,10 @@ export function SettingsPage() {
             ) : tab === "import" ? (
               <Columns left={<ImportCard />} right={<LegacyLinksCard />} />
             ) : tab === "rules" ? (
-              <div className="max-w-4xl">
+              <div className="flex max-w-4xl flex-col gap-4">
                 <ClashRulesCard s={s} />
+                <TorrentCard />
+                <TorrentHitsCard />
               </div>
             ) : (
               <Columns

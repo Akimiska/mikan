@@ -190,6 +190,19 @@ pub fn choose(entries: &[Entry], current: &str, beta: bool) -> Choice {
     c
 }
 
+/// A refusal of the index itself (the requested release is not in it), not a failure to
+/// get it: the latest release on GitHub does not answer instead.
+#[derive(Debug)]
+struct Refused(String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
 /// The release found for a server.
 #[derive(Debug)]
 pub struct Found {
@@ -212,7 +225,7 @@ pub fn find(current: Option<&str>, channel: Channel) -> Result<Found> {
 }
 
 pub fn find_with(current: Option<&str>, channel: Channel, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
-    match from_index(current.unwrap_or_default(), channel, key, fetch) {
+    match from_index(current.unwrap_or_default(), channel, None, key, fetch) {
         Ok(found) => Ok(found),
         Err(e) => {
             let manifest = latest_with(key, fetch)?;
@@ -221,13 +234,61 @@ pub fn find_with(current: Option<&str>, channel: Channel, key: &VerifyingKey, fe
     }
 }
 
-fn from_index(current: &str, channel: Channel, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
+/// The release a server running current takes on its way to the release upto, which the
+/// panel asked for and which goes no further: the highest release of the index that is
+/// not past upto and that current updates to directly (a hop, when upto is not
+/// reachable at once; `newest` of the answer is upto then). upto must be a release of the
+/// index in the channel (a pre-release makes the channel beta: the panel runs it): the
+/// index says so, or the request is refused. Only when the index cannot be had or believed
+/// does GitHub's latest release answer, and only if it is upto itself.
+pub fn find_upto(current: &str, channel: Channel, upto: &str) -> Result<Found> {
+    find_upto_with(current, channel, upto, &key()?, &crate::net::get_opt)
+}
+
+pub fn find_upto_with(current: &str, channel: Channel, upto: &str, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
+    match from_index(current, channel, Some(upto), key, fetch) {
+        Ok(found) => Ok(found),
+        Err(e) if e.downcast_ref::<Refused>().is_some() => Err(e),
+        Err(e) => {
+            let why = format!("{e:#}");
+            let manifest = latest_with(key, fetch).with_context(|| format!("the release index is unavailable ({why})"))?;
+            if newer(&manifest.version, upto) || newer(upto, &manifest.version) {
+                bail!(
+                    "the release index is unavailable ({why}) and the latest release is mikan {}, not the mikan {upto} that was asked for",
+                    manifest.version
+                );
+            }
+            Ok(Found { manifest, newest: None, unreachable: false, fallback: Some(why) })
+        }
+    }
+}
+
+/// Whether a version is a pre-release (1.2.3-rc.1).
+pub fn is_prerelease(v: &str) -> bool {
+    matches!(semver(v), Some((_, Some(_))))
+}
+
+/// Whether v is a version of a release, as a request may name it: short, and nothing but a
+/// version (no "v", no "dev", no address).
+pub fn valid_version(v: &str) -> bool {
+    v.len() <= 64 && semver(v).is_some()
+}
+
+fn from_index(current: &str, channel: Channel, upto: Option<&str>, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
     let url = index_url();
     let data = fetch(&url, 1 << 20).context("download the release index")?.context("no release index is published")?;
     let sig =
         fetch(&format!("{url}.sig"), 4096).context("download the index's signature")?.context("the release index has no signature")?;
-    let entries = parse_index(&data, &String::from_utf8_lossy(&sig), key)?;
-    let c = choose(&entries, current, channel == Channel::Beta);
+    let mut entries = parse_index(&data, &String::from_utf8_lossy(&sig), key)?;
+    let beta = channel == Channel::Beta;
+    if let Some(upto) = upto {
+        // Never a release the index does not list for the channel, and never past it.
+        if !entries.iter().any(|e| (beta || e.channel != "beta") && !newer(&e.version, upto) && !newer(upto, &e.version)) {
+            return Err(Refused(format!("mikan {upto} is not a release of this server's channel in the signed release index")).into());
+        }
+        entries.retain(|e| !newer(&e.version, upto));
+    }
+    let c = choose(&entries, current, beta);
     let newest = c.newest.context("the release index lists no release of the channel")?;
     let (entry, later, unreachable) = match c.target {
         Some(t) if newer(&newest.version, &t.version) => (t, Some(newest.version), false),

@@ -16,7 +16,7 @@ import (
 
 // Callback data: m main, s subscription, d devices, dc:<id> confirm unbind, du:<id>
 // unbind, c connect, r renew, p:<button> the admin's page, w switch list, u:<user> show
-// that subscription.
+// that subscription, rm confirm removing it from the account, rd:<user> remove it.
 
 // screen renders what the chat sees for a press: text (HTML) and buttons.
 func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice string) (string, *Keyboard) {
@@ -71,7 +71,13 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if offers := b.packageOffers(ctx, u.ID); len(offers) > 0 {
 			rows = append(rows, []Button{{Text: w.buyTraffic, CallbackData: "x"}})
 		}
+		rows = append(rows, []Button{{Text: w.removeSub, CallbackData: "rm"}})
 		return withNotice(strings.Join(lines, "\n")), &Keyboard{append(rows, back)}
+	case "rm":
+		// The id goes with the button: a tap after switching subscriptions removes the
+		// one that was asked about, not the one shown now.
+		return withNotice(html.EscapeString(fmt.Sprintf(w.confirmRemove, u.Name))), &Keyboard{[][]Button{
+			{{Text: w.yesRemove, CallbackData: "rd:" + strconv.FormatInt(u.ID, 10)}, {Text: w.cancel, CallbackData: "s"}}}}
 	case "x", "xk", "xp":
 		return b.trafficShop(ctx, w, chat, u, cmd, arg, notice)
 	case "d", "dc":
@@ -295,6 +301,23 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 			if s.ID == id {
 				_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: id, TgID: chat})
 			}
+		}
+		return "m", ""
+	case "rd":
+		// Only a subscription of this account, and only its link: the subscription itself
+		// stays as it is. The next one in the list is shown after it.
+		w := wordsFor(b.Config(ctx).Lang)
+		list, _, _ := b.subs(ctx, chat)
+		for _, s := range list {
+			if s.ID != id {
+				continue
+			}
+			if err := b.d.Store.Q.UnlinkTg(ctx, id); err != nil {
+				b.d.Log.Warn("telegram: remove a subscription", "user", id, "err", err)
+				return "s", ""
+			}
+			b.d.Log.Info("telegram: a subscription removed from its account", "user", id)
+			return "m", fmt.Sprintf(w.removed, s.Name)
 		}
 		return "m", ""
 	}

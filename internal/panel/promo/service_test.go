@@ -189,6 +189,36 @@ func TestValidateDiscountUsesInvoiceRules(t *testing.T) {
 	}
 }
 
+// The Mini App's one "Apply" takes a discount code before any order is picked: Check lets
+// it through for the checkout, and still refuses what the account may not use.
+func TestCheckTakesADiscountWithoutAnOrder(t *testing.T) {
+	st := newTestStore(t)
+	defer st.Close()
+	ctx := context.Background()
+	p, err := st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "WELCOME15", Type: "percent", Value: 15, Currency: "RUB", MinOrder: 100, MaxDiscount: 500000,
+		PerUserLimit: 1, FirstPurchaseOnly: 1, TariffIds: "[]", Enabled: 1, CreatedAt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, func() time.Time { return time.Unix(1000, 0) })
+	if _, err := s.Validate(ctx, 77, 0, 0, 0, "", "welcome15"); !errors.Is(err, ErrMinimum) {
+		t.Fatalf("Validate without an order: %v, want ErrMinimum", err)
+	}
+	got, err := s.Check(ctx, 77, 0, " welcome15 ")
+	if err != nil || got.ID != p.ID {
+		t.Fatalf("Check = %+v, %v", got, err)
+	}
+	if _, err := s.Check(ctx, 77, 0, "NOPE"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown code: %v", err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_name,amount,currency,status,created_at) VALUES('stars','p1',77,'package','T',100,'XTR','applied',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Check(ctx, 77, 0, "WELCOME15"); !errors.Is(err, ErrFirstPurchase) {
+		t.Fatalf("after a purchase: %v, want ErrFirstPurchase", err)
+	}
+}
+
 func TestDeletedCodeCanBeRecreated(t *testing.T) {
 	st := newTestStore(t)
 	defer st.Close()

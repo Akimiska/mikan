@@ -12,6 +12,7 @@ import (
 	"html"
 	"log/slog"
 	"net"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -493,6 +495,8 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) error {
 		b.running.Go(func() { b.preCheckout(ctx, c, up.PreCheckoutQuery) })
 	case up.Message != nil && up.Message.SuccessfulPayment != nil && up.Message.Chat.Type == "private":
 		return b.starsPaid(ctx, up.Message)
+	case up.Message != nil && up.Message.RefundedPayment != nil && up.Message.Chat.Type == "private":
+		return b.starsRefunded(ctx, up.Message)
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil && up.CallbackQuery.Message.Chat.Type == "private":
 		if cmd, _, _ := strings.Cut(up.CallbackQuery.Data, ":"); cmd == "ta" || cmd == "tx" {
 			b.onTransfer(ctx, c, out, up.CallbackQuery)
@@ -505,7 +509,14 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) error {
 	return nil
 }
 
-var subLink = regexp.MustCompile(`https?://\S+/([A-Za-z0-9]{24})(?:[/?#]\S*)?`)
+var (
+	linkInText  = regexp.MustCompile(`https?://\S+`)
+	nativeToken = regexp.MustCompile(`^[A-Za-z0-9]{24}$`)
+)
+
+// maxLinksRead: how many addresses of one message are looked at, so that a long list is
+// not a hundred database lookups.
+const maxLinksRead = 3
 
 // onMessage: /start (with a code from a subscription page), a subscription link, or
 // anything else — every message brings the main menu back to the bottom of the chat.
@@ -543,8 +554,8 @@ func (b *Bot) onMessage(ctx context.Context, out *Outbox, m *Message) {
 	switch {
 	case strings.HasPrefix(text, "/start "):
 		notice = b.linkByCode(ctx, out, w, chat, who(m.From), strings.TrimSpace(strings.TrimPrefix(text, "/start ")))
-	case subLink.MatchString(text):
-		notice = b.linkByToken(ctx, out, w, chat, who(m.From), subLink.FindStringSubmatch(text)[1])
+	default:
+		notice = b.linkByAddress(ctx, out, w, chat, who(m.From), text)
 	}
 	b.freshMenu(out, chat, notice)
 }
@@ -622,12 +633,57 @@ func (b *Bot) linkByCode(ctx context.Context, out *Outbox, w *words, chat int64,
 	return b.link(ctx, out, w, chat, name, id)
 }
 
-func (b *Bot) linkByToken(ctx context.Context, out *Outbox, w *words, chat int64, name, token string) string {
-	u, err := b.d.Store.Q.GetUserBySubToken(ctx, token)
-	if err != nil {
+// linkByAddress takes the subscription address in a message: the panel's own, or one of
+// the panel the users came from. "" when the message has no address with a path at all;
+// an address that leads to no subscription is told so.
+func (b *Bot) linkByAddress(ctx context.Context, out *Outbox, w *words, chat int64, name, text string) string {
+	var seen bool
+	for _, raw := range linkInText.FindAllString(text, maxLinksRead) {
+		u, err := url.Parse(strings.TrimRight(raw, ".,;:!?)]}>\"'»"))
+		if err != nil || u.Host == "" {
+			continue
+		}
+		if u.Path != "" && u.Path != "/" {
+			seen = true
+		}
+		if id, ok := b.userOfAddress(ctx, u.Path); ok {
+			return b.link(ctx, out, w, chat, name, id)
+		}
+	}
+	if seen {
 		return w.linkInvalid
 	}
-	return b.link(ctx, out, w, chat, name, u.ID)
+	return ""
+}
+
+// userOfAddress finds whose subscription an address path leads to. The own token is a
+// path segment of 24 letters and digits. An old panel's address is taken as the panel
+// serves it (panelimport.LinkToken), and only while old links are set up; the signature
+// of a token Marzban or PasarGuard signed is checked as there (Verifier.User).
+func (b *Bot) userOfAddress(ctx context.Context, urlPath string) (int64, bool) {
+	for seg := range strings.SplitSeq(urlPath, "/") {
+		if !nativeToken.MatchString(seg) {
+			continue
+		}
+		if u, err := b.d.Store.Q.GetUserBySubToken(ctx, seg); err == nil {
+			return u.ID, true
+		}
+	}
+	if b.d.Settings == nil {
+		return 0, false
+	}
+	legacyPath, verifier, err := panelimport.LoadLegacy(ctx, b.d.Settings)
+	if err != nil {
+		return 0, false
+	}
+	token, _, ok := panelimport.LinkToken(urlPath, legacyPath)
+	if !ok {
+		return 0, false
+	}
+	if u, ok := verifier.User(ctx, b.d.Store.Q, token); ok {
+		return u.ID, true
+	}
+	return 0, false
 }
 
 // link ties a subscription to the chat's account. A subscription has one owner. The link

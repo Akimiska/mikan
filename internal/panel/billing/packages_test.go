@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -168,5 +169,72 @@ func TestPackageNotForSale(t *testing.T) {
 	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-a", "XTR", 75))
 	if gs, _ := q.ListUserGrants(ctx, u.ID); len(gs) != 1 || e.payment(p.ID).Status != "applied" {
 		t.Fatalf("a paid package must apply: %+v", gs)
+	}
+}
+
+// A package for a pool closed on the subscription's tariff is neither invoiced nor let
+// through Telegram's pre-checkout; one already paid still applies, with a warning.
+func TestPackageClosedPoolIsNotSold(t *testing.T) {
+	e, u, _ := packageEnv(t)
+	ctx := context.Background()
+	q := e.st.Q
+	pool, err := q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})
+	must(t, err)
+	wl, err := q.CreateTrafficPackage(ctx, db.CreateTrafficPackageParams{Name: "wl", Bytes: domain.GiB, PoolID: sql.NullInt64{Int64: pool.ID, Valid: true},
+		Lifetime: domain.LifetimeUsed, PriceStars: sql.NullInt64{Int64: 5, Valid: true}, OnSale: 1, CreatedAt: 1})
+	must(t, err)
+	setPool := func(limit sql.NullInt64, closed bool) {
+		t.Helper()
+		must(t, q.SetUserPoolLimit(ctx, db.SetUserPoolLimitParams{UserID: u.ID, PoolID: pool.ID, TrafficLimit: limit, Excluded: closed}))
+	}
+	buy := func() (db.Payment, error) {
+		return e.s.PackageInvoice(ctx, PackageRequest{TgID: 555, UserID: u.ID, PackageID: wl.ID, Provider: Stars})
+	}
+	limit := sql.NullInt64{Int64: 10 * domain.GiB, Valid: true}
+
+	setPool(limit, false)
+	p, err := buy()
+	must(t, err)
+	must(t, e.s.PreCheckout(ctx, 555, p.Payload, "XTR", 5))
+
+	// Closed after the invoice: Telegram's pre-checkout refuses, a new invoice is refused.
+	setPool(sql.NullInt64{}, true)
+	if err := e.s.PreCheckout(ctx, 555, p.Payload, "XTR", 5); !errors.Is(err, ErrNotForSale) {
+		t.Fatalf("pre-checkout for a closed pool: %v", err)
+	}
+	if _, err := buy(); !errors.Is(err, ErrNotForSale) {
+		t.Fatalf("invoice for a closed pool: %v", err)
+	}
+	// A limit row left on a closed pool does not make it sellable.
+	setPool(limit, true)
+	if _, err := buy(); !errors.Is(err, ErrNotForSale) {
+		t.Fatalf("invoice for a closed pool with a limit row: %v", err)
+	}
+	if ups, _ := q.ListUserPools(ctx, u.ID); domain.PackageFits(u, ups, wl) {
+		t.Fatal("PackageFits must refuse a closed pool")
+	}
+	if offers, _, err := e.s.PackageOffers(ctx, u.ID); err != nil {
+		t.Fatal(err)
+	} else {
+		for _, o := range offers {
+			if o.Package.ID == wl.ID {
+				t.Fatal("a closed pool's package is offered")
+			}
+		}
+	}
+
+	// Paid before it was closed (the provider took the money): it applies and warns.
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-closed", "XTR", 5))
+	if gs, _ := q.ListUserGrants(ctx, u.ID); len(gs) != 1 || e.payment(p.ID).Status != "applied" {
+		t.Fatalf("a paid package must apply: %+v", gs)
+	}
+	if !strings.Contains(e.logs.String(), "closed for the subscription") {
+		t.Errorf("no warning in the log: %s", e.logs)
+	}
+
+	// Opened again: sellable.
+	setPool(limit, false)
+	if _, err := buy(); err != nil {
+		t.Fatalf("an open pool sells: %v", err)
 	}
 }

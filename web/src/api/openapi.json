@@ -799,32 +799,26 @@
         ],
         "type": "object"
       },
-      "CascadeView": {
+      "CascadeRelay": {
         "additionalProperties": false,
         "properties": {
-          "exits": {
-            "description": "Ноды, через которые эта нода выпускает трафик",
-            "items": {
-              "$ref": "#/components/schemas/CascadeExit"
-            },
-            "type": "array"
+          "error": {
+            "description": "Почему служебный вход не запустился, как сказала нода",
+            "type": "string"
           },
-          "relay": {
-            "$ref": "#/components/schemas/CascadeViewRelayStruct",
-            "description": "Служебный вход для других нод; есть, когда кто-то выходит через эту ноду"
-          }
-        },
-        "required": [
-          "exits"
-        ],
-        "type": "object"
-      },
-      "CascadeViewRelayStruct": {
-        "additionalProperties": false,
-        "properties": {
           "exit_node_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "listener": {
+            "description": "Слушает ли нода порт служебного входа: busy, если порт занят другой программой",
+            "enum": [
+              "ok",
+              "busy",
+              "failed",
+              "unknown"
+            ],
+            "type": "string"
           },
           "outbound": {
             "description": "Куда эта нода выпускает их трафик",
@@ -849,7 +843,28 @@
         "required": [
           "port",
           "sources",
-          "outbound"
+          "outbound",
+          "listener"
+        ],
+        "type": "object"
+      },
+      "CascadeView": {
+        "additionalProperties": false,
+        "properties": {
+          "exits": {
+            "description": "Ноды, через которые эта нода выпускает трафик",
+            "items": {
+              "$ref": "#/components/schemas/CascadeExit"
+            },
+            "type": "array"
+          },
+          "relay": {
+            "$ref": "#/components/schemas/CascadeRelay",
+            "description": "Служебный вход для других нод; есть, когда кто-то выходит через эту ноду"
+          }
+        },
+        "required": [
+          "exits"
         ],
         "type": "object"
       },
@@ -1307,6 +1322,9 @@
           "tls": {
             "type": "boolean"
           },
+          "torrent": {
+            "type": "boolean"
+          },
           "update": {
             "type": "boolean"
           },
@@ -1322,7 +1340,8 @@
           "autotune",
           "autotune_recovery",
           "tls",
-          "update"
+          "update",
+          "torrent"
         ],
         "type": "object"
       },
@@ -1345,6 +1364,9 @@
             "type": "boolean"
           },
           "tls": {
+            "type": "boolean"
+          },
+          "torrent": {
             "type": "boolean"
           },
           "update": {
@@ -1894,6 +1916,28 @@
         ],
         "type": "object"
       },
+      "LegacyLinks": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "Старые ссылки сейчас открываются: задан их путь, а для подписанных ещё и секрет старой панели",
+            "type": "boolean"
+          },
+          "source": {
+            "description": "Из какой панели: marzban, pasarguard или remnawave",
+            "type": "string"
+          },
+          "url": {
+            "description": "Ссылка целиком. Только у Remnawave: токен Marzban и PasarGuard подписан, импорт его не видел и не хранит, а ссылки, что уже у людей, проверяются по подписи",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "active"
+        ],
+        "type": "object"
+      },
       "LegacyView": {
         "additionalProperties": false,
         "properties": {
@@ -1920,6 +1964,20 @@
           "kind",
           "secret_set",
           "links"
+        ],
+        "type": "object"
+      },
+      "LiftTorrentOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "lifted": {
+            "description": "Сколько банов снято",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lifted"
         ],
         "type": "object"
       },
@@ -2144,6 +2202,14 @@
             "description": "host:port API ноды; пусто у своей ноды",
             "type": "string"
           },
+          "behind": {
+            "description": "Нода старее панели",
+            "type": "boolean"
+          },
+          "can_update": {
+            "description": "Панель может обновить ноду сама: удалённая, отвечает, версия 0.5.0.2 или новее; старую обновляют один раз вручную командой mikan update на её сервере",
+            "type": "boolean"
+          },
           "certificate": {
             "$ref": "#/components/schemas/NodeCertView"
           },
@@ -2218,6 +2284,10 @@
             ],
             "type": "string"
           },
+          "update": {
+            "$ref": "#/components/schemas/UpdateStatus",
+            "description": "Как идёт или прошло обновление ноды"
+          },
           "version": {
             "type": "string"
           }
@@ -2238,7 +2308,9 @@
           "conns",
           "cpu_percent",
           "mem_used",
-          "mem_total"
+          "mem_total",
+          "behind",
+          "can_update"
         ],
         "type": "object"
       },
@@ -2337,6 +2409,25 @@
           "expired",
           "traffic_90",
           "traffic_100"
+        ],
+        "type": "object"
+      },
+      "OrderNodesInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Все ноды панели, каждая один раз, в том порядке, в каком их серверы идут в подписках",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
         ],
         "type": "object"
       },
@@ -2606,6 +2697,7 @@
             "type": "boolean"
           },
           "auto_sni": {
+            "description": "Нельзя включить, пока у подключения свой адрес (listen)",
             "type": "boolean"
           },
           "client": {
@@ -2849,6 +2941,11 @@
             "maxLength": 65536,
             "type": "string"
           },
+          "sub_title": {
+            "description": "Переменные — см. SettingsView.sub_title",
+            "maxLength": 200,
+            "type": "string"
+          },
           "support_url": {
             "description": "https://… или tg://…",
             "maxLength": 200,
@@ -2881,6 +2978,30 @@
         },
         "type": "object"
       },
+      "PatchTorrentInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ban_minutes": {
+            "format": "int64",
+            "maximum": 43200,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "exempt": {
+            "description": "Весь список id пользователей-исключений",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "PatchUpdatesInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2893,6 +3014,9 @@
               "beta"
             ],
             "type": "string"
+          },
+          "nodes_follow": {
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -3221,6 +3345,10 @@
       "PoolLimit": {
         "additionalProperties": false,
         "properties": {
+          "excluded": {
+            "description": "Пул закрыт: его подключений нет в подписке, ноды их не пускают, пакеты трафика пула не продаются; traffic_limit тогда не важен",
+            "type": "boolean"
+          },
           "pool_id": {
             "format": "int64",
             "minimum": 1,
@@ -3365,7 +3493,7 @@
             "type": "string"
           },
           "currency": {
-            "description": "Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется.",
+            "description": "Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для percent: пусто — любая валюта, тогда min_order и max_discount равны 0. Для остальных типов не используется.",
             "type": "string"
           },
           "description": {
@@ -4036,7 +4164,7 @@
             "type": "array"
           },
           "sub_announce": {
-            "description": "Объявление над профилем в приложениях (заголовок announce); пусто — нет",
+            "description": "Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title",
             "type": "string"
           },
           "sub_announce_url": {
@@ -4075,6 +4203,10 @@
             "description": "Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий",
             "type": "string"
           },
+          "sub_title": {
+            "description": "Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего; без срока или лимита — ∞",
+            "type": "string"
+          },
           "support_url": {
             "type": "string"
           }
@@ -4082,6 +4214,7 @@
         "required": [
           "brand",
           "support_url",
+          "sub_title",
           "sub_announce",
           "sub_announce_url",
           "app_branding",
@@ -4106,6 +4239,58 @@
           "device_require_hwid",
           "default_lang",
           "certificate"
+        ],
+        "type": "object"
+      },
+      "SpeedTestView": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "down_bps": {
+            "description": "Загрузка, бит/с",
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Где тест оборвался; измеренное до того сохранено",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "jitter_ms": {
+            "description": "Средний разброс задержки, мс",
+            "format": "double",
+            "type": "number"
+          },
+          "loss_pct": {
+            "description": "Потери, %",
+            "format": "double",
+            "type": "number"
+          },
+          "ping_ms": {
+            "description": "Медиана задержки, мс; -1 если ответов не было",
+            "format": "double",
+            "type": "number"
+          },
+          "up_bps": {
+            "description": "Отдача, бит/с",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "ping_ms",
+          "jitter_ms",
+          "loss_pct",
+          "down_bps",
+          "up_bps"
         ],
         "type": "object"
       },
@@ -4325,7 +4510,7 @@
             "type": "boolean"
           },
           "pools": {
-            "description": "Лимиты пулов трафика; пул не в списке — без лимита",
+            "description": "Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается",
             "items": {
               "$ref": "#/components/schemas/PoolLimit"
             },
@@ -4697,6 +4882,147 @@
         ],
         "type": "object"
       },
+      "TorrentHitView": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "banned_until": {
+            "description": "До какого времени бан; null — без бана",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dest": {
+            "description": "Куда шло соединение",
+            "type": "string"
+          },
+          "hits": {
+            "description": "Сколько попыток за раз: нода сообщает о пользователе не чаще раза в минуту",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "inbound": {
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес, с которого подключался пользователь",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Что распознано",
+            "enum": [
+              "handshake",
+              "tracker",
+              "dht",
+              "utp"
+            ],
+            "type": "string"
+          },
+          "lifted_at": {
+            "description": "Когда администратор снял бан",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network": {
+            "enum": [
+              "tcp",
+              "udp"
+            ],
+            "type": "string"
+          },
+          "node_id": {
+            "description": "null — нода удалена",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "node_name": {
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "user_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "user_name",
+          "node_id",
+          "node_name",
+          "ip",
+          "inbound",
+          "network",
+          "kind",
+          "dest",
+          "hits",
+          "at",
+          "banned_until",
+          "lifted_at"
+        ],
+        "type": "object"
+      },
+      "TorrentUser": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TorrentView": {
+        "additionalProperties": false,
+        "properties": {
+          "ban_minutes": {
+            "description": "На сколько минут пойманный пользователь теряет доступ ко всем нодам; 0 — только сбросить соединение",
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "Ноды распознают BitTorrent (рукопожатие, DHT, uTP, трекеры) и не пропускают его. Зашифрованный торрент не распознаётся",
+            "type": "boolean"
+          },
+          "exempt": {
+            "description": "Пользователи, которых блокировщик не трогает",
+            "items": {
+              "$ref": "#/components/schemas/TorrentUser"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "ban_minutes",
+          "exempt"
+        ],
+        "type": "object"
+      },
       "TotpCodeInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -4800,6 +5126,39 @@
         ],
         "type": "object"
       },
+      "UpdateStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "RFC 3339",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "ok",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "version",
+          "from",
+          "at"
+        ],
+        "type": "object"
+      },
       "UpdatesView": {
         "additionalProperties": false,
         "properties": {
@@ -4843,6 +5202,10 @@
             "description": "Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто",
             "type": "string"
           },
+          "nodes_follow": {
+            "description": "Удалённые ноды следуют за панелью: после её обновления панель обновляет их до своей версии, по одной",
+            "type": "boolean"
+          },
           "notes": {
             "additionalProperties": {
               "type": "string"
@@ -4876,7 +5239,8 @@
           "channel",
           "newest",
           "unreachable",
-          "requested_at"
+          "requested_at",
+          "nodes_follow"
         ],
         "type": "object"
       },
@@ -4921,6 +5285,10 @@
       "UserPoolView": {
         "additionalProperties": false,
         "properties": {
+          "excluded": {
+            "description": "Пул закрыт для пользователя: его подключений нет в подписке, ноды их не пускают",
+            "type": "boolean"
+          },
           "exhausted": {
             "description": "Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса",
             "type": "boolean"
@@ -4961,7 +5329,8 @@
           "used_up",
           "used_down",
           "extra",
-          "exhausted"
+          "exhausted",
+          "excluded"
         ],
         "type": "object"
       },
@@ -4991,6 +5360,11 @@
               "integer",
               "null"
             ]
+          },
+          "bound_devices": {
+            "description": "Привязанные устройства: с привязкой это занятые места",
+            "format": "int64",
+            "type": "integer"
           },
           "contact": {
             "type": "string"
@@ -5024,6 +5398,10 @@
               "type": "integer"
             },
             "type": "array"
+          },
+          "legacy": {
+            "$ref": "#/components/schemas/LegacyLinks",
+            "description": "Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка"
           },
           "name": {
             "type": "string"
@@ -5093,6 +5471,14 @@
             "$ref": "#/components/schemas/TelegramLink",
             "description": "Только в карточке пользователя"
           },
+          "torrent_ban": {
+            "description": "До какого времени действует бан блокировщика торрентов; null — бана нет",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "total_down": {
             "format": "int64",
             "type": "integer"
@@ -5146,7 +5532,9 @@
           "sub_url",
           "online",
           "online_ips",
+          "bound_devices",
           "online_at",
+          "torrent_ban",
           "created_at"
         ],
         "type": "object"
@@ -5186,6 +5574,42 @@
         "required": [
           "type",
           "network"
+        ],
+        "type": "object"
+      },
+      "WarpCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "colo": {
+            "type": "string"
+          },
+          "detail": {
+            "description": "Причина словами, без секретов; на английском",
+            "type": "string"
+          },
+          "error": {
+            "description": "Причина: timeout | dns | tls | refused | not_loaded | bad_answer | https_timeout | failed; node_unreachable — нода не ответила панели; unreachable — старая нода",
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес, который видят сайты",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "warp": {
+            "description": "on | plus | off — как отвечает Cloudflare",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "checked_at"
         ],
         "type": "object"
       },
@@ -5262,6 +5686,10 @@
           "ipv6": {
             "type": "string"
           },
+          "no_reserved": {
+            "description": "Свой конфиг без Reserved: на части endpoint'ов Cloudflare молча не отвечает на handshake",
+            "type": "boolean"
+          },
           "plus": {
             "description": "Аккаунт WARP+",
             "type": "boolean"
@@ -5282,8 +5710,8 @@
             "type": "string"
           },
           "status": {
-            "$ref": "#/components/schemas/WarpViewStatusStruct",
-            "description": "Последняя проверка выхода через WARP с ноды; нет — нода недоступна"
+            "$ref": "#/components/schemas/WarpCheck",
+            "description": "Последняя проверка выхода через WARP с ноды; нет — у ноды ещё нет настроенного WARP"
           }
         },
         "required": [
@@ -5292,37 +5720,6 @@
           "plus",
           "routes",
           "inbounds"
-        ],
-        "type": "object"
-      },
-      "WarpViewStatusStruct": {
-        "additionalProperties": false,
-        "properties": {
-          "checked_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "colo": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          },
-          "ip": {
-            "description": "Адрес, который видят сайты",
-            "type": "string"
-          },
-          "ok": {
-            "type": "boolean"
-          },
-          "warp": {
-            "description": "on | plus | off — как отвечает Cloudflare",
-            "type": "string"
-          }
-        },
-        "required": [
-          "ok",
-          "checked_at"
         ],
         "type": "object"
       }
@@ -5342,7 +5739,7 @@
     }
   },
   "info": {
-    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.",
+    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n## Подписка в приложениях\n\nСсылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: `profile-title` — название профиля (настройка `sub_title`, пусто — бренд), `announce` — строка над профилем или под его названием (`sub_announce`), `subscription-userinfo` — трафик и срок, `support-url`, `profile-web-page-url`. Настраиваются в `PATCH /api/v1/settings`.\n\nВ `sub_title` и `sub_announce` подставляются переменные каждого пользователя: `{brand}` — бренд, `{name}` — имя, `{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, `{total}` — лимит с пакетами. Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`.",
     "title": "mikan",
     "version": "dev"
   },
@@ -6677,6 +7074,74 @@
         "x-session-only": true
       }
     },
+    "/api/v1/nodes/order": {
+      "put": {
+        "operationId": "order-nodes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderNodesInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Порядок серверов в подписке",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/update-all": {
+      "post": {
+        "operationId": "update-nodes",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NodeInfo"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Обновить отстающие ноды до версии панели, по одной",
+        "tags": [
+          "node"
+        ]
+      }
+    },
     "/api/v1/nodes/{id}": {
       "delete": {
         "operationId": "delete-node",
@@ -6993,6 +7458,152 @@
         "x-session-only": true
       }
     },
+    "/api/v1/nodes/{id}/speedtest": {
+      "post": {
+        "description": "Задержка, разброс и потери по 20 DNS-запросам к 1.1.1.1, затем загрузка и отдача через speed.cloudflare.com: каждое до 8 секунд или до лимита объёма, что наступит раньше, не больше 250 МБ на загрузку и 100 МБ на отдачу. Занимает около 20 секунд; пользователи ноды могут почувствовать нагрузку на время теста. Одновременно на ноде идёт один тест, на одну ноду не чаще раза в 5 минут (иначе 429 speed_test_cooldown).",
+        "operationId": "run-node-speedtest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpeedTestView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Проверить скорость ноды",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/speedtests": {
+      "get": {
+        "description": "Новые сверху; хранятся последние 100.",
+        "operationId": "list-node-speedtests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 30,
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SpeedTestView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "История проверок скорости ноды",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/update": {
+      "post": {
+        "operationId": "update-node-version",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Обновить ноду до версии панели",
+        "tags": [
+          "node"
+        ]
+      }
+    },
     "/api/v1/nodes/{id}/warp": {
       "delete": {
         "operationId": "delete-node-warp",
@@ -7039,6 +7650,16 @@
               "format": "int64",
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд)",
+            "explode": false,
+            "in": "query",
+            "name": "force",
+            "schema": {
+              "description": "Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд)",
+              "type": "boolean"
             }
           }
         ],
@@ -8813,6 +9434,147 @@
         "x-session-only": true
       }
     },
+    "/api/v1/torrent": {
+      "get": {
+        "operationId": "get-torrent",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TorrentView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Блокировка торрентов",
+        "tags": [
+          "torrent"
+        ]
+      },
+      "patch": {
+        "operationId": "update-torrent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchTorrentInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TorrentView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настроить блокировку торрентов",
+        "tags": [
+          "torrent"
+        ]
+      }
+    },
+    "/api/v1/torrent/hits": {
+      "get": {
+        "description": "Новые сверху; следующая страница — before=id последней записи.",
+        "operationId": "list-torrent-hits",
+        "parameters": [
+          {
+            "description": "Только этого пользователя",
+            "explode": false,
+            "in": "query",
+            "name": "user_id",
+            "schema": {
+              "description": "Только этого пользователя",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Страница: записи с id меньше этого",
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "Страница: записи с id меньше этого",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TorrentHitView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Пойманные торренты",
+        "tags": [
+          "torrent"
+        ]
+      }
+    },
     "/api/v1/updates": {
       "get": {
         "operationId": "get-updates",
@@ -9744,6 +10506,49 @@
         "summary": "Отвязать подписку от Telegram",
         "tags": [
           "telegram"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/torrent-ban/lift": {
+      "post": {
+        "operationId": "lift-torrent-ban",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiftTorrentOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Снять торрент-бан пользователя",
+        "tags": [
+          "users"
         ]
       }
     },

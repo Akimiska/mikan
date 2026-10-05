@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/torrent"
 )
 
 // snapshot is what the nodes' states and policies are built from: the same tables for
@@ -26,6 +28,8 @@ type snapshot struct {
 	grants   domain.GrantsLeft
 	pools    []db.UserPool
 	counters map[int64]counterPos
+	torrent  torrent.Config
+	bans     map[int64]int64 // user → when the torrent blocker's ban ends (unix)
 }
 
 type counterPos struct {
@@ -61,7 +65,7 @@ func (m *Manager) readSnapshot(ctx context.Context) (s *snapshot, err error) {
 	}
 	defer tx.Rollback()
 	q := m.st.Q.WithTx(tx)
-	s = &snapshot{counters: map[int64]counterPos{}}
+	s = &snapshot{counters: map[int64]counterPos{}, bans: map[int64]int64{}}
 	if s.users, err = q.ListUsers(ctx); err != nil {
 		return nil, err
 	}
@@ -79,6 +83,18 @@ func (m *Manager) readSnapshot(ctx context.Context) (s *snapshot, err error) {
 	}
 	if s.pools, err = q.ListAllUserPools(ctx); err != nil {
 		return nil, err
+	}
+	if s.torrent, err = torrent.Load(ctx, settings.New(q)); err != nil {
+		return nil, err
+	}
+	if s.torrent.Enabled {
+		bans, err := q.ActiveTorrentBans(ctx, m.now().Unix())
+		if err != nil {
+			return nil, err
+		}
+		for _, b := range bans {
+			s.bans[b.UserID] = b.BannedUntil
+		}
 	}
 	rows, err := q.CountersPositions(ctx)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -29,7 +31,7 @@ const stateKey = "monitor"
 
 type Runtime interface {
 	Health(id int64) (nodesync.HealthView, bool)
-	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
+	Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error)
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 }
 
@@ -40,6 +42,11 @@ type Tuner interface {
 type CertificateSource func() acme.Status
 type UpdateSource interface {
 	Host() (updates.HostStatus, bool)
+}
+
+// NodeUpdateSource knows the updates of the remote nodes that failed (nodeupdate.Service).
+type NodeUpdateSource interface {
+	Failures(ctx context.Context) []nodeupdate.Failure
 }
 
 type sampleState struct {
@@ -61,8 +68,10 @@ type persistentState struct {
 	Samples            map[string]sampleState `json:"samples"`
 	Stuck              map[string]string      `json:"stuck"`
 	AutoCursor         int64                  `json:"auto_cursor"`
+	TorrentCursor      int64                  `json:"torrent_cursor,omitempty"`
 	TLSBad             bool                   `json:"tls_bad"`
 	UpdateAt           string                 `json:"update_at"`
+	NodeUpdateAt       map[string]int64       `json:"node_update_at,omitempty"`
 	PublicTarget       string                 `json:"public_target"`
 	PublicMessage      int64                  `json:"public_message"`
 	PublicText         string                 `json:"public_text"`
@@ -79,6 +88,7 @@ type Monitor struct {
 	tuner       Tuner
 	cert        CertificateSource
 	updates     UpdateSource
+	nodeUpdates NodeUpdateSource
 	bot         *tgbot.Bot
 	log         *slog.Logger
 	now         func() time.Time
@@ -91,6 +101,10 @@ func New(st *store.Store, set *settings.Settings, runtime Runtime, tuner Tuner, 
 	bot *tgbot.Bot, log *slog.Logger, now func() time.Time) *Monitor {
 	return &Monitor{store: st, settings: set, runtime: runtime, tuner: tuner, cert: cert, updates: updates, bot: bot, log: log, now: now}
 }
+
+// WatchNodeUpdates makes the monitor tell the admin about the updates of nodes that failed
+// (the "update" event); call it before Run.
+func (m *Monitor) WatchNodeUpdates(src NodeUpdateSource) { m.nodeUpdates = src }
 
 func (m *Monitor) Run(ctx context.Context) {
 	// Node health arrives every five seconds. Outbound checks are cached by the node for a
@@ -112,6 +126,9 @@ func (m *Monitor) load(ctx context.Context) (persistentState, error) {
 	raw, err := m.store.Q.GetInfrastructureAlertState(ctx, stateKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		st.AutoCursor, err = m.store.Q.MaxInboundEventID(ctx)
+		if err == nil {
+			st.TorrentCursor, err = m.store.Q.LastTorrentHitID(ctx)
+		}
 	} else if err == nil {
 		err = json.Unmarshal([]byte(raw), &st)
 	}
@@ -181,9 +198,9 @@ func (m *Monitor) config(ctx context.Context) AlertsConfig {
 	return c
 }
 
-// inboundFailAfter is how many failed samples make an inbound unavailable. A port held by
-// another program is moved by the tuner within seconds: such an inbound is reported only
-// when the move did not help.
+// inboundFailAfter is how many failed samples make an inbound or the cascade relay
+// unavailable. A port held by another program is moved by the tuner within seconds: such a
+// listener is reported only when the move did not help.
 func inboundFailAfter(busy, autoPort bool) int {
 	if busy && autoPort {
 		return 24
@@ -232,6 +249,15 @@ func (m *Monitor) round(ctx context.Context) {
 	}
 	levels := make(map[int64]Level, len(nodes))
 	listenerHealth := make(map[int64]map[string]bool, len(nodes))
+	// Whether the tuner moves a busy relay by itself: there is no switch for one relay.
+	relayMoves := false
+	if m.settings != nil {
+		on, err := m.settings.On(ctx, settings.AutoPort)
+		if err != nil {
+			m.logError("infrastructure alerts: settings", err)
+		}
+		relayMoves = on && err == nil
+	}
 	for _, n := range nodes {
 		if n.Enabled == 0 {
 			continue
@@ -273,6 +299,9 @@ func (m *Monitor) round(ctx context.Context) {
 				nodeLevel = Degraded
 			}
 		}
+		if m.checkRelay(&st, cfg, n, hv, relayMoves, lang) != Healthy {
+			nodeLevel = Degraded
+		}
 		levels[n.ID] = nodeLevel
 	}
 
@@ -293,9 +322,11 @@ func (m *Monitor) round(ctx context.Context) {
 		inboundByID[in.ID] = in
 	}
 	m.autotuneEvents(ctx, &st, cfg, nodeByID, inboundByID, lang)
+	m.torrentEvents(ctx, &st, cfg, lang)
 	m.checkTuner(&st, cfg, byNode, nodeByID, lang)
 	m.checkCertificate(&st, cfg, lang)
 	m.checkUpdate(&st, cfg, lang)
+	m.checkNodeUpdates(ctx, &st, cfg, nodeByID, lang)
 	m.publicStatus(ctx, &st, cfg, nodes, byNode, lang)
 	// Samples only matter for configured infrastructure. Drop removed node and inbound
 	// state so the JSON snapshot stays bounded as installations change over time.
@@ -303,6 +334,7 @@ func (m *Monitor) round(ctx context.Context) {
 	for _, n := range nodes {
 		valid["node/"+strconv.FormatInt(n.ID, 10)] = true
 		valid["warp/"+strconv.FormatInt(n.ID, 10)] = true
+		valid["relay/"+strconv.FormatInt(n.ID, 10)] = true
 	}
 	for _, list := range byNode {
 		for _, in := range list {
@@ -310,7 +342,7 @@ func (m *Monitor) round(ctx context.Context) {
 		}
 	}
 	for key := range st.Samples {
-		if strings.HasPrefix(key, "node/") || strings.HasPrefix(key, "warp/") || strings.HasPrefix(key, "inbound/") {
+		if strings.HasPrefix(key, "node/") || strings.HasPrefix(key, "warp/") || strings.HasPrefix(key, "relay/") || strings.HasPrefix(key, "inbound/") {
 			if !valid[key] {
 				delete(st.Samples, key)
 			}
@@ -490,6 +522,92 @@ func eventFor(c AlertsConfig, event, name string, level Level, lang string) stri
 	return icon + " <b>" + html.EscapeString(name) + "</b> — " + state
 }
 
+// checkRelay watches the cascade relay's listener: other nodes leave through it, and a port
+// another program holds keeps it down without a word. A node without a relay has no such
+// listener and is Healthy here. moves says whether the tuner moves a busy relay by itself,
+// which is given time to, as an inbound's move is.
+func (m *Monitor) checkRelay(st *persistentState, cfg AlertsConfig, n db.Node, hv nodesync.HealthView, moves bool, lang string) Level {
+	i := slices.IndexFunc(hv.Listeners, func(l nodeapi.ListenerStatus) bool { return l.Name == nodeapi.RelayListener })
+	if i < 0 {
+		return Healthy
+	}
+	l, level := hv.Listeners[i], Healthy
+	if !l.OK {
+		level = Unavailable
+	}
+	label := n.Name + " / " + relayLabel(lang)
+	m.observe(st, "relay/"+strconv.FormatInt(n.ID, 10), level, hv.CheckedAt, inboundFailAfter(l.Busy(), moves), 2, eventFor(cfg, "exit", label, level, lang))
+	return level
+}
+
+// relayLabel names the cascade relay in an alert, as the Nodes page does.
+func relayLabel(lang string) string {
+	if lang == "en" {
+		return "cascade relay"
+	}
+	return "служебный вход каскада"
+}
+
+// warpReason says in a line why the node's WARP check failed, so the alert is not just
+// "down". Codes come from the node (nodeapi.WarpStatus); the node's own detail is
+// English only, so it is the fallback for codes this panel does not know.
+func warpReason(s nodeapi.WarpStatus, endpoint, lang string) string {
+	ru := lang != "en"
+	var text string
+	switch s.Error {
+	case "timeout":
+		text = "no answer from the WARP endpoint " + endpoint + " over UDP: the host may block UDP, try another endpoint"
+		if ru {
+			text = "нет ответа от endpoint " + endpoint + " по UDP: возможно, хостер блокирует UDP, попробуйте другой endpoint"
+		}
+	case "https_timeout":
+		text = "the tunnel is up, but cloudflare.com did not answer in time"
+		if ru {
+			text = "туннель поднят, но cloudflare.com не ответил вовремя"
+		}
+	case "dns":
+		text = "WARP could not resolve a name"
+		if ru {
+			text = "WARP не смог разрешить имя"
+		}
+	case "tls":
+		text = "TLS error through WARP"
+		if ru {
+			text = "ошибка TLS через WARP"
+		}
+	case "refused":
+		text = "the connection was refused"
+		if ru {
+			text = "соединение отклонено"
+		}
+	case "not_loaded":
+		text = "WARP is not loaded on the node yet"
+		if ru {
+			text = "WARP ещё не загружен на ноде"
+		}
+	case "bad_answer":
+		text = "Cloudflare answered something unexpected"
+		if ru {
+			text = "Cloudflare ответил непонятно"
+		}
+	default:
+		text = s.Detail
+		if text == "" {
+			text = s.Error
+		}
+		if text == "" {
+			text = "check failed"
+			if ru {
+				text = "проверка не прошла"
+			}
+		}
+	}
+	if ru {
+		return "Причина: " + text
+	}
+	return "Reason: " + text
+}
+
 func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
 	for _, n := range nodes {
 		if n.Enabled == 0 || levels[n.ID] == Unavailable {
@@ -499,7 +617,7 @@ func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg Alerts
 		if err != nil || w.Enabled == 0 {
 			continue
 		}
-		s, err := m.runtime.Warp(ctx, n.ID)
+		s, err := m.runtime.Warp(ctx, n.ID, false)
 		if err != nil || s.CheckedAt.IsZero() {
 			continue
 		}
@@ -507,7 +625,11 @@ func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg Alerts
 		if !s.OK {
 			level = Degraded
 		}
-		m.observe(st, "warp/"+strconv.FormatInt(n.ID, 10), level, s.CheckedAt, 2, 2, eventFor(cfg, "warp", n.Name+" / WARP", level, lang))
+		text := eventFor(cfg, "warp", n.Name+" / WARP", level, lang)
+		if text != "" && level == Degraded {
+			text += "\n" + html.EscapeString(warpReason(s, w.Endpoint, lang))
+		}
+		m.observe(st, "warp/"+strconv.FormatInt(n.ID, 10), level, s.CheckedAt, 2, 2, text)
 		if level != Healthy {
 			levels[n.ID] = Degraded
 		}
@@ -679,6 +801,52 @@ func (m *Monitor) checkUpdate(st *persistentState, cfg AlertsConfig, lang string
 		text += " (" + html.EscapeString(s.From) + " → " + html.EscapeString(s.Version) + ")"
 	}
 	st.Pending = appendPending(st.Pending, delivery{Key: "update/" + s.At, Target: "admin", Text: text})
+}
+
+// checkNodeUpdates tells about each failed update of a node once, by the time it was asked
+// for. The panel stops its rollout at the failure; the admin decides what to do next.
+func (m *Monitor) checkNodeUpdates(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes map[int64]db.Node, lang string) {
+	if m.nodeUpdates == nil || !cfg.Events.Update {
+		return
+	}
+	failures := m.nodeUpdates.Failures(ctx)
+	for _, f := range failures {
+		n, ok := nodes[f.NodeID]
+		id := strconv.FormatInt(f.NodeID, 10)
+		if !ok || st.NodeUpdateAt[id] == f.At {
+			continue
+		}
+		if st.NodeUpdateAt == nil {
+			st.NodeUpdateAt = map[string]int64{}
+		}
+		st.NodeUpdateAt[id] = f.At
+		text := "🔴 <b>Ошибка обновления ноды</b> " + html.EscapeString(n.Name)
+		if lang == "en" {
+			text = "🔴 <b>Node update failed</b> " + html.EscapeString(n.Name)
+		}
+		if f.Error != "" {
+			text += ": " + html.EscapeString(f.Error)
+		}
+		if f.From != "" {
+			text += " (" + html.EscapeString(f.From) + " → " + html.EscapeString(f.Version) + ")"
+		}
+		if lang == "en" {
+			text += ". The rollout to the other nodes is stopped; the node can be updated again from the Nodes page."
+		} else {
+			text += ". Обновление остальных нод остановлено; ноду можно обновить снова на странице «Ноды»."
+		}
+		st.Pending = appendPending(st.Pending, delivery{Key: "node-update/" + id + "/" + strconv.FormatInt(f.At, 10), Target: "admin", Text: text})
+	}
+	// A node that was removed, or whose failure is gone, is not remembered.
+	for id := range st.NodeUpdateAt {
+		found := false
+		for _, f := range failures {
+			found = found || strconv.FormatInt(f.NodeID, 10) == id
+		}
+		if !found {
+			delete(st.NodeUpdateAt, id)
+		}
+	}
 }
 
 func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node,
@@ -1009,4 +1177,48 @@ func PublicTextEN(name string, level Level) string {
 		icon, label = "🔴", "Unavailable"
 	}
 	return icon + " " + name + " — " + label
+}
+
+// torrentShown is how many catches one message lists; the rest are counted.
+const torrentShown = 10
+
+// torrentEvents tells the admin about the torrent blocker's new catches: one message a
+// round, so a wave of them does not flood the chat.
+func (m *Monitor) torrentEvents(ctx context.Context, st *persistentState, cfg AlertsConfig, lang string) {
+	hits, err := m.store.Q.TorrentHitsAfter(ctx, db.TorrentHitsAfterParams{ID: st.TorrentCursor, Limit: 200})
+	if err != nil {
+		m.logError("infrastructure alerts: torrent hits", err)
+		return
+	}
+	if len(hits) == 0 {
+		return
+	}
+	st.TorrentCursor = hits[len(hits)-1].ID
+	if !cfg.Events.Torrent {
+		return
+	}
+	title, banned, more := "🧲 <b>Пойман торрент</b>", "бан до %s UTC", "и ещё %d"
+	if lang == "en" {
+		title, banned, more = "🧲 <b>Torrent caught</b>", "banned until %s UTC", "and %d more"
+	}
+	var b strings.Builder
+	b.WriteString(title)
+	for i, h := range hits {
+		if i == torrentShown {
+			b.WriteString("\n" + fmt.Sprintf(more, len(hits)-torrentShown))
+			break
+		}
+		b.WriteString("\n• <b>" + html.EscapeString(h.UserName) + "</b>: ")
+		if h.NodeName != "" {
+			b.WriteString(html.EscapeString(h.NodeName) + ", ")
+		}
+		b.WriteString(html.EscapeString(h.Kind) + " → " + html.EscapeString(h.Dest) + " (" + html.EscapeString(h.Ip) + ")")
+		if h.Hits > 1 {
+			b.WriteString(" ×" + strconv.Itoa(int(h.Hits)))
+		}
+		if h.BannedUntil > 0 {
+			b.WriteString(", " + fmt.Sprintf(banned, time.Unix(h.BannedUntil, 0).UTC().Format("02.01 15:04")))
+		}
+	}
+	st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("torrent/%d", st.TorrentCursor), Target: "admin", Text: b.String()})
 }

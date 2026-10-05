@@ -148,6 +148,16 @@ func (s *Service) checkUser(ctx context.Context, q *db.Queries, p db.PromoCode, 
 	return nil
 }
 
+// Check returns a code the account may use, without an order: a bonus is redeemed right
+// after it, a discount is checked against the price at the checkout (Validate).
+func (s *Service) Check(ctx context.Context, tgID, userID int64, code string) (db.PromoCode, error) {
+	p, err := s.load(ctx, code)
+	if err != nil {
+		return p, err
+	}
+	return p, s.checkUser(ctx, s.Store.Q, p, tgID, userID, s.Now())
+}
+
 // Validate returns the current code and a human-readable machine status without consuming it.
 // It is used by the Mini App before the actual action/payment.
 func (s *Service) Validate(ctx context.Context, tgID, userID, tariffID, amount int64, currency, code string) (db.PromoCode, error) {
@@ -385,6 +395,24 @@ func (s *Service) ReleasePayment(ctx context.Context, paymentID int64) error {
 		_, err = q.DecrementPromoUse(ctx, r.PromoID)
 		return err
 	})
+}
+
+// ReleaseApplied gives back the use of a code whose payment was applied and then refunded,
+// on q's transaction (the refund's). It says whether the payment had a code to give back.
+func (s *Service) ReleaseApplied(ctx context.Context, q *db.Queries, paymentID int64) (bool, error) {
+	r, err := q.GetPromoRedemptionByPayment(ctx, sql.NullInt64{Int64: paymentID, Valid: paymentID != 0})
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	n, err := q.ReleaseAppliedPromoRedemption(ctx, r.ID)
+	if err != nil || n == 0 {
+		return false, err
+	}
+	_, err = q.DecrementPromoUse(ctx, r.PromoID)
+	return err == nil, err
 }
 
 func (s *Service) ReleaseExpired(ctx context.Context, before int64) error {

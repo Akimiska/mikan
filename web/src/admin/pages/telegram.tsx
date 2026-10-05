@@ -218,6 +218,7 @@ function InfrastructureCard({ v, draft, setDraft, dirty }: { v: View; draft: Sch
         {([
           ["node", "eventNode"], ["warp", "eventWarp"], ["exit", "eventExit"], ["inbound", "eventInbound"],
           ["autotune", "eventAutotune"], ["autotune_recovery", "eventAutotuneRecovery"], ["tls", "eventTLS"], ["update", "eventUpdate"],
+          ["torrent", "eventTorrent"],
         ] as const).map(([key, label]) => <div key={key} className="panel-soft flex items-center justify-between gap-3 rounded-xl p-3"><span className="text-sm leading-5">{t(`telegram.infra.${label}`)}</span><Switch checked={draft.events[key]} label={t(`telegram.infra.${label}`)} onChange={(on) => event(key, on)} /></div>)}
       </div>
       <div className="mt-5 flex justify-end"><Button variant="primary" loading={patch.isPending} disabled={!dirty} onClick={save}>{t("common.save")}</Button></div>

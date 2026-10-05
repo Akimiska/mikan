@@ -180,6 +180,8 @@ type Message struct {
 	Text      string `json:"text"`
 	// SuccessfulPayment: a Stars invoice was paid (a service message from Telegram).
 	SuccessfulPayment *SuccessfulPayment `json:"successful_payment"`
+	// RefundedPayment: a Stars payment was refunded (a service message from Telegram).
+	RefundedPayment *RefundedPayment `json:"refunded_payment"`
 }
 
 type CallbackQuery struct {
@@ -320,6 +322,15 @@ func (c *Client) SetMenuButton(ctx context.Context, text, url string) error {
 
 // SuccessfulPayment is what Telegram reports after a Stars payment.
 type SuccessfulPayment struct {
+	Currency       string `json:"currency"`
+	TotalAmount    int64  `json:"total_amount"`
+	InvoicePayload string `json:"invoice_payload"`
+	ChargeID       string `json:"telegram_payment_charge_id"`
+}
+
+// RefundedPayment is what Telegram reports after a Stars payment is refunded, by the bot
+// or by Telegram itself.
+type RefundedPayment struct {
 	Currency       string `json:"currency"`
 	TotalAmount    int64  `json:"total_amount"`
 	InvoicePayload string `json:"invoice_payload"`

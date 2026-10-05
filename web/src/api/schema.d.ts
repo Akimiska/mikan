@@ -498,6 +498,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Порядок серверов в подписке */
+        put: operations["order-nodes"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/update-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Обновить отстающие ноды до версии панели, по одной */
+        post: operations["update-nodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}": {
         parameters: {
             query?: never;
@@ -563,6 +597,63 @@ export interface paths {
         put?: never;
         /** Выпустить новый ключ ноды (старый перестаёт работать) */
         post: operations["rekey-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/speedtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Проверить скорость ноды
+         * @description Задержка, разброс и потери по 20 DNS-запросам к 1.1.1.1, затем загрузка и отдача через speed.cloudflare.com: каждое до 8 секунд или до лимита объёма, что наступит раньше, не больше 250 МБ на загрузку и 100 МБ на отдачу. Занимает около 20 секунд; пользователи ноды могут почувствовать нагрузку на время теста. Одновременно на ноде идёт один тест, на одну ноду не чаще раза в 5 минут (иначе 429 speed_test_cooldown).
+         */
+        post: operations["run-node-speedtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/speedtests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * История проверок скорости ноды
+         * @description Новые сверху; хранятся последние 100.
+         */
+        get: operations["list-node-speedtests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Обновить ноду до версии панели */
+        post: operations["update-node-version"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1081,6 +1172,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/torrent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Блокировка торрентов */
+        get: operations["get-torrent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Настроить блокировку торрентов */
+        patch: operations["update-torrent"];
+        trace?: never;
+    };
+    "/api/v1/torrent/hits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Пойманные торренты
+         * @description Новые сверху; следующая страница — before=id последней записи.
+         */
+        get: operations["list-torrent-hits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/updates": {
         parameters: {
             query?: never;
@@ -1337,6 +1466,23 @@ export interface paths {
         post?: never;
         /** Отвязать подписку от Telegram */
         delete: operations["unlink-telegram"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/torrent-ban/lift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Снять торрент-бан пользователя */
+        post: operations["lift-torrent-ban"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1639,15 +1785,16 @@ export interface components {
              */
             outbound: "direct" | "warp" | "node";
         };
-        CascadeView: {
-            /** @description Ноды, через которые эта нода выпускает трафик */
-            exits: components["schemas"]["CascadeExit"][];
-            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
-            relay?: components["schemas"]["CascadeViewRelayStruct"];
-        };
-        CascadeViewRelayStruct: {
+        CascadeRelay: {
+            /** @description Почему служебный вход не запустился, как сказала нода */
+            error?: string;
             /** Format: int64 */
             exit_node_id?: number;
+            /**
+             * @description Слушает ли нода порт служебного входа: busy, если порт занят другой программой
+             * @enum {string}
+             */
+            listener: "ok" | "busy" | "failed" | "unknown";
             /**
              * @description Куда эта нода выпускает их трафик
              * @enum {string}
@@ -1656,6 +1803,12 @@ export interface components {
             port: string;
             /** @description Ноды, которые выходят через эту */
             sources: components["schemas"]["CascadeHop"][];
+        };
+        CascadeView: {
+            /** @description Ноды, через которые эта нода выпускает трафик */
+            exits: components["schemas"]["CascadeExit"][];
+            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
+            relay?: components["schemas"]["CascadeRelay"];
         };
         CertInputBody: {
             /** @description Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem) */
@@ -1825,6 +1978,7 @@ export interface components {
             inbound: boolean;
             node: boolean;
             tls: boolean;
+            torrent: boolean;
             update: boolean;
             warp: boolean;
         };
@@ -1835,6 +1989,7 @@ export interface components {
             inbound?: boolean;
             node?: boolean;
             tls?: boolean;
+            torrent?: boolean;
             update?: boolean;
             warp?: boolean;
         };
@@ -2028,6 +2183,14 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        LegacyLinks: {
+            /** @description Старые ссылки сейчас открываются: задан их путь, а для подписанных ещё и секрет старой панели */
+            active: boolean;
+            /** @description Из какой панели: marzban, pasarguard или remnawave */
+            source: string;
+            /** @description Ссылка целиком. Только у Remnawave: токен Marzban и PasarGuard подписан, импорт его не видел и не хранит, а ссылки, что уже у людей, проверяются по подписи */
+            url?: string;
+        };
         LegacyView: {
             /** @description Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам */
             kind: string;
@@ -2040,6 +2203,13 @@ export interface components {
             path: string;
             /** @description Секрет старой панели задан; сам он не возвращается */
             secret_set: boolean;
+        };
+        LiftTorrentOutputBody: {
+            /**
+             * Format: int64
+             * @description Сколько банов снято
+             */
+            lifted: number;
         };
         List: {
             /**
@@ -2109,6 +2279,10 @@ export interface components {
         NodeInfo: {
             /** @description host:port API ноды; пусто у своей ноды */
             address: string;
+            /** @description Нода старее панели */
+            behind: boolean;
+            /** @description Панель может обновить ноду сама: удалённая, отвечает, версия 0.5.0.2 или новее; старую обновляют один раз вручную командой mikan update на её сервере */
+            can_update: boolean;
             certificate?: components["schemas"]["NodeCertView"];
             /** Format: date-time */
             checked_at?: string;
@@ -2141,6 +2315,8 @@ export interface components {
             public_name: string;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
+            /** @description Как идёт или прошло обновление ноды */
+            update?: components["schemas"]["UpdateStatus"];
             version?: string;
         };
         NodeKeyOutputBody: {
@@ -2170,6 +2346,10 @@ export interface components {
             expired: boolean;
             traffic_100: boolean;
             traffic_90: boolean;
+        };
+        OrderNodesInputBody: {
+            /** @description Все ноды панели, каждая один раз, в том порядке, в каком их серверы идут в подписках */
+            ids: number[];
         };
         OverviewOutputBody: {
             /** Format: int64 */
@@ -2282,6 +2462,7 @@ export interface components {
         PatchInboundInputBody: {
             /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_port?: boolean;
+            /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_sni?: boolean;
             /** @description Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три */
             client?: components["schemas"]["ClientEndpoint"];
@@ -2378,6 +2559,8 @@ export interface components {
             sub_routing?: "ru_direct" | "all";
             /** @description Свои правила Clash, до 500 строк; ошибка указывает номер строки */
             sub_rules?: string;
+            /** @description Переменные — см. SettingsView.sub_title */
+            sub_title?: string;
             /** @description https://… или tg://… */
             support_url?: string;
         };
@@ -2390,10 +2573,18 @@ export interface components {
             /** @description Токен от @BotFather; пустая строка — удалить */
             token?: string;
         };
+        PatchTorrentInputBody: {
+            /** Format: int64 */
+            ban_minutes?: number;
+            enabled?: boolean;
+            /** @description Весь список id пользователей-исключений */
+            exempt?: number[];
+        };
         PatchUpdatesInputBody: {
             auto?: boolean;
             /** @enum {string} */
             channel?: "stable" | "beta";
+            nodes_follow?: boolean;
         };
         PatchUserInputBody: {
             /**
@@ -2517,6 +2708,8 @@ export interface components {
             name: string;
         };
         PoolLimit: {
+            /** @description Пул закрыт: его подключений нет в подписке, ноды их не пускают, пакеты трафика пула не продаются; traffic_limit тогда не важен */
+            excluded?: boolean;
             /** Format: int64 */
             pool_id: number;
             /**
@@ -2569,7 +2762,7 @@ export interface components {
         };
         PromoBody: {
             code: string;
-            /** @description Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется. */
+            /** @description Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для percent: пусто — любая валюта, тогда min_order и max_discount равны 0. Для остальных типов не используется. */
             currency: string;
             description: string;
             /**
@@ -2820,7 +3013,7 @@ export interface components {
             quiet_hour_utc: number;
             /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
             rule_targets: string[];
-            /** @description Объявление над профилем в приложениях (заголовок announce); пусто — нет */
+            /** @description Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title */
             sub_announce: string;
             /** @description Куда ведёт нажатие на объявление */
             sub_announce_url: string;
@@ -2843,7 +3036,42 @@ export interface components {
             sub_routing: "ru_direct" | "all";
             /** @description Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий */
             sub_rules: string;
+            /** @description Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего; без срока или лимита — ∞ */
+            sub_title: string;
             support_url: string;
+        };
+        SpeedTestView: {
+            /** Format: date-time */
+            at: string;
+            /**
+             * Format: int64
+             * @description Загрузка, бит/с
+             */
+            down_bps: number;
+            /** @description Где тест оборвался; измеренное до того сохранено */
+            error?: string;
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: double
+             * @description Средний разброс задержки, мс
+             */
+            jitter_ms: number;
+            /**
+             * Format: double
+             * @description Потери, %
+             */
+            loss_pct: number;
+            /**
+             * Format: double
+             * @description Медиана задержки, мс; -1 если ответов не было
+             */
+            ping_ms: number;
+            /**
+             * Format: int64
+             * @description Отдача, бит/с
+             */
+            up_bps: number;
         };
         Status: {
             /** Format: date-time */
@@ -2929,7 +3157,7 @@ export interface components {
             name: string;
             /** @description Продаётся в боте и Mini App */
             on_sale: boolean;
-            /** @description Лимиты пулов трафика; пул не в списке — без лимита */
+            /** @description Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается */
             pools: components["schemas"]["PoolLimit"][];
             price_label: string;
             /**
@@ -3085,6 +3313,64 @@ export interface components {
             id: number;
             name: string;
         };
+        TorrentHitView: {
+            /** Format: date-time */
+            at: string;
+            /**
+             * Format: date-time
+             * @description До какого времени бан; null — без бана
+             */
+            banned_until: string | null;
+            /** @description Куда шло соединение */
+            dest: string;
+            /**
+             * Format: int32
+             * @description Сколько попыток за раз: нода сообщает о пользователе не чаще раза в минуту
+             */
+            hits: number;
+            /** Format: int64 */
+            id: number;
+            inbound: string;
+            /** @description Адрес, с которого подключался пользователь */
+            ip: string;
+            /**
+             * @description Что распознано
+             * @enum {string}
+             */
+            kind: "handshake" | "tracker" | "dht" | "utp";
+            /**
+             * Format: date-time
+             * @description Когда администратор снял бан
+             */
+            lifted_at: string | null;
+            /** @enum {string} */
+            network: "tcp" | "udp";
+            /**
+             * Format: int64
+             * @description null — нода удалена
+             */
+            node_id: number | null;
+            node_name: string;
+            /** Format: int64 */
+            user_id: number;
+            user_name: string;
+        };
+        TorrentUser: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        TorrentView: {
+            /**
+             * Format: int64
+             * @description На сколько минут пойманный пользователь теряет доступ ко всем нодам; 0 — только сбросить соединение
+             */
+            ban_minutes: number;
+            /** @description Ноды распознают BitTorrent (рукопожатие, DHT, uTP, трекеры) и не пропускают его. Зашифрованный торрент не распознаётся */
+            enabled: boolean;
+            /** @description Пользователи, которых блокировщик не трогает */
+            exempt: components["schemas"]["TorrentUser"][];
+        };
         TotpCodeInputBody: {
             code: string;
         };
@@ -3111,6 +3397,15 @@ export interface components {
             /** Format: int64 */
             up: number;
         };
+        UpdateStatus: {
+            /** @description RFC 3339 */
+            at: string;
+            error?: string;
+            from: string;
+            /** @enum {string} */
+            state: "running" | "ok" | "failed";
+            version: string;
+        };
         UpdatesView: {
             /** @description Сервер сам ставит новые релизы раз в сутки, ночью */
             auto: boolean;
@@ -3135,6 +3430,8 @@ export interface components {
             latest: string;
             /** @description Новейший релиз канала, если обновление идёт к нему через latest или до него отсюда не добраться; иначе пусто */
             newest: string;
+            /** @description Удалённые ноды следуют за панелью: после её обновления панель обновляет их до своей версии, по одной */
+            nodes_follow: boolean;
             /** @description Что изменилось: markdown по языкам, en и ru */
             notes: {
                 [key: string]: string;
@@ -3164,6 +3461,8 @@ export interface components {
             limited: number;
         };
         UserPoolView: {
+            /** @description Пул закрыт для пользователя: его подключений нет в подписке, ноды их не пускают */
+            excluded: boolean;
             /** @description Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса */
             exhausted: boolean;
             /**
@@ -3193,6 +3492,11 @@ export interface components {
              * @description День месяца, в который заканчивается срок (1–31); null — продление днями
              */
             billing_day: number | null;
+            /**
+             * Format: int64
+             * @description Привязанные устройства: с привязкой это занятые места
+             */
+            bound_devices: number;
             contact: string;
             /** Format: date-time */
             created_at: string;
@@ -3204,6 +3508,8 @@ export interface components {
             id: number;
             /** @description Разрешённые подключения; пусто — все */
             inbounds: number[];
+            /** @description Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка */
+            legacy?: components["schemas"]["LegacyLinks"];
             name: string;
             note: string;
             online: boolean;
@@ -3225,6 +3531,11 @@ export interface components {
             tariff_id: number | null;
             /** @description Только в карточке пользователя */
             telegram?: components["schemas"]["TelegramLink"];
+            /**
+             * Format: date-time
+             * @description До какого времени действует бан блокировщика торрентов; null — бана нет
+             */
+            torrent_ban: string | null;
             /** Format: int64 */
             total_down: number;
             /** Format: int64 */
@@ -3254,6 +3565,20 @@ export interface components {
             network: string;
             type: string;
         };
+        WarpCheck: {
+            /** Format: date-time */
+            checked_at: string;
+            colo?: string;
+            /** @description Причина словами, без секретов; на английском */
+            detail?: string;
+            /** @description Причина: timeout | dns | tls | refused | not_loaded | bad_answer | https_timeout | failed; node_unreachable — нода не ответила панели; unreachable — старая нода */
+            error?: string;
+            /** @description Адрес, который видят сайты */
+            ip?: string;
+            ok: boolean;
+            /** @description on | plus | off — как отвечает Cloudflare */
+            warp?: string;
+        };
         WarpImportInputBody: {
             /** @description WireGuard-конфиг WARP: wgcf, warp-plus или экспорт приложения */
             config: string;
@@ -3277,25 +3602,16 @@ export interface components {
             inbounds: string[];
             ipv4?: string;
             ipv6?: string;
+            /** @description Свой конфиг без Reserved: на части endpoint'ов Cloudflare молча не отвечает на handshake */
+            no_reserved?: boolean;
             /** @description Аккаунт WARP+ */
             plus: boolean;
             /** @description Домены и сети, которые идут через WARP у всех подключений ноды */
             routes: string[];
             /** @enum {string} */
             source?: "register" | "import" | "";
-            /** @description Последняя проверка выхода через WARP с ноды; нет — нода недоступна */
-            status?: components["schemas"]["WarpViewStatusStruct"];
-        };
-        WarpViewStatusStruct: {
-            /** Format: date-time */
-            checked_at: string;
-            colo?: string;
-            error?: string;
-            /** @description Адрес, который видят сайты */
-            ip?: string;
-            ok: boolean;
-            /** @description on | plus | off — как отвечает Cloudflare */
-            warp?: string;
+            /** @description Последняя проверка выхода через WARP с ноды; нет — у ноды ещё нет настроенного WARP */
+            status?: components["schemas"]["WarpCheck"];
         };
     };
     responses: never;
@@ -4365,6 +4681,66 @@ export interface operations {
             };
         };
     };
+    "order-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderNodesInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "delete-node": {
         parameters: {
             query?: never;
@@ -4590,9 +4966,107 @@ export interface operations {
             };
         };
     };
-    "get-node-warp": {
+    "run-node-speedtest": {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeedTestView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-node-speedtests": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpeedTestView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-node-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-node-warp": {
+        parameters: {
+            query?: {
+                /** @description Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд) */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 id: number;
@@ -5996,6 +6470,103 @@ export interface operations {
             };
         };
     };
+    "get-torrent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TorrentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-torrent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchTorrentInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TorrentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-torrent-hits": {
+        parameters: {
+            query?: {
+                /** @description Только этого пользователя */
+                user_id?: number;
+                /** @description Страница: записи с id меньше этого */
+                before?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TorrentHitView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-updates": {
         parameters: {
             query?: never;
@@ -6649,6 +7220,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "lift-torrent-ban": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiftTorrentOutputBody"];
+                };
             };
             /** @description Error */
             default: {

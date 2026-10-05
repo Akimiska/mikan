@@ -30,7 +30,7 @@ const stateKey = "monitor"
 
 type Runtime interface {
 	Health(id int64) (nodesync.HealthView, bool)
-	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
+	Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error)
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 }
 
@@ -508,6 +508,66 @@ func eventFor(c AlertsConfig, event, name string, level Level, lang string) stri
 	return icon + " <b>" + html.EscapeString(name) + "</b> — " + state
 }
 
+// warpReason says in a line why the node's WARP check failed, so the alert is not just
+// "down". Codes come from the node (nodeapi.WarpStatus); the node's own detail is
+// English only, so it is the fallback for codes this panel does not know.
+func warpReason(s nodeapi.WarpStatus, endpoint, lang string) string {
+	ru := lang != "en"
+	var text string
+	switch s.Error {
+	case "timeout":
+		text = "no answer from the WARP endpoint " + endpoint + " over UDP: the host may block UDP, try another endpoint"
+		if ru {
+			text = "нет ответа от endpoint " + endpoint + " по UDP: возможно, хостер блокирует UDP, попробуйте другой endpoint"
+		}
+	case "https_timeout":
+		text = "the tunnel is up, but cloudflare.com did not answer in time"
+		if ru {
+			text = "туннель поднят, но cloudflare.com не ответил вовремя"
+		}
+	case "dns":
+		text = "WARP could not resolve a name"
+		if ru {
+			text = "WARP не смог разрешить имя"
+		}
+	case "tls":
+		text = "TLS error through WARP"
+		if ru {
+			text = "ошибка TLS через WARP"
+		}
+	case "refused":
+		text = "the connection was refused"
+		if ru {
+			text = "соединение отклонено"
+		}
+	case "not_loaded":
+		text = "WARP is not loaded on the node yet"
+		if ru {
+			text = "WARP ещё не загружен на ноде"
+		}
+	case "bad_answer":
+		text = "Cloudflare answered something unexpected"
+		if ru {
+			text = "Cloudflare ответил непонятно"
+		}
+	default:
+		text = s.Detail
+		if text == "" {
+			text = s.Error
+		}
+		if text == "" {
+			text = "check failed"
+			if ru {
+				text = "проверка не прошла"
+			}
+		}
+	}
+	if ru {
+		return "Причина: " + text
+	}
+	return "Reason: " + text
+}
+
 func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
 	for _, n := range nodes {
 		if n.Enabled == 0 || levels[n.ID] == Unavailable {
@@ -517,7 +577,7 @@ func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg Alerts
 		if err != nil || w.Enabled == 0 {
 			continue
 		}
-		s, err := m.runtime.Warp(ctx, n.ID)
+		s, err := m.runtime.Warp(ctx, n.ID, false)
 		if err != nil || s.CheckedAt.IsZero() {
 			continue
 		}
@@ -525,7 +585,11 @@ func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg Alerts
 		if !s.OK {
 			level = Degraded
 		}
-		m.observe(st, "warp/"+strconv.FormatInt(n.ID, 10), level, s.CheckedAt, 2, 2, eventFor(cfg, "warp", n.Name+" / WARP", level, lang))
+		text := eventFor(cfg, "warp", n.Name+" / WARP", level, lang)
+		if text != "" && level == Degraded {
+			text += "\n" + html.EscapeString(warpReason(s, w.Endpoint, lang))
+		}
+		m.observe(st, "warp/"+strconv.FormatInt(n.ID, 10), level, s.CheckedAt, 2, 2, text)
 		if level != Healthy {
 			levels[n.ID] = Degraded
 		}

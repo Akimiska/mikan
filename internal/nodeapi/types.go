@@ -328,13 +328,17 @@ type Warp struct {
 
 // WarpStatus is the node's last look at the internet through WARP.
 type WarpStatus struct {
-	Configured bool      `json:"configured"`
-	OK         bool      `json:"ok"`
-	IP         string    `json:"ip,omitempty"`   // the address sites see
-	Warp       string    `json:"warp,omitempty"` // on | plus | off, as Cloudflare says
-	Colo       string    `json:"colo,omitempty"` // Cloudflare's data center
-	Error      string    `json:"error,omitempty"`
-	CheckedAt  time.Time `json:"checked_at"`
+	Configured bool   `json:"configured"`
+	OK         bool   `json:"ok"`
+	IP         string `json:"ip,omitempty"`   // the address sites see
+	Warp       string `json:"warp,omitempty"` // on | plus | off, as Cloudflare says
+	Colo       string `json:"colo,omitempty"` // Cloudflare's data center
+	// Error is a stable code: timeout | dns | tls | refused | not_loaded | bad_answer |
+	// https_timeout | failed. Detail says the same in words for the admin (no secrets).
+	// Older nodes send the code "unreachable" and no detail.
+	Error     string    `json:"error,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
 }
 
 // RelayListener names the relay's listener. It cannot clash with an inbound: their

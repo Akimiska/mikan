@@ -3526,6 +3526,20 @@ export interface components {
             network: string;
             type: string;
         };
+        WarpCheck: {
+            /** Format: date-time */
+            checked_at: string;
+            colo?: string;
+            /** @description Причина словами, без секретов; на английском */
+            detail?: string;
+            /** @description Причина: timeout | dns | tls | refused | not_loaded | bad_answer | https_timeout | failed; node_unreachable — нода не ответила панели; unreachable — старая нода */
+            error?: string;
+            /** @description Адрес, который видят сайты */
+            ip?: string;
+            ok: boolean;
+            /** @description on | plus | off — как отвечает Cloudflare */
+            warp?: string;
+        };
         WarpImportInputBody: {
             /** @description WireGuard-конфиг WARP: wgcf, warp-plus или экспорт приложения */
             config: string;
@@ -3549,25 +3563,16 @@ export interface components {
             inbounds: string[];
             ipv4?: string;
             ipv6?: string;
+            /** @description Свой конфиг без Reserved: на части endpoint'ов Cloudflare молча не отвечает на handshake */
+            no_reserved?: boolean;
             /** @description Аккаунт WARP+ */
             plus: boolean;
             /** @description Домены и сети, которые идут через WARP у всех подключений ноды */
             routes: string[];
             /** @enum {string} */
             source?: "register" | "import" | "";
-            /** @description Последняя проверка выхода через WARP с ноды; нет — нода недоступна */
-            status?: components["schemas"]["WarpViewStatusStruct"];
-        };
-        WarpViewStatusStruct: {
-            /** Format: date-time */
-            checked_at: string;
-            colo?: string;
-            error?: string;
-            /** @description Адрес, который видят сайты */
-            ip?: string;
-            ok: boolean;
-            /** @description on | plus | off — как отвечает Cloudflare */
-            warp?: string;
+            /** @description Последняя проверка выхода через WARP с ноды; нет — у ноды ещё нет настроенного WARP */
+            status?: components["schemas"]["WarpCheck"];
         };
     };
     responses: never;
@@ -4988,7 +4993,10 @@ export interface operations {
     };
     "get-node-warp": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд) */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 id: number;

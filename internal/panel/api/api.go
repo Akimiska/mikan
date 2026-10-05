@@ -113,8 +113,8 @@ type NodeRuntime interface {
 	NodesChanged()
 	// ScanTargets looks for REALITY targets from the node itself (its RTTs, its routes).
 	ScanTargets(ctx context.Context, id int64, req nodeapi.TargetScanRequest) (nodeapi.TargetScan, error)
-	// Warp checks the node's way out through WARP.
-	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
+	// Warp checks the node's way out through WARP; force skips the node's cached answer.
+	Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error)
 	// Probe checks the internet through one outbound of a node (NODE-<id> of a cascade).
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 	// SpeedTest measures a node's own way to the internet.

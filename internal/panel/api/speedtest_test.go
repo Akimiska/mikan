@@ -28,6 +28,15 @@ type speedNodes struct {
 	hook func(ctx context.Context)
 	// ctxErr is that context's error when the call returned.
 	ctxErr error
+	// warp and warpErr answer Warp; warpForce notes the force flag of each call.
+	warp      nodeapi.WarpStatus
+	warpErr   error
+	warpForce []bool
+}
+
+func (n *speedNodes) Warp(_ context.Context, _ int64, force bool) (nodeapi.WarpStatus, error) {
+	n.warpForce = append(n.warpForce, force)
+	return n.warp, n.warpErr
 }
 
 func (n *speedNodes) SpeedTest(ctx context.Context, _ int64) (nodeapi.SpeedTest, error) {

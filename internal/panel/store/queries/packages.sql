@@ -71,3 +71,6 @@ SELECT * FROM payments
 WHERE tg_id = sqlc.arg(tg_id) AND package_id = sqlc.arg(package_id) AND provider = sqlc.arg(provider) AND kind = 'package' AND user_id = sqlc.arg(user_id)
   AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
 ORDER BY id DESC;
+
+-- name: DeleteGrantByPayment :execrows
+DELETE FROM traffic_grants WHERE payment_id = $1;

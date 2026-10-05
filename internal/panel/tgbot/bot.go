@@ -495,6 +495,8 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) error {
 		b.running.Go(func() { b.preCheckout(ctx, c, up.PreCheckoutQuery) })
 	case up.Message != nil && up.Message.SuccessfulPayment != nil && up.Message.Chat.Type == "private":
 		return b.starsPaid(ctx, up.Message)
+	case up.Message != nil && up.Message.RefundedPayment != nil && up.Message.Chat.Type == "private":
+		return b.starsRefunded(ctx, up.Message)
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil && up.CallbackQuery.Message.Chat.Type == "private":
 		if cmd, _, _ := strings.Cut(up.CallbackQuery.Data, ":"); cmd == "ta" || cmd == "tx" {
 			b.onTransfer(ctx, c, out, up.CallbackQuery)

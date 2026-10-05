@@ -33,6 +33,15 @@ type fakeTG struct {
 	refunds   []string
 	refundErr error
 	invoices  int
+	refunded  []refundNote
+	onRefund  func() // runs after Telegram accepted a refund
+}
+
+// refundNote is what the buyer was told about a refund.
+type refundNote struct {
+	p        db.Payment
+	u        db.User
+	disabled bool
 }
 
 func (f *fakeTG) InvoiceLink(_ context.Context, _, _, payload string, stars int64) (string, error) {
@@ -47,6 +56,9 @@ func (f *fakeTG) RefundStars(_ context.Context, _ int64, charge string) error {
 	if f.refundErr != nil {
 		return f.refundErr
 	}
+	if f.onRefund != nil {
+		f.onRefund()
+	}
 	f.refunds = append(f.refunds, charge)
 	return nil
 }
@@ -54,6 +66,16 @@ func (f *fakeTG) Paid(_ context.Context, p db.Payment, _ db.User, _ bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.paid = append(f.paid, p)
+}
+func (f *fakeTG) Refunded(_ context.Context, p db.Payment, u db.User, disabled bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refunded = append(f.refunded, refundNote{p, u, disabled})
+}
+func (f *fakeTG) refundNotes() []refundNote {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]refundNote(nil), f.refunded...)
 }
 func (f *fakeTG) BotURL(context.Context) string { return "https://t.me/mikan_test_bot" }
 func (f *fakeTG) told() int {
@@ -391,11 +413,16 @@ func TestStarsNewSubscription(t *testing.T) {
 		t.Fatal("an applied invoice passed pre-checkout")
 	}
 	// Refund: Stars go back through the bot, the payment says so.
-	must(t, e.s.Refund(ctx, p.ID))
+	if _, err := e.s.Refund(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
 	if e.payment(p.ID).Status != "refunded" || len(e.tg.refunds) != 1 || e.tg.refunds[0] != "ch-1" {
 		t.Fatalf("refund: %+v %v", e.payment(p.ID), e.tg.refunds)
 	}
-	if err := e.s.Refund(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
+	if off, _ := e.st.Q.GetUser(ctx, got.UserID.Int64); off.Status != "disabled" {
+		t.Fatalf("the refunded subscription is %q", off.Status)
+	}
+	if _, err := e.s.Refund(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
 		t.Fatalf("second refund: %v", err)
 	}
 }

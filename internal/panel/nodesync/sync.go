@@ -757,19 +757,20 @@ func (s *Syncer) warp(ctx context.Context, n db.Node, inbounds []db.Inbound) (*n
 	return out, nil
 }
 
-// Warp asks the node how it reaches the internet through WARP.
-func (m *Manager) Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error) {
+// Warp asks the node how it reaches the internet through WARP; force skips the node's
+// minute-old answer.
+func (m *Manager) Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error) {
 	s, ok := m.Syncer(id)
 	if !ok {
 		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
 	}
 	c, ok := s.node.(interface {
-		Warp(ctx context.Context) (nodeapi.WarpStatus, error)
+		Warp(ctx context.Context, force bool) (nodeapi.WarpStatus, error)
 	})
 	if !ok {
 		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
 	}
-	return c.Warp(ctx)
+	return c.Warp(ctx, force)
 }
 
 // cascade is the node's part in cascades: its relay listener when other nodes leave

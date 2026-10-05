@@ -202,10 +202,16 @@ func (c *Client) ScanTargets(ctx context.Context, req TargetScanRequest) (Target
 	return r, err
 }
 
-// Warp checks the node's way out through WARP (a request to Cloudflare through it).
-func (c *Client) Warp(ctx context.Context) (WarpStatus, error) {
+// Warp checks the node's way out through WARP (a request to Cloudflare through it). The
+// node answers from a minute-old check unless force asks for a new one; it may still
+// answer from the cache when forced too often, and old nodes ignore force.
+func (c *Client) Warp(ctx context.Context, force bool) (WarpStatus, error) {
 	var r WarpStatus
-	err := c.do(ctx, http.MethodGet, "/v1/warp", nil, &r, 20*time.Second)
+	path := "/v1/warp"
+	if force {
+		path += "?force=1"
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &r, 20*time.Second)
 	return r, err
 }
 

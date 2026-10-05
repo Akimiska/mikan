@@ -5558,6 +5558,42 @@
         ],
         "type": "object"
       },
+      "WarpCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "colo": {
+            "type": "string"
+          },
+          "detail": {
+            "description": "Причина словами, без секретов; на английском",
+            "type": "string"
+          },
+          "error": {
+            "description": "Причина: timeout | dns | tls | refused | not_loaded | bad_answer | https_timeout | failed; node_unreachable — нода не ответила панели; unreachable — старая нода",
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес, который видят сайты",
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "warp": {
+            "description": "on | plus | off — как отвечает Cloudflare",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "checked_at"
+        ],
+        "type": "object"
+      },
       "WarpImportInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5631,6 +5667,10 @@
           "ipv6": {
             "type": "string"
           },
+          "no_reserved": {
+            "description": "Свой конфиг без Reserved: на части endpoint'ов Cloudflare молча не отвечает на handshake",
+            "type": "boolean"
+          },
           "plus": {
             "description": "Аккаунт WARP+",
             "type": "boolean"
@@ -5651,8 +5691,8 @@
             "type": "string"
           },
           "status": {
-            "$ref": "#/components/schemas/WarpViewStatusStruct",
-            "description": "Последняя проверка выхода через WARP с ноды; нет — нода недоступна"
+            "$ref": "#/components/schemas/WarpCheck",
+            "description": "Последняя проверка выхода через WARP с ноды; нет — у ноды ещё нет настроенного WARP"
           }
         },
         "required": [
@@ -5661,37 +5701,6 @@
           "plus",
           "routes",
           "inbounds"
-        ],
-        "type": "object"
-      },
-      "WarpViewStatusStruct": {
-        "additionalProperties": false,
-        "properties": {
-          "checked_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "colo": {
-            "type": "string"
-          },
-          "error": {
-            "type": "string"
-          },
-          "ip": {
-            "description": "Адрес, который видят сайты",
-            "type": "string"
-          },
-          "ok": {
-            "type": "boolean"
-          },
-          "warp": {
-            "description": "on | plus | off — как отвечает Cloudflare",
-            "type": "string"
-          }
-        },
-        "required": [
-          "ok",
-          "checked_at"
         ],
         "type": "object"
       }
@@ -7588,6 +7597,16 @@
               "format": "int64",
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд)",
+            "explode": false,
+            "in": "query",
+            "name": "force",
+            "schema": {
+              "description": "Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд)",
+              "type": "boolean"
             }
           }
         ],

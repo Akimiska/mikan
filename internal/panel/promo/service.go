@@ -387,6 +387,24 @@ func (s *Service) ReleasePayment(ctx context.Context, paymentID int64) error {
 	})
 }
 
+// ReleaseApplied gives back the use of a code whose payment was applied and then refunded,
+// on q's transaction (the refund's). It says whether the payment had a code to give back.
+func (s *Service) ReleaseApplied(ctx context.Context, q *db.Queries, paymentID int64) (bool, error) {
+	r, err := q.GetPromoRedemptionByPayment(ctx, sql.NullInt64{Int64: paymentID, Valid: paymentID != 0})
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	n, err := q.ReleaseAppliedPromoRedemption(ctx, r.ID)
+	if err != nil || n == 0 {
+		return false, err
+	}
+	_, err = q.DecrementPromoUse(ctx, r.PromoID)
+	return err == nil, err
+}
+
 func (s *Service) ReleaseExpired(ctx context.Context, before int64) error {
 	rows, err := s.Store.Q.ListExpiredPromoPayments(ctx, before)
 	if err != nil {

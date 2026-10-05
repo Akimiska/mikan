@@ -38,6 +38,9 @@ type words struct {
 
 	// Traffic packages.
 	buyTraffic, trafficTitle, payPackage, packageGone, paidPackage, plusPackages string
+
+	// A refund takes back what the payment gave.
+	refundedNew, refundedRenew, refundedPackage, refundedGone string
 }
 
 var ru = words{
@@ -109,6 +112,11 @@ var ru = words{
 	packageGone:  "Этот пакет больше не продаётся.",
 	paidPackage:  "✅ Оплата получена — пакет «%s» начислен на подписку «%s».",
 	plusPackages: "%s + пакеты %s",
+
+	refundedNew:     "↩️ Платёж за тариф «%s» возвращён. Подписка «%s» отключена.",
+	refundedRenew:   "↩️ Платёж за продление «%s» возвращён. Срок подписки «%s» уменьшен. Окончание: %s.",
+	refundedPackage: "↩️ Платёж за пакет «%s» возвращён. Трафик пакета снят с подписки «%s».",
+	refundedGone:    "↩️ Платёж за «%s» возвращён.",
 }
 
 var en = words{
@@ -180,6 +188,11 @@ var en = words{
 	packageGone:  "This package is no longer sold.",
 	paidPackage:  "✅ Payment received — package “%s” is added to subscription “%s”.",
 	plusPackages: "%s + packages %s",
+
+	refundedNew:     "↩️ The payment for plan “%s” is refunded. Subscription “%s” is turned off.",
+	refundedRenew:   "↩️ The payment for the renewal “%s” is refunded. The term of subscription “%s” is shortened. Ends: %s.",
+	refundedPackage: "↩️ The payment for package “%s” is refunded. Its traffic is taken off subscription “%s”.",
+	refundedGone:    "↩️ The payment for “%s” is refunded.",
 }
 
 func wordsFor(lang string) *words {

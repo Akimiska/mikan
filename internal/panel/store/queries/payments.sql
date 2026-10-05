@@ -84,3 +84,12 @@ FROM payments WHERE status = 'applied' AND applied_at >= $1 GROUP BY currency;
 
 -- name: ListTariffsOnSale :many
 SELECT * FROM tariffs WHERE archived = 0 AND on_sale = 1 ORDER BY sort, id;
+
+-- name: SetPaymentRevert :exec
+UPDATE payments SET revert = $1 WHERE id = $2;
+
+-- name: CountLaterTariffPayments :one
+-- Tariff payments of the user applied after the given one: they build on what it set.
+SELECT count(*) FROM payments
+WHERE user_id = sqlc.arg(user_id) AND status = 'applied' AND kind IN ('new', 'renew') AND id <> sqlc.arg(id)
+  AND (applied_at > CAST(sqlc.arg(applied_at) AS BIGINT) OR (applied_at = CAST(sqlc.arg(applied_at) AS BIGINT) AND id > sqlc.arg(id)));

@@ -1660,7 +1660,7 @@
     "refund": "Refund",
     "refunded": "Stars refunded",
     "refundTitle": "Refund {sum}?",
-    "refundText": "The Stars go back to the buyer. The subscription stays as it is — turn it off in the user card if needed.",
+    "refundText": "The Stars go back to the buyer, and the subscription or traffic this payment gave is taken back: a new subscription is turned off, a renewal loses its term, a traffic package is removed.",
     "settings": "Accepting payments",
     "settingsSub": "Keys stay in the panel and are never shown again.",
     "saved": "Payment settings saved",

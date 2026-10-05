@@ -718,6 +718,18 @@ func (q *Queries) PromoStats(ctx context.Context) (PromoStatsRow, error) {
 	return i, err
 }
 
+const releaseAppliedPromoRedemption = `-- name: ReleaseAppliedPromoRedemption :execrows
+UPDATE promo_redemptions SET status='released' WHERE id=$1 AND status='applied'
+`
+
+func (q *Queries) ReleaseAppliedPromoRedemption(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseAppliedPromoRedemption, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const releaseExpiredPromoRedemption = `-- name: ReleaseExpiredPromoRedemption :execrows
 UPDATE promo_redemptions SET status='released' WHERE promo_redemptions.id=$1 AND promo_redemptions.status='reserved' AND (promo_redemptions.expires_at IS NOT NULL AND promo_redemptions.expires_at<=$2 AND EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('pending','expired','failed','refunded')) OR EXISTS (SELECT 1 FROM payments p WHERE p.id=promo_redemptions.payment_id AND p.status IN ('failed','expired','refunded') AND p.created_at<$2))
 `

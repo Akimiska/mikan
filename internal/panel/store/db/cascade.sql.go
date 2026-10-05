@@ -168,6 +168,20 @@ func (q *Queries) SetInboundExit(ctx context.Context, arg SetInboundExitParams) 
 	return err
 }
 
+const setNodeRelayPort = `-- name: SetNodeRelayPort :exec
+UPDATE node_relays SET port = $1 WHERE node_id = $2
+`
+
+type SetNodeRelayPortParams struct {
+	Port   string
+	NodeID int64
+}
+
+func (q *Queries) SetNodeRelayPort(ctx context.Context, arg SetNodeRelayPortParams) error {
+	_, err := q.db.ExecContext(ctx, setNodeRelayPort, arg.Port, arg.NodeID)
+	return err
+}
+
 const setNodeRelayRoute = `-- name: SetNodeRelayRoute :exec
 UPDATE node_relays SET outbound = $1, exit_node_id = $2 WHERE node_id = $3
 `

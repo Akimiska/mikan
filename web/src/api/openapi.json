@@ -799,32 +799,26 @@
         ],
         "type": "object"
       },
-      "CascadeView": {
+      "CascadeRelay": {
         "additionalProperties": false,
         "properties": {
-          "exits": {
-            "description": "Ноды, через которые эта нода выпускает трафик",
-            "items": {
-              "$ref": "#/components/schemas/CascadeExit"
-            },
-            "type": "array"
+          "error": {
+            "description": "Почему служебный вход не запустился, как сказала нода",
+            "type": "string"
           },
-          "relay": {
-            "$ref": "#/components/schemas/CascadeViewRelayStruct",
-            "description": "Служебный вход для других нод; есть, когда кто-то выходит через эту ноду"
-          }
-        },
-        "required": [
-          "exits"
-        ],
-        "type": "object"
-      },
-      "CascadeViewRelayStruct": {
-        "additionalProperties": false,
-        "properties": {
           "exit_node_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "listener": {
+            "description": "Слушает ли нода порт служебного входа: busy, если порт занят другой программой",
+            "enum": [
+              "ok",
+              "busy",
+              "failed",
+              "unknown"
+            ],
+            "type": "string"
           },
           "outbound": {
             "description": "Куда эта нода выпускает их трафик",
@@ -849,7 +843,28 @@
         "required": [
           "port",
           "sources",
-          "outbound"
+          "outbound",
+          "listener"
+        ],
+        "type": "object"
+      },
+      "CascadeView": {
+        "additionalProperties": false,
+        "properties": {
+          "exits": {
+            "description": "Ноды, через которые эта нода выпускает трафик",
+            "items": {
+              "$ref": "#/components/schemas/CascadeExit"
+            },
+            "type": "array"
+          },
+          "relay": {
+            "$ref": "#/components/schemas/CascadeRelay",
+            "description": "Служебный вход для других нод; есть, когда кто-то выходит через эту ноду"
+          }
+        },
+        "required": [
+          "exits"
         ],
         "type": "object"
       },

@@ -1768,15 +1768,16 @@ export interface components {
              */
             outbound: "direct" | "warp" | "node";
         };
-        CascadeView: {
-            /** @description Ноды, через которые эта нода выпускает трафик */
-            exits: components["schemas"]["CascadeExit"][];
-            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
-            relay?: components["schemas"]["CascadeViewRelayStruct"];
-        };
-        CascadeViewRelayStruct: {
+        CascadeRelay: {
+            /** @description Почему служебный вход не запустился, как сказала нода */
+            error?: string;
             /** Format: int64 */
             exit_node_id?: number;
+            /**
+             * @description Слушает ли нода порт служебного входа: busy, если порт занят другой программой
+             * @enum {string}
+             */
+            listener: "ok" | "busy" | "failed" | "unknown";
             /**
              * @description Куда эта нода выпускает их трафик
              * @enum {string}
@@ -1785,6 +1786,12 @@ export interface components {
             port: string;
             /** @description Ноды, которые выходят через эту */
             sources: components["schemas"]["CascadeHop"][];
+        };
+        CascadeView: {
+            /** @description Ноды, через которые эта нода выпускает трафик */
+            exits: components["schemas"]["CascadeExit"][];
+            /** @description Служебный вход для других нод; есть, когда кто-то выходит через эту ноду */
+            relay?: components["schemas"]["CascadeRelay"];
         };
         CertInputBody: {
             /** @description Цепочка в PEM: сначала сертификат, за ним промежуточные (fullchain.pem) */

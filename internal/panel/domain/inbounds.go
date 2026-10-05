@@ -70,6 +70,7 @@ type Inbounds struct {
 	dry     DryRun
 	now     func() time.Time
 	resolve func(ctx context.Context, host string) ([]netip.Addr, error) // nil: names are not looked up
+	host    HostLookup                                                   // nil: what listens on the servers is not known
 }
 
 // NewInbounds: dry nil skips the nodes' own check, for callers that do not talk to the
@@ -318,7 +319,7 @@ func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		}
 		// The exit's chain is checked, and its relay made, before the inbound changes.
 		if p.Outbound != nil && next.ExitNodeID.Valid {
-			if err := UseExit(ctx, q, prev.NodeID, next.ExitNodeID.Int64, s.now()); err != nil {
+			if err := UseExit(ctx, q, prev.NodeID, next.ExitNodeID.Int64, s.now(), s.host); err != nil {
 				return err
 			}
 		}
@@ -445,6 +446,13 @@ func SystemResolve(ctx context.Context, host string) ([]netip.Addr, error) {
 // one (tests) names are taken as they are.
 func (s *Inbounds) SetResolver(resolve func(ctx context.Context, host string) ([]netip.Addr, error)) {
 	s.resolve = resolve
+}
+
+// SetHostLookup lets the relay an inbound's new exit gets keep off ports other programs
+// hold on the exit's server; without one (tests, the CLI) the relay takes what the panel
+// knows is free.
+func (s *Inbounds) SetHostLookup(host HostLookup) {
+	s.host = host
 }
 
 // checkDestResolves refuses a REALITY target whose name leads to this host or its

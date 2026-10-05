@@ -130,6 +130,7 @@ type Node struct {
 	CreatedAt  int64
 	UpdatedAt  int64
 	PublicName string
+	Sort       int64
 }
 
 type NodeRelay struct {

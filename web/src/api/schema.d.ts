@@ -2159,6 +2159,14 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        LegacyLinks: {
+            /** @description Старые ссылки сейчас открываются: задан их путь, а для подписанных ещё и секрет старой панели */
+            active: boolean;
+            /** @description Из какой панели: marzban, pasarguard или remnawave */
+            source: string;
+            /** @description Ссылка целиком. Только у Remnawave: токен Marzban и PasarGuard подписан, импорт его не видел и не хранит, а ссылки, что уже у людей, проверяются по подписи */
+            url?: string;
+        };
         LegacyView: {
             /** @description Чьи ссылки: marzban, pasarguard или remnawave; импорт ставит его сам */
             kind: string;
@@ -3471,6 +3479,8 @@ export interface components {
             id: number;
             /** @description Разрешённые подключения; пусто — все */
             inbounds: number[];
+            /** @description Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка */
+            legacy?: components["schemas"]["LegacyLinks"];
             name: string;
             note: string;
             online: boolean;

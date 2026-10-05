@@ -120,7 +120,7 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
         open={confirm === "reissue"}
         onOpenChange={(v) => !v && setConfirm(null)}
         title={t("userDrawer.reissueTitle")}
-        text={t("userDrawer.reissueText")}
+        text={u.legacy ? `${t("userDrawer.reissueText")} ${t("userDrawer.legacyReissue")}` : t("userDrawer.reissueText")}
         confirm={t("userDrawer.reissueConfirm")}
         loading={reissue.isPending}
         onConfirm={() =>

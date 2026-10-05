@@ -498,6 +498,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Порядок серверов в подписке */
+        put: operations["order-nodes"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/update-all": {
         parameters: {
             query?: never;
@@ -2329,6 +2346,10 @@ export interface components {
             expired: boolean;
             traffic_100: boolean;
             traffic_90: boolean;
+        };
+        OrderNodesInputBody: {
+            /** @description Все ноды панели, каждая один раз, в том порядке, в каком их серверы идут в подписках */
+            ids: number[];
         };
         OverviewOutputBody: {
             /** Format: int64 */
@@ -4648,6 +4669,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "order-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderNodesInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

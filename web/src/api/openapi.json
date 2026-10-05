@@ -2412,6 +2412,25 @@
         ],
         "type": "object"
       },
+      "OrderNodesInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Все ноды панели, каждая один раз, в том порядке, в каком их серверы идут в подписках",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "OverviewOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -7053,6 +7072,40 @@
           "node"
         ],
         "x-session-only": true
+      }
+    },
+    "/api/v1/nodes/order": {
+      "put": {
+        "operationId": "order-nodes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderNodesInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Порядок серверов в подписке",
+        "tags": [
+          "node"
+        ]
       }
     },
     "/api/v1/nodes/update-all": {

@@ -268,6 +268,7 @@
       "node_in_use_inbounds": "the connections {value}",
       "node_in_use_relays": "the cascade of the nodes {value}",
       "node_in_use_telegram": "the bot's route to Telegram (the Telegram tab)",
+      "node_order_mismatch": "The list of servers has changed: reload the page and try again",
       "pool_name_taken": "A pool with this name already exists",
       "pool_not_found": "No such pool",
       "pool_duplicate": "The pool is listed twice",
@@ -1274,6 +1275,10 @@
   },
   "nodes": {
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",
+    "orderHint": "Servers appear in the subscription in this order, so you can sort them, for example by country. Use the arrows to move a server.",
+    "moveUp": "Move {name} up",
+    "moveDown": "Move {name} down",
+    "position": "Position {n} of {total}",
     "add": "Add node",
     "addSubmit": "Add and get the key",
     "emptyTitle": "No nodes yet",

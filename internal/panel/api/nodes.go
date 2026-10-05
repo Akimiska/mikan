@@ -90,12 +90,58 @@ type nodeIDInput struct {
 	ID int64 `path:"id" minimum:"1"`
 }
 
+type orderNodesInput struct {
+	Body struct {
+		IDs []int64 `json:"ids" minItems:"1" maxItems:"1000" doc:"Все ноды панели, каждая один раз, в том порядке, в каком их серверы идут в подписках"`
+	}
+}
+
 func (h *handlers) registerNodes() {
 	huma.Register(h.api, huma.Operation{OperationID: "list-nodes", Method: http.MethodGet, Path: "/api/v1/nodes", Summary: "Ноды", Tags: []string{"node"}}, h.listNodes)
 	huma.Register(h.api, huma.Operation{OperationID: "create-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/nodes", Summary: "Добавить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusCreated}, h.createNode)
 	huma.Register(h.api, huma.Operation{OperationID: "update-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/nodes/{id}", Summary: "Изменить ноду", Tags: []string{"node"}}, h.updateNode)
 	huma.Register(h.api, huma.Operation{OperationID: "rekey-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/key", Summary: "Выпустить новый ключ ноды (старый перестаёт работать)", Tags: []string{"node"}}, h.rekeyNode)
+	huma.Register(h.api, huma.Operation{OperationID: "order-nodes", Method: http.MethodPut, Path: "/api/v1/nodes/order", Summary: "Порядок серверов в подписке", Tags: []string{"node"}, DefaultStatus: http.StatusNoContent}, h.orderNodes)
 	huma.Register(h.api, huma.Operation{OperationID: "delete-node", Method: http.MethodDelete, Path: "/api/v1/nodes/{id}", Summary: "Удалить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusNoContent}, h.deleteNode)
+}
+
+// orderNodes sets the order of the servers in the subscriptions: the list must be every
+// node once, so a stale page of the admin cannot silently drop or duplicate one.
+func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct{}, error) {
+	ids := in.Body.IDs
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		nodes, err := q.ListNodes(ctx)
+		if err != nil {
+			return err
+		}
+		have := make(map[int64]bool, len(nodes))
+		for _, n := range nodes {
+			have[n.ID] = true
+		}
+		seen := make(map[int64]bool, len(ids))
+		for _, id := range ids {
+			if !have[id] || seen[id] {
+				return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.ids", Message: "node_order_mismatch", Value: id})
+			}
+			seen[id] = true
+		}
+		if len(ids) != len(nodes) {
+			return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.ids", Message: "node_order_mismatch"})
+		}
+		for i, id := range ids {
+			if err := q.SetNodeSort(ctx, db.SetNodeSortParams{Sort: int64(i + 1), ID: id}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// The subscription's server list is built again from the new order.
+	h.nodesChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.order", "node", "", map[string]any{"ids": ids})
+	return nil, nil
 }
 
 func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {

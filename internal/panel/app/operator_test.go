@@ -101,6 +101,10 @@ func TestOperatorHeadersOverHTTP(t *testing.T) {
 	if got := decode(hd.Get("Profile-Title")); got != "Mikan · a" {
 		t.Errorf("title: %q", got)
 	}
+	// Clash apps name the profile after the file, so the file carries the title too.
+	if got, want := hd.Get("Content-Disposition"), "attachment; filename*=UTF-8''Mikan%20%C2%B7%20a.yaml"; got != want {
+		t.Errorf("Content-Disposition = %q, want %q", got, want)
+	}
 	if got := decode(hd.Get("Announce")); !strings.HasPrefix(got, "Осталось ") || strings.Contains(got, "{") {
 		t.Errorf("announce: %q", got)
 	}

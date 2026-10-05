@@ -148,6 +148,16 @@ func (s *Service) checkUser(ctx context.Context, q *db.Queries, p db.PromoCode, 
 	return nil
 }
 
+// Check returns a code the account may use, without an order: a bonus is redeemed right
+// after it, a discount is checked against the price at the checkout (Validate).
+func (s *Service) Check(ctx context.Context, tgID, userID int64, code string) (db.PromoCode, error) {
+	p, err := s.load(ctx, code)
+	if err != nil {
+		return p, err
+	}
+	return p, s.checkUser(ctx, s.Store.Q, p, tgID, userID, s.Now())
+}
+
 // Validate returns the current code and a human-readable machine status without consuming it.
 // It is used by the Mini App before the actual action/payment.
 func (s *Service) Validate(ctx context.Context, tgID, userID, tariffID, amount int64, currency, code string) (db.PromoCode, error) {

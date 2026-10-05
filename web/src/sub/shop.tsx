@@ -5,7 +5,7 @@ import { Check, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui";
 import { t, type Key } from "../i18n";
-import { rubles } from "../lib/format";
+import { money, rubles } from "../lib/format";
 
 /** A term of a plan sold for several: its own price; label is "30 days", "3 months". */
 export type Term = { days: number; label: string; description: string; stars?: number; rub?: number };
@@ -146,7 +146,7 @@ export function Shop({
     <section className="glass rounded-3xl p-4" aria-label={title}>
       <h2 className="mb-1 text-[15px] font-semibold">{title}</h2>
       <p className="mb-3 text-xs text-[var(--ink-500)]">{pick}{promoCode ? ` · ${t("sub.promoSelected", { code: promoCode })}` : ""}</p>
-      {promoPreview ? <p className="mb-3 text-xs text-[var(--leaf-600)]">{t("sub.promoCheckoutDiscount", { discount: promoPreview.discount, total: promoPreview.final_amount, currency: promoPreview.currency })}</p> : null}
+      {promoPreview ? <p className="mb-3 text-xs text-[var(--leaf-600)]">{t("sub.promoCheckoutDiscount", { discount: money(promoPreview.discount, promoPreview.currency), total: money(promoPreview.final_amount, promoPreview.currency) })}</p> : null}
       <div className="flex flex-col gap-2" role="radiogroup" aria-label={pick}>
         {offers.map((o) => (
           <button key={o.id} type="button" role="radio" aria-checked={picked === o.id} className="opt" onClick={() => setPicked(o.id)}>

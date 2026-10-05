@@ -484,9 +484,10 @@ func (t *Tuner) remedy(ctx context.Context, w *world, n db.Node, x db.Inbound) {
 		return
 	}
 	dest, _ := presets.Dest(tpl)
-	// Hopping ranges are the admin's, and so is a port a proxy in front forwards to.
+	// Hopping ranges are the admin's, and so are the port and the site a proxy in front
+	// forwards by.
 	portOK := w.portOn && x.AutoPort != 0 && !strings.Contains(x.Port, "-") && !domain.ListenPinsPort(x.Listen)
-	sniOK := w.sniOn && x.AutoSni != 0 && dest != ""
+	sniOK := w.sniOn && x.AutoSni != 0 && dest != "" && !domain.ListenPinsSNI(x.Listen)
 	h := t.history(w, x.ID)
 	switch {
 	case !portOK && !sniOK:
@@ -645,7 +646,7 @@ func (t *Tuner) checkTargets(ctx context.Context, w *world) {
 			fails := t.stateLocked(c.x.ID).fails
 			t.mu.Unlock()
 			h := t.history(w, c.x.ID)
-			if fails >= t.o.TargetFails && w.sniOn && c.x.AutoSni != 0 && w.now.Sub(h.lastSNI) >= t.o.Cooldown && h.recent < t.o.MaxChanges {
+			if fails >= t.o.TargetFails && w.sniOn && c.x.AutoSni != 0 && !domain.ListenPinsSNI(c.x.Listen) && w.now.Sub(h.lastSNI) >= t.o.Cooldown && h.recent < t.o.MaxChanges {
 				t.replaceTarget(ctx, w, c.n, c.x, c.tpl, "target_down")
 			}
 		}

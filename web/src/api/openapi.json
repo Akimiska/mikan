@@ -2641,6 +2641,7 @@
             "type": "boolean"
           },
           "auto_sni": {
+            "description": "Нельзя включить, пока у подключения свой адрес (listen)",
             "type": "boolean"
           },
           "client": {
@@ -3436,7 +3437,7 @@
             "type": "string"
           },
           "currency": {
-            "description": "Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется.",
+            "description": "Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для percent: пусто — любая валюта, тогда min_order и max_discount равны 0. Для остальных типов не используется.",
             "type": "string"
           },
           "description": {

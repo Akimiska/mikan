@@ -2426,6 +2426,7 @@ export interface components {
         PatchInboundInputBody: {
             /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_port?: boolean;
+            /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_sni?: boolean;
             /** @description Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три */
             client?: components["schemas"]["ClientEndpoint"];
@@ -2725,7 +2726,7 @@ export interface components {
         };
         PromoBody: {
             code: string;
-            /** @description Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется. */
+            /** @description Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для percent: пусто — любая валюта, тогда min_order и max_discount равны 0. Для остальных типов не используется. */
             currency: string;
             description: string;
             /**

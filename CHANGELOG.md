@@ -14,6 +14,15 @@ the signed manifest, and the panel shows the one in its language.
 - **Speed test of a node** (Nodes → a node): latency, loss, download and upload, with the history. One test uses up to 250 MB down and 100 MB up; a node can be tested once in 5 minutes.
 - **Subscription name in apps** (Settings → Subscription): the profile name Happ, v2RayTun and Hiddify show, with variables like `{name}`, `{days}` and `{left}`; the announcement takes them too.
 - **Close a traffic pool on a plan**: the plan's users lose that pool at once, and its packages are not sold to them. Opening it again puts the plan's limit back on them.
+- **Remove a subscription from the bot**: the subscription screen in the bot has "Remove from the bot". Only the Telegram link goes: the subscription keeps working in the apps and comes back when its link is sent to the bot.
+- **Server order** (Nodes, arrows up and down): the order of the nodes is the order of the servers in subscriptions, in every app.
+- Promo codes: the bot's **Promo codes** button opens the Mini App signed in, one **Apply** takes both bonus and discount codes (a discount applies at checkout), and discounts are shown in rubles. In the promo code form sums of a RUB code are entered in rubles; a minimum order or a maximum discount needs the code's currency.
+- A Telegram Stars refund takes back what the payment gave: a new subscription is turned off, a renewal loses its term (and gets its previous plan back when nothing changed since), a traffic package is removed, and the promo code can be used again. Refunds Telegram makes itself do the same. The buyer gets a message in the bot.
+- The bot takes the old subscription links of users imported from Marzban, PasarGuard or Remnawave, and the user's card shows the old link (Remnawave) or that it still works.
+- Cascade: the relay on the exit node no longer takes a port another program holds, and a relay whose port is taken moves to a free one by itself. The cascade window shows the relay's state, and an alert comes when it is down. Works with nodes on 0.5.0.2.
+- WARP: the WARP window shows why the check fails (no UDP answer from the endpoint, DNS, TLS and so on), the node writes it to its log, and **Check** really checks again. The WARP alert in Telegram gives the reason too.
+- Behind a proxy (a protocol with its own listen address) the masking site no longer changes by itself, like the port: a proxy that routes by the site's name would lose the clients. The update turns it off where it was on.
+- Clash apps (Koala Clash, Clash Verge, FlClash) name the profile with the subscription name from Settings → Subscription instead of the brand.
 
 ### ru
 - **Ноды обновляются из панели.** На странице «Ноды» видна версия каждой ноды и отмечены отстающие от панели, есть кнопки **Обновить** и **Обновить все**. По умолчанию ноды сами следуют за панелью: после её обновления они подтягиваются до её версии по одной, следующая начинает, когда предыдущая заработала. Нода, которая не обновилась, возвращается на свою версию, приходит уведомление, и обновление останавливается. Переключатель в «Настройки → Основное → Обновления».
@@ -25,6 +34,15 @@ the signed manifest, and the panel shows the one in its language.
 - **Проверка скорости ноды** («Ноды → нода»): задержка, потери, загрузка и отдача, с историей. Один тест расходует до 250 МБ на загрузку и 100 МБ на отдачу, ноду можно проверять раз в 5 минут.
 - **Название подписки в приложениях** («Настройки → Подписка»): имя профиля, которое показывают Happ, v2RayTun и Hiddify, с переменными вроде `{name}`, `{days}` и `{left}`, объявление тоже их понимает.
 - **Закрыть пул трафика на тарифе**: пользователи тарифа сразу теряют этот пул, пакеты для него им не продаются. При открытии им снова ставится лимит тарифа.
+- **Убрать подписку из бота**: на экране подписки в боте есть кнопка «Убрать из бота». Снимается только привязка к Telegram: подписка продолжает работать в приложениях и возвращается в бот, если прислать ему её ссылку.
+- **Порядок серверов** («Ноды», стрелки вверх и вниз): в каком порядке стоят ноды, в таком порядке серверы идут в подписке, во всех приложениях.
+- Промокоды: кнопка **Промокоды** в боте открывает Mini App со входом, одна кнопка **Применить** принимает и бонусные, и скидочные коды (скидка применяется при оплате), скидки показываются в рублях. В форме промокода суммы для кода в RUB вводятся в рублях, а минимальная сумма или максимальная скидка требуют выбрать валюту кода.
+- Возврат Telegram Stars забирает то, что дал платёж: новая подписка выключается, продление теряет свой срок (и получает прежний тариф, если с тех пор ничего не менялось), пакет трафика снимается, промокод снова можно использовать. Возвраты, которые Telegram делает сам, работают так же. Покупатель получает сообщение в боте.
+- Бот принимает старые ссылки подписок пользователей, перенесённых из Marzban, PasarGuard или Remnawave, а в карточке пользователя видна старая ссылка (Remnawave) или отметка, что она работает.
+- Каскад: служебный вход на ноде выхода больше не занимает порт, который держит другая программа, а если порт заняли, сам переезжает на свободный. В окне каскада видно его состояние, при сбое приходит уведомление. Работает с нодами на 0.5.0.2.
+- WARP: окно WARP показывает, почему проверка не проходит (нет ответа от endpoint по UDP, DNS, TLS и так далее), нода пишет причину в свой лог, а кнопка **Проверить** действительно проверяет заново. Уведомление о WARP в Telegram тоже называет причину.
+- За прокси (у протокола свой адрес для прослушивания) сайт маскировки больше не меняется сам, как и порт: прокси, который выбирает подключение по имени сайта, потерял бы клиентов. Обновление выключает это там, где было включено.
+- Clash-приложения (Koala Clash, Clash Verge, FlClash) называют профиль названием подписки из «Настройки → Подписка», а не брендом.
 
 ## 0.5.0.1
 ### en

@@ -1,0 +1,520 @@
+/*
+ * mikan docs theme. Colours come from the panel's own tokens (web/src/styles/app.css):
+ * the warm paper background, ink greys and the mandarin scale in light mode, and the
+ * "Midnight" panel theme in dark mode. Accent text uses the darker mandarin steps so it
+ * keeps AA contrast on the paper background.
+ */
+
+:root {
+	--sl-font: 'Onest Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--sl-font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+	--mk-font-display: 'Unbounded Variable', 'Onest Variable', system-ui, sans-serif;
+
+	--sl-text-h1: 2rem;
+	--sl-text-h2: 1.5rem;
+	--sl-text-h3: 1.1875rem;
+	--sl-text-h4: 1.0625rem;
+	--sl-line-height: 1.7;
+	--sl-content-width: 46rem;
+	--sl-nav-height: 4rem;
+
+	--mk-radius: 12px;
+	--mk-radius-lg: 20px;
+	--mk-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+	/* dark (Starlight's default scheme): the panel's Midnight theme */
+	--mk-bg: #10131a;
+	--mk-surface: #171b24;
+	--mk-surface-2: #1d222d;
+	--mk-hairline: rgba(255, 255, 255, 0.09);
+	--mk-hairline-strong: rgba(255, 255, 255, 0.16);
+	--mk-ink: #f4f7fb;
+	--mk-text: #c9d0da;
+	--mk-muted: #96a1b1;
+	--mk-accent: #ff843d;
+	--mk-accent-text: #ffa56b;
+	--mk-accent-soft: #3a2418;
+	--mk-fill: #ff843d;
+	--mk-on-fill: #161a24;
+	--mk-leaf: #73dca8;
+	--mk-leaf-soft: #173326;
+	--mk-lagoon: #79d6e4;
+	--mk-lagoon-soft: #17343b;
+	--mk-honey: #ffd36b;
+	--mk-honey-soft: #3a3018;
+	--mk-berry: #ff8a84;
+	--mk-berry-soft: #3d2021;
+	--mk-shadow-lg: 0 32px 64px -24px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.3);
+	--mk-seg-on: #2f3644;
+	--mk-on-seg-on: #f4f7fb;
+	--mk-orange: #ff843d;
+	--mk-orange-hover: #ff9a5c;
+	--mk-on-orange: #161a24;
+	--mk-code-bg: #181c26;
+	--mk-code-line: rgba(255, 255, 255, 0.08);
+
+	--sl-color-accent-low: var(--mk-accent-soft);
+	--sl-color-accent: var(--mk-accent);
+	--sl-color-accent-high: var(--mk-accent-text);
+	--sl-color-white: var(--mk-ink);
+	--sl-color-gray-1: #e3e8ef;
+	--sl-color-gray-2: var(--mk-text);
+	--sl-color-gray-3: var(--mk-muted);
+	--sl-color-gray-4: #5d6878;
+	--sl-color-gray-5: #2c3340;
+	--sl-color-gray-6: var(--mk-surface);
+	--sl-color-black: var(--mk-bg);
+	--sl-color-text: var(--mk-text);
+	--sl-color-text-accent: var(--mk-accent-text);
+	--sl-color-text-invert: var(--mk-on-fill);
+	--sl-color-bg: var(--mk-bg);
+	--sl-color-bg-nav: var(--mk-bg);
+	--sl-color-bg-sidebar: var(--mk-bg);
+	--sl-color-bg-inline-code: var(--mk-surface-2);
+	--sl-color-bg-accent: var(--mk-fill);
+	--sl-color-hairline-light: var(--mk-hairline-strong);
+	--sl-color-hairline: var(--mk-hairline);
+	--sl-color-hairline-shade: rgba(0, 0, 0, 0.4);
+	--sl-color-backdrop-overlay: rgba(10, 12, 16, 0.7);
+}
+
+:root[data-theme='light'] {
+	--mk-bg: #fcf6f0;
+	--mk-surface: #ffffff;
+	--mk-surface-2: #f6ebe0;
+	--mk-hairline: rgba(22, 26, 36, 0.09);
+	--mk-hairline-strong: rgba(22, 26, 36, 0.16);
+	--mk-ink: #161a24;
+	--mk-text: #394050;
+	--mk-muted: #5c6474;
+	--mk-accent: #f07a2e;
+	--mk-accent-text: #a8460a;
+	--mk-accent-soft: #ffe9d9;
+	--mk-fill: #161a24;
+	--mk-on-fill: #ffffff;
+	--mk-leaf: #1f7650;
+	--mk-leaf-soft: #e4f4eb;
+	--mk-lagoon: #1d6876;
+	--mk-lagoon-soft: #e0f1f4;
+	--mk-honey: #7d5205;
+	--mk-honey-soft: #fcf1da;
+	--mk-berry: #a8322a;
+	--mk-berry-soft: #fce7e4;
+	--mk-shadow-lg: 0 2px 8px rgba(22, 26, 36, 0.06), 0 32px 64px -24px rgba(22, 26, 36, 0.28);
+	--mk-seg-on: #161a24;
+	--mk-on-seg-on: #ffffff;
+	--mk-orange: #f07a2e;
+	--mk-orange-hover: #e26a1c;
+	--mk-on-orange: #1b1006;
+	--mk-code-bg: #161a24;
+	--mk-code-line: transparent;
+
+	--sl-color-gray-1: #252b38;
+	--sl-color-gray-4: #a6adb8;
+	--sl-color-gray-5: #e3d8cc;
+	--sl-color-gray-6: #f6ece2;
+	--sl-color-gray-7: #faf3ec;
+	--sl-color-hairline-shade: rgba(22, 26, 36, 0.12);
+	--sl-color-backdrop-overlay: rgba(22, 26, 36, 0.4);
+}
+
+/* ---------- base ---------- */
+
+body {
+	background: var(--mk-bg);
+	font-feature-settings: 'kern', 'liga';
+	text-rendering: optimizeLegibility;
+}
+
+::selection {
+	background: color-mix(in srgb, var(--mk-accent) 30%, transparent);
+}
+
+:focus-visible {
+	outline: 2px solid var(--mk-accent);
+	outline-offset: 2px;
+}
+
+/* ---------- header ---------- */
+
+/* The frame's <header>, not the row inside it (also .header), which stops short of the menu button. */
+header.header {
+	border-bottom: 1px solid var(--mk-hairline);
+}
+
+.site-title {
+	font-family: var(--mk-font-display);
+	font-weight: 600;
+	font-size: 1.25rem;
+	letter-spacing: -0.02em;
+	color: var(--mk-ink);
+	gap: 0.625rem;
+}
+
+.site-title img {
+	height: 2rem;
+	width: auto;
+}
+
+/* ---------- sidebar ---------- */
+
+.sidebar-pane {
+	border-inline-end: 1px solid var(--mk-hairline);
+}
+
+.sidebar-content .top-level > li > details > summary .group-label > span,
+.sidebar-content .group-label .large {
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--mk-muted);
+}
+
+.sidebar-content a {
+	border-radius: 8px;
+	padding-block: 0.3125rem;
+	color: var(--mk-text);
+	font-size: 0.9375rem;
+}
+
+.sidebar-content a:hover {
+	color: var(--mk-ink);
+	background: color-mix(in srgb, var(--mk-ink) 5%, transparent);
+}
+
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover {
+	background: var(--mk-accent-soft);
+	color: var(--mk-accent-text);
+	font-weight: 600;
+}
+
+/* ---------- headings ---------- */
+
+h1#_top,
+.sl-markdown-content h2 {
+	font-family: var(--mk-font-display);
+	letter-spacing: -0.02em;
+	font-weight: 600;
+}
+
+h1#_top {
+	font-size: clamp(1.75rem, 1.4rem + 1.6vw, 2.25rem);
+	line-height: 1.15;
+	color: var(--mk-ink);
+}
+
+.sl-markdown-content h2 {
+	font-size: var(--sl-text-h2);
+	margin-top: 2.75rem;
+	padding-top: 0.25rem;
+}
+
+.sl-markdown-content h3 {
+	font-weight: 650;
+	letter-spacing: -0.01em;
+}
+
+.sl-markdown-content :is(h2, h3, h4) {
+	color: var(--mk-ink);
+	text-wrap: balance;
+}
+
+.sl-markdown-content p,
+.sl-markdown-content li {
+	text-wrap: pretty;
+}
+
+/* ---------- links ---------- */
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+	color: var(--mk-accent-text);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.2em;
+	text-decoration-color: color-mix(in srgb, var(--mk-accent-text) 45%, transparent);
+}
+
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+	text-decoration-color: currentColor;
+}
+
+/* ---------- inline code, kbd ---------- */
+
+.sl-markdown-content :not(pre) > code {
+	border-radius: 6px;
+	padding: 0.1em 0.375em;
+	font-size: 0.875em;
+	background: var(--mk-surface-2);
+	color: var(--mk-ink);
+	border: 1px solid var(--mk-hairline);
+	overflow-wrap: anywhere;
+}
+
+kbd {
+	font-family: var(--sl-font-mono);
+	font-size: 0.8125em;
+	padding: 0.1em 0.4em;
+	border: 1px solid var(--mk-hairline-strong);
+	border-bottom-width: 2px;
+	border-radius: 6px;
+	background: var(--mk-surface);
+}
+
+/* UI paths like «Настройки → Подписка» */
+.ui {
+	font-weight: 600;
+	color: var(--mk-ink);
+	white-space: nowrap;
+}
+
+/* ---------- tables ---------- */
+
+.sl-markdown-content table {
+	display: block;
+	overflow-x: auto;
+	border-collapse: collapse;
+	font-size: 0.9375rem;
+	border: 1px solid var(--mk-hairline);
+	border-radius: var(--mk-radius);
+}
+
+.sl-markdown-content :is(th, td) {
+	border: 0;
+	border-bottom: 1px solid var(--mk-hairline);
+	padding: 0.625rem 0.875rem;
+	vertical-align: top;
+}
+
+.sl-markdown-content tr:last-child td {
+	border-bottom: 0;
+}
+
+.sl-markdown-content th {
+	background: var(--mk-surface-2);
+	color: var(--mk-ink);
+	font-weight: 600;
+	text-align: start;
+}
+
+.sl-markdown-content td code {
+	white-space: nowrap;
+}
+
+/* ---------- asides: tinted panels with a hairline, no stripe ---------- */
+
+.starlight-aside {
+	border: 1px solid var(--mk-aside-line);
+	border-radius: var(--mk-radius);
+	background: var(--mk-aside-bg);
+	padding: 0.875rem 1rem;
+}
+
+.starlight-aside--note {
+	--mk-aside-bg: var(--mk-lagoon-soft);
+	--mk-aside-line: color-mix(in srgb, var(--mk-lagoon) 22%, transparent);
+	--sl-color-asides-text-accent: var(--mk-lagoon);
+}
+
+.starlight-aside--tip {
+	--mk-aside-bg: var(--mk-leaf-soft);
+	--mk-aside-line: color-mix(in srgb, var(--mk-leaf) 22%, transparent);
+	--sl-color-asides-text-accent: var(--mk-leaf);
+}
+
+.starlight-aside--caution {
+	--mk-aside-bg: var(--mk-honey-soft);
+	--mk-aside-line: color-mix(in srgb, var(--mk-honey) 25%, transparent);
+	--sl-color-asides-text-accent: var(--mk-honey);
+}
+
+.starlight-aside--danger {
+	--mk-aside-bg: var(--mk-berry-soft);
+	--mk-aside-line: color-mix(in srgb, var(--mk-berry) 25%, transparent);
+	--sl-color-asides-text-accent: var(--mk-berry);
+}
+
+.starlight-aside__title {
+	font-size: 0.9375rem;
+	font-weight: 650;
+}
+
+.starlight-aside__icon {
+	font-size: 1.125em;
+}
+
+.starlight-aside__content {
+	color: var(--mk-text);
+	font-size: 0.9375rem;
+}
+
+/* ---------- steps ---------- */
+
+.sl-steps {
+	--bullet-size: 1.75rem;
+}
+
+.sl-steps > li::before {
+	font-family: var(--sl-font-mono);
+	font-weight: 600;
+	background: var(--mk-surface-2) !important;
+	color: var(--mk-ink) !important;
+	box-shadow: inset 0 0 0 1px var(--mk-hairline-strong);
+}
+
+.sl-steps > li::after {
+	background: var(--mk-hairline-strong) !important;
+}
+
+/* ---------- cards & link cards ---------- */
+
+.sl-link-card {
+	border: 1px solid var(--mk-hairline);
+	border-radius: var(--mk-radius);
+	background: var(--mk-surface);
+	box-shadow: none;
+	transition: border-color 0.2s var(--mk-ease), transform 0.2s var(--mk-ease);
+}
+
+.sl-link-card:hover {
+	border-color: color-mix(in srgb, var(--mk-accent) 55%, transparent);
+	background: var(--mk-surface);
+}
+
+.sl-link-card .title {
+	font-weight: 650;
+	color: var(--mk-ink);
+}
+
+.sl-link-card .description {
+	color: var(--mk-muted);
+}
+
+/* ---------- tabs ---------- */
+
+starlight-tabs .tablist-wrapper {
+	border-bottom: 1px solid var(--mk-hairline);
+}
+
+starlight-tabs [role='tab'][aria-selected='true'] {
+	color: var(--mk-ink);
+	border-color: var(--mk-accent);
+}
+
+/* ---------- code ---------- */
+
+.expressive-code .frame {
+	box-shadow: none;
+}
+
+/* ---------- pagination & footer ---------- */
+
+.pagination-links a {
+	border: 1px solid var(--mk-hairline);
+	border-radius: var(--mk-radius);
+	box-shadow: none;
+	background: var(--mk-surface);
+}
+
+.pagination-links a:hover {
+	border-color: color-mix(in srgb, var(--mk-accent) 55%, transparent);
+}
+
+.pagination-links .link-title {
+	color: var(--mk-ink);
+	font-weight: 600;
+}
+
+/* ---------- phone menu button: the same 36px family as the header buttons ---------- */
+
+:root {
+	--sl-menu-button-size: 2.25rem;
+}
+
+button.sl-menu-button,
+[data-theme='light'] button.sl-menu-button {
+	border: 1px solid var(--mk-hairline-strong);
+	border-radius: 10px;
+	padding: 0.5rem;
+	background: var(--mk-surface);
+	color: var(--mk-ink);
+	box-shadow: none;
+}
+
+button.sl-menu-button:has(~ :popover-open),
+[data-theme='light'] button.sl-menu-button:has(~ :popover-open) {
+	background: var(--mk-seg-on);
+	color: var(--mk-on-seg-on);
+}
+
+button.sl-menu-button:focus-visible {
+	outline: 2px solid var(--mk-accent);
+	outline-offset: 2px;
+}
+
+/* ---------- header controls: segmented pills (theme, language) ---------- */
+
+.seg {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	box-sizing: border-box;
+	height: 2.25rem;
+	padding: 3px;
+	border: 1px solid var(--mk-hairline-strong);
+	border-radius: 10px;
+	background: var(--mk-surface);
+}
+
+.seg .seg-item {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	height: 100%;
+	min-width: 1.75rem;
+	padding: 0 0.375rem;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--mk-muted);
+	font: 600 0.75rem/1 var(--sl-font-mono);
+	letter-spacing: 0.02em;
+	text-decoration: none;
+	cursor: pointer;
+	transition:
+		background-color 0.15s var(--mk-ease),
+		color 0.15s var(--mk-ease);
+}
+
+.seg .seg-item:hover {
+	color: var(--mk-ink);
+}
+
+.seg .seg-item:focus-visible {
+	outline: 2px solid var(--mk-accent);
+	outline-offset: 1px;
+}
+
+.seg .seg-item[aria-pressed='true'],
+.seg .seg-item[aria-current='page'] {
+	background: var(--mk-seg-on);
+	color: var(--mk-on-seg-on);
+}
+
+/* ---------- right TOC ---------- */
+
+starlight-toc a[aria-current='true'],
+starlight-toc a[aria-current='true']:hover {
+	color: var(--mk-accent-text);
+	font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation: none !important;
+		transition: none !important;
+	}
+}

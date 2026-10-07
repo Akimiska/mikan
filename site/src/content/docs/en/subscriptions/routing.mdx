@@ -1,0 +1,80 @@
+---
+title: Routing in Clash
+description: Route modes, services, DNS, your own Clash YAML profile, custom rules and torrent blocking.
+---
+
+Everything on this page applies to **Clash apps on mihomo**: Koala Clash, Clash Verge, FlClash, ClashFest, SlothClash and others. Happ, v2RayTun, Hiddify and other Xray and sing-box apps don't get these routes.
+
+## Mode
+
+**Settings → Routing → Routing in Clash apps**:
+
+- **Russian sites direct** (default): Russian sites bypass the VPN based on geodata.
+- **Everything through the VPN**.
+- **Only what is blocked**: sites from Russian blocklists and services you sent to the VPN yourself go through the tunnel. Everything else goes direct.
+
+## Services
+
+For each service you can choose: "Like the rest" (follows the mode), "Through the VPN", "Direct", "Block" or "Through a server", meaning a specific node. The services: ads and trackers, YouTube, Telegram, Discord, WhatsApp and Signal, Instagram and Facebook, TikTok, X (Twitter), ChatGPT, Claude and Gemini, Netflix and Spotify, Twitch, games (Steam, Epic, Riot…), GitHub, torrents.
+
+**Past the VPN**: Russian apps and sites (banks, government services, marketplaces) bypass the tunnel. On Android and desktop this works by app names, on iPhone by sites.
+
+## DNS
+
+Empty: the panel's default DNS. Ready sets: "The panel's", "All through the VPN", "Russian domains by Yandex". Servers are written as in mihomo: an IP or `https://`, `tls://`, `quic://`, and `#PROXY` at the end sends the query through the VPN. You can also set DNS for the servers' addresses and your own DNS for domains, one per line like `+.cn: https://dns.alidns.com/dns-query`.
+
+The **Show the profile** button shows what the app will get.
+
+## Your own Clash profile
+
+The "How to set it up" switch → **Own YAML** opens an editor for the whole mihomo config: DNS, fake-ip, TUN, sniffer, groups, rules. "Start from the simple one" copies the current settings as a starting point, and the ready snippets add DNS fake-ip, TUN, sniffer, QUIC blocking, and a group by country or by node.
+
+The panel inserts the user's servers itself, so don't write a `proxies` section. A group picks them up like this:
+
+```yaml
+proxy-groups:
+  - name: VPN
+    type: select
+    include-all-proxies: true        # all of the user's servers
+    exclude-filter: "Hysteria"       # filters as in mihomo
+  - name: Germany
+    type: url-test
+    mikan:
+      nodes: [Germany]               # nodes by name or id
+      types: [vless, hysteria2]      # protocol types
+rules:
+  - MATCH,VPN
+```
+
+- A group that ends up with no servers for this app gets REJECT.
+- After your `MATCH,<group>` the panel adds `MATCH,REJECT`, and before your rules it puts direct routes to the addresses of the panel and nodes.
+- On save the panel checks the YAML, the group names and the references to them. The size limit is 512 KB. If the profile later fails to build, the app gets the built-in one.
+- While your own YAML is on, the simple-mode settings don't reach Clash apps. Stash and non-mihomo apps always get the simple profile.
+
+"Back to the simple one" turns your own profile off.
+
+## Custom rules
+
+**Settings → Clash rules**: one rule per line, `TYPE,VALUE,TARGET[,no-resolve]`, lines with `#` are comments. Rules go before the routing mode in every Clash profile, while the addresses of the panel and nodes still go direct.
+
+```text
+DOMAIN-SUFFIX,example.ru,DIRECT
+DOMAIN-SUFFIX,openai.com,PROXY
+GEOSITE,category-ads-all,REJECT
+PROCESS-NAME,Telegram.exe,PROXY
+IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+```
+
+- **Types**: DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, GEOSITE, GEOIP, IP-CIDR, IP-CIDR6, IP-SUFFIX, SRC-IP-CIDR, DST-PORT, SRC-PORT, NETWORK, PROCESS-NAME, PROCESS-PATH. DOMAIN-REGEX, IP-ASN, SRC-GEOIP and DOMAIN-WILDCARD are received only by apps with a recent core.
+- **Targets**: DIRECT, REJECT, REJECT-DROP, PROXY (the main group), the name of the main group or of the auto-select group.
+- Every line is checked on save, and an error names the line number, so a typo won't break clients' profiles. Up to 500 rules.
+
+The example buttons add common rules in one click.
+
+## Torrent blocking
+
+On the same tab: **Block torrents**. Nodes look at the first bytes of a connection and recognize the BitTorrent handshake, DHT, uTP and trackers. Encrypted BitTorrent may slip through.
+
+**On a catch**: only drop the connection, or ban the user for a chosen time. The ban applies to the user, not the IP, and takes effect on all nodes at once. A single tracker request bans nobody; it takes three within ten minutes, because a web page can make a browser send such a request.
+
+In the user's card you can lift a ban or turn on "Do not check for torrents". Those caught are listed under "Caught", and a "Torrent caught" notification arrives in Telegram.

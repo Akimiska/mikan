@@ -1,0 +1,42 @@
+---
+title: WARP
+description: Cloudflare WARP as an exit to the internet for selected protocols, domains and networks.
+---
+
+Every node can have its own Cloudflare WARP. Selected protocols, domains and networks exit through it, and everything else goes direct. This helps when websites dislike your hosting provider's address.
+
+## Connect
+
+The **WARP** button on the node card, two ways:
+
+- **Register**: the panel creates a free Cloudflare account by itself, like the WARP app or wgcf. You can add a "WARP+ key" from the 1.1.1.1 app (Account → Key).
+- **Own config**: paste a WireGuard config from wgcf, warp-plus or the app's export. You need `PrivateKey`, `Address` and the peer's `PublicKey`. If the config has no `Reserved` line, the panel warns you: when registering through the panel it is filled in automatically.
+
+## What to send through WARP
+
+- **A whole protocol**: in the connection settings, **Way out to the internet → WARP**.
+- **Domains and networks** for all of the node's protocols: the "Domains and networks through WARP" field, one per line. `example.com` includes subdomains, `104.16.0.0/13` defines a network. Up to 1000 lines.
+
+The "WARP on" switch temporarily sends everything direct, while the account and lists are kept. "Delete WARP" removes the account: protocols set to WARP keep that setting but work direct.
+
+:::caution
+If WARP does not work, its traffic does not leave directly from the server's address. A protocol that exits through WARP stays silent until WARP is back.
+:::
+
+## Check
+
+The WARP window shows the state: off, not checked, works or down. When it works, you can see which address sites see and which Cloudflare data center the traffic goes through. The **Check** button checks again.
+
+If the check fails, the panel states the reason. The same reason goes to the node's log and to the Telegram notification.
+
+| Reason | What it means |
+|---|---|
+| no answer over UDP | Cloudflare's endpoint did not answer. Hosting providers often block UDP: try another endpoint in your own config |
+| no answer over HTTPS | the tunnel is up, but cloudflare.com did not answer in time |
+| DNS | a name could not be resolved through WARP |
+| TLS | a TLS error on the way |
+| connection refused | a firewall or outbound rules are in the way |
+| not loaded yet | the node has not applied WARP yet, wait a minute after saving |
+| node unreachable | the panel could not reach the node, or the node is on an old version |
+
+By default the node connects to the endpoint `162.159.192.1:2408`.

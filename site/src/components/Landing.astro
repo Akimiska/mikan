@@ -1,0 +1,691 @@
+---
+import { Image } from 'astro:assets';
+import { Code } from '@astrojs/starlight/components';
+import mandarin from '../assets/mandarin.webp';
+import { installCommand, links, protocolMatrix, strings, type Lang, type Screen } from '../landing';
+
+interface Props {
+	lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = strings[lang];
+const docs = (path: string) => `${import.meta.env.BASE_URL}${lang === 'en' ? 'en/' : ''}${path}`;
+
+// The README screenshots, one set per language.
+const shots = import.meta.glob<{ default: ImageMetadata }>('../../../.github/assets/screens/*/*.webp', {
+	eager: true,
+});
+const shot = (name: string) => shots[`../../../.github/assets/screens/${lang}/${name}.webp`].default;
+const screens = Object.keys(t.screens.items) as Screen[];
+---
+
+<div class="landing not-content">
+	<section class="hero" aria-labelledby="hero-title">
+		<div class="hero-copy">
+			<h1 id="hero-title">{t.hero.title}</h1>
+			<p class="lead">{t.hero.lead}</p>
+			<div class="install">
+				<Code code={installCommand} lang="bash" frame="none" />
+			</div>
+			<p class="req">{t.hero.requirements}</p>
+			<div class="actions">
+				<a class="btn btn-primary" href={docs('start/install/')}>
+					{t.hero.primary}
+					<svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+				</a>
+				<a class="btn btn-ghost" href={docs('start/overview/')}>{t.hero.secondary}</a>
+				<a class="btn btn-ghost" href={links.github}>GitHub</a>
+			</div>
+		</div>
+		<div class="hero-art">
+			<Image src={mandarin} alt={t.hero.art} widths={[210, 420]} sizes="(min-width: 50rem) 300px, 168px" loading="eager" fetchpriority="high" class="fruit" />
+			<span class="shade" aria-hidden="true"></span>
+		</div>
+	</section>
+
+	<section class="block" aria-labelledby="screens-title">
+		<header class="block-head">
+			<h2 id="screens-title">{t.screens.title}</h2>
+			<p>{t.screens.lead}</p>
+		</header>
+		<div class="shots">
+			<div class="shot-tabs" role="radiogroup" aria-label={t.screens.label}>
+				{
+					screens.map((s, i) => (
+						<>
+							<input type="radio" name="shot" id={`shot-${s}`} value={s} checked={i === 0} />
+							<label for={`shot-${s}`}>{t.screens.items[s][0]}</label>
+						</>
+					))
+				}
+			</div>
+			{
+				screens.map((s, i) => (
+					<figure class="shot" data-shot={s}>
+						<div class="frame">
+							<Image
+								src={shot(s)}
+								alt={`mikan · ${t.screens.items[s][0]}`}
+								format="webp"
+								widths={[720, 1080, 1600, 2160]}
+								sizes="(min-width: 72rem) 1056px, calc(100vw - 2rem)"
+								loading={i === 0 ? 'eager' : 'lazy'}
+							/>
+						</div>
+						<figcaption>{t.screens.items[s][1]}</figcaption>
+					</figure>
+				))
+			}
+		</div>
+	</section>
+
+	<section class="block" aria-labelledby="features-title">
+		<header class="block-head">
+			<h2 id="features-title">{t.features.title}</h2>
+		</header>
+		<ul class="features">
+			{
+				t.features.items.map((f) => (
+					<li>
+						<h3>
+							<a href={f.href}>{f.title}</a>
+						</h3>
+						<p>{f.text}</p>
+					</li>
+				))
+			}
+		</ul>
+	</section>
+
+	<section class="block split" aria-labelledby="protocols-title">
+		<header class="block-head">
+			<h2 id="protocols-title">{t.protocols.title}</h2>
+			<p>{t.protocols.lead}</p>
+			<a class="more" href={t.protocols.moreHref}>{t.protocols.more}</a>
+		</header>
+		<div class="matrix-wrap">
+			<table class="matrix">
+				<thead>
+					<tr>
+						{t.protocols.headers.map((h, i) => (i === 0 ? <th scope="col">{h}</th> : <th scope="col" class="c">{h}</th>))}
+					</tr>
+				</thead>
+				<tbody>
+					{
+						protocolMatrix.map(([name, clash, xray, singbox, shared]) => (
+							<tr>
+								<th scope="row">
+									{name}
+									{shared && <sup>1</sup>}
+								</th>
+								{[clash, xray, singbox].map((ok) => (
+									<td class="c">
+										<span class={ok ? 'yes' : 'no'} aria-hidden="true" />
+										<span class="sr-only">{ok ? t.protocols.yes : t.protocols.no}</span>
+									</td>
+								))}
+							</tr>
+						))
+					}
+				</tbody>
+			</table>
+			<p class="note">{t.protocols.note}</p>
+		</div>
+	</section>
+
+	<section class="block phones" aria-labelledby="phones-title">
+		<div class="phones-copy">
+			<h2 id="phones-title">{t.phones.title}</h2>
+			<p>{t.phones.text}</p>
+			<a class="more" href={t.phones.href}>{t.phones.link}</a>
+		</div>
+		<div class="phones-art">
+			<Image src={shot('phone-subscription')} alt={t.phones.alts[0]} widths={[260, 390, 520]} sizes="(min-width: 50rem) 260px, 42vw" class="phone" />
+			<Image src={shot('phone-dashboard')} alt={t.phones.alts[1]} widths={[260, 390, 520]} sizes="(min-width: 50rem) 260px, 42vw" class="phone phone-back" />
+		</div>
+	</section>
+
+	<section class="block cta" aria-labelledby="cta-title">
+		<div class="cta-main">
+			<h2 id="cta-title">{t.cta.title}</h2>
+			<p>{t.cta.text}</p>
+			<Code code={installCommand} lang="bash" frame="none" />
+			<div class="actions">
+				<a class="btn btn-primary" href={docs('start/install/')}>{t.cta.docs}</a>
+				<a class="btn btn-ghost" href={links.github}>{t.cta.github}</a>
+			</div>
+		</div>
+		<aside class="sponsor" aria-labelledby="sponsor-title">
+			<h3 id="sponsor-title">{t.cta.sponsorTitle}</h3>
+			<p>{t.cta.sponsorText}</p>
+			<a class="btn btn-accent" href={links.sponsor}>{t.cta.sponsor}</a>
+		</aside>
+	</section>
+</div>
+
+<style>
+	.landing {
+		--gap: clamp(3.5rem, 2rem + 6vw, 7rem);
+		color: var(--mk-text);
+	}
+
+	.landing h1,
+	.landing h2 {
+		font-family: var(--mk-font-display);
+		font-weight: 600;
+		letter-spacing: -0.03em;
+		color: var(--mk-ink);
+		text-wrap: balance;
+	}
+
+	.landing h2 {
+		font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.25rem);
+		line-height: 1.15;
+		margin: 0;
+	}
+
+	.landing p {
+		margin: 0;
+		text-wrap: pretty;
+	}
+
+	/* ---------- hero ---------- */
+
+	.hero {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 1.5rem;
+		padding-block: clamp(1rem, 4vw, 3.5rem) 0;
+	}
+
+	.hero-art {
+		position: relative;
+		order: -1;
+		justify-self: start;
+		width: 168px;
+	}
+
+	.fruit {
+		display: block;
+		width: 100%;
+		height: auto;
+		position: relative;
+		z-index: 1;
+		animation: float 7s ease-in-out infinite;
+		filter: drop-shadow(0 18px 24px rgba(160, 70, 10, 0.18));
+	}
+
+	.shade {
+		position: absolute;
+		left: 18%;
+		right: 22%;
+		bottom: -6%;
+		height: 9%;
+		border-radius: 50%;
+		background: rgba(140, 60, 10, 0.2);
+		filter: blur(6px);
+		animation: shade 7s ease-in-out infinite;
+	}
+
+	:global([data-theme='dark']) .shade {
+		background: rgba(0, 0, 0, 0.55);
+	}
+
+	@keyframes float {
+		50% {
+			transform: translateY(-8px) rotate(-1.5deg);
+		}
+	}
+
+	@keyframes shade {
+		50% {
+			transform: scaleX(0.86);
+			opacity: 0.7;
+		}
+	}
+
+	.hero h1 {
+		font-size: clamp(2.125rem, 1.3rem + 3.6vw, 3.75rem);
+		line-height: 1.04;
+		margin: 0;
+		max-width: 14ch;
+	}
+
+	.lead {
+		margin-top: 1.25rem !important;
+		font-size: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+		line-height: 1.55;
+		max-width: 36rem;
+		color: var(--mk-text);
+	}
+
+	.install {
+		margin-top: 1.75rem;
+	}
+
+	.req {
+		margin-top: 0.75rem !important;
+		font-size: 0.875rem;
+		color: var(--mk-muted);
+		max-width: 40rem;
+	}
+
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-top: 1.75rem;
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-height: 2.75rem;
+		padding: 0 1.25rem;
+		border-radius: 12px;
+		font-weight: 600;
+		font-size: 0.9375rem;
+		text-decoration: none;
+		transition:
+			background-color 0.2s var(--mk-ease),
+			border-color 0.2s var(--mk-ease),
+			transform 0.12s var(--mk-ease);
+	}
+
+	.btn:active {
+		transform: translateY(1px);
+	}
+
+	.btn-primary {
+		background: var(--mk-fill);
+		color: var(--mk-on-fill);
+	}
+
+	.btn-primary:hover {
+		background: color-mix(in srgb, var(--mk-fill) 86%, var(--mk-accent));
+	}
+
+	.btn-ghost {
+		border: 1px solid var(--mk-hairline-strong);
+		color: var(--mk-ink);
+		background: var(--mk-surface);
+	}
+
+	.btn-ghost:hover {
+		border-color: color-mix(in srgb, var(--mk-accent) 60%, transparent);
+	}
+
+	.btn-accent {
+		background: var(--mk-accent);
+		color: #1b1006;
+	}
+
+	.btn-accent:hover {
+		background: color-mix(in srgb, var(--mk-accent) 88%, #fff);
+	}
+
+	@media (min-width: 50rem) {
+		.hero {
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
+			gap: 3rem;
+		}
+		.hero-art {
+			order: 0;
+			width: 300px;
+			justify-self: end;
+			margin-inline-end: 1rem;
+		}
+	}
+
+	/* ---------- blocks ---------- */
+
+	.block {
+		margin-top: var(--gap);
+	}
+
+	.block-head {
+		max-width: 40rem;
+		margin-bottom: 1.75rem;
+	}
+
+	.block-head p {
+		margin-top: 0.75rem;
+		font-size: 1.0625rem;
+	}
+
+	.more {
+		display: inline-block;
+		margin-top: 1rem;
+		color: var(--mk-accent-text);
+		font-weight: 600;
+		text-decoration: underline;
+		text-decoration-color: color-mix(in srgb, var(--mk-accent-text) 40%, transparent);
+		text-underline-offset: 0.25em;
+	}
+
+	.more:hover {
+		text-decoration-color: currentColor;
+	}
+
+	/* ---------- screenshots ---------- */
+
+	.shot-tabs {
+		position: relative;
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		padding: 0.25rem;
+		margin-bottom: 1rem;
+		border: 1px solid var(--mk-hairline);
+		border-radius: 14px;
+		background: var(--mk-surface);
+	}
+
+	.shot-tabs input {
+		position: absolute;
+		opacity: 0;
+		width: 1px;
+		height: 1px;
+	}
+
+	.shot-tabs label {
+		padding: 0.5rem 0.875rem;
+		border-radius: 10px;
+		font-size: 0.9375rem;
+		font-weight: 500;
+		color: var(--mk-muted);
+		cursor: pointer;
+		transition:
+			background-color 0.2s var(--mk-ease),
+			color 0.2s var(--mk-ease);
+	}
+
+	.shot-tabs label:hover {
+		color: var(--mk-ink);
+	}
+
+	.shot-tabs input:checked + label {
+		background: var(--mk-fill);
+		color: var(--mk-on-fill);
+	}
+
+	.shot-tabs input:focus-visible + label {
+		outline: 2px solid var(--mk-accent);
+		outline-offset: 2px;
+	}
+
+	.shot {
+		display: none;
+		margin: 0;
+	}
+
+	.shot[data-shot='dashboard'] {
+		display: block;
+	}
+
+	.shots:has(input:checked) .shot {
+		display: none;
+	}
+
+	.shots:has(#shot-dashboard:checked) [data-shot='dashboard'],
+	.shots:has(#shot-users:checked) [data-shot='users'],
+	.shots:has(#shot-inbounds:checked) [data-shot='inbounds'],
+	.shots:has(#shot-telegram:checked) [data-shot='telegram'],
+	.shots:has(#shot-settings:checked) [data-shot='settings'] {
+		display: block;
+		animation: appear 0.35s var(--mk-ease);
+	}
+
+	@keyframes appear {
+		from {
+			opacity: 0;
+			transform: translateY(6px);
+		}
+	}
+
+	.frame {
+		border-radius: var(--mk-radius-lg);
+		overflow: hidden;
+		border: 1px solid var(--mk-hairline);
+		box-shadow: var(--mk-shadow-lg);
+		background: var(--mk-surface-2);
+		aspect-ratio: 2160 / 1350;
+	}
+
+	.frame :global(img) {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+
+	figcaption {
+		margin-top: 1rem;
+		font-size: 0.9375rem;
+		color: var(--mk-muted);
+		max-width: 40rem;
+	}
+
+	/* ---------- features ---------- */
+
+	.features {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+		column-gap: 2.5rem;
+	}
+
+	.features li {
+		padding-block: 1.25rem 1.5rem;
+		border-top: 1px solid var(--mk-hairline-strong);
+	}
+
+	.features h3 {
+		margin: 0 0 0.5rem;
+		font-size: 1.0625rem;
+		font-weight: 650;
+		line-height: 1.35;
+	}
+
+	.features h3 a {
+		color: var(--mk-ink);
+		text-decoration: none;
+	}
+
+	.features h3 a:hover {
+		color: var(--mk-accent-text);
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+	}
+
+	.features p {
+		font-size: 0.9375rem;
+		line-height: 1.6;
+	}
+
+	/* ---------- protocol matrix ---------- */
+
+	.split {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.5rem 4rem;
+	}
+
+	@media (min-width: 60rem) {
+		.split {
+			grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+			align-items: start;
+		}
+		.split h2 {
+			font-size: clamp(1.5rem, 1rem + 1vw, 1.875rem);
+		}
+		.split .block-head {
+			position: sticky;
+			top: calc(var(--sl-nav-height) + 2rem);
+		}
+	}
+
+	.matrix-wrap {
+		position: relative;
+		overflow-x: auto;
+		border: 1px solid var(--mk-hairline);
+		border-radius: var(--mk-radius);
+		background: var(--mk-surface);
+	}
+
+	.matrix {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.9375rem;
+	}
+
+	.matrix :is(th, td) {
+		padding: 0.625rem 1rem;
+		border-bottom: 1px solid var(--mk-hairline);
+		text-align: start;
+	}
+
+	.matrix thead th {
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--mk-muted);
+		vertical-align: bottom;
+	}
+
+	.matrix tbody th {
+		font-weight: 500;
+		color: var(--mk-ink);
+		white-space: nowrap;
+	}
+
+	.matrix .c {
+		text-align: center;
+		width: 7rem;
+	}
+
+	.matrix sup {
+		color: var(--mk-muted);
+		margin-inline-start: 0.125rem;
+	}
+
+	.yes,
+	.no {
+		display: inline-block;
+		vertical-align: middle;
+	}
+
+	.yes {
+		width: 0.625rem;
+		height: 0.625rem;
+		border-radius: 50%;
+		background: var(--mk-accent);
+	}
+
+	.no {
+		width: 0.75rem;
+		height: 1.5px;
+		background: var(--mk-hairline-strong);
+	}
+
+	.note {
+		padding: 0.75rem 1rem;
+		font-size: 0.8125rem;
+		color: var(--mk-muted);
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0 0 0 0);
+		white-space: nowrap;
+	}
+
+	/* ---------- phones ---------- */
+
+	.phones {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 2.5rem;
+		align-items: center;
+	}
+
+	.phones-copy p {
+		margin-top: 0.75rem;
+		font-size: 1.0625rem;
+		max-width: 32rem;
+	}
+
+	.phones-art {
+		display: flex;
+		justify-content: center;
+		gap: 1rem;
+	}
+
+	.phone {
+		width: min(42vw, 260px);
+		height: auto;
+		border-radius: 28px;
+		border: 1px solid var(--mk-hairline);
+		box-shadow: var(--mk-shadow-lg);
+	}
+
+	.phone-back {
+		margin-top: 2.5rem;
+	}
+
+	@media (min-width: 50rem) {
+		.phones {
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 4rem;
+		}
+	}
+
+	/* ---------- call to action ---------- */
+
+	.cta {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 1.5rem;
+		padding-top: var(--gap);
+		border-top: 1px solid var(--mk-hairline);
+	}
+
+	.cta-main p {
+		margin: 0.75rem 0 1.25rem;
+		max-width: 34rem;
+		font-size: 1.0625rem;
+	}
+
+	.sponsor {
+		padding: 1.5rem;
+		border-radius: var(--mk-radius-lg);
+		background: var(--mk-accent-soft);
+		border: 1px solid color-mix(in srgb, var(--mk-accent) 25%, transparent);
+		align-self: start;
+	}
+
+	.sponsor h3 {
+		margin: 0;
+		font-size: 1.125rem;
+		font-weight: 650;
+		color: var(--mk-ink);
+	}
+
+	.sponsor p {
+		margin: 0.5rem 0 1.25rem;
+		font-size: 0.9375rem;
+	}
+
+	@media (min-width: 60rem) {
+		.cta {
+			grid-template-columns: minmax(0, 1fr) 20rem;
+			gap: 4rem;
+		}
+	}
+</style>

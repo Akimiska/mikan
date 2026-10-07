@@ -1,0 +1,30 @@
+---
+title: XHTTP masking
+description: The "Masking" tab for VLESS XHTTP, the ready-made sets and what they change.
+---
+
+VLESS · REALITY · XHTTP and XHTTP · PQ connections have a **Masking** tab. It changes the traffic pattern: padding, how data is uploaded, and how apps reuse connections. The settings reach apps through the subscription.
+
+## Ready sets
+
+| Set | What it sets |
+|---|---|
+| Standard | nothing, the core's defaults |
+| More noise | padding 500-3000 bytes, 8-16 streams, connection lifetime 900-1800 s |
+| Maximum masking | padding 1000-4000 bytes with obfuscation in a cookie, PUT upload method, 4-8 streams, lifetime 600-1200 s |
+
+If you change any field by hand, the panel shows "own values".
+
+:::caution[Recent apps required]
+Padding obfuscation and a different upload method work only in new apps: Happ and v2RayTun on a recent Xray, Clash apps on mihomo 1.19.31+. Older apps will stop connecting to this connection. If you're not sure, keep a second connection with standard settings next to it.
+:::
+
+## Fields
+
+- **Mode**: Default, stream-one, stream-up or packet-up.
+- **Padding**: size in bytes, for example `500-3000`.
+- **Padding obfuscation**: where it is sent, what fills it, the parameter or header name.
+- **Upload**: the method, chunk size and largest request.
+- **App connections**: streams per connection, connections at once (instead of streams, not together with them), how many times a connection is reused, requests per connection, connection lifetime, pause between requests.
+
+The panel won't save REALITY over WebSocket. If XHTTP is selected in a Clash app, UDP (calls, QUIC) also goes through the tunnel.

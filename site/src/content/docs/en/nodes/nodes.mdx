@@ -1,0 +1,72 @@
+---
+title: Nodes
+description: Remote nodes, the connection key, server order, updating from the panel and the speed check.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+A node accepts client connections, and mihomo runs inside it. One node always runs on the panel's server ("Own node"), and the others are installed on other servers and connect to the panel with a key. In a subscription, each node looks like a separate group of servers.
+
+## Add a node
+
+<Steps>
+
+1. In the **Nodes** section click "Add node" and fill in:
+   - **Name**: the group in the subscription. A flag at the start of the name is added to the names of its protocols, for example "🇺🇸 VLESS XHTTP".
+   - **Server IP**.
+   - **Domain**, optional: used instead of the IP in Hysteria2 and TUIC links.
+   - **API port**, random by default.
+   - **Name in status channel**, optional: see [Notifications](/mikan/en/operations/alerts/).
+
+2. Click "Add and get the key". The panel shows a command with the connection key:
+
+   ```bash
+   curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh | sudo bash -s -- --join KEY
+   ```
+
+3. Run it as root on the node's server. The installer sets up Docker and the node and opens the ports.
+
+4. In about 30 seconds the node's state in the panel changes to "Working".
+
+</Steps>
+
+:::caution[The key is shown once]
+The panel stores only the key's fingerprint. If you lose it, the "New key" button on the node card issues a new one, and the old one stops working immediately. On the node's server, the new key is accepted by `mikan join KEY`.
+:::
+
+The key contains the node's private key. To keep it out of the process list, you can pass it through the `MIKAN_JOIN_KEY` variable. The `--panel-ip IP` flag opens the node's API port only to the panel's address.
+
+You can also add a node from the panel's server: `mikan node add --name NAME --host IP` prints the key.
+
+## Node card
+
+The card shows the state, address, how many protocols are running, connections, CPU and memory load, version and certificate. Since 0.5.0.3 it also shows the node's traffic, which is in a chart and on the overview too. Buttons:
+
+- **Configure**: name, address, domain, and the "Serves clients" switch. A node that is turned off does not accept connections and disappears from subscriptions.
+- **WARP**: exit to the internet through Cloudflare, see [WARP](/mikan/en/nodes/warp/).
+- **Cascade**: where the node sends other nodes' traffic, see [Cascades](/mikan/en/nodes/cascades/).
+- **Speed**: a check of the node's connection.
+- **Certificate**: your own TLS certificate for Hysteria2, TUIC, AnyTLS and TrustTunnel, see [Domain and certificates](/mikan/en/start/domain/#node-certificate).
+- **Delete**: removes the node from the panel. The server itself is cleaned with `mikan uninstall` on it. A node that carries a cascade or the bot's connection to Telegram cannot be deleted while it is in use.
+
+## Server order
+
+When there is more than one node, up and down arrows appear on the cards. The order of nodes in the panel becomes the order of servers in the subscription, in all apps.
+
+## Updating nodes from the panel
+
+If a node falls behind the panel, its card shows an "Older than the panel" mark and an **Update** button. The node's server makes a backup, takes the signed release and restarts the node. The VPN on it drops for a few seconds, and if the new version does not start, the node goes back to the previous one. When several nodes are behind, the "Update all" button updates them one at a time: the next one starts when the previous one is up, and on a failure the rest wait.
+
+The **Nodes follow the panel** switch in **Settings → General → Updates**: after the panel is updated, the nodes catch up to its version by themselves, one at a time. If a node fails to update, you get a notification and the run stops.
+
+A node installs only signed releases and never rolls back to an older version.
+
+:::note[Nodes on 0.5.0.1 and older]
+They need the `mikan update` command once on their server, and the panel shows it on the card. After that they update from the panel.
+:::
+
+## Speed check
+
+The **Speed** button on the card measures the node's own connection to the internet: latency, jitter and loss over 20 DNS queries to 1.1.1.1, then download and upload speed through speed.cloudflare.com. Results are saved in the history.
+
+One check takes about 20 seconds and uses up to 250 MB for download and up to 100 MB for upload, which the node's users may notice. You can check one node once every 5 minutes.

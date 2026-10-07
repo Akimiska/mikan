@@ -1,0 +1,49 @@
+---
+title: Import from other panels
+description: Moving users from Marzban, PasarGuard and Remnawave, and how old subscription links keep working.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+**Settings → Import** moves users from Marzban, PasarGuard or Remnawave. You do not need access to the old panel's database: everything goes through its API, and the old panel itself is not changed.
+
+## Move users
+
+<Steps>
+
+1. Pick the panel and enter the **Address of the old panel**, for example `https://panel.example.com`, without the admin path.
+
+2. Access:
+   - **Marzban**: the administrator's username and password;
+   - **PasarGuard**: a username and password, or an API key with the `users:read` permission;
+   - **Remnawave**: an API token with permission to read users.
+
+3. Pick a **Plan**: users get its protocols, traffic reset rule and pools.
+
+4. "Check" shows how many users were found, how many are new and how many are already here.
+
+5. "Import" starts the import in the background, so you can close the page.
+
+</Steps>
+
+The traffic limit, used traffic, term, device limit and note are carried over. Users whose names already exist in mikan are skipped. The old reset rule, groups and connections are not carried over. Users "on hold" start their term at the moment of import.
+
+:::caution
+Links that were revoked in the old panel work again after the import. If that matters, reissue them.
+:::
+
+## Old subscription links
+
+For clients to change nothing, point the old domain at the mikan server and set up the **Old subscription links** card:
+
+- **Path of the old links**: `sub` for Marzban and PasarGuard, `api/sub` for Remnawave. Empty: off.
+- Marzban and PasarGuard also need the **Signing secret of the old panel**. It is stored in the old panel's database:
+
+  ```sql
+  SELECT secret_key FROM jwt;
+  ```
+
+  Without it, the old links will not open.
+- Set the subscription port in **Settings → Subscription** if the old panel served subscriptions on a different port.
+
+The bot accepts old links, and the user card shows the old link (Remnawave) or that it works. Reissuing a link disables the old one too.

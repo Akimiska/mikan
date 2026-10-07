@@ -1,0 +1,53 @@
+---
+title: Payments and marketplace
+description: Selling subscriptions in the bot and Mini App, Telegram Stars, payment adapters from the marketplace and refunds.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Subscribers buy and renew access in the bot and Mini App. The panel creates or extends the subscription as soon as the payment system confirms the payment, and the bot sends the link.
+
+## Turn on selling
+
+<Steps>
+
+1. **Settings → General → Selling subscriptions**, or the "Start selling" button in the **Payments** section. On new panels selling is off.
+
+2. In **Plans**, mark plans "On sale" and set a price in Stars and/or rubles.
+
+3. In **Payments → Accepting payments**, turn on Telegram Stars (it only needs a working bot) or add a payment method from the marketplace.
+
+</Steps>
+
+The same place has the "Sell to new people" and "Renewal resets traffic" switches. A renewal adds the plan's term after the current one and, unless switched off, starts a new traffic period.
+
+If no plan with a price for an enabled payment method is on sale, the **Payments** section warns you: the bot will only tell people to message support.
+
+With selling off, the bot and Mini App sell nothing, the **Payments** section disappears from the menu, and plan prices are hidden. Invoices issued earlier are still applied.
+
+## Payment method marketplace
+
+**Payments → Payment methods from the marketplace → Add** shows the signed [getmikan/marketplace](https://github.com/getmikan/marketplace) catalog: to begin with, YooKassa (cards and SBP) and CryptoBot (cryptocurrency). The "Install" button puts the adapter on the server as a separate container. Its card has a settings form, the notification URL you need to enter in the payment system's dashboard, and a switch.
+
+The panel never trusts a single notification from a payment system: it asks the adapter for the invoice and checks the amount and currency against its own payment.
+
+On the server the same is done with commands:
+
+```bash
+mikan addon list               # what is running and what is in the catalog
+mikan addon install yookassa   # install or update an adapter
+mikan addon remove yookassa    # stop and remove; settings and history stay
+```
+
+Adapters are installed only by the mikan program on the host: the panel itself does not see Docker.
+
+## History and refunds
+
+**Payments** has a payment history. With the "Refund" button you can refund an applied Telegram Stars payment. A refund takes back what the payment gave:
+
+- a new subscription is disabled, but not deleted;
+- a renewal loses the term it bought, and if nothing changed after the payment, the previous plan and limits are restored;
+- a traffic package is deleted;
+- a promo code can be used again.
+
+Traffic reset by a renewal is not restored. Refunds that Telegram makes on its own are handled the same way. The buyer gets a message in the bot.

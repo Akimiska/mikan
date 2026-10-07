@@ -1,0 +1,111 @@
+---
+title: Installation
+description: Server requirements, the install command, installer steps and all flags.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## Requirements
+
+- **OS:** Ubuntu 22.04+ or Debian 12+. On other distributions the installer warns you but does not stop.
+- **Architecture:** amd64 or arm64. A Raspberry Pi 4 works if it runs a 64-bit system.
+- **Memory:** 400 MB or more, less only with a warning. Docker takes about 300 MB and mikan about 60 MB more.
+- **Disk:** at least 1 GB of free space where Docker lives, ideally 3 GB or more.
+- **Access:** root (`sudo`).
+- **Time:** the server clock must be synchronized, otherwise TLS and REALITY work poorly.
+- **A domain** is optional. Without one, the panel gets a Let's Encrypt certificate for the IP address.
+
+## The command
+
+```bash
+curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh | sudo bash
+```
+
+`install.sh` first checks the release signature and the installer hash, and only then installs anything. If Docker is missing, it is installed from get.docker.com. Docker without compose v2 (the `docker.io` package from Ubuntu 22.04 and Debian) is replaced by the installer, but only with your consent: images, volumes and containers stay.
+
+## What the installer asks
+
+A step-by-step wizard opens in the terminal:
+
+<Steps>
+
+1. **Panel language**: Russian or English. The admin UI and the subscription page open in it, and plan names and bot menus use it by default.
+
+2. **Server check**: OS, memory, disk, time, free ports 443 and 8443 (TCP and UDP) and 80. A busy port does not stop the installation: protocols on it get other free ports.
+
+3. **Server address**: the public IPv4 is detected automatically, or you can enter a hostname.
+
+4. **Domain**, optional. The installer checks through public DNS that the domain points to this server. It stops if there is no A record, it points to another address, the domain is behind a Cloudflare proxy (the "orange cloud"), or there is an AAAA record for a foreign address.
+
+5. **Email for Let's Encrypt**, optional.
+
+6. **nginx or Caddy on port 80.** If they already hold port 80 and a domain is set, the installer offers to add a rule so that Let's Encrypt checks reach the panel. The config is saved, validated (`nginx -t`, `caddy validate`) and restored as it was if there is an error. If you decline, the lines to add yourself are shown at the end.
+
+7. **Parameters**: the panel port (random from 20000 to 60000 by default), whether to open ports in ufw, whether to enable BBR and large UDP buffers.
+
+8. **Installation**: the image of the latest signed release and PostgreSQL 18, files in `/opt/mikan`, the admin account and secret links, network setup, start.
+
+9. **REALITY camouflage**: for up to a minute the installer looks for sites near the server and offers you one to choose.
+
+</Steps>
+
+The last screen shows the panel link, login and password. The <kbd>q</kbd> key shows a QR code of the link.
+
+:::caution[Save the password]
+The password is shown only on the last screen. After you exit, the link and login stay in the terminal. If you forget the password, `mikan reset-password` gives you a new one.
+:::
+
+## Unattended, for scripts
+
+With the `--yes` flag the installer asks nothing and takes values from flags and defaults:
+
+```bash
+curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install.sh \
+  | sudo bash -s -- --yes --lang en --domain vpn.example.com --email you@example.com
+```
+
+| Flag | What it does |
+|---|---|
+| `--lang en\|ru` | default panel language |
+| `--host IP` | the server's public IPv4, detected automatically by default |
+| `--domain DOMAIN` | a domain that points to the server, for the Let's Encrypt certificate |
+| `--email EMAIL` | email for Let's Encrypt |
+| `--port N` | panel port, random from 20000 to 60000 by default |
+| `--no-firewall` | do not touch ufw |
+| `--no-tune` | do not change kernel settings (BBR, UDP buffers) |
+| `--no-proxy-rule` | with a domain and nginx or Caddy on port 80: do not change their config, print the rule instead |
+| `--join KEY` | install a node for another panel, the key comes from the Nodes page |
+| `--panel-ip IP` | for a node: open its API port only to the panel's address |
+| `--replace-docker` | replace Docker without compose v2 with Docker from get.docker.com |
+| `-y`, `--yes` | ask nothing |
+
+Full list: `mikan install --help`.
+
+## Where things are
+
+| Path | What is there |
+|---|---|
+| `/opt/mikan/.env`, `compose.yaml` | launch settings and containers |
+| `/opt/mikan/data/panel`, `data/node` | panel and node data |
+| `/opt/mikan/backups` | backups |
+| `/opt/mikan/data/panel/www` | your own site: files are served on paths the panel does not use, `404.html` serves as the error page |
+| Docker volume `mikan_pg-data` | the PostgreSQL database |
+| `/usr/local/bin/mikan` | the server management command |
+
+The installer opens these in ufw (if it is enabled): the panel port, 80, 443 and the spare ports 2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443 over TCP and UDP. Automatic fixes move blocked protocols to them. If ufw is off and your hosting provider has its own firewall, open at least 443, 8443 and the panel port there.
+
+:::tip[Installation interrupted]
+Run `mikan install` again and the installer continues from where it stopped. On an already installed server, the `mikan` command opens the management menu.
+:::
+
+## A node for another panel
+
+If the panel is already installed and you need one more exit point, only the node is installed on the new server. The command with a key comes from the **Nodes** page, more in the [Nodes](/mikan/en/nodes/nodes/) section.
+
+## Uninstalling
+
+`mikan uninstall` stops the containers and removes the command, services and kernel settings. Data and backups stay in `/opt/mikan`, and the database stays in a Docker volume. To remove everything completely:
+
+```bash
+rm -rf /opt/mikan && docker volume rm mikan_pg-data
+```

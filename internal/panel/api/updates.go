@@ -28,6 +28,7 @@ type UpdatesView struct {
 	Unreachable bool                `json:"unreachable" doc:"Вышел newest, но с этой версии к нему не ведёт ни одно обновление"`
 	RequestedAt int64               `json:"requested_at" doc:"Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял"`
 	Host        *updates.HostStatus `json:"host,omitempty" doc:"Как прошло последнее обновление на сервере"`
+	NodesFollow bool                `json:"nodes_follow" doc:"Удалённые ноды следуют за панелью: после её обновления панель обновляет их до своей версии, по одной"`
 }
 
 type updatesOutput struct{ Body UpdatesView }
@@ -36,6 +37,8 @@ type patchUpdatesInput struct {
 	Body struct {
 		Auto    *bool   `json:"auto,omitempty"`
 		Channel *string `json:"channel,omitempty" enum:"stable,beta"`
+		// NodesFollow turning on also lets the panel try again the nodes whose update failed.
+		NodesFollow *bool `json:"nodes_follow,omitempty"`
 	}
 }
 
@@ -57,6 +60,9 @@ func (h *handlers) updatesView(ctx context.Context) (UpdatesView, error) {
 		return v, err
 	}
 	if v.Channel, err = h.d.Settings.UpdateChannel(ctx); err != nil {
+		return v, err
+	}
+	if v.NodesFollow, err = h.d.Settings.On(ctx, settings.NodesFollow); err != nil {
 		return v, err
 	}
 	u := h.d.Updates
@@ -93,6 +99,23 @@ func (h *handlers) getUpdates(ctx context.Context, _ *struct{}) (*updatesOutput,
 }
 
 func (h *handlers) patchUpdates(ctx context.Context, in *patchUpdatesInput) (*updatesOutput, error) {
+	if in.Body.NodesFollow != nil {
+		on, err := h.d.Settings.On(ctx, settings.NodesFollow)
+		if err != nil {
+			return nil, err
+		}
+		if *in.Body.NodesFollow != on {
+			if h.d.NodeUpdates != nil {
+				err = h.d.NodeUpdates.SetFollowing(ctx, *in.Body.NodesFollow)
+			} else {
+				err = settings.Set(ctx, h.d.Settings, settings.KeyNodesFollow, *in.Body.NodesFollow)
+			}
+			if err != nil {
+				return nil, err
+			}
+			h.audit(ctx, sessionOf(ctx).AdminID, "updates.nodes_follow", "", "", map[string]any{"nodes_follow": *in.Body.NodesFollow})
+		}
+	}
 	if in.Body.Auto == nil && in.Body.Channel == nil {
 		return h.getUpdates(ctx, nil)
 	}

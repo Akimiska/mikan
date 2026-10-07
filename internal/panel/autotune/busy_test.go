@@ -262,3 +262,154 @@ func TestBusyMoveIsNotAChangeAgainstTheBudget(t *testing.T) {
 		t.Fatalf("history: %+v", h)
 	}
 }
+
+// runsRelay: node 1 runs its relay at the row's port now, with this status, and its
+// server holds the ports of host (nil: the node does not say).
+func (e *env) runsRelay(t *testing.T, status nodeapi.ListenerStatus, host *nodeapi.HostPorts) {
+	t.Helper()
+	r, err := e.st.Q.GetNodeRelay(e.ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.runs(t, 1)
+	hv := e.nodes.health[1]
+	status.Name = nodeapi.RelayListener
+	hv.Ports[nodeapi.RelayListener] = r.Port
+	hv.Listeners = append(hv.Listeners, status)
+	hv.Health.Host = host
+	e.nodes.health[1] = hv
+}
+
+func (e *env) relay(t *testing.T) string {
+	t.Helper()
+	r, err := e.st.Q.GetNodeRelay(e.ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r.Port
+}
+
+func (e *env) relayAudits(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := e.st.DB.QueryRowContext(e.ctx, `SELECT count(*) FROM audit_log WHERE action = 'auto.relay_port' AND details LIKE '%"reason":"busy"%'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// The relay's decision, like an inbound's: the first free port of the pool for TCP that
+// the relay did not leave lately, and one the server's own programs do not hold.
+func TestBusyRelayMove(t *testing.T) {
+	e := setup(t)
+	ports := e.ports(t, 1)
+	allPool := map[string]bool{}
+	for _, p := range domain.PortPool {
+		allPool[strconv.Itoa(p)] = true
+	}
+	// Every high port held too: nothing is left to pick.
+	var high []int
+	for p := 30000; p < 60000; p++ {
+		high = append(high, p)
+	}
+	for _, c := range []struct {
+		name          string
+		host          *nodeapi.HostPorts
+		relay, failed string
+		portOn        bool
+		left          map[string]bool
+		port, why     string
+	}{
+		{name: "the pool's first", relay: "2053", failed: "2053", portOn: true, port: "2083"},
+		{name: "ports left lately", relay: "2053", failed: "2053", portOn: true, left: map[string]bool{"2083": true, "2087": true}, port: "2096"},
+		{name: "held by programs of the server", host: &nodeapi.HostPorts{TCP: []int{2083}, UDP: []int{2087}}, relay: "2053", failed: "2053", portOn: true, port: "2087"},
+		{name: "the whole pool left", relay: "2053", failed: "2053", portOn: true, left: allPool, port: "high"},
+		{name: "nothing left to pick", host: &nodeapi.HostPorts{TCP: high}, relay: "2053", failed: "2053", portOn: true, left: allPool, why: BusyNoPort},
+		{name: "the row moved since", relay: "2083", failed: "2053", portOn: true, why: BusyStale},
+		{name: "moves off in settings", relay: "2053", failed: "2053", why: BusyOff},
+		// The panel's own HTTPS is mikan's, not another program: the admin's conflict to fix.
+		{name: "the panel's port", relay: "21355", failed: "21355", portOn: true, why: BusyMikan},
+		{name: "an inbound's port", relay: "443", failed: "443", portOn: true, why: BusyMikan},
+	} {
+		port, why := BusyRelayMove(ports.WithHost(c.host), c.relay, c.failed, c.portOn, c.left)
+		if c.port == "high" {
+			if p, err := strconv.Atoi(port); err != nil || p < 30000 || why != "" {
+				t.Errorf("%s: got %q %q, want a high port", c.name, port, why)
+			}
+			continue
+		}
+		if port != c.port || why != c.why {
+			t.Errorf("%s: got %q %q, want %q %q", c.name, port, why, c.port, c.why)
+		}
+	}
+}
+
+// A third-party Xray holds the relay's 2053/tcp: the relay moves on by itself, with an
+// audit entry and a push to the nodes, so its sources follow; a failure of any other kind
+// stays; and the relay never goes back to a port it left.
+func TestBusyRelayMovesByItself(t *testing.T) {
+	e := setup(t)
+	var logs bytes.Buffer
+	e.tn.log = slog.New(slog.NewTextHandler(&logs, nil))
+	local, err := e.st.Q.GetNode(e.ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := domain.EnsureRelay(e.ctx, e.st.Q, local, e.now, nil); err != nil || r.Port != "2053" {
+		t.Fatalf("relay %+v, %v", r, err)
+	}
+	// Something else than a busy port: nothing moves.
+	e.runsRelay(t, nodeapi.ListenerStatus{Error: "listen tcp :2053: bind: permission denied"}, nil)
+	e.tn.MoveBusy(e.ctx)
+	if got := e.relay(t); got != "2053" || e.relayAudits(t) != 0 {
+		t.Fatalf("a failure that is not a busy port moved the relay to %s", got)
+	}
+
+	// The node tells what its server holds: 2083 is not an option either. A node before 0.5
+	// sends no code, only the OS's words.
+	e.runsRelay(t, nodeapi.ListenerStatus{Error: inUse}, &nodeapi.HostPorts{TCP: []int{2053, 2083}})
+	e.tn.MoveBusy(e.ctx)
+	if got := e.relay(t); got != "2087" {
+		t.Fatalf("relay on %s, want 2087", got)
+	}
+	if e.relayAudits(t) != 1 || e.ch.slots == 0 {
+		t.Fatalf("audit entries %d, the nodes told %d times", e.relayAudits(t), e.ch.slots)
+	}
+	if len(e.events(t)) != 0 {
+		t.Fatalf("the relay is no inbound's event: %+v", e.events(t))
+	}
+	e.tn.MoveBusy(e.ctx) // the health still names 2053: the node has not caught up
+	if got := e.relay(t); got != "2087" || e.relayAudits(t) != 1 {
+		t.Fatalf("moved again on a stale health: %s, %d entries", got, e.relayAudits(t))
+	}
+
+	// 2087 is held as well, and the node does not say: on to the first one not left.
+	e.runsRelay(t, busyOn(nodeapi.RelayListener), nil)
+	e.tn.MoveBusy(e.ctx)
+	if got := e.relay(t); got != "2083" {
+		t.Fatalf("relay on %s, want 2083", got)
+	}
+	seen := map[string]bool{"2053": true, "2087": true, "2083": true}
+	for range 2 * len(domain.PortPool) {
+		cur := e.relay(t)
+		e.runsRelay(t, busyOn(nodeapi.RelayListener), nil)
+		e.tn.MoveBusy(e.ctx)
+		if next := e.relay(t); next != cur {
+			if seen[next] {
+				t.Fatalf("the relay went back to %s", next)
+			}
+			seen[next] = true
+		}
+	}
+
+	// Moves off in settings: the relay stays and the error stays visible.
+	if err := settings.Set(e.ctx, e.set, settings.KeyAutoPort, false); err != nil {
+		t.Fatal(err)
+	}
+	before, audits := e.relay(t), e.relayAudits(t)
+	e.runsRelay(t, busyOn(nodeapi.RelayListener), nil)
+	e.tn.MoveBusy(e.ctx)
+	if e.relay(t) != before || e.relayAudits(t) != audits {
+		t.Fatalf("moved with moves off: %s", e.relay(t))
+	}
+}

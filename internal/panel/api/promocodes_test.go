@@ -21,6 +21,8 @@ func TestValidatePromoBody(t *testing.T) {
 		{name: "bad percent", in: func() PromoBody { x := base; x.Value = 101; return x }(), want: "bad_percent"},
 		{name: "traffic above grant maximum", in: func() PromoBody { x := base; x.Type = "traffic"; x.Value = domain.MaxGrantBytes + 1; return x }(), want: "bad_traffic"},
 		{name: "pool only for traffic bonus", in: func() PromoBody { x := base; id := int64(4); x.PoolID = &id; return x }(), want: "bad_pool"},
+		{name: "minimum without a currency", in: func() PromoBody { x := base; x.MinOrder = 100; return x }(), want: "promo_sum_needs_currency"},
+		{name: "maximum without a currency", in: func() PromoBody { x := base; x.MaxDiscount = 5000; return x }(), want: "promo_sum_needs_currency"},
 		{name: "new users only unsupported for bonus", in: func() PromoBody { x := base; x.Type = "traffic"; x.Value = 1 << 30; x.NewUsersOnly = true; return x }(), want: "new_users_only_not_supported_for_bonus"},
 	}
 	for _, tc := range cases {
@@ -30,5 +32,10 @@ func TestValidatePromoBody(t *testing.T) {
 				t.Fatalf("validatePromoBody() = %v, want %s", err, tc.want)
 			}
 		})
+	}
+	ok := base
+	ok.Currency, ok.MinOrder, ok.MaxDiscount = "RUB", 100, 500000
+	if err := validatePromoBody(ok, now, 0); err != nil {
+		t.Fatalf("sums in rubles refused: %v", err)
 	}
 }

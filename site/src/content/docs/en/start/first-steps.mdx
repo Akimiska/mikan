@@ -1,0 +1,74 @@
+---
+title: First steps
+description: Signing in, 2FA, default connections, the first user and recovering access.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## Signing in
+
+The admin link looks like this:
+
+```text
+https://vpn.example.com:PORT/SECRET-PATH/
+```
+
+The port is random and the path is 24 characters. Any other path on this port answers with an empty "404 Not Found", so the panel cannot be found without the link. The installer shows the login and password. If you lost the link, run this on the server:
+
+```bash
+mikan url
+```
+
+## Protect the sign-in
+
+Open **Settings → Security**:
+
+- **Two-factor protection**: the "Turn on 2FA" button, a QR code for Google Authenticator, 1Password or Aegis. Save the recovery codes, they are not shown a second time.
+- **Panel link**: "Issue a new link" if the old one may have leaked.
+- The password is changed there too, at least 12 characters long.
+
+## Default connections
+
+A fresh installation already has four connections (the **Protocols** section):
+
+| Connection | Port | What for |
+|---|---|---|
+| VLESS · REALITY · XHTTP | 443/tcp | the main one for Russia: looks like ordinary HTTPS |
+| Hysteria2 | 443/udp | a fast QUIC-based protocol |
+| TUIC v5 | 8443/udp | another QUIC protocol |
+| VLESS · REALITY · Vision | 8443/tcp | for older clients without XHTTP |
+
+Each one can be turned on, turned off, configured or deleted. A new one is added with the **Add a connection** button: pick a preset, change the port if you like, and the keys are created for you. All presets and settings are described in [Protocol presets](/mikan/en/protocols/presets/).
+
+:::note
+Changing the port or the camouflage reconnects this protocol's clients for a few seconds. Clients get the changes with their next subscription update, which apps do once an hour.
+:::
+
+## The first user
+
+<Steps>
+
+1. Open **Plans** and adjust the plan: traffic per period, duration, number of devices, when to reset traffic. More in [Plans and users](/mikan/en/billing/plans/).
+
+2. In **Users** click "New user", enter a name, a contact if you want, and pick a plan.
+
+3. The "Create and copy the link" button creates the user and copies the subscription link.
+
+4. Send the link to the person. When they open it in a browser, they see the subscription page with buttons for their apps.
+
+</Steps>
+
+## What next
+
+- [Domain and certificates](/mikan/en/start/domain/): if you installed without a domain or want your own certificate.
+- [Telegram bot](/mikan/en/billing/telegram/): so subscribers can see their expiry date and renew on their own.
+- [Nodes](/mikan/en/nodes/nodes/): more servers in other countries.
+
+## If you lose access
+
+| What happened | Command on the server |
+|---|---|
+| no panel link | `mikan url` |
+| forgot the password | `mikan reset-password`: a new password, and all sessions and API keys are revoked |
+| the link may have leaked | `mikan reset-path`: a new link, and the old one stops working in a few seconds |
+| lost the phone with 2FA | a recovery code at sign-in, or `mikan disable-2fa` |

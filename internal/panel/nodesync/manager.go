@@ -281,6 +281,15 @@ func (m *Manager) Health(id int64) (HealthView, bool) {
 	return s.Health(), true
 }
 
+// HostPorts is what the node last said listens on its server; nil when it has not (domain.HostLookup).
+func (m *Manager) HostPorts(id int64) *nodeapi.HostPorts {
+	hv, ok := m.Health(id)
+	if !ok {
+		return nil
+	}
+	return hv.HostPorts()
+}
+
 // Validate runs mihomo's parser on an inbound on the node that will run it.
 func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRequest) error {
 	v, err := clientOf[interface {
@@ -290,6 +299,17 @@ func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRe
 		return err
 	}
 	return v.Validate(ctx, req)
+}
+
+// RequestUpdate asks a node to update to a release (nodeupdate has the rules).
+func (m *Manager) RequestUpdate(ctx context.Context, id int64, version string) error {
+	c, err := clientOf[interface {
+		RequestUpdate(context.Context, string) error
+	}](m, id)
+	if err != nil {
+		return err
+	}
+	return c.RequestUpdate(ctx, version)
 }
 
 // Activity reports which inbounds of a node each device reached lately.
@@ -323,6 +343,17 @@ func (m *Manager) ScanTargets(ctx context.Context, id int64, req nodeapi.TargetS
 		return nodeapi.TargetScan{}, err
 	}
 	return c.ScanTargets(ctx, req)
+}
+
+// SpeedTest runs a node's speed test of its own way to the internet.
+func (m *Manager) SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error) {
+	c, err := clientOf[interface {
+		SpeedTest(context.Context) (nodeapi.SpeedTest, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.SpeedTest{}, err
+	}
+	return c.SpeedTest(ctx)
 }
 
 // clientOf returns a node's client as T: methods beyond Node are optional, and tests
@@ -397,6 +428,10 @@ func (m *Manager) prune(ctx context.Context, now time.Time) {
 	}
 	if err := m.st.Q.PruneDevices(ctx, now.Add(-deviceKeep).Unix()); err != nil {
 		m.log.Error("prune devices", "err", err)
+		return
+	}
+	if err := m.st.Q.PruneTorrentHits(ctx, now.Add(-torrentKeep).Unix()); err != nil {
+		m.log.Error("prune torrent hits", "err", err)
 		return
 	}
 	m.lastPrune = now

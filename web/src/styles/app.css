@@ -168,7 +168,8 @@ html[data-theme="forest"] {
   .btn-sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
   .btn-block { width: 100%; }
   .icon-btn { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; color: var(--ink-600); transition: background-color 0.2s, color 0.2s; }
-  .icon-btn:hover { background: var(--hover); color: var(--ink-900); }
+  .icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--ink-900); }
+  .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .link-btn { color: var(--mikan-700); font-weight: 500; }
   .link-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
   .kbd { font: 500 11px/16px var(--font-ui-stack); color: var(--ink-500); border: 1px solid var(--hairline); background: var(--surface); border-radius: 6px; padding: 0 4px; }

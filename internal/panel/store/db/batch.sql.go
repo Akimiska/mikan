@@ -188,6 +188,39 @@ func (q *Queries) BurnUsersSlots(ctx context.Context, arg BurnUsersSlotsParams) 
 	return err
 }
 
+const countBoundDevicesOf = `-- name: CountBoundDevicesOf :many
+SELECT user_id, count(*) AS n FROM bound_devices WHERE user_id = ANY($1::bigint[]) GROUP BY user_id
+`
+
+type CountBoundDevicesOfRow struct {
+	UserID int64
+	N      int64
+}
+
+// How many devices are bound to each of these users: the places they take.
+func (q *Queries) CountBoundDevicesOf(ctx context.Context, ids []int64) ([]CountBoundDevicesOfRow, error) {
+	rows, err := q.db.QueryContext(ctx, countBoundDevicesOf, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountBoundDevicesOfRow{}
+	for rows.Next() {
+		var i CountBoundDevicesOfRow
+		if err := rows.Scan(&i.UserID, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countUserStates = `-- name: CountUserStates :one
 WITH g AS (
   SELECT user_id, SUM(remaining) AS left_bytes FROM traffic_grants

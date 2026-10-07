@@ -5,6 +5,9 @@ ON CONFLICT (token) DO NOTHING;
 -- name: LegacySubTokenUser :one
 SELECT sqlc.embed(u), t.not_before FROM legacy_sub_tokens t JOIN users u ON u.id = t.user_id WHERE t.token = $1;
 
+-- name: ListLegacySubTokensOf :many
+SELECT token, source FROM legacy_sub_tokens WHERE user_id = $1 ORDER BY token;
+
 -- name: CountLegacySubTokens :one
 SELECT count(*) FROM legacy_sub_tokens;
 

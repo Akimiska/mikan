@@ -1,0 +1,88 @@
+---
+title: Protocol presets
+description: Every mikan protocol, its default port, which apps receive it, and the main settings.
+---
+
+The **Protocols** section holds the protocols clients use to reach your nodes. Add a new one from a preset with the **Add** button: keys, passwords and certificates are created for you, and all you pick is the node and, if you like, the port.
+
+## List
+
+| Preset | Default port | Notes |
+|---|---|---|
+| VLESS · REALITY · XHTTP | 443/tcp | the main one for Russia: looks like ordinary HTTPS and holds few connections |
+| VLESS · REALITY · Vision | 8443/tcp | for older clients without XHTTP |
+| VLESS · REALITY · gRPC | 2053/tcp | |
+| VLESS · REALITY · XHTTP · PQ | 2096/tcp | post-quantum VLESS encryption, needs a recent mihomo or Xray |
+| Trojan · REALITY | 2087/tcp | |
+| Hysteria2 | 443/udp | QUIC, a port range can be set |
+| Hysteria2 · Gecko | 2443/udp | Hysteria2 with Gecko obfuscation, Clash apps only |
+| TUIC v5 | 8443/udp | |
+| AnyTLS | 2083/tcp | |
+| TrustTunnel | 4443/tcp | Clash apps only |
+| ShadowQUIC | 4443/udp | Clash apps only |
+| Mieru | 5443/tcp | Clash apps only |
+| Shadowsocks-2022 | 6443/tcp | one key for everyone |
+| Sudoku | 7443/tcp | one key for everyone, Clash apps only |
+| Snell | 9443/tcp | one key for everyone, Clash apps only |
+| Own config | | a mihomo listener template in YAML |
+
+:::caution[One-key protocols]
+In mihomo, Shadowsocks-2022, Sudoku and Snell work with a single key for everyone. The node cannot tell users apart, so these protocols have no traffic accounting, limits, device binding or automatic fixes. A disabled or expired user keeps access until the key changes, and the only way to change it is to delete the connection and add it again.
+:::
+
+## Who gets what
+
+The subscription detects the app and sends it only what it can run. The connection form shows this on the "Delivered to" line.
+
+| Protocol | Clash apps (mihomo) | Happ, v2RayTun, INCY (Xray) | Hiddify, Karing (sing-box) |
+|---|:---:|:---:|:---:|
+| VLESS · REALITY · Vision | yes | yes | yes |
+| VLESS · REALITY · XHTTP | yes | yes | |
+| VLESS · REALITY · gRPC | yes | yes | yes |
+| VLESS PQ | yes | yes | |
+| Trojan · REALITY | yes | yes | yes |
+| Hysteria2 | yes | yes | yes |
+| TUIC v5 | yes | | yes |
+| AnyTLS | yes | | Karing |
+| TrustTunnel, ShadowQUIC, Mieru | yes | | |
+| Shadowsocks-2022 | yes | yes | yes |
+| Sudoku, Snell | yes | | |
+
+A Clash app gets the newer protocols only if it reports a recent enough core version: for example, Gecko needs mihomo 1.19.26+ and ShadowQUIC 1.19.29+. If the app doesn't report a version, these protocols are not sent to it.
+
+## Connection settings
+
+The **Configure** button opens the tabs "Main", "Masking" (XHTTP only) and "Config (YAML)".
+
+- **Name in the subscription**: how the connection is named in apps.
+- **Port**. For Hysteria2 you can set a range, for example `20000-30000`: clients hop between ports, so blocking a single port is pointless. Open the whole range for UDP in the firewall.
+- **Camouflage site (REALITY)**: `www.microsoft.com:443` by default. The buttons are "Check" and "Find near the server" (looks for sites in the same /24 network as the node). If the panel has a domain, you can pick your own domain. If an IP is given instead of a name, the "Site domain (SNI)" field is required.
+- **Obfuscation** for Hysteria2: Salamander or Gecko. Gecko cuts the QUIC handshake into pieces of random size with padding, against DPI that recognizes QUIC by packet sizes. Only Clash apps on mihomo 1.19.26+ receive it, so keep a plain Hysteria2 next to it.
+- **TLS fingerprint**: as in the settings (Chrome by default), Chrome, Firefox, Safari, iOS, Android, Edge, 360, QQ, a random browser, or "Own…" with any uTLS profile name, for example `chrome120`. The shared default is set in **Settings → Subscription**. Hysteria2 and TUIC have no fingerprint.
+- **Way out to the internet**: direct, [WARP](/mikan/en/nodes/warp/) or [via a node](/mikan/en/nodes/cascades/).
+- **Traffic pool**: if you have pools, a protocol can count against a separate limit, see [Pools and packages](/mikan/en/billing/pools/).
+- **Behind a proxy (nginx, HAProxy)**: see [Behind a proxy](/mikan/en/protocols/behind-proxy/).
+- **Automatic fixes**: switches for moving the port and changing the site, see [Automatic fixes](/mikan/en/protocols/autotune/).
+
+## Own config
+
+The "Own config" preset opens a YAML editor with a mihomo listener of type vless, vmess, trojan, hysteria2, tuic or anytls. mikan fills in the name, port, address, users and certificate itself. The "Check" button validates the config before saving.
+
+## From the command line
+
+```bash
+mikan inbound list
+mikan inbound add                        # shows the list of presets
+mikan inbound add hysteria2 --port 20000-20100 --node 2
+mikan inbound set vless-xhttp --port 2443
+```
+
+On the panel server the new port is opened in ufw automatically, and the node picks up the changes within 30 seconds.
+
+## Camouflage sites from the command line
+
+```bash
+mikan targets scan                       # find suitable sites near the server
+mikan targets check --dest www.example.com:443
+mikan targets apply --dest www.example.com:443 --all
+```

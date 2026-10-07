@@ -31,6 +31,9 @@ import (
 type Config struct {
 	Brand      string
 	SupportURL string
+	// Title is the profile's name in the apps (Profile-Title); "" names it Brand. Title and
+	// Announce may hold TitleVars, filled for each user.
+	Title string
 	// Announce is the text apps show over the profile, AnnounceURL where a tap on it leads.
 	Announce    string
 	AnnounceURL string
@@ -192,7 +195,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg)
+	// The values are worked out only when a title or an announcement can use them.
+	var vars map[string]string
+	if cfg.Title != "" || cfg.Announce != "" {
+		vars = titleValues(u, grants.Main(u.ID), cfg, h.now())
+		if cfg.Announce != "" {
+			cfg.Announce = fillTitle(cfg.Announce, vars)
+		}
+	}
+	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg, vars)
 	h.operatorHeaders(w, r, u, cfg)
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodHead {
@@ -235,6 +246,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+		// AoiVPN fork: inline, чтобы не скачивать в браузере; имя = бренд.
 		w.Header().Set("Content-Disposition", "inline; filename*=UTF-8''"+url.PathEscape(cfg.Brand))
 		_, _ = w.Write(body)
 	default:
@@ -409,7 +421,7 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	}
 	if err != nil {
 		if strings.TrimSpace(in.PromoCode) != "" && promoError(err) {
-			fail(http.StatusConflict, "promo_unavailable")
+			fail(h.promoAttempt(err))
 			return
 		}
 		status, code, unexplained := invoiceFailure(err)
@@ -486,29 +498,37 @@ func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p, err := h.promos.Validate(r.Context(), tgID, userID, tariffID, amount, currency, in.Code)
-		if err != nil || p.Type != "percent" && p.Type != "fixed" {
-			fail(http.StatusConflict, "promo_unavailable")
+		if err == nil && p.Type != "percent" && p.Type != "fixed" {
+			err = promo.ErrNotDiscount
+		}
+		if err != nil {
+			fail(h.promoAttempt(err))
 			return
 		}
 		discount := promo.DiscountAmount(p, amount)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "discount": discount, "final_amount": amount - discount, "currency": currency})
 		return
 	}
-	p, err := h.promos.Validate(r.Context(), tgID, userID, 0, 0, "", in.Code)
+	p, err := h.promos.Check(r.Context(), tgID, userID, in.Code)
 	if err != nil {
 		fail(h.promoAttempt(err))
 		return
 	}
-	if p.Type == "days" || p.Type == "traffic" {
+	switch p.Type {
+	case "days", "traffic":
 		r, err := h.promos.RedeemBonus(r.Context(), tgID, userID, in.Code)
 		if err != nil {
 			fail(h.promoAttempt(err))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "days": r.Days, "bytes": r.Bytes, "message": "promo_applied"})
-		return
+	case "percent", "fixed":
+		// A discount needs an order: the page keeps the code for the checkout, where it is
+		// checked against the price and reserved with the payment.
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "code": p.Code})
+	default:
+		fail(http.StatusConflict, "promo_unavailable")
 	}
-	fail(http.StatusConflict, "promo_unavailable")
 }
 
 // miniAppPromoOrder is the order a discount code is checked against: the tariff, and the
@@ -607,8 +627,11 @@ func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
 // promoAttempt is the answer to a code that could not be used. Why a code does not apply is
 // not told: "promo_unavailable" for all of it, so codes cannot be probed. Anything else is
 // the panel's trouble, logged and answered as such.
+// promoAttempt answers a refused code without saying why (the buyer must not learn which
+// codes exist or who they are for); the admin finds the reason in the log.
 func (h *Handler) promoAttempt(err error) (int, string) {
 	if code := promoAttemptCode(err); code != "" {
+		h.log.Info("mini app: promo code refused", "reason", err)
 		return http.StatusConflict, code
 	}
 	h.log.Error("mini app: promo code failed", "err", err)
@@ -704,7 +727,7 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 
 // userInfoHeaders: the traffic and term apps show. With traffic packages left the total
 // is what the user can reach: what is used plus what is left.
-func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64, cfg Config) {
+func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64, cfg Config, vars map[string]string) {
 	var total, expire int64
 	if u.TrafficLimit.Valid {
 		total = u.TrafficLimit.Int64
@@ -720,7 +743,7 @@ func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64
 		"; total="+strconv.FormatInt(total, 10)+"; expire="+strconv.FormatInt(expire, 10))
 	// Hourly: a port or target the panel changed on its own reaches clients soon.
 	hd.Set("Profile-Update-Interval", "1")
-	hd.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(cfg.Brand)))
+	hd.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(profileTitle(cfg, vars))))
 	if cfg.SupportURL != "" {
 		hd.Set("Support-Url", cfg.SupportURL)
 	}
@@ -978,7 +1001,7 @@ func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.Gran
 	var out []PoolInfo
 	for _, r := range rows {
 		used := r.UsedUp + r.UsedDown
-		if !r.TrafficLimit.Valid && used == 0 {
+		if r.Excluded || !r.TrafficLimit.Valid && used == 0 {
 			continue
 		}
 		pi := PoolInfo{Name: names[r.PoolID], Used: used}

@@ -5,6 +5,7 @@ import { usePools, usePromoMutations, usePromoRedemptions, usePromocodes, useTar
 import { useToast } from "../../components/toast";
 import { Button, ErrorState, PageHeader, Pill } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
+import { money } from "../../lib/format";
 
 const empty: PromoCode = {
   id: 0, code: "", name: "", description: "", type: "days", value: 30, currency: "", used_count: 0,
@@ -12,7 +13,23 @@ const empty: PromoCode = {
   new_users_only: false, enabled: true, status: "active", created_at: "",
 };
 
-type Draft = Omit<PromoCode, "created_at" | "created_by"> & { starts_at: string; ends_at: string; max_uses: string | number | undefined; value: string | number };
+type Draft = Omit<PromoCode, "created_at" | "created_by" | "min_order" | "max_discount"> & {
+  starts_at: string; ends_at: string; max_uses: string | number | undefined; value: string | number; min_order: string | number; max_discount: string | number;
+};
+
+// Sums are kept in the payment's smallest unit (kopecks, Stars); the form shows rubles.
+function fromUnits(n: number, currency: string) {
+  return currency === "RUB" ? n / 100 : n;
+}
+
+function toUnits(v: string | number, currency: string) {
+  const n = Number(v) || 0;
+  return Math.round(currency === "RUB" ? n * 100 : n);
+}
+
+function unitOf(currency: string) {
+  return currency === "RUB" ? "₽" : "⭐";
+}
 
 function dateInput(value?: string) {
   if (!value) return "";
@@ -51,7 +68,7 @@ function redemptionStatusText(status: string) {
 function valueText(p: PromoCode) {
   if (p.type === "traffic") return `${(p.value / 1073741824).toFixed(1)} ${t("promocodes.trafficUnit")}`;
   if (p.type === "days") return `${p.value} ${t("promocodes.daysUnit")}`;
-  return p.type === "percent" ? `${p.value}%` : `${p.value} ${p.currency}`;
+  return p.type === "percent" ? `${p.value}%` : money(p.value, p.currency);
 }
 
 export function PromocodesPage() {
@@ -150,7 +167,7 @@ export function PromocodesPage() {
 function PromoEditor({ value, onClose, onSave }: { value: PromoCode; onClose: () => void; onSave: (p: Omit<PromoCode, "created_at" | "created_by">) => Promise<void> }) {
   const pools = usePools();
   const tariffs = useTariffs();
-  const [p, setP] = useState<Draft>(() => ({ ...value, value: value.type === "traffic" ? value.value / 1073741824 : value.value, starts_at: dateInput(value.starts_at), ends_at: dateInput(value.ends_at), max_uses: value.max_uses, tariff_ids: [...value.tariff_ids] }));
+  const [p, setP] = useState<Draft>(() => ({ ...value, value: value.type === "traffic" ? value.value / 1073741824 : value.type === "fixed" ? fromUnits(value.value, value.currency) : value.value, min_order: fromUnits(value.min_order, value.currency), max_discount: fromUnits(value.max_discount, value.currency), starts_at: dateInput(value.starts_at), ends_at: dateInput(value.ends_at), max_uses: value.max_uses, tariff_ids: [...value.tariff_ids] }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (key: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setP((x) => ({ ...x, [key]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value }));
@@ -159,7 +176,9 @@ function PromoEditor({ value, onClose, onSave }: { value: PromoCode; onClose: ()
     setError("");
     setSaving(true);
     try {
-      await onSave({ ...p, value: p.type === "traffic" ? Math.round(Number(p.value) * 1073741824) : Number(p.value), per_user_limit: Number(p.per_user_limit), discount_ttl: Number(p.discount_ttl), min_order: Number(p.min_order), max_discount: Number(p.max_discount), max_uses: p.max_uses ? Number(p.max_uses) : undefined, tariff_ids: p.tariff_ids, starts_at: p.starts_at || undefined, ends_at: p.ends_at || undefined });
+      await onSave({ ...p, value: p.type === "traffic" ? Math.round(Number(p.value) * 1073741824) : p.type === "fixed" ? toUnits(p.value, p.currency) : Number(p.value), per_user_limit: Number(p.per_user_limit), discount_ttl: Number(p.discount_ttl),
+        // Sums mean nothing without a currency: a code for any currency has none.
+        min_order: p.currency ? toUnits(p.min_order, p.currency) : 0, max_discount: p.currency ? toUnits(p.max_discount, p.currency) : 0, max_uses: p.max_uses ? Number(p.max_uses) : undefined, tariff_ids: p.tariff_ids, starts_at: p.starts_at || undefined, ends_at: p.ends_at || undefined });
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -171,13 +190,13 @@ function PromoEditor({ value, onClose, onSave }: { value: PromoCode; onClose: ()
     <label className="field"><span className="lbl">{t("promocodes.name")}</span><input className="input" value={p.name} onChange={set("name")} /></label>
     <label className="field"><span className="lbl">{t("promocodes.description")}</span><input className="input" value={p.description} onChange={set("description")} /></label>
     <label className="field"><span className="lbl">{t("promocodes.type")}</span><select className="input" value={p.type} onChange={set("type")}><option value="days">{t("promocodes.days")}</option><option value="traffic">{t("promocodes.traffic")}</option><option value="percent">{t("promocodes.percent")}</option><option value="fixed">{t("promocodes.fixed")}</option></select></label>
-    <label className="field"><span className="lbl">{t("promocodes.value")}</span><input className="input" type="number" min="1" max={p.type === "days" ? 36500 : undefined} value={p.value} onChange={set("value")} /></label>
-    {(p.type === "fixed" || p.type === "percent") && <label className="field"><span className="lbl">{t("promocodes.currency")}</span><select className="input" value={p.currency} onChange={set("currency")}><option value="">{t("promocodes.anyCurrency")}</option><option value="RUB">RUB</option><option value="XTR">XTR</option></select></label>}
+    <label className="field"><span className="lbl">{p.type === "fixed" && p.currency ? `${t("promocodes.value")}, ${unitOf(p.currency)}` : t("promocodes.value")}</span><input className="input" type="number" min={p.type === "fixed" && p.currency === "RUB" ? "0.01" : "1"} step={p.type === "fixed" && p.currency === "RUB" ? "0.01" : "1"} max={p.type === "days" ? 36500 : undefined} value={p.value} onChange={set("value")} /></label>
+    {(p.type === "fixed" || p.type === "percent") && <label className="field"><span className="lbl">{t("promocodes.currency")}</span><select className="input" value={p.currency} onChange={set("currency")}>{p.type === "percent" || !p.currency ? <option value="">{t("promocodes.anyCurrency")}</option> : null}<option value="RUB">RUB</option><option value="XTR">XTR</option></select>{p.type === "percent" && !p.currency ? <span className="hint">{t("promocodes.anyCurrencyHint")}</span> : null}</label>}
     <label className="field"><span className="lbl">{t("promocodes.startsAt")}</span><input className="input" type="datetime-local" value={p.starts_at} onChange={set("starts_at")} /></label>
     <label className="field"><span className="lbl">{t("promocodes.endsAt")}</span><input className="input" type="datetime-local" value={p.ends_at} onChange={set("ends_at")} /></label>
     <label className="field"><span className="lbl">{t("promocodes.maxUses")}</span><input className="input" type="number" min="1" placeholder={t("promocodes.noLimit")} value={p.max_uses ?? ""} onChange={set("max_uses")} /></label>
     <label className="field"><span className="lbl">{t("promocodes.perUserLimit")}</span><input className="input" type="number" min="1" value={p.per_user_limit} onChange={set("per_user_limit")} /></label>
-    {(p.type === "percent" || p.type === "fixed") && <><label className="field"><span className="lbl">{t("promocodes.minOrder")}</span><input className="input" type="number" min="0" value={p.min_order} onChange={set("min_order")} /></label><label className="field"><span className="lbl">{t("promocodes.maxDiscount")}</span><input className="input" type="number" min="0" value={p.max_discount} onChange={set("max_discount")} /></label><label className="field"><span className="lbl">{t("promocodes.discountTtl")}</span><input className="input" type="number" min="0" max={30 * 24 * 60 * 60} value={p.discount_ttl} onChange={set("discount_ttl")} /><span className="hint">{t("promocodes.discountTtlHint")}</span></label></>}
+    {(p.type === "percent" || p.type === "fixed") && <>{p.currency ? <><label className="field"><span className="lbl">{`${t("promocodes.minOrder")}, ${unitOf(p.currency)}`}</span><input className="input" type="number" min="0" step={p.currency === "RUB" ? "0.01" : "1"} value={p.min_order} onChange={set("min_order")} /><span className="hint">{t("promocodes.zeroNoLimit")}</span></label><label className="field"><span className="lbl">{`${t("promocodes.maxDiscount")}, ${unitOf(p.currency)}`}</span><input className="input" type="number" min="0" step={p.currency === "RUB" ? "0.01" : "1"} value={p.max_discount} onChange={set("max_discount")} /><span className="hint">{t("promocodes.zeroNoLimit")}</span></label></> : null}<label className="field"><span className="lbl">{t("promocodes.discountTtl")}</span><input className="input" type="number" min="0" max={30 * 24 * 60 * 60} value={p.discount_ttl} onChange={set("discount_ttl")} /><span className="hint">{t("promocodes.discountTtlHint")}</span></label></>}
     <div className="field"><span className="lbl">{t("promocodes.tariffs")}</span><span className="hint">{t("promocodes.allTariffsHint")}</span>{tariffs.isError ? <p className="text-sm text-[var(--berry-600)]" role="alert">{errorText(tariffs.error)}</p> : <div className="flex max-h-32 flex-col gap-2 overflow-auto rounded-xl border border-[var(--hairline)] p-3">{(tariffs.data ?? []).map((tariff) => <label key={tariff.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={p.tariff_ids.includes(tariff.id)} onChange={(e) => setP((x) => ({ ...x, tariff_ids: e.target.checked ? [...x.tariff_ids, tariff.id] : x.tariff_ids.filter((id) => id !== tariff.id) }))} />{tariff.name}</label>)}</div>}</div>
     <label className="flex gap-2"><input type="checkbox" checked={p.first_purchase_only} onChange={set("first_purchase_only")} />{t("promocodes.firstPurchaseOnly")}</label>
     <label className="flex gap-2"><input type="checkbox" checked={p.new_users_only} onChange={set("new_users_only")} />{t("promocodes.newUsersOnly")}</label>

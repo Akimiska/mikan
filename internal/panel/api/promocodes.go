@@ -49,7 +49,7 @@ type PromoBody struct {
 	Description       string  `json:"description" maxLength:"500"`
 	Type              string  `json:"type" enum:"days,traffic,percent,fixed"`
 	Value             int64   `json:"value" minimum:"1" doc:"days: дни; traffic: байты (минимум 1 GiB); percent: проценты 1-100; fixed: сумма в минимальных единицах оплаты"`
-	Currency          string  `json:"currency" doc:"Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для остальных типов не используется."`
+	Currency          string  `json:"currency" doc:"Для fixed: RUB или XTR; RUB — копейки, XTR — Stars. Для percent: пусто — любая валюта, тогда min_order и max_discount равны 0. Для остальных типов не используется."`
 	StartsAt          *int64  `json:"starts_at,omitempty" doc:"Unix time в секундах"`
 	EndsAt            *int64  `json:"ends_at,omitempty" doc:"Unix time в секундах; значение не может быть в прошлом"`
 	MaxUses           *int64  `json:"max_uses,omitempty" minimum:"1"`
@@ -183,6 +183,10 @@ func validatePromoBody(in PromoBody, now time.Time, usedCount int64) error {
 		}
 		if in.Currency != "" && in.Currency != "RUB" && in.Currency != "XTR" {
 			return errors.New("bad_currency")
+		}
+		// Sums are in the currency's smallest unit: kopecks and Stars do not compare.
+		if in.Currency == "" && (in.MinOrder > 0 || in.MaxDiscount > 0) {
+			return errors.New("promo_sum_needs_currency")
 		}
 	case "fixed":
 		if in.Currency != "RUB" && in.Currency != "XTR" {

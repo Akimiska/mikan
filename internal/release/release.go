@@ -116,6 +116,17 @@ func validImage(image string) bool {
 		strings.Trim(name, "abcdefghijklmnopqrstuvwxyz0123456789._/-") == ""
 }
 
+// MaxVersionLen is the longest version a request names: real ones are a dozen characters,
+// and what a node writes to its host's disk stays small.
+const MaxVersionLen = 64
+
+// Valid says whether v is a release version (1.2.3 or 1.2.3.4, a pre-release after a
+// hyphen allowed): not "dev", not a tag with a "v", not an address.
+func Valid(v string) bool { return len(v) <= MaxVersionLen && versionParts(v) != nil }
+
+// AtLeast says whether version a is b or later. A version that is not a release is never.
+func AtLeast(a, b string) bool { return Valid(a) && Valid(b) && !Newer(b, a) }
+
 // Newer says whether version a is later than b. A pre-release (1.2.3-rc.1) comes before
 // its release; "dev" and other unparsable versions are older than everything.
 func Newer(a, b string) bool {

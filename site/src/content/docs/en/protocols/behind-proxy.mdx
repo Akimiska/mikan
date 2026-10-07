@@ -1,0 +1,44 @@
+---
+title: Behind a proxy
+description: Protocols behind nginx stream or HAProxy on a shared port 443, and the address and port for clients.
+---
+
+If port 443 on the server is already held by nginx or HAProxy, you can hide protocols behind it: the proxy accepts connections on 443 and hands them to protocols on `127.0.0.1:444`, `:445` and so on, by SNI.
+
+## Set up
+
+In the connection settings, the **Behind a proxy (nginx, HAProxy)** block:
+
+- **Where the node listens**: "All addresses" (as usual), "Localhost only" (127.0.0.1) or "Own IP".
+- **Address for clients**: the address clients get in the subscription. Empty: the node's address.
+- **Port for clients**: usually 443, the proxy's port. Empty: the connection's port.
+- **SNI for clients**: for protocols with their own TLS name. With REALITY it stays the camouflage site's domain, which is how the proxy tells connections apart.
+
+:::caution
+If the node listens on localhost only and no port for clients is set, clients will go to a port that is closed from outside. The panel warns you about this: set the proxy's port.
+:::
+
+## nginx stream example
+
+```nginx
+stream {
+    map $ssl_preread_server_name $mikan {
+        www.microsoft.com  127.0.0.1:444;   # VLESS · REALITY, camouflage site
+        default            127.0.0.1:4430;  # your site
+    }
+    server {
+        listen 443;
+        ssl_preread on;
+        proxy_pass $mikan;
+    }
+}
+```
+
+This is a sketch: use your own names and ports.
+
+## What changes
+
+Automatic fixes are off for a connection behind a proxy and can't be turned on:
+
+- the port isn't moved, otherwise the proxy wouldn't know the new one;
+- the camouflage site isn't changed, because the proxy may route by its name.

@@ -1,0 +1,32 @@
+---
+title: Traffic pools and packages
+description: A separate limit for some protocols, and buying extra traffic in the bot.
+---
+
+## Traffic pools
+
+A pool is a separate limit for selected protocols. For example, a whitelist node with 100 GB a month, while Germany and Estonia stay unlimited, all in one subscription.
+
+1. **Plans → Traffic pools**: create a pool.
+2. In the connection settings, pick it in the **Traffic pool** field. This connection's traffic no longer spends the main limit.
+3. Set the pool limit in the plan (empty means unlimited) or for a single user in their card ("Change limits").
+
+When a pool runs out, only its protocols stop working and disappear from the subscription until the reset. Everything else keeps working, and the other way round. Pools reset together with the main traffic. The user card, the subscription page and the bot show every pool.
+
+**Closing a pool on a plan**: the plan's users lose this pool at once, and packages for it are not sold to them. If you open it again, users get the plan's limit back, even if the limit was changed by hand before.
+
+Deleting a pool returns its protocols to the main traffic and deletes its packages together with what is left of them.
+
+## Traffic packages
+
+**Plans → Traffic packages** sell extra traffic for the main limit or for a pool. A package has a size, a target it is added to, and a lifetime:
+
+- until used up;
+- until the period ends;
+- N days.
+
+The plan's traffic is spent first, then packages, the one that expires sooner going first. What is left survives a traffic reset, except for "until the period ends" packages. A pool package is offered only to those who have a limit in that pool.
+
+Packages are sold in the bot ("Buy more traffic") and in the Mini App for Stars and the payment methods from the marketplace. A user or pool that ran out of traffic works again right after the purchase, with no new link.
+
+To add traffic by hand, use the user card: "Add traffic", then the size, pool, lifetime and a comment.

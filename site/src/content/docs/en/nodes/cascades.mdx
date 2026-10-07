@@ -1,0 +1,36 @@
+---
+title: Cascades
+description: Exit to the internet through another panel node, chains of three or more servers.
+---
+
+A cascade sends a protocol's traffic through another node of the panel:
+
+```text
+client → node A → node B → internet
+```
+
+Clients connect to node A, and sites see node B's address. This way you can keep the entry point where it is not blocked and exit in the country you need.
+
+## Set up
+
+1. Open the connection on node A and in the **Way out to the internet** field choose "Via a node".
+2. In the **Exit node** field choose node B.
+3. Save.
+
+The panel itself opens a hidden relay on node B with a separate key for each source node. The relay listens on a TCP port: the first free one among the spare ports (2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443), or a random one from 30000 to 59999 if all are taken.
+
+Traffic is counted once, on the first node. A cascade does not need WARP.
+
+:::caution
+If the exit node is unavailable, this protocol's traffic does not go direct, the protocol simply does not work until the node is back. This way node A's address is not exposed by accident.
+:::
+
+## Longer chains
+
+The **Cascade** button on a node card shows which nodes it sends traffic through, the check status (which address sites see) and the relay status: listening on a port, port taken, or did not start.
+
+There is also the **Where other nodes' traffic goes next** field: direct, through this node's WARP, or through one more node. This is how chains of three or more servers are built. The panel will not save loops, and a protocol cannot choose its own node as the exit.
+
+## If the relay port is taken
+
+If another program has taken the relay's port, the relay moves to a free port by itself when the "Move to another port when it is blocked" switch is on (**Settings → General → Automatic fixes**). When the relay is not working, a notification arrives in Telegram. This works with nodes on version 0.5.0.2 and newer.

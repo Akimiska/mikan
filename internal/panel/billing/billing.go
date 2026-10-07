@@ -72,6 +72,9 @@ type Telegram interface {
 	RefundStars(ctx context.Context, tgID int64, chargeID string) error
 	// Paid tells the buyer the subscription is ready.
 	Paid(ctx context.Context, p db.Payment, u db.User, created bool)
+	// Refunded tells the buyer the payment was refunded and what it gave is taken back:
+	// u is the subscription after that (zero when it is gone), disabled that it was turned off.
+	Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool)
 	// BotURL is https://t.me/<bot>, "" while the bot is off.
 	BotURL(ctx context.Context) string
 }
@@ -133,6 +136,9 @@ var (
 	ErrTooMany      = errors.New("too_many_invoices")
 	ErrBadPayment   = errors.New("bad_payment")
 	ErrNotRefunable = errors.New("not_refundable")
+	// ErrRefundNotApplied: Telegram returned the Stars, but taking back what the payment
+	// gave failed; refunding again finishes it.
+	ErrRefundNotApplied = errors.New("refund_not_applied")
 )
 
 // LoadConfig reads the payment settings. A read error is returned, never replaced by the
@@ -880,8 +886,17 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			return markApplied(ctx, q, id, u.ID, s.d.Now())
 		}
 		var userID int64
+		var prior db.User
+		hadPrior := false
 		if pay.Kind == "renew" && pay.UserID.Valid {
 			userID = pay.UserID.Int64
+			// What the renewal changes is recorded for a refund; a user gone since the
+			// invoice is made anew.
+			if prior, err = q.GetUser(ctx, userID); err == nil {
+				hadPrior = true
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 		}
 		if u, created, err = s.d.Users.Purchase(ctx, q, userID, pay.TariffID.Int64, pay.TermDays, buyerName(ctx, q, pay.TgID), reset); err != nil {
 			return err
@@ -900,7 +915,10 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 				return err
 			}
 		}
-		return markApplied(ctx, q, id, u.ID, s.d.Now())
+		if err := markApplied(ctx, q, id, u.ID, s.d.Now()); err != nil {
+			return err
+		}
+		return q.SetPaymentRevert(ctx, db.SetPaymentRevertParams{Revert: purchaseRevert(created, hadPrior, prior, u), ID: id})
 	}
 	err = s.d.Store.Tx(ctx, run)
 	if errors.Is(err, domain.ErrNoSlots) {
@@ -951,24 +969,45 @@ func buyerName(ctx context.Context, q *db.Queries, tgID int64) string {
 	return fmt.Sprintf("tg %d", tgID)
 }
 
-// Refund returns a Stars payment to the buyer. The subscription stays as it is: the admin
-// decides about it. Payments through adapters are refunded in the provider's dashboard.
-func (s *Service) Refund(ctx context.Context, id int64) error {
+// Refund returns a Stars payment to the buyer and takes back what it gave (revert.go).
+// Payments through adapters are refunded in the provider's dashboard. A failure after
+// Telegram refunded leaves the payment applied: refunding again finishes it, Telegram
+// answers a repeated refund as done.
+func (s *Service) Refund(ctx context.Context, id int64) (Reverted, error) {
 	p, err := s.d.Store.Q.GetPayment(ctx, id)
 	if err != nil {
-		return err
+		return Reverted{}, err
 	}
 	if p.Provider != Stars || p.Status != "applied" || !p.ExternalID.Valid {
-		return ErrNotRefunable
+		return Reverted{}, ErrNotRefunable
 	}
 	tg := s.telegram()
 	if tg == nil {
-		return ErrProviderOff
+		return Reverted{}, ErrProviderOff
 	}
 	if err := tg.RefundStars(ctx, p.TgID, p.ExternalID.String); err != nil {
+		return Reverted{}, err
+	}
+	rv, err := s.refunded(ctx, id)
+	if err != nil {
+		return Reverted{}, fmt.Errorf("%w: %w", ErrRefundNotApplied, err)
+	}
+	return rv, nil
+}
+
+// StarsRefunded takes Telegram's word that a Stars payment was refunded (refunded_payment:
+// the buyer asked Telegram, or the refund above came back as an update). A charge that is
+// not a payment of ours, or one already refunded, changes nothing.
+func (s *Service) StarsRefunded(ctx context.Context, tgID int64, chargeID string) error {
+	p, err := s.d.Store.Q.GetPaymentByExternal(ctx, db.GetPaymentByExternalParams{Provider: Stars, ExternalID: sql.NullString{String: chargeID, Valid: chargeID != ""}})
+	if errors.Is(err, sql.ErrNoRows) || err == nil && p.TgID != tgID {
+		s.d.Log.Warn("billing: stars refund does not match a payment", "tg", tgID)
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	_, err = s.d.Store.Q.MarkPaymentRefunded(ctx, db.MarkPaymentRefundedParams{RefundedAt: sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}, ID: id})
+	_, err = s.refunded(ctx, p.ID)
 	return err
 }
 

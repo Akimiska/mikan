@@ -26,7 +26,7 @@ SELECT * FROM tariff_pools ORDER BY tariff_id, pool_id;
 DELETE FROM tariff_pools WHERE tariff_id = $1;
 
 -- name: AddTariffPool :exec
-INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit) VALUES ($1, $2, $3);
+INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4);
 
 -- name: ListUserPools :many
 SELECT * FROM user_pools WHERE user_id = $1 ORDER BY pool_id;
@@ -35,11 +35,12 @@ SELECT * FROM user_pools WHERE user_id = $1 ORDER BY pool_id;
 SELECT * FROM user_pools ORDER BY user_id, pool_id;
 
 -- name: ClearUserPoolLimits :exec
-UPDATE user_pools SET traffic_limit = NULL WHERE user_id = $1;
+UPDATE user_pools SET traffic_limit = NULL, excluded = false WHERE user_id = $1;
 
 -- name: SetUserPoolLimit :exec
-INSERT INTO user_pools (user_id, pool_id, traffic_limit) VALUES ($1, $2, $3)
-ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit;
+-- An excluded pool has no limit: nothing of it is sold or shown, the user cannot use it.
+INSERT INTO user_pools (user_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit, excluded = excluded.excluded;
 
 -- name: AddUserPoolTraffic :exec
 INSERT INTO user_pools (user_id, pool_id, used_up, used_down) VALUES ($1, $2, $3, $4)
@@ -59,3 +60,11 @@ SELECT
   (SELECT COUNT(*) FROM traffic_packages k WHERE k.pool_id = sqlc.arg(pool_id) AND k.archived = 0) AS packages,
   (SELECT COUNT(*) FROM payments p JOIN traffic_packages k ON k.id = p.package_id
     WHERE k.pool_id = sqlc.arg(pool_id) AND p.status IN ('pending', 'paid')) AS payments;
+
+-- name: SetTariffUsersPool :exec
+-- The users of a tariff follow a pool it closed or opened again at once; the limit of a
+-- pool opened again is the tariff's (NULL: none).
+INSERT INTO user_pools (user_id, pool_id, traffic_limit, excluded)
+SELECT u.id, sqlc.arg(pool_id)::BIGINT, sqlc.narg(traffic_limit)::BIGINT, sqlc.arg(excluded)::BOOLEAN
+FROM users u WHERE u.tariff_id = sqlc.arg(tariff_id)::BIGINT
+ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit, excluded = excluded.excluded;

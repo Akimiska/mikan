@@ -1,0 +1,104 @@
+---
+title: API
+description: The panel's REST API, keys with "Read" and "Full access" scopes, OpenAPI documentation and request examples.
+---
+
+The panel has a REST API for bots, billing and monitoring. Its documentation is built into the panel itself.
+
+## Where the documentation is
+
+**Settings → Security → API → Open**. The page has:
+
+- the API address and keys;
+- a list of all methods with parameters, responses and curl examples, and a "Try it" button for GET requests;
+- "Download OpenAPI": a `mikan-openapi.json` file with your panel's address already filled in. It works with Postman, Insomnia, Swagger UI and client generators.
+
+:::caution
+The downloaded file contains your panel's secret path. Do not publish it.
+:::
+
+The API address is `https://<panel address>:<port>/<secret path>/api/v1`.
+
+## Keys
+
+On the API page, the **New key** button:
+
+- **Name**.
+- **Access**: "Read" or "Full access".
+- **Expires**: when I revoke it, 30, 90 or 365 days.
+- The administrator password and the 2FA code, if it is on.
+
+The key is shown once, and the panel keeps only its hash. Keys are created and revoked only from the panel, not through the API. When the password changes, you can revoke the administrator's keys with a checkbox, and `mikan reset-password` always revokes them.
+
+| Access | What it allows |
+|---|---|
+| Read | GET only: users, statistics, settings, metrics. Responses contain no subscription links or secret addresses |
+| Full access | create and extend users, change plans and connections. Without sign-in, sessions, keys, the audit log, payments, the bot, certificates, updates and panel addresses: those are available only from the panel |
+
+The key goes in a header:
+
+```http
+Authorization: Bearer mk_...
+```
+
+Errors come in RFC 9457 format (`application/problem+json`), with the error code in the `detail` field.
+
+## Examples
+
+```bash
+BASE="https://vpn.example.com:PORT/SECRET-PATH/api/v1"
+KEY="mk_..."
+```
+
+List active users:
+
+```bash
+curl -H "Authorization: Bearer $KEY" "$BASE/users?state=active&limit=10"
+```
+
+Create a user on plan 2:
+
+```bash
+curl -X POST "$BASE/users" \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"name": "Anna", "tariff_id": 2, "contact": "@anna"}'
+```
+
+The response has the user with an `id` and the subscription link `sub_url`.
+
+Extend by 30 days or by a month (one of the two is required):
+
+```bash
+curl -X POST "$BASE/users/42/extend" \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"days": 30}'
+```
+
+Add 10 GB that is valid until used up:
+
+```bash
+curl -X POST "$BASE/users/42/grants" \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"bytes": 10737418240, "lifetime": "used"}'
+```
+
+## Main methods
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/users` | list: `state`, `q`, `limit`, `offset` |
+| POST | `/users` | create a user from a plan |
+| GET, PATCH | `/users/{id}` | a user, change |
+| POST | `/users/{id}/extend` | extend: `days` or `months` |
+| POST | `/users/{id}/reset-traffic` | reset traffic |
+| POST | `/users/{id}/reissue` | reissue the link |
+| POST | `/users/{id}/grants` | add traffic |
+| POST | `/users/bulk` | an action on a group: extend, reset, disable, enable, delete |
+| GET | `/tariffs` | plans |
+| GET | `/inbounds` | connections |
+| GET | `/nodes` | nodes |
+| GET | `/stats/overview` | overview figures |
+| GET | `/stats/traffic` | server traffic: `range` 24h, 7d or 30d |
+| GET | `/metrics` | Prometheus metrics |
+
+For the full list with request and response bodies, see the API page in the panel.

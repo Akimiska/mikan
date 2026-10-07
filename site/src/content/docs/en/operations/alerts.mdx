@@ -1,0 +1,46 @@
+---
+title: Alerts and monitoring
+description: Admin alerts in Telegram, a public status in a channel, and Prometheus metrics.
+---
+
+## Alerts for the admin
+
+**Telegram → Infrastructure → Private alerts**: the "Connect chat" button gives a one-time link, open it in the bot. After that, pick the events:
+
+- a node is unavailable or recovered;
+- WARP stopped working or recovered, with the reason;
+- a cascade exit node is unavailable or recovered;
+- a connection is unavailable or recovered;
+- autotune changed a connection or could not restore it;
+- a TLS certificate problem;
+- an update failed or rolled back;
+- a torrent was caught.
+
+For failure events a recovery message arrives too. You can also receive [daily database backups](/mikan/en/operations/backups/#backups-to-telegram) here.
+
+## Public status in a channel
+
+**Public status channel** shows subscribers which servers are working.
+
+1. Add the bot to the channel as an administrator with permission to post, edit and pin messages.
+2. Enter the channel: a public `@username` or a numeric ID.
+3. Choose "Pinned summary" (one message the bot keeps updating) and/or separate messages about changes.
+
+The status shows only nodes that have **Name in status channel** filled in their settings. Subscribers see this name, and server addresses are not published.
+
+## Prometheus
+
+The panel serves metrics at `/api/v1/metrics` on the API address, and you need a [key](/mikan/en/api/) with "Read" access. Metrics are split by node and connection, but never by user: the number of users by state, online, traffic, node and connection availability, node load.
+
+The API page (**Settings → Security → API**) shows a ready block for `prometheus.yml`, roughly like this:
+
+```yaml
+scrape_configs:
+  - job_name: mikan
+    scheme: https
+    metrics_path: /SECRET-PATH/api/v1/metrics
+    authorization:
+      credentials: mk_...
+    static_configs:
+      - targets: ['vpn.example.com:PORT']
+```

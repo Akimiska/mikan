@@ -28,6 +28,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/server"
@@ -44,27 +45,29 @@ import (
 
 // Panel is the fully wired HTTP side of the panel, without the listener.
 type Panel struct {
-	Handler   http.Handler
-	Settings  *settings.Settings
-	Nodes     *nodesync.Manager
-	Tuner     *autotune.Tuner // nil without nodes
-	Telegram  *tgbot.Bot
-	Billing   *billing.Service
-	Updates   *updates.Checker
-	Alerts    *infraalerts.Monitor
-	Backups   *tgbackup.Service
-	Importer  *panelimport.Importer
-	Addons    *addons.Manager
-	server    *server.Server
-	spa       *server.SPA
-	subPage   *server.SPA
-	sessions  *auth.Sessions
-	st        *store.Store
-	devices   *domain.Devices
-	ipLimit   *auth.Limiter
-	userLimit *auth.Limiter
-	now       func() time.Time
-	log       *slog.Logger
+	Handler  http.Handler
+	Settings *settings.Settings
+	Nodes    *nodesync.Manager
+	Tuner    *autotune.Tuner // nil without nodes
+	// NodeUpdates updates the remote nodes to the panel's version; nil without nodes.
+	NodeUpdates *nodeupdate.Service
+	Telegram    *tgbot.Bot
+	Billing     *billing.Service
+	Updates     *updates.Checker
+	Alerts      *infraalerts.Monitor
+	Backups     *tgbackup.Service
+	Importer    *panelimport.Importer
+	Addons      *addons.Manager
+	server      *server.Server
+	spa         *server.SPA
+	subPage     *server.SPA
+	sessions    *auth.Sessions
+	st          *store.Store
+	devices     *domain.Devices
+	ipLimit     *auth.Limiter
+	userLimit   *auth.Limiter
+	now         func() time.Time
+	log         *slog.Logger
 }
 
 type Options struct {
@@ -137,6 +140,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		changes = p.Nodes
 		deps.Online = p.Nodes.Online
 		deps.Nodes = p.Nodes
+		p.NodeUpdates = nodeupdate.New(st, set, p.Nodes, o.Version, o.Log, o.Now)
+		deps.NodeUpdates = p.NodeUpdates
 		tune := o.Autotune
 		if tune == (autotune.Options{}) {
 			tune = autotune.DefaultOptions()
@@ -154,6 +159,10 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		dryRun = p.Nodes
 	}
 	deps.Inbounds = domain.NewInbounds(st, dryRun, o.Now)
+	if p.Nodes != nil {
+		// A relay made for a new exit keeps off the ports other programs hold on its server.
+		deps.Inbounds.SetHostLookup(p.Nodes.HostPorts)
+	}
 	// A REALITY target given by name is looked up when it is saved: the node dials it past the
 	// rules that fence its users in.
 	deps.Resolve = o.Resolve
@@ -207,6 +216,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		certStatus = o.Certs.Status
 	}
 	p.Alerts = infraalerts.New(st, set, p.Nodes, p.Tuner, certStatus, p.Updates, p.Telegram, o.Log, o.Now)
+	if p.NodeUpdates != nil {
+		p.Alerts.WatchNodeUpdates(p.NodeUpdates)
+	}
 	// The server's name in a backup's file name: its domain, else its address.
 	serverName := func(ctx context.Context) string {
 		if d, err := set.String(ctx, settings.KeyDomain); err == nil && d != "" {
@@ -311,7 +323,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if cfg.App.Enabled, err = set.On(ctx, settings.AppBranding); err != nil {
 			return subs.Config{}, err
 		}
-		for key, dst := range map[string]*string{settings.KeyAnnounce: &cfg.Announce, settings.KeyAnnounceURL: &cfg.AnnounceURL,
+		for key, dst := range map[string]*string{settings.KeySubTitle: &cfg.Title, settings.KeyAnnounce: &cfg.Announce, settings.KeyAnnounceURL: &cfg.AnnounceURL,
 			settings.KeyBrandAccent: &cfg.App.Accent, settings.KeyBrandLogo: &cfg.App.LogoURL} {
 			if *dst, err = set.String(ctx, key); err != nil {
 				return subs.Config{}, err
@@ -427,6 +439,9 @@ func (p *Panel) Run(ctx context.Context) {
 	}
 	if p.Tuner != nil {
 		workers = append(workers, p.Tuner.Run)
+	}
+	if p.NodeUpdates != nil {
+		workers = append(workers, p.NodeUpdates.Run)
 	}
 	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {

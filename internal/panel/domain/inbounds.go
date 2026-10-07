@@ -26,6 +26,7 @@ var (
 	ErrBadPort        = errors.New("bad_port")
 	ErrBadListen      = errors.New("bad_listen")
 	ErrAutoPortListen = errors.New("auto_port_listen") // a proxy in front would not learn the new port
+	ErrAutoSNIListen  = errors.New("auto_sni_listen")  // nor the new site, if it routes by SNI
 	ErrUnknownPool    = errors.New("pool_not_found")
 	// ErrInboundChanged: someone else kept changing the inbound while the change was
 	// checked; nothing was written, the caller may try again.
@@ -69,6 +70,7 @@ type Inbounds struct {
 	dry     DryRun
 	now     func() time.Time
 	resolve func(ctx context.Context, host string) ([]netip.Addr, error) // nil: names are not looked up
+	host    HostLookup                                                   // nil: what listens on the servers is not known
 }
 
 // NewInbounds: dry nil skips the nodes' own check, for callers that do not talk to the
@@ -222,7 +224,10 @@ func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		if p.AutoPort != nil && *p.AutoPort {
 			return fail(ErrAutoPortListen)
 		}
-		next.AutoPort = 0
+		if p.AutoSNI != nil && *p.AutoSNI {
+			return fail(ErrAutoSNIListen)
+		}
+		next.AutoPort, next.AutoSni = 0, 0
 	}
 	if p.PoolID != nil {
 		next.PoolID = sql.NullInt64{Int64: *p.PoolID, Valid: *p.PoolID != 0}
@@ -314,7 +319,7 @@ func (s *Inbounds) update(ctx context.Context, id int64, p InboundPatch) (prev, 
 		}
 		// The exit's chain is checked, and its relay made, before the inbound changes.
 		if p.Outbound != nil && next.ExitNodeID.Valid {
-			if err := UseExit(ctx, q, prev.NodeID, next.ExitNodeID.Int64, s.now()); err != nil {
+			if err := UseExit(ctx, q, prev.NodeID, next.ExitNodeID.Int64, s.now(), s.host); err != nil {
 				return err
 			}
 		}
@@ -443,6 +448,13 @@ func (s *Inbounds) SetResolver(resolve func(ctx context.Context, host string) ([
 	s.resolve = resolve
 }
 
+// SetHostLookup lets the relay an inbound's new exit gets keep off ports other programs
+// hold on the exit's server; without one (tests, the CLI) the relay takes what the panel
+// knows is free.
+func (s *Inbounds) SetHostLookup(host HostLookup) {
+	s.host = host
+}
+
 // checkDestResolves refuses a REALITY target whose name leads to this host or its
 // network: proto.Validate reads the text, and every DNS name looks public. The node dials
 // the target for every probe of the port, past the rules that fence its users in, so such
@@ -564,6 +576,10 @@ func ParseListen(s string) (string, error) {
 // inbounds of a node still may not share a port number on different addresses: one rule
 // for every check, and a bind on every address takes the port on all of them.
 func ListenPinsPort(listen string) bool { return listen != "" }
+
+// ListenPinsSNI: the same proxy may pick the backend by the site's name (nginx stream,
+// HAProxy), and the panel cannot tell, so a new site would lose the inbound's clients.
+func ListenPinsSNI(listen string) bool { return listen != "" }
 
 // InboundNetwork is the network the inbound's port is bound on: "tcp" or "udp".
 func InboundNetwork(in db.Inbound) string {

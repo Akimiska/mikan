@@ -23,6 +23,7 @@ import (
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/server"
@@ -90,6 +91,8 @@ type Deps struct {
 	ForgetNode func(id int64) error
 	// Updates knows the newest release and talks to the host updater; nil in tests.
 	Updates *updates.Checker
+	// NodeUpdates updates the remote nodes to the panel's version; nil without nodes.
+	NodeUpdates *nodeupdate.Service
 	// Addons are the marketplace's payment adapters; nil in tests.
 	Addons *addons.Manager
 	// Resolve looks a name up for what the panel dials on the admin's word (a REALITY
@@ -110,10 +113,12 @@ type NodeRuntime interface {
 	NodesChanged()
 	// ScanTargets looks for REALITY targets from the node itself (its RTTs, its routes).
 	ScanTargets(ctx context.Context, id int64, req nodeapi.TargetScanRequest) (nodeapi.TargetScan, error)
-	// Warp checks the node's way out through WARP.
-	Warp(ctx context.Context, id int64) (nodeapi.WarpStatus, error)
+	// Warp checks the node's way out through WARP; force skips the node's cached answer.
+	Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error)
 	// Probe checks the internet through one outbound of a node (NODE-<id> of a cascade).
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
+	// SpeedTest measures a node's own way to the internet.
+	SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error)
 }
 
 type ctxKey int
@@ -136,6 +141,9 @@ type handlers struct {
 	pending   map[int64]pendingTOTP
 
 	metricsCache metricsCache
+
+	// speedCooldown spaces the speed tests of a node.
+	speedCooldown speedCooldown
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.
@@ -153,7 +161,14 @@ func Config(version string) huma.Config {
 		"Скрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. " +
 		"Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\n" +
 		"Админка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n" +
-		"Ошибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю."
+		"Ошибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n" +
+		"## Подписка в приложениях\n\n" +
+		"Ссылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: " +
+		"`profile-title` — название профиля (настройка `sub_title`, пусто — бренд), `announce` — строка над профилем или под его названием (`sub_announce`), " +
+		"`subscription-userinfo` — трафик и срок, `support-url`, `profile-web-page-url`. Настраиваются в `PATCH /api/v1/settings`.\n\n" +
+		"В `sub_title` и `sub_announce` подставляются переменные каждого пользователя: `{brand}` — бренд, `{name}` — имя, " +
+		"`{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, " +
+		"`{total}` — лимит с пакетами. Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		"apiKey":  {Type: "http", Scheme: "bearer", Description: "Ключ API: Authorization: Bearer mk_…"},
 		"session": {Type: "apiKey", In: "cookie", Name: auth.CookieName, Description: "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах"},
@@ -205,6 +220,9 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()
+	h.registerTorrent()
+	h.registerSpeedTests()
+	h.registerNodeUpdates()
 	h.registerAPIKeys()
 	h.registerPayments()
 	h.registerPromocodes()

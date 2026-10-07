@@ -109,3 +109,79 @@ func TestBusyInboundWaitsForTheMove(t *testing.T) {
 		t.Fatal("a busy port with automatic moves off waits for a move that never comes")
 	}
 }
+
+// A relay that cannot listen is reported like an inbound that cannot: a plain failure
+// after a few samples, one whose port another program holds only when the tuner's move
+// did not help (and at once when it does not move it), and its recovery follows.
+func TestRelayListenerAlerts(t *testing.T) {
+	st, _ := testMonitorStore(t)
+	now := time.Unix(1_800_000_000, 0)
+	m := New(st, nil, nil, nil, nil, nil, nil, slog.Default(), func() time.Time { return now })
+	node := db.Node{ID: 7, Name: "US"}
+	state := persistentState{Samples: map[string]sampleState{}}
+	round := func(l nodeapi.ListenerStatus, moves bool, lang string) Level {
+		now = now.Add(5 * time.Second)
+		l.Name = nodeapi.RelayListener
+		hv := nodesync.HealthView{OK: true, CheckedAt: now, Listeners: []nodeapi.ListenerStatus{{Name: "vless", OK: true}, l}}
+		return m.checkRelay(&state, Default(), node, hv, moves, lang)
+	}
+	failed := nodeapi.ListenerStatus{Error: "listen tcp 0.0.0.0:2053: bind: permission denied"}
+	busy := nodeapi.ListenerStatus{Error: "listen tcp 0.0.0.0:2053: bind: address already in use", Code: nodeapi.ListenerAddrInUse}
+
+	// A node without a relay says nothing.
+	hv := nodesync.HealthView{OK: true, CheckedAt: now, Listeners: []nodeapi.ListenerStatus{{Name: "vless", OK: true}}}
+	if lv := m.checkRelay(&state, Default(), node, hv, true, "en"); lv != Healthy || len(state.Pending) != 0 {
+		t.Fatalf("no relay: %v %+v", lv, state.Pending)
+	}
+	for range 2 {
+		if lv := round(failed, true, "en"); lv != Unavailable {
+			t.Fatalf("level %v", lv)
+		}
+	}
+	if len(state.Pending) != 0 {
+		t.Fatalf("reported too soon: %+v", state.Pending)
+	}
+	round(failed, true, "en")
+	if len(state.Pending) != 1 || !strings.Contains(state.Pending[0].Text, "US / cascade relay") || !strings.Contains(state.Pending[0].Text, "Unavailable") {
+		t.Fatalf("pending: %+v", state.Pending)
+	}
+	for range 2 {
+		round(nodeapi.ListenerStatus{OK: true}, true, "ru")
+	}
+	if len(state.Pending) != 2 || !strings.Contains(state.Pending[1].Text, "US / служебный вход каскада") || !strings.Contains(state.Pending[1].Text, "Восстановлен") {
+		t.Fatalf("recovery: %+v", state.Pending)
+	}
+
+	// A busy port the tuner moves is given time; with moves off it is reported at once.
+	state = persistentState{Samples: map[string]sampleState{}}
+	for range 23 {
+		round(busy, true, "en")
+	}
+	if len(state.Pending) != 0 {
+		t.Fatalf("a busy relay reported before the move had its time: %+v", state.Pending)
+	}
+	round(busy, true, "en")
+	if len(state.Pending) != 1 {
+		t.Fatalf("a busy relay the move did not help: %+v", state.Pending)
+	}
+	state = persistentState{Samples: map[string]sampleState{}}
+	for range 3 {
+		round(busy, false, "en")
+	}
+	if len(state.Pending) != 1 {
+		t.Fatalf("a busy relay with moves off: %+v", state.Pending)
+	}
+
+	// The relay's alerts are the exit events': off, nothing is queued.
+	state = persistentState{Samples: map[string]sampleState{}}
+	cfg := Default()
+	cfg.Events.Exit = false
+	for range 3 {
+		now = now.Add(5 * time.Second)
+		hv := nodesync.HealthView{OK: true, CheckedAt: now, Listeners: []nodeapi.ListenerStatus{{Name: nodeapi.RelayListener, Error: "x"}}}
+		m.checkRelay(&state, cfg, node, hv, false, "en")
+	}
+	if len(state.Pending) != 0 {
+		t.Fatalf("exit events off: %+v", state.Pending)
+	}
+}

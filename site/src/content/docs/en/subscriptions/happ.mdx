@@ -1,0 +1,35 @@
+---
+title: Happ
+description: The encrypted happ://crypt5 link, a routing profile, and hidden server settings.
+---
+
+Happ has its own card in **Settings → Subscription**. Only Happ receives its headers; other apps don't see them.
+
+## Encrypted link
+
+The **Encrypted link** hides the subscription address: the user gets `happ://crypt5/…` instead. It is opened by the Happ button on the subscription page, and it is also shown in the user's card as "Link for Happ".
+
+- **Off**: a plain `happ://add/…` link.
+- **By Happ**: the address is sent once to crypto.happ.su. If the service is unavailable, the panel encrypts it itself.
+- **By the panel**: encrypts locally.
+
+Reissuing a user's link also invalidates their encrypted link.
+
+## Routing profile
+
+The **Routing profile** field accepts a link built in Happ itself (Routing → Share):
+
+- `happ://routing/onadd/…`: add the profile and turn it on;
+- `happ://routing/add/…`: add it only;
+- `happ://routing/off`: turn routing off.
+
+Happ adds the profile together with the subscription and applies it after reconnecting.
+
+## Hidden server settings
+
+- **Provider ID** from happ-proxy.com: Latin letters, digits, `-` and `_`, up to 64 characters.
+- **Hide server settings**: the user won't see the server parameters in Happ. Works only with a saved Provider ID.
+
+:::note
+Per-service routes from **Settings → Routing** don't reach Happ: they are for Clash apps only. For Happ, use a routing profile.
+:::

@@ -1,0 +1,55 @@
+---
+title: Backups and restore
+description: Backups on the server and in Telegram, what they contain and how to restore.
+---
+
+## Backup on the server
+
+```bash
+mikan backup
+```
+
+The archive `mikan-YYYYMMDD-HHMMSS.tar.gz` appears in `/opt/mikan/backups`. It holds `.env`, `compose.yaml`, a consistent database snapshot, the panel's certificates, node data and payment adapter settings. All of the server's secrets are inside, so the folder is accessible only to root.
+
+Before risky operations mikan makes backups by itself and keeps a few of the latest:
+
+| When | How many are kept |
+|---|---|
+| before an update | 5 |
+| before moving to PostgreSQL | 3 |
+| before a restore | 3 |
+
+Your own `mikan-*` archives are never deleted automatically.
+
+:::note
+Your own site from `/opt/mikan/data/panel/www` is not part of the backup, so keep it separately.
+:::
+
+## Restore
+
+```bash
+mikan restore /opt/mikan/backups/mikan-20261001-031500.tar.gz
+```
+
+Before restoring, the program checks the archive, stops the containers and saves a snapshot of the current state. If a step fails, everything goes back as it was. The server's own database password, image and version are kept, so a backup can be moved to a freshly installed server. A panel backup will not fit a node, and the other way round.
+
+- `-y` asks no questions.
+- `--no-db-snapshot` does not copy the current database before replacing it: for a PostgreSQL that is so broken it cannot be dumped. If the restore fails, the current data is lost.
+
+An archive with only the database (like a backup from Telegram) restores only the database, while settings, certificates and adapters stay as they are. Old SQLite backups restore onto a PostgreSQL panel too. A restore replaces the whole database.
+
+## Backups to Telegram
+
+**Telegram → Infrastructure → Backups to Telegram**: every day at the chosen hour (UTC) the panel sends an encrypted database backup to the admin chat. You need to connect the admin chat, see [Alerts](/mikan/en/operations/alerts/).
+
+- **Encryption password**: at least 20 characters, with a "Generate" button. A lost password cannot be recovered.
+- "Send now" sends a backup right away.
+- The backup holds only the database: users, plans, settings, the bot token. It has no `.env`, certificates or node keys, so keep server backups for those.
+- The file is at most 50 MB, which is the limit for Telegram bots.
+
+To restore on the server (you need the [age](https://github.com/FiloSottile/age) utility):
+
+```bash
+age -d -o mikan.tar.gz mikan-….tar.gz.age
+mikan restore mikan.tar.gz
+```

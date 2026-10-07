@@ -1,0 +1,51 @@
+---
+title: Plans and users
+description: Plans with a term, traffic and several sale terms, users, devices and binding to them.
+---
+
+## Plans
+
+**Plans** section, "Plans" tab. A plan has:
+
+- **Traffic per period** in GB, or unlimited.
+- **Term**: "In days" (0 means no expiry) or "To a day of the month": N months and a billing day. The first term ends on the nearest such day, but not sooner than 15 days from now. In a month without that day, the term ends on the last day.
+- **Devices at once**: from 1 to 100, or unlimited.
+- **When to reset traffic**: every 30 days, on the 1st (or on the billing day), never.
+- **Price label**: shown only in the panel.
+- **Pool limits**, if you have [traffic pools](/mikan/en/billing/pools/).
+
+The **Selling** block: the "On sale" switch, a price in Telegram Stars and in rubles (at least one is required). **More terms** adds up to 12 options, for example 7, 30 and 90 days, each with its own price. Limits are not multiplied, and traffic resets by the plan's rule. The buyer picks a term in the bot and the Mini App, and the invoice remembers the term and price it was issued with.
+
+An archived plan cannot be chosen for new users; nothing changes for existing ones.
+
+## Users
+
+"New user": a name, an optional contact and a plan. The term, traffic and device limit come from the plan and can be changed later in the card. The "Create and copy the link" button copies the subscription link right away.
+
+In the user card:
+
+- **Extend**: by 7, 30, 90 days or a year, or, with a billing day, by 1, 3, 6 or 12 months. There is also an exact end date and "No expiry".
+- **Billing day**: extending by a month runs the term to this day.
+- **Change plan**: limits come from the new plan, the term starts again from today, and used traffic is kept.
+- **Reset traffic**, **Disable**.
+- **More actions → Reissue the link**: the old link and all devices stop working immediately, along with any old links left after an import.
+- **Add traffic**: a package as a gift or as compensation.
+- **Telegram → Unlink**, a torrent ban and "Do not check for torrents".
+
+The list can be filtered by state: active, expiring, limit reached, expired, disabled. Search works on name, contact, tag and note. With rows selected, you can do "+1 month", reset traffic, disable and delete.
+
+Since version 0.5.0.3 there are also folders, a user source (created in the panel, bought in the bot, free trial, import) and hidden users. Hiding only removes the row from the list: the subscription, payment and nodes work as usual.
+
+## Devices
+
+Without binding, a device is an IP address with an active connection, and its place frees up about a minute after it disconnects.
+
+**Settings → Subscription → Devices → Bind subscriptions to devices** protects against key resale:
+
+- each device gets its own keys, and the device limit becomes the number of places;
+- an extra device sees that all places are taken instead of servers;
+- apps without a device ID share one place.
+
+With the **Only apps with a device ID** switch, other apps get no subscription. Happ, Koala Clash, INCY, v2RayTun, FlClashX, ClashFest and SlothClash (unless it is turned off in its settings) send a device ID.
+
+A subscriber can unbind one device a day on the subscription page or in the bot; an administrator can do it any time in the user card. An unbound device is cut off immediately. Only bound devices take places, so a phone moving from Wi-Fi to mobile data does not turn into two devices.

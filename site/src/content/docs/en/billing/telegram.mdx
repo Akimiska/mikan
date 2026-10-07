@@ -1,0 +1,60 @@
+---
+title: Telegram bot and Mini App
+description: A bot for subscribers right inside the panel, a Mini App, notifications, broadcasts and a free trial.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+The bot runs right inside the panel, so no separate server is needed. Subscribers see their plan, devices and instructions in it, open the subscription page as a Mini App, get reminders and buy access.
+
+## Connect
+
+<Steps>
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) using `/newbot` and copy the token.
+
+2. In the panel, open **Telegram → Connection**, paste the token and press "Connect". The panel checks it with Telegram.
+
+</Steps>
+
+:::note[The Mini App needs a real certificate]
+Telegram will not open a page with a self-signed certificate. The Mini App starts working once the panel has a Let's Encrypt or your own certificate, see [Domain and certificates](/mikan/en/start/domain/).
+:::
+
+### If Telegram is blocked on the server
+
+The **Way to Telegram** card on the same tab:
+
+- **Direct**;
+- **Via a node**: a remote node of the panel passes only requests to Telegram;
+- **Via a proxy**: SOCKS5 or HTTP(S). The password is not shown after saving.
+
+The route is checked before it is saved.
+
+## What the subscriber sees
+
+- The subscription screen: term, traffic, devices, pools. If there are several subscriptions, you can switch between them, up to five per account.
+- Devices with unbinding, once a day.
+- "Connect a device": the link and apps, plus a button for the subscription page in the Mini App.
+- Buying and renewing, "Buy more traffic", "Promo codes", "Try it for free".
+- "Remove from the bot": removes only the link to Telegram. The subscription keeps working in apps and comes back to the bot if you send it the link again.
+
+A subscription is bound when a person sends the bot the link or taps "Open in Telegram" on the subscription page. If the subscription is already bound to another account, it moves only when its owner taps "Allow"; the request lives for an hour. The bot also accepts old links of users moved from Marzban, PasarGuard or Remnawave.
+
+## Menu and texts
+
+The **Menu and texts** tab: main menu buttons (subscription, devices, connection, renewal, support, Mini App and your own: a link or a page with text), up to 20 buttons, ordered with arrows. Texts for the welcome, renewal and notifications, and the bot language. On the right is a preview with sample data.
+
+## Notifications
+
+The **Notifications** tab: reminders 3 days and 1 day before the term ends, when it ends, at 90% of traffic and when traffic runs out. It also has the Mini App button next to the input field, "Keep one menu in the chat" and "Silent at night" (from 22:00 to 9:00 Moscow time).
+
+## Broadcast
+
+The **Broadcast** tab sends a text to everyone whose subscription is bound to the bot. Messages go within Telegram's limits, and progress is shown in the panel.
+
+## Free trial
+
+**Payments → Accepting payments → Free trial**: pick a plan with a term, and the bot offers it for free in the welcome message. A trial is given once to a Telegram account that has no subscription, no payments and no earlier trial. It works even if selling is off.
+
+Admin notifications and Telegram backups are described in [Alerts and monitoring](/mikan/en/operations/alerts/).

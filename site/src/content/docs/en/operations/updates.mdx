@@ -1,0 +1,49 @@
+---
+title: Updates
+description: The update button, nightly auto-update, beta versions, signed releases, rollback and the move to PostgreSQL.
+---
+
+Once a day the panel checks whether a new release is out and shows what changed. Updates are done by the `mikan` program on the host: the panel itself does not touch Docker.
+
+## How to update
+
+- **With the button**: **Settings → General → Updates → Update to X**. If the server does not pick up the task within 2 minutes, the panel suggests running `mikan update` by hand.
+- **Automatically**: the "Update automatically" switch. Once a day at night (at 3:00 plus a random delay of up to three hours): a backup first, and if the new version does not start, a return to the current one.
+- **With a command** on the server:
+
+```bash
+mikan update           # update now
+mikan update --check   # only check whether a new version is out
+mikan status           # containers, versions, available update
+```
+
+The same card has the "Nodes follow the panel" switch, see [Nodes](/mikan/en/nodes/nodes/#updating-nodes-from-the-panel).
+
+## Beta versions
+
+The **Beta versions** switch adds release candidates. They can have bugs, so turn it on deliberately on a production server.
+
+## What happens during an update
+
+1. A backup. If it fails, the update does not start.
+2. The panel stops, a final database snapshot is taken, and the new image starts.
+3. The database migrates.
+4. A check that the new version came up.
+
+If the new version did not come up and the database schema did not change, the panel returns to the previous version by itself. If the schema has already been updated, the panel stays stopped with its data saved, and the message points you to the backup path: run `mikan update` again. A node always rolls back by itself. A server never installs a version older than the current one.
+
+## Signed releases
+
+Servers read a signed list of releases, not "latest" on GitHub. Each release has a signed manifest, its signature is checked with a key built into the installer, and the binary's hash is verified. If the target version cannot be reached directly, the server goes through the intermediate ones by itself.
+
+## Moving to PostgreSQL
+
+Since version 0.5 the panel runs on PostgreSQL. The update moves all the data by itself: subscription links, VPN keys, user IDs, counters, payments and settings do not change. A backup is made first, and the old SQLite database stays on disk.
+
+:::caution[Versions 0.4.4 and older]
+Update to 0.4.5 first, with the button or `mikan update`. After that, 0.5 arrives the usual way. If you skipped 0.4.5, the install command from the README updates an existing server.
+:::
+
+If the move fails, the panel stays stopped and both databases are kept. Run the update again.
+
+Since version 0.5 version numbers have four parts: major.minor.patch.revision.

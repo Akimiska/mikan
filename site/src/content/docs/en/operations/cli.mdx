@@ -1,0 +1,74 @@
+---
+title: The mikan command
+description: Reference for the mikan server management command.
+---
+
+Running `mikan` with no arguments opens a menu in the terminal: status, updates, logs, access, REALITY sites, nodes, backups. The same actions are available as commands. Run them as root.
+
+## Server
+
+| Command | What it does |
+|---|---|
+| `mikan status` | containers, CPU and memory, panel state, available update |
+| `mikan logs [panel\|node]` | live logs, <kbd>Ctrl</kbd>+<kbd>C</kbd> stops |
+| `mikan restart` | restart the containers |
+| `mikan update [--check]` | update now, a backup first, rollback on failure. `--check` only checks |
+| `mikan install [flags]` | install; on an installed server it opens the menu |
+| `mikan uninstall [-y]` | stop and remove the command, data stays in `/opt/mikan` |
+
+## Access
+
+| Command | What it does |
+|---|---|
+| `mikan url` | the panel link and login |
+| `mikan reset-password` | a new administrator password, all sessions and API keys are revoked |
+| `mikan reset-path` | a new secret link, the old one stops working |
+| `mikan disable-2fa` | turn off 2FA if the phone is lost |
+
+## Backups
+
+| Command | What it does |
+|---|---|
+| `mikan backup` | a backup into `/opt/mikan/backups` |
+| `mikan restore FILE [-y] [--no-db-snapshot]` | restore from a backup, see [Backups](/mikan/en/operations/backups/) |
+
+## Nodes and connections
+
+| Command | What it does |
+|---|---|
+| `mikan node list` | the panel's nodes |
+| `mikan node add --name NAME --host IP [--domain D] [--api-port P]` | add a node and get a key |
+| `mikan node key NODE` | a new node key, the old one stops working |
+| `mikan node set NODE [--name] [--host] [--domain] [--enabled=true\|false]` | change a node |
+| `mikan join [KEY] [--panel-ip IP]` | on a node: accept a new key from the panel |
+| `mikan inbound list` | connections |
+| `mikan inbound add PRESET [--port PORT] [--node N]` | add a connection; without a preset it shows the list |
+| `mikan inbound set NAME --port PORT [--node N]` | change the port, keys and masking stay |
+
+The panel's own node has number 1, and its address and domain are changed in the panel settings.
+
+## Certificates
+
+| Command | What it does |
+|---|---|
+| `mikan cert set --cert fullchain.pem --key privkey.pem [--node N]` | your own certificate for the panel or a node |
+| `mikan cert show [--node N]` | what is installed now |
+| `mikan cert clear [--node N]` | go back to Let's Encrypt (for a node: self-signed) |
+
+## REALITY masking sites
+
+| Command | What it does |
+|---|---|
+| `mikan targets scan [--node N] [--json]` | find suitable sites near the server |
+| `mikan targets check --dest HOST:PORT [--sni NAME]` | check a site |
+| `mikan targets apply --dest HOST:PORT [--sni NAME] (--all \| --inbound NAME) [--force]` | set the site for all connections or for one |
+
+For an IP address in `--dest`, `--sni` is required. The site is checked before it is applied, and `--force` skips the check.
+
+## Payment adapters
+
+| Command | What it does |
+|---|---|
+| `mikan addon list` | what is running and what is in the catalog |
+| `mikan addon install ID` | install or update an adapter |
+| `mikan addon remove ID` | stop and remove, settings and payments in the panel stay |

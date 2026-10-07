@@ -1,0 +1,55 @@
+---
+title: Domain and certificates
+description: Let's Encrypt for a domain and an IP, your own certificate for the panel and nodes, the subscription port.
+---
+
+## Panel certificate
+
+The panel gets a Let's Encrypt certificate by itself and renews it:
+
+- **with a domain**: a regular certificate for the domain;
+- **without a domain**: a short-lived certificate for the IP address, about six days, renewed automatically.
+
+Issuing needs port 80 open, and it is used for a few seconds. If the certificate cannot be obtained, the panel runs with a self-signed one: the browser warns you once, some apps will not accept the subscription, and Telegram will not open the Mini App. The status is shown in **Settings → Security → Panel certificate**, with a "Request now" button.
+
+## Change the domain or address
+
+**Settings → General → Server**: the "Server address" and "Domain" fields. On save, the panel checks the domain through public DNS and tells you if there is no record or the domain points to another server. After a change, the panel requests a new certificate right away.
+
+:::caution
+Subscription links are built from this address. If clients already use subscriptions, the old address must keep working until everyone has updated their subscription.
+:::
+
+## Own certificate
+
+If port 80 is closed, or you need a wildcard, a Cloudflare Origin certificate or a certificate from your own CA, install your own: **Settings → Security → Panel certificate → Own certificate**. You need "Certificate with its chain" (`fullchain.pem`) and "Private key" (`privkey.pem`), as a file or as text. Port 80 is not needed then. To go back, use "Back to Let's Encrypt".
+
+The same from the command line, handy for a certbot or acme.sh renewal hook:
+
+```bash
+mikan cert set --cert /etc/letsencrypt/live/DOMAIN/fullchain.pem \
+               --key  /etc/letsencrypt/live/DOMAIN/privkey.pem
+```
+
+```bash
+certbot renew --deploy-hook \
+  'mikan cert set --cert $RENEWED_LINEAGE/fullchain.pem --key $RENEWED_LINEAGE/privkey.pem'
+```
+
+The new file is picked up without a restart. `mikan cert show` shows what is installed now, and `mikan cert clear` goes back to Let's Encrypt.
+
+## Node certificate
+
+Hysteria2, TUIC, AnyTLS and TrustTunnel use the node's certificate. By default it is self-signed, and clients receive its fingerprint (the pin) in the subscription. Your own certificate is installed with the **Certificate** button on the node card or with `mikan cert set ... --node N`. A publicly trusted certificate goes to clients without a pin, so renewing it breaks nothing.
+
+If the panel has a domain, the panel's own node serves the panel's public certificate on these protocols by itself.
+
+## Subscription port
+
+**Settings → Subscription → Subscription port** moves subscription links and the subscription page to a separate port, for example 443 or 2053. It applies immediately, with no restart. The admin UI does not open on this port, and old links on the panel port keep working, so clients do not need to change anything.
+
+The panel suggests the ports opened at install time and marks the ones used by protocols. Open any other port in the firewall yourself: `ufw allow PORT/tcp`.
+
+## Your own site on the domain
+
+Put files in `/opt/mikan/data/panel/www`: the panel serves them on all paths it does not use itself, and `404.html` becomes the error page. This way an ordinary website opens at the panel's address.

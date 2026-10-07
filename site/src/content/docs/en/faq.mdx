@@ -1,0 +1,70 @@
+---
+title: FAQ and troubleshooting
+description: Common problems when installing and running mikan, and what to do about them.
+---
+
+## Installation
+
+### Port 80 or 443 is taken by nginx or Caddy
+
+The installer will not stop. Protocols whose port is taken get other free ports. If a domain is set, the installer offers to add a rule for Let's Encrypt checks to nginx or Caddy: the config is saved, validated and restored if there is an error. If port 80 is held by another program, such as Apache, there will be no Let's Encrypt certificate until the port is freed. You can [install your own certificate](/mikan/en/start/domain/#own-certificate).
+
+### The installer does not accept the domain
+
+It checks the domain through public DNS. Common causes: the A record points to another server, the domain has an extra A record or an AAAA record for a foreign address, or the domain is behind the Cloudflare proxy. For the panel, switch the record in Cloudflare to "DNS only" (the grey cloud).
+
+### Installation was interrupted
+
+Run `mikan install` again and it will continue. If the admin account already exists, the installer does not know the password: get a new one with `mikan reset-password`.
+
+## Access
+
+### I lost the link, the password or 2FA
+
+On the server: `mikan url`, `mikan reset-password`, `mikan disable-2fa`. More in [First steps](/mikan/en/start/first-steps/#if-you-lose-access).
+
+### The browser complains about the certificate, the Mini App does not open
+
+The panel is running with a self-signed certificate because it could not get one from Let's Encrypt. Check that port 80 is open from outside, including in your hosting provider's firewall, and click "Request now" in **Settings → Security → Panel certificate**.
+
+## Connections
+
+### Hysteria2 or TUIC do not connect
+
+These protocols run over UDP. Some hosting providers and networks block UDP entirely or on certain ports. Check that the port is open for UDP in your hosting provider's firewall, and try another port or a port range for Hysteria2, for example `20000-30000`. Keep a TCP protocol alongside, such as VLESS XHTTP: the "Auto" group in the app will pick one that works by itself.
+
+### The app does not see a protocol
+
+A subscription gives an app only what it can run. Happ and v2RayTun will not get TUIC and AnyTLS, and TrustTunnel, Mieru and other new protocols go only to Clash apps with a recent core. The "Delivered to" line in the connection form shows who gets it. See the [table](/mikan/en/protocols/presets/#who-gets-what).
+
+### I changed the port and clients do not connect
+
+Apps refresh the subscription once an hour. Ask them to update the subscription manually or wait. Until they update, Clash apps switch to working connections by themselves.
+
+### A device says there are no free slots
+
+Device binding is on and the plan's limit is used up. Unbind the old device in the user's card, or the subscriber can do it on the subscription page or in the bot (once a day).
+
+### Automatic fixes do not move a blocked port
+
+They wait for cut-off devices from at least two different networks and 30 minutes of confirmation. They do not work for connections behind a proxy, Hysteria2 port ranges and protocols with a single shared key. More in [Automatic fixes](/mikan/en/protocols/autotune/).
+
+## Nodes
+
+### A node shows "No connection"
+
+The panel could not reach the node's API port. Check that the node is running (`mikan status` on its server) and that the API port is open in the hosting provider's firewall for the panel's address. If the key may have been lost, issue a new one with the "New key" button and accept it on the node with `mikan join`.
+
+### WARP fails the check
+
+The WARP window states the reason. Most often it is "no answer over UDP": the hosting provider blocks UDP to Cloudflare's endpoint. Connect your own WireGuard config with a different endpoint. All reasons are listed in the [WARP](/mikan/en/nodes/warp/#check) section.
+
+## Updates
+
+### The panel is stopped after an update
+
+If the new version changed the database schema and did not start, the panel stays stopped with its data preserved, so nothing is lost. Run `mikan update` again. The backup taken before the update is in `/opt/mikan/backups`, and its path is in the error message.
+
+### Where to find logs
+
+`mikan logs panel` and `mikan logs node`. If nothing helped, open an [issue on GitHub](https://github.com/Miroshka000/mikan/issues) with the logs, with addresses and keys removed from them.

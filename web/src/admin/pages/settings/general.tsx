@@ -228,7 +228,7 @@ export function UpdatesCard() {
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="font-semibold">mikan {v.current}</span>
+        <span className="font-semibold">{t("settings.forkVersion", { v: v.current })}</span>
         {v.available ? (
           <Pill tone="warn">{t("settings.updatesOut", { v: v.latest })}</Pill>
         ) : v.unreachable && v.newest ? (

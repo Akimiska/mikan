@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ArrowUpCircle, Cloud, Copy, Gauge, KeyRound, LoaderCircle, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpCircle, Cloud, Copy, Gauge, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
@@ -45,9 +45,27 @@ export function NodesPage() {
   const [cascadeOf, setCascadeOf] = useState<Node | null>(null);
   const [certOf, setCertOf] = useState<Node | null>(null);
   const [updateOf, setUpdateOf] = useState<Node | "all" | null>(null);
+  const [checking, setChecking] = useState(false);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: qk.nodes });
     void qc.invalidateQueries({ queryKey: qk.inbounds });
+  };
+  // Manual protocol-core check: refetch node health (brings fresh core/version
+  // for every node) and report how many are behind the panel. No new endpoint —
+  // the Nodes query already carries each node's core ("mihomo vX") and behind flag.
+  const checkProtocols = async () => {
+    setChecking(true);
+    try {
+      const fresh = await qc.fetchQuery({ queryKey: qk.nodes, queryFn: () => unwrap(api.GET("/api/v1/nodes")) });
+      const list = (fresh ?? []) as Node[];
+      const behind = list.filter((n) => !n.local && n.behind).length;
+      if (behind > 0) toast.ok(t("nodes.protocolsBehind", { n: behind }));
+      else toast.ok(t("nodes.protocolsAllCurrent"));
+    } catch (e) {
+      toast.error(errorText(e));
+    } finally {
+      setChecking(false);
+    }
   };
   const rekey = useMutation({
     mutationFn: (id: number) => unwrap(api.POST("/api/v1/nodes/{id}/key", { params: { path: { id } } })),
@@ -122,7 +140,11 @@ export function NodesPage() {
         sub={t("nodes.subtitle")}
         actions={
           <>
-            {toUpdate.length > 1 ? (
+            <Button variant="ghost" loading={checking} onClick={() => void checkProtocols()}>
+              <RefreshCw size={18} aria-hidden />
+              <span className="max-[760px]:hidden">{t("nodes.checkProtocols")}</span>
+            </Button>
+            {toUpdate.length >= 1 ? (
               <Button loading={update.isPending && update.variables === "all"} disabled={update.isPending || toUpdate.some(updating)} onClick={() => setUpdateOf("all")}>
                 <ArrowUpCircle size={18} aria-hidden />
                 <span className="max-[760px]:hidden">{t("nodes.updateAll", { n: toUpdate.length })}</span>
@@ -348,6 +370,12 @@ function NodeCard({
               <span className="num">{n.version}</span>
               {n.behind ? <Pill tone="warn">{t("nodes.behind")}</Pill> : null}
             </dd>
+          </div>
+        ) : null}
+        {n.core ? (
+          <div className="col-span-2">
+            <dt className="text-xs text-[var(--ink-500)]">{t("nodes.core")}</dt>
+            <dd className="num">{n.core}</dd>
           </div>
         ) : null}
         {n.certificate ? (

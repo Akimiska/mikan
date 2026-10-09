@@ -56,7 +56,8 @@
     "twoFactorOn": "2FA on",
     "owner": "owner",
     "logout": "Sign out",
-    "more": "More"
+    "more": "More",
+    "forkVersion": "Aoi · mikan {v}"
   },
   "states": {
     "active": "active",
@@ -940,6 +941,7 @@
     "updatesBetaSub": "Release candidates too, before the release is out. For testing: they can have bugs.",
     "updatesNodes": "Nodes follow the panel",
     "updatesNodesSub": "After the panel updates, it updates its other nodes to the same version, one at a time. If a node fails, the rest wait and you get an alert.",
+    "forkVersion": "Aoi · mikan {v}",
     "lang": "Default language",
     "langSub": "For visitors who have not picked a language yet",
     "langAuto": "Browser language",
@@ -1310,6 +1312,10 @@
     "updateAll": "Update all ({n})",
     "updateAllTitle": "Update {n} nodes to the panel's version?",
     "updateAllText": "One at a time: the next node starts when the last one runs the new version. If one fails, the rest wait.",
+    "checkProtocols": "Check updates",
+    "core": "Protocol core",
+    "protocolsAllCurrent": "Protocol cores are current on every node",
+    "protocolsBehind": "{n, plural, one {# node runs an older protocol core} other {# nodes run an older protocol core}}",
     "oldNode": "This node is too old to update from the panel. Run this once on its server, and the panel updates it from then on:",
     "configure": "Configure",
     "rekey": "New key",

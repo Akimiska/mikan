@@ -187,6 +187,7 @@ html[data-theme="forest"] {
   .nav-item.active svg { color: var(--mikan-600); }
   .nav-count { margin-left: auto; font-size: 12px; color: var(--ink-500); }
   .side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; }
+  .fork-version { font-size: 11px; color: var(--ink-500); padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .node-card { border-radius: 16px; padding: 12px; background: var(--surface-soft); border: 1px solid var(--hairline); }
   .node-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .node-name { font-weight: 600; font-size: 13px; }
@@ -410,6 +411,7 @@ html[data-theme="forest"] {
   .sidebar { padding: 16px 8px; align-items: center; }
   .brand { padding: 4px; }
   .brand-name, .nav-label, .nav-count, .node-card, .admin-row .who-wrap, .admin-row .logout { display: none; }
+  .fork-version { display: none; }
   .nav-item { justify-content: center; width: 48px; padding: 0; }
   .sidebar .lang-switch { flex-direction: column; align-self: center; }
 }

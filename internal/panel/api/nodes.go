@@ -36,6 +36,7 @@ type NodeInfo struct {
 	Status      string     `json:"status" enum:"ok,error,unknown"`
 	Error       string     `json:"error,omitempty"`
 	Version     string     `json:"version,omitempty"`
+	Core        string     `json:"core,omitempty" doc:"Протокол-ядро ноды, например «mihomo v1.19.32»"`
 	Listeners   int        `json:"listeners"`
 	ListenersOK int        `json:"listeners_ok"`
 	Conns       int        `json:"conns"`
@@ -168,6 +169,7 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 		return v
 	}
 	v.Status, v.Version, v.Conns = "ok", hv.Health.Version, hv.Health.Conns
+	v.Core = hv.Health.Core
 	v.CPUPercent, v.MemUsed, v.MemTotal = hv.Health.System.CPUPercent, hv.Health.System.MemUsed, hv.Health.System.MemTotal
 	for _, l := range hv.Listeners {
 		v.Listeners++

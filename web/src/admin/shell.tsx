@@ -54,6 +54,7 @@ export function Shell() {
             <NodeCard />
             <AdminRow />
             <LangSwitch className="self-start" />
+            <ForkVersion />
           </div>
         </aside>
         <main className="main">
@@ -112,6 +113,19 @@ function UpdateChip() {
       <ArrowUpCircle size={16} aria-hidden />
       <span className="truncate">{t("shell.update", { v: u.data.latest })}</span>
     </Link>
+  );
+}
+
+// Always-visible build marker: makes clear this is the Aoi fork and which
+// version is running (upstream mikan has no such line). Reads the panel's own
+// reported version via useUpdates().current.
+function ForkVersion() {
+  const u = useUpdates();
+  const v = u.data?.current;
+  return (
+    <div className="fork-version num" title={t("shell.forkVersion", { v: v ?? "" })}>
+      {t("shell.forkVersion", { v: v ?? "—" })}
+    </div>
   );
 }
 

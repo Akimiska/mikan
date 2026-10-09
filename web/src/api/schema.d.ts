@@ -2288,6 +2288,8 @@ export interface components {
             checked_at?: string;
             /** Format: int64 */
             conns: number;
+            /** @description Протокол-ядро ноды, например «mihomo v1.19.32» */
+            core?: string;
             /** Format: double */
             cpu_percent: number;
             domain: string;

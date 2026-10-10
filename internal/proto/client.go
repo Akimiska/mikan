@@ -329,6 +329,17 @@ func (c *clientBuilder) finish() (Client, error) {
 		if alpn := strings1(c.t["alpn"]); len(alpn) > 0 {
 			c.y["alpn"] = alpn
 		}
+		// up/down tell mihomo the link's bandwidth up front. Without them the client
+		// runs Hysteria2's "Brutal" bandwidth probing on every connection — the speed
+		// ramps up slowly and sites are sluggish for the first seconds. Emitting them
+		// (the inbound's own, e.g. "200 Mbps") disables probing and the link is fast at
+		// once. mihomo wants a string with a unit; a bare number is passed through.
+		for _, key := range []string{"up", "down"} {
+			if v := c.t.str(key); v != "" {
+				c.y[key] = v
+				c.q.Set(key, v)
+			}
+		}
 		// A port of the inbound's own (a proxy in front) replaces the node's hopping range.
 		if c.in.PortSpec != "" && c.in.PortSpec != strconv.Itoa(c.in.Port) && c.port == c.in.Port {
 			c.y["ports"] = c.in.PortSpec

@@ -545,14 +545,17 @@ func (q *Queries) ListUnbindsSince(ctx context.Context, arg ListUnbindsSincePara
 	return items, nil
 }
 
-const lockUser = `-- name: LockUser :exec
-SELECT id FROM users WHERE id = $1 FOR UPDATE
+const lockUser = `-- name: LockUser :one
+SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE
 `
 
-// Two unbinds of one subscriber at once must not both fit under the limit.
-func (q *Queries) LockUser(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, lockUser, id)
-	return err
+// One unbind of a user's at a time: a second waits, then finds the device gone, and two
+// unbinds of the subscriber's never both fit under the limit.
+func (q *Queries) LockUser(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, lockUser, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const setBoundDeviceName = `-- name: SetBoundDeviceName :execrows

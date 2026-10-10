@@ -256,15 +256,17 @@ function DeviceBans({ u }: { u: User }) {
         <ul className="flex flex-col gap-2" aria-label={t("userDrawer.bansTitle")}>
           {list.map((b) => (
             <li key={b.id} className="panel-soft grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 p-2">
-              <span className={`grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] ${b.until ? "text-[var(--mikan-600)]" : "text-[var(--berry-600)]"}`} aria-hidden>
-                {b.until ? <Hourglass size={18} /> : <Ban size={18} />}
+              <span className={`grid h-9 w-9 place-items-center rounded-[10px] bg-[var(--hover)] ${b.until || b.forever ? "text-[var(--mikan-600)]" : "text-[var(--berry-600)]"}`} aria-hidden>
+                {b.until || b.forever ? <Hourglass size={18} /> : <Ban size={18} />}
               </span>
               <div className="min-w-0">
                 <div className="truncate text-[13px] font-medium" title={label(b)}>
                   {label(b)}
                 </div>
                 <div className="truncate text-xs text-[var(--ink-500)]">
-                  {b.until
+                  {b.forever
+                    ? t("userDrawer.pausedForever")
+                    : b.until
                     ? t("userDrawer.pausedUntil", { when: dateShort(b.until), time: time(b.until) })
                     : b.admin
                       ? t("userDrawer.bannedBy", { when: dateShort(b.banned_at), admin: b.admin })
@@ -281,7 +283,7 @@ function DeviceBans({ u }: { u: User }) {
       <Confirm
         open={pick !== null}
         onOpenChange={(v) => !v && setPick(null)}
-        title={t(pick?.until ? "userDrawer.unpauseTitle" : "userDrawer.unbanTitle", { name: pick ? label(pick) : "" })}
+        title={t(pick?.until || pick?.forever ? "userDrawer.unpauseTitle" : "userDrawer.unbanTitle", { name: pick ? label(pick) : "" })}
         text={t("userDrawer.unbanText")}
         confirm={t("userDrawer.unban")}
         loading={unban.isPending}

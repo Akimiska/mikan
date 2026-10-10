@@ -1401,6 +1401,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tariffs/{id}/apply-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Применить лимиты пулов тарифа к уже выданным подпискам: свои лимиты пулов у клиентов заменятся, израсходованное останется */
+        post: operations["apply-tariff-pools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/telegram": {
         parameters: {
             query?: never;
@@ -2037,6 +2054,13 @@ export interface components {
             public_enabled?: boolean;
             public_summary?: boolean;
         };
+        ApplyPoolsOutputBody: {
+            /**
+             * Format: int64
+             * @description У скольких клиентов тарифа обновлены лимиты пулов
+             */
+            applied: number;
+        };
         Attempt: {
             /** Format: date-time */
             at: string;
@@ -2444,6 +2468,8 @@ export interface components {
             admin: string;
             /** Format: date-time */
             banned_at: string;
+            /** @description Подписчик отвязал устройство, а вернуть его может только админ (until не показывается) */
+            forever?: boolean;
             /** @description ID устройства, которому закрыта привязка */
             hwid: string;
             /** Format: int64 */
@@ -4563,9 +4589,11 @@ export interface components {
              * @description Сколько устройств подписчик может отвязать за days; 0 — без ограничения
              */
             limit: number;
+            /** @description Подписчик не отвязывает устройства сам, только админ */
+            off?: boolean;
             /**
              * Format: int64
-             * @description Сколько часов отвязанное подписчиком устройство не может привязаться снова; 0 — сразу
+             * @description Сколько часов отвязанное подписчиком устройство не может привязаться снова; 0 — сразу, -1 — пока админ не разрешит
              */
             return_hours: number;
         };
@@ -8265,6 +8293,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "apply-tariff-pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplyPoolsOutputBody"];
+                };
             };
             /** @description Error */
             default: {

@@ -235,6 +235,34 @@ func (q *Queries) ListTrafficPools(ctx context.Context) ([]TrafficPool, error) {
 	return items, nil
 }
 
+const listUserIDsOfTariff = `-- name: ListUserIDsOfTariff :many
+SELECT id FROM users WHERE tariff_id = $1 ORDER BY id
+`
+
+// The users a tariff was given to, for bringing them up to the tariff's pool limits.
+func (q *Queries) ListUserIDsOfTariff(ctx context.Context, tariffID sql.NullInt64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listUserIDsOfTariff, tariffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserPools = `-- name: ListUserPools :many
 SELECT user_id, pool_id, traffic_limit, used_up, used_down, excluded FROM user_pools WHERE user_id = $1 ORDER BY pool_id
 `

@@ -889,10 +889,11 @@ type Info struct {
 	Bound       []DeviceItem `json:"devices"`
 	UnbindAfter *time.Time   `json:"unbind_after,omitempty" doc:"The subscriber may unbind again from then"`
 	// The admin's rules for unbinding (domain.UnbindRules), for the page to tell them.
-	UnbindLimit int `json:"unbind_limit" doc:"Unbinds allowed per unbind_days; 0: no limit"`
-	UnbindDays  int `json:"unbind_days"`
-	UnbindsLeft int `json:"unbinds_left" doc:"Unbinds left in the window now; -1: no limit"`
-	ReturnHours int `json:"return_hours" doc:"An unbound device may not bind again for this long; 0: at once"`
+	UnbindOff   bool `json:"unbind_off,omitempty" doc:"Only the admin unbinds devices"`
+	UnbindLimit int  `json:"unbind_limit" doc:"Unbinds allowed per unbind_days; 0: no limit"`
+	UnbindDays  int  `json:"unbind_days"`
+	UnbindsLeft int  `json:"unbinds_left" doc:"Unbinds left in the window now; -1: no limit"`
+	ReturnHours int  `json:"return_hours" doc:"An unbound device may not bind again for this long; 0: at once, -1: until the admin lets it"`
 	// Pools: the user's traffic pools with a limit or with traffic used.
 	Pools []PoolInfo `json:"pools,omitempty"`
 	// The announcement the apps show, with the user's values in it; the page shows it when
@@ -966,7 +967,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 		if !st.Next.IsZero() {
 			out.UnbindAfter = &st.Next
 		}
-		out.UnbindLimit, out.UnbindDays, out.UnbindsLeft, out.ReturnHours = st.Rules.Limit, st.Rules.Days, st.Left(), st.Rules.ReturnHours
+		out.UnbindOff, out.UnbindLimit, out.UnbindDays, out.UnbindsLeft, out.ReturnHours = st.Rules.Off, st.Rules.Limit, st.Rules.Days, st.Left(), st.Rules.ReturnHours
 	}
 	if u.TrafficLimit.Valid {
 		out.Limit = &u.TrafficLimit.Int64
@@ -1021,10 +1022,18 @@ func (h *Handler) unbind(w http.ResponseWriter, r *http.Request, u db.User, id i
 		h.log.Info("subs: the subscriber unbound a device", "user", u.ID, "device", id)
 		w.WriteHeader(http.StatusNoContent)
 	case errors.Is(err, domain.ErrUnbindCooldown):
-		st, _ := h.devices.UnbindState(r.Context(), u.ID)
+		out := map[string]any{"code": "unbind_cooldown"}
+		// Without the moment the page says only that it cannot: never a date of year one.
+		if st, err := h.devices.UnbindState(r.Context(), u.ID); err == nil && !st.Next.IsZero() {
+			out["unbind_after"] = st.Next
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": "unbind_cooldown", "unbind_after": st.Next})
+		_ = json.NewEncoder(w).Encode(out)
+	case errors.Is(err, domain.ErrUnbindOff):
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": "unbind_off"})
 	case errors.Is(err, domain.ErrNotFound):
 		server.NotFound(w)
 	default:
@@ -1099,6 +1108,12 @@ func (h *Handler) stub(w http.ResponseWriter, u db.User, cfg Config, format stri
 		name = fmt.Sprintf("⏸ Устройство отвязано — подключится снова через %d ч", hours)
 		if en {
 			name = fmt.Sprintf("⏸ This device was unbound — it can connect again in %d h", hours)
+		}
+		if ue != nil && domain.Forever(ue.Until) {
+			name = "⏸ Устройство отвязано — подключить его снова может только администратор"
+			if en {
+				name = "⏸ This device was unbound — only the administrator can let it connect again"
+			}
 		}
 	case errors.Is(reason, domain.ErrNoHWID):
 		name = "⛔ Приложение не сообщает ID устройства — поставьте Happ, Koala Clash или INCY"

@@ -443,6 +443,25 @@ func TestBot(t *testing.T) {
 			t.Fatalf("an unbind button while none is left: %v", buttons(edit))
 		}
 	}
+	// Unbinding off: no buttons, the note says whom to ask, a stale tap is refused.
+	if err := settings.Set(e.ctx, settings.New(e.st.Q), settings.KeyUnbindRules, domain.UnbindRules{Off: true, Limit: 1, Days: 1}); err != nil {
+		t.Fatal(err)
+	}
+	e.later()
+	n = e.tg.count()
+	e.press(anna, menuMsg, "d")
+	edit, _ = find(e.tg.wait(t, n, "editMessageText"), "editMessageText")
+	if !strings.Contains(text(edit), "Отвязать устройство может только администратор") || strings.Contains(text(edit), "Можно отвязать ещё") {
+		t.Fatalf("off: %q", text(edit))
+	}
+	for label := range buttons(edit) {
+		if strings.HasPrefix(label, "❌") {
+			t.Fatalf("an unbind button with unbinding off: %v", buttons(edit))
+		}
+	}
+	if err := settings.Set(e.ctx, settings.New(e.st.Q), settings.KeyUnbindRules, domain.DefaultUnbindRules); err != nil {
+		t.Fatal(err)
+	}
 	// A confirmation asked for before stays closed: the list again.
 	e.later()
 	n = e.tg.count()

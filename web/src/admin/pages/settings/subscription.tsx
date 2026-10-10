@@ -284,9 +284,10 @@ function periodLabel(days: number): string {
   return t("settings.unbindDays", { n: days });
 }
 
-/** A pause in hours: "at once", "6 h", whole days as days. */
+/** A pause in hours: "at once", "6 h", whole days as days, "never" (-1: until the admin lets it). */
 function pauseLabel(hours: number): string {
   if (hours === 0) return t("settings.unbindAtOnce");
+  if (hours < 0) return t("settings.unbindNever");
   if (hours % 24 === 0) return t("settings.unbindDays", { n: hours / 24 });
   return t("settings.unbindHours", { n: hours });
 }
@@ -299,17 +300,34 @@ function UnbindRules({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   const r = s.device_unbind;
   const set = (patch: Partial<Schemas["UnbindRules"]>, done: () => void) => save.mutate({ device_unbind: { ...r, ...patch } }, { onSuccess: done });
-  const summary =
-    r.limit === 0
+  const off = !!r.off;
+  const summary = off
+    ? t("settings.unbindSummaryOff")
+    : r.limit === 0
       ? t("settings.unbindSummaryFree")
       : t("settings.unbindSummary", { n: r.limit, period: periodLabel(r.days).toLowerCase() });
+  const pause =
+    r.return_hours < 0
+      ? t("settings.unbindSummaryNever")
+      : r.return_hours > 0
+        ? t("settings.unbindSummaryPause", { pause: pauseLabel(r.return_hours) })
+        : t("settings.unbindSummaryNoPause");
   return (
     <div className="mt-4 border-t border-[var(--line)] pt-4">
       <h3 className="text-[14px] font-medium">{t("settings.unbindTitle")}</h3>
       <p className="mt-1 mb-3 text-xs text-[var(--ink-500)]">{t("settings.unbindSub")}</p>
       <div className="flex flex-col gap-3">
-        <LimitPicker label={t("settings.unbindLimit")} value={r.limit === 0 ? null : r.limit} presets={[1, 2, 3, 5]} min={1} max={100} busy={save.isPending} onChange={(n, done) => set({ limit: n ?? 0 }, done)} />
-        {r.limit > 0 ? (
+        <LimitPicker
+          label={t("settings.unbindLimit")}
+          value={off ? -1 : r.limit === 0 ? null : r.limit}
+          presets={[-1, 1, 2, 3, 5]}
+          format={(n) => (n < 0 ? t("settings.unbindOff") : String(n))}
+          min={1}
+          max={100}
+          busy={save.isPending}
+          onChange={(n, done) => set(n === -1 ? { off: true } : { off: false, limit: n ?? 0 }, done)}
+        />
+        {!off && r.limit > 0 ? (
           <LimitPicker
             label={t("settings.unbindPeriod")}
             value={r.days}
@@ -323,10 +341,11 @@ function UnbindRules({ s }: { s: Schemas["SettingsView"] }) {
             onChange={(n, done) => set({ days: n ?? 1 }, done)}
           />
         ) : null}
+        {off ? null : (
         <LimitPicker
           label={t("settings.unbindReturn")}
           value={r.return_hours}
-          presets={[0, 6, 24, 72]}
+          presets={[0, 6, 24, 72, -1]}
           min={0}
           max={720}
           unlimited={false}
@@ -335,9 +354,10 @@ function UnbindRules({ s }: { s: Schemas["SettingsView"] }) {
           busy={save.isPending}
           onChange={(n, done) => set({ return_hours: n ?? 0 }, done)}
         />
+        )}
       </div>
       <p className="mt-3 text-xs text-[var(--ink-600)]" role="status">
-        {summary} {r.return_hours > 0 ? t("settings.unbindSummaryPause", { pause: pauseLabel(r.return_hours) }) : t("settings.unbindSummaryNoPause")}
+        {off ? summary : `${summary} ${pause}`}
       </p>
     </div>
   );

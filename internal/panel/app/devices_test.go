@@ -184,9 +184,30 @@ func TestDeviceBindingOverHTTP(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"device_unbind":{"limit":3,"days":7,"return_hours":0}`) {
 		t.Fatalf("rules saved: %d %s", resp.StatusCode, body)
 	}
+	// "Not allowed": the page gets 403 and says only the admin unbinds.
+	if resp, _ := h.do(http.MethodPatch, settingsAPI, map[string]any{"device_unbind": map[string]any{"off": true, "limit": 3, "days": 7, "return_hours": 0}}, csrf); resp.StatusCode != http.StatusOK {
+		t.Fatalf("off: %d", resp.StatusCode)
+	}
 	third := sub + "/devices/" + strconv.FormatInt(info.Devices[2].ID, 10) + "/unbind"
+	if resp, body := h.do(http.MethodPost, third, nil, map[string]string{"Sec-Fetch-Site": "same-origin"}); resp.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "unbind_off") {
+		t.Fatalf("an unbind with unbinding off: %d %s", resp.StatusCode, body)
+	}
+	if _, body := h.do(http.MethodGet, sub+"/info", nil, nil); !strings.Contains(string(body), `"unbind_off":true`) || !strings.Contains(string(body), `"unbinds_left":0`) {
+		t.Fatalf("off on the page: %s", body)
+	}
+	// "Never": the tablet stays out until the admin lets it, and its app says so.
+	if resp, _ := h.do(http.MethodPatch, settingsAPI, map[string]any{"device_unbind": map[string]any{"limit": 3, "days": 7, "return_hours": -1}}, csrf); resp.StatusCode != http.StatusOK {
+		t.Fatalf("never: %d", resp.StatusCode)
+	}
 	if resp, _ := h.do(http.MethodPost, third, nil, map[string]string{"Sec-Fetch-Site": "same-origin"}); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("one of three a week: %d", resp.StatusCode)
+	}
+	if _, links := fetch("tablet-0123456789"); notice(links) != "⏸ This device was unbound — only the administrator can let it connect again" {
+		t.Fatalf("the never stub: %q", notice(links))
+	}
+	resp, body = h.do(http.MethodGet, "/"+adminPath+"/api/v1/users/"+strconv.FormatInt(u.ID, 10)+"/device-bans", nil, nil)
+	if !strings.Contains(string(body), `"forever":true`) || strings.Contains(string(body), "9999") {
+		t.Fatalf("never among the bans: %d %s", resp.StatusCode, body)
 	}
 
 	// Strict mode: an app without an id gets no keys.

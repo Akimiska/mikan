@@ -23,10 +23,12 @@ export type Info = {
   devices?: Device[];
   unbind_after?: string;
   /** The admin's unbind rules: so many per unbind_days (0: no limit), so many left now (-1: no limit). */
+  /** Only the admin unbinds devices. */
+  unbind_off?: boolean;
   unbind_limit?: number;
   unbind_days?: number;
   unbinds_left?: number;
-  /** An unbound device may not connect again for so many hours; 0: at once. */
+  /** An unbound device may not connect again for so many hours; 0: at once, -1: until the admin lets it. */
   return_hours?: number;
   telegram?: string;
   pools?: { name: string; limit?: number; used: number; extra?: number }[];

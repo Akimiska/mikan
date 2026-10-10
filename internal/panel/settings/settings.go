@@ -183,6 +183,10 @@ func (s *Settings) raw(ctx context.Context, key string) (string, bool, error) {
 	return raw, found, nil
 }
 
+// Raw is the stored JSON under key as it is, for a reader that falls back on its own
+// when the value does not parse; found is false when the key is absent.
+func (s *Settings) Raw(ctx context.Context, key string) (string, bool, error) { return s.raw(ctx, key) }
+
 func (s *Settings) read(ctx context.Context, key string) (string, bool, error) {
 	raw, err := s.q.GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {

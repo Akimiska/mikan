@@ -42,9 +42,10 @@ SELECT at FROM device_unbinds WHERE user_id = $1 AND at > $2 ORDER BY at;
 -- name: DeleteUnbindsBefore :exec
 DELETE FROM device_unbinds WHERE at < $1;
 
--- name: LockUser :exec
--- Two unbinds of one subscriber at once must not both fit under the limit.
-SELECT id FROM users WHERE id = $1 FOR UPDATE;
+-- name: LockUser :one
+-- One unbind of a user's at a time: a second waits, then finds the device gone, and two
+-- unbinds of the subscriber's never both fit under the limit.
+SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: ListDeviceSlots :many
 -- Slots of bound devices with an id: keys of their own, profile fetches of their own.

@@ -105,10 +105,14 @@ export function Devices({ info, subURL, reload, title }: { info: Info; subURL: s
   const wait = info.unbind_after && new Date(info.unbind_after).getTime() > Date.now() ? info.unbind_after : "";
   const returnHours = info.return_hours ?? 0;
   const left = info.unbinds_left ?? -1;
+  // Only the admin unbinds: no buttons, and the note says whom to ask.
+  const off = !!info.unbind_off;
   const note = [
     t("sub.devicesNote"),
-    left >= 0 && !wait ? t("sub.unbindLeft", { left, limit: info.unbind_limit ?? 0, period: period(info.unbind_days ?? 1) }) : "",
-    returnHours > 0 ? t("sub.returnNote", { pause: pause(returnHours) }) : "",
+    off ? t("sub.unbindOff") : "",
+    !off && left >= 0 && !wait ? t("sub.unbindLeft", { left, limit: info.unbind_limit ?? 0, period: period(info.unbind_days ?? 1) }) : "",
+    !off && returnHours > 0 ? t("sub.returnNote", { pause: pause(returnHours) }) : "",
+    !off && returnHours < 0 ? t("sub.returnNever") : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -211,7 +215,7 @@ export function Devices({ info, subURL, reload, title }: { info: Info; subURL: s
                       >
                         <Pencil size={16} aria-hidden />
                       </button>
-                      {wait ? null : (
+                      {wait || off ? null : (
                         <Button id={`unbind-${d.id}`} size="sm" disabled={busy} onClick={() => ask(d.id)} aria-label={t("sub.unbindLabel", { name })}>
                           {t("sub.unbind")}
                         </Button>
@@ -223,7 +227,11 @@ export function Devices({ info, subURL, reload, title }: { info: Info; subURL: s
                 {confirm === d.id ? (
                   <div className="mt-2 rounded-2xl bg-[var(--hover)] p-3" role="group" aria-label={t("sub.unbindLabel", { name })}>
                     <p className="text-[13px] text-[var(--ink-700)]">{t("sub.unbindWarn")}</p>
-                    {returnHours > 0 && !d.shared ? <p className="mt-1 text-[13px] font-medium text-[var(--ink-800)]">{t("sub.unbindWarnReturn", { pause: pause(returnHours) })}</p> : null}
+                    {returnHours !== 0 && !d.shared ? (
+                      <p className="mt-1 text-[13px] font-medium text-[var(--ink-800)]">
+                        {returnHours < 0 ? t("sub.unbindWarnNever") : t("sub.unbindWarnReturn", { pause: pause(returnHours) })}
+                      </p>
+                    ) : null}
                     <div className="mt-2 flex justify-end gap-2">
                       <Button variant="ghost" size="sm" disabled={busy} autoFocus onClick={() => setConfirm(null)}>
                         {t("common.cancel")}

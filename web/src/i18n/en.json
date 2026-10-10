@@ -862,7 +862,8 @@
     "unbanText": "The device can bind again: on its next subscription update it takes a free place.",
     "unbanned": "“{name}” is unbanned",
     "pausedUntil": "Unbound by the client · returns {when} at {time}",
-    "unpauseTitle": "Let “{name}” back earlier?"
+    "unpauseTitle": "Let “{name}” back earlier?",
+    "pausedForever": "Unbound by the client · stays out until you let it"
   },
   "tariffs": {
     "subtitle": "Templates for granting access in one click. Changing a plan does not touch subscriptions already issued.",
@@ -942,7 +943,13 @@
       "pools": "Traffic pools",
       "packages": "Traffic packages"
     },
-    "sections": "Plan sections"
+    "sections": "Plan sections",
+    "applyPools": "Apply the pool limits to subscriptions given out",
+    "applyPoolsLabel": "Apply the pool limits of “{name}” to subscriptions given out",
+    "applyPoolsTitle": "Apply the pool limits of “{name}” to subscriptions given out?",
+    "applyPoolsText": "Every client of this tariff gets its pool limits ({limits}), as on a renewal: their own pool limits are replaced, the traffic they used stays. Then the traffic packages of these pools are offered to them.",
+    "applyPoolsConfirm": "Apply",
+    "applyPoolsDone": "Pool limits updated for {n, plural, one {# client} other {# clients}}"
   },
   "presets": {
     "vless_reality_xhttp": "Main one for Russia: looks like plain HTTPS and keeps few connections",
@@ -1821,7 +1828,11 @@
     "unbindSummary": "A client unbinds {n, plural, one {# device} other {# devices}} per {period}.",
     "unbindSummaryFree": "A client unbinds as many devices as they like.",
     "unbindSummaryPause": "An unbound device can connect again in {pause}: an app left open on it does not take the place back.",
-    "unbindSummaryNoPause": "An unbound device can bind again at once if its app is still open."
+    "unbindSummaryNoPause": "An unbound device can bind again at once if its app is still open.",
+    "unbindOff": "Not allowed",
+    "unbindNever": "Never",
+    "unbindSummaryOff": "The client does not unbind devices themselves: only you, on the client's card. The bot, the subscription page and the Mini App show no unbind buttons.",
+    "unbindSummaryNever": "An unbound device does not connect again until you let it on the client's card."
   },
   "goals": {
     "title": "What we are working on",
@@ -1979,7 +1990,10 @@
     "periodWeek": "week",
     "periodMonth": "month",
     "periodDays": "{n, plural, one {# day} other {# days}}",
-    "pauseHours": "{n} h"
+    "pauseHours": "{n} h",
+    "unbindOff": "Only the administrator can unbind a device: write to support.",
+    "returnNever": "An unbound device can connect again only if the administrator lets it.",
+    "unbindWarnNever": "Close the app on it first: it can connect again only if the administrator lets it."
   },
   "nodes": {
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",

@@ -19,6 +19,7 @@ type words struct {
 	devicesNone, devicesOff, devicesNote, confirmUnbind, unbound, wait string
 	// The admin's unbind rules: what is left in the window, the pause of an unbound device.
 	unbindLeft, returnNote, confirmReturn, unbindFailed          string
+	unbindOff, returnNever, confirmNever                         string
 	perDay, perWeek, perMonth, perDays, hours                    string
 	connectText, linked, alreadyLinked, linkExpired, linkInvalid string
 	linkLimit, noSub, sharedPlace, device, justNow               string
@@ -69,6 +70,9 @@ var ru = words{
 	returnNote:    "Отвязанное устройство не сможет подключиться снова %s, поэтому сначала закройте на нём приложение.",
 	confirmReturn: "Подключиться снова оно сможет только через %s: сначала закройте на нём приложение, иначе оно сразу попробует вернуться.",
 	unbindFailed:  "⚠️ Не получилось отвязать устройство. Попробуйте ещё раз чуть позже.",
+	unbindOff:     "Отвязать устройство может только администратор: напишите в поддержку.",
+	returnNever:   "Отвязанное устройство подключится снова, только если разрешит администратор.",
+	confirmNever:  "Подключиться снова оно сможет, только если разрешит администратор: сначала закройте на нём приложение.",
 	perDay:        "сутки", perWeek: "неделю", perMonth: "месяц", perDays: "%s", hours: "%d ч",
 	unbound:           "✅ «%s» отвязано.",
 	removeSub:         "🗑 Убрать из бота",
@@ -154,6 +158,9 @@ var en = words{
 	returnNote:    "An unbound device cannot connect again for %s, so close the app on it first.",
 	confirmReturn: "It can connect again only in %s: close the app on it first, or it tries to come back at once.",
 	unbindFailed:  "⚠️ The device was not unbound. Please try again a little later.",
+	unbindOff:     "Only the administrator can unbind a device: write to support.",
+	returnNever:   "An unbound device connects again only if the administrator lets it.",
+	confirmNever:  "It can connect again only if the administrator lets it: close the app on it first.",
 	perDay:        "day", perWeek: "week", perMonth: "month", perDays: "%s", hours: "%d h",
 	unbound:           "✅ “%s” is unbound.",
 	removeSub:         "🗑 Remove from the bot",

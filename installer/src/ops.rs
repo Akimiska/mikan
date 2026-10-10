@@ -146,8 +146,10 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
     }
 }
 
-/// Starts the containers again with what .env says now.
+/// Starts the containers again with what .env says now, through this release's compose
+/// file: one written by an older mikan may not pass MIKAN_ACME_LISTEN on.
 fn recreate(install: &Install) -> Result<()> {
+    docker::ensure_compose(Path::new(DIR), install.node)?;
     docker::compose_run(&["up", "-d"])?;
     setup::wait_ready(install.node_port(), Duration::from_secs(90))
 }

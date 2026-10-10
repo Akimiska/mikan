@@ -385,6 +385,20 @@
         },
         "type": "object"
       },
+      "ApplyPoolsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "description": "У скольких клиентов тарифа обновлены лимиты пулов",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applied"
+        ],
+        "type": "object"
+      },
       "Attempt": {
         "additionalProperties": false,
         "properties": {
@@ -1556,6 +1570,10 @@
           "banned_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "forever": {
+            "description": "Подписчик отвязал устройство, а вернуть его может только админ (until не показывается)",
+            "type": "boolean"
           },
           "hwid": {
             "description": "ID устройства, которому закрыта привязка",
@@ -7296,11 +7314,15 @@
             "minimum": 0,
             "type": "integer"
           },
+          "off": {
+            "description": "Подписчик не отвязывает устройства сам, только админ",
+            "type": "boolean"
+          },
           "return_hours": {
-            "description": "Сколько часов отвязанное подписчиком устройство не может привязаться снова; 0 — сразу",
+            "description": "Сколько часов отвязанное подписчиком устройство не может привязаться снова; 0 — сразу, -1 — пока админ не разрешит",
             "format": "int64",
             "maximum": 720,
-            "minimum": 0,
+            "minimum": -1,
             "type": "integer"
           }
         },
@@ -12546,6 +12568,49 @@
           }
         },
         "summary": "Изменить тариф",
+        "tags": [
+          "tariffs"
+        ]
+      }
+    },
+    "/api/v1/tariffs/{id}/apply-pools": {
+      "post": {
+        "operationId": "apply-tariff-pools",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyPoolsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Применить лимиты пулов тарифа к уже выданным подпискам: свои лимиты пулов у клиентов заменятся, израсходованное останется",
         "tags": [
           "tariffs"
         ]

@@ -730,6 +730,8 @@ type DeviceBanView struct {
 	BannedAt time.Time `json:"banned_at"`
 	// Until is set for a device the subscriber unbound: it may bind again from then.
 	Until *time.Time `json:"until,omitempty" doc:"Подписчик сам отвязал устройство: оно сможет привязаться снова с этого момента; пусто — заблокировано админом навсегда"`
+	// Forever: the subscriber unbound it, and it comes back only when the admin lets it.
+	Forever bool `json:"forever,omitempty" doc:"Подписчик отвязал устройство, а вернуть его может только админ (until не показывается)"`
 }
 
 type deviceBanOutput struct{ Body DeviceBanView }
@@ -770,7 +772,11 @@ func (h *handlers) deviceBans(ctx context.Context, in *userIDInput) (*deviceBans
 		v := DeviceBanView{ID: r.ID, HWID: r.Hwid, Label: r.Label, Admin: r.AdminName, BannedAt: time.Unix(r.BannedAt, 0).UTC()}
 		if r.Until.Valid {
 			t := time.Unix(r.Until.Int64, 0).UTC()
-			v.Until = &t
+			if domain.Forever(t) {
+				v.Forever = true
+			} else {
+				v.Until = &t
+			}
 		}
 		out.Body = append(out.Body, v)
 	}

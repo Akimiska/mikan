@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,14 +18,27 @@ import (
 // device fetches the subscription and binds again, and the unbind seems to do nothing.
 // The admin unbinds outside these rules.
 type UnbindRules struct {
+	// Off: the subscriber unbinds nothing themselves, only the admin does.
+	Off bool `json:"off,omitempty" doc:"Подписчик не отвязывает устройства сам, только админ"`
 	// Limit is how many devices the subscriber may unbind in Days; 0: as many as they like.
 	Limit int `json:"limit" minimum:"0" maximum:"100" doc:"Сколько устройств подписчик может отвязать за days; 0 — без ограничения"`
 	// Days is the window the limit counts in, sliding: an unbind leaves it Days later.
 	Days int `json:"days" minimum:"1" maximum:"365" doc:"За сколько дней считается лимит (скользящее окно)"`
 	// ReturnHours is how long a device the subscriber unbound may not bind again; 0: at
-	// once. The admin sees it among the bans and may let it in earlier.
-	ReturnHours int `json:"return_hours" minimum:"0" maximum:"720" doc:"Сколько часов отвязанное подписчиком устройство не может привязаться снова; 0 — сразу"`
+	// once, ReturnNever: until the admin lets it. The admin sees it among the bans and may
+	// let it in earlier.
+	ReturnHours int `json:"return_hours" minimum:"-1" maximum:"720" doc:"Сколько часов отвязанное подписчиком устройство не может привязаться снова; 0 — сразу, -1 — пока админ не разрешит"`
 }
+
+// ReturnNever: a device the subscriber unbound comes back only when the admin lets it.
+const ReturnNever = -1
+
+// foreverUnix is when a pause of ReturnNever ends: never, in practice (9999-12-31). A
+// pause rather than a ban: the admin's list tells it is the subscriber's unbind.
+const foreverUnix = 253402300799
+
+// Forever tells a pause that ends only by the admin.
+func Forever(until time.Time) bool { return until.Unix() >= foreverUnix }
 
 // DefaultUnbindRules: one a day, and the unbound device stays out for a day, until the
 // admin says otherwise.
@@ -43,7 +57,7 @@ func (r UnbindRules) Validate() error {
 		return fieldErr("limit", "bad_unbind_limit")
 	case r.Days < 1 || r.Days > MaxUnbindDays:
 		return fieldErr("days", "bad_unbind_days")
-	case r.ReturnHours < 0 || r.ReturnHours > MaxReturnHours:
+	case r.ReturnHours < ReturnNever || r.ReturnHours > MaxReturnHours:
 		return fieldErr("return_hours", "bad_return_hours")
 	}
 	return nil
@@ -52,13 +66,16 @@ func (r UnbindRules) Validate() error {
 func (r UnbindRules) window() time.Duration { return time.Duration(r.Days) * 24 * time.Hour }
 
 // LoadUnbindRules reads the admin's rules; DefaultUnbindRules until they set any. Rules
-// stored broken (by hand) fall back to the default rather than lock unbinding up.
+// stored broken (edited by hand into what is no JSON, or out of range) fall back to the
+// default rather than lock unbinding and the settings page up; only a database that
+// cannot be read is an error.
 func LoadUnbindRules(ctx context.Context, set *settings.Settings) (UnbindRules, error) {
-	r, _, err := settings.GetOver(ctx, set, settings.KeyUnbindRules, DefaultUnbindRules)
-	if err != nil {
+	raw, found, err := set.Raw(ctx, settings.KeyUnbindRules)
+	if err != nil || !found {
 		return DefaultUnbindRules, err
 	}
-	if r.Validate() != nil {
+	r := DefaultUnbindRules
+	if json.Unmarshal([]byte(raw), &r) != nil || r.Validate() != nil {
 		return DefaultUnbindRules, nil
 	}
 	return r, nil
@@ -73,13 +90,20 @@ type UnbindState struct {
 	Next time.Time
 }
 
-// Left is how many unbinds the window still has room for; -1 without a limit.
+// Left is how many unbinds the window still has room for; -1 without a limit, 0 when the
+// subscriber may not unbind at all.
 func (s UnbindState) Left() int {
-	if s.Rules.Limit == 0 {
+	switch {
+	case s.Rules.Off:
+		return 0
+	case s.Rules.Limit == 0:
 		return -1
 	}
 	return max(0, s.Rules.Limit-s.Used)
 }
+
+// ErrUnbindOff: the admin unbinds the subscriber's devices, the subscriber does not.
+var ErrUnbindOff = errors.New("unbind_off")
 
 // ErrDeviceUnbound: the subscriber unbound this device a moment ago; it may bind again
 // at UnboundError.Until.
@@ -105,7 +129,7 @@ func (d *Devices) UnbindState(ctx context.Context, userID int64) (UnbindState, e
 // when the oldest that fills it leaves the window.
 func unbindState(ctx context.Context, q *db.Queries, rules UnbindRules, userID int64, now time.Time) (UnbindState, error) {
 	st := UnbindState{Rules: rules}
-	if rules.Limit == 0 {
+	if rules.Off || rules.Limit == 0 {
 		return st, nil
 	}
 	ats, err := q.ListUnbindsSince(ctx, db.ListUnbindsSinceParams{UserID: userID, At: now.Add(-rules.window()).Unix()})
@@ -126,6 +150,9 @@ func holdUnbound(ctx context.Context, q *db.Queries, rules UnbindRules, userID i
 		return nil
 	}
 	until := now.Add(time.Duration(rules.ReturnHours) * time.Hour).Unix()
+	if rules.ReturnHours == ReturnNever {
+		until = foreverUnix
+	}
 	return q.HoldUnbound(ctx, db.HoldUnboundParams{UserID: userID, Hwid: dev.Hwid, Label: DeviceLabel(dev), BannedAt: now.Unix(),
 		Until: sql.NullInt64{Int64: until, Valid: true}})
 }

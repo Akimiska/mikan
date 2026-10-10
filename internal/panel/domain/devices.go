@@ -223,7 +223,9 @@ func (d *Devices) Unbind(ctx context.Context, userID, deviceID int64, bySubscrib
 func (d *Devices) unbind(ctx context.Context, rules UnbindRules, userID, deviceID int64, bySubscriber bool) error {
 	now := d.now()
 	return d.st.Tx(ctx, func(q *db.Queries) error {
-		if _, err := q.GetUser(ctx, userID); errors.Is(err, sql.ErrNoRows) {
+		// The user first, locked: a second unbind (a double tap) waits here and then finds
+		// the device gone, instead of counting it twice or taking a second fresh slot.
+		if _, err := q.LockUser(ctx, userID); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
@@ -235,11 +237,10 @@ func (d *Devices) unbind(ctx context.Context, rules UnbindRules, userID, deviceI
 		if err != nil {
 			return err
 		}
+		if bySubscriber && rules.Off {
+			return ErrUnbindOff
+		}
 		if bySubscriber {
-			// One unbind of the subscriber's at a time: two at once would both fit the limit.
-			if err := q.LockUser(ctx, userID); err != nil {
-				return err
-			}
 			st, err := unbindState(ctx, q, rules, userID, now)
 			if err != nil {
 				return err

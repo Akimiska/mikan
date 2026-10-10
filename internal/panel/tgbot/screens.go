@@ -232,12 +232,17 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 	if err != nil {
 		b.d.Log.Warn("telegram: unbind rules", "err", err)
 	}
-	waiting := !rules.Next.IsZero()
+	// No unbind buttons while none is left, or when only the admin unbinds.
+	waiting := !rules.Next.IsZero() || rules.Rules.Off
 	if cmd == "dc" && !waiting {
 		for _, d := range devs {
 			if d.ID == id {
 				text := html.EscapeString(fmt.Sprintf(w.confirmUnbind, name(d)))
-				if r := rules.Rules.ReturnHours; r > 0 && d.Hwid != "" {
+				switch r := rules.Rules.ReturnHours; {
+				case d.Hwid == "":
+				case r == domain.ReturnNever:
+					text += "\n\n" + html.EscapeString(w.confirmNever)
+				case r > 0:
 					text += "\n\n" + html.EscapeString(fmt.Sprintf(w.confirmReturn, w.span(r)))
 				}
 				return text, &Keyboard{[][]Button{
@@ -249,7 +254,7 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 	switch {
 	case notice != "":
 		lines = append([]string{html.EscapeString(notice), ""}, lines...)
-	case waiting && len(devs) > 0:
+	case !rules.Next.IsZero() && len(devs) > 0:
 		// No buttons to tap while the limit is reached: the line says when they come back.
 		lines = append([]string{"<b>" + html.EscapeString(fmt.Sprintf(w.wait, b.when(w, rules.Next))) + "</b>", ""}, lines...)
 	}
@@ -279,11 +284,16 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 	}
 	if len(devs) > 0 {
 		note := []string{w.devicesNote}
-		if left := rules.Left(); left >= 0 && !waiting {
-			note = append(note, fmt.Sprintf(w.unbindLeft, left, rules.Rules.Limit, w.period(rules.Rules.Days)))
-		}
-		if r := rules.Rules.ReturnHours; r > 0 {
+		switch r := rules.Rules.ReturnHours; {
+		case rules.Rules.Off:
+			note = append(note, w.unbindOff)
+		case r == domain.ReturnNever:
+			note = append(note, w.returnNever)
+		case r > 0:
 			note = append(note, fmt.Sprintf(w.returnNote, w.span(r)))
+		}
+		if left := rules.Left(); left >= 0 && !waiting {
+			note = append(note[:1], append([]string{fmt.Sprintf(w.unbindLeft, left, rules.Rules.Limit, w.period(rules.Rules.Days))}, note[1:]...)...)
 		}
 		lines = append(lines, "", html.EscapeString(strings.Join(note, " ")))
 	}
@@ -334,17 +344,24 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 				return "d", fmt.Sprintf(w.wait, b.when(w, st.Next))
 			case errors.Is(err, domain.ErrNotFound):
 				return "d", ""
+			case errors.Is(err, domain.ErrUnbindOff):
+				return "d", w.unbindOff
 			default:
 				b.d.Log.Warn("telegram: device not unbound", "user", u.ID, "device", id, "err", err)
 				return "d", w.unbindFailed
 			}
 		}
 		return "d", ""
-	case "u":
+	case "u", "xu":
+		// "xu" is the buy button of a traffic notice: that subscription's packages, not the
+		// one the menu shows now. Only a subscription of this account is switched to.
 		list, _, _ := b.subs(ctx, chat)
 		for _, s := range list {
 			if s.ID == id {
 				_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: id, TgID: chat})
+				if cmd == "xu" {
+					return "x", ""
+				}
 			}
 		}
 		return "m", ""

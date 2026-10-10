@@ -161,3 +161,131 @@ func TestUnbindRulesValidate(t *testing.T) {
 		t.Error("the default does not pass")
 	}
 }
+
+// Rules edited by hand into something that is no JSON, or out of range, fall back to the
+// default instead of locking unbinding and the settings page up.
+func TestBrokenUnbindRulesFallBack(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	st, _, _ := setup(t, &now)
+	ctx := context.Background()
+	for _, raw := range []string{"{not json", `{"limit":-5,"days":1}`, `"one a day"`} {
+		if err := st.Q.SetSetting(ctx, db.SetSettingParams{Key: settings.KeyUnbindRules, Value: raw}); err != nil {
+			t.Fatal(err)
+		}
+		if r, err := LoadUnbindRules(ctx, settings.New(st.Q)); err != nil || r != DefaultUnbindRules {
+			t.Errorf("%s: %+v %v", raw, r, err)
+		}
+	}
+}
+
+// A double tap on Unbind: both requests at once, one unbind counted, one fresh slot taken
+// for the shared place, the other request finds the device gone.
+func TestDoubleUnbindCountsOnce(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	st, users, ch := setup(t, &now)
+	ctx := context.Background()
+	clock := func() time.Time { return now }
+	devs := NewDevices(st, NewPool(st, clock), ch, clock)
+	if err := settings.Set(ctx, settings.New(st.Q), settings.KeyUnbindRules, UnbindRules{Limit: 5, Days: 1}); err != nil {
+		t.Fatal(err)
+	}
+	tariffs, _ := st.Q.ListTariffs(ctx)
+	u, err := users.Create(ctx, CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, info := range []DeviceInfo{{HWID: "phone-0123456789"}, {App: "clash-verge/v2"}} {
+		if _, err := devs.Bind(ctx, u, info, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	free := func() int64 {
+		var n int64
+		if err := st.DB.QueryRowContext(ctx, "SELECT count(*) FROM slots WHERE state = 'free'").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	list, _ := st.Q.ListBoundDevices(ctx, u.ID)
+	for _, dev := range list {
+		before := free()
+		errs := make(chan error, 2)
+		for range 2 {
+			go func() { errs <- devs.Unbind(ctx, u.ID, dev.ID, true) }()
+		}
+		e1, e2 := <-errs, <-errs
+		if (e1 == nil) == (e2 == nil) || (!errors.Is(e1, ErrNotFound) && !errors.Is(e2, ErrNotFound)) {
+			t.Fatalf("%q: one unbind and one not found, got %v and %v", dev.Hwid, e1, e2)
+		}
+		if dev.Hwid == "" && free() != before-1 {
+			t.Fatalf("the shared place took %d fresh slots", before-free())
+		}
+	}
+	if s, _ := devs.UnbindState(ctx, u.ID); s.Used != 2 {
+		t.Fatalf("unbinds counted: %d, want 2", s.Used)
+	}
+}
+
+// "Not allowed": only the admin unbinds. "Never": the unbound device stays out until the
+// admin lets it, and no cleanup lets it in.
+func TestUnbindOffAndNever(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	st, users, ch := setup(t, &now)
+	ctx := context.Background()
+	clock := func() time.Time { return now }
+	devs := NewDevices(st, NewPool(st, clock), ch, clock)
+	set := settings.New(st.Q)
+	tariffs, _ := st.Q.ListTariffs(ctx)
+	u, err := users.Create(ctx, CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone := DeviceInfo{HWID: "phone-0123456789"}
+	if _, err := devs.Bind(ctx, u, phone, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Set(ctx, set, settings.KeyUnbindRules, UnbindRules{Off: true, Limit: 1, Days: 1}); err != nil {
+		t.Fatal(err)
+	}
+	id := mustDevice(t, st.Q, u.ID, phone.HWID)
+	if err := devs.Unbind(ctx, u.ID, id, true); !errors.Is(err, ErrUnbindOff) {
+		t.Fatalf("the subscriber with unbinding off: %v", err)
+	}
+	if s, _ := devs.UnbindState(ctx, u.ID); s.Left() != 0 || !s.Next.IsZero() {
+		t.Fatalf("off: %+v left %d", s, s.Left())
+	}
+	if err := devs.Unbind(ctx, u.ID, id, false); err != nil {
+		t.Fatalf("the admin unbinds anyway: %v", err)
+	}
+	if _, err := devs.Bind(ctx, u, phone, false); err != nil {
+		t.Fatalf("a device the admin unbound comes back: %v", err)
+	}
+
+	if err := settings.Set(ctx, set, settings.KeyUnbindRules, UnbindRules{Limit: 0, Days: 1, ReturnHours: ReturnNever}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devs.Unbind(ctx, u.ID, mustDevice(t, st.Q, u.ID, phone.HWID), true); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(5 * 365 * 24 * time.Hour)
+	if err := devs.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var ue *UnboundError
+	if _, err := devs.Bind(ctx, u, phone, false); !errors.As(err, &ue) || !Forever(ue.Until) {
+		t.Fatalf("never, five years on: %v", err)
+	}
+	bans, _ := st.Q.ListDeviceBans(ctx, db.ListDeviceBansParams{UserID: u.ID, Until: sql.NullInt64{Int64: now.Unix(), Valid: true}})
+	if len(bans) != 1 {
+		t.Fatalf("the admin sees it: %+v", bans)
+	}
+	if _, err := devs.Unban(ctx, u.ID, bans[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := devs.Bind(ctx, u, phone, false); err != nil {
+		t.Fatalf("let in by the admin: %v", err)
+	}
+	if (UnbindRules{Limit: 1, Days: 1, ReturnHours: -2}).Validate() == nil {
+		t.Fatal("a pause below never passes")
+	}
+}

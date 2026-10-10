@@ -104,4 +104,37 @@ func TestBuyTraffic(t *testing.T) {
 	if !strings.Contains(text(sub), "150 ГБ + пакеты 50 ГБ") {
 		t.Fatalf("traffic line: %q", text(sub))
 	}
+
+	// Traffic running out: the notice carries the buy button of this very subscription,
+	// and the tap opens its packages.
+	// The bought package is used up, and 95% of the tariff's traffic: the 90% notice is due.
+	if _, err := e.st.DB.ExecContext(e.ctx, "UPDATE traffic_grants SET remaining = 0 WHERE user_id = $1", e.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.DB.ExecContext(e.ctx, "UPDATE users SET used_up = 0, used_down = traffic_limit * 95 / 100 WHERE id = $1", e.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	n = e.tg.count()
+	e.bot.Notify(e.ctx)
+	var notice call
+	e.tg.until(t, n, func(cs []call) bool {
+		for _, c := range cs {
+			if c.method == "sendMessage" && strings.Contains(text(c), "90%") {
+				notice = c
+				return true
+			}
+		}
+		return false
+	})
+	xu := "xu:" + strconv.FormatInt(e.user.ID, 10)
+	if buttons(notice)["📦 Докупить трафик"] != xu {
+		t.Fatalf("the 90%% notice: %q %v", text(notice), buttons(notice))
+	}
+	if b := buttons(step(xu)); b["+50 ГБ · ⭐ 75"] != "xk:"+mainID {
+		t.Fatalf("the notice's button: %v", b)
+	}
+	// Somebody else's subscription id opens nothing of theirs.
+	if b := buttons(step("xu:999999")); b["+50 ГБ · ⭐ 75"] != "" {
+		t.Fatalf("another subscription's packages: %v", b)
+	}
 }

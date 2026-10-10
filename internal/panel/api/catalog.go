@@ -91,6 +91,7 @@ func (h *handlers) registerCatalog() {
 	huma.Register(h.api, huma.Operation{OperationID: "create-tariff", Method: http.MethodPost, Path: "/api/v1/tariffs", Summary: "Создать тариф", Tags: []string{"tariffs"}, DefaultStatus: http.StatusCreated}, h.createTariff)
 	huma.Register(h.api, huma.Operation{OperationID: "update-tariff", Method: http.MethodPut, Path: "/api/v1/tariffs/{id}", Summary: "Изменить тариф", Tags: []string{"tariffs"}}, h.updateTariff)
 	huma.Register(h.api, huma.Operation{OperationID: "archive-tariff", Method: http.MethodDelete, Path: "/api/v1/tariffs/{id}", Summary: "Убрать тариф в архив", Tags: []string{"tariffs"}, DefaultStatus: http.StatusNoContent}, h.archiveTariff)
+	huma.Register(h.api, huma.Operation{OperationID: "apply-tariff-pools", Method: http.MethodPost, Path: "/api/v1/tariffs/{id}/apply-pools", Summary: "Применить лимиты пулов тарифа к уже выданным подпискам: свои лимиты пулов у клиентов заменятся, израсходованное останется", Tags: []string{"tariffs"}}, h.applyTariffPools)
 }
 
 func (h *handlers) listTariffs(ctx context.Context, _ *struct{}) (*tariffsOutput, error) {
@@ -210,6 +211,23 @@ func (h *handlers) archiveTariff(ctx context.Context, in *userIDInput) (*struct{
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.archive", "tariff", strconv.FormatInt(in.ID, 10), nil)
 	return nil, nil
+}
+
+type applyPoolsOutput struct {
+	Body struct {
+		Applied int `json:"applied" doc:"У скольких клиентов тарифа обновлены лимиты пулов"`
+	}
+}
+
+func (h *handlers) applyTariffPools(ctx context.Context, in *userIDInput) (*applyPoolsOutput, error) {
+	n, err := h.d.Users.ApplyTariffPoolsToAll(ctx, in.ID)
+	if err != nil {
+		return nil, mapDomainErr(err)
+	}
+	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.apply_pools", "tariff", strconv.FormatInt(in.ID, 10), map[string]any{"users": n})
+	out := &applyPoolsOutput{}
+	out.Body.Applied = n
+	return out, nil
 }
 
 // terms are the tariff's terms after this body: the body's own, or the first from its

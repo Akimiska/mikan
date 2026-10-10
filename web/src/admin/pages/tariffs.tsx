@@ -57,6 +57,7 @@ export function TariffsPage() {
   const selling = usePaymentSettings().data?.enabled === true;
   const [edit, setEdit] = useState<Tariff | "new" | null>(null);
   const [archive, setArchive] = useState<Tariff | null>(null);
+  const [applying, setApplying] = useState<Tariff | null>(null);
   const [creating, setCreating] = useState<"pools" | "packages" | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
@@ -67,6 +68,16 @@ export function TariffsPage() {
       void qc.invalidateQueries({ queryKey: qk.paymentSettings });
       toast.ok(t("tariffs.archived"));
       setArchive(null);
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  // A tariff's pool limits reach the subscriptions given out before they were set.
+  const applyPools = useMutation({
+    mutationFn: (id: number) => unwrap(api.POST("/api/v1/tariffs/{id}/apply-pools", { params: { path: { id } } })),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: qk.users });
+      toast.ok(t("tariffs.applyPoolsDone", { n: r.applied }));
+      setApplying(null);
     },
     onError: (e) => toast.error(errorText(e)),
   });
@@ -137,6 +148,11 @@ export function TariffsPage() {
                           <button type="button" className="icon-btn" aria-label={t("tariffs.editLabel", { name: tr.name })} onClick={() => setEdit(tr)}>
                             <Pencil size={16} />
                           </button>
+                          {tr.pools.length > 0 ? (
+                            <button type="button" className="icon-btn" aria-label={t("tariffs.applyPoolsLabel", { name: tr.name })} title={t("tariffs.applyPools")} onClick={() => setApplying(tr)}>
+                              <Layers size={16} />
+                            </button>
+                          ) : null}
                           <button type="button" className="icon-btn" aria-label={t("tariffs.archiveLabel", { name: tr.name })} onClick={() => setArchive(tr)}>
                             <Archive size={16} />
                           </button>
@@ -171,6 +187,15 @@ export function TariffsPage() {
         confirm={t("tariffs.archiveConfirm")}
         loading={remove.isPending}
         onConfirm={() => archive && remove.mutate(archive.id)}
+      />
+      <Confirm
+        open={!!applying}
+        onOpenChange={(v) => !v && setApplying(null)}
+        title={t("tariffs.applyPoolsTitle", { name: applying?.name ?? "" })}
+        text={applying ? t("tariffs.applyPoolsText", { limits: poolLimitsText(applying, poolNames) }) : ""}
+        confirm={t("tariffs.applyPoolsConfirm")}
+        loading={applyPools.isPending}
+        onConfirm={() => applying && applyPools.mutate(applying.id)}
       />
     </>
   );

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"mikan/internal/panel/domain"
@@ -172,9 +173,19 @@ func (b *Bot) Notify(ctx context.Context) {
 			vars := b.vars(ctx, w, u, now)
 			text := render(map[string]string{"expire_3d": pick(cfg.Texts.Expiring, w.expiring), "expire_1d": pick(cfg.Texts.Expiring, w.expiring),
 				"expired": pick(cfg.Texts.Expired, w.expired), "traffic_90": pick(cfg.Texts.Traffic90, w.traffic90), "traffic_100": pick(cfg.Texts.TrafficEnd, w.trafficEnd)}[n.kind], vars)
-			var kb *Keyboard
+			var rows [][]Button
+			// Traffic running out: the packages there are for this subscription, a tap away.
+			if n.kind == "traffic_90" || n.kind == "traffic_100" {
+				if len(b.packageOffers(ctx, u.ID)) > 0 {
+					rows = append(rows, []Button{{Text: w.buyTraffic, CallbackData: "xu:" + strconv.FormatInt(u.ID, 10)}})
+				}
+			}
 			if n.kind != "traffic_90" {
-				kb = &Keyboard{[][]Button{{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}}}}
+				rows = append(rows, []Button{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}})
+			}
+			var kb *Keyboard
+			if len(rows) > 0 {
+				kb = &Keyboard{rows}
 			}
 			chat, userID := l.TgID, u.ID
 			out.Notice(chat, func(ctx context.Context, c *Client) error {

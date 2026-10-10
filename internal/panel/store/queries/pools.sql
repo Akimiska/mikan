@@ -28,6 +28,10 @@ DELETE FROM tariff_pools WHERE tariff_id = $1;
 -- name: AddTariffPool :exec
 INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4);
 
+-- name: ListUserIDsOfTariff :many
+-- The users a tariff was given to, for bringing them up to the tariff's pool limits.
+SELECT id FROM users WHERE tariff_id = $1 ORDER BY id;
+
 -- name: ListUserPools :many
 SELECT * FROM user_pools WHERE user_id = $1 ORDER BY pool_id;
 

@@ -289,32 +289,14 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		"enable": true, "ipv6": false, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
 		"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
 		"nameserver":         []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"},
-		// Local, captive-portal and connectivity-check names must not get a fake IP:
-		// routing them through the tunnel and waiting for a proxied DNS answer stalls
-		// the first connection on each. *.lan/*.local and time/stun resolve directly.
-		"fake-ip-filter": []string{
-			"*.lan", "*.local", "*.localhost", "*.arpa",
-			"time.*.com", "time.*.gov", "time.*.apple.com", "ntp.*.com",
-			"*.msftconnecttest.com", "*.msftncsi.com",
-			"connectivitycheck.*.com", "connectivitycheck.gstatic.com",
-			"captive.apple.com", "*.push.apple.com",
-			"stun.*.*", "*.stun.*.*",
-		},
-	}
-	// Sniffer reads the real domain from the TLS ClientHello / HTTP Host, so a fake-ip
-	// connection is routed and dialed by its sniffed name without a separate DNS
-	// round-trip through the tunnel first. Without it every new domain waits on a
-	// proxied DoH query before the handshake — connections feel slow to open even when
-	// throughput is fine. override-destination stays false next to fake-ip (match rules
-	// by the sniffed name, never rewrite the destination).
-	sniffer := map[string]any{
-		"enable": true, "override-destination": false, "force-dns-mapping": true, "parse-pure-ip": true,
-		"sniff": map[string]any{
-			"TLS":  map[string]any{"ports": []any{443, 8443}},
-			"HTTP": map[string]any{"ports": []any{80, "8080-8880"}},
-			"QUIC": map[string]any{"ports": []any{443}},
-		},
-		"skip-domain": []string{"+.push.apple.com"},
+		// respect-rules: DNS for a domain follows the same routing rule as its traffic, so
+		// a proxied domain is resolved through the tunnel and a direct one directly — no
+		// mismatch where the handshake waits on a wrongly-routed DNS answer. prefer-h3:
+		// resolve the DoH servers over HTTP/3, which opens faster. Together these are what
+		// cut the handshake delay (the client's "Соблюдать правила" + "PreferH3"); unlike a
+		// sniffer they do not touch routing, so RU-direct rules and Hysteria2 keep working.
+		"respect-rules": true,
+		"prefer-h3":     true,
 	}
 	// The panel and the nodes stay out of the tunnel whatever the admin's rules say.
 	rules := append(directRules(p.Direct), "GEOIP,LAN,DIRECT,no-resolve")
@@ -325,7 +307,6 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		// tunnel and wait for the node's "network unreachable" before falling back.
 		"ipv6": false, "unified-delay": true, "tcp-concurrent": true,
 		"dns":          dns,
-		"sniffer":      sniffer,
 		"proxies":      proxies,
 		"proxy-groups": groups,
 	}

@@ -140,16 +140,6 @@ export function NodesPage() {
         sub={t("nodes.subtitle")}
         actions={
           <>
-            <Button variant="ghost" loading={checking} onClick={() => void checkProtocols()}>
-              <RefreshCw size={18} aria-hidden />
-              <span className="max-[760px]:hidden">{t("nodes.checkProtocols")}</span>
-            </Button>
-            {toUpdate.length >= 1 ? (
-              <Button loading={update.isPending && update.variables === "all"} disabled={update.isPending || toUpdate.some(updating)} onClick={() => setUpdateOf("all")}>
-                <ArrowUpCircle size={18} aria-hidden />
-                <span className="max-[760px]:hidden">{t("nodes.updateAll", { n: toUpdate.length })}</span>
-              </Button>
-            ) : null}
             <Button variant="primary" onClick={() => setAdding(true)}>
               <Plus size={18} aria-hidden />
               <span className="max-[760px]:hidden">{t("nodes.add")}</span>
@@ -175,6 +165,7 @@ export function NodesPage() {
             </section>
           ) : (
             <div className="grid gap-4 lg:grid-cols-2">
+              <ProtocolCore nodes={list} behind={toUpdate.length} checking={checking} updating={update.isPending && update.variables === "all"} busy={update.isPending || toUpdate.some(updating)} onCheck={() => void checkProtocols()} onUpdateAll={() => setUpdateOf("all")} />
               {list.length > 1 && list.some((n) => n.local && !n.name) ? (
                 <div className="banner warn lg:col-span-2" role="status">
                   <Pencil size={18} className="shrink-0" aria-hidden />
@@ -248,8 +239,48 @@ export function NodesPage() {
   );
 }
 
-function NodeCard({
-  n,
+// ProtocolCore (AoiVPN fork): the one piece of version info that matters for a mikan
+// node — its data-plane core (mihomo). Every protocol (VLESS, Hysteria2, TUIC, …) is
+// mihomo's own implementation, so there is a single version per node, not one per
+// protocol. The card shows that core, whether any node is behind the panel, a manual
+// recheck and a single "update all nodes" that rolls every remote node to the panel's
+// version and restarts it.
+function ProtocolCore({ nodes, behind, checking, updating: updatingAll, busy, onCheck, onUpdateAll }: { nodes: Node[]; behind: number; checking: boolean; updating: boolean; busy: boolean; onCheck: () => void; onUpdateAll: () => void }) {
+  // The core string the nodes report, e.g. "mihomo v1.19.31"; the most common wins.
+  const cores = nodes.filter((n) => n.core).map((n) => n.core as string);
+  const core = cores.sort((a, b) => cores.filter((c) => c === b).length - cores.filter((c) => c === a).length)[0] ?? "";
+  return (
+    <section className="card glass reveal lg:col-span-2">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("nodes.coreTitle")}</h2>
+          <div className="card-sub">{t("nodes.coreSub")}</div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" loading={checking} onClick={onCheck}>
+            <RefreshCw size={18} aria-hidden /> {t("nodes.checkProtocols")}
+          </Button>
+          {behind >= 1 ? (
+            <Button variant="primary" loading={updatingAll} disabled={busy} onClick={onUpdateAll}>
+              <ArrowUpCircle size={18} aria-hidden /> {t("nodes.updateAll", { n: behind })}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {core ? <span className="num font-semibold">{core}</span> : <span className="text-[var(--ink-500)]">{t("nodes.coreUnknown")}</span>}
+        {behind >= 1 ? (
+          <Pill tone="warn">{t("nodes.protocolsBehind", { n: behind })}</Pill>
+        ) : core ? (
+          <Pill tone="ok">{t("nodes.protocolsAllCurrent")}</Pill>
+        ) : null}
+      </div>
+      <p className="mt-3 text-xs text-[var(--ink-500)]">{t("nodes.coreNote")}</p>
+    </section>
+  );
+}
+
+function NodeCard({  n,
   idx,
   total,
   sorting,

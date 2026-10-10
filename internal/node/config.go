@@ -94,7 +94,7 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (r
 	cfg := map[string]any{
 		"mode":              "rule",
 		"log-level":         "warning",
-		"ipv6":              true,
+		"ipv6":              false,
 		"allow-lan":         false,
 		"mixed-port":        0,
 		"find-process-mode": "off",

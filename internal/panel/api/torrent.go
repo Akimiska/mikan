@@ -124,7 +124,7 @@ func (h *handlers) updateTorrent(ctx context.Context, in *patchTorrentInput) (*t
 		if b.Exempt != nil {
 			for _, id := range b.Exempt {
 				if _, err := q.GetUser(ctx, id); errors.Is(err, sql.ErrNoRows) {
-					return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.exempt", Message: "user_not_found", Value: id})
+					return fieldErrValue("body.exempt", "user_not_found", id)
 				} else if err != nil {
 					return err
 				}
@@ -132,7 +132,7 @@ func (h *handlers) updateTorrent(ctx context.Context, in *patchTorrentInput) (*t
 			c.Exempt = b.Exempt
 		}
 		if err := c.Validate(); err != nil {
-			return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body", Message: "torrent_config"})
+			return fieldErr("body", "torrent_config")
 		}
 		return settings.Set(ctx, set, torrent.KeyConfig, c)
 	})
@@ -180,9 +180,7 @@ func (h *handlers) listTorrentHits(ctx context.Context, in *torrentHitsInput) (*
 }
 
 func (h *handlers) liftTorrentBan(ctx context.Context, in *userIDInput) (*liftTorrentOutput, error) {
-	if _, err := h.d.Store.Q.GetUser(ctx, in.ID); errors.Is(err, sql.ErrNoRows) {
-		return nil, huma.Error404NotFound("not_found")
-	} else if err != nil {
+	if err := requireUser(ctx, h.d.Store.Q, in.ID); err != nil {
 		return nil, err
 	}
 	n, err := h.d.Store.Q.LiftTorrentBans(ctx, db.LiftTorrentBansParams{UserID: in.ID, Now: h.d.Now().Unix()})

@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -40,9 +39,9 @@ Commands:
   admin reset-path              give the panel a new secret link
   admin disable-2fa             turn off the admin's 2FA
   admin backup FILE             write a consistent copy of the database while the panel runs
-  database migrate              import legacy SQLite while the panel is stopped
+  database migrate              bring the database schema up to date while the panel is stopped
   database backup FILE          write a PostgreSQL archive (pg_dump)
-  database restore FILE         restore PostgreSQL or import a legacy SQLite backup offline
+  database restore FILE         restore a PostgreSQL backup offline
   admin inbound list            inbounds: node, name, preset, port
   admin inbound add PRESET [--port PORT] [--node NODE]
                                 add an inbound from a preset with fresh keys
@@ -373,8 +372,8 @@ func readOrGeneratePassword(fromStdin bool, r io.Reader) (string, bool, error) {
 		return "", false, err
 	}
 	pw := strings.TrimRight(line, "\r\n")
-	if len(pw) < 12 {
-		return "", false, errors.New("the password must be at least 12 characters long")
+	if len(pw) < auth.MinPassword {
+		return "", false, fmt.Errorf("the password must be at least %d characters long", auth.MinPassword)
 	}
 	return pw, false, nil
 }
@@ -445,8 +444,8 @@ func panelURL(ctx context.Context, set *settings.Settings) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if ep.Host == "" || p.Admin == "" {
+	if ep.URL() == "" || p.Admin == "" {
 		return "", errors.New("the panel is not set up: run `mikan admin bootstrap`")
 	}
-	return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + p.Admin + "/", nil
+	return ep.URL() + "/" + p.Admin + "/", nil
 }

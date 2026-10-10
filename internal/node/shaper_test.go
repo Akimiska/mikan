@@ -149,3 +149,24 @@ func TestShapedConnHoldsTheRate(t *testing.T) {
 		t.Fatalf("600 KB at 4 Mbit/s took only %s", took)
 	}
 }
+
+// writes counts the writes that reach the connection under a shapedConn.
+type writes struct {
+	net.Conn
+	n int
+}
+
+func (w *writes) Write(b []byte) (int, error) { w.n++; return len(b), nil }
+
+// A group with no ceiling yet (new, before its first share) passes a write whole: cut by
+// its burst of 0 it went out a byte at a time.
+func TestShapedConnWithoutCeilingWritesWhole(t *testing.T) {
+	w := &writes{}
+	c := &shapedConn{Conn: w, g: newGroup()}
+	if n, err := c.Write(make([]byte, 64<<10)); err != nil || n != 64<<10 {
+		t.Fatalf("wrote %d, %v", n, err)
+	}
+	if w.n != 1 {
+		t.Fatalf("64 KB went out in %d writes", w.n)
+	}
+}

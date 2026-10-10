@@ -1,6 +1,6 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { UsersSearch } from "../admin/search";
-import { api, rawApi, unwrap, type Schemas, type User } from "./client";
+import { api, unwrap, type Schemas, type User } from "./client";
 
 export const qk = {
   me: ["me"] as const,
@@ -210,12 +210,24 @@ export function useUpdates() {
   });
 }
 
-/** Mutations that change a user refresh every user-related view. */
-export function useUserMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>) {
+/** What a user mutation can change: "devices" touches only the user's devices (renaming,
+ * unbinding, banning), so the traffic, the dashboard and the folders are not asked again. */
+type UserScope = "all" | "devices";
+
+/** The user views a devices mutation changes: the user (its device count), the list (the
+ * same count) and the device lists. */
+const DEVICE_VIEWS = new Set(["one", "list", "devices", "bound", "bans"]);
+
+/** Mutations that change a user refresh the user-related views they change. */
+export function useUserMutation<TArgs, TResult>(fn: (args: TArgs) => Promise<TResult>, scope: UserScope = "all") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
     onSettled: () => {
+      if (scope === "devices") {
+        void qc.invalidateQueries({ queryKey: qk.users, predicate: (q) => DEVICE_VIEWS.has(String(q.queryKey[1])) });
+        return;
+      }
       void qc.invalidateQueries({ queryKey: qk.users });
       void qc.invalidateQueries({ queryKey: qk.overview });
       // A user moved in or out of a folder changes its count.
@@ -304,70 +316,22 @@ export function useUserGrants(id: number) {
 }
 
 
-export type PromoCode = {
-  id: number;
-  code: string;
-  name: string;
-  description: string;
-  type: "days" | "traffic" | "percent" | "fixed";
-  value: number;
-  currency: string;
-  starts_at?: string;
-  ends_at?: string;
-  max_uses?: number;
-  used_count: number;
-  per_user_limit: number;
-  discount_ttl: number;
-  min_order: number;
-  max_discount: number;
-  tariff_ids: number[];
-  pool_id?: number;
-  first_purchase_only: boolean;
-  new_users_only: boolean;
-  enabled: boolean;
-  status: string;
-  created_at: string;
-  created_by?: number;
-};
-
-export type PromoRedemption = {
-  id: number;
-  promo_id: number;
-  user_id?: number;
-  tg_id: number;
-  payment_id?: number;
-  status: string;
-  redeemed_at: string;
-  expires_at?: string;
-  days: number;
-  bytes: number;
-  discount_amount: number;
-  original_amount: number;
-  final_amount: number;
-  currency: string;
-  code: string;
-};
-
-type PromoBody = {
-  code: string; name: string; description: string; type: PromoCode["type"]; value: number; currency: string;
-  starts_at?: number; ends_at?: number; max_uses?: number; per_user_limit: number; discount_ttl: number;
-  min_order: number; max_discount: number; tariff_ids: number[]; pool_id?: number; first_purchase_only: boolean; new_users_only: boolean; enabled: boolean;
-};
-
-type PromoList = { items: PromoCode[]; total: number };
-type PromoRedemptionList = { items: PromoRedemption[]; total: number };
+/** Promo codes and their history are what the API's schema says they are. */
+export type PromoCode = Schemas["PromoCodeView"];
+export type PromoRedemption = Schemas["PromoRedemptionView"];
+type PromoBody = Schemas["PromoBody"];
 
 export function usePromocodes() {
   return useQuery({
     queryKey: qk.promocodes,
-    queryFn: ({ signal }) => rawJson<PromoList>("/api/v1/promocodes?limit=100", { signal }),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/promocodes", { params: { query: { limit: 100 } }, signal })),
   });
 }
 
 export function usePromoRedemptions() {
   return useQuery({
     queryKey: qk.promocodeRedemptions,
-    queryFn: ({ signal }) => rawJson<PromoRedemptionList>("/api/v1/promocodes/redemptions?limit=100", { signal }),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/promocodes/redemptions", { params: { query: { limit: 100 } }, signal })),
   });
 }
 
@@ -378,24 +342,49 @@ export function usePromoMutations() {
     queryClient.invalidateQueries({ queryKey: qk.promocodeRedemptions }),
   ]);
   const create = useMutation({
-    mutationFn: (body: PromoBody) => rawJson<PromoCode>("/api/v1/promocodes", { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
+    mutationFn: (body: PromoBody) => unwrap(api.POST("/api/v1/promocodes", { body })),
     onSuccess: refresh,
   });
   const update = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: PromoBody }) => rawJson<PromoCode>(`/api/v1/promocodes/${id}`, { method: "PUT", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }),
+    mutationFn: ({ id, body }: { id: number; body: PromoBody }) => unwrap(api.PUT("/api/v1/promocodes/{id}", { params: { path: { id } }, body })),
     onSuccess: refresh,
   });
   const toggle = useMutation({
-    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => rawJson<PromoCode>(`/api/v1/promocodes/${id}/enabled`, { method: "POST", body: JSON.stringify({ enabled }), headers: { "Content-Type": "application/json" } }),
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => unwrap(api.POST("/api/v1/promocodes/{id}/enabled", { params: { path: { id } }, body: { enabled } })),
     onSuccess: refresh,
   });
   const remove = useMutation({
-    mutationFn: (id: number) => rawJson<Record<string, never>>(`/api/v1/promocodes/${id}`, { method: "DELETE" }),
+    mutationFn: (id: number) => unwrap(api.DELETE("/api/v1/promocodes/{id}", { params: { path: { id } } })),
     onSuccess: refresh,
   });
   return { create, update, toggle, remove };
 }
 
-async function rawJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-  return rawApi(path, init) as Promise<T>;
+/**
+ * A pool changed or went: everything that shows pools is asked again - the tariffs' limits
+ * in it, the protocols that belong to it and the packages bought into it.
+ */
+export function invalidatePoolRelated(qc: QueryClient) {
+  for (const key of [qk.pools, qk.tariffs, qk.inbounds, qk.packages]) void qc.invalidateQueries({ queryKey: key });
+}
+
+/** The bot's settings and state. A broadcast in progress moves every second; otherwise little changes. */
+export function useTelegram() {
+  return useQuery({
+    queryKey: qk.telegram,
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram", { signal })),
+    refetchInterval: (q) => (q.state.data?.broadcast?.active ? 2_000 : 10_000),
+  });
+}
+
+/** How many speed tests of a node are kept and shown; the list and the cache agree on it. */
+export const SPEEDTESTS_LIMIT = 30;
+
+/** A node's speed tests, newest first; nothing is asked until there is a node. */
+export function useSpeedTests(node: number | undefined) {
+  return useQuery({
+    queryKey: qk.speedTests(node ?? 0),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/nodes/{id}/speedtests", { params: { path: { id: node! }, query: { limit: SPEEDTESTS_LIMIT } }, signal })),
+    enabled: !!node,
+  });
 }

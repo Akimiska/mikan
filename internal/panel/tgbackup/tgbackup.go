@@ -94,6 +94,12 @@ type Service struct {
 	now     func() time.Time
 	log     *slog.Logger
 	mu      sync.Mutex
+	// A backup Start began runs on Run's context and Run waits for it, so it never works
+	// on a database the panel has closed: life is that context, closed set once Run ended.
+	lifeMu  sync.Mutex
+	life    context.Context
+	closed  bool
+	started sync.WaitGroup
 }
 
 // New: dataDir is the panel's data directory, where the dump is made before it is sent;
@@ -128,6 +134,15 @@ func (s *Service) Cleanup() {
 // that day.
 func (s *Service) Run(ctx context.Context) {
 	s.Cleanup()
+	s.lifeMu.Lock()
+	s.life = ctx
+	s.lifeMu.Unlock()
+	defer func() {
+		s.lifeMu.Lock()
+		s.closed = true
+		s.lifeMu.Unlock()
+		s.started.Wait()
+	}()
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
@@ -204,13 +219,22 @@ func (s *Service) Start() error {
 	if s.Busy() {
 		return ErrBusy
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), SendTimeout)
+	s.lifeMu.Lock()
+	defer s.lifeMu.Unlock()
+	if s.closed {
+		return ErrBusy
+	}
+	life := s.life
+	if life == nil { // Run not started: the CLI, tests
+		life = context.Background()
+	}
+	s.started.Go(func() {
+		ctx, cancel := context.WithTimeout(life, SendTimeout)
 		defer cancel()
 		if _, err := s.Send(ctx); err != nil && !errors.Is(err, ErrBusy) {
 			s.log.Warn("telegram backup", "err", err)
 		}
-	}()
+	})
 	return nil
 }
 

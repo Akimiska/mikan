@@ -2,9 +2,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Archive, Layers, Package, Pencil, Plus, Tag, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas, type Tariff } from "../../api/client";
+import { api, errorText, unwrap, type Schemas, type Tariff } from "../../api/client";
+import { onFormError } from "../../lib/fields";
 import { qk, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
-import { Confirm, Drawer } from "../../components/overlay";
+import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { Tabs } from "../../components/tabs";
 import { useToast } from "../../components/toast";
@@ -12,6 +13,7 @@ import { Button, EmptyState, Field, PageHeader, Pill, Segmented, Skeleton } from
 import { Switch } from "../../components/switch";
 import { t } from "../../i18n";
 import { bytes, days, GiB, months, rubles, termMonths } from "../../lib/format";
+import { isKopecks, isStars, parseDecimal, rubKopecks } from "../../lib/validate";
 import { TARIFF_TABS } from "../search";
 import { PackagesCard } from "./packages";
 import { PoolLimitsField, PoolsCard } from "./pools";
@@ -280,8 +282,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       onClose();
     },
     onError: (e) => {
-      if (e instanceof ApiError && Object.keys(e.fields).length) setErrors(e.fields);
-      else toast.error(errorText(e));
+      onFormError(e, toast, setErrors);
     },
   });
 
@@ -296,8 +297,8 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     const speedN = Number(speed);
     const poolLimits = (allPools.data ?? []).map((p) => {
       if (poolClosed[p.id]) return { pool_id: p.id, traffic_limit: null, excluded: true };
-      const v = (poolGB[p.id] ?? "").trim().replace(",", ".");
-      return { pool_id: p.id, traffic_limit: v ? Math.round(Number(v) * GiB) : null };
+      const v = (poolGB[p.id] ?? "").trim();
+      return { pool_id: p.id, traffic_limit: v ? Math.round(parseDecimal(v) * GiB) : null };
     });
     if (poolLimits.some((p) => p.traffic_limit !== null && (!Number.isFinite(p.traffic_limit) || p.traffic_limit <= 0))) errs.pools = t("pools.errLimit");
     const toDay = term === "day";
@@ -309,9 +310,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     if (!devicesUnlimited && (!Number.isInteger(devN) || devN < 1 || devN > 100)) errs.device_limit = t("tariffs.errDevices");
     if (!speedUnlimited && (!Number.isInteger(speedN) || speedN < 1 || speedN > 100000)) errs.speed_limit = t("tariffs.errSpeed");
     const starsN = Number(stars);
-    const rubN = Math.round(Number(rub.replace(",", ".")) * 100);
-    if (stars.trim() && (!Number.isInteger(starsN) || starsN < 1 || starsN > 10000)) errs.price_stars = t("tariffs.errStars");
-    if (rub.trim() && (!Number.isFinite(rubN) || rubN < 100 || rubN > 100000000)) errs.price_rub = t("tariffs.errRub");
+    const rubN = rubKopecks(rub);
+    if (stars.trim() && !isStars(starsN)) errs.price_stars = t("tariffs.errStars");
+    if (rub.trim() && !isKopecks(rubN)) errs.price_rub = t("tariffs.errRub");
     if (onSale && !stars.trim() && !rub.trim()) errs.on_sale = t("errors.api.on_sale_no_price");
     const firstDays = toDay ? monN * 30 : durN;
     const seen = new Set([firstDays]);
@@ -325,9 +326,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       else if (seen.has(d)) errs[`${at}.days`] = t("errors.api.term_days_repeat");
       seen.add(d);
       const s = Number(m.stars);
-      const r = Math.round(Number(m.rub.replace(",", ".")) * 100);
-      if (m.stars.trim() && (!Number.isInteger(s) || s < 1 || s > 10000)) errs[`${at}.price_stars`] = t("tariffs.errStars");
-      if (m.rub.trim() && (!Number.isFinite(r) || r < 100 || r > 100000000)) errs[`${at}.price_rub`] = t("tariffs.errRub");
+      const r = rubKopecks(m.rub);
+      if (m.stars.trim() && !isStars(s)) errs[`${at}.price_stars`] = t("tariffs.errStars");
+      if (m.rub.trim() && !isKopecks(r)) errs[`${at}.price_rub`] = t("tariffs.errRub");
       if (!m.stars.trim() && !m.rub.trim()) errs[`${at}.price_rub`] = t("errors.api.term_no_price");
       terms.push({ days: d, price_stars: m.stars.trim() ? s : undefined, price_rub: m.rub.trim() ? r : undefined });
     });
@@ -360,14 +361,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       title={tariff === "new" ? t("tariffs.new") : t("users.colTariff")}
       meta={t("tariffs.drawerMeta")}
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="primary" type="submit" form="tariff-form" loading={save.isPending}>
-            {t("common.save")}
-          </Button>
-        </>
+        <DrawerFooter form="tariff-form" onCancel={onClose} loading={save.isPending}>
+          {t("common.save")}
+        </DrawerFooter>
       }
     >
       <form id="tariff-form" onSubmit={submit} className="pt-5" noValidate>
@@ -431,10 +427,10 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
         </Field>
         <Field label={t("tariffs.speed")} htmlFor="t-speed" hint={t("tariffs.speedHint")} error={errors.speed_limit}>
           <div className="flex items-center gap-2">
-            <span className="input-unit max-w-[160px] flex-1">
+            <label className="input-unit max-w-[160px] flex-1">
               <input id="t-speed" className="input" inputMode="numeric" value={speedUnlimited ? "" : speed} disabled={speedUnlimited} onChange={(e) => setSpeed(e.target.value)} aria-invalid={!!errors.speed_limit} />
               <span>{t("tariffs.mbps")}</span>
-            </span>
+            </label>
             <label className="ml-auto flex items-center gap-2 text-[13px]">
               <input type="checkbox" className="check" checked={speedUnlimited} onChange={(e) => setSpeedUnlimited(e.target.checked)} /> {t("users.unlimited")}
             </label>
@@ -521,7 +517,6 @@ function MoreTerms({ value, onChange, toDay, errors }: { value: ExtraTerm[]; onC
               <label className="input-unit min-w-0">
                 <input
                   className="input num"
-                  style={{ paddingRight: 48 }}
                   inputMode="numeric"
                   value={m.days}
                   onChange={(e) => set(i, "days", e.target.value)}

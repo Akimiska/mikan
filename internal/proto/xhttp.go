@@ -31,23 +31,35 @@ type XHTTPTuning struct {
 	MinPostsIntervalMs string `json:"sc_min_posts_interval_ms" required:"false" doc:"Пауза между запросами отправки (packet-up), мс"`
 }
 
-// The server keys of XHTTPTuning in xhttp-config.
+// rangeKind says whether a key holds a byte or count range ("N" or "N-M"), and whether it
+// must be above zero.
+type rangeKind int
+
+const (
+	noRange   rangeKind = iota
+	anyRange            // 0 and up
+	someRange           // 1 and up
+)
+
+// The server keys of XHTTPTuning in xhttp-config; a range key is checked by its kind
+// (XHTTPTuning.check), so a key added here is read, written and checked at once.
 var xhttpServerKeys = []struct {
-	key string
-	get func(*XHTTPTuning) *string
+	key  string
+	get  func(*XHTTPTuning) *string
+	kind rangeKind
 }{
-	{"mode", func(x *XHTTPTuning) *string { return &x.Mode }},
-	{"x-padding-bytes", func(x *XHTTPTuning) *string { return &x.PaddingBytes }},
-	{"x-padding-placement", func(x *XHTTPTuning) *string { return &x.PaddingPlacement }},
-	{"x-padding-key", func(x *XHTTPTuning) *string { return &x.PaddingKey }},
-	{"x-padding-header", func(x *XHTTPTuning) *string { return &x.PaddingHeader }},
-	{"x-padding-method", func(x *XHTTPTuning) *string { return &x.PaddingMethod }},
-	{"uplink-http-method", func(x *XHTTPTuning) *string { return &x.UplinkMethod }},
-	{"uplink-chunk-size", func(x *XHTTPTuning) *string { return &x.UplinkChunkSize }},
-	{"sc-max-each-post-bytes", func(x *XHTTPTuning) *string { return &x.MaxEachPostBytes }},
+	{"mode", func(x *XHTTPTuning) *string { return &x.Mode }, noRange},
+	{"x-padding-bytes", func(x *XHTTPTuning) *string { return &x.PaddingBytes }, anyRange},
+	{"x-padding-placement", func(x *XHTTPTuning) *string { return &x.PaddingPlacement }, noRange},
+	{"x-padding-key", func(x *XHTTPTuning) *string { return &x.PaddingKey }, noRange},
+	{"x-padding-header", func(x *XHTTPTuning) *string { return &x.PaddingHeader }, noRange},
+	{"x-padding-method", func(x *XHTTPTuning) *string { return &x.PaddingMethod }, noRange},
+	{"uplink-http-method", func(x *XHTTPTuning) *string { return &x.UplinkMethod }, noRange},
+	{"uplink-chunk-size", func(x *XHTTPTuning) *string { return &x.UplinkChunkSize }, someRange},
+	{"sc-max-each-post-bytes", func(x *XHTTPTuning) *string { return &x.MaxEachPostBytes }, someRange},
 }
 
-// The client keys: mihomo's reuse-settings and the Xray share link's xmux.
+// The client keys: mihomo's reuse-settings and the Xray share link's xmux; all ranges.
 var xmuxKeys = []struct {
 	mihomo, xray string
 	get          func(*XHTTPTuning) *string
@@ -203,20 +215,20 @@ func (x XHTTPTuning) check() error {
 			return fail("xhttp_value", v.field)
 		}
 	}
-	ranges := []struct {
+	type rangeField struct {
 		v, field string
 		min1     bool
-	}{
-		{x.PaddingBytes, "xhttp-config.x-padding-bytes", false},
-		{x.UplinkChunkSize, "xhttp-config.uplink-chunk-size", true},
-		{x.MaxEachPostBytes, "xhttp-config.sc-max-each-post-bytes", true},
-		{x.MaxConcurrency, extKey + ".client.xhttp.xmux.max-concurrency", false},
-		{x.MaxConnections, extKey + ".client.xhttp.xmux.max-connections", false},
-		{x.MaxReuseTimes, extKey + ".client.xhttp.xmux.c-max-reuse-times", false},
-		{x.MaxRequestTimes, extKey + ".client.xhttp.xmux.h-max-request-times", false},
-		{x.MaxReusableSecs, extKey + ".client.xhttp.xmux.h-max-reusable-secs", false},
-		{x.MinPostsIntervalMs, extKey + ".client.xhttp.sc-min-posts-interval-ms", true},
 	}
+	var ranges []rangeField
+	for _, k := range xhttpServerKeys {
+		if k.kind != noRange {
+			ranges = append(ranges, rangeField{*k.get(&x), "xhttp-config." + k.key, k.kind == someRange})
+		}
+	}
+	for _, k := range xmuxKeys {
+		ranges = append(ranges, rangeField{*k.get(&x), extKey + ".client.xhttp.xmux." + k.mihomo, false})
+	}
+	ranges = append(ranges, rangeField{x.MinPostsIntervalMs, extKey + ".client.xhttp.sc-min-posts-interval-ms", true})
 	for _, r := range ranges {
 		if s := strings.TrimSpace(r.v); s != "" && !validRange(s, r.min1) {
 			return fail("xhttp_range", r.field)

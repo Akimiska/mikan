@@ -133,29 +133,12 @@ pub fn catalog(panel: &str) -> Result<Vec<Entry>> {
     let data = net::get(CATALOG_URL, 1 << 20).context("download the marketplace catalog")?;
     let sig = net::get(&format!("{CATALOG_URL}.sig"), 4096).context("download the catalog's signature")?;
     let entries = parse_catalog(&data, &String::from_utf8_lossy(&sig), &release::key()?, panel)?;
-    not_older(Path::new(CATALOG_SEEN), &data)?;
+    release::not_older(Path::new(CATALOG_SEEN), &data, "updated", "the marketplace's catalog")?;
     Ok(entries)
 }
 
 /// The newest catalog this server has accepted ("updated" of the signed index).
 const CATALOG_SEEN: &str = "/opt/mikan/addons/catalog-updated";
-
-/// A signed catalog stays validly signed for ever: an old copy served again (a cache, a
-/// CDN, someone in the path) would offer a vulnerable build as the current one. The
-/// catalog's own "updated" may only grow.
-fn not_older(seen: &Path, catalog: &[u8]) -> Result<()> {
-    let updated = serde_json::from_slice::<serde_json::Value>(catalog).ok().and_then(|v| v["updated"].as_str().map(str::to_owned));
-    let Some(updated) = updated.filter(|u| !u.is_empty()) else { return Ok(()) };
-    let before = fs::read_to_string(seen).unwrap_or_default();
-    // RFC 3339 in UTC, always the same shape: comparing the text compares the time.
-    if !before.is_empty() && updated.as_str() < before.trim() {
-        bail!("the marketplace's catalog is from {updated}, older than the one seen on {}: it is not accepted", before.trim());
-    }
-    if updated.as_str() > before.trim() {
-        panelfs::write_root(seen, updated.as_bytes())?;
-    }
-    Ok(())
-}
 
 /// The adapters as root keeps them. 0.4.3 kept them only in the panel's directory: such a
 /// state is taken once, entry by entry, and only entries that pass sound() survive.
@@ -504,12 +487,13 @@ mod tests {
         let d = tmpdir("catalog-seen");
         let seen = d.join("addons/catalog-updated");
         let cat = |u: &str| format!(r#"{{"version":1,"updated":"{u}","adapters":[]}}"#).into_bytes();
-        not_older(&seen, &cat("2026-10-01T17:01:18Z")).unwrap();
-        not_older(&seen, &cat("2026-10-01T17:01:18Z")).unwrap();
-        not_older(&seen, &cat("2026-10-02T00:00:00Z")).unwrap();
-        assert!(not_older(&seen, &cat("2026-10-01T17:01:18Z")).is_err(), "a rollback to a catalog of the day before");
+        let not_older = |doc: &[u8]| release::not_older(&seen, doc, "updated", "the catalog");
+        not_older(&cat("2026-10-01T17:01:18Z")).unwrap();
+        not_older(&cat("2026-10-01T17:01:18Z")).unwrap();
+        not_older(&cat("2026-10-02T00:00:00Z")).unwrap();
+        assert!(not_older(&cat("2026-10-01T17:01:18Z")).is_err(), "a rollback to a catalog of the day before");
         assert_eq!(fs::read_to_string(&seen).unwrap(), "2026-10-02T00:00:00Z");
-        not_older(&seen, b"{}").unwrap();
+        not_older(b"{}").unwrap();
         fs::remove_dir_all(&d).unwrap();
     }
 

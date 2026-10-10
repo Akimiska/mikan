@@ -235,9 +235,12 @@ func httpServer(h http.Handler) *http.Server {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    64 << 10,
-		ErrorLog:          log.New(dropHandshakeNoise{}, "", log.LstdFlags),
+		// A reader slower than this does not hold a connection: the longest answers (a
+		// certificate ordered on the spot, 90 s; a node's speed test, 100 s) fit well within.
+		WriteTimeout:   3 * time.Minute,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 64 << 10,
+		ErrorLog:       log.New(dropHandshakeNoise{}, "", log.LstdFlags),
 	}
 }
 

@@ -5,10 +5,10 @@ import { useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../../api/client";
 import { qk, useUpdates } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
-import { StaleNotice } from "../../../components/query";
+import { QueryBoundary, StaleNotice } from "../../../components/query";
 import { useToast } from "../../../components/toast";
 import { Disclosure, FormActions } from "../../../components/layout";
-import { Button, ErrorState, Field, Pill, Skeleton } from "../../../components/ui";
+import { Button, Field, Pill, Skeleton } from "../../../components/ui";
 import { SwitchRow } from "../../../components/switch";
 import { getLocale, LOCALES, t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
@@ -182,12 +182,13 @@ export function UpdatesCard() {
     onError: fail,
   });
   const v = u.data;
+  // Without data yet: the skeleton, or the error with a retry in a card. (With data the card below
+  // shows it, and a failed refresh adds the notice at its top.)
   if (!v) {
-    if (!u.isError) return <Skeleton style={{ height: 180, borderRadius: 20 }} />;
     return (
-      <section className="card glass">
-        <ErrorState text={errorText(u.error)} onRetry={() => void u.refetch()} />
-      </section>
+      <QueryBoundary query={u} pending={<Skeleton style={{ height: 180, borderRadius: 20 }} />} wrap={(state) => <section className="card glass">{state}</section>}>
+        {() => null}
+      </QueryBoundary>
     );
   }
   const notes = v.notes[getLocale()] || v.notes.en || "";

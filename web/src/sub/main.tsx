@@ -8,7 +8,7 @@ import { Button, Skeleton } from "../components/ui";
 import { initI18n, t, useLocale } from "../i18n";
 import { subDicts } from "../i18n/sub";
 import { APPS } from "./apps";
-import { hashParams, initData, json, openOutside, pageURL, request, subRoot, tgEvent, tgMode, tokenOf } from "./net";
+import { hashParams, initData, json, okData, openOutside, pageURL, postJSON, request, subRoot, tgEvent, tgMode, tokenOf } from "./net";
 import { applyLook, readPage, titleOf, type DocView } from "./page";
 import { loadShop, Shop, type ShopData } from "./shop";
 import { PromoSection } from "./promo";
@@ -75,8 +75,8 @@ function SubPage() {
   // The Mini App signs in with the launch data Telegram puts after the #.
   const session = useCallback(
     () =>
-      request(subRoot + "/tg/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ init_data: initData }) })
-        .then((r) => json<{ subs: TgSub[] }>(r))
+      postJSON<{ subs: TgSub[] }>(subRoot + "/tg/session", { init_data: initData })
+        .then(okData)
         .then((d) => {
           if (d.subs.length === 0) {
             setTg({ state: "none", subs: [] });

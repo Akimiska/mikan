@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -158,6 +162,22 @@ func TestHostsAreChecked(t *testing.T) {
 			t.Errorf("bootstrap %v: %v", c.args, err)
 		}
 	}
+	// The shell asks public DNS where a node's domain leads, as the panel does.
+	records := map[string]string{"b.example.com": "198.51.100.20", "other.example.com": "198.51.100.7"}
+	doh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ans := map[string]any{"Status": 3, "Answer": []any{}}
+		if ip, ok := records[r.URL.Query().Get("name")]; ok {
+			ans["Status"] = 0
+			if r.URL.Query().Get("type") == "A" {
+				ans["Answer"] = []any{map[string]any{"type": 1, "data": ip}}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(ans)
+	}))
+	defer doh.Close()
+	prev := nodeDNS
+	nodeDNS = &dnscheck.Checker{Resolvers: []string{doh.URL}, HTTP: http.DefaultClient}
+	defer func() { nodeDNS = prev }()
 	data := t.TempDir()
 	for _, c := range []struct {
 		args []string
@@ -165,6 +185,8 @@ func TestHostsAreChecked(t *testing.T) {
 	}{
 		{[]string{"add", "--name", "B", "--host", "198.51.100.20/24"}, "--host"},
 		{[]string{"add", "--name", "B", "--host", "198.51.100.20", "--domain", "b"}, "--domain"},
+		{[]string{"add", "--name", "C", "--host", "198.51.100.30", "--domain", "other.example.com"}, "does not lead to the node"},
+		{[]string{"add", "--name", "proxy", "--host", "198.51.100.30"}, "--name: this is the name of a group"},
 	} {
 		if err := nodeCmd(ctx, st, data, c.args, &out, &errOut); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("node %v: %v", c.args, err)
@@ -172,6 +194,10 @@ func TestHostsAreChecked(t *testing.T) {
 	}
 	if err := nodeCmd(ctx, st, data, []string{"add", "--name", "B", "--host", "198.51.100.20", "--api-port", "40000", "--domain", "b.example.com"}, &out, &errOut); err != nil {
 		t.Fatal(err)
+	}
+	// A name is one node's: the panel compares them without regard to case.
+	if err := nodeCmd(ctx, st, data, []string{"add", "--name", "b", "--host", "198.51.100.30"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "--name: another node has this name") {
+		t.Errorf("a second B: %v", err)
 	}
 	nodes, err := st.Q.ListNodes(ctx)
 	if err != nil {
@@ -185,12 +211,16 @@ func TestHostsAreChecked(t *testing.T) {
 	}{
 		{[]string{"set", id, "--host", "b..example.com"}, "--host"},
 		{[]string{"set", id, "--domain", "b.example.123"}, "--domain"},
+		{[]string{"set", id, "--domain", "other.example.com"}, "does not lead to the node (198.51.100.7 → 198.51.100.20)"},
+		{[]string{"set", id, "--domain", "nowhere.example.com"}, "no A or AAAA record"},
+		{[]string{"set", id, "--name", "PROXY"}, "--name: this is the name of a group"},
+		{[]string{"set", id, "--host", "198.51.100.99"}, "does not lead to the node"},
 	} {
 		if err := nodeCmd(ctx, st, data, c.args, &out, &errOut); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("node %v: %v", c.args, err)
 		}
 	}
-	if err := nodeCmd(ctx, st, data, []string{"set", id, "--host", " 198.51.100.21 "}, &out, &errOut); err != nil {
+	if err := nodeCmd(ctx, st, data, []string{"set", id, "--host", " 198.51.100.21 ", "--domain", ""}, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := st.Q.GetNode(ctx, b.ID); err != nil || n.PublicHost != "198.51.100.21" || n.Address != "198.51.100.21:40000" {

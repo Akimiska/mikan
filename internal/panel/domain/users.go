@@ -190,7 +190,9 @@ func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, any
 // Purchase applies a paid tariff on q's transaction, so the payment and its effect commit
 // together. userID 0 (or a user deleted since the invoice) makes a new subscription named
 // name. A renewal takes the tariff's limits, adds its term after the current one (from
-// now when that already ended) and turns the user on; resetTraffic also starts a new
+// now when that already ended) and turns the user on, one the admin switched off too: the
+// buyer paid for the term, and the admin who wants someone out deletes the subscription or
+// stops selling to them (decided 2026-10-11); resetTraffic also starts a new
 // traffic period (the payment buys a full quota). term is the term bought, as it was
 // when bought (invalid: the tariff's own). ErrNoSlots: refill and run again.
 // The caller calls Changed after the commit.
@@ -422,7 +424,7 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 		if !ValidBillingDay(*p.BillingDay) {
 			return db.User{}, ErrBadBillingDay
 		}
-		par.BillingDay = sql.NullInt64{Int64: *p.BillingDay, Valid: true}
+		par.BillingDay = NullInt(p.BillingDay)
 	}
 	if p.Name != nil {
 		// A rename changes only the name: the link, the slots and the keys stay.
@@ -451,13 +453,13 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 	case p.ClearTrafficLimit:
 		par.TrafficLimit = sql.NullInt64{}
 	case p.TrafficLimit != nil:
-		par.TrafficLimit = sql.NullInt64{Int64: *p.TrafficLimit, Valid: true}
+		par.TrafficLimit = NullInt(p.TrafficLimit)
 	}
 	switch {
 	case p.ClearDeviceLimit:
 		par.DeviceLimit = sql.NullInt64{}
 	case p.DeviceLimit != nil:
-		par.DeviceLimit = sql.NullInt64{Int64: *p.DeviceLimit, Valid: true}
+		par.DeviceLimit = NullInt(p.DeviceLimit)
 	}
 	switch {
 	case p.ClearSpeedLimit:
@@ -466,7 +468,7 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 		if !ValidSpeedLimit(*p.SpeedLimit) {
 			return db.User{}, ErrBadSpeedLimit
 		}
-		par.SpeedLimit = sql.NullInt64{Int64: *p.SpeedLimit, Valid: true}
+		par.SpeedLimit = NullInt(p.SpeedLimit)
 	}
 	switch {
 	case p.ClearExpiry:
@@ -493,7 +495,7 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 	// Where the user is listed is not one of the fields above: it changes on its own
 	// statements, and the row returned follows.
 	if p.Hidden != nil {
-		out.Hidden = b2i(*p.Hidden)
+		out.Hidden = Flag(*p.Hidden)
 		if err := q.SetUserHidden(ctx, db.SetUserHiddenParams{Hidden: out.Hidden, UpdatedAt: now, ID: id}); err != nil {
 			return out, err
 		}
@@ -501,20 +503,13 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 	if p.FolderID != nil || p.ClearFolder {
 		out.FolderID = sql.NullInt64{}
 		if p.FolderID != nil && !p.ClearFolder {
-			out.FolderID = sql.NullInt64{Int64: *p.FolderID, Valid: true}
+			out.FolderID = NullInt(p.FolderID)
 		}
 		if err := q.SetUserFolder(ctx, db.SetUserFolderParams{FolderID: out.FolderID, UpdatedAt: now, ID: id}); err != nil {
 			return out, err
 		}
 	}
 	return out, nil
-}
-
-func b2i(b bool) int64 {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // lockFolder keeps a folder from being deleted until the transaction ends; a folder that
@@ -538,11 +533,6 @@ func (s *Users) Extend(ctx context.Context, id int64, days int64) (db.User, erro
 // the month (see AddMonths). A term that already ended restarts from now.
 func (s *Users) ExtendMonths(ctx context.Context, id int64, n int) (db.User, error) {
 	return s.Update(ctx, id, Patch{Extend: &Extension{Months: n}})
-}
-
-// ExtendPeriod adds one paid period: a month up to the billing day, or 30 days without one.
-func (s *Users) ExtendPeriod(ctx context.Context, id int64) (db.User, error) {
-	return s.Update(ctx, id, Patch{Extend: &Extension{Period: true}})
 }
 
 // ResetTraffic starts a new traffic period now (see StartPeriod).
@@ -729,12 +719,9 @@ func (s *Users) Bulk(ctx context.Context, ids []int64, action string, opt BulkOp
 		case BulkDelete:
 			err = deleteUsers(ctx, q, found, now.Unix())
 		case BulkHide, BulkUnhide:
-			err = q.SetUsersHidden(ctx, db.SetUsersHiddenParams{Hidden: b2i(action == BulkHide), UpdatedAt: now.Unix(), Ids: found})
+			err = q.SetUsersHidden(ctx, db.SetUsersHiddenParams{Hidden: Flag(action == BulkHide), UpdatedAt: now.Unix(), Ids: found})
 		case BulkMove:
-			folder := sql.NullInt64{}
-			if opt.Folder != nil {
-				folder = sql.NullInt64{Int64: *opt.Folder, Valid: true}
-			}
+			folder := NullInt(opt.Folder)
 			err = q.SetUsersFolder(ctx, db.SetUsersFolderParams{FolderID: folder, UpdatedAt: now.Unix(), Ids: found})
 		}
 		if err != nil {

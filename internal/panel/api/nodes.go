@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"mikan/internal/hostname"
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodeupdate"
@@ -141,12 +139,12 @@ func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct
 		seen := make(map[int64]bool, len(ids))
 		for _, id := range ids {
 			if !have[id] || seen[id] {
-				return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.ids", Message: "node_order_mismatch", Value: id})
+				return fieldErrValue("body.ids", "node_order_mismatch", id)
 			}
 			seen[id] = true
 		}
 		if len(ids) != len(nodes) {
-			return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.ids", Message: "node_order_mismatch"})
+			return fieldErr("body.ids", "node_order_mismatch")
 		}
 		for i, id := range ids {
 			if err := q.SetNodeSort(ctx, db.SetNodeSortParams{Sort: int64(i + 1), ID: id}); err != nil {
@@ -241,67 +239,22 @@ func (h *handlers) listNodes(ctx context.Context, _ *struct{}) (*nodesOutput, er
 	return out, nil
 }
 
-// checkNodeName: a node's name is its country group in Clash apps, so it follows the
-// group rules and must not repeat another node or group.
-func (h *handlers) checkNodeName(ctx context.Context, name string, self int64) error {
-	bad := func(code string) error {
-		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.name", Message: code})
-	}
-	if err := subs.ValidName(name); err != nil {
-		return bad(err.Error())
-	}
-	g, err := h.groups(ctx)
-	if err != nil {
-		return err
-	}
-	for _, x := range []string{g.Main, g.Auto, subs.AliasGroup} {
-		if strings.EqualFold(name, x) {
-			return bad("name_is_group")
-		}
-	}
-	nodes, err := h.d.Store.Q.ListNodes(ctx)
-	if err != nil {
-		return err
-	}
-	for _, n := range nodes {
-		if n.ID != self && strings.EqualFold(n.Name, name) {
-			return bad("name_in_use")
-		}
-	}
-	return nil
-}
-
 func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKeyOutput, error) {
 	if h.d.PanelCert == nil {
 		return nil, huma.Error409Conflict("nodes_disabled")
 	}
 	b := in.Body
-	name, host, dom := strings.TrimSpace(b.Name), strings.TrimSpace(b.Host), strings.TrimSpace(b.Domain)
-	if err := h.checkNodeName(ctx, name, 0); err != nil {
-		return nil, err
-	}
-	var details []error
-	if !hostname.Valid(host) {
-		details = append(details, &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
-	}
-	if dom != "" && !hostname.Valid(dom) {
-		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
-	}
-	if len(details) == 0 {
-		if d := h.domainHere(ctx, "body.domain", dom, h.nodeAddrs(ctx, host)); d != nil {
-			details = append(details, d)
-		}
-	}
-	if len(details) > 0 {
-		return nil, huma.Error422UnprocessableEntity("validation", details...)
-	}
 	panel, err := h.d.PanelCert()
 	if err != nil {
 		return nil, err
 	}
-	n, key, err := domain.AddNode(ctx, h.d.Store, panel, domain.NodeInput{Name: name, Host: host, Domain: dom, APIPort: b.APIPort, PanelURL: h.panelURL(ctx)}, h.d.Now())
+	rules, err := h.nodeRules(ctx)
 	if err != nil {
 		return nil, err
+	}
+	n, key, err := domain.AddNode(ctx, h.d.Store, panel, domain.NodeInput{Name: b.Name, Host: b.Host, Domain: b.Domain, APIPort: b.APIPort, PanelURL: h.panelURL(ctx), Rules: rules}, h.d.Now())
+	if err != nil {
+		return nil, h.nodeErr(err)
 	}
 	h.forgetNode(n.ID)
 	h.nodesChanged()
@@ -334,81 +287,63 @@ func (h *handlers) getNode(ctx context.Context, id int64) (db.Node, error) {
 }
 
 func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInfoOutput, error) {
-	n, err := h.getNode(ctx, in.ID)
-	if err != nil {
-		return nil, err
-	}
 	b := in.Body
-	local := n.Address == ""
-	if b.Name != nil {
-		name := strings.TrimSpace(*b.Name)
-		if err := h.checkNodeName(ctx, name, n.ID); err != nil {
-			return nil, err
-		}
-		n.Name = name
-	}
-	if b.PublicName != nil {
-		n.PublicName = strings.TrimSpace(*b.PublicName)
-	}
-	if local && (b.Host != nil || b.Domain != nil) {
-		// The panel's own node follows the panel's address in the settings.
-		return nil, huma.Error422UnprocessableEntity("local_node")
-	}
-	if b.Host != nil {
-		host := strings.TrimSpace(*b.Host)
-		if !hostname.Valid(host) {
-			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.host", Message: "public_host_invalid"})
-		}
-		_, port, err := net.SplitHostPort(n.Address)
-		if err != nil {
-			return nil, err
-		}
-		n.PublicHost, n.Address = host, net.JoinHostPort(host, port)
-	}
-	if b.Domain != nil {
-		dom := strings.TrimSpace(*b.Domain)
-		if dom != "" && !hostname.Valid(dom) {
-			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
-		}
-		n.Domain = dom
-	}
-	// The node's domain must lead to the node: checked when it or the node's address changes.
-	if n.Domain != "" && (b.Domain != nil || b.Host != nil) {
-		if d := h.domainHere(ctx, "body.domain", n.Domain, h.nodeAddrs(ctx, n.PublicHost)); d != nil {
-			return nil, huma.Error422UnprocessableEntity("validation", d)
-		}
-	}
-	if b.Enabled != nil {
-		n.Enabled = 0
-		if *b.Enabled {
-			n.Enabled = 1
-		}
-	}
-	shaping := b.FairShare != nil || b.ChannelMbps != nil
-	if b.ChannelMbps != nil {
-		n.ChannelMbps = sql.NullInt64{Int64: *b.ChannelMbps, Valid: true}
-	}
-	if b.FairShare != nil {
-		n.FairShare = domain.Flag(*b.FairShare)
-	}
-	if n.FairShare != 0 && !n.ChannelMbps.Valid {
-		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.channel_mbps", Message: "channel_required"})
-	}
-	if shaping {
-		if err := h.d.Store.Q.SetNodeShaping(ctx, db.SetNodeShapingParams{FairShare: n.FairShare, ChannelMbps: n.ChannelMbps, UpdatedAt: h.d.Now().Unix(), ID: n.ID}); err != nil {
-			return nil, err
-		}
-	}
-	n, err = h.d.Store.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, PublicName: n.PublicName,
-		Enabled: n.Enabled, UpdatedAt: h.d.Now().Unix(), ID: n.ID})
+	rules, err := h.nodeRules(ctx)
 	if err != nil {
 		return nil, err
+	}
+	n, err := domain.UpdateNode(ctx, h.d.Store, in.ID, domain.NodePatch{Name: b.Name, PublicName: b.PublicName, Host: b.Host, Domain: b.Domain,
+		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, Rules: rules}, h.d.Now())
+	if err != nil {
+		return nil, h.nodeErr(err)
 	}
 	h.nodesChanged()
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "public_name": n.PublicName, "enabled": n.Enabled != 0,
 		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64})
 	return h.nodeInfo(ctx, n.ID)
+}
+
+// nodeRules are what a node's name and domain are checked against: the subscription's
+// groups, and public DNS.
+func (h *handlers) nodeRules(ctx context.Context) (domain.NodeRules, error) {
+	g, err := subs.LoadGroups(ctx, h.d.Settings)
+	if err != nil {
+		return domain.NodeRules{}, err
+	}
+	return domain.NodeRules{Name: g.CheckName, DNS: h.d.DNS}, nil
+}
+
+// nodeErr says what the rules of a node refused the way the UI reads it; an error that is
+// none of theirs comes back as it is.
+func (h *handlers) nodeErr(err error) error {
+	var name *domain.NameError
+	var dom *domain.DomainError
+	switch {
+	case errors.As(err, &name):
+		return fieldErr("body.name", name.Code)
+	case errors.Is(err, domain.ErrUnknownNode):
+		return huma.Error404NotFound("not_found")
+	case errors.Is(err, domain.ErrLocalNode):
+		// The panel's own node follows the panel's address in the settings.
+		return huma.Error422UnprocessableEntity("local_node")
+	case errors.Is(err, domain.ErrChannelRequired):
+		return fieldErr("body.channel_mbps", "channel_required")
+	}
+	var details []error
+	if errors.Is(err, domain.ErrBadHost) {
+		details = append(details, fieldDetail("body.host", "public_host_invalid", nil))
+	}
+	if errors.Is(err, domain.ErrBadDomain) {
+		details = append(details, fieldDetail("body.domain", "domain_invalid", nil))
+	}
+	if errors.As(err, &dom) {
+		details = append(details, h.domainDetail("body.domain", dom))
+	}
+	if len(details) > 0 {
+		return fieldErrs(details...)
+	}
+	return err
 }
 
 // nodeInfo is one node as the Nodes page shows it.

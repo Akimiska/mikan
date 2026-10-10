@@ -498,3 +498,9 @@ func TestPolicyCarriesSpeedCap(t *testing.T) {
 		t.Fatal("a changed cap must be pushed to the node")
 	}
 }
+
+// desired is the node's full state without the pin of its certificate.
+func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
+	st, _, err := s.desiredPin(ctx)
+	return st, err
+}

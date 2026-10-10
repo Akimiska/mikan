@@ -35,17 +35,32 @@ type NodeInput struct {
 	APIPort int    // 0 picks a free random port
 	// PanelURL is where the node says hello (nodetls.Key.PanelURL); "" leaves it out.
 	PanelURL string
+	// Rules are what the name and the domain are checked against; the zero value asks
+	// nothing but that the name is not taken.
+	Rules NodeRules
 }
 
 // AddNode creates a remote node with the default inbounds and returns its join key.
-// The key carries the node's private key: it is shown once and never stored.
+// The key carries the node's private key: it is shown once and never stored. Errors, in
+// the order they are looked for: *NameError; ErrBadHost and ErrBadDomain (both, joined,
+// when both are wrong); *DomainError, the domain not leading to the host; ErrBadPort.
 func AddNode(ctx context.Context, st *store.Store, panel nodetls.Pair, in NodeInput, now time.Time) (db.Node, string, error) {
-	host, dom := strings.TrimSpace(in.Host), strings.TrimSpace(in.Domain)
+	name, host, dom := strings.TrimSpace(in.Name), strings.TrimSpace(in.Host), strings.TrimSpace(in.Domain)
+	if err := checkNodeName(ctx, st.Q, in.Rules, name, 0); err != nil {
+		return db.Node{}, "", err
+	}
+	var bad error
 	if !hostname.Valid(host) {
-		return db.Node{}, "", ErrBadHost
+		bad = ErrBadHost
 	}
 	if dom != "" && !hostname.Valid(dom) {
-		return db.Node{}, "", ErrBadDomain
+		bad = errors.Join(bad, ErrBadDomain)
+	}
+	if bad != nil {
+		return db.Node{}, "", bad
+	}
+	if err := checkNodeDomain(ctx, in.Rules, dom, host); err != nil {
+		return db.Node{}, "", err
 	}
 	port := in.APIPort
 	if port == 0 {
@@ -62,7 +77,7 @@ func AddNode(ctx context.Context, st *store.Store, panel nodetls.Pair, in NodeIn
 	var key string
 	err := st.Tx(ctx, func(q *db.Queries) error {
 		var err error
-		node, err = q.CreateNode(ctx, db.CreateNodeParams{Name: strings.TrimSpace(in.Name), Address: net.JoinHostPort(host, strconv.Itoa(port)),
+		node, err = q.CreateNode(ctx, db.CreateNodeParams{Name: name, Address: net.JoinHostPort(host, strconv.Itoa(port)),
 			PublicHost: host, Domain: dom, CreatedAt: now.Unix(), UpdatedAt: now.Unix()})
 		if err != nil {
 			return err

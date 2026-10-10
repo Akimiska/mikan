@@ -721,10 +721,14 @@ pub fn postgres_env(env: &mut EnvFile) -> Result<()> {
 /// Waits for the panel to answer, or for a node's API port to listen.
 pub fn wait_ready(node_port: Option<u16>, limit: Duration) -> Result<()> {
     let start = Instant::now();
+    // A health check is a `docker compose exec` into a container that is just starting:
+    // asked every second at first, then less often, up to every 5 s.
+    let mut pause = Duration::from_secs(1);
     loop {
+        let left = limit.saturating_sub(start.elapsed());
         let ready = match node_port {
             Some(p) => system::port_owner(p, Proto::Tcp).is_some(),
-            None => docker::panel_healthy(),
+            None => docker::panel_healthy_within(left.clamp(Duration::from_secs(1), Duration::from_secs(10))),
         };
         if ready {
             return Ok(());
@@ -736,7 +740,10 @@ pub fn wait_ready(node_port: Option<u16>, limit: Duration) -> Result<()> {
                 .unwrap_or_default();
             return Err(anyhow!("mikan did not start in {} s. Its last logs:\n{}", limit.as_secs(), logs.trim_end()));
         }
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(pause);
+        if node_port.is_none() {
+            pause = (pause + Duration::from_secs(1)).min(Duration::from_secs(5));
+        }
     }
 }
 

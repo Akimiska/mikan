@@ -1,0 +1,465 @@
+package subs
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+
+	"mikan/internal/panel/billing"
+	"mikan/internal/panel/promo"
+	"mikan/internal/panel/server"
+	"mikan/internal/panel/store/db"
+)
+
+// The Telegram Mini App's JSON endpoints under "/tg/": the subscription page inside Telegram,
+// its sign-in, the shop, the promo codes and their history. Every request but the page is a
+// POST from the page itself (sameOrigin) whose body carries Telegram's init_data, the proof
+// of who the Telegram account is; the subscriptions the account may act on are the ones
+// Telegram.MiniAppUser names, and a token in the body is checked against them (ownerOf).
+
+// miniApp serves the subscription page inside Telegram and signs its user in.
+func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
+	switch {
+	case r.Method == http.MethodGet && rest == "" && h.page != nil:
+		// Telegram Web opens Mini Apps in a frame; the apps open them in a web view.
+		hd := w.Header()
+		hd.Set("Content-Security-Policy", strings.Replace(hd.Get("Content-Security-Policy"), "frame-ancestors 'none'", "frame-ancestors https://web.telegram.org", 1))
+		hd.Del("X-Frame-Options")
+		cfg, _ := h.cfg(r.Context())
+		h.servePage(w, r, cfg)
+	case r.Method == http.MethodPost && rest == "session" && sameOrigin(r):
+		h.miniAppSession(w, r)
+	case r.Method == http.MethodPost && (rest == "shop" || rest == "pay") && sameOrigin(r) && h.shop != nil:
+		h.miniAppShop(w, r, rest)
+	case r.Method == http.MethodPost && (rest == "promo" || rest == "promo-history") && sameOrigin(r) && h.promos != nil:
+		if rest == "promo-history" {
+			h.miniAppPromoHistory(w, r)
+		} else {
+			h.miniAppPromo(w, r)
+		}
+	default:
+		server.NotFound(w)
+	}
+}
+
+// miniAuth is what every Mini App request starts with: Telegram's proof of who is asking.
+// The requests embed it, so that mini can read it from any of them.
+type miniAuth struct {
+	InitData string `json:"init_data"`
+}
+
+func (a miniAuth) initData() string { return a.InitData }
+
+// miniRequest is a request body of the Mini App: it holds the init_data.
+type miniRequest interface{ initData() string }
+
+// checkedRequest is a request that can be refused for its content alone, before Telegram is
+// asked who sent it (a promo request without a code).
+type checkedRequest interface{ valid() bool }
+
+// plainRequest is a request whose unreadable body is answered with the plain-text 400 of
+// http.Error, not with the JSON code the others have.
+type plainRequest interface{ plainBadRequest() }
+
+// mini is the beginning of every Mini App request that answers in JSON: the answer is not to
+// be cached and is JSON, the body (16 KiB at most) is read into in, and the init_data in it is
+// checked. It returns the Telegram account and the subscriptions it owns, and fail, which
+// writes the JSON error {"code": code} with the status. ok is false when the request has
+// been answered already: a body that cannot be read (400, bad_request) or whose init_data
+// Telegram does not vouch for (401, init_data).
+func (h *Handler) mini(w http.ResponseWriter, r *http.Request, in miniRequest) (tgID int64, users []db.User, fail func(int, string), ok bool) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	fail = func(status int, code string) {
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
+	}
+	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(in) != nil || !requestValid(in) {
+		if _, plain := in.(plainRequest); plain {
+			http.Error(w, "bad request", http.StatusBadRequest)
+		} else {
+			fail(http.StatusBadRequest, "bad_request")
+		}
+		return 0, nil, fail, false
+	}
+	tgID, users, err := h.tg.MiniAppUser(r.Context(), in.initData())
+	if err != nil {
+		fail(http.StatusUnauthorized, "init_data")
+		return 0, nil, fail, false
+	}
+	return tgID, users, fail, true
+}
+
+func requestValid(in miniRequest) bool {
+	c, ok := in.(checkedRequest)
+	return !ok || c.valid()
+}
+
+// ownerOf is the subscription the token in a request names, out of the ones the Telegram
+// account owns: its user id. A request without a token (""), for something not tied to a
+// subscription, gets 0 and ok. A token of a subscription the account does not own is not ok,
+// and must be refused: the token alone is a bearer of the subscription, but what the Mini App
+// does with it (buying for it) is for its owner only.
+func ownerOf(users []db.User, token string) (userID int64, ok bool) {
+	if token == "" {
+		return 0, true
+	}
+	for _, u := range users {
+		if u.SubToken == token {
+			return u.ID, u.ID != 0
+		}
+	}
+	return 0, false
+}
+
+// miniAppSession signs the Telegram account in: it answers with the subscriptions the
+// account owns (their tokens and names), which the page then opens.
+func (h *Handler) miniAppSession(w http.ResponseWriter, r *http.Request) {
+	var in miniAuth
+	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	_, users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": "init_data"})
+		return
+	}
+	type sub struct {
+		Token string `json:"token"`
+		Name  string `json:"name"`
+	}
+	out := struct {
+		Subs []sub `json:"subs"`
+	}{Subs: []sub{}}
+	for _, u := range users {
+		out.Subs = append(out.Subs, sub{Token: u.SubToken, Name: u.Name})
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// shopRequest is the body of "shop" and "pay".
+type shopRequest struct {
+	miniAuth
+	TariffID  int64  `json:"tariff_id"`
+	TermDays  *int64 `json:"term_days"` // the tariff's term; absent: its first
+	PackageID int64  `json:"package_id"`
+	Provider  string `json:"provider"`
+	Token     string `json:"token"`
+	PromoCode string `json:"promo_code"`
+}
+
+// miniAppShop: "shop" lists what the Telegram account can buy (with token: the traffic
+// packages of that subscription too), "pay" opens an invoice for a new subscription
+// (token ""), one of the account's own, or a traffic package for it (package_id).
+func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest string) {
+	var in shopRequest
+	tgID, users, fail, ok := h.mini(w, r, &in)
+	if !ok {
+		return
+	}
+	userID, ok := ownerOf(users, in.Token)
+	if !ok {
+		fail(http.StatusForbidden, billing.ErrNotYours.Error())
+		return
+	}
+	ctx := r.Context()
+	if rest == "shop" {
+		h.miniAppOffers(ctx, w, userID, fail)
+		return
+	}
+	if strings.TrimSpace(in.PromoCode) != "" && !h.promoLimit.allow(tgID, h.now(), in.PromoCode) {
+		fail(http.StatusTooManyRequests, "promo_try_later")
+		return
+	}
+	var p db.Payment
+	var err error
+	if in.PackageID != 0 {
+		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
+	} else {
+		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, TermDays: in.TermDays, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
+	}
+	if err != nil {
+		if strings.TrimSpace(in.PromoCode) != "" && promoError(err) {
+			fail(h.promoAttempt(err))
+			return
+		}
+		status, code, unexplained := invoiceFailure(err)
+		if unexplained {
+			h.log.Warn("mini app: the invoice was not made", "provider", in.Provider, "err", err)
+		}
+		fail(status, code)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"url": p.PayUrl, "provider": p.Provider})
+}
+
+// miniAppOffers answers "shop": the tariffs on sale, the payment providers, and the traffic
+// packages of the subscription userID (0: none).
+func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, userID int64, fail func(int, string)) {
+	offers, av, err := h.shop.Offers(ctx)
+	if err != nil {
+		fail(http.StatusInternalServerError, "internal")
+		return
+	}
+	cfg, _ := h.cfg(ctx)
+	packages, err := h.shopPackages(ctx, userID, cfg.Lang)
+	if err != nil {
+		fail(http.StatusInternalServerError, "internal")
+		return
+	}
+	// A tariff's terms, the first one also in the offer itself (as before terms).
+	type term struct {
+		Days        int64  `json:"days"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+		Stars       int64  `json:"stars,omitempty"`
+		Rub         int64  `json:"rub,omitempty"`
+	}
+	type offer struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Stars       int64  `json:"stars,omitempty"`
+		Rub         int64  `json:"rub,omitempty"`
+		Terms       []term `json:"terms"`
+	}
+	// Marketplace adapters take rubles; the buyer sees each by its own name.
+	type addon struct {
+		Provider string `json:"provider"`
+		Name     string `json:"name"`
+	}
+	out := struct {
+		AllowNew  bool            `json:"allow_new"`
+		Providers map[string]bool `json:"providers"`
+		Addons    []addon         `json:"addons"`
+		Offers    []offer         `json:"offers"`
+		Packages  []shopPackage   `json:"packages"`
+	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
+		Providers: map[string]bool{billing.Stars: av.Stars}}
+	for _, id := range av.Addons {
+		out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
+	}
+	for _, o := range offers {
+		v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.DescribeOffer(o, cfg.Lang), Stars: o.Stars, Rub: o.Rub}
+		for _, t := range o.Terms {
+			v.Terms = append(v.Terms, term{Days: t.Days, Label: billing.TermLabel(o.Tariff, t.Days, cfg.Lang),
+				Description: billing.Describe(o.Tariff, t.Days, cfg.Lang), Stars: t.Stars, Rub: t.Rub})
+		}
+		out.Offers = append(out.Offers, v)
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// promoError is a code the buyer sent that cannot be used, as opposed to the panel failing.
+func promoError(err error) bool { return promo.IsRefusal(err) }
+
+// promoRequest is the body of "promo".
+type promoRequest struct {
+	miniAuth
+	Token        string `json:"token"`
+	Code         string `json:"code"`
+	TariffID     int64  `json:"tariff_id"`
+	TermDays     *int64 `json:"term_days"`
+	PackageID    int64  `json:"package_id"`
+	Provider     string `json:"provider"`
+	ValidateOnly bool   `json:"validate_only"`
+}
+
+// valid: a request without a code is refused before Telegram is asked who sent it.
+func (in *promoRequest) valid() bool { return strings.TrimSpace(in.Code) != "" }
+
+// miniAppPromo validates a code or immediately redeems a bonus. Discount codes are only
+// validated here; they are reserved atomically with the payment when the order is opened.
+func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
+	var in promoRequest
+	tgID, users, fail, ok := h.mini(w, r, &in)
+	if !ok {
+		return
+	}
+	if !h.promoLimit.allow(tgID, h.now(), in.Code) {
+		fail(http.StatusTooManyRequests, "promo_try_later")
+		return
+	}
+	userID, ok := ownerOf(users, in.Token)
+	if !ok {
+		fail(http.StatusForbidden, billing.ErrNotYours.Error())
+		return
+	}
+	if in.ValidateOnly {
+		tariffID, amount, currency, err := h.miniAppPromoOrder(r.Context(), userID, in.TariffID, in.TermDays, in.PackageID, billing.AdapterOf(in.Provider))
+		if err != nil {
+			fail(http.StatusConflict, "promo_unavailable")
+			return
+		}
+		p, err := h.promos.Validate(r.Context(), tgID, userID, tariffID, amount, currency, in.Code)
+		if err == nil && p.Type != "percent" && p.Type != "fixed" {
+			err = promo.ErrNotDiscount
+		}
+		if err != nil {
+			fail(h.promoAttempt(err))
+			return
+		}
+		discount := promo.DiscountAmount(p, amount)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "discount": discount, "final_amount": amount - discount, "currency": currency})
+		return
+	}
+	p, err := h.promos.Check(r.Context(), tgID, userID, in.Code)
+	if err != nil {
+		fail(h.promoAttempt(err))
+		return
+	}
+	switch p.Type {
+	case "days", "traffic":
+		r, err := h.promos.RedeemBonus(r.Context(), tgID, userID, in.Code)
+		if err != nil {
+			fail(h.promoAttempt(err))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "days": r.Days, "bytes": r.Bytes, "message": "promo_applied"})
+	case "percent", "fixed":
+		// A discount needs an order: the page keeps the code for the checkout, where it is
+		// checked against the price and reserved with the payment.
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "code": p.Code})
+	default:
+		fail(http.StatusConflict, "promo_unavailable")
+	}
+}
+
+// miniAppPromoOrder is the order a discount code is checked against: the tariff, and the
+// price of the chosen term (days nil: the first) or of the package, with provider.
+func (h *Handler) miniAppPromoOrder(ctx context.Context, userID, tariffID int64, days *int64, packageID int64, provider string) (int64, int64, string, error) {
+	if h.shop == nil || provider == "" {
+		return 0, 0, "", promo.ErrUnavailable
+	}
+	if packageID != 0 {
+		offers, _, err := h.shop.PackageOffers(ctx, userID)
+		if err != nil {
+			return 0, 0, "", err
+		}
+		user, err := h.st.Q.GetUser(ctx, userID)
+		if err != nil || !user.TariffID.Valid {
+			return 0, 0, "", promo.ErrTariff
+		}
+		for _, offer := range offers {
+			if offer.Package.ID == packageID {
+				if amount, currency, ok := promoOrderPrice(provider, offer.Stars, offer.Rub); ok {
+					return user.TariffID.Int64, amount, currency, nil
+				}
+			}
+		}
+		return 0, 0, "", promo.ErrUnavailable
+	}
+	offers, _, err := h.shop.Offers(ctx)
+	if err != nil {
+		return 0, 0, "", err
+	}
+	for _, offer := range offers {
+		if offer.Tariff.ID == tariffID {
+			t, ok := offer.Term(days)
+			if !ok {
+				break
+			}
+			if amount, currency, ok := promoOrderPrice(provider, t.Stars, t.Rub); ok {
+				return offer.Tariff.ID, amount, currency, nil
+			}
+		}
+	}
+	return 0, 0, "", promo.ErrUnavailable
+}
+
+func promoOrderPrice(provider string, stars, rub int64) (int64, string, bool) {
+	switch {
+	case provider == billing.Stars && stars > 0:
+		return stars, "XTR", true
+	case strings.HasPrefix(provider, billing.AddonPrefix) && rub > 0:
+		return rub, "RUB", true
+	default:
+		return 0, "", false
+	}
+}
+
+// historyRequest is the body of "promo-history". Its unreadable body is answered in plain
+// text, as it always was (plainRequest).
+type historyRequest struct{ miniAuth }
+
+func (historyRequest) plainBadRequest() {}
+
+// miniAppPromoHistory lists the promo codes the Telegram account has used, the latest first.
+func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
+	var in historyRequest
+	tgID, _, fail, ok := h.mini(w, r, &in)
+	if !ok {
+		return
+	}
+	rs, err := h.st.Q.ListPromoRedemptionsByTgWithCode(r.Context(), db.ListPromoRedemptionsByTgWithCodeParams{TgID: tgID, Lim: 100})
+	if err != nil {
+		fail(http.StatusInternalServerError, "internal")
+		return
+	}
+	type item struct {
+		Code     string `json:"code"`
+		Days     int64  `json:"days"`
+		Bytes    int64  `json:"bytes"`
+		Discount int64  `json:"discount"`
+		Currency string `json:"currency"`
+		At       int64  `json:"at"`
+	}
+	out := struct {
+		Items []item `json:"items"`
+	}{Items: []item{}}
+	for _, row := range rs {
+		redemption := row
+		out.Items = append(out.Items, item{Code: row.Code, Days: redemption.Days, Bytes: redemption.Bytes, Discount: redemption.DiscountAmount, Currency: redemption.Currency, At: redemption.RedeemedAt})
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// promoAttempt is the answer to a code that could not be used. Why a code does not apply is
+// not told: "promo_unavailable" for all of it, so codes cannot be probed (the buyer must not
+// learn which codes exist or who they are for); the admin finds the reason in the log.
+// Anything else is the panel's trouble, logged and answered as such.
+func (h *Handler) promoAttempt(err error) (int, string) {
+	if code := promoAttemptCode(err); code != "" {
+		h.log.Info("mini app: promo code refused", "reason", err)
+		return http.StatusConflict, code
+	}
+	h.log.Error("mini app: promo code failed", "err", err)
+	return http.StatusInternalServerError, "internal"
+}
+
+func promoAttemptCode(err error) string {
+	if promoError(err) {
+		return "promo_unavailable"
+	}
+	return ""
+}
+
+// invoiceFailure is what the Mini App answers when no invoice could be made. What the buyer
+// can act on is told as it is. A provider that is switched off is "provider_off". Anything
+// else, a provider that failed, a database that was busy, is the panel's trouble: the buyer
+// is told it did not work, not that payment is off, and unexplained says nobody has logged
+// the cause yet (billing logs a provider's failure itself).
+func invoiceFailure(err error) (status int, code string, unexplained bool) {
+	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours} {
+		if errors.Is(err, e) {
+			return http.StatusConflict, e.Error(), false
+		}
+	}
+	if promoError(err) { // a code the buyer cannot use is told the same way everywhere
+		return http.StatusConflict, "promo_unavailable", false
+	}
+	switch {
+	case err == billing.ErrProviderOff:
+		return http.StatusConflict, billing.ErrProviderOff.Error(), false
+	case errors.Is(err, billing.ErrProviderOff): // the provider failed
+		return http.StatusBadGateway, "invoice_failed", false
+	}
+	return http.StatusBadGateway, "invoice_failed", true
+}

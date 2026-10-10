@@ -355,7 +355,7 @@ func inboundError(err error, dest bool) error {
 	case errors.Is(err, domain.ErrInboundChanged):
 		return huma.Error409Conflict("inbound_changed")
 	case errors.Is(err, domain.ErrUnknownPool):
-		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.pool_id", Message: "pool_not_found"})
+		return fieldErr("body.pool_id", "pool_not_found")
 	case errors.As(err, &name):
 		return huma.Error409Conflict("name_in_use", &huma.ErrorDetail{Location: "body.display_name", Message: "name_in_use", Value: name.Owner})
 	case errors.As(err, &edit):

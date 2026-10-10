@@ -477,7 +477,8 @@ func (m *Manager) prune(ctx context.Context, now time.Time) {
 }
 
 func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
-	users, err := m.st.Q.ListUsers(ctx)
+	// Every 30 s: only the users whose period may be over, and only what decides it.
+	users, err := m.st.Q.ListUsersToReset(ctx, now.Unix())
 	if err != nil {
 		return err
 	}

@@ -261,9 +261,9 @@ func (h *handlers) patchAddon(ctx context.Context, in *patchAddonInput) (*addons
 	var ae *addons.Error
 	switch {
 	case errors.As(err, &se):
-		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.settings." + se.Key, Message: "addon_setting_invalid"})
+		return nil, fieldErr("body.settings."+se.Key, "addon_setting_invalid")
 	case errors.As(err, &ae) && ae.Status < 500:
-		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.settings", Message: "addon_settings_refused", Value: ae.Code})
+		return nil, fieldErrValue("body.settings", "addon_settings_refused", ae.Code)
 	case errors.Is(err, addons.ErrNotInstalled):
 		return nil, huma.Error404NotFound("addon_not_installed")
 	case errors.Is(err, addons.ErrUnavailable):

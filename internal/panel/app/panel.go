@@ -201,14 +201,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.ForgetNode = forgetNodeFiles(o)
 	subBase := func(ctx context.Context) string {
 		ep, err := set.SubEndpoint(ctx)
-		if err != nil || ep.Host == "" {
+		if err != nil || ep.URL() == "" {
 			return ""
 		}
 		paths, err := set.Paths(ctx)
 		if err != nil {
 			return ""
 		}
-		return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + paths.Sub
+		return ep.URL() + "/" + paths.Sub
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	deps.Addons = p.Addons

@@ -45,13 +45,6 @@ func nullPtr(n sql.NullInt64) *int64 {
 	return &n.Int64
 }
 
-func ptrNull(p *int64) sql.NullInt64 {
-	if p == nil {
-		return sql.NullInt64{}
-	}
-	return sql.NullInt64{Int64: *p, Valid: true}
-}
-
 func stateOf(u db.User) *userState {
 	return &userState{Status: u.Status, TariffID: nullPtr(u.TariffID), TrafficLimit: nullPtr(u.TrafficLimit), DeviceLimit: nullPtr(u.DeviceLimit),
 		SpeedLimit: nullPtr(u.SpeedLimit), ResetStrategy: u.ResetStrategy, BillingDay: nullPtr(u.BillingDay), ExpiresAt: nullPtr(u.ExpiresAt)}
@@ -156,8 +149,8 @@ func (s *Service) takeBackTariff(ctx context.Context, q *db.Queries, p db.Paymen
 			return rv, u, err
 		}
 		if ok {
-			par.Status, par.TariffID, par.TrafficLimit, par.DeviceLimit = ri.Prior.Status, ptrNull(ri.Prior.TariffID), ptrNull(ri.Prior.TrafficLimit), ptrNull(ri.Prior.DeviceLimit)
-			par.ResetStrategy, par.BillingDay, par.SpeedLimit = ri.Prior.ResetStrategy, ptrNull(ri.Prior.BillingDay), ptrNull(ri.Prior.SpeedLimit)
+			par.Status, par.TariffID, par.TrafficLimit, par.DeviceLimit = ri.Prior.Status, domain.NullInt(ri.Prior.TariffID), domain.NullInt(ri.Prior.TrafficLimit), domain.NullInt(ri.Prior.DeviceLimit)
+			par.ResetStrategy, par.BillingDay, par.SpeedLimit = ri.Prior.ResetStrategy, domain.NullInt(ri.Prior.BillingDay), domain.NullInt(ri.Prior.SpeedLimit)
 			rv.TariffRestored = true
 			if ri.Prior.TariffID != nil {
 				restoreTariff = *ri.Prior.TariffID
@@ -224,7 +217,7 @@ func rolledBack(cur sql.NullInt64, ri revertInfo, appliedAt, days, now int64) sq
 	var next sql.NullInt64
 	switch {
 	case ri.Set != nil:
-		set := ptrNull(ri.Set.ExpiresAt)
+		set := domain.NullInt(ri.Set.ExpiresAt)
 		base := appliedAt
 		if ri.Prior != nil && ri.Prior.ExpiresAt != nil {
 			base = max(*ri.Prior.ExpiresAt, appliedAt)
@@ -234,7 +227,7 @@ func rolledBack(cur sql.NullInt64, ri revertInfo, appliedAt, days, now int64) sq
 			// Unlimited before: unlimited again.
 		case cur == set && ri.Prior != nil && !set.Valid:
 			// The payment made it unlimited: the old end comes back as it was.
-			next = ptrNull(ri.Prior.ExpiresAt)
+			next = domain.NullInt(ri.Prior.ExpiresAt)
 		case cur == set && ri.Prior != nil:
 			next = sql.NullInt64{Int64: base, Valid: true}
 		case !cur.Valid || !set.Valid:
@@ -276,7 +269,7 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 		}
 		at := sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}
 		switch p.Status {
-		case "applied":
+		case PaymentApplied:
 			n, err := q.MarkPaymentRefunded(ctx, db.MarkPaymentRefundedParams{RefundedAt: at, ID: id})
 			if err != nil || n != 1 {
 				return err
@@ -284,7 +277,7 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 			done = true
 			rv, u, err = s.takeBack(ctx, q, p)
 			return err
-		case "pending", "expired", "paid", "failed":
+		case PaymentPending, PaymentExpired, PaymentPaid, PaymentFailed:
 			// Refunded before it was applied: it never will be.
 			n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: at, ID: id})
 			open = n == 1
@@ -306,7 +299,7 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 	s.d.Users.Changed()
 	s.d.Log.Info("billing: refunded", "payment", id, "action", rv.Action, "exact", rv.Exact)
 	if tg := s.telegram(); tg != nil {
-		p.Status = "refunded"
+		p.Status = PaymentRefunded
 		tg.Refunded(ctx, p, u, rv.Action == "disabled")
 	}
 	return rv, nil

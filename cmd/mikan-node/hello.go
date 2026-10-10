@@ -10,6 +10,7 @@ import (
 
 	"mikan/internal/nodehello"
 	"mikan/internal/nodetls"
+	"mikan/internal/panel/config"
 )
 
 // helloPause are the waits before each hello of a start: the panel may need a moment to
@@ -59,7 +60,7 @@ func helloOnce() {
 		s = nodehello.Status{Result: nodehello.Send(ctx, key, nodehello.Client(), now)}
 	}
 	s.At, s.Started, s.Attempt, s.Final = time.Now().UTC(), now, 1, true
-	if err := nodehello.Write(envOr("MIKAN_DATA_DIR", "/data"), s); err != nil {
+	if err := nodehello.Write(envOr("MIKAN_DATA_DIR", config.DefaultDataDir), s); err != nil {
 		fmt.Fprintln(os.Stderr, "mikan-node: save the answer:", err)
 	}
 	raw, _ := json.Marshal(s)

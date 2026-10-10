@@ -93,6 +93,13 @@ SELECT * FROM users WHERE sub_token = $1;
 -- name: ListUsers :many
 SELECT * FROM users ORDER BY id DESC;
 
+-- name: ListUsersToReset :many
+-- The users whose traffic period may be over: every monthly one (its day depends on the
+-- billing day, checked in Go), and the periodic ones whose period has run out.
+SELECT id, period_start, reset_strategy, billing_day, period_days FROM users
+WHERE reset_strategy = 'month_start'
+   OR reset_strategy = 'period' AND period_start + GREATEST(period_days, 1) * 86400 <= sqlc.arg(now)::bigint;
+
 -- name: UpdateUser :one
 UPDATE users
 SET name = $1, contact = $2, note = $3, tags = $4, status = $5, tariff_id = $6, traffic_limit = $7, device_limit = $8,

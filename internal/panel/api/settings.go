@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -71,42 +70,48 @@ type SettingsView struct {
 
 type settingsOutput struct{ Body SettingsView }
 
+// The size limits of the body are the huma tags: sub_template takes up to 524288 bytes (512 KiB),
+// the largest template there is, as a full profile with rule lists is a few dozen kilobytes.
 type patchSettingsInput struct {
-	Body struct {
-		Brand         *string             `json:"brand,omitempty" maxLength:"40"`
-		SupportURL    *string             `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
-		SubTitle      *string             `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
-		Announce      *string             `json:"sub_announce,omitempty" maxLength:"200"`
-		AnnounceURL   *string             `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
-		AppBranding   *bool               `json:"app_branding,omitempty"`
-		BrandAccent   *string             `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
-		BrandLogoURL  *string             `json:"brand_logo_url,omitempty" maxLength:"500" doc:"https://… или пусто"`
-		HappRouting   *string             `json:"happ_routing,omitempty" maxLength:"65536" doc:"happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать"`
-		HappProvider  *string             `json:"happ_provider_id,omitempty" maxLength:"64"`
-		HappHide      *bool               `json:"happ_hide_settings,omitempty"`
-		HappCrypt     *string             `json:"happ_crypt,omitempty" enum:"off,api,local"`
-		PublicHost    *string             `json:"public_host,omitempty" maxLength:"253"`
-		Domain        *string             `json:"domain,omitempty" maxLength:"253"`
-		QuietHourUTC  *int                `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
-		SubGroupMain  *string             `json:"sub_group_main,omitempty" maxLength:"200"`
-		SubGroupAuto  *string             `json:"sub_group_auto,omitempty" maxLength:"200"`
-		SubRouting    *string             `json:"sub_routing,omitempty" enum:"ru_direct,all,blocked"`
-		SubRoutes     *subs.Routes        `json:"sub_routes,omitempty"`
-		SubTemplate   *string             `json:"sub_template,omitempty" maxLength:"524288" doc:"Свой профиль Clash; пусто — вернуть встроенный"`
-		SubRules      *string             `json:"sub_rules,omitempty" maxLength:"65536" doc:"Свои правила Clash, до 500 строк; ошибка указывает номер строки"`
-		Fingerprint   *string             `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
-		AutoPort      *bool               `json:"auto_port,omitempty"`
-		AutoSNI       *bool               `json:"auto_sni,omitempty"`
-		DeviceBinding *bool               `json:"device_binding,omitempty"`
-		RequireHWID   *bool               `json:"device_require_hwid,omitempty"`
-		DeviceUnbind  *domain.UnbindRules `json:"device_unbind,omitempty"`
-		DefaultLang   *string             `json:"default_lang,omitempty" enum:"auto,ru,en"`
-		SubPort       *int                `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
-		ACMECA        *string             `json:"acme_ca,omitempty" enum:"letsencrypt,zerossl,google" doc:"Смена центра выпускает сертификаты панели и нод заново"`
-		ACMEEmail     *string             `json:"acme_email,omitempty" maxLength:"254"`
-		ACMEEABKID    *string             `json:"acme_eab_kid,omitempty" maxLength:"256"`
-		ACMEEABHMAC   *string             `json:"acme_eab_hmac,omitempty" maxLength:"512" doc:"Ключ HMAC (base64url); пусто — убрать. Обратно не показывается"`
-	}
+	Body patchSettingsBody
+}
+
+// patchSettingsBody is the body of PATCH /settings; an alias of the struct, so the API's
+// schema keeps its name (PatchSettingsInputBody). settingFields says how each is written.
+type patchSettingsBody = struct {
+	Brand         *string             `json:"brand,omitempty" maxLength:"40"`
+	SupportURL    *string             `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+	SubTitle      *string             `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
+	Announce      *string             `json:"sub_announce,omitempty" maxLength:"200"`
+	AnnounceURL   *string             `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+	AppBranding   *bool               `json:"app_branding,omitempty"`
+	BrandAccent   *string             `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
+	BrandLogoURL  *string             `json:"brand_logo_url,omitempty" maxLength:"500" doc:"https://… или пусто"`
+	HappRouting   *string             `json:"happ_routing,omitempty" maxLength:"65536" doc:"happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать"`
+	HappProvider  *string             `json:"happ_provider_id,omitempty" maxLength:"64"`
+	HappHide      *bool               `json:"happ_hide_settings,omitempty"`
+	HappCrypt     *string             `json:"happ_crypt,omitempty" enum:"off,api,local"`
+	PublicHost    *string             `json:"public_host,omitempty" maxLength:"253"`
+	Domain        *string             `json:"domain,omitempty" maxLength:"253"`
+	QuietHourUTC  *int                `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
+	SubGroupMain  *string             `json:"sub_group_main,omitempty" maxLength:"200"`
+	SubGroupAuto  *string             `json:"sub_group_auto,omitempty" maxLength:"200"`
+	SubRouting    *string             `json:"sub_routing,omitempty" enum:"ru_direct,all,blocked"`
+	SubRoutes     *subs.Routes        `json:"sub_routes,omitempty"`
+	SubTemplate   *string             `json:"sub_template,omitempty" maxLength:"524288" doc:"Свой профиль Clash; пусто — вернуть встроенный"`
+	SubRules      *string             `json:"sub_rules,omitempty" maxLength:"65536" doc:"Свои правила Clash, до 500 строк; ошибка указывает номер строки"`
+	Fingerprint   *string             `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
+	AutoPort      *bool               `json:"auto_port,omitempty"`
+	AutoSNI       *bool               `json:"auto_sni,omitempty"`
+	DeviceBinding *bool               `json:"device_binding,omitempty"`
+	RequireHWID   *bool               `json:"device_require_hwid,omitempty"`
+	DeviceUnbind  *domain.UnbindRules `json:"device_unbind,omitempty"`
+	DefaultLang   *string             `json:"default_lang,omitempty" enum:"auto,ru,en"`
+	SubPort       *int                `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
+	ACMECA        *string             `json:"acme_ca,omitempty" enum:"letsencrypt,zerossl,google" doc:"Смена центра выпускает сертификаты панели и нод заново"`
+	ACMEEmail     *string             `json:"acme_email,omitempty" maxLength:"254"`
+	ACMEEABKID    *string             `json:"acme_eab_kid,omitempty" maxLength:"256"`
+	ACMEEABHMAC   *string             `json:"acme_eab_hmac,omitempty" maxLength:"512" doc:"Ключ HMAC (base64url); пусто — убрать. Обратно не показывается"`
 }
 
 type resetPathOutput struct {
@@ -223,18 +228,22 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if err != nil {
 		return v, err
 	}
-	host := v.Domain
-	if host == "" {
-		host = v.PublicHost
-	}
 	// The addresses carry the secret path segments: not for a key that may only read.
-	if host != "" && !hidesSecrets(ctx) {
-		v.AdminURL = "https://" + net.JoinHostPort(host, strconv.Itoa(v.PanelPort)) + "/" + paths.Admin + "/"
-		subPort := v.PanelPort
-		if v.SubPort > 0 {
-			subPort = v.SubPort
+	if !hidesSecrets(ctx) {
+		ep, err := h.d.Settings.Endpoint(ctx)
+		if err != nil {
+			return v, err
 		}
-		v.SubBaseURL = "https://" + net.JoinHostPort(host, strconv.Itoa(subPort)) + "/" + paths.Sub + "/"
+		sub, err := h.d.Settings.SubEndpoint(ctx)
+		if err != nil {
+			return v, err
+		}
+		if u := ep.URL(); u != "" {
+			v.AdminURL = u + "/" + paths.Admin + "/"
+		}
+		if u := sub.URL(); u != "" {
+			v.SubBaseURL = u + "/" + paths.Sub + "/"
+		}
 	}
 	v.Certificate = acme.Status{Kind: "self-signed", WantCA: acme.CALetsEncrypt}
 	if h.d.Cert != nil {
@@ -266,20 +275,10 @@ func (h *handlers) getSettings(ctx context.Context, _ *struct{}) (*settingsOutpu
 }
 
 func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (*settingsOutput, error) {
-	b := in.Body
-	// Where clients are sent, and what they are told to trust: a leaked API key must not
-	// move subscriptions to another server or add rules to every client.
-	for field, touched := range map[string]bool{"public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
-		"sub_rules": b.SubRules != nil, "sub_routes": b.SubRoutes != nil, "sub_template": b.SubTemplate != nil, "sub_routing": b.SubRouting != nil, "support_url": b.SupportURL != nil,
-		// What every subscriber's app shows: text, links and the logo it downloads.
-		"sub_title": b.SubTitle != nil, "sub_announce": b.Announce != nil, "sub_announce_url": b.AnnounceURL != nil, "app_branding": b.AppBranding != nil,
-		"brand_accent": b.BrandAccent != nil, "brand_logo_url": b.BrandLogoURL != nil,
-		// What Happ is told to apply, to hide, and where the subscription address goes.
-		"happ_routing": b.HappRouting != nil, "happ_provider_id": b.HappProvider != nil, "happ_hide_settings": b.HappHide != nil, "happ_crypt": b.HappCrypt != nil,
-		// Who the panel's and the nodes' certificates come from, and the account's secret.
-		"acme_ca": b.ACMECA != nil, "acme_email": b.ACMEEmail != nil, "acme_eab_kid": b.ACMEEABKID != nil, "acme_eab_hmac": b.ACMEEABHMAC != nil} {
-		if touched {
-			if err := requireSession(ctx, field); err != nil {
+	b := &in.Body
+	for _, f := range settingFields {
+		if f.session && f.given(b) {
+			if err := requireSession(ctx, f.name); err != nil {
 				return nil, err
 			}
 		}
@@ -297,7 +296,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	if b.Domain != nil && *b.Domain != "" && !hostname.Valid(*b.Domain) {
 		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
 	}
-	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {
+	if b.SupportURL != nil && strings.TrimSpace(*b.SupportURL) != "" && !subs.ValidLink(strings.TrimSpace(*b.SupportURL), true) {
 		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
 	}
 	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !subs.ValidLink(strings.TrimSpace(*b.AnnounceURL), true) {
@@ -337,7 +336,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 	}
 	if b.SubGroupMain != nil || b.SubGroupAuto != nil || b.SubRules != nil {
-		cur, err := h.groups(ctx)
+		cur, err := subs.LoadGroups(ctx, h.d.Settings)
 		if err != nil {
 			return nil, err
 		}
@@ -433,7 +432,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 	}
 	if len(details) > 0 {
-		return nil, huma.Error422UnprocessableEntity("validation", details...)
+		return nil, fieldErrs(details...)
 	}
 	// The port opens first: one that cannot be had changes nothing. If the settings then
 	// fail to save, the port is put back, so the server does not listen on one nobody saved.
@@ -447,7 +446,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			return nil, err
 		}
 		if err := h.d.SubPort(*b.SubPort); err != nil {
-			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.sub_port", Message: "sub_port_busy", Value: *b.SubPort})
+			return nil, fieldErrValue("body.sub_port", "sub_port_busy", *b.SubPort)
 		}
 	}
 	// Every setting of the request is written in one transaction: a failure in the middle
@@ -455,79 +454,9 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	// read from nothing: READ COMMITTED.
 	err := h.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
-		if b.SubPort != nil {
-			if err := settings.Set(ctx, set, settings.KeySubPort, *b.SubPort); err != nil {
-				return err
-			}
-		}
-		if b.SubRules != nil {
-			if err := settings.Set(ctx, set, settings.KeyRules, strings.TrimRight(*b.SubRules, " \n\r\t")); err != nil {
-				return err
-			}
-		}
-		if b.SubRoutes != nil {
-			if err := settings.Set(ctx, set, settings.KeyRoutes, *b.SubRoutes); err != nil {
-				return err
-			}
-		}
-		if b.SubTemplate != nil {
-			tpl := *b.SubTemplate
-			if strings.TrimSpace(tpl) == "" {
-				tpl = ""
-			}
-			if err := settings.Set(ctx, set, settings.KeyTemplate, tpl); err != nil {
-				return err
-			}
-		}
-		for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
-			settings.KeySubTitle: b.SubTitle, settings.KeyAnnounce: b.Announce, settings.KeyAnnounceURL: b.AnnounceURL, settings.KeyBrandAccent: b.BrandAccent, settings.KeyBrandLogo: b.BrandLogoURL,
-			settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang,
-			settings.KeyHappRouting: b.HappRouting, settings.KeyHappProvider: b.HappProvider} {
-			if v == nil {
-				continue
-			}
-			if err := settings.Set(ctx, set, key, strings.TrimSpace(*v)); err != nil {
-				return err
-			}
-		}
-		for key, v := range map[string]*string{settings.KeyACMECA: b.ACMECA, settings.KeyACMEEmail: b.ACMEEmail, settings.KeyACMEEABKID: b.ACMEEABKID, settings.KeyACMEEABHMAC: b.ACMEEABHMAC} {
-			if v == nil {
-				continue
-			}
-			if err := settings.Set(ctx, set, key, strings.TrimSpace(*v)); err != nil {
-				return err
-			}
-		}
-		if b.QuietHourUTC != nil {
-			if err := settings.Set(ctx, set, settings.KeyQuietHour, *b.QuietHourUTC); err != nil {
-				return err
-			}
-		}
-		if b.HappCrypt != nil {
-			mode := *b.HappCrypt
-			if mode == "off" {
-				mode = ""
-			}
-			if err := settings.Set(ctx, set, settings.KeyHappCrypt, mode); err != nil {
-				return err
-			}
-		}
-		// Without a provider id Happ ignores hide-settings: the switch goes off with it, so
-		// the panel never shows a setting that does nothing.
-		if b.HappProvider != nil && strings.TrimSpace(*b.HappProvider) == "" {
-			if err := settings.Set(ctx, set, settings.KeyHappHide, false); err != nil {
-				return err
-			}
-		}
-		if b.DeviceUnbind != nil {
-			if err := settings.Set(ctx, set, settings.KeyUnbindRules, *b.DeviceUnbind); err != nil {
-				return err
-			}
-		}
-		for key, v := range map[string]*bool{settings.KeyAutoPort: b.AutoPort, settings.KeyAutoSNI: b.AutoSNI,
-			settings.KeyDeviceBinding: b.DeviceBinding, settings.KeyRequireHWID: b.RequireHWID, settings.KeyAppBranding: b.AppBranding, settings.KeyHappHide: b.HappHide} {
-			if v != nil {
-				if err := settings.Set(ctx, set, key, *v); err != nil {
+		for _, f := range settingFields {
+			if f.given(b) {
+				if err := f.write(ctx, set, b); err != nil {
 					return err
 				}
 			}
@@ -586,11 +515,8 @@ func (h *handlers) checkSubPort(ctx context.Context, port int) (*huma.ErrorDetai
 	if port == 0 {
 		return nil, nil
 	}
-	bad := func(code string, value any) (*huma.ErrorDetail, error) {
-		return &huma.ErrorDetail{Location: "body.sub_port", Message: code, Value: value}, nil
-	}
 	if subPortReserved[port] {
-		return bad("sub_port_reserved", port)
+		return fieldDetail("body.sub_port", "sub_port_reserved", port), nil
 	}
 	nodes, err := h.d.Store.Q.ListNodes(ctx)
 	if err != nil {
@@ -608,60 +534,40 @@ func (h *handlers) checkSubPort(ctx context.Context, port int) (*huma.ErrorDetai
 		switch {
 		case !busy:
 		case owner.Kind == domain.PortPanel:
-			return bad("sub_port_panel", port)
+			return fieldDetail("body.sub_port", "sub_port_panel", port), nil
 		case owner.Kind == domain.PortRelay:
-			return bad("sub_port_relay", port)
+			return fieldDetail("body.sub_port", "sub_port_relay", port), nil
 		default:
-			return bad("sub_port_inbound", owner.Name)
+			return fieldDetail("body.sub_port", "sub_port_inbound", owner.Name), nil
 		}
 	}
 	return nil, nil
-}
-
-// groups returns the subscription group names with defaults applied.
-func (h *handlers) groups(ctx context.Context) (subs.Groups, error) {
-	var g subs.Groups
-	var err error
-	if g.Main, err = h.d.Settings.String(ctx, settings.KeyGroupMain); err != nil {
-		return g, err
-	}
-	if g.Auto, err = h.d.Settings.String(ctx, settings.KeyGroupAuto); err != nil {
-		return g, err
-	}
-	lang, err := h.d.Settings.Lang(ctx)
-	if err != nil {
-		return g, err
-	}
-	return g.WithDefaults(lang), nil
 }
 
 // checkGroups: a profile with a group named like a proxy, a built-in policy or the
 // other group does not load in any Clash app.
 func (h *handlers) checkGroups(ctx context.Context, g subs.Groups) []error {
 	var out []error
-	bad := func(field, code string, value any) {
-		out = append(out, &huma.ErrorDetail{Location: "body." + field, Message: code, Value: value})
-	}
 	if err := subs.ValidName(g.Main); err != nil {
-		bad("sub_group_main", err.Error(), nil)
+		out = append(out, fieldDetail("body.sub_group_main", err.Error(), nil))
 	}
 	if err := subs.ValidName(g.Auto); err != nil {
-		bad("sub_group_auto", err.Error(), nil)
+		out = append(out, fieldDetail("body.sub_group_auto", err.Error(), nil))
 	}
 	if strings.EqualFold(g.Auto, subs.AliasGroup) {
-		bad("sub_group_auto", "group_alias_taken", subs.AliasGroup)
+		out = append(out, fieldDetail("body.sub_group_auto", "group_alias_taken", subs.AliasGroup))
 	}
 	if strings.EqualFold(g.Main, g.Auto) {
-		bad("sub_group_auto", "groups_same", nil)
+		out = append(out, fieldDetail("body.sub_group_auto", "groups_same", nil))
 	}
 	if inbounds, err := h.d.Store.Q.ListInbounds(ctx); err == nil {
 		for _, in := range inbounds {
 			name := domain.ProxyName(in)
 			if strings.EqualFold(name, g.Main) {
-				bad("sub_group_main", "group_is_proxy", in.Name)
+				out = append(out, fieldDetail("body.sub_group_main", "group_is_proxy", in.Name))
 			}
 			if strings.EqualFold(name, g.Auto) {
-				bad("sub_group_auto", "group_is_proxy", in.Name)
+				out = append(out, fieldDetail("body.sub_group_auto", "group_is_proxy", in.Name))
 			}
 		}
 	}
@@ -674,14 +580,12 @@ func (h *handlers) checkSubName(ctx context.Context, name string) string {
 	if err := subs.ValidName(name); err != nil {
 		return err.Error()
 	}
-	g, err := h.groups(ctx)
+	g, err := subs.LoadGroups(ctx, h.d.Settings)
 	if err != nil {
 		return ""
 	}
-	for _, x := range []string{g.Main, g.Auto, subs.AliasGroup} {
-		if strings.EqualFold(name, x) {
-			return "name_is_group"
-		}
+	if err := g.CheckName(name); err != nil {
+		return err.Error()
 	}
 	return ""
 }
@@ -729,29 +633,26 @@ func (h *handlers) checkCA(ctx context.Context, ca, email, kid, hmac *string) ([
 		return nil, err
 	}
 	var out []error
-	bad := func(field, code string) {
-		out = append(out, &huma.ErrorDetail{Location: "body." + field, Message: code})
-	}
 	if e != "" && !acme.ValidEmail(e) {
-		bad("acme_email", "email_invalid")
+		out = append(out, fieldDetail("body.acme_email", "email_invalid", nil))
 	}
 	if k != "" && !acme.ValidEABKID(k) {
-		bad("acme_eab_kid", "eab_kid_invalid")
+		out = append(out, fieldDetail("body.acme_eab_kid", "eab_kid_invalid", nil))
 	}
 	if m != "" && !acme.ValidEABKey(m) {
-		bad("acme_eab_hmac", "eab_hmac_invalid")
+		out = append(out, fieldDetail("body.acme_eab_hmac", "eab_hmac_invalid", nil))
 	}
 	switch chosen {
 	case acme.CAZeroSSL:
 		if e == "" {
-			bad("acme_email", "zerossl_email_required")
+			out = append(out, fieldDetail("body.acme_email", "zerossl_email_required", nil))
 		}
 	case acme.CAGoogle:
 		if k == "" {
-			bad("acme_eab_kid", "google_eab_required")
+			out = append(out, fieldDetail("body.acme_eab_kid", "google_eab_required", nil))
 		}
 		if m == "" {
-			bad("acme_eab_hmac", "google_eab_required")
+			out = append(out, fieldDetail("body.acme_eab_hmac", "google_eab_required", nil))
 		}
 	}
 	return out, nil

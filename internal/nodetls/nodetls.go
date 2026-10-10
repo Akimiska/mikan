@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"mikan/internal/fsutil"
 )
 
 // Pair is a certificate with its private key, both PEM.
@@ -72,16 +74,28 @@ func Fingerprint(certPEM string) (string, error) {
 	if block == nil || block.Type != "CERTIFICATE" {
 		return "", errors.New("no certificate")
 	}
-	sum := sha256.Sum256(block.Bytes)
-	return hex.EncodeToString(sum[:]), nil
+	return PinOfDER(block.Bytes), nil
 }
 
-// LoadOrCreate keeps the panel's client certificate in dir.
+// PinOfDER is the pin of a certificate: the hex SHA-256 of its DER encoding, the leaf alone and
+// not the chain. Everything that pins a certificate of a node, or tells a client which one to
+// pin, must get it from here, or the two sides would silently stop agreeing.
+func PinOfDER(der []byte) string {
+	sum := sha256.Sum256(der)
+	return hex.EncodeToString(sum[:])
+}
+
+// LoadOrCreate keeps the panel's client certificate in dir. Each file is written whole or
+// not at all, so a crash never leaves half a pair; one that does not load is said so, not
+// replaced: the nodes pin this certificate, a new one would lock the panel out of them.
 func LoadOrCreate(dir string, now time.Time) (Pair, error) {
 	certPath, keyPath := filepath.Join(dir, "client.pem"), filepath.Join(dir, "client.key")
 	c, errC := os.ReadFile(certPath)
 	k, errK := os.ReadFile(keyPath)
 	if errC == nil && errK == nil {
+		if _, err := tls.X509KeyPair(c, k); err != nil {
+			return Pair{}, fmt.Errorf("the panel's client certificate in %s does not load: %w", dir, err)
+		}
 		return Pair{CertPEM: string(c), KeyPEM: string(k)}, nil
 	}
 	p, err := Generate("mikan-panel", x509.ExtKeyUsageClientAuth, now)
@@ -91,10 +105,11 @@ func LoadOrCreate(dir string, now time.Time) (Pair, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Pair{}, err
 	}
-	if err := os.WriteFile(keyPath, []byte(p.KeyPEM), 0o600); err != nil {
+	// The key first: a pair without its certificate is made anew at the next start.
+	if err := fsutil.WriteFileAtomic(keyPath, []byte(p.KeyPEM), 0o600); err != nil {
 		return Pair{}, err
 	}
-	return p, os.WriteFile(certPath, []byte(p.CertPEM), 0o600)
+	return p, fsutil.WriteFileAtomic(certPath, []byte(p.CertPEM), 0o600)
 }
 
 // Key is what a remote node needs to serve the Node API to its panel.
@@ -195,8 +210,7 @@ func Verify(certPEM string, msg, sig []byte) (string, error) {
 	if !ed25519.Verify(pub, msg, sig) {
 		return "", errors.New("nodetls: bad signature")
 	}
-	sum := sha256.Sum256(block.Bytes)
-	return hex.EncodeToString(sum[:]), nil
+	return PinOfDER(block.Bytes), nil
 }
 
 // SamePin compares two pins in constant time.

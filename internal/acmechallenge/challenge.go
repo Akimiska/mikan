@@ -177,9 +177,6 @@ func (s *Server) Pending() int {
 	return len(s.tokens)
 }
 
-// Listening says whether the port is held now.
-func (s *Server) Listening() bool { return s.Bound() != "" }
-
 // Bound is the address held now, "" while none is.
 func (s *Server) Bound() string {
 	s.mu.Lock()

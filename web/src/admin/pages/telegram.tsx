@@ -4,7 +4,8 @@ import { Link, useBlocker, useNavigate, useSearch } from "@tanstack/react-router
 import { ArrowDown, ArrowUp, Bell, Bot, Globe, LayoutList, Link2, Megaphone, Network, Plus, PlugZap, Send, Shield, Trash2, TriangleAlert } from "lucide-react";
 import { useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk, useNodes, useSettings } from "../../api/hooks";
+import { onFormError } from "../../lib/fields";
+import { qk, useNodes, useSettings, useTelegram } from "../../api/hooks";
 import { useDraft } from "../../lib/draft";
 import { TELEGRAM_TABS } from "../search";
 import { BackToAddons } from "./addons";
@@ -24,15 +25,6 @@ type MenuButton = Schemas["MenuButton"];
 type TextKey = keyof Schemas["Texts"];
 
 const TAB_ICONS = { connect: PlugZap, menu: LayoutList, notify: Bell, infra: Network, broadcast: Megaphone } as const;
-
-function useTelegram() {
-  return useQuery({
-    queryKey: qk.telegram,
-    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram", { signal })),
-    // A broadcast in progress moves every second; otherwise little changes.
-    refetchInterval: (q) => (q.state.data?.broadcast?.active ? 2_000 : 10_000),
-  });
-}
 
 function usePatchTelegram() {
   const qc = useQueryClient();
@@ -304,7 +296,7 @@ function BackupCard() {
   // While a backup is being made in the background, its end is looked for every few seconds.
   const q = useQuery({
     queryKey: ["telegram-backup"],
-    queryFn: () => unwrap(api.GET("/api/v1/telegram/backup", {})),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram/backup", { signal })),
     refetchInterval: (query) => (query.state.data?.sending ? 3000 : false),
   });
   const [password, setPassword] = useState("");
@@ -326,8 +318,7 @@ function BackupCard() {
     setShown(true);
   };
   const fail = (e: unknown) => {
-    if (e instanceof ApiError && Object.keys(e.fields).length) setError(Object.values(e.fields)[0] ?? "");
-    else toast.error(errorText(e));
+    onFormError(e, toast, (fields) => setError(Object.values(fields)[0] ?? ""));
   };
   const patch = useMutation({
     mutationFn: (body: { enabled?: boolean; hour?: number; password?: string }) => unwrap(api.PATCH("/api/v1/telegram/backup", { body })),

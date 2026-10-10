@@ -109,7 +109,7 @@ func (h *handlers) previewTelegram(_ context.Context, in *telegramPreviewInput) 
 	vars := make(map[string]string, len(in.Body.Vars))
 	for k, v := range in.Body.Vars {
 		if len(k) > 20 || utf8.RuneCountInString(v) > 200 {
-			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.vars", Message: "tg_text"})
+			return nil, fieldErr("body.vars", "tg_text")
 		}
 		vars[k] = v
 	}
@@ -254,10 +254,6 @@ func cutToken(t string) (id, secret string, ok bool) {
 	return m[1], m[2], true
 }
 
-func tgFieldErr(field, code string) error {
-	return huma.Error422UnprocessableEntity(code, &huma.ErrorDetail{Location: "body." + field, Message: code})
-}
-
 func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (*telegramOutput, error) {
 	if h.d.Telegram == nil {
 		return nil, huma.Error503ServiceUnavailable("bot_unavailable")
@@ -286,16 +282,16 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 			details["token"] = "removed"
 		} else {
 			if _, _, ok := cutToken(token); !ok {
-				return nil, tgFieldErr("token", "tg_token_format")
+				return nil, fieldErr("body.token", "tg_token_format")
 			}
 			// Through the route as it will be: a new route is proven by the token's check.
 			me, err := h.d.Telegram.CheckTokenVia(ctx, token, route)
 			var ae *tgbot.APIError
 			switch {
 			case errors.As(err, &ae) && (ae.Code == 401 || ae.Code == 404):
-				return nil, tgFieldErr("token", "tg_token_invalid")
+				return nil, fieldErr("body.token", "tg_token_invalid")
 			case err != nil && b.Route != nil && route.Mode != tgbot.RouteDirect:
-				return nil, tgFieldErr("route", "tg_route_unreachable")
+				return nil, fieldErr("body.route", "tg_route_unreachable")
 			case err != nil:
 				return nil, huma.Error502BadGateway("tg_unreachable")
 			}
@@ -305,12 +301,12 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 	}
 	if b.Route != nil && route.Mode != tgbot.RouteDirect && bot == nil {
 		if err := h.d.Telegram.CheckRoute(ctx, route, token); err != nil {
-			return nil, tgFieldErr("route", "tg_route_unreachable")
+			return nil, fieldErr("body.route", "tg_route_unreachable")
 		}
 	}
 	if b.Config != nil {
 		if err := b.Config.Validate(); err != nil {
-			return nil, tgFieldErr("config", err.Error())
+			return nil, fieldErr("body.config", err.Error())
 		}
 		details["config"] = true
 	}
@@ -318,7 +314,7 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 		details["infrastructure"] = true
 	}
 	if b.Enabled != nil && *b.Enabled && token == "" {
-		return nil, tgFieldErr("enabled", "tg_no_token")
+		return nil, fieldErr("body.enabled", "tg_no_token")
 	}
 
 	// One transaction: a token saved without the route that reaches it, or a route without
@@ -335,7 +331,7 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 			}
 			merged := b.Infrastructure.Merge(current)
 			if err := merged.Validate(); err != nil {
-				return tgFieldErr("infrastructure", err.Error())
+				return fieldErr("body.infrastructure", err.Error())
 			}
 			infrastructure = &merged
 		}
@@ -344,7 +340,7 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 			if cur, err := set.String(ctx, tgbot.KeyToken); err != nil {
 				return err
 			} else if cur == "" {
-				return tgFieldErr("enabled", "tg_no_token")
+				return fieldErr("body.enabled", "tg_no_token")
 			}
 		}
 		if b.Route != nil {
@@ -431,13 +427,13 @@ func (h *handlers) nextRoute(ctx context.Context, r tgbot.Route, mode string, no
 		n, err := h.d.Store.Q.GetNode(ctx, nodeID)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return r, tgFieldErr("route", "tg_route_node_missing")
+			return r, fieldErr("body.route", "tg_route_node_missing")
 		case err != nil:
 			h.d.Log.Warn("telegram: the route's node not read", "node", nodeID, "err", err)
 			return r, err
 		case n.Address == "":
 			// The panel's own node shares its server, and with it the block.
-			return r, tgFieldErr("route", "tg_route_node")
+			return r, fieldErr("body.route", "tg_route_node")
 		}
 		r.NodeID = n.ID
 		details["route"], details["node"] = mode, n.Name
@@ -447,10 +443,10 @@ func (h *handlers) nextRoute(ctx context.Context, r tgbot.Route, mode string, no
 		}
 		u, err := tgbot.ParseProxy(r.Proxy)
 		if err != nil {
-			return r, tgFieldErr("route", "tg_proxy_invalid")
+			return r, fieldErr("body.route", "tg_proxy_invalid")
 		}
 		if !h.proxyHostOK(ctx, u.Hostname()) {
-			return r, tgFieldErr("route", "tg_proxy_private")
+			return r, fieldErr("body.route", "tg_proxy_private")
 		}
 		details["route"], details["proxy"] = mode, tgbot.ProxyHost(r.Proxy)
 	default:

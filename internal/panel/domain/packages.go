@@ -72,7 +72,7 @@ func (s *Packages) Create(ctx context.Context, in PackageInput) (db.TrafficPacka
 	// No invariant across rows (a pool deleted after the check fails on its foreign key):
 	// READ COMMITTED.
 	err := s.st.TxRC(ctx, func(q *db.Queries) error {
-		if err := poolExists(ctx, q, in.PoolID); err != nil {
+		if err := PoolExists(ctx, q, in.PoolID); err != nil {
 			return err
 		}
 		var err error
@@ -91,7 +91,7 @@ func (s *Packages) Update(ctx context.Context, id int64, in PackageInput) (db.Tr
 	}
 	var p db.TrafficPackage
 	err := s.st.TxRC(ctx, func(q *db.Queries) error {
-		if err := poolExists(ctx, q, in.PoolID); err != nil {
+		if err := PoolExists(ctx, q, in.PoolID); err != nil {
 			return err
 		}
 		var err error
@@ -176,4 +176,12 @@ func Flag(b bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+// NullInt is an optional number as the database keeps it: NULL for nil.
+func NullInt(p *int64) sql.NullInt64 {
+	if p == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *p, Valid: true}
 }

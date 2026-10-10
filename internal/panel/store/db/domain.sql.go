@@ -1001,6 +1001,51 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const listUsersToReset = `-- name: ListUsersToReset :many
+SELECT id, period_start, reset_strategy, billing_day, period_days FROM users
+WHERE reset_strategy = 'month_start'
+   OR reset_strategy = 'period' AND period_start + GREATEST(period_days, 1) * 86400 <= $1::bigint
+`
+
+type ListUsersToResetRow struct {
+	ID            int64
+	PeriodStart   int64
+	ResetStrategy string
+	BillingDay    sql.NullInt64
+	PeriodDays    int64
+}
+
+// The users whose traffic period may be over: every monthly one (its day depends on the
+// billing day, checked in Go), and the periodic ones whose period has run out.
+func (q *Queries) ListUsersToReset(ctx context.Context, now int64) ([]ListUsersToResetRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUsersToReset, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersToResetRow{}
+	for rows.Next() {
+		var i ListUsersToResetRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PeriodStart,
+			&i.ResetStrategy,
+			&i.BillingDay,
+			&i.PeriodDays,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pruneDevices = `-- name: PruneDevices :exec
 DELETE FROM devices WHERE last_seen < $1
 `

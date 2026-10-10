@@ -410,30 +410,12 @@ func (t *Tuner) recordReach(ctx context.Context, w *world, inbounds []db.Inbound
 	for _, in := range inbounds {
 		ids[in.Name] = in.ID
 	}
-	// Blind upserts: READ COMMITTED.
-	err := t.st.TxRC(ctx, func(q *db.Queries) error {
-		for _, c := range act.Clients {
-			if _, known := w.users[c.Slot]; !known {
-				continue
-			}
-			for name, at := range c.Seen {
-				id, ok := ids[name]
-				if !ok || at-w.reach[c.Slot][id] < int64(reachStep/time.Second) {
-					continue
-				}
-				if err := q.UpsertInboundReach(ctx, db.UpsertInboundReachParams{Slot: c.Slot, InboundID: id, At: at}); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.log.Error("autotune: record reach", "err", err)
-		return
+	// What is new enough to write down, each (slot, inbound) once with its latest time.
+	type key struct {
+		slot string
+		id   int64
 	}
-	// Publish the cache only after commit: a retry (deadlock) must still write
-	// every reach observation from the rolled-back attempt.
+	due := map[key]int64{}
 	for _, c := range act.Clients {
 		if _, known := w.users[c.Slot]; !known {
 			continue
@@ -443,11 +425,29 @@ func (t *Tuner) recordReach(ctx context.Context, w *world, inbounds []db.Inbound
 			if !ok || at-w.reach[c.Slot][id] < int64(reachStep/time.Second) {
 				continue
 			}
-			if w.reach[c.Slot] == nil {
-				w.reach[c.Slot] = map[int64]int64{}
-			}
-			w.reach[c.Slot][id] = at
+			k := key{c.Slot, id}
+			due[k] = max(due[k], at)
 		}
+	}
+	if len(due) == 0 {
+		return
+	}
+	p := db.UpsertInboundReachesParams{}
+	for k, at := range due {
+		p.Slots, p.InboundIds, p.Ats = append(p.Slots, k.slot), append(p.InboundIds, k.id), append(p.Ats, at)
+	}
+	// One blind upsert for the whole node: READ COMMITTED.
+	err := t.st.TxRC(ctx, func(q *db.Queries) error { return q.UpsertInboundReaches(ctx, p) })
+	if err != nil {
+		t.log.Error("autotune: record reach", "err", err)
+		return
+	}
+	// The cache only after the commit: a retry must still write every reach.
+	for k, at := range due {
+		if w.reach[k.slot] == nil {
+			w.reach[k.slot] = map[int64]int64{}
+		}
+		w.reach[k.slot][k.id] = at
 	}
 }
 

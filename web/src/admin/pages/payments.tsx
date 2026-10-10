@@ -6,11 +6,11 @@ import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, usePaymentSettings, useTariffs } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { QueryBoundary, StaleNotice } from "../../components/query";
+import { QueryBoundary } from "../../components/query";
 import { Switch, SwitchRow } from "../../components/switch";
 import { FormActions } from "../../components/layout";
 import { Tabs } from "../../components/tabs";
-import { Button, EmptyState, ErrorState, Field, PageHeader, Pill, Skeleton, Spinner } from "../../components/ui";
+import { Button, EmptyState, Field, PageHeader, Pill, Skeleton, Spinner } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
 import { useDraft } from "../../lib/draft";
 import { dateShort, days, money, num, time } from "../../lib/format";
@@ -150,8 +150,8 @@ function History() {
   const list = useInfiniteQuery({
     queryKey: [...qk.payments, status, provider],
     initialPageParam: 0,
-    queryFn: ({ pageParam }) =>
-      unwrap(api.GET("/api/v1/payments", { params: { query: { status: status || undefined, provider: provider || undefined, before: pageParam || undefined, limit: 50 } } })),
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(api.GET("/api/v1/payments", { params: { query: { status: status || undefined, provider: provider || undefined, before: pageParam || undefined, limit: 50 } }, signal })),
     getNextPageParam: (last) => (last.items.length === 50 ? last.items[last.items.length - 1]!.id : undefined),
     placeholderData: keepPreviousData,
   });
@@ -194,31 +194,35 @@ function History() {
           ))}
         </select>
       </div>
-      {list.isError && list.data ? <StaleNotice onRetry={() => void list.refetch()} retrying={list.isFetching} /> : null}
-      {list.isPending ? (
-        <div className="flex flex-col gap-2">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} style={{ height: 56 }} />
-          ))}
-        </div>
-      ) : !list.data ? (
-        <ErrorState text={errorText(list.error)} onRetry={() => void list.refetch()} />
-      ) : items.length === 0 ? (
-        <EmptyState title={t("payments.empty")} text={status || provider ? t("payments.emptyFiltered") : t("payments.emptyText")} search={!!(status || provider)} />
-      ) : (
-        <>
-          <ul className="row-list" aria-busy={list.isFetching}>
-            {items.map((p) => (
-              <PaymentRow key={p.id} p={p} provider={providerName(p.provider, addons)} onRefund={() => setRefund(p)} />
+      <QueryBoundary
+        query={list}
+        pending={
+          <div className="flex flex-col gap-2">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} style={{ height: 56 }} />
             ))}
-          </ul>
-          {list.hasNextPage ? (
-            <Button className="mt-3" size="sm" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
-              {t("payments.more")}
-            </Button>
-          ) : null}
-        </>
-      )}
+          </div>
+        }
+      >
+        {() =>
+          items.length === 0 ? (
+            <EmptyState title={t("payments.empty")} text={status || provider ? t("payments.emptyFiltered") : t("payments.emptyText")} search={!!(status || provider)} />
+          ) : (
+            <>
+              <ul className="row-list" aria-busy={list.isFetching}>
+                {items.map((p) => (
+                  <PaymentRow key={p.id} p={p} provider={providerName(p.provider, addons)} onRefund={() => setRefund(p)} />
+                ))}
+              </ul>
+              {list.hasNextPage ? (
+                <Button className="mt-3" size="sm" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                  {t("payments.more")}
+                </Button>
+              ) : null}
+            </>
+          )
+        }
+      </QueryBoundary>
       <Confirm
         open={!!refund}
         onOpenChange={(v) => !v && setRefund(null)}
@@ -258,7 +262,7 @@ function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; o
           <div className="mt-1 text-xs text-[var(--berry-600)]">{t(p.status === "failed" ? "payments.invoiceFailed" : "payments.notApplied", { error: paymentError(p.error) })}</div>
         ) : null}
       </div>
-      {p.provider === "stars" && p.status === "applied" ? (
+      {p.provider === "stars" && (p.status === "applied" || p.status === "paid") ? (
         <Button size="sm" variant="ghost" onClick={onRefund}>
           <Undo2 size={16} aria-hidden /> {t("payments.refund")}
         </Button>

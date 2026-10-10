@@ -13,7 +13,7 @@ import { AcmeAttempts, AcmeProblem, caName, CertCheckDrawer } from "../../../com
 import { getLocale, t, tMaybe } from "../../../i18n";
 import { useCopy } from "../../../lib/copy";
 import { CertDrawer, certUntil, type CertInfo } from "../../../components/cert-drawer";
-import { fieldErrors } from "../../../lib/fields";
+import { fieldErrors, onFormError } from "../../../lib/fields";
 import { ago } from "../../../lib/format";
 
 export function AccessCard({ s }: { s: Schemas["SettingsView"] }) {
@@ -199,7 +199,7 @@ function AuthorityForm({ s, focus }: { s: Schemas["SettingsView"]; focus: number
       window.setTimeout(() => void qc.invalidateQueries({ queryKey: qk.settings }), 15_000);
     },
     onError: (e) => {
-      if (!(e instanceof ApiError && Object.keys(e.fields).length)) toast.error(errorText(e));
+      onFormError(e, toast);
     },
   });
   const errors = fieldErrors(save.error);

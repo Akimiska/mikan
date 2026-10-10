@@ -11,6 +11,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/textutil"
 )
 
 // Devices binds a subscription to the devices that use it, against resale: a device
@@ -67,10 +68,7 @@ func clip(s string, n int) string {
 		}
 		return r
 	}, strings.TrimSpace(s))
-	if len([]rune(s)) > n {
-		s = string([]rune(s)[:n])
-	}
-	return s
+	return textutil.ClipRunes(s, n)
 }
 
 // Bind returns the slot whose keys a device fetching the subscription gets. A new

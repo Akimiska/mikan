@@ -134,6 +134,8 @@ func TestAddonsMarketplace(t *testing.T) {
 		t.Fatalf("refused keys: %d %s", resp.StatusCode, body)
 	}
 	must(settings.Set(t.Context(), settings.New(h.st.Q), settings.KeyPublicHost, "203.0.113.10"))
+	// The webhook address is the panel's: no address, no webhook, and a port is part of it.
+	must(settings.Set(t.Context(), settings.New(h.st.Q), settings.KeyPanelPort, 21355))
 	if resp, body := h.do(http.MethodPatch, "/"+adminPath+"/api/v1/payments/settings", map[string]any{"enabled": true}, csrf); resp.StatusCode != http.StatusOK {
 		t.Fatalf("selling on: %d %s", resp.StatusCode, body)
 	}

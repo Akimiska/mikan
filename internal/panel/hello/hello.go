@@ -15,6 +15,7 @@ import (
 
 	"mikan/internal/nodehello"
 	"mikan/internal/nodetls"
+	"mikan/internal/panel/auth"
 )
 
 // Node is a node of the panel as a hello needs it.
@@ -117,19 +118,28 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // allow counts a request of ip and says whether it is within the limit. Every request
-// counts, a stranger's too.
+// counts, a stranger's too. An IPv6 client counts as its /64, and a full table makes room
+// by forgetting the client heard from longest ago: strangers cannot fill it to shut the
+// nodes' hellos out.
 func (h *Handler) allow(ip string, now time.Time) bool {
+	ip = auth.ClientKey(ip)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	cut := now.Add(-perWindow)
-	if len(h.hits) >= maxIPs {
+	if _, known := h.hits[ip]; !known && len(h.hits) >= maxIPs {
 		for k, ts := range h.hits {
 			if len(ts) == 0 || ts[len(ts)-1].Before(cut) {
 				delete(h.hits, k)
 			}
 		}
 		if len(h.hits) >= maxIPs {
-			return false
+			oldest, at := "", now
+			for k, ts := range h.hits {
+				if last := ts[len(ts)-1]; last.Before(at) {
+					oldest, at = k, last
+				}
+			}
+			delete(h.hits, oldest)
 		}
 	}
 	kept := h.hits[ip][:0]

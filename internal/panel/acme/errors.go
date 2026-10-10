@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -149,7 +150,7 @@ func problemCode(pd *legoacme.ProblemDetails, own []netip.Addr, registering bool
 			switch {
 			case dnscheck.Cloudflare(ip):
 				where = "cloudflare"
-			case len(own) > 0 && !containsAddr(own, ip):
+			case len(own) > 0 && !slices.Contains(own, ip):
 				where = "elsewhere"
 			}
 		}
@@ -182,13 +183,4 @@ func problemCode(pd *legoacme.ProblemDetails, own []netip.Addr, registering bool
 		return CodePort80Foreign
 	}
 	return CodeUnknown
-}
-
-func containsAddr(list []netip.Addr, a netip.Addr) bool {
-	for _, x := range list {
-		if x == a {
-			return true
-		}
-	}
-	return false
 }

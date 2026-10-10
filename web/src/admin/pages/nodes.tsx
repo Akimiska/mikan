@@ -1,12 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Activity, ArrowDown, ArrowUp, ArrowUpCircle, ArrowUpDown, Check, Cloud, Copy, Gauge, KeyRound, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw, ShieldCheck, Stethoscope, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk, useNodes } from "../../api/hooks";
+import { onFormError } from "../../lib/fields";
+import { qk, useNodes, useSpeedTests } from "../../api/hooks";
 import { AcmeAttempts, AcmeProblem, caName } from "../../components/acme";
 import { CertDrawer, certUntil } from "../../components/cert-drawer";
-import { Confirm, Drawer } from "../../components/overlay";
+import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
 import { Bar, Button, EmptyState, Field, PageHeader, Pill, Skeleton } from "../../components/ui";
@@ -586,8 +587,7 @@ function AddNodeDrawer({ open, onOpenChange, onJoined }: { open: boolean; onOpen
       onJoined({ id: r.node.id, name: nodeLabel(r.node), key: r.key, command: r.command });
     },
     onError: (e) => {
-      if (e instanceof ApiError && Object.keys(e.fields).length) setErrors(e.fields);
-      else toast.error(errorText(e));
+      onFormError(e, toast, setErrors);
     },
   });
   const submit = (e: FormEvent) => {
@@ -610,14 +610,9 @@ function AddNodeDrawer({ open, onOpenChange, onJoined }: { open: boolean; onOpen
       title={t("nodes.newTitle")}
       meta={t("nodes.newMeta")}
       footer={
-        <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="primary" type="submit" form="add-node" loading={create.isPending}>
-            {t("nodes.addSubmit")}
-          </Button>
-        </>
+        <DrawerFooter form="add-node" onCancel={() => onOpenChange(false)} loading={create.isPending}>
+          {t("nodes.addSubmit")}
+        </DrawerFooter>
       }
     >
       <form id="add-node" onSubmit={submit} className="pt-5" noValidate>
@@ -687,11 +682,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
     }
   }, [node]);
   // The last speed test of the node, to fill the channel in with one click.
-  const tests = useQuery({
-    queryKey: qk.speedTests(node?.id ?? 0),
-    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/nodes/{id}/speedtests", { params: { path: { id: node!.id }, query: { limit: 30 } }, signal })),
-    enabled: !!node,
-  });
+  const tests = useSpeedTests(node?.id);
   const measured = tests.data?.[0]?.down_bps ? Math.floor(tests.data[0].down_bps / 1_000_000) : 0;
   const save = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Schemas["PatchNodeInputBody"] }) => unwrap(api.PATCH("/api/v1/nodes/{id}", { params: { path: { id } }, body })),
@@ -704,8 +695,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
       void qc.invalidateQueries({ queryKey: qk.inbounds });
     },
     onError: (e) => {
-      if (e instanceof ApiError && Object.keys(e.fields).length) setErrors(e.fields);
-      else toast.error(errorText(e));
+      onFormError(e, toast, setErrors);
     },
   });
   const submit = (e: FormEvent) => {
@@ -737,14 +727,9 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
       title={node ? nodeLabel(node) : ""}
       meta={node?.local ? t("nodes.kindLocal") : t("nodes.kindRemote")}
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="primary" type="submit" form="edit-node" loading={save.isPending}>
-            {t("common.save")}
-          </Button>
-        </>
+        <DrawerFooter form="edit-node" onCancel={onClose} loading={save.isPending}>
+          {t("common.save")}
+        </DrawerFooter>
       }
     >
       <form id="edit-node" onSubmit={submit} className="pt-5" noValidate>
@@ -779,7 +764,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
           </div>
           <Field label={t("nodes.channel")} htmlFor="e-channel" hint={form.fair_share ? t("nodes.channelHint") : t("nodes.channelHintOff")} error={errors.channel_mbps}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="input-unit max-w-[180px] flex-1">
+              <label className="input-unit max-w-[180px] flex-1">
                 <input
                   id="e-channel"
                   className="input"
@@ -792,7 +777,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
                   aria-invalid={!!errors.channel_mbps}
                 />
                 <span>{t("tariffs.mbps")}</span>
-              </span>
+              </label>
               {measured > 0 && String(measured) !== form.channel ? (
                 <Button size="sm" variant="ghost" type="button" onClick={() => setForm((f) => ({ ...f, channel: String(measured) }))}>
                   {t("nodes.channelFromTest", { n: measured })}

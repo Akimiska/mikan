@@ -67,9 +67,6 @@ INSERT INTO promo_redemptions
 (promo_id,user_id,tg_id,payment_id,status,redeemed_at,expires_at,days,bytes,discount_amount,original_amount,final_amount,currency,note)
 VALUES (sqlc.arg(promo_id),sqlc.narg(user_id),sqlc.arg(tg_id),sqlc.narg(payment_id),sqlc.arg(status),sqlc.arg(redeemed_at),sqlc.narg(expires_at),sqlc.arg(days),sqlc.arg(bytes),sqlc.arg(discount_amount),sqlc.arg(original_amount),sqlc.arg(final_amount),sqlc.arg(currency),sqlc.arg(note)) RETURNING *;
 
--- name: GetPromoRedemption :one
-SELECT * FROM promo_redemptions WHERE id=sqlc.arg(id);
-
 -- name: GetPromoRedemptionByPayment :one
 SELECT * FROM promo_redemptions WHERE payment_id=sqlc.arg(payment_id);
 

@@ -46,10 +46,6 @@ UPDATE user_pools SET traffic_limit = NULL, excluded = false WHERE user_id = $1;
 INSERT INTO user_pools (user_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4)
 ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit, excluded = excluded.excluded;
 
--- name: AddUserPoolTraffic :exec
-INSERT INTO user_pools (user_id, pool_id, used_up, used_down) VALUES ($1, $2, $3, $4)
-ON CONFLICT (user_id, pool_id) DO UPDATE SET used_up = user_pools.used_up + excluded.used_up, used_down = user_pools.used_down + excluded.used_down;
-
 -- name: ResetUserPools :exec
 -- Pools reset with the main traffic: a new period, a renewal, the admin's reset.
 UPDATE user_pools SET used_up = 0, used_down = 0 WHERE user_id = $1;

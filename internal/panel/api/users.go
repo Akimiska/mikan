@@ -158,19 +158,6 @@ func (e userEnv) liveIPs(slots []string) []string {
 	return out
 }
 
-// allUserSlots maps every user to the names of all their slots.
-func (h *handlers) allUserSlots(ctx context.Context) (map[int64][]string, error) {
-	rows, err := h.d.Store.Q.ListSlotUsers(ctx)
-	if err != nil {
-		return nil, err
-	}
-	m := map[int64][]string{}
-	for _, r := range rows {
-		m[r.UserID] = append(m[r.UserID], r.SlotName)
-	}
-	return m, nil
-}
-
 // userSlots maps the users of ids to the names of all their slots: for a list's page.
 func (h *handlers) userSlots(ctx context.Context, ids []int64) (map[int64][]string, error) {
 	rows, err := h.d.Store.Q.UserSlotsOf(ctx, ids)
@@ -342,7 +329,7 @@ func mapDomainErr(err error) error {
 	}
 	var fe *domain.FieldError
 	if errors.As(err, &fe) {
-		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body." + fe.Field, Message: fe.Code})
+		return fieldErr("body."+fe.Field, fe.Code)
 	}
 	return err
 }
@@ -362,7 +349,7 @@ func parseFolderFilter(s string) (folderFilter, error) {
 	}
 	id, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || id < 1 {
-		return folderFilter{}, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "query.folder", Message: "bad_folder", Value: s})
+		return folderFilter{}, fieldErrValue("query.folder", "bad_folder", s)
 	}
 	return folderFilter{id: sql.NullInt64{Int64: id, Valid: true}}, nil
 }
@@ -872,4 +859,15 @@ func (h *handlers) userDevices(ctx context.Context, in *userIDInput) (*devicesOu
 		out.Body = append(out.Body, DeviceView{IP: d.Ip, FirstSeen: time.Unix(d.FirstSeen, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC(), Online: slices.Contains(live, d.Ip)})
 	}
 	return out, nil
+}
+
+// requireUser is nil when the user exists and a 404 not_found when it does not: the check
+// the per-user endpoints (pools, grants, torrent bans) make before they touch anything.
+func requireUser(ctx context.Context, q *db.Queries, id int64) error {
+	if _, err := q.GetUser(ctx, id); errors.Is(err, sql.ErrNoRows) {
+		return huma.Error404NotFound("not_found")
+	} else if err != nil {
+		return err
+	}
+	return nil
 }

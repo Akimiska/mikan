@@ -57,7 +57,13 @@ type noticeState struct {
 	queued  bool      // in the outbox
 	retryAt time.Time // delivery failed: not again before this
 	sent    bool      // delivered, but the row could not be written
+	// known: the database says it was delivered; not asked again before this, so a user
+	// who stays in a notice's window is not looked up every round.
+	known time.Time
 }
+
+// noticeKnown is how long a delivered notice found in the database is remembered.
+const noticeKnown = 24 * time.Hour
 
 // noticeRetry is how long a notice waits after a failed delivery.
 const noticeRetry = 5 * time.Minute
@@ -71,7 +77,7 @@ func noticeKey(userID int64, n notice) string {
 func (b *Bot) claimNotice(ctx context.Context, userID int64, n notice, now time.Time) (string, bool) {
 	key := noticeKey(userID, n)
 	b.noticeMu.Lock()
-	if st := b.notices[key]; st != nil && (st.queued || st.sent || now.Before(st.retryAt)) {
+	if st := b.notices[key]; st != nil && (st.queued || st.sent || now.Before(st.retryAt) || now.Before(st.known)) {
 		b.noticeMu.Unlock()
 		return "", false
 	}
@@ -84,7 +90,11 @@ func (b *Bot) claimNotice(ctx context.Context, userID int64, n notice, now time.
 			b.d.Log.Error("telegram: notices", "err", err)
 		}
 		b.noticeMu.Lock()
-		delete(b.notices, key)
+		if sent {
+			b.notices[key] = &noticeState{known: now.Add(noticeKnown)}
+		} else {
+			delete(b.notices, key)
+		}
 		b.noticeMu.Unlock()
 		return "", false
 	}
@@ -133,7 +143,7 @@ func (b *Bot) forgetNotices(now time.Time) {
 	b.noticeMu.Lock()
 	defer b.noticeMu.Unlock()
 	for k, st := range b.notices {
-		if !st.queued && !st.sent && !now.Before(st.retryAt) {
+		if !st.queued && !st.sent && !now.Before(st.retryAt) && !now.Before(st.known) {
 			delete(b.notices, k)
 		}
 	}

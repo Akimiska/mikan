@@ -396,7 +396,7 @@ func (s *Users) Grant(ctx context.Context, userID int64, in GrantInput) (db.Traf
 		if err != nil {
 			return err
 		}
-		if err := poolExists(ctx, q, in.PoolID); err != nil {
+		if err := PoolExists(ctx, q, in.PoolID); err != nil {
 			return err
 		}
 		g, err = GrantTx(ctx, q, u, GrantSpec{PoolID: in.PoolID, Bytes: in.Bytes, Lifetime: in.Lifetime, Days: in.Days, Source: SourceAdmin, Note: in.Note}, s.now())
@@ -409,8 +409,8 @@ func (s *Users) Grant(ctx context.Context, userID int64, in GrantInput) (db.Traf
 	return g, nil
 }
 
-// poolExists: id 0 (the main traffic) or a pool that exists.
-func poolExists(ctx context.Context, q *db.Queries, id int64) error {
+// PoolExists: id 0 (the main traffic) or a pool that exists.
+func PoolExists(ctx context.Context, q *db.Queries, id int64) error {
 	if id == 0 {
 		return nil
 	}

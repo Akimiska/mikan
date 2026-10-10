@@ -238,7 +238,7 @@ func TestPanelOrderOnItsOwnPort(t *testing.T) {
 	if !done || st.Kind != "acme" || st.CA != CALetsEncrypt || st.Error != "" || m.Public() == nil {
 		t.Fatalf("renew now: %+v %v", st, done)
 	}
-	if m.challenge.Listening() {
+	if m.challenge.Bound() != "" {
 		t.Fatal("port 80 is still held after the order")
 	}
 }

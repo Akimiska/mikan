@@ -63,7 +63,7 @@ export function PageShell({ config, brand, logo, right, children }: { config: Pa
   );
 }
 
-export type BlocksProps = {
+type BlocksProps = {
   config: PageConfig;
   info: Info;
   subURL: string;

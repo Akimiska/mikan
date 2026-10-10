@@ -4,7 +4,6 @@
 //! after an install or a join, and again by `mikan doctor`.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -12,6 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde::Deserialize;
 
+use crate::panelfs::Dir;
 use crate::system::Level;
 use crate::{DIR, clock};
 
@@ -66,12 +66,34 @@ impl Hello {
     }
 }
 
+/// The node's container writes the file: what it says is printed only without control
+/// characters, so it cannot move the cursor or retitle the admin's terminal.
 pub fn parse(text: &str) -> Option<Hello> {
-    serde_json::from_str(text).ok()
+    let mut h: Hello = serde_json::from_str(text).ok()?;
+    for f in [&mut h.code, &mut h.seen_ip, &mut h.host, &mut h.error].into_iter().flatten() {
+        *f = printable(f);
+    }
+    for v in h.params.values_mut() {
+        if let serde_json::Value::String(s) = v {
+            *s = printable(s);
+        }
+    }
+    Some(h)
 }
 
+fn printable(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control() || *c == '\n').collect()
+}
+
+/// The largest hello.json read: a few hundred bytes in practice.
+const MAX_FILE: u64 = 64 << 10;
+
+/// Reads the file as root reads what an unprivileged container wrote: a link, a FIFO or a
+/// huge file is refused, not followed, waited on or read whole.
 fn read(path: &Path) -> Option<Hello> {
-    parse(&fs::read_to_string(path).ok()?)
+    let dir = Dir::open(path.parent()?, "", false).ok()??;
+    let data = dir.read(path.file_name()?.to_str()?, MAX_FILE).ok()??;
+    parse(std::str::from_utf8(&data).ok()?)
 }
 
 /// The last report in the node's data directory, whenever it was made.
@@ -192,9 +214,18 @@ pub fn render(lines: &[(Level, String)]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::time::UNIX_EPOCH;
 
     const TIMEOUT: &str = r#"{"at":"2026-10-10T12:01:00Z","started":"2026-10-10T12:00:00Z","attempt":2,"final":true,"ok":false,"code":"timeout","params":{"port":"31234","host":"203.0.113.10"},"seen_ip":"203.0.113.5","host":"203.0.113.10","error":"dial tcp 203.0.113.10:31234: i/o timeout"}"#;
+
+    // What the container wrote is printed without control characters.
+    #[test]
+    fn control_characters_are_dropped() {
+        let h = parse(r#"{"at":"a","started":"s","final":true,"ok":false,"code":"x","host":"evil\u001b]0;pwned\u0007.example","error":"one\u001b[2Jtwo\nthree"}"#).unwrap();
+        assert_eq!(h.host.as_deref(), Some("evil]0;pwned.example"));
+        assert_eq!(h.error.as_deref(), Some("one[2Jtwo\nthree"));
+    }
 
     fn hello(json: &str) -> Hello {
         parse(json).unwrap_or_else(|| panic!("{json}"))

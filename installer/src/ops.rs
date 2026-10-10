@@ -6,7 +6,7 @@ use std::fs;
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::IpAddr;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -225,11 +225,12 @@ pub fn status() -> Result<()> {
     let version = install.version();
     crate::out(&format!("mikan {version}, {}", if install.node { "node" } else { "panel" }));
     let mut wrong = false;
-    for s in docker::services()? {
+    let services = docker::services()?;
+    for s in &services {
         crate::out(&format!("  {:<6} {}", s.name, s.status));
         wrong |= s.state != "running";
     }
-    for s in docker::stats() {
+    for s in docker::stats(&services) {
         crate::out(&format!("  {:<16} CPU {:>6}  memory {}", s.name, s.cpu, s.mem));
     }
     if let Some(p) = install.node_port() {
@@ -359,7 +360,7 @@ pub fn uninstall() -> Result<bool> {
     addon::down();
     host::remove_units();
     if fs::remove_file(host::SYSCTL).is_ok() {
-        let _ = Command::new("sysctl").arg("--system").stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = system::succeeds("sysctl", &["--system"]);
     }
     let _ = fs::remove_file(host::BIN);
     Ok(panel)

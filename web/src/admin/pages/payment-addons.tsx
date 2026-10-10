@@ -28,7 +28,7 @@ export function useAddons() {
 }
 
 /** A text the adapter gives per language, in the panel's. */
-export function localized(m: Record<string, string> | undefined, fallback: string): string {
+function localized(m: Record<string, string> | undefined, fallback: string): string {
   if (!m) return fallback;
   return m[getLocale()] || m.en || Object.values(m)[0] || fallback;
 }
@@ -278,7 +278,7 @@ function CatalogRow({ e, busy, loading, onInstall }: { e: Entry; busy: boolean; 
   );
 }
 
-export function Webhook({ label, url }: { label: string; url: string }) {
+function Webhook({ label, url }: { label: string; url: string }) {
   const copy = useCopy();
   if (!url) return <p className="text-xs text-[var(--ink-500)]">{t("payments.webhookNoHost")}</p>;
   return (

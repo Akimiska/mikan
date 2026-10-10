@@ -79,6 +79,10 @@ type Syncer struct {
 	// Only the torrent loop touches this: the blocker's state last recorded for the node
 	// ("0", "1"; "" until read).
 	torrentOn string
+	// The stored torrent position, once read or written: only the torrent loop writes it,
+	// so it is not asked of PostgreSQL every five seconds.
+	torrentAt    counterPos
+	torrentKnown bool
 
 	health atomic.Pointer[HealthView]
 	online atomic.Pointer[map[string]nodeapi.Online]
@@ -200,13 +204,7 @@ func every(ctx context.Context, d time.Duration, fn func(context.Context)) {
 	}
 }
 
-// desired builds the node's full state from the database.
-func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
-	st, _, err := s.desiredPin(ctx)
-	return st, err
-}
-
-// desiredPin is desired with the pin of the certificate in it.
+// desiredPin builds the node's full state from the database, with the pin of the certificate in it.
 func (s *Syncer) desiredPin(ctx context.Context) (st nodeapi.DesiredState, pin string, err error) {
 	q := s.m.st.Q
 	n, err := q.GetNode(ctx, s.id)

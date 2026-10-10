@@ -222,3 +222,32 @@ func TestHelloAnswerMustBeThePanels(t *testing.T) {
 		t.Fatalf("unreachable: %+v", r)
 	}
 }
+
+// Strangers cannot fill the table to shut the nodes' hellos out: an IPv6 network counts
+// once, and a full table forgets the client heard from longest ago.
+func TestHelloLimiterCannotBeFilled(t *testing.T) {
+	h := &Handler{hits: map[string][]time.Time{}}
+	now := time.Unix(1_800_000_000, 0)
+	for i := range maxIPs {
+		ip := netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}).String()
+		if !h.allow(ip, now.Add(time.Duration(i)*time.Millisecond)) {
+			t.Fatalf("stranger %d refused", i)
+		}
+	}
+	if !h.allow("203.0.113.9", now.Add(time.Second)) {
+		t.Fatal("a node was shut out by a full table")
+	}
+	if len(h.hits) > maxIPs {
+		t.Fatalf("the table grew to %d", len(h.hits))
+	}
+	if _, ok := h.hits["10.0.0.0"]; ok {
+		t.Fatal("the client heard from longest ago was kept")
+	}
+	// Addresses of one IPv6 network share an allowance.
+	for i := range perIP {
+		h.allow(netip.AddrFrom16([16]byte{0x20, 0x01, 0x0d, 0xb8, 15: byte(i + 1)}).String(), now.Add(2*time.Second))
+	}
+	if h.allow("2001:db8::ff", now.Add(2*time.Second)) {
+		t.Fatal("a new address of the same /64 got a fresh allowance")
+	}
+}

@@ -3,6 +3,7 @@ package tgbot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -263,7 +264,8 @@ func TestOffsetIsSavedAndPaymentsAreRetried(t *testing.T) {
 	}
 }
 
-// An update that never works is dropped after a few tries, and does not stop the bot.
+// An update that never works is dropped after a few tries (a Stars payment nothing saved
+// after many more), and does not stop the bot.
 func TestPoisonUpdateDoesNotStopTheBot(t *testing.T) {
 	updateRetryPause = time.Millisecond
 	t.Cleanup(func() { updateRetryPause = 2 * time.Second })
@@ -279,8 +281,30 @@ func TestPoisonUpdateDoesNotStopTheBot(t *testing.T) {
 	n := e.tg.count()
 	e.say(555, "привет")
 	e.tg.wait(t, n, "sendMessage")
-	if got := tries.Load(); got != maxUpdateTries {
-		t.Fatalf("tried %d times, want %d", got, maxUpdateTries)
+	if got := tries.Load(); got != maxPaymentTries {
+		t.Fatalf("tried %d times, want %d", got, maxPaymentTries)
+	}
+}
+
+// A payment saved with its charge but not applied is not offered again: the reconcile
+// pass finishes it.
+func TestRecordedPaymentIsNotRetried(t *testing.T) {
+	updateRetryPause = time.Millisecond
+	t.Cleanup(func() { updateRetryPause = 2 * time.Second })
+	var tries atomic.Int32
+	e := setup(t, func(e *env, d *Deps) {
+		d.stars = func(context.Context, int64, string, string, string, int64) error {
+			tries.Add(1)
+			return fmt.Errorf("%w: apply failed", billing.ErrRecorded)
+		}
+	})
+	e.tg.push(Update{Message: &Message{MessageID: 9, From: &User{ID: 555}, Chat: Chat{ID: 555, Type: "private"},
+		SuccessfulPayment: &SuccessfulPayment{Currency: "XTR", TotalAmount: 10, InvoicePayload: "p", ChargeID: "ch1"}}})
+	n := e.tg.count()
+	e.say(555, "привет")
+	e.tg.wait(t, n, "sendMessage")
+	if got := tries.Load(); got != 1 {
+		t.Fatalf("a saved payment was offered %d times", got)
 	}
 }
 

@@ -306,9 +306,14 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		// The node has no IPv6 on most VPS: with it on, apps first try IPv6 through the
 		// tunnel and wait for the node's "network unreachable" before falling back.
 		"ipv6": false, "unified-delay": true, "tcp-concurrent": true,
-		"dns":          dns,
-		"proxies":      proxies,
-		"proxy-groups": groups,
+		// find-process-mode: always — mihomo matches PROCESS-NAME rules (games/torrents
+		// → DIRECT). Without it those rules never fire, so e.g. Roblox is forced through
+		// the tunnel and its datacentre-IP block breaks the game. "strict" would break
+		// the match, so "always" like the legacy subscription.
+		"find-process-mode": "always",
+		"dns":               dns,
+		"proxies":           proxies,
+		"proxy-groups":      groups,
 	}
 	if r == RoutingRUDirect {
 		rules = append(rules, "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT")

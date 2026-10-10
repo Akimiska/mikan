@@ -2,8 +2,10 @@ package billing
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,6 +199,71 @@ func TestPaidTrialPaidTwice(t *testing.T) {
 	}
 	if links, err := e.st.Q.ListTgLinksOf(ctx, 916); err != nil || len(links) != 1 {
 		t.Fatalf("links %+v %v", links, err)
+	}
+}
+
+// Two trial invoices paid before either applies (two webhooks at once, or Stars while an
+// adapter's report is on its way): each sees the other paid. One of them still gives the
+// trial and only the other goes back: a paid trial is not refused for another trial
+// payment, TakeTrial decides between them.
+func TestPaidTrialBothPaidBeforeApply(t *testing.T) {
+	for _, together := range []bool{false, true} {
+		name := "one after the other"
+		if together {
+			name = "at once"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			ctx := context.Background()
+			e.priceTrial()
+			first, err := e.s.TrialInvoice(ctx, 918, Stars)
+			must(t, err)
+			e.now = e.now.Add(invoiceReuse + time.Minute)
+			second, err := e.s.TrialInvoice(ctx, 918, Stars)
+			must(t, err)
+			pays := []db.Payment{first, second}
+			users := e.users()
+			for i, p := range pays {
+				n, err := e.st.Q.MarkPaymentPaid(ctx, db.MarkPaymentPaidParams{ExternalID: sql.NullString{String: "ch-both-" + strconv.Itoa(i), Valid: true},
+					PaidAt: sql.NullInt64{Int64: e.now.Unix(), Valid: true}, ID: p.ID})
+				must(t, err)
+				if n != 1 {
+					t.Fatalf("payment %d not marked paid", p.ID)
+				}
+			}
+			if together {
+				errs := make([]error, len(pays))
+				var wg sync.WaitGroup
+				for i, p := range pays {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						errs[i] = e.s.Apply(ctx, p.ID)
+					}()
+				}
+				wg.Wait()
+				must(t, errors.Join(errs...))
+			} else {
+				must(t, e.s.Apply(ctx, first.ID))
+				if got := e.payment(first.ID); got.Status != "applied" {
+					t.Fatalf("the first paid trial, with another one paid: %q %q", got.Status, got.Error)
+				}
+				must(t, e.s.Apply(ctx, second.ID))
+			}
+			statuses := map[string]int{}
+			for _, p := range pays {
+				statuses[e.payment(p.ID).Status]++
+			}
+			if statuses["applied"] != 1 || statuses["refunded"] != 1 {
+				t.Fatalf("two trials paid before either applied ended as %v", statuses)
+			}
+			if e.users() != users+1 {
+				t.Fatalf("two paid trials made %d subscriptions", e.users()-users)
+			}
+			if refunds := e.tg.refundNotes(); len(refunds) != 1 {
+				t.Fatalf("the buyer was told of %d refunds", len(refunds))
+			}
+		})
 	}
 }
 

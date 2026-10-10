@@ -120,7 +120,7 @@ func (q *Queries) CountUserPaidPayments(ctx context.Context, tgID int64) (int64,
 }
 
 const countUserPaidPaymentsExcept = `-- name: CountUserPaidPaymentsExcept :one
-SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied') AND id <> $2
+SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied') AND id <> $2 AND kind <> 'trial'
 `
 
 type CountUserPaidPaymentsExceptParams struct {
@@ -128,8 +128,9 @@ type CountUserPaidPaymentsExceptParams struct {
 	ID   int64
 }
 
-// The same, apart from one payment: whether the account paid for anything besides the
-// payment being applied.
+// The same, apart from the trial's own payments: whether the account paid for anything
+// besides the trial being applied. Another trial payment paid meanwhile does not count:
+// TakeTrial gives the trial to one of them and the other goes back.
 func (q *Queries) CountUserPaidPaymentsExcept(ctx context.Context, arg CountUserPaidPaymentsExceptParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countUserPaidPaymentsExcept, arg.TgID, arg.ID)
 	var count int64

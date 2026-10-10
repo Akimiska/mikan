@@ -67,9 +67,11 @@ func (s *Service) trialAllowed(ctx context.Context, q *db.Queries, tgID int64) (
 }
 
 // trialAllowedFor: the account of payment pay may still be given the trial, asked while
-// that payment is already paid, so it does not count against itself. Everything else does:
-// a trial taken, a subscription of its own, a plan or a second trial paid for in the
-// meantime. The trial a payment bought is given once, to someone who had nothing.
+// that payment is already paid, so it does not count against itself; nor does another
+// trial payment paid meanwhile, or two paid at once would refuse each other: TakeTrial
+// gives the trial to one of them. Everything else counts: a trial taken, a subscription of
+// its own, a plan paid for. The trial a payment bought is given once, to someone who had
+// nothing.
 func (s *Service) trialAllowedFor(ctx context.Context, q *db.Queries, pay db.Payment) (bool, error) {
 	if taken, err := q.HasTrial(ctx, pay.TgID); err != nil || taken {
 		return false, err

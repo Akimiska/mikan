@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -180,6 +181,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.NodeCerts = o.NodeCerts
 	deps.ForgetNode = forgetNodeFiles(o)
 	subBase := func(ctx context.Context) string {
+		// AoiVPN fork: the operator may hand links out at another address entirely (a
+		// proxy on a separate host, e.g. https://sub.example.com/sub). It wins when set.
+		if base, err := set.String(ctx, settings.KeySubPublicBase); err == nil {
+			if base = strings.TrimRight(strings.TrimSpace(base), "/"); base != "" {
+				if !strings.HasPrefix(base, "https://") {
+					return ""
+				}
+				return base
+			}
+		}
 		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {
 			return ""

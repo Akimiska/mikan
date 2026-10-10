@@ -20,8 +20,12 @@ const (
 	// KeySubPort is a port of its own for subscriptions; 0 or unset: the panel's port.
 	// The panel's port keeps serving subscriptions either way, for links handed out.
 	KeySubPort   = "sub_port"
-	KeyDomain    = "domain"
-	KeyACMEEmail = "acme_email"
+	// KeySubPublicBase (AoiVPN fork): the public base URL subscriptions are handed out
+	// at when the panel sits behind a proxy on another host, e.g.
+	// "https://sub.example.com/sub". Empty: links point at the panel's own endpoint.
+	KeySubPublicBase = "sub_public_base"
+	KeyDomain        = "domain"
+	KeyACMEEmail     = "acme_email"
 	KeyGroupMain = "sub_group_main" // subscription group names, see subs.Groups
 	KeyGroupAuto = "sub_group_auto"
 	KeyGroupIcon = "sub_group_icon" // AoiVPN fork: icon URL for the main group

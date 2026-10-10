@@ -38,6 +38,7 @@ type SettingsView struct {
 	QuietHourUTC int      `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
 	AdminURL     string   `json:"admin_url"`
 	SubBaseURL   string   `json:"sub_base_url"`
+	SubPublicBase string  `json:"sub_public_base" doc:"Публичный базовый URL подписок, когда панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки ведут на саму панель"`
 	SubGroupMain string   `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
 	SubGroupAuto string   `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
 	SubRules     string   `json:"sub_rules" doc:"Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий"`
@@ -79,6 +80,7 @@ type patchSettingsInput struct {
 		RequireHWID   *bool   `json:"device_require_hwid,omitempty"`
 		DefaultLang   *string `json:"default_lang,omitempty" enum:"auto,ru,en"`
 		SubPort       *int    `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
+		SubPublicBase *string `json:"sub_public_base,omitempty" maxLength:"253" doc:"Публичный адрес подписок, если панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки на саму панель"`
 	}
 }
 
@@ -121,6 +123,7 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	get(settings.KeyBrandLogo, &v.BrandLogoURL)
 	get(settings.KeyPublicHost, &v.PublicHost)
 	get(settings.KeyDomain, &v.Domain)
+	get(settings.KeySubPublicBase, &v.SubPublicBase)
 	get(settings.KeyGroupMain, &v.SubGroupMain)
 	get(settings.KeyGroupAuto, &v.SubGroupAuto)
 	get(settings.KeyRouting, &v.SubRouting)
@@ -189,6 +192,10 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 		}
 		v.SubBaseURL = "https://" + net.JoinHostPort(host, strconv.Itoa(subPort)) + "/" + paths.Sub + "/"
 	}
+	if v.SubBaseURL == "" && v.SubPublicBase != "" && !hidesSecrets(ctx) {
+		// The links go to the public address; the secret path is inside it, if any.
+		v.SubBaseURL = v.SubPublicBase + "/"
+	}
 	v.Certificate = acme.Status{Kind: "self-signed"}
 	if h.d.Cert != nil {
 		v.Certificate = h.d.Cert()
@@ -209,7 +216,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	// Where clients are sent, and what they are told to trust: a leaked API key must not
 	// move subscriptions to another server or add rules to every client.
 	for field, touched := range map[string]bool{"public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
-		"sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil,
+		"sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil, "sub_public_base": b.SubPublicBase != nil,
 		// What every subscriber's app shows: text, links and the logo it downloads.
 		"sub_title": b.SubTitle != nil, "sub_announce": b.Announce != nil, "sub_announce_url": b.AnnounceURL != nil, "app_branding": b.AppBranding != nil,
 		"brand_accent": b.BrandAccent != nil, "brand_logo_url": b.BrandLogoURL != nil} {
@@ -228,6 +235,14 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	}
 	if b.SupportURL != nil && *b.SupportURL != "" && !strings.HasPrefix(*b.SupportURL, "https://") && !strings.HasPrefix(*b.SupportURL, "tg://") {
 		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
+	}
+	if b.SubPublicBase != nil {
+		base := strings.TrimSpace(*b.SubPublicBase)
+		// Either empty (back to the panel's own address) or https with a path: the
+		// subscription page is served only over TLS.
+		if base != "" && (!strings.HasPrefix(base, "https://") || len(base) <= len("https://")) {
+			details = append(details, &huma.ErrorDetail{Location: "body.sub_public_base", Message: "support_url_invalid"})
+		}
 	}
 	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !subs.ValidLink(strings.TrimSpace(*b.AnnounceURL), true) {
 		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce_url", Message: "support_url_invalid"})
@@ -352,7 +367,8 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 		for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
 			settings.KeySubTitle: b.SubTitle, settings.KeyAnnounce: b.Announce, settings.KeyAnnounceURL: b.AnnounceURL, settings.KeyBrandAccent: b.BrandAccent, settings.KeyBrandLogo: b.BrandLogoURL,
-			settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
+			settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang,
+			settings.KeySubPublicBase: b.SubPublicBase} {
 			if v == nil {
 				continue
 			}

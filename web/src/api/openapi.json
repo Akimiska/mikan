@@ -2933,6 +2933,11 @@
             "minimum": 0,
             "type": "integer"
           },
+          "sub_public_base": {
+            "description": "Публичный адрес подписок, если панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки на саму панель",
+            "maxLength": 253,
+            "type": "string"
+          },
           "sub_routing": {
             "enum": [
               "ru_direct",
@@ -4195,6 +4200,10 @@
             "description": "sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели",
             "type": "string"
           },
+          "sub_public_base": {
+            "description": "Публичный базовый URL подписок, когда панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки ведут на саму панель",
+            "type": "string"
+          },
           "sub_routing": {
             "description": "Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN",
             "enum": [
@@ -4231,6 +4240,7 @@
           "quiet_hour_utc",
           "admin_url",
           "sub_base_url",
+          "sub_public_base",
           "sub_group_main",
           "sub_group_auto",
           "sub_rules",

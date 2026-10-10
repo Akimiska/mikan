@@ -100,6 +100,47 @@ export function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
   );
 }
 
+// AoiVPN fork: subscriptions handed out at another address (a proxy on a separate
+// host, e.g. https://sub.example.com/sub). Empty: links point at the panel itself.
+export function SubPublicBaseCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const { draft: base, setDraft: setBase } = useDraft(s.sub_public_base ?? "");
+  const errors = fieldErrors(save.error);
+  const value = base.trim();
+  const valid = value === "" || (value.startsWith("https://") && value.length > "https://".length);
+  const changed = value !== (s.sub_public_base ?? "");
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (valid) save.mutate({ sub_public_base: value });
+  };
+  return (
+    <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+      <form onSubmit={submit} noValidate>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t("settings.subPublicBase")}</h2>
+            <div className="card-sub">{t("settings.subPublicBaseSub")}</div>
+          </div>
+        </div>
+        <Field label={t("settings.subPublicBaseField")} htmlFor="s-sub-public-base" hint={t("settings.subPublicBaseHint")} error={errors.sub_public_base ?? (valid ? undefined : t("settings.subPublicBaseInvalid"))}>
+          <input id="s-sub-public-base" className="input mono" value={base} onChange={(e) => setBase(e.target.value)} placeholder="https://sub.example.com/sub" maxLength={253} aria-invalid={!!errors.sub_public_base || !valid} autoComplete="off" />
+        </Field>
+        <p className="mb-4 text-xs text-[var(--ink-500)]">{t("settings.subPublicBaseNote")}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={!changed || !valid}>
+            {t("common.save")}
+          </Button>
+          {s.sub_public_base ? (
+            <Button variant="ghost" loading={save.isPending} onClick={() => save.mutate({ sub_public_base: "" })}>
+              {t("settings.subPublicBaseOff")}
+            </Button>
+          ) : null}
+        </div>
+      </form>
+    </section>
+  );
+}
+
 const routingModes = [
   { id: "ru_direct", title: "settings.routingRuDirect", sub: "settings.routingRuDirectSub" },
   { id: "all", title: "settings.routingAll", sub: "settings.routingAllSub" },

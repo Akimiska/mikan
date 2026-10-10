@@ -3,7 +3,7 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
-## 0.5.0.5
+## 0.5.1.0
 ### en
 - Platega payments stayed "awaiting payment" although the buyer had paid: once the buyer picks a method, Platega adds its fee on top (5% for SBP), and the panel refused a paid amount that differed from the invoice. A payment that covers the invoice now counts; less, or another currency, is still refused. Update the Platega addon to 1.0.5 as well: the one before could not read the amount Platega sends, so it failed every check and Platega reported its notifications as failed. Payments that expired while awaiting have to be given by hand.
 - When the panel's own check of an open invoice fails (the provider is down, the keys stopped working), it now says so in its log.
@@ -42,6 +42,13 @@ the signed manifest, and the panel shows the one in its language.
 - The bot's route through a node could not be switched back on when the saved route still named a node deleted since: the form showed another node but sent the old one, and the panel answered "pick a remote node". The form offers only the panel's nodes, the panel no longer hands the gone node back, and deleting a node takes it out of the bot's route. The route also tells a node that is gone from one on the panel's own server, and logs a node it could not read.
 - A tariff's pool limits reach the subscriptions given out before they were set with one button on the tariff ("Apply the pool limits to subscriptions given out"): as on a renewal, their own pool limits are replaced and what they used stays. Until then such subscriptions had no pool limit, so the bot offered them none of the pool's traffic packages.
 - The bot's notices of 90% and of all the traffic used carry "📦 Buy more traffic" when there are packages for that subscription; the button opens that subscription's packages, whichever one the menu shows.
+- **Servers on 0.4 (SQLite) update through 0.5.0.4.** This release no longer moves a database from SQLite: the Update button and `mikan update` take such a server to 0.5.0.4 first, which moves it to PostgreSQL, and then here. A backup of 0.4 is restored on 0.5.0.4. Servers already on 0.5 are not affected.
+- A Stars payment is no longer lost when the database is busy at the moment Telegram reports it: the bot asks again until it is saved. A second payment of the same invoice (a double tap, two devices) is returned to the buyer at once, and a payment that could not be applied can be refunded from the Payments page.
+- Changing the password and turning off 2FA count wrong passwords like other sensitive actions. Device binding settings can be changed only from the panel, not with an API key.
+- The first second of traffic of every user on a node with a fair share of the channel went out a byte at a time; now it does not. A node no longer looks down to the panel while it applies a large configuration or checks WARP.
+- Lighter on a big panel: metrics, period resets and the alerts' checks of WARP and exits no longer read every user or wait for one slow node after another; adapters that do not answer no longer hold the other invoices' checks.
+- The installer reads the node's files safely, retries failed downloads, keeps the old web server config backup private, and does not take an older signed release list than one it has seen. The update runs up to two hours before systemd stops it.
+- Fields with a unit ("Mbit/s", "GB", "₽") no longer cover the number you type.
 
 ### ru
 - Платежи через Platega висели в «Ждёт оплаты», хотя покупатель заплатил: после выбора способа Platega добавляет свою комиссию сверху (5% для СБП), а панель не принимала сумму, отличную от счёта. Теперь оплата, покрывающая счёт, засчитывается; меньше или в другой валюте по-прежнему отклоняется. Обновите и дополнение Platega до 1.0.5: прежнее не читало сумму в том виде, в каком её присылает Platega, поэтому каждая проверка падала, а Platega показывала уведомления неуспешными. Платежи, которые уже истекли в ожидании, нужно выдать вручную.
@@ -81,6 +88,14 @@ the signed manifest, and the panel shows the one in its language.
 - Маршрут бота через ноду не включался снова, если в сохранённом маршруте осталась нода, которую с тех пор удалили: форма показывала другую ноду, а отправляла старую, и панель отвечала «выберите удалённую ноду». Теперь форма предлагает только ноды панели, панель не отдаёт удалённую ноду обратно, а удаление ноды убирает её из маршрута бота. Ещё маршрут отличает ноду, которой больше нет, от своей ноды панели и пишет в лог ноду, которую не удалось прочитать.
 - Лимиты пулов тарифа доходят до уже выданных подписок одной кнопкой у тарифа («Применить лимиты пулов к выданным подпискам»): как при продлении, свои лимиты пулов у клиентов заменяются, израсходованное остаётся. Раньше у таких подписок не было лимита пула, и бот не предлагал им пакеты трафика этого пула.
 - Уведомления бота о 90% и о конце трафика приходят с кнопкой «📦 Докупить трафик», если для этой подписки есть пакеты; кнопка открывает пакеты именно этой подписки, какая бы ни была выбрана в меню.
+
+- **Серверы на 0.4 (SQLite) обновляются через 0.5.0.4.** Этот релиз больше не переносит базу из SQLite: кнопка «Обновить» и `mikan update` сначала ведут такой сервер на 0.5.0.4, который переносит базу в PostgreSQL, а затем сюда. Бэкап 0.4 восстанавливается на 0.5.0.4. Серверов, уже работающих на 0.5, это не касается.
+- Оплата Stars больше не теряется, если в момент сообщения Telegram база занята: бот повторяет, пока платёж не сохранится. Повторная оплата того же счёта (двойное нажатие, два устройства) сразу возвращается покупателю, а оплату, которую не удалось применить, можно вернуть со страницы «Платежи».
+- Смена пароля и отключение 2FA считают неверные пароли, как и другие чувствительные действия. Настройки привязки устройств меняются только из панели, не API-ключом.
+- Первая секунда трафика каждого пользователя на ноде с разделением канала уходила по байту; больше нет. Нода больше не выглядит упавшей для панели, пока применяет большую конфигурацию или проверяет WARP.
+- Легче на большой панели: метрики, сброс периодов и проверки WARP и выходов в алертах больше не читают всех пользователей и не ждут медленные ноды по очереди; неотвечающие дополнения не задерживают проверку остальных счетов.
+- Установщик безопасно читает файлы ноды, повторяет неудачные загрузки, не делает резервную копию конфига веб-сервера доступной всем и не принимает список релизов старше уже виденного. Обновление идёт до двух часов, прежде чем systemd его остановит.
+- Поля с единицей измерения («Мбит/с», «ГБ», «₽») больше не перекрывают вводимое число.
 
 ## 0.5.0.4
 ### en

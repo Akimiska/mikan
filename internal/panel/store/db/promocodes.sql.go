@@ -356,34 +356,6 @@ func (q *Queries) GetPromoCodeByCode(ctx context.Context, code string) (PromoCod
 	return i, err
 }
 
-const getPromoRedemption = `-- name: GetPromoRedemption :one
-SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE id=$1
-`
-
-func (q *Queries) GetPromoRedemption(ctx context.Context, id int64) (PromoRedemption, error) {
-	row := q.db.QueryRowContext(ctx, getPromoRedemption, id)
-	var i PromoRedemption
-	err := row.Scan(
-		&i.ID,
-		&i.PromoID,
-		&i.UserID,
-		&i.TgID,
-		&i.PaymentID,
-		&i.Status,
-		&i.RefundStartedAt,
-		&i.RedeemedAt,
-		&i.ExpiresAt,
-		&i.Days,
-		&i.Bytes,
-		&i.DiscountAmount,
-		&i.OriginalAmount,
-		&i.FinalAmount,
-		&i.Currency,
-		&i.Note,
-	)
-	return i, err
-}
-
 const getPromoRedemptionByPayment = `-- name: GetPromoRedemptionByPayment :one
 SELECT id, promo_id, user_id, tg_id, payment_id, status, refund_started_at, redeemed_at, expires_at, days, bytes, discount_amount, original_amount, final_amount, currency, note FROM promo_redemptions WHERE payment_id=$1
 `

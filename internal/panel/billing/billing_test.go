@@ -391,8 +391,12 @@ func TestStarsNewSubscription(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// A different charge id for the same invoice changes nothing either.
-	_ = e.s.StarsPaid(ctx, 555, p.Payload, "ch-2", "XTR", 150)
+	// A second charge for the same invoice gives nothing and goes back to the buyer.
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-2", "XTR", 150))
+	must(t, e.s.StarsPaid(ctx, 555, p.Payload, "ch-1", "XTR", 150)) // the first one again: nothing
+	if len(e.tg.refunds) != 1 || e.tg.refunds[0] != "ch-2" {
+		t.Fatalf("a second charge was not refunded: %v", e.tg.refunds)
+	}
 	got := e.payment(p.ID)
 	if got.Status != "applied" || got.ExternalID.String != "ch-1" || !got.UserID.Valid {
 		t.Fatalf("payment: %+v", got)
@@ -419,7 +423,7 @@ func TestStarsNewSubscription(t *testing.T) {
 	if _, err := e.s.Refund(ctx, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if e.payment(p.ID).Status != "refunded" || len(e.tg.refunds) != 1 || e.tg.refunds[0] != "ch-1" {
+	if e.payment(p.ID).Status != "refunded" || len(e.tg.refunds) != 2 || e.tg.refunds[1] != "ch-1" {
 		t.Fatalf("refund: %+v %v", e.payment(p.ID), e.tg.refunds)
 	}
 	if off, _ := e.st.Q.GetUser(ctx, got.UserID.Int64); off.Status != "disabled" {
@@ -606,5 +610,47 @@ func TestSalesDefault(t *testing.T) {
 	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, map[string]any{"stars": true, "allow_new": true}))
 	if c := e.s.Config(ctx); !c.Enabled || !c.Stars {
 		t.Fatalf("settings from 0.4.1 lost selling: %+v", c)
+	}
+}
+
+// A database that does not answer is not "no such invoice": the bot offers the payment
+// again, and once the database answers it is applied.
+func TestStarsPaidLookupFailureIsRetried(t *testing.T) {
+	e := newEnv(t)
+	p := e.invoice(555, 0, Stars)
+	down, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := e.s.StarsPaid(down, 555, p.Payload, "ch-1", "XTR", 150)
+	if err == nil || errors.Is(err, ErrBadPayment) || errors.Is(err, ErrRecorded) {
+		t.Fatalf("a failed lookup answered %v", err)
+	}
+	must(t, e.s.StarsPaid(context.Background(), 555, p.Payload, "ch-1", "XTR", 150))
+	if got := e.payment(p.ID); got.Status != "applied" {
+		t.Fatalf("payment after the retry: %q", got.Status)
+	}
+}
+
+// A payment saved with its charge but not applied says so: the reconcile pass finishes
+// it, the report of the payment is not needed again.
+func TestStarsPaidSavedButNotApplied(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	p := e.invoice(555, 0, Stars)
+	// The payment settings turn unreadable: applying fails after the payment is saved.
+	_, err := e.st.DB.ExecContext(ctx, "UPDATE settings SET value = '{' WHERE key = $1", KeyConfig)
+	must(t, err)
+	err = e.s.StarsPaid(ctx, 555, p.Payload, "ch-1", "XTR", 150)
+	if !errors.Is(err, ErrRecorded) {
+		t.Fatalf("an unapplied saved payment answered %v", err)
+	}
+	if got := e.payment(p.ID); got.Status != "paid" || got.ExternalID.String != "ch-1" {
+		t.Fatalf("payment: %+v", got)
+	}
+	// Paid and never applied: the admin can still give the Stars back.
+	if _, err := e.s.Refund(ctx, p.ID); err != nil {
+		t.Fatalf("refund of a paid payment: %v", err)
+	}
+	if got := e.payment(p.ID); got.Status != "refunded" || len(e.tg.refunds) != 1 || e.tg.refunds[0] != "ch-1" {
+		t.Fatalf("after the refund: %+v %v", got, e.tg.refunds)
 	}
 }

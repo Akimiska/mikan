@@ -6,10 +6,11 @@ import { useEffect, useState } from "react";
 import { Button } from "../components/ui";
 import { t, type Key } from "../i18n";
 import { money, rubles } from "../lib/format";
+import { okData, postJSON } from "./net";
 
 /** A term of a plan sold for several: its own price; label is "30 days", "3 months". */
-export type Term = { days: number; label: string; description: string; stars?: number; rub?: number };
-export type Offer = { id: number; name: string; description: string; stars?: number; rub?: number; terms?: Term[] };
+type Term = { days: number; label: string; description: string; stars?: number; rub?: number };
+type Offer = { id: number; name: string; description: string; stars?: number; rub?: number; terms?: Term[] };
 export type ShopData = {
   allow_new: boolean;
   providers: { stars: boolean };
@@ -34,9 +35,7 @@ const FAIL: Record<string, Key> = {
 
 /** What the account can buy; with token, the traffic packages of that subscription too. */
 export function loadShop(subRoot: string, initData: string, token = ""): Promise<ShopData> {
-  return fetch(subRoot + "/tg/shop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ init_data: initData, token }), cache: "no-store" }).then(
-    (r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
-  );
+  return postJSON<ShopData>(subRoot + "/tg/shop", { init_data: initData, token }).then(okData);
 }
 
 /**
@@ -97,13 +96,15 @@ export function Shop({
     setError("");
     try {
       if (promoCode) {
-        const preview = await fetch(subRoot + "/tg/promo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ init_data: initData, token, code: promoCode, ...order, provider, validate_only: true }),
-          cache: "no-store",
+        const preview = await postJSON<{ code: string; discount: number; final_amount: number; currency: string }>(subRoot + "/tg/promo", {
+          init_data: initData,
+          token,
+          code: promoCode,
+          ...order,
+          provider,
+          validate_only: true,
         });
-        const result = (await preview.json().catch(() => ({}))) as { code?: string; discount?: number; final_amount?: number; currency?: string };
+        const result = preview.data;
         if (!preview.ok) {
           setError(failText(result.code ?? "promo_unavailable"));
           return;
@@ -112,13 +113,8 @@ export function Shop({
           setPromoPreview({ discount: result.discount, final_amount: result.final_amount, currency: result.currency });
         }
       }
-      const r = await fetch(subRoot + "/tg/pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ init_data: initData, ...order, provider, token, promo_code: promoCode }),
-        cache: "no-store",
-      });
-      const body = (await r.json().catch(() => ({}))) as { url?: string; code?: string };
+      const r = await postJSON<{ url: string; code: string }>(subRoot + "/tg/pay", { init_data: initData, ...order, provider, token, promo_code: promoCode });
+      const body = r.data;
       if (!r.ok || !body.url) {
         setError(failText(body.code ?? ""));
         return;

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"mikan/internal/fsutil"
 )
 
 // Attempt is one order at a CA as the admin panel lists it: when, at which CA and how it
@@ -80,8 +82,5 @@ func (j *journal) Add(a Attempt) {
 	if err := os.MkdirAll(filepath.Dir(j.path), 0o700); err != nil {
 		return
 	}
-	tmp := j.path + ".tmp"
-	if os.WriteFile(tmp, raw, 0o600) == nil {
-		_ = os.Rename(tmp, j.path)
-	}
+	_ = fsutil.WriteFileAtomic(j.path, raw, 0o600)
 }

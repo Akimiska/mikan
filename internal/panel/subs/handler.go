@@ -35,7 +35,7 @@ type Config struct {
 	Brand      string
 	SupportURL string
 	// Title is the profile's name in the apps (Profile-Title); "" names it Brand. Title and
-	// Announce may hold TitleVars, filled for each user.
+	// Announce may hold the variables of titleValues, filled for each user.
 	Title string
 	// Announce is the text apps show over the profile, AnnounceURL where a tap on it leads.
 	Announce    string
@@ -132,9 +132,6 @@ func NewHandler(st *store.Store, cfg func(ctx context.Context) (Config, error), 
 	return &Handler{st: st, cfg: cfg, page: page, now: now, devices: devices, trustProxy: trustProxy, log: slog.New(slog.DiscardHandler), happ: NewHappLinks()}
 }
 
-// SetHappLinks replaces the maker of Happ crypt links (tests: a fake service).
-func (h *Handler) SetHappLinks(l *HappLinks) { h.happ = l }
-
 // HappLink is the Happ crypt link of u's subscription, "" when the crypt link is off or
 // the panel has no address for subscriptions yet.
 func (h *Handler) HappLink(ctx context.Context, u db.User) (string, error) {
@@ -157,7 +154,8 @@ var devicePath = regexp.MustCompile(`^devices/([0-9]{1,18})/(unbind|name)$`)
 // "POST /<token>/devices/<id>/name" (the subscription page), the page assets under the sub
 // prefix, the admin's images
 // ("/brand/<name>") and instructions ("/<token>/docs/<id>": for subscribers only, not for
-// whoever counts ids).
+// whoever counts ids). It only routes: the Mini App is miniApp, a subscription is
+// serveProfile.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	token, rest, _ := strings.Cut(p, "/")
@@ -215,18 +213,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := h.cfg(r.Context())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 		return
 	}
 	if rest == "info" {
-		prof, err := h.profile(r.Context(), u, cfg, db.Slot{})
+		prof, err := h.profile(r.Context(), u, cfg, db.Slot{}, nil)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			internalError(w)
 			return
 		}
 		h.info(r.Context(), w, u, prof, cfg)
 		return
 	}
+	h.serveProfile(w, r, u, cfg)
+}
+
+// internalError answers a request the panel failed on, without telling why: the cause is
+// the panel's to log, not the client's to read.
+func internalError(w http.ResponseWriter) {
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// serveProfile answers a fetch of "/<token>" by u: the page for a browser or a messenger's
+// preview, the profile in the format the app asks for otherwise (Format). The order is
+// fixed: the headers go before the keys are handed out (a HEAD stops after them), the
+// device gets its keys before the profile is made, and the fetch is recorded once there
+// is a profile to give.
+func (h *Handler) serveProfile(w http.ResponseWriter, r *http.Request, u db.User, cfg Config) {
 	format := Format(r.Header.Get("User-Agent"), r.Header.Get("Accept"), r.URL.Query().Get("format"))
 	// A messenger that builds a preview of a pasted link gets the page, which has the
 	// preview's title and picture and nothing of the user's.
@@ -236,7 +249,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	grants, err := domain.UserGrantsLeft(r.Context(), h.st.Q, u.ID, h.now())
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 		return
 	}
 	// The values are worked out only when a title or an announcement can use them.
@@ -275,12 +288,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.stub(w, u, cfg, format, err)
 		return
 	case err != nil:
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 		return
 	}
-	prof, err := h.profile(r.Context(), u, cfg, slot)
+	prof, err := h.profile(r.Context(), u, cfg, slot, grants)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 		return
 	}
 	prof.Skip = func(in db.Inbound, err error) {
@@ -295,24 +308,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "clash":
 		prof.Rules = RulesFor(cfg.Rules, app)
 		prof.Routes, prof.App, prof.Lang = cfg.Routes, app, cfg.Lang
-		var body []byte
-		if cfg.Template != "" && prof.routable() {
-			body, err = Template(prof, cfg.Template)
-			var te *TemplateError
-			if errors.As(err, &te) {
-				// Saved templates are checked; one that went bad must not leave apps without a profile.
-				h.warn("template/"+te.Code, "subscription: the own Clash profile does not render, the built-in one goes out", "err", err)
-				body, err = Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
-			}
-		} else {
-			body, err = Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
-		}
-		if errors.Is(err, ErrNoProxies) {
-			h.stub(w, u, cfg, format, err)
-			return
-		}
+		body, err := h.clashProfile(prof, cfg)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			h.profileFailed(w, u, cfg, format, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
@@ -322,12 +320,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "singbox":
 		prof.Rules, prof.Routes, prof.Lang = cfg.Rules, cfg.Routes, cfg.Lang
 		body, err := SingBox(r.Context(), prof, cfg.Groups, cfg.Routing, cfg.Template)
-		if errors.Is(err, ErrNoProxies) {
-			h.stub(w, u, cfg, format, err)
-			return
-		}
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			h.profileFailed(w, u, cfg, format, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -335,12 +329,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 	default:
 		links, err := URIs(prof)
-		if errors.Is(err, ErrNoProxies) {
-			h.stub(w, u, cfg, format, err)
-			return
-		}
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			h.profileFailed(w, u, cfg, format, err)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -348,410 +338,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// miniApp serves the subscription page inside Telegram and signs its user in.
-func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
-	switch {
-	case r.Method == http.MethodGet && rest == "" && h.page != nil:
-		// Telegram Web opens Mini Apps in a frame; the apps open them in a web view.
-		hd := w.Header()
-		hd.Set("Content-Security-Policy", strings.Replace(hd.Get("Content-Security-Policy"), "frame-ancestors 'none'", "frame-ancestors https://web.telegram.org", 1))
-		hd.Del("X-Frame-Options")
-		cfg, _ := h.cfg(r.Context())
-		h.servePage(w, r, cfg)
-	case r.Method == http.MethodPost && rest == "session" && sameOrigin(r):
-		var in struct {
-			InitData string `json:"init_data"`
-		}
-		if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-		_, users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Type", "application/json")
-		if err != nil {
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{"code": "init_data"})
-			return
-		}
-		type sub struct {
-			Token string `json:"token"`
-			Name  string `json:"name"`
-		}
-		out := struct {
-			Subs []sub `json:"subs"`
-		}{Subs: []sub{}}
-		for _, u := range users {
-			out.Subs = append(out.Subs, sub{Token: u.SubToken, Name: u.Name})
-		}
-		_ = json.NewEncoder(w).Encode(out)
-	case r.Method == http.MethodPost && (rest == "shop" || rest == "pay") && sameOrigin(r) && h.shop != nil:
-		h.miniAppShop(w, r, rest)
-	case r.Method == http.MethodPost && (rest == "promo" || rest == "promo-history") && sameOrigin(r) && h.promos != nil:
-		if rest == "promo-history" {
-			h.miniAppPromoHistory(w, r)
-		} else {
-			h.miniAppPromo(w, r)
-		}
-	default:
-		server.NotFound(w)
+// clashProfile is the Clash profile of prof: the admin's own (cfg.Template) when the app can
+// take it, the built-in one otherwise.
+func (h *Handler) clashProfile(prof Profile, cfg Config) ([]byte, error) {
+	if cfg.Template == "" || !prof.routable() {
+		return Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
 	}
+	body, err := Template(prof, cfg.Template)
+	var te *TemplateError
+	if errors.As(err, &te) {
+		// Saved templates are checked; one that went bad must not leave apps without a profile.
+		h.warn("template/"+te.Code, "subscription: the own Clash profile does not render, the built-in one goes out", "err", err)
+		return Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
+	}
+	return body, err
 }
 
-// miniAppShop: "shop" lists what the Telegram account can buy (with token: the traffic
-// packages of that subscription too), "pay" opens an invoice for a new subscription
-// (token ""), one of the account's own, or a traffic package for it (package_id).
-func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest string) {
-	var in struct {
-		InitData  string `json:"init_data"`
-		TariffID  int64  `json:"tariff_id"`
-		TermDays  *int64 `json:"term_days"` // the tariff's term; absent: its first
-		PackageID int64  `json:"package_id"`
-		Provider  string `json:"provider"`
-		Token     string `json:"token"`
-		PromoCode string `json:"promo_code"`
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	fail := func(status int, code string) {
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
-	}
-	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil {
-		fail(http.StatusBadRequest, "bad_request")
+// profileFailed answers a profile that could not be made: with nothing for this app to
+// connect to (ErrNoProxies) the stub that says so, otherwise the panel's own failure.
+func (h *Handler) profileFailed(w http.ResponseWriter, u db.User, cfg Config, format string, err error) {
+	if errors.Is(err, ErrNoProxies) {
+		h.stub(w, u, cfg, format, err)
 		return
 	}
-	tgID, users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
-	if err != nil {
-		fail(http.StatusUnauthorized, "init_data")
-		return
-	}
-	ctx := r.Context()
-	var userID int64
-	if in.Token != "" {
-		for _, u := range users {
-			if u.SubToken == in.Token {
-				userID = u.ID
-			}
-		}
-		if userID == 0 {
-			fail(http.StatusForbidden, billing.ErrNotYours.Error())
-			return
-		}
-	}
-	if rest == "shop" {
-		offers, av, err := h.shop.Offers(ctx)
-		if err != nil {
-			fail(http.StatusInternalServerError, "internal")
-			return
-		}
-		cfg, _ := h.cfg(ctx)
-		packages, err := h.shopPackages(ctx, userID, cfg.Lang)
-		if err != nil {
-			fail(http.StatusInternalServerError, "internal")
-			return
-		}
-		// A tariff's terms, the first one also in the offer itself (as before terms).
-		type term struct {
-			Days        int64  `json:"days"`
-			Label       string `json:"label"`
-			Description string `json:"description"`
-			Stars       int64  `json:"stars,omitempty"`
-			Rub         int64  `json:"rub,omitempty"`
-		}
-		type offer struct {
-			ID          int64  `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Stars       int64  `json:"stars,omitempty"`
-			Rub         int64  `json:"rub,omitempty"`
-			Terms       []term `json:"terms"`
-		}
-		// Marketplace adapters take rubles; the buyer sees each by its own name.
-		type addon struct {
-			Provider string `json:"provider"`
-			Name     string `json:"name"`
-		}
-		out := struct {
-			AllowNew  bool            `json:"allow_new"`
-			Providers map[string]bool `json:"providers"`
-			Addons    []addon         `json:"addons"`
-			Offers    []offer         `json:"offers"`
-			Packages  []shopPackage   `json:"packages"`
-		}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
-			Providers: map[string]bool{billing.Stars: av.Stars}}
-		for _, id := range av.Addons {
-			out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
-		}
-		for _, o := range offers {
-			v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.DescribeOffer(o, cfg.Lang), Stars: o.Stars, Rub: o.Rub}
-			for _, t := range o.Terms {
-				v.Terms = append(v.Terms, term{Days: t.Days, Label: billing.TermLabel(o.Tariff, t.Days, cfg.Lang),
-					Description: billing.Describe(o.Tariff, t.Days, cfg.Lang), Stars: t.Stars, Rub: t.Rub})
-			}
-			out.Offers = append(out.Offers, v)
-		}
-		_ = json.NewEncoder(w).Encode(out)
-		return
-	}
-	if strings.TrimSpace(in.PromoCode) != "" && !h.promoLimit.allow(tgID, h.now(), in.PromoCode) {
-		fail(http.StatusTooManyRequests, "promo_try_later")
-		return
-	}
-	var p db.Payment
-	if in.PackageID != 0 {
-		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
-	} else {
-		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, TermDays: in.TermDays, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
-	}
-	if err != nil {
-		if strings.TrimSpace(in.PromoCode) != "" && promoError(err) {
-			fail(h.promoAttempt(err))
-			return
-		}
-		status, code, unexplained := invoiceFailure(err)
-		if unexplained {
-			h.log.Warn("mini app: the invoice was not made", "provider", in.Provider, "err", err)
-		}
-		fail(status, code)
-		return
-	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"url": p.PayUrl, "provider": p.Provider})
-}
-
-func promoError(err error) bool {
-	for _, candidate := range []error{promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit,
-		promo.ErrTariff, promo.ErrMinimum, promo.ErrNewUser, promo.ErrFirstPurchase, promo.ErrCurrency, promo.ErrUnavailable,
-		promo.ErrNotDiscount, promo.ErrInvalidValue, promo.ErrRefundUnsupported, promo.ErrAlreadyApplied,
-		promo.ErrSubscription, promo.ErrNoExpiry, promo.ErrReservationExpired} {
-		if errors.Is(err, candidate) {
-			return true
-		}
-	}
-	return false
-}
-
-// miniAppPromo validates a code or immediately redeems a bonus. Discount codes are only
-// validated here; they are reserved atomically with the payment when the order is opened.
-func (h *Handler) miniAppPromo(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		InitData     string `json:"init_data"`
-		Token        string `json:"token"`
-		Code         string `json:"code"`
-		TariffID     int64  `json:"tariff_id"`
-		TermDays     *int64 `json:"term_days"`
-		PackageID    int64  `json:"package_id"`
-		Provider     string `json:"provider"`
-		ValidateOnly bool   `json:"validate_only"`
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	fail := func(status int, code string) {
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]string{"code": code})
-	}
-	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil || strings.TrimSpace(in.Code) == "" {
-		fail(http.StatusBadRequest, "bad_request")
-		return
-	}
-	tgID, users, err := h.tg.MiniAppUser(r.Context(), in.InitData)
-	if err != nil {
-		fail(http.StatusUnauthorized, "init_data")
-		return
-	}
-	if !h.promoLimit.allow(tgID, h.now(), in.Code) {
-		fail(http.StatusTooManyRequests, "promo_try_later")
-		return
-	}
-	var userID int64
-	if in.Token != "" {
-		for _, u := range users {
-			if u.SubToken == in.Token {
-				userID = u.ID
-				break
-			}
-		}
-		if userID == 0 {
-			fail(http.StatusForbidden, billing.ErrNotYours.Error())
-			return
-		}
-	}
-	if in.ValidateOnly {
-		tariffID, amount, currency, err := h.miniAppPromoOrder(r.Context(), userID, in.TariffID, in.TermDays, in.PackageID, billing.AdapterOf(in.Provider))
-		if err != nil {
-			fail(http.StatusConflict, "promo_unavailable")
-			return
-		}
-		p, err := h.promos.Validate(r.Context(), tgID, userID, tariffID, amount, currency, in.Code)
-		if err == nil && p.Type != "percent" && p.Type != "fixed" {
-			err = promo.ErrNotDiscount
-		}
-		if err != nil {
-			fail(h.promoAttempt(err))
-			return
-		}
-		discount := promo.DiscountAmount(p, amount)
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "discount": discount, "final_amount": amount - discount, "currency": currency})
-		return
-	}
-	p, err := h.promos.Check(r.Context(), tgID, userID, in.Code)
-	if err != nil {
-		fail(h.promoAttempt(err))
-		return
-	}
-	switch p.Type {
-	case "days", "traffic":
-		r, err := h.promos.RedeemBonus(r.Context(), tgID, userID, in.Code)
-		if err != nil {
-			fail(h.promoAttempt(err))
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "days": r.Days, "bytes": r.Bytes, "message": "promo_applied"})
-	case "percent", "fixed":
-		// A discount needs an order: the page keeps the code for the checkout, where it is
-		// checked against the price and reserved with the payment.
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "type": p.Type, "code": p.Code})
-	default:
-		fail(http.StatusConflict, "promo_unavailable")
-	}
-}
-
-// miniAppPromoOrder is the order a discount code is checked against: the tariff, and the
-// price of the chosen term (days nil: the first) or of the package, with provider.
-func (h *Handler) miniAppPromoOrder(ctx context.Context, userID, tariffID int64, days *int64, packageID int64, provider string) (int64, int64, string, error) {
-	if h.shop == nil || provider == "" {
-		return 0, 0, "", promo.ErrUnavailable
-	}
-	if packageID != 0 {
-		offers, _, err := h.shop.PackageOffers(ctx, userID)
-		if err != nil {
-			return 0, 0, "", err
-		}
-		user, err := h.st.Q.GetUser(ctx, userID)
-		if err != nil || !user.TariffID.Valid {
-			return 0, 0, "", promo.ErrTariff
-		}
-		for _, offer := range offers {
-			if offer.Package.ID == packageID {
-				if amount, currency, ok := promoOrderPrice(provider, offer.Stars, offer.Rub); ok {
-					return user.TariffID.Int64, amount, currency, nil
-				}
-			}
-		}
-		return 0, 0, "", promo.ErrUnavailable
-	}
-	offers, _, err := h.shop.Offers(ctx)
-	if err != nil {
-		return 0, 0, "", err
-	}
-	for _, offer := range offers {
-		if offer.Tariff.ID == tariffID {
-			t, ok := offer.Term(days)
-			if !ok {
-				break
-			}
-			if amount, currency, ok := promoOrderPrice(provider, t.Stars, t.Rub); ok {
-				return offer.Tariff.ID, amount, currency, nil
-			}
-		}
-	}
-	return 0, 0, "", promo.ErrUnavailable
-}
-
-func promoOrderPrice(provider string, stars, rub int64) (int64, string, bool) {
-	switch {
-	case provider == billing.Stars && stars > 0:
-		return stars, "XTR", true
-	case strings.HasPrefix(provider, billing.AddonPrefix) && rub > 0:
-		return rub, "RUB", true
-	default:
-		return 0, "", false
-	}
-}
-
-func (h *Handler) miniAppPromoHistory(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		InitData string `json:"init_data"`
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	if json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&in) != nil {
-		http.Error(w, "bad request", 400)
-		return
-	}
-	tgID, _, err := h.tg.MiniAppUser(r.Context(), in.InitData)
-	if err != nil {
-		w.WriteHeader(401)
-		_ = json.NewEncoder(w).Encode(map[string]string{"code": "init_data"})
-		return
-	}
-	rs, err := h.st.Q.ListPromoRedemptionsByTgWithCode(r.Context(), db.ListPromoRedemptionsByTgWithCodeParams{TgID: tgID, Lim: 100})
-	if err != nil {
-		w.WriteHeader(500)
-		_ = json.NewEncoder(w).Encode(map[string]string{"code": "internal"})
-		return
-	}
-	type item struct {
-		Code     string `json:"code"`
-		Days     int64  `json:"days"`
-		Bytes    int64  `json:"bytes"`
-		Discount int64  `json:"discount"`
-		Currency string `json:"currency"`
-		At       int64  `json:"at"`
-	}
-	out := struct {
-		Items []item `json:"items"`
-	}{Items: []item{}}
-	for _, row := range rs {
-		redemption := row
-		out.Items = append(out.Items, item{Code: row.Code, Days: redemption.Days, Bytes: redemption.Bytes, Discount: redemption.DiscountAmount, Currency: redemption.Currency, At: redemption.RedeemedAt})
-	}
-	_ = json.NewEncoder(w).Encode(out)
-}
-
-// promoAttempt is the answer to a code that could not be used. Why a code does not apply is
-// not told: "promo_unavailable" for all of it, so codes cannot be probed. Anything else is
-// the panel's trouble, logged and answered as such.
-// promoAttempt answers a refused code without saying why (the buyer must not learn which
-// codes exist or who they are for); the admin finds the reason in the log.
-func (h *Handler) promoAttempt(err error) (int, string) {
-	if code := promoAttemptCode(err); code != "" {
-		h.log.Info("mini app: promo code refused", "reason", err)
-		return http.StatusConflict, code
-	}
-	h.log.Error("mini app: promo code failed", "err", err)
-	return http.StatusInternalServerError, "internal"
-}
-
-func promoAttemptCode(err error) string {
-	if promoError(err) || errors.Is(err, promo.ErrNotBonus) {
-		return "promo_unavailable"
-	}
-	return ""
-}
-
-// invoiceFailure is what the Mini App answers when no invoice could be made. What the buyer
-// can act on is told as it is. A provider that is switched off is "provider_off". Anything
-// else, a provider that failed, a database that was busy, is the panel's trouble: the buyer
-// is told it did not work, not that payment is off, and unexplained says nobody has logged
-// the cause yet (billing logs a provider's failure itself).
-func invoiceFailure(err error) (status int, code string, unexplained bool) {
-	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours,
-		promo.ErrNotFound, promo.ErrInactive, promo.ErrExpired, promo.ErrLimit, promo.ErrUserLimit, promo.ErrTariff, promo.ErrMinimum, promo.ErrNewUser, promo.ErrFirstPurchase, promo.ErrCurrency, promo.ErrUnavailable, promo.ErrNotDiscount, promo.ErrInvalidValue, promo.ErrRefundUnsupported} {
-		if errors.Is(err, e) {
-			if strings.HasPrefix(e.Error(), "promo_") {
-				return http.StatusConflict, "promo_unavailable", false
-			}
-			return http.StatusConflict, e.Error(), false
-		}
-	}
-	switch {
-	case err == billing.ErrProviderOff:
-		return http.StatusConflict, billing.ErrProviderOff.Error(), false
-	case errors.Is(err, billing.ErrProviderOff): // the provider failed
-		return http.StatusBadGateway, "invoice_failed", false
-	}
-	return http.StatusBadGateway, "invoice_failed", true
+	internalError(w)
 }
 
 // forApp keeps the inbounds the app can use. Inbounds with one key for everyone go only
@@ -794,15 +404,21 @@ func (h *Handler) slotFor(r *http.Request, u db.User, cfg Config) (db.Slot, erro
 }
 
 // profile lists what the user may use; slot is whose keys go in (zero for the page).
-func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Slot) (Profile, error) {
+// grants is what is left of the user's grants when the caller read it already; nil reads it.
+func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Slot, grants domain.GrantsLeft) (Profile, error) {
 	prof := Profile{Nodes: cfg.Nodes, Direct: cfg.Direct, Slot: slot, Fingerprint: cfg.Fingerprint}
 	all, err := h.st.Q.ListInbounds(ctx)
 	if err != nil {
 		return prof, err
 	}
 	allowed := domain.DecodeInbounds(u.Inbounds)
+	if grants == nil {
+		if grants, err = domain.UserGrantsLeft(ctx, h.st.Q, u.ID, h.now()); err != nil {
+			return prof, err
+		}
+	}
 	// A traffic pool that ran out leaves the subscription; the node already turns it away.
-	spent, err := domain.ExhaustedPools(ctx, h.st.Q, u.ID, h.now())
+	spent, err := domain.ExhaustedPools(ctx, h.st.Q, u.ID, grants)
 	if err != nil {
 		return prof, err
 	}
@@ -923,7 +539,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 	now := h.now()
 	grants, err := domain.UserGrantsLeft(ctx, h.st.Q, u.ID, now)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 		return
 	}
 	out := Info{Name: u.Name, Brand: cfg.Brand, SupportURL: cfg.SupportURL, State: domain.State(u, grants.Main(u.ID), now), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
@@ -947,7 +563,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 	if cfg.Binding {
 		devs, err := h.st.Q.ListBoundDevices(ctx, u.ID)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			internalError(w)
 			return
 		}
 		used := map[int64]int64{}
@@ -999,7 +615,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 	}
 	pools, err := h.poolInfo(ctx, u.ID, grants)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 		return
 	}
 	out.Pools = pools
@@ -1038,7 +654,7 @@ func (h *Handler) unbind(w http.ResponseWriter, r *http.Request, u db.User, id i
 		server.NotFound(w)
 	default:
 		h.log.Warn("subs: device not unbound", "user", u.ID, "device", id, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 	}
 }
 
@@ -1070,7 +686,7 @@ func (h *Handler) renameDevice(w http.ResponseWriter, r *http.Request, u db.User
 	case errors.Is(err, domain.ErrNotFound):
 		server.NotFound(w)
 	default:
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		internalError(w)
 	}
 }
 
@@ -1282,7 +898,7 @@ func (h *Handler) sample(ctx context.Context) (Profile, Config, error) {
 	if err != nil {
 		return Profile{}, cfg, err
 	}
-	prof, err := h.profile(ctx, db.User{}, cfg, db.Slot{Name: "preview", Uuid: "00000000-0000-0000-0000-000000000000", Secret: "preview"})
+	prof, err := h.profile(ctx, db.User{}, cfg, db.Slot{Name: "preview", Uuid: "00000000-0000-0000-0000-000000000000", Secret: "preview"}, domain.GrantsLeft{})
 	if err != nil {
 		return Profile{}, cfg, err
 	}

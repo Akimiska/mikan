@@ -208,7 +208,7 @@ func TestPort80(t *testing.T) {
 	if got := find(t, c.Run(context.Background(), in), "port80"); got.Code != "port80_ok" {
 		t.Fatalf("reachable: %+v", got)
 	}
-	if ch.Listening() {
+	if ch.Bound() != "" {
 		t.Fatal("the check left port 80 held")
 	}
 

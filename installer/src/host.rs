@@ -20,11 +20,7 @@ net.core.wmem_max = 16777216
 
 pub fn tune() -> Result<()> {
     fs::write(SYSCTL, SYSCTL_CONF)?;
-    let ok = Command::new("sysctl").arg("--system").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-    if !ok {
-        bail!("sysctl failed");
-    }
-    Ok(())
+    crate::system::run_quiet("sysctl", &["--system"])
 }
 
 /// HTTPS ports the panel moves a blocked inbound to on its own (internal/panel/autotune
@@ -102,11 +98,7 @@ pub fn allow_from(ip: std::net::IpAddr, port: u16) -> Result<()> {
 }
 
 fn ufw(args: &[&str]) -> Result<()> {
-    let ok = Command::new("ufw").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-    if !ok {
-        bail!("ufw {} failed", args.join(" "));
-    }
-    Ok(())
+    crate::system::run_quiet("ufw", args)
 }
 
 pub const BIN: &str = "/usr/local/bin/mikan";
@@ -192,8 +184,9 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 # A oneshot unit has no time limit by default: an update stuck on a dead connection
-# would keep the timer from ever starting it again.
-TimeoutStartSec=45min
+# would keep the timer from ever starting it again. Two hours: a database move alone may
+# take an hour (DATABASE_LIMIT), with the pull and the backups around it.
+TimeoutStartSec=2h
 ExecStart=/usr/local/bin/mikan update --auto
 "
             .into(),
@@ -221,7 +214,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=45min
+TimeoutStartSec=2h
 ExecStart=/usr/local/bin/mikan update --requested
 "
             .into(),
@@ -279,11 +272,7 @@ pub fn remove_units() {
 }
 
 fn systemctl(args: &[&str]) -> Result<()> {
-    let ok = Command::new("systemctl").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-    if !ok {
-        bail!("systemctl {} failed", args.join(" "));
-    }
-    Ok(())
+    crate::system::run_quiet("systemctl", args)
 }
 
 #[cfg(test)]

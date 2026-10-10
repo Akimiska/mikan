@@ -7,9 +7,6 @@ import (
 	"mikan/internal/panel/store/db"
 )
 
-// MaxTerms caps the terms one tariff is sold for.
-const MaxTerms = 12
-
 // Term is one way a tariff is sold: for so many days (0: no end date; with a billing day,
 // months of 30 days each) at these prices.
 type Term struct {

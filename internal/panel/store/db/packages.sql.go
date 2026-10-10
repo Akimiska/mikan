@@ -210,56 +210,6 @@ func (q *Queries) EndPeriodGrants(ctx context.Context, arg EndPeriodGrantsParams
 	return err
 }
 
-const findOpenPackagePayment = `-- name: FindOpenPackagePayment :one
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert FROM payments
-WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
-  AND status = 'pending' AND pay_url <> '' AND created_at > $5
-ORDER BY id DESC LIMIT 1
-`
-
-type FindOpenPackagePaymentParams struct {
-	TgID      int64
-	PackageID sql.NullInt64
-	Provider  string
-	UserID    sql.NullInt64
-	Since     int64
-}
-
-func (q *Queries) FindOpenPackagePayment(ctx context.Context, arg FindOpenPackagePaymentParams) (Payment, error) {
-	row := q.db.QueryRowContext(ctx, findOpenPackagePayment,
-		arg.TgID,
-		arg.PackageID,
-		arg.Provider,
-		arg.UserID,
-		arg.Since,
-	)
-	var i Payment
-	err := row.Scan(
-		&i.ID,
-		&i.Provider,
-		&i.Payload,
-		&i.ExternalID,
-		&i.TgID,
-		&i.Kind,
-		&i.UserID,
-		&i.TariffID,
-		&i.PackageID,
-		&i.TariffName,
-		&i.Amount,
-		&i.Currency,
-		&i.Status,
-		&i.Error,
-		&i.PayUrl,
-		&i.CreatedAt,
-		&i.PaidAt,
-		&i.AppliedAt,
-		&i.RefundedAt,
-		&i.TermDays,
-		&i.Revert,
-	)
-	return i, err
-}
-
 const findOpenPackagePayments = `-- name: FindOpenPackagePayments :many
 SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert FROM payments
 WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4

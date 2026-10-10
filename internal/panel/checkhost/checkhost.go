@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"mikan/internal/textutil"
 )
 
 // Base is the real service.
@@ -144,12 +146,17 @@ func (c *Client) CheckTCP(ctx context.Context, host string, ports []int) (Result
 	var firstErr error
 	for range ports {
 		a := <-answers
-		if a.err != nil && firstErr == nil {
-			firstErr = a.err
+		if a.err != nil {
+			if firstErr == nil {
+				firstErr = a.err
+			}
+			continue
 		}
 		byPort[a.port] = a.res
 	}
-	if len(ports) > 0 && firstErr != nil && len(byPort) == 0 {
+	// No port checked at all is the service's failure, said as it is; a port it failed on
+	// shows as pending beside the others.
+	if len(ports) > 0 && len(byPort) == 0 {
 		return Result{}, firstErr
 	}
 	out := Result{At: c.now().UTC()}
@@ -170,7 +177,10 @@ func (c *Client) CheckTCP(ctx context.Context, host string, ports []int) (Result
 			delete(c.results, k)
 		}
 	}
-	c.results[key] = out
+	// An answer with a port the service failed on is not kept: checking again may do better.
+	if firstErr == nil {
+		c.results[key] = out
+	}
 	c.mu.Unlock()
 	return out, nil
 }
@@ -290,7 +300,7 @@ func (c *Client) checkPort(ctx context.Context, host string, port int, checkers 
 			case len(rs) == 0:
 				pr.Error = "no answer"
 			case rs[0].Error != "":
-				pr.Error = clip(rs[0].Error)
+				pr.Error = textutil.Clip(rs[0].Error, 120)
 			case rs[0].Time != nil:
 				pr.OK, pr.Ms = true, int(math.Round(*rs[0].Time*1000))
 			default:
@@ -302,11 +312,4 @@ func (c *Client) checkPort(ctx context.Context, host string, port int, checkers 
 			return out, nil
 		}
 	}
-}
-
-func clip(s string) string {
-	if len(s) > 120 {
-		return s[:120]
-	}
-	return s
 }

@@ -14,7 +14,7 @@ export type DocItem = { id: number; title: string; emoji?: string; platform?: st
 export type DocView = DocItem & { body: string };
 
 /** The page's data block (subpage.Public). */
-export type PagePublic = {
+type PagePublic = {
   config: PageConfig;
   brand: string;
   /** The brand's colour when the page takes it; none keeps the palette's. */
@@ -36,7 +36,7 @@ const emptyApps = { order: [], hidden: [] };
  * The page as it always was. The server sends its own (subpage.Default) with every page;
  * this copy is for a page served without one (the Vite dev server). Keep the two in step.
  */
-export const DEFAULT_PAGE: PageConfig = {
+const DEFAULT_PAGE: PageConfig = {
   look: { palette: "mikan", mode: "light", accent: "theme", font: "default", radius: "medium", cards: "glass", background: { kind: "theme", from: "", to: "", angle: 160, dim: 30 } },
   brand: { logo: "letter", emoji: "", subtitle: "" },
   blocks: (
@@ -76,14 +76,14 @@ export function readPage(): PagePublic {
 }
 
 /** The scheme the page is shown in: the admin's, or the visitor's with "system". */
-export function schemeOf(mode: PageLook["mode"], systemDark: boolean): "light" | "dark" {
+function schemeOf(mode: PageLook["mode"], systemDark: boolean): "light" | "dark" {
   return mode === "system" ? (systemDark ? "dark" : "light") : mode;
 }
 
 const hex = (c: string) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
 
 /** Text on a colour: dark on a light one, white on the rest (WCAG relative luminance). */
-export function onColor(color: string): string {
+function onColor(color: string): string {
   if (!/^#[0-9a-f]{6}$/i.test(color)) return "#ffffff";
   const [r, g, b] = hex(color).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)) as [number, number, number];
   const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -95,7 +95,7 @@ export function onColor(color: string): string {
  * The attributes that put a look on an element with the class sub-look (look.css): the
  * page's <html>, or the admin's preview frame.
  */
-export function lookAttrs(look: PageLook, scheme: "light" | "dark", accent?: string): { data: Record<string, string>; style: CSSProperties } {
+function lookAttrs(look: PageLook, scheme: "light" | "dark", accent?: string): { data: Record<string, string>; style: CSSProperties } {
   // A panel theme other than the four that follow the mode is light or dark by itself, and
   // brings all of its tokens (styles/themes.css) through data-theme and data-tone.
   const own = !followsMode(look.palette) && isTheme(look.palette);
@@ -180,7 +180,7 @@ export function cleanCSS(css: string): string {
 }
 
 /** An emoji as an icon: an SVG of one letter, a data: link the page's CSP allows. */
-export function emojiIcon(emoji: string): string {
+function emojiIcon(emoji: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text x="32" y="54" font-size="52" text-anchor="middle">${emoji.replace(/[<>&"']/g, "")}</text></svg>`;
   return "data:image/svg+xml," + encodeURIComponent(svg);
 }

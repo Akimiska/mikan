@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mikan/internal/textutil"
 )
 
 // DefaultAPI is Telegram's Bot API; tests point the bot at a fake one.
@@ -375,8 +377,8 @@ type PreCheckoutQuery struct {
 // InvoiceLink makes a link to pay in Telegram Stars (XTR, no provider token).
 func (c *Client) InvoiceLink(ctx context.Context, title, description, payload string, stars int64) (string, error) {
 	var link string
-	err := c.call(ctx, "createInvoiceLink", map[string]any{"title": truncate(title, 32), "description": truncate(description, 255), "payload": payload,
-		"currency": "XTR", "prices": []map[string]any{{"label": truncate(title, 32), "amount": stars}}}, &link)
+	err := c.call(ctx, "createInvoiceLink", map[string]any{"title": textutil.ClipRunes(title, 32), "description": textutil.ClipRunes(description, 255), "payload": payload,
+		"currency": "XTR", "prices": []map[string]any{{"label": textutil.ClipRunes(title, 32), "amount": stars}}}, &link)
 	return link, err
 }
 
@@ -397,11 +399,4 @@ func (c *Client) RefundStars(ctx context.Context, user int64, chargeID string) e
 		return nil
 	}
 	return err
-}
-
-func truncate(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n])
-	}
-	return s
 }

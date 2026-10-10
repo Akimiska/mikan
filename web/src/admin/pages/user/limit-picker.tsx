@@ -68,7 +68,7 @@ export function LimitPicker({
             if (ok) pick(n);
           }}
         >
-          <span className="input-unit max-w-[180px] flex-1">
+          <label className="input-unit max-w-[180px] flex-1">
             <input
               className="input"
               inputMode="numeric"
@@ -84,7 +84,7 @@ export function LimitPicker({
               placeholder={`${min}–${max}`}
             />
             {(fieldUnit ?? unit) ? <span>{fieldUnit ?? unit}</span> : null}
-          </span>
+          </label>
           <Button size="sm" type="submit" disabled={!ok} loading={busy}>
             {t("userDrawer.limitSet")}
           </Button>

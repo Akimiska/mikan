@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -49,8 +47,8 @@ type PackageBody struct {
 }
 
 func (b PackageBody) input() domain.PackageInput {
-	in := domain.PackageInput{Name: b.Name, Bytes: b.Bytes, Lifetime: b.Lifetime, Days: b.Days, PriceStars: nullable(b.PriceStars),
-		PriceRub: nullable(b.PriceRub), OnSale: b.OnSale, Sort: b.Sort}
+	in := domain.PackageInput{Name: b.Name, Bytes: b.Bytes, Lifetime: b.Lifetime, Days: b.Days, PriceStars: domain.NullInt(b.PriceStars),
+		PriceRub: domain.NullInt(b.PriceRub), OnSale: b.OnSale, Sort: b.Sort}
 	if b.PoolID != nil {
 		in.PoolID = *b.PoolID
 	}
@@ -145,9 +143,7 @@ func (h *handlers) archivePackage(ctx context.Context, in *userIDInput) (*struct
 
 func (h *handlers) userGrants(ctx context.Context, in *userIDInput) (*grantsOutput, error) {
 	q := h.d.Store.Q
-	if _, err := q.GetUser(ctx, in.ID); errors.Is(err, sql.ErrNoRows) {
-		return nil, huma.Error404NotFound("not_found")
-	} else if err != nil {
+	if err := requireUser(ctx, q, in.ID); err != nil {
 		return nil, err
 	}
 	gs, err := q.ListUserGrants(ctx, in.ID)

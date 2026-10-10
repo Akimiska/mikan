@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/textutil"
 )
 
 // Targets are the places a check reaches.
@@ -111,16 +112,9 @@ func Run(ctx context.Context, o Options) nodeapi.Diagnosis {
 func fail(id, code string, err error) nodeapi.DiagItem {
 	it := nodeapi.DiagItem{ID: id, Status: nodeapi.CheckFail, Code: code}
 	if err != nil {
-		it.Detail = clip(err.Error())
+		it.Detail = textutil.Clip(err.Error(), 300)
 	}
 	return it
-}
-
-func clip(s string) string {
-	if len(s) > 300 {
-		return s[:300]
-	}
-	return s
 }
 
 func lookup(ctx context.Context, o Options) nodeapi.DiagItem {

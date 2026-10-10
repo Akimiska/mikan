@@ -3,7 +3,6 @@ package tgbot
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"html"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -23,6 +23,7 @@ import (
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/panelimport"
+	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -96,7 +97,12 @@ type Bot struct {
 	// What the bot started and has not ended: the poll loop and its outbox, and the calls
 	// that must not hold the loop up. Run returns when they have all returned, so that the
 	// database is not closed under them.
-	running sync.WaitGroup
+	running   sync.WaitGroup
+	notifying atomic.Bool // a round of notices is being made
+
+	infraMu    sync.Mutex
+	infraRT    http.RoundTripper // nil for the default route, see infraTransport
+	infraRoute Route
 }
 
 // BroadcastProgress is the last broadcast as the admin panel shows it.
@@ -182,7 +188,13 @@ func (b *Bot) Run(ctx context.Context) {
 		case <-b.reload:
 			start()
 		case <-notify.C:
-			b.Notify(ctx)
+			// Apart from this loop, which must keep answering a reload; one round at a time.
+			if b.notifying.CompareAndSwap(false, true) {
+				b.running.Go(func() {
+					defer b.notifying.Store(false)
+					b.Notify(ctx)
+				})
+			}
 		}
 	}
 }
@@ -286,11 +298,31 @@ func (b *Bot) InfrastructureClient(ctx context.Context) (*Client, error) {
 	if err != nil || token == "" {
 		return nil, ErrOff
 	}
-	rt, err := b.transport(b.Route(ctx))
+	rt, err := b.infraTransport(b.Route(ctx))
 	if err != nil {
 		return nil, err
 	}
 	return NewClient(b.d.API, token, rt), nil
+}
+
+// infraTransport is the transport of route for the alerts' deliveries, kept while the
+// route stays: each delivery reuses its connections instead of a new TLS handshake
+// through the tunnel, and a route left behind has its idle connections closed.
+func (b *Bot) infraTransport(r Route) (http.RoundTripper, error) {
+	b.infraMu.Lock()
+	defer b.infraMu.Unlock()
+	if b.infraRT != nil && b.infraRoute == r {
+		return b.infraRT, nil
+	}
+	rt, err := b.transport(r)
+	if err != nil {
+		return nil, err
+	}
+	if t, ok := b.infraRT.(*http.Transport); ok {
+		t.CloseIdleConnections()
+	}
+	b.infraRT, b.infraRoute = rt, r
+	return rt, nil
 }
 
 // InfrastructureEnabled reports whether Telegram delivery is enabled and has a token.
@@ -321,7 +353,7 @@ func (b *Bot) claimInfrastructureAdmin(ctx context.Context, chat int64, code str
 		if err != nil {
 			return err
 		}
-		if !ok || json.Unmarshal([]byte(raw), &pending) != nil || pending.Until < b.d.Now().Unix() || len(code) != len(pending.Code) || subtle.ConstantTimeCompare([]byte(code), []byte(pending.Code)) != 1 {
+		if !ok || json.Unmarshal([]byte(raw), &pending) != nil || pending.Until < b.d.Now().Unix() || !secure.Equal(code, pending.Code) {
 			return nil
 		}
 		if err := settings.Set(ctx, set, KeyInfraAdminChat, chat); err != nil {
@@ -390,11 +422,17 @@ func (b *Bot) poll(ctx context.Context, c *Client) {
 		for _, up := range ups {
 			if err := b.handle(ctx, c, up); err != nil && ctx.Err() == nil {
 				// Not acknowledged: Telegram sends it again, with whatever came after.
-				if fails[up.UpdateID]++; fails[up.UpdateID] < maxUpdateTries {
-					sleep(ctx, time.Duration(fails[up.UpdateID])*updateRetryPause)
+				if fails[up.UpdateID]++; fails[up.UpdateID] < triesOf(up) {
+					sleep(ctx, min(time.Duration(fails[up.UpdateID])*updateRetryPause, time.Minute))
 					break
 				}
-				b.d.Log.Error("telegram: update given up", "update", up.UpdateID, "err", err)
+				if sp := paymentOf(up); sp != nil {
+					// Stars were taken and nothing saved them: the admin refunds by this charge.
+					b.d.Log.Error("telegram: stars payment given up, refund it by hand", "update", up.UpdateID, "err", err,
+						"charge", sp.ChargeID, "payload", sp.InvoicePayload, "amount", sp.TotalAmount)
+				} else {
+					b.d.Log.Error("telegram: update given up", "update", up.UpdateID, "err", err)
+				}
 			}
 			if ctx.Err() != nil {
 				return // not handled to the end: stays unacknowledged for the next run
@@ -411,7 +449,27 @@ func (b *Bot) poll(ctx context.Context, c *Client) {
 // before each new try, longer every time.
 const maxUpdateTries = 5
 
+// maxPaymentTries is the same for a Stars payment not yet saved: the buyer has paid, so it
+// waits out a database outage (about 25 minutes, the pause capped at a minute) rather
+// than the few seconds other updates get.
+const maxPaymentTries = 40
+
 var updateRetryPause = 2 * time.Second
+
+func triesOf(up Update) int {
+	if paymentOf(up) != nil {
+		return maxPaymentTries
+	}
+	return maxUpdateTries
+}
+
+// paymentOf is the Stars payment an update reports, if any.
+func paymentOf(up Update) *SuccessfulPayment {
+	if up.Message == nil {
+		return nil
+	}
+	return up.Message.SuccessfulPayment
+}
 
 // offsetRecord is the saved position in Telegram's update stream, of one bot.
 type offsetRecord struct {
@@ -575,11 +633,6 @@ func (b *Bot) onMessage(ctx context.Context, out *Outbox, m *Message) {
 		notice = b.linkByAddress(ctx, out, w, chat, who(m.From), text)
 	}
 	b.freshMenu(out, chat, notice)
-}
-
-func (b *Bot) InfrastructureAdminChatIs(ctx context.Context, chat int64) bool {
-	id, ok, err := b.InfrastructureAdminChat(ctx)
-	return err == nil && ok && id == chat
 }
 
 // freshMenu sends the main menu as a new message and removes the previous one, so the
@@ -907,11 +960,6 @@ func labelOf(cfg Config, action, def string) string {
 		}
 	}
 	return def
-}
-
-// CheckToken asks Telegram whose token this is, the way the bot goes there.
-func (b *Bot) CheckToken(ctx context.Context, token string) (User, error) {
-	return b.CheckTokenVia(ctx, token, b.Route(ctx))
 }
 
 // CheckTokenVia asks Telegram whose token this is, through route: a route and a token

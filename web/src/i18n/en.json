@@ -1534,7 +1534,6 @@
       "tariff": "Plan",
       "tariffHint": "Clients get the plan's protocols, reset strategy and pools; the limit, term and devices come from the old panel.",
       "run": "Import {n}",
-      "done": "Imported: {n}",
       "started": "The import has started; you may leave the page",
       "fetching": "Reading the old panel…",
       "progress": "Importing: {done} of {total}",

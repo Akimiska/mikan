@@ -289,11 +289,22 @@ func (s *Service) addonWebhook(ctx context.Context, w http.ResponseWriter, r *ht
 // checkAddon asks the adapter about an invoice and records what it says: the currency must
 // match the payment and the amount must cover it. More is the provider's fee charged to the
 // buyer on top (Platega adds it once a method is picked); the invoice is ours, so it is paid.
+// Only an invoice we do not have is ErrBadPayment: a database that failed to answer is
+// returned as it is, so the webhook answers 503 and the provider sends it again.
 func (s *Service) checkAddon(ctx context.Context, provider, ext string) error {
 	pay, err := s.d.Store.Q.GetPaymentByExternal(ctx, db.GetPaymentByExternalParams{Provider: provider, ExternalID: sql.NullString{String: ext, Valid: true}})
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrBadPayment
 	}
+	if err != nil {
+		return err
+	}
+	return s.checkAddonPayment(ctx, pay)
+}
+
+// checkAddonPayment is checkAddon for a payment already loaded.
+func (s *Service) checkAddonPayment(ctx context.Context, pay db.Payment) error {
+	provider, ext := pay.Provider, pay.ExternalID.String
 	cl, cfg, err := s.addonClient(ctx, AddonID(provider))
 	if err != nil {
 		return err
@@ -313,7 +324,7 @@ func (s *Service) checkAddon(ctx context.Context, provider, ext string) error {
 		}
 		if s.d.Promo != nil {
 			r, redemptionErr := s.d.Promo.GetPaymentRedemption(ctx, pay.ID)
-			late := redemptionErr == nil && latePromoPayment(r, paymentTime(pay, s.d.Now().Unix()))
+			late := redemptionErr == nil && promo.PaidLate(r, paymentTime(pay, s.d.Now().Unix()))
 			if late {
 				handled, err := s.refundLatePromoPayment(ctx, pay.ID, ext, func(current db.Payment) error {
 					// This invoice already contains the discounted amount. The stable key
@@ -333,11 +344,11 @@ func (s *Service) checkAddon(ctx context.Context, provider, ext string) error {
 		}
 		return s.paid(ctx, pay, ext)
 	case "canceled":
-		_, err := s.d.Store.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: "failed", ID: pay.ID, OldStatus: "pending"})
+		_, err := s.d.Store.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: PaymentFailed, ID: pay.ID, OldStatus: PaymentPending})
 		if err != nil {
 			return err
 		}
-		if s.d.Promo != nil && (pay.Status == "pending" || pay.Status == "expired" || pay.Status == "failed") {
+		if s.d.Promo != nil && (pay.Status == PaymentPending || pay.Status == PaymentExpired || pay.Status == PaymentFailed) {
 			return s.d.Promo.ReleasePayment(ctx, pay.ID)
 		}
 		return nil

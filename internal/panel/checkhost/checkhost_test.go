@@ -137,3 +137,28 @@ func TestNoRussianCheckers(t *testing.T) {
 		t.Fatalf("service down: %v", err)
 	}
 }
+
+// The service failing to start a check is an error the admin sees, not every port
+// "pending", and it is not kept: the next check asks again.
+func TestCheckTCPServiceFailure(t *testing.T) {
+	var checks atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/nodes/hosts" {
+			_, _ = w.Write([]byte(`{"nodes":{"ru1.node.check-host.net":{"location":["ru","Russia","Moscow"]}}}`))
+			return
+		}
+		checks.Add(1)
+		http.Error(w, "slow down", http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, srv.Client(), nil)
+	c.pollEvery = 10 * time.Millisecond
+	for i := range 2 {
+		if _, err := c.CheckTCP(context.Background(), "203.0.113.5", []int{443, 8443}); err == nil {
+			t.Fatalf("check %d: a failed service answered no error", i)
+		}
+	}
+	if checks.Load() != 4 {
+		t.Fatalf("the failed answer was kept: %d checks", checks.Load())
+	}
+}

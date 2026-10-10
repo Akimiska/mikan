@@ -120,7 +120,7 @@ function Details({ text }: { text?: string }) {
 }
 
 /** A command to run on a server, with a copy button. */
-export function CommandToCopy({ command, label }: { command: string; label: string }) {
+function CommandToCopy({ command, label }: { command: string; label: string }) {
   const copy = useCopy();
   return (
     <div className="mt-2">

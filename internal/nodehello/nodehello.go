@@ -17,10 +17,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -254,17 +252,4 @@ func Write(dir string, s Status) error {
 		return err
 	}
 	return fsutil.WriteFileAtomic(filepath.Join(dir, File), append(raw, '\n'), 0o644)
-}
-
-// Read loads the status in dir.
-func Read(dir string) (Status, error) {
-	var s Status
-	raw, err := os.ReadFile(filepath.Join(dir, File))
-	if err != nil {
-		return s, err
-	}
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return s, fmt.Errorf("%s: %w", File, err)
-	}
-	return s, nil
 }

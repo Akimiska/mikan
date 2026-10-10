@@ -287,6 +287,10 @@ func (b *Bot) starsPaid(ctx context.Context, m *Message) error {
 	case errors.Is(err, billing.ErrBadPayment):
 		b.d.Log.Error("telegram: stars payment is not an invoice of ours", "tg", m.From.ID, "charge", sp.ChargeID, "amount", sp.TotalAmount)
 		return nil
+	case errors.Is(err, billing.ErrRecorded):
+		// Saved with its charge: the reconcile pass applies it, the update is done.
+		b.d.Log.Error("telegram: stars payment saved, not applied yet", "err", err, "charge", sp.ChargeID)
+		return nil
 	}
 	b.d.Log.Error("telegram: stars payment", "err", err, "charge", sp.ChargeID)
 	return err

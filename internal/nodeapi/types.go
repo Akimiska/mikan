@@ -8,17 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"mikan/internal/proto"
 	"mikan/internal/scan"
-)
-
-const (
-	PresetVlessVision = "vless_reality_vision"
-	PresetVlessXHTTP  = "vless_reality_xhttp"
-	PresetHysteria2   = "hysteria2"
-	PresetTUIC        = "tuic_v5"
+	"mikan/internal/textutil"
 )
 
 // DesiredState is the complete configuration of a node. Applying the same state twice
@@ -255,21 +248,9 @@ func (u UpdateStatus) Clean() (UpdateStatus, bool) {
 	default:
 		return UpdateStatus{}, false
 	}
-	u.Version, u.From, u.At = clip(u.Version, MaxUpdateField), clip(u.From, MaxUpdateField), clip(u.At, MaxUpdateField)
-	u.Error = clip(u.Error, MaxUpdateError)
+	u.Version, u.From, u.At = textutil.Clip(u.Version, MaxUpdateField), textutil.Clip(u.From, MaxUpdateField), textutil.Clip(u.At, MaxUpdateField)
+	u.Error = textutil.Clip(u.Error, MaxUpdateError)
 	return u, true
-}
-
-// clip cuts s to at most n bytes without splitting a character.
-func clip(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	s = s[:n]
-	for !utf8.ValidString(s) {
-		s = s[:len(s)-1]
-	}
-	return s
 }
 
 type System struct {
@@ -361,37 +342,6 @@ type Error struct {
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
-
-// Preset settings stored in inbounds.settings and passed to the node as-is.
-
-type RealitySettings struct {
-	PrivateKey  string   `json:"private_key"`
-	PublicKey   string   `json:"public_key"`
-	ShortIDs    []string `json:"short_ids"`
-	Dest        string   `json:"dest"`
-	ServerNames []string `json:"server_names"`
-}
-
-type VlessVisionSettings struct {
-	Reality RealitySettings `json:"reality"`
-}
-
-type VlessXHTTPSettings struct {
-	Reality RealitySettings `json:"reality"`
-	Path    string          `json:"path"`
-	Mode    string          `json:"mode"` // "stream-one": "auto" hangs on mihomo v1.19.31 (S-01a)
-}
-
-type Hysteria2Settings struct {
-	ObfsPassword string `json:"obfs_password,omitempty"`
-	UpMbps       int    `json:"up_mbps,omitempty"`
-	DownMbps     int    `json:"down_mbps,omitempty"`
-	Masquerade   string `json:"masquerade,omitempty"`
-}
-
-type TUICSettings struct {
-	CongestionControl string `json:"congestion_control"`
-}
 
 // Warp is a WireGuard tunnel to Cloudflare WARP on the node. The listed inbounds leave
 // through it whole, and so do the listed domains and networks for every inbound; the

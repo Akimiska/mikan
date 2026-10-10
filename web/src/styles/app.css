@@ -95,18 +95,6 @@
   .theme-mock-split .theme-mock + .theme-mock { padding: 8px 8px 8px 4px; }
   .theme-mock-split .tm-side { display: none; }
 
-  .theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)); gap: 8px; }
-  .theme-option { display: flex; min-width: 0; flex-direction: column; gap: 8px; align-items: stretch; padding: 8px; border: 1px solid var(--hairline); border-radius: 14px; background: var(--surface-soft); color: var(--ink-700); font-size: 12px; font-weight: 500; text-align: left; transition: border-color .2s, transform .12s, background-color .2s; }
-  .theme-option > span:last-child { overflow-wrap: anywhere; }
-  .theme-option:hover { transform: translateY(-1px); background: var(--surface-hover); }
-  .theme-option[aria-checked="true"] { border-color: var(--mikan-500); box-shadow: 0 0 0 2px color-mix(in srgb, var(--mikan-500) 18%, transparent); }
-  .theme-swatch { display: block; height: 42px; border-radius: 9px; background: var(--mikan-500); box-shadow: inset 0 0 0 1px rgba(255,255,255,.25); }
-  .theme-option[data-theme-preview="mikan"] .theme-swatch { background: linear-gradient(135deg, #f07a2e, #58afbe); }
-  .theme-option[data-theme-preview="midnight"] .theme-swatch { background: linear-gradient(135deg, #0d1118, #ff843d); }
-  .theme-option[data-theme-preview="ocean"] .theme-swatch { background: linear-gradient(135deg, #eaf5f8, #2499ae); }
-  .theme-option[data-theme-preview="sakura"] .theme-swatch { background: linear-gradient(135deg, #fbf0f5, #e96b96); }
-  .theme-option[data-theme-preview="forest"] .theme-swatch { background: linear-gradient(135deg, #eef6ef, #379c51); }
-
   /* surfaces */
   .glass { background: var(--glass); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); border: 1px solid var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-md); }
   .glass-strong { background: var(--glass-strong); -webkit-backdrop-filter: blur(32px) saturate(170%); backdrop-filter: blur(32px) saturate(170%); border: 1px solid var(--glass-edge); box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow-lg); }
@@ -137,7 +125,6 @@
   .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .link-btn { color: var(--mikan-700); font-weight: 500; }
   .link-btn:hover { text-decoration: underline; text-underline-offset: 3px; }
-  .kbd { font: 500 11px/16px var(--font-ui-stack); color: var(--ink-500); border: 1px solid var(--hairline); background: var(--surface); border-radius: 6px; padding: 0 4px; }
   .spin { animation: spin 0.8s linear infinite; }
 
   /* shell */
@@ -373,9 +360,14 @@
   .input { height: 44px; padding: 0 12px; border-radius: var(--r-md); border: 1px solid var(--hairline); background: var(--surface); color: var(--ink-900); outline: 0; width: 100%; transition: border-color 0.2s, box-shadow 0.2s; }
   .input:focus { border-color: var(--mikan-600); box-shadow: 0 0 0 3px var(--ring); }
   .input[aria-invalid="true"] { border-color: var(--berry-600); }
-  .input-unit { position: relative; display: block; }
-  .input-unit .input { padding-right: 40px; text-align: right; }
-  .input-unit span { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--ink-500); pointer-events: none; }
+  /* The frame is the wrapper's, and the unit sits beside the field in the flow: a unit of
+     any width ("Мбит/с", "мес.") takes its own room and never covers the digits. */
+  .input-unit { display: flex; align-items: center; height: 44px; border-radius: var(--r-md); border: 1px solid var(--hairline); background: var(--surface); cursor: text; transition: border-color 0.2s, box-shadow 0.2s; }
+  .input-unit:focus-within { border-color: var(--mikan-600); box-shadow: 0 0 0 3px var(--ring); }
+  .input-unit:has(.input[aria-invalid="true"]) { border-color: var(--berry-600); }
+  .input-unit:has(.input:disabled) { cursor: default; }
+  .input-unit .input { flex: 1; min-width: 0; height: 100%; padding: 0 8px 0 12px; border: 0; border-radius: inherit; background: transparent; box-shadow: none; text-align: right; }
+  .input-unit > span { flex: none; padding-right: 12px; font-size: 13px; color: var(--ink-500); white-space: nowrap; pointer-events: none; }
   textarea.input { height: auto; min-height: 80px; padding: 12px; resize: vertical; line-height: 20px; }
   .rules-editor { display: grid; grid-template-columns: auto minmax(0, 1fr); border-radius: var(--r-md); border: 1px solid var(--hairline); background: var(--surface); overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s; }
   .rules-editor:focus-within { border-color: var(--mikan-600); box-shadow: 0 0 0 3px var(--ring); }

@@ -11,9 +11,8 @@ import { DARK_THEMES, isDarkTheme, LIGHT_THEMES, THEMES, type Theme } from "../l
 
 const LIGHT = LIGHT_THEMES;
 const DARK = DARK_THEMES;
-export { THEMES, type Theme };
 /** What the admin picks: a theme, or the device's light or dark (Mikan or Midnight). */
-export type ThemeChoice = Theme | "system";
+type ThemeChoice = Theme | "system";
 
 const KEY = "mikan-theme";
 
@@ -21,7 +20,7 @@ function valid(value: string | null): value is ThemeChoice {
   return value === "system" || (value !== null && (THEMES as readonly string[]).includes(value));
 }
 
-export const isDark = (theme: Theme) => isDarkTheme(theme);
+const isDark = (theme: Theme) => isDarkTheme(theme);
 
 export function getTheme(): ThemeChoice {
   if (typeof window === "undefined") return "mikan";

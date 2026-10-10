@@ -15,7 +15,6 @@ package addons
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,9 +91,8 @@ type Catalog struct {
 // ParseCatalog checks the signature over the exact bytes, then the entries: what this
 // panel cannot run (another protocol, a newer panel, a malformed entry) is left out.
 func ParseCatalog(data []byte, sig string, pub ed25519.PublicKey, panelVersion string) (Catalog, error) {
-	raw, err := base64.StdEncoding.DecodeString(string(trimSpace([]byte(sig))))
-	if err != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, data, raw) {
-		return Catalog{}, errors.New("addons: the catalog signature does not match")
+	if err := release.Verify(data, sig, pub); err != nil {
+		return Catalog{}, fmt.Errorf("addons: the catalog signature does not match: %w", err)
 	}
 	var c Catalog
 	if err := json.Unmarshal(data, &c); err != nil {
@@ -102,7 +100,7 @@ func ParseCatalog(data []byte, sig string, pub ed25519.PublicKey, panelVersion s
 	}
 	out := c.Adapters[:0]
 	for _, e := range c.Adapters {
-		if !ValidID(e.ID) || e.Protocol != Protocol || e.Image == "" || !validDigest.MatchString(e.Digest) {
+		if !ValidID(e.ID) || e.Protocol != Protocol || e.Image == "" || !release.ValidDigest(e.Digest) {
 			continue
 		}
 		if e.MinPanel != "" && panelVersion != "dev" && release.Newer(e.MinPanel, panelVersion) {
@@ -112,15 +110,6 @@ func ParseCatalog(data []byte, sig string, pub ed25519.PublicKey, panelVersion s
 	}
 	c.Adapters = out
 	return c, nil
-}
-
-var validDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-
-func trimSpace(b []byte) []byte {
-	for len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == '\r' || b[len(b)-1] == ' ') {
-		b = b[:len(b)-1]
-	}
-	return b
 }
 
 // Installed is an adapter the host runs.
@@ -206,15 +195,11 @@ func (m *Manager) Catalog(ctx context.Context) (Catalog, error) {
 		return c, nil
 	}
 	m.mu.Unlock()
-	data, err := m.get(ctx, m.catalogURL, 1<<20)
-	if err != nil {
-		return Catalog{}, err
-	}
-	sig, err := m.get(ctx, m.catalogURL+".sig", 4<<10)
-	if err != nil {
-		return Catalog{}, err
-	}
-	c, err := ParseCatalog(data, string(sig), m.pub, m.version)
+	var c Catalog
+	err := release.FetchSigned(ctx, m.get, m.catalogURL, 1<<20, func(data []byte, sig string) (err error) {
+		c, err = ParseCatalog(data, sig, m.pub, m.version)
+		return err
+	})
 	if err != nil {
 		return Catalog{}, err
 	}

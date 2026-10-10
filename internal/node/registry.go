@@ -324,16 +324,10 @@ func (r *Registry) sharedSlot(inName string) *slot {
 	return r.shared[inName]
 }
 
-// admit checks policy and the device limit. For TCP it reserves an open-connection
-// slot on the source IP; release it with slot.closeConn.
-func (r *Registry) admit(user, inName, ip string, tcp bool) *slot {
-	s, _ := r.admitIn(user, inName, ip, tcp)
-	return s
-}
-
-// admitIn is admit that also says which traffic pool the connection counts to (nil: the
-// main quota). An exhausted pool turns away only its own inbounds, and so does the main
-// quota.
+// admitIn checks policy and the device limit. For TCP it reserves an open-connection
+// slot on the source IP; release it with slot.closeConn. It also says which traffic pool
+// the connection counts to (nil: the main quota). An exhausted pool turns away only its own
+// inbounds, and so does the main quota.
 func (r *Registry) admitIn(user, inName, ip string, tcp bool) (*slot, *bucket) {
 	s := r.lookup(user)
 	if user == "" {

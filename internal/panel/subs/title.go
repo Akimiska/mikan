@@ -10,10 +10,6 @@ import (
 	"mikan/internal/panel/store/db"
 )
 
-// TitleVars are the variables the profile title and the announcement may hold, the same
-// way the bot's texts do: {brand} · {name} · until {date}. Any other {word} stays as text.
-var TitleVars = []string{"brand", "name", "date", "days", "used", "left", "total"}
-
 // TitleMax bounds a filled title or announcement: apps show one line.
 const TitleMax = 200
 

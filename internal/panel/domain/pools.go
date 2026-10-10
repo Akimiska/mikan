@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"time"
 
 	"mikan/internal/panel/store/db"
 )
@@ -71,13 +70,9 @@ func PoolExhausted(p db.UserPool, grants int64) bool {
 }
 
 // ExhaustedPools are the user's pools that do not serve: nothing left, or left out of the
-// user's tariff, by pool id.
-func ExhaustedPools(ctx context.Context, q *db.Queries, userID int64, now time.Time) (map[int64]bool, error) {
+// user's tariff, by pool id. left is UserGrantsLeft of the user, which the caller has read.
+func ExhaustedPools(ctx context.Context, q *db.Queries, userID int64, left GrantsLeft) (map[int64]bool, error) {
 	ps, err := q.ListUserPools(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	left, err := UserGrantsLeft(ctx, q, userID, now)
 	if err != nil {
 		return nil, err
 	}

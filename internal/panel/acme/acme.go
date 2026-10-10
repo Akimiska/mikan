@@ -8,10 +8,8 @@ package acme
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net"
@@ -23,6 +21,7 @@ import (
 
 	"mikan/internal/acmechallenge"
 	"mikan/internal/hostname"
+	"mikan/internal/nodetls"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/tlscert"
@@ -132,8 +131,7 @@ func (m *Manager) Load(ctx context.Context) { m.settle(ctx) }
 func (m *Manager) announce() {
 	key := ""
 	if c := m.Public(); c != nil {
-		sum := sha256.Sum256(c.Leaf.Raw)
-		key = hex.EncodeToString(sum[:])
+		key = nodetls.PinOfDER(c.Leaf.Raw)
 	}
 	m.annMu.Lock()
 	if key == m.announced {

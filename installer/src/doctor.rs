@@ -459,8 +459,12 @@ fn firewall(install: &Install) -> Vec<Item> {
     let Some(status) = system::output("ufw", &["status"]).filter(|s| s.contains("Status: active")) else {
         return vec![Item::ok("Firewall (ufw)", "off; a firewall in the hoster's panel is not checked here")];
     };
-    let state: Option<NodeState> =
-        std::fs::read_to_string(Path::new(DIR).join("data/node/node-state.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
+    // The node's container writes the file: read as panelfs reads it, no link, FIFO or huge file.
+    let state: Option<NodeState> = crate::panelfs::Dir::open(Path::new(DIR), "data/node", false)
+        .ok()
+        .flatten()
+        .and_then(|d| d.read("node-state.json", 16 << 20).ok().flatten())
+        .and_then(|raw| serde_json::from_slice(&raw).ok());
     let panel = (!install.node).then(|| install.env.get("PANEL_PORT").and_then(|p| p.parse().ok())).flatten();
     firewall_items(&status, &wants(install.node_port(), panel, state.as_ref()))
 }
@@ -779,7 +783,8 @@ Anywhere                   ALLOW       10.0.0.0/8
 
     #[test]
     fn containers_by_state() {
-        let service = |state: &str, status: &str| Service { name: "node".into(), state: state.into(), status: status.into() };
+        let service =
+            |state: &str, status: &str| Service { name: "node".into(), state: state.into(), status: status.into(), ..Default::default() };
         assert_eq!(container(&service("running", "Up 3 hours")).level, Level::Ok);
         assert_eq!(container(&service("running", "Up 3 hours (healthy)")).level, Level::Ok);
         assert_eq!(container(&service("running", "Up 5 seconds (health: starting)")).level, Level::Warn);

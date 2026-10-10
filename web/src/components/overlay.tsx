@@ -75,6 +75,36 @@ export function Drawer({
 }
 
 /**
+ * The footer of a drawer that holds a form: Cancel, and the button that submits the form.
+ * The footer sits outside the <form>, so the button names it by id (`form`). `children` is
+ * the submit button's label.
+ */
+export function DrawerFooter({
+  form,
+  onCancel,
+  loading,
+  disabled,
+  children,
+}: {
+  form: string;
+  onCancel: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <Button variant="ghost" onClick={onCancel}>
+        {t("common.cancel")}
+      </Button>
+      <Button variant="primary" type="submit" form={form} loading={loading} disabled={disabled}>
+        {children}
+      </Button>
+    </>
+  );
+}
+
+/**
  * A dialog that asks for one name: renaming a client or a device. `optional` lets it be
  * emptied (the device goes back to the name its app reports, shown as the placeholder).
  * `error` is the API's word on the name; the dialog stays open with it.

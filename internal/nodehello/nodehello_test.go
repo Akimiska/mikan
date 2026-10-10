@@ -3,8 +3,12 @@ package nodehello
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -61,4 +65,18 @@ func TestHelloToAnUntrustedPanel(t *testing.T) {
 	if r.Code != PanelUntrusted || r.Params["url"] != panel.URL || !Final(r) {
 		t.Fatalf("%+v", r)
 	}
+}
+
+// Read loads the status in dir. The panel never reads this file (root reads it on the host),
+// so only the tests need it.
+func Read(dir string) (Status, error) {
+	var s Status
+	raw, err := os.ReadFile(filepath.Join(dir, File))
+	if err != nil {
+		return s, err
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return s, fmt.Errorf("%s: %w", File, err)
+	}
+	return s, nil
 }

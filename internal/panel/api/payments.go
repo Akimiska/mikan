@@ -136,29 +136,38 @@ func (h *handlers) getPaymentSettings(ctx context.Context, _ *struct{}) (*paymen
 
 func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSettingsInput) (*paymentSettingsOutput, error) {
 	b := in.Body
-	c, err := h.d.Billing.LoadConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic} {
-		if v != nil {
-			*dst = *v
-		}
-	}
 	if b.TrialTariffID != nil {
 		if id := *b.TrialTariffID; id != 0 {
 			t, err := h.d.Store.Q.GetTariff(ctx, id)
 			if err != nil || t.Archived != 0 {
-				return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.trial_tariff_id", Message: "tariff_not_found"})
+				return nil, fieldErr("body.trial_tariff_id", "tariff_not_found")
 			}
 			// A tariff without a term would make the free trial a subscription with no end.
 			if t.DurationDays <= 0 {
-				return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.trial_tariff_id", Message: "trial_no_term"})
+				return nil, fieldErr("body.trial_tariff_id", "trial_no_term")
 			}
 		}
-		c.TrialTariffID = *b.TrialTariffID
 	}
-	if err := settings.Set(ctx, h.d.Settings, billing.KeyConfig, c); err != nil {
+	// Read and written in one transaction: a change made meanwhile is not overwritten
+	// with the fields this request did not name.
+	var c billing.Config
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		set := settings.New(q)
+		var err error
+		if c, err = billing.LoadConfig(ctx, set); err != nil {
+			return err
+		}
+		for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic} {
+			if v != nil {
+				*dst = *v
+			}
+		}
+		if b.TrialTariffID != nil {
+			c.TrialTariffID = *b.TrialTariffID
+		}
+		return settings.Set(ctx, set, billing.KeyConfig, c)
+	})
+	if err != nil {
 		return nil, err
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "payments.settings", "", "", map[string]any{"enabled": c.Enabled, "stars": c.Stars,

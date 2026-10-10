@@ -201,16 +201,3 @@ func (t *Tracker) Observe(sample Level, failAfter, recoverAfter int) *Transition
 	}
 	return nil
 }
-
-func PublicText(name string, level Level) string {
-	icon, label := "⚪", "Проверяем"
-	switch level {
-	case Healthy:
-		icon, label = "🟢", "Работает"
-	case Degraded:
-		icon, label = "🟡", "Есть проблемы"
-	case Unavailable:
-		icon, label = "🔴", "Недоступен"
-	}
-	return icon + " " + name + " — " + label
-}

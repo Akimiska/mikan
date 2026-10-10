@@ -1,9 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Bot, ChevronRight, ListFilter, Plus, ShieldBan, Wallet, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { api, unwrap } from "../../api/client";
-import { qk, useFilters, useTorrent } from "../../api/hooks";
+import { useFilters, useTelegram, useTorrent } from "../../api/hooks";
 import { QueryBoundary } from "../../components/query";
 import { PageHeader, Pill, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
@@ -88,7 +86,7 @@ function Tile({
 }
 
 function TelegramTile() {
-  const tg = useQuery({ queryKey: qk.telegram, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram", { signal })) });
+  const tg = useTelegram();
   const v = tg.data;
   const state = !v ? null : v.running ? <Pill tone="ok">{t("addons.on")}</Pill> : v.enabled ? <Pill tone="warn">{t("addons.stopped")}</Pill> : <Pill tone="off">{t("addons.off")}</Pill>;
   const facts: [string, string][] | undefined = v && [

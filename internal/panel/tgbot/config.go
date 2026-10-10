@@ -3,6 +3,8 @@ package tgbot
 import (
 	"errors"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -129,7 +131,7 @@ func (c *Config) Validate() error {
 				return ErrButtonText
 			}
 		default:
-			if !contains(builtins, b.Action) || seen[b.Action] {
+			if !slices.Contains(builtins, b.Action) || seen[b.Action] {
 				return ErrButtons
 			}
 			seen[b.Action] = true
@@ -137,8 +139,8 @@ func (c *Config) Validate() error {
 		}
 		if b.Action == "url" || b.Action == "page" {
 			// Custom buttons keep their id: the callback data points at it.
-			if b.ID == "" || contains(builtins, b.ID) || len(b.ID) > 16 || strings.ContainsAny(b.ID, ": ") || seen["id:"+b.ID] {
-				b.ID = "c" + itoa(i+1)
+			if b.ID == "" || slices.Contains(builtins, b.ID) || len(b.ID) > 16 || strings.ContainsAny(b.ID, ": ") || seen["id:"+b.ID] {
+				b.ID = "c" + strconv.Itoa(i+1)
 			}
 			seen["id:"+b.ID] = true
 			if b.Action == "url" {
@@ -160,24 +162,4 @@ func (c *Config) Validate() error {
 func safeURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && (u.Scheme == "https" && u.Host != "" || u.Scheme == "tg" && u.Host != "") && u.User == nil
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for ; n > 0; n /= 10 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-	}
-	return string(b)
 }

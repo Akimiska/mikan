@@ -3,6 +3,7 @@
 //! with a valid signature of the release key.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use base64::Engine;
@@ -280,6 +281,9 @@ fn from_index(current: &str, channel: Channel, upto: Option<&str>, key: &Verifyi
     let sig =
         fetch(&format!("{url}.sig"), 4096).context("download the index's signature")?.context("the release index has no signature")?;
     let mut entries = parse_index(&data, &String::from_utf8_lossy(&sig), key)?;
+    if let Some(seen) = index_seen() {
+        not_older(seen, &data, "published", "the release index")?;
+    }
     let beta = channel == Channel::Beta;
     if let Some(upto) = upto {
         // Never a release the index does not list for the channel, and never past it.
@@ -307,6 +311,29 @@ fn from_index(current: &str, channel: Channel, upto: Option<&str>, key: &Verifyi
         bail!("the release index says {}, its manifest is of {}", entry.version, manifest.version);
     }
     Ok(Found { manifest, newest: later, unreachable, fallback: None })
+}
+
+/// The newest release index this server has accepted ("published"); tests keep none.
+fn index_seen() -> Option<&'static Path> {
+    if cfg!(test) { None } else { Some(Path::new("/opt/mikan/release/index-published")) }
+}
+
+/// A signed document stays validly signed for ever: an old copy served again (a cache, a
+/// CDN, someone in the path) would hold a server on an old release, a security fix
+/// hidden, or offer a vulnerable build as the current one. Its timestamp field (RFC 3339
+/// in UTC) may only grow; the newest one seen is kept in seen, root's own file.
+pub fn not_older(seen: &Path, doc: &[u8], field: &str, what: &str) -> Result<()> {
+    let at = serde_json::from_slice::<serde_json::Value>(doc).ok().and_then(|v| v[field].as_str().map(str::to_owned));
+    let Some(at) = at.filter(|u| !u.is_empty()) else { return Ok(()) };
+    let before = std::fs::read_to_string(seen).unwrap_or_default();
+    // RFC 3339 in UTC, always the same shape: comparing the text compares the time.
+    if !before.is_empty() && at.as_str() < before.trim() {
+        bail!("{what} is from {at}, older than the one seen on {}: it is not accepted", before.trim());
+    }
+    if at.as_str() > before.trim() {
+        crate::panelfs::write_root(seen, at.as_bytes())?;
+    }
+    Ok(())
 }
 
 pub fn key() -> Result<VerifyingKey> {
@@ -389,6 +416,16 @@ fn semver(v: &str) -> Option<Version<'_>> {
 
 /// Whether version a is later than b, as internal/release.Newer: a pre-release comes
 /// before its release, and "dev" or anything unparsable is older than every release.
+/// The last release whose panel moves a database from SQLite to PostgreSQL.
+pub const LAST_SQLITE_MOVE: &str = "0.5.0.4";
+
+/// Whether the panel of version can take a database from SQLite (a server of 0.4, or a
+/// backup of one): 0.5.0.x can, 0.5.1.0 and later cannot. A version that is not a release's
+/// (a local build) is let through: its panel refuses SQLite data itself.
+pub fn moves_sqlite(version: &str) -> bool {
+    semver(version).is_none() || newer("0.5.1.0-0", version)
+}
+
 pub fn newer(a: &str, b: &str) -> bool {
     match (semver(a), semver(b)) {
         (None, _) => false,
@@ -437,6 +474,17 @@ fn compare_prerelease(a: &str, b: &str) -> std::cmp::Ordering {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    // 0.5.0.x moves a database from SQLite, 0.5.1.0 and its pre-releases do not.
+    #[test]
+    fn which_releases_move_sqlite() {
+        for v in ["0.4.5", "0.5.0.0", "0.5.0.4", "0.5.0.5-rc.4", "dev"] {
+            assert!(moves_sqlite(v), "{v}");
+        }
+        for v in ["0.5.1.0", "0.5.1.0-rc.1", "0.5.1.1", "0.6.0"] {
+            assert!(!moves_sqlite(v), "{v}");
+        }
+    }
 
     fn manifest(version: &str, image: &str) -> Vec<u8> {
         format!(

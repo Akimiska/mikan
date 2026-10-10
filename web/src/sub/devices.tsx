@@ -4,7 +4,7 @@ import { Button, Pill } from "../components/ui";
 import { t, tMaybe } from "../i18n";
 import { DEVICE_NAME_MAX, desktopOS, deviceDetails, deviceLabel, reportedName } from "../lib/devices";
 import { ago, bytes, dateShort, time } from "../lib/format";
-import { request } from "./net";
+import { postJSON } from "./net";
 import type { Device, Info } from "./types";
 
 function deviceName(d: Device): string {
@@ -27,12 +27,12 @@ function RenameForm({ d, subURL, onDone }: { d: Device; subURL: string; onDone: 
     setBusy(true);
     setError("");
     try {
-      const r = await request(`${subURL}/devices/${d.id}/name`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: clean }) });
+      const r = await postJSON<{ code: string }>(`${subURL}/devices/${d.id}/name`, { name: clean });
       if (r.ok) {
         onDone(true);
         return;
       }
-      const b = (await r.json().catch(() => ({}))) as { code?: string };
+      const b = r.data;
       setError((b.code && tMaybe(`sub.nameErrors.${b.code}`)) || t("sub.renameFailed"));
     } catch {
       setError(t("sub.renameFailed"));
@@ -140,9 +140,9 @@ export function Devices({ info, subURL, reload, title }: { info: Info; subURL: s
     setBusy(true);
     setError("");
     try {
-      const r = await request(`${subURL}/devices/${id}/unbind`, { method: "POST" });
+      const r = await postJSON<{ unbind_after: string }>(`${subURL}/devices/${id}/unbind`);
       if (r.status === 429) {
-        const b = (await r.json().catch(() => ({}))) as { unbind_after?: string };
+        const b = r.data;
         setError(b.unbind_after ? t("sub.unbindAfter", { date: dateShort(b.unbind_after), time: time(b.unbind_after) }) : t("sub.unbindFailed"));
       } else if (!r.ok) {
         setError(t("sub.unbindFailed"));

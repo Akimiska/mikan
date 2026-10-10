@@ -151,7 +151,7 @@ export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   );
 }
 
-// The variables the title and the announcement take (subs.TitleVars).
+// The variables the title and the announcement take (subs.titleValues fills them).
 const TITLE_VARS = ["brand", "name", "date", "days", "used", "left", "total"] as const;
 
 // The {words} of a text that are no variable: they stay as text in the apps, so this only

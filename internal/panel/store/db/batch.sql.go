@@ -866,6 +866,23 @@ func (q *Queries) StartPeriodIfOlder(ctx context.Context, arg StartPeriodIfOlder
 	return result.RowsAffected()
 }
 
+const sumUserTraffic = `-- name: SumUserTraffic :one
+SELECT COALESCE(SUM(total_up), 0)::bigint AS up, COALESCE(SUM(total_down), 0)::bigint AS down FROM users
+`
+
+type SumUserTrafficRow struct {
+	Up   int64
+	Down int64
+}
+
+// Traffic of all users, all time.
+func (q *Queries) SumUserTraffic(ctx context.Context) (SumUserTrafficRow, error) {
+	row := q.db.QueryRowContext(ctx, sumUserTraffic)
+	var i SumUserTrafficRow
+	err := row.Scan(&i.Up, &i.Down)
+	return i, err
+}
+
 const tgNoticeSent = `-- name: TgNoticeSent :one
 SELECT EXISTS (SELECT 1 FROM tg_notices WHERE user_id = $1 AND kind = $2 AND period = $3)
 `

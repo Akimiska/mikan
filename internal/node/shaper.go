@@ -237,6 +237,11 @@ func (c *shapedConn) Read(b []byte) (int, error) {
 }
 
 func (c *shapedConn) Write(b []byte) (int, error) {
+	// No ceiling yet (a new group before its first share, or the fair share leaves it
+	// free): written whole. Cut by a burst of 0, it would go out a byte at a time.
+	if c.g.down.Limit() == rate.Inf {
+		return c.Conn.Write(b)
+	}
 	written := 0
 	for written < len(b) {
 		chunk := min(len(b)-written, max(c.g.down.Burst(), 1))

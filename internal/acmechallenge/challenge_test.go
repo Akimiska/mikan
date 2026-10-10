@@ -192,3 +192,6 @@ func TestServerNameFromItsAnswer(t *testing.T) {
 		t.Fatalf("serverOn = %q", got)
 	}
 }
+
+// Listening says whether the port is held now.
+func (s *Server) Listening() bool { return s.Bound() != "" }

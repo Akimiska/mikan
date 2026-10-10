@@ -207,11 +207,19 @@ struct Change {
 }
 
 impl Change {
-    /// Writes text to path; what was there is copied to backup first.
+    /// Writes text to path; what was there is copied to backup first, readable by no more
+    /// people than the original (a Caddyfile may hold DNS tokens or password hashes).
     fn write(path: &Path, text: &str, backup: &Path) -> std::io::Result<Change> {
         let before = fs::read(path).ok();
         if let Some(b) = &before {
-            fs::write(backup, b)?;
+            use std::io::Write;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let mode = fs::metadata(path).map(|m| m.permissions().mode() & 0o777).unwrap_or(0o600);
+            let _ = fs::remove_file(backup);
+            let mut f = fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(backup)?;
+            f.write_all(b)?;
+            // The umask may have taken bits off; the original's mode is what it should be.
+            f.set_permissions(fs::Permissions::from_mode(mode))?;
         }
         // In place, so the file keeps its owner and mode.
         fs::write(path, text)?;

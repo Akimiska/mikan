@@ -26,6 +26,30 @@ impl Check {
     }
 }
 
+/// Runs a command for its effect, quietly; when it fails the error carries the last line
+/// it wrote to stderr, which says why ("ufw allow ... failed: ERROR: Bad port").
+pub fn run_quiet(cmd: &str, args: &[&str]) -> anyhow::Result<()> {
+    let what = || format!("{cmd} {}", args.join(" "));
+    let out = Command::new(cmd).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).output();
+    let out = match out {
+        Ok(o) => o,
+        Err(e) => anyhow::bail!("{} failed: {e}", what()),
+    };
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    match err.lines().rev().map(str::trim).find(|l| !l.is_empty()) {
+        Some(why) => anyhow::bail!("{} failed: {why}", what()),
+        None => anyhow::bail!("{} failed ({})", what(), out.status),
+    }
+}
+
+/// Whether a command ran and succeeded, quietly.
+pub fn succeeds(cmd: &str, args: &[&str]) -> bool {
+    Command::new(cmd).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
 /// Runs a command and returns its stdout when it succeeds.
 pub fn output(cmd: &str, args: &[&str]) -> Option<String> {
     let out = Command::new(cmd).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;

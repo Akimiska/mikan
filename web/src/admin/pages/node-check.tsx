@@ -4,7 +4,7 @@
 // panel's own server.
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { CircleCheck, CircleMinus, CircleX, ClipboardCopy, Copy, Globe, KeyRound, Pencil, RefreshCw, Stethoscope, TriangleAlert, ArrowUpCircle } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { useNodes } from "../../api/hooks";
 import { Drawer } from "../../components/overlay";
@@ -26,7 +26,7 @@ export type FixActions = { rekey?: () => void; update?: () => void; edit?: () =>
 const ANSWER_CODES = ["pin_mismatch", "tls", "http_status"];
 
 /** The node's API port, from its host:port. */
-export const apiPort = (n: Node) => n.address.slice(n.address.lastIndexOf(":") + 1);
+const apiPort = (n: Node) => n.address.slice(n.address.lastIndexOf(":") + 1);
 
 /** Commands of the fixes that only the server can do, filled with the item's facts. */
 function commands(fix: string | undefined, p: Params): string[] {
@@ -63,7 +63,7 @@ function factsOf(it: { params?: Params | null }): Params {
 }
 
 /** The words of a node's code (nodeapi.Link* and the hello's own). */
-export function codeText(code: string | undefined | null, params?: Params | null): string {
+function codeText(code: string | undefined | null, params?: Params | null): string {
   const p = factsOf({ params });
   return (code && tMaybe(`nodeCheck.code.${code}`, p)) || t("nodeCheck.code.unknown", p);
 }
@@ -84,7 +84,7 @@ const STATUS_ICON: Record<Status, { icon: typeof CircleCheck; cls: string }> = {
 };
 
 /** A status as an icon with its word for screen readers: never by colour alone. */
-export function StatusMark({ status }: { status: Status }) {
+function StatusMark({ status }: { status: Status }) {
   const { icon: Icon, cls } = STATUS_ICON[status];
   return (
     <span className={`mt-px shrink-0 ${cls}`}>
@@ -107,7 +107,7 @@ function Command({ cmd }: { cmd: string }) {
 }
 
 /** How to fix it: the words, the panel's button for it, or the commands for the server. */
-export function Fix({ fix, params, actions, panelServer }: { fix?: string | null; params?: Params | null; actions?: FixActions; panelServer?: boolean }) {
+function Fix({ fix, params, actions, panelServer }: { fix?: string | null; params?: Params | null; actions?: FixActions; panelServer?: boolean }) {
   if (!fix) return null;
   const p = factsOf({ params });
   const cmds = commands(fix, p);
@@ -174,7 +174,7 @@ function Summary({ items }: { items: Item[] }) {
 }
 
 /** A check's lines, problems first. */
-export function CheckList({ items, actions, panelServer }: { items: Item[]; actions?: FixActions; panelServer?: boolean }) {
+function CheckList({ items, actions, panelServer }: { items: Item[]; actions?: FixActions; panelServer?: boolean }) {
   const rank: Record<Status, number> = { fail: 0, warn: 1, ok: 2, skip: 3 };
   const sorted = items.map((it, i) => ({ it, i })).sort((a, b) => rank[a.it.status] - rank[b.it.status] || a.i - b.i);
   return (
@@ -200,7 +200,7 @@ export function CheckList({ items, actions, panelServer }: { items: Item[]; acti
   );
 }
 
-export function CheckSkeleton({ rows = 6 }: { rows?: number }) {
+function CheckSkeleton({ rows = 6 }: { rows?: number }) {
   return (
     <div className="space-y-3" aria-hidden>
       <Skeleton style={{ height: 44, borderRadius: 16 }} />
@@ -417,16 +417,27 @@ type Step = { key: string; status: "done" | "wait" | "fail"; text: string; extra
  * open. A failing step shows its reason and fix; closing the drawer changes nothing.
  */
 export function JoinProgress({ id, actions }: { id: number; actions: FixActions }) {
-  const nodes = useNodes(true);
+  // Close polling (2.5 s) is for a node still joining: once every step is done it stops and
+  // the list falls back to the usual pace, however long the drawer stays open.
+  const [settled, setSettled] = useState(false);
+  const nodes = useNodes(!settled);
   const n = nodes.data?.find((x) => x.id === id);
   const ready = !!n && n.status === "ok" && n.listeners > 0 && n.listeners_ok === n.listeners;
   const internet = useQuery({
     queryKey: ["node-join-check", id],
-    queryFn: () => unwrap(api.POST("/api/v1/nodes/{id}/check", { params: { path: { id } } })),
+    queryFn: ({ signal }) => unwrap(api.POST("/api/v1/nodes/{id}/check", { params: { path: { id } }, signal })),
     enabled: ready,
     staleTime: Infinity,
     retry: 1,
   });
+  const net = internet.data?.items.find((i) => i.id === "node_internet");
+  const old = internet.data?.items.some((i) => i.id === "diagnose" && i.code === "old_node");
+  // A node that is ready has the earlier steps behind it (installed, reached, key); the last
+  // is the internet from the node, or a node too old to be asked.
+  const done = ready && (net?.status === "ok" || !!old);
+  useEffect(() => {
+    if (done) setSettled(true);
+  }, [done]);
   if (!n) {
     return nodes.isPending ? <CheckSkeleton rows={4} /> : null;
   }
@@ -470,8 +481,6 @@ export function JoinProgress({ id, actions }: { id: number; actions: FixActions 
       text: ok && n.listeners > 0 ? t("nodeCheck.join.protocols", { ok: n.listeners_ok, total: n.listeners }) : t("nodeCheck.join.protocolsWait"),
     },
   ];
-  const net = internet.data?.items.find((i) => i.id === "node_internet");
-  const old = internet.data?.items.some((i) => i.id === "diagnose" && i.code === "old_node");
   steps.push({
     key: "internet",
     status: net?.status === "ok" ? "done" : net?.status === "fail" ? "fail" : "wait",
@@ -479,7 +488,6 @@ export function JoinProgress({ id, actions }: { id: number; actions: FixActions 
       net?.status === "ok" ? t("nodeCheck.join.internet") : net?.status === "fail" ? t("nodeCheck.join.internetFail") : old ? t("nodeCheck.join.internetSkip") : t("nodeCheck.join.internetWait"),
     extra: net?.status === "fail" ? <Fix fix="check_outbound" /> : null,
   });
-  const done = steps.every((s) => s.status === "done") || (ready && !!old);
   return (
     <section className="mt-5" aria-labelledby="join-title">
       <h3 id="join-title" className="text-[15px] font-semibold text-[var(--ink-900)]">

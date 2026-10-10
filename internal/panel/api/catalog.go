@@ -58,9 +58,10 @@ type termBody struct {
 }
 
 func (b termBody) term() domain.Term {
-	return domain.Term{Days: b.Days, PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub)}
+	return domain.Term{Days: b.Days, PriceStars: domain.NullInt(b.PriceStars), PriceRub: domain.NullInt(b.PriceRub)}
 }
 
+// A tariff is sold for at most 12 terms: the maxItems tag of terms is the limit.
 type tariffBody struct {
 	Name          string      `json:"name" minLength:"1" maxLength:"60"`
 	TrafficLimit  *int64      `json:"traffic_limit,omitempty" minimum:"1"`
@@ -116,13 +117,6 @@ func (h *handlers) listTariffs(ctx context.Context, _ *struct{}) (*tariffsOutput
 	return out, nil
 }
 
-func nullable(p *int64) sql.NullInt64 {
-	if p == nil {
-		return sql.NullInt64{}
-	}
-	return sql.NullInt64{Int64: *p, Valid: true}
-}
-
 // createTariff and updateTariff write the tariff and its pool limits in one transaction: a
 // refused pool list leaves the tariff, and the limits it had, as they were.
 func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOutput, error) {
@@ -137,10 +131,10 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 	// foreign key): READ COMMITTED.
 	err = h.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		var err error
-		t, err = q.CreateTariff(ctx, db.CreateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
-			DurationDays: first.Days, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
-			Sort: b.Sort, CreatedAt: h.d.Now().Unix(), BillingDay: nullable(b.BillingDay), PriceStars: first.PriceStars, PriceRub: first.PriceRub, OnSale: domain.Flag(b.OnSale),
-			SpeedLimit: nullable(b.SpeedLimit)})
+		t, err = q.CreateTariff(ctx, db.CreateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: domain.NullInt(b.TrafficLimit),
+			DurationDays: first.Days, DeviceLimit: domain.NullInt(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
+			Sort: b.Sort, CreatedAt: h.d.Now().Unix(), BillingDay: domain.NullInt(b.BillingDay), PriceStars: first.PriceStars, PriceRub: first.PriceRub, OnSale: domain.Flag(b.OnSale),
+			SpeedLimit: domain.NullInt(b.SpeedLimit)})
 		if err != nil {
 			return err
 		}
@@ -176,10 +170,10 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 			return err
 		}
 		first := terms[0]
-		t, err = q.UpdateTariff(ctx, db.UpdateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: nullable(b.TrafficLimit),
-			DurationDays: first.Days, DeviceLimit: nullable(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
-			Sort: b.Sort, BillingDay: nullable(b.BillingDay), PriceStars: first.PriceStars, PriceRub: first.PriceRub, OnSale: domain.Flag(b.OnSale), ID: in.ID,
-			SpeedLimit: nullable(b.SpeedLimit)})
+		t, err = q.UpdateTariff(ctx, db.UpdateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: domain.NullInt(b.TrafficLimit),
+			DurationDays: first.Days, DeviceLimit: domain.NullInt(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
+			Sort: b.Sort, BillingDay: domain.NullInt(b.BillingDay), PriceStars: first.PriceStars, PriceRub: first.PriceRub, OnSale: domain.Flag(b.OnSale), ID: in.ID,
+			SpeedLimit: domain.NullInt(b.SpeedLimit)})
 		if err != nil {
 			return err
 		}
@@ -236,20 +230,17 @@ func (h *handlers) applyTariffPools(ctx context.Context, in *userIDInput) (*appl
 // number of months are one term); with several, each needs a price, and a tariff on sale
 // needs one at all.
 func (b tariffBody) terms(kept []domain.Term) ([]domain.Term, error) {
-	bad := func(loc, msg string) error {
-		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: loc, Message: msg})
-	}
 	var terms []domain.Term
 	loc := "body.terms[%d]"
 	if b.Terms != nil {
 		if len(b.Terms) == 0 {
-			return nil, bad("body.terms", "terms_empty")
+			return nil, fieldErr("body.terms", "terms_empty")
 		}
 		for _, t := range b.Terms {
 			terms = append(terms, t.term())
 		}
 	} else {
-		terms = []domain.Term{{Days: b.DurationDays, PriceStars: nullable(b.PriceStars), PriceRub: nullable(b.PriceRub)}}
+		terms = []domain.Term{{Days: b.DurationDays, PriceStars: domain.NullInt(b.PriceStars), PriceRub: domain.NullInt(b.PriceRub)}}
 		if len(kept) > 1 {
 			terms = append(terms, kept[1:]...)
 		}
@@ -268,15 +259,15 @@ func (b tariffBody) terms(kept []domain.Term) ([]domain.Term, error) {
 			key = int64(domain.TermMonths(t.Days))
 		}
 		if seen[key] {
-			return nil, bad(at(i, "days"), "term_days_repeat")
+			return nil, fieldErr(at(i, "days"), "term_days_repeat")
 		}
 		seen[key] = true
 		if len(terms) > 1 && !t.PriceStars.Valid && !t.PriceRub.Valid {
-			return nil, bad(at(i, "price_rub"), "term_no_price")
+			return nil, fieldErr(at(i, "price_rub"), "term_no_price")
 		}
 	}
 	if b.OnSale && !terms[0].PriceStars.Valid && !terms[0].PriceRub.Valid {
-		return nil, bad("body.on_sale", "on_sale_no_price")
+		return nil, fieldErr("body.on_sale", "on_sale_no_price")
 	}
 	return terms, nil
 }

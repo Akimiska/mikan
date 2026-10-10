@@ -297,6 +297,22 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		// sniffer they do not touch routing, so RU-direct rules and Hysteria2 keep working.
 		"respect-rules": true,
 		"prefer-h3":     true,
+		// fake-ip-filter: domains that get a REAL IP instead of a fake 198.18.x one.
+		// Without it, apps excluded from the tunnel (per-app bypass) still get a fake IP
+		// from mihomo's DNS and can't connect at all (seen with Roblox — fails even when
+		// bypassed). Covers local/captive/connectivity-check + STUN + game/CDN hosts that
+		// break under fake-ip. No sniffer here — it does not touch routing, so Hysteria2
+		// and RU-direct keep working.
+		"fake-ip-filter": []string{
+			"*.lan", "*.local", "*.localhost", "*.arpa",
+			"time.*.com", "time.*.gov", "time.windows.com", "ntp.*.com",
+			"*.msftconnecttest.com", "*.msftncsi.com",
+			"connectivitycheck.*.com", "connectivitycheck.gstatic.com",
+			"captive.apple.com", "*.push.apple.com",
+			"stun.*.*", "*.stun.*.*",
+			"+.roblox.com", "+.rbxcdn.com", "+.rbxcdn.net", "+.rbxinfra.com",
+			"+.rbxgear.com", "+.robloxlabs.com", "+.rbx.com",
+		},
 	}
 	// The panel and the nodes stay out of the tunnel whatever the admin's rules say.
 	rules := append(directRules(p.Direct), "GEOIP,LAN,DIRECT,no-resolve")

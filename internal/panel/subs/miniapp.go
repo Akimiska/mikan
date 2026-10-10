@@ -150,14 +150,21 @@ type shopRequest struct {
 	TariffID  int64  `json:"tariff_id"`
 	TermDays  *int64 `json:"term_days"` // the tariff's term; absent: its first
 	PackageID int64  `json:"package_id"`
+	Trial     bool   `json:"trial"` // the priced trial, for an account without a subscription
 	Provider  string `json:"provider"`
 	Token     string `json:"token"`
 	PromoCode string `json:"promo_code"`
 }
 
+// valid: the trial is bought for no subscription and at its own price, without a code.
+func (in shopRequest) valid() bool {
+	return !in.Trial || in.Token == "" && strings.TrimSpace(in.PromoCode) == ""
+}
+
 // miniAppShop: "shop" lists what the Telegram account can buy (with token: the traffic
 // packages of that subscription too), "pay" opens an invoice for a new subscription
-// (token ""), one of the account's own, or a traffic package for it (package_id).
+// (token ""), one of the account's own, a traffic package for it (package_id), or the
+// priced trial (trial).
 func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest string) {
 	var in shopRequest
 	tgID, users, fail, ok := h.mini(w, r, &in)
@@ -171,7 +178,7 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	}
 	ctx := r.Context()
 	if rest == "shop" {
-		h.miniAppOffers(ctx, w, userID, fail)
+		h.miniAppOffers(ctx, w, tgID, userID, fail)
 		return
 	}
 	if strings.TrimSpace(in.PromoCode) != "" && !h.promoLimit.allow(tgID, h.now(), in.PromoCode) {
@@ -180,7 +187,9 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	}
 	var p db.Payment
 	var err error
-	if in.PackageID != 0 {
+	if in.Trial {
+		p, err = h.shop.TrialInvoice(ctx, tgID, billing.AdapterOf(in.Provider))
+	} else if in.PackageID != 0 {
 		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
 	} else {
 		p, err = h.shop.Invoice(ctx, billing.InvoiceRequest{TgID: tgID, UserID: userID, TariffID: in.TariffID, TermDays: in.TermDays, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
@@ -200,9 +209,10 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	_ = json.NewEncoder(w).Encode(map[string]string{"url": p.PayUrl, "provider": p.Provider})
 }
 
-// miniAppOffers answers "shop": the tariffs on sale, the payment providers, and the traffic
-// packages of the subscription userID (0: none).
-func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, userID int64, fail func(int, string)) {
+// miniAppOffers answers "shop": the tariffs on sale, the payment providers, the traffic
+// packages of the subscription userID (0: none), and the priced trial when the Telegram
+// account tgID may buy it.
+func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID, userID int64, fail func(int, string)) {
 	offers, av, err := h.shop.Offers(ctx)
 	if err != nil {
 		fail(http.StatusInternalServerError, "internal")
@@ -241,8 +251,13 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, user
 		Addons    []addon         `json:"addons"`
 		Offers    []offer         `json:"offers"`
 		Packages  []shopPackage   `json:"packages"`
+		// Trial is the priced trial this account may buy now, if any.
+		Trial *offer `json:"trial,omitempty"`
 	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 		Providers: map[string]bool{billing.Stars: av.Stars}}
+	if to, _, ok := h.shop.TrialOffer(ctx, tgID); ok {
+		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
+	}
 	for _, id := range av.Addons {
 		out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
 	}
@@ -447,7 +462,8 @@ func promoAttemptCode(err error) string {
 // is told it did not work, not that payment is off, and unexplained says nobody has logged
 // the cause yet (billing logs a provider's failure itself).
 func invoiceFailure(err error) (status int, code string, unexplained bool) {
-	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours} {
+	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours,
+		billing.ErrTrialUsed, billing.ErrTrialOff} {
 		if errors.Is(err, e) {
 			return http.StatusConflict, e.Error(), false
 		}

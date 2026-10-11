@@ -185,23 +185,7 @@ func (b *Bot) Notify(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			vars := b.vars(ctx, w, u, now)
-			text := render(map[string]string{"expire_3d": pick(cfg.Texts.Expiring, w.expiring), "expire_1d": pick(cfg.Texts.Expiring, w.expiring),
-				"expired": pick(cfg.Texts.Expired, w.expired), "traffic_90": pick(cfg.Texts.Traffic90, w.traffic90), "traffic_100": pick(cfg.Texts.TrafficEnd, w.trafficEnd)}[n.kind], vars)
-			var rows [][]tgate.Button
-			// Traffic running out: the packages there are for this subscription, a tap away.
-			if n.kind == "traffic_90" || n.kind == "traffic_100" {
-				if len(b.packageOffers(ctx, u.ID)) > 0 {
-					rows = append(rows, []tgate.Button{{Text: w.buyTraffic, CallbackData: "xu:" + strconv.FormatInt(u.ID, 10)}})
-				}
-			}
-			if n.kind != "traffic_90" {
-				rows = append(rows, []tgate.Button{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}})
-			}
-			var kb *tgate.Keyboard
-			if len(rows) > 0 {
-				kb = &tgate.Keyboard{InlineKeyboard: rows}
-			}
+			text, kb := b.noticeMessage(ctx, cfg, w, u, n.kind, now)
 			chat, userID := l.TgID, u.ID
 			out.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
 				_, err := c.Send(ctx, chat, text, kb, silent)
@@ -365,4 +349,26 @@ func (b *Bot) emitNotices(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// noticeMessage is a notice of kind about u, as the admin worded it, with its buttons.
+func (b *Bot) noticeMessage(ctx context.Context, cfg Config, w *words, u db.User, kind string, now time.Time) (string, *tgate.Keyboard) {
+	vars := b.vars(ctx, w, u, now)
+	text := render(map[string]string{"expire_3d": pick(cfg.Texts.Expiring, w.expiring), "expire_1d": pick(cfg.Texts.Expiring, w.expiring),
+		"expired": pick(cfg.Texts.Expired, w.expired), "traffic_90": pick(cfg.Texts.Traffic90, w.traffic90), "traffic_100": pick(cfg.Texts.TrafficEnd, w.trafficEnd)}[kind], vars)
+	var rows [][]tgate.Button
+	// Traffic running out: the packages there are for this subscription, a tap away.
+	if kind == "traffic_90" || kind == "traffic_100" {
+		if len(b.packageOffers(ctx, u.ID)) > 0 {
+			rows = append(rows, []tgate.Button{{Text: w.buyTraffic, CallbackData: "xu:" + strconv.FormatInt(u.ID, 10)}})
+		}
+	}
+	if kind != "traffic_90" {
+		rows = append(rows, []tgate.Button{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}})
+	}
+	var kb *tgate.Keyboard
+	if len(rows) > 0 {
+		kb = &tgate.Keyboard{InlineKeyboard: rows}
+	}
+	return text, kb
 }

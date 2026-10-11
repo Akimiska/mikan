@@ -247,20 +247,23 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	// holds the bot.
 	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
 		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend, p.Gateway.Member)})
+	// What the bot says comes from the bot addon (the official one is installed by itself,
+	// botaddon.go): the panel tells it through events, and keeps the broadcasts and the
+	// previews of the admin's texts.
+	emit := func(ctx context.Context, typ string, userID, tgID int64, data any, dedupe string) error {
+		err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, o.Now(), typ, userID, tgID, data, dedupe) })
+		if err == nil {
+			hub.Kick()
+		}
+		return err
+	}
 	p.Telegram = tgbot.New(tgbot.Deps{Backend: backend, Gateway: p.Gateway, Log: o.Log, Now: o.Now,
-		Off: func(ctx context.Context) bool { return p.AddonsAPI.Slot(ctx) != "" },
-		Emit: func(ctx context.Context, typ string, userID, tgID int64, data any, dedupe string) error {
-			err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, o.Now(), typ, userID, tgID, data, dedupe) })
-			if err == nil {
-				hub.Kick()
-			}
-			return err
-		}})
-	// An addon holding the bot gets the updates through the proxy; the screens otherwise.
-	p.Gateway.SetHandler(p.AddonsAPI.BotSlot(p.Telegram))
+		Off: func(context.Context) bool { return true }, Emit: emit})
+	// The updates wait in the buffer for the addon that holds the bot.
+	p.Gateway.SetHandler(p.AddonsAPI.BotSlot(nil))
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
 	p.Billing.SetTelegram(p.Gateway)
-	p.Billing.SetNotifier(p.Telegram)
+	p.Billing.SetNotifier(tgbot.Notifications{Emit: emit, Log: o.Log})
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
 	var certStatus infraalerts.CertificateSource
@@ -515,7 +518,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.NodeUpdates != nil {
 		workers = append(workers, p.NodeUpdates.Run)
 	}
-	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
+	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

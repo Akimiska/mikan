@@ -84,7 +84,8 @@ func (s *Server) Slot(ctx context.Context) string {
 }
 
 // BotSlot is the gateway's handler: the addon's buffer while an addon holds the bot, the
-// panel's screens (fallback) otherwise.
+// fallback's screens otherwise; with no fallback the buffer always, so that the updates
+// wait for the bot addon being installed.
 type BotSlot struct {
 	s        *Server
 	fallback tgate.Handler
@@ -103,10 +104,8 @@ func (b *BotSlot) Started(ctx context.Context, c *tgate.Client) {
 }
 
 func (b *BotSlot) Update(ctx context.Context, c *tgate.Client, out *tgate.Outbox, up tgate.Update) error {
-	if b.s.Slot(ctx) == "" {
-		if b.fallback == nil {
-			return nil
-		}
+	// Without screens of its own the panel keeps the updates for the addon to come.
+	if b.fallback != nil && b.s.Slot(ctx) == "" {
 		return b.fallback.Update(ctx, c, out, up)
 	}
 	n, err := b.s.d.Store.Q.CountAddonUpdates(ctx)

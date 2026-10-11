@@ -259,7 +259,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		// incy (iOS/Xray) cannot set routing by hand, so carry the RU-direct split inline
+		// in the subscription body as a "://routing/onadd/{base64}" line (mixed format,
+		// docs.incy.cc). Other URI-list apps ignore an unknown scheme line, so this is
+		// safe for all of them. Only incy-family apps get it (others have their own
+		// routing or are desktop); gated to RoutingRUDirect inside incyRoutingLine.
+		if DetectApp(r.Header.Get("User-Agent")).Family == FamilyXray {
+			if line := incyRoutingLine(cfg.Routing, incyRoutingEpoch); line != "" {
+				links = links + "\n" + line
+			}
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		// incy also reads routing from the "routing" HTTP header (it overrides the body);
+		// set it too so the split applies even if the client prefers headers.
+		if DetectApp(r.Header.Get("User-Agent")).Family == FamilyXray {
+			if hdr := incyRoutingHeader(cfg.Routing, incyRoutingEpoch); hdr != "" {
+				w.Header().Set("routing", hdr)
+			}
+		}
 		_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(links))))
 	}
 }

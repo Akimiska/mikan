@@ -11053,6 +11053,51 @@
         "x-session-only": true
       }
     },
+    "/api/v1/payments/{id}/refunded-by-hand": {
+      "post": {
+        "description": "Оплата через способ оплаты из маркетплейса, оплаченная, но не применённая (например, пробный период, который уже нельзя выдать): админ вернул деньги в кабинете платёжной системы, платёж становится возвращённым, покупателю приходит сообщение. Stars возвращаются через refund.",
+        "operationId": "mark-payment-refunded",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отметить, что деньги возвращены вручную",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/pools": {
       "get": {
         "operationId": "list-pools",

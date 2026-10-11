@@ -271,9 +271,10 @@ func TestPaidTrialBothPaidBeforeApply(t *testing.T) {
 }
 
 // A paid trial is sold through every payment method that takes its price, refunds or not.
-// One that cannot be given when it applies goes back where the method refunds; through an
-// adapter without refunds the adapter is not asked, and the payment stays paid with
-// trial_refund_failed for the admin to refund by hand. Nothing is given either way.
+// One that cannot be given when it applies goes back where the method refunds. Through an
+// adapter without refunds the adapter is not asked: the payment stays paid with
+// trial_refund_manual, the buyer is told once, the reconcile pass leaves it alone, and the
+// admin closes it with RefundedByHand once the money is back. Nothing is given either way.
 func TestPaidTrialThroughAnyAdapter(t *testing.T) {
 	for _, refunds := range []bool{true, false} {
 		name := "an adapter that refunds"
@@ -310,11 +311,32 @@ func TestPaidTrialThroughAnyAdapter(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || got.Status != "paid" || got.Error != "trial_refund_failed" {
+			if err != nil || got.Status != "paid" || got.Error != TrialRefundByHand {
 				t.Fatalf("the trial through an adapter without refunds: %v %+v", err, got)
 			}
 			if len(fa.refundCalls) != 0 {
 				t.Fatalf("an adapter without refunds was asked to refund: %v", fa.refundCalls)
+			}
+			// The reconcile pass and a repeated report leave it alone: told once.
+			e.s.Reconcile(ctx)
+			must(t, e.s.Apply(ctx, p.ID))
+			e.tg.mu.Lock()
+			told := len(e.tg.notGiven)
+			e.tg.mu.Unlock()
+			if told != 1 || e.payment(p.ID).Error != TrialRefundByHand || len(fa.refundCalls) != 0 {
+				t.Fatalf("after another pass: told %d times, %+v", told, e.payment(p.ID))
+			}
+			// The admin refunds it in the provider's dashboard and closes it.
+			must(t, e.s.RefundedByHand(ctx, p.ID))
+			got = e.payment(p.ID)
+			if got.Status != "refunded" || !got.RefundedAt.Valid || got.Error != "" {
+				t.Fatalf("refunded by hand: %+v", got)
+			}
+			if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].p.ID != p.ID || notes[0].u.ID != 0 {
+				t.Fatalf("the buyer was told %+v", notes)
+			}
+			if err := e.s.RefundedByHand(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
+				t.Fatalf("refunded by hand twice: %v", err)
 			}
 		})
 	}
@@ -354,6 +376,32 @@ func TestPaidTrialRefundWaitsForTheAdapter(t *testing.T) {
 	must(t, e.s.Apply(ctx, p.ID))
 	if got := e.payment(p.ID); got.Status != "refunded" || len(fa.refundCalls) != 1 {
 		t.Fatalf("the refund once the adapter runs: %+v %v", got, fa.refundCalls)
+	}
+}
+
+// "Refunded by hand" is for a payment through an adapter that was paid and never applied:
+// Stars go back through the panel, and what was applied or never paid is not closed so.
+func TestRefundedByHandOnlyPaidAdapterPayments(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.priceTrial()
+	stars, err := e.s.TrialInvoice(ctx, 928, Stars)
+	must(t, err)
+	if err := e.s.RefundedByHand(ctx, stars.ID); !errors.Is(err, ErrNotRefunable) {
+		t.Fatalf("an open Stars invoice closed by hand: %v", err)
+	}
+	must(t, e.s.StarsPaid(ctx, 928, stars.Payload, "ch-928", "XTR", 1))
+	if err := e.s.RefundedByHand(ctx, stars.ID); !errors.Is(err, ErrNotRefunable) {
+		t.Fatalf("an applied Stars payment closed by hand: %v", err)
+	}
+	p, err := e.st.Q.CreatePayment(ctx, db.CreatePaymentParams{Provider: "addon:fake", Payload: "pending-929", TgID: 929, Kind: "new",
+		TariffID: sql.NullInt64{Int64: e.sale.ID, Valid: true}, TariffName: e.sale.Name, Amount: 100, Currency: "RUB", CreatedAt: e.now.Unix()})
+	must(t, err)
+	if err := e.s.RefundedByHand(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
+		t.Fatalf("an unpaid invoice closed by hand: %v", err)
+	}
+	if got := e.payment(p.ID); got.Status != "pending" {
+		t.Fatalf("the unpaid invoice: %+v", got)
 	}
 }
 

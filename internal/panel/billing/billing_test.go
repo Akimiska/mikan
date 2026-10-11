@@ -34,7 +34,8 @@ type fakeTG struct {
 	refundErr error
 	invoices  int
 	refunded  []refundNote
-	onRefund  func() // runs after Telegram accepted a refund
+	notGiven  []db.Payment // TrialNotGiven
+	onRefund  func()       // runs after Telegram accepted a refund
 }
 
 // refundNote is what the buyer was told about a refund.
@@ -66,6 +67,11 @@ func (f *fakeTG) Paid(_ context.Context, p db.Payment, _ db.User, _ bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.paid = append(f.paid, p)
+}
+func (f *fakeTG) TrialNotGiven(_ context.Context, p db.Payment) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notGiven = append(f.notGiven, p)
 }
 func (f *fakeTG) Refunded(_ context.Context, p db.Payment, u db.User, disabled bool) {
 	f.mu.Lock()

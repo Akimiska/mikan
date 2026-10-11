@@ -15,6 +15,11 @@ import (
 // KindTrial is a payment for the trial when the admin puts a price on it.
 const KindTrial = "trial"
 
+// TrialRefundByHand is the error of a paid trial that may not be given and whose payment
+// method cannot refund: the admin refunds it in the provider's dashboard and closes it with
+// RefundedByHand. The reconcile pass leaves such a payment alone.
+const TrialRefundByHand = "trial_refund_manual"
+
 var (
 	// ErrTrialOff: the admin offers no trial, or its tariff is gone.
 	ErrTrialOff = errors.New("trial_off")
@@ -267,7 +272,7 @@ func (s *Service) applyTrial(ctx context.Context, q *db.Queries, pay db.Payment)
 // payment, so it goes back whole and ends as refunded. A refund that fails (a bot that is
 // down) leaves it paid with trial_refund_failed on it: the admin sees it on the Payments
 // page and the reconcile pass keeps trying. An adapter without refunds is not asked at
-// all: the same mark tells the admin to refund it by hand in the provider's dashboard.
+// all: trialByHand leaves the payment to the admin.
 func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 	// One refund of the payment at a time; it never gives up, as a refund already started
 	// must finish.
@@ -281,9 +286,10 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 	if cur.Status != PaymentPaid {
 		return nil
 	}
-	refundErr := errors.New("the payment method cannot refund: refund it by hand")
+	var refundErr error
 	switch err := s.validatePromoProvider(ctx, cur.Provider); {
 	case errors.Is(err, promo.ErrRefundUnsupported):
+		return s.trialByHand(ctx, cur)
 	case err != nil:
 		// The adapter did not say what it can do (not answering now): not a refund by
 		// hand, the next pass asks again.
@@ -323,6 +329,61 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 		// Nothing was made for the payment, so the buyer hears only that it came back.
 		cur.Status, cur.RefundedAt = PaymentRefunded, refundedAt
 		tg.Refunded(ctx, cur, db.User{}, false)
+	}
+	return nil
+}
+
+// trialByHand leaves a paid trial the payment method cannot refund to the admin, once: the
+// payment stays paid with TrialRefundByHand, which the reconcile pass does not retry, it is
+// logged once, and the buyer is told the money comes back by hand. Nothing is made for it.
+// Called again (a repeated report of the payment) it does nothing.
+func (s *Service) trialByHand(ctx context.Context, p db.Payment) error {
+	if p.Error == TrialRefundByHand {
+		return nil
+	}
+	if err := s.d.Store.Q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: TrialRefundByHand, ID: p.ID}); err != nil {
+		return err
+	}
+	s.d.Log.Warn("billing: a paid trial the account may not take waits for a refund by hand", "payment", p.ID, "provider", p.Provider, "tg", p.TgID)
+	if tg := s.telegram(); tg != nil {
+		tg.TrialNotGiven(ctx, p)
+	}
+	return nil
+}
+
+// RefundedByHand closes a payment the admin refunded in the provider's dashboard: one paid
+// through an adapter but never applied (a trial that could not be given, a subscription
+// deleted since the invoice). It ends refunded, as a refund through the panel would, and
+// the buyer is told the money is back. Stars are refunded through the panel (Refund); a
+// payment applied, or in another state, is ErrNotRefunable.
+func (s *Service) RefundedByHand(ctx context.Context, id int64) error {
+	p, err := s.d.Store.Q.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if p.Provider == Stars || p.Status != PaymentPaid {
+		return ErrNotRefunable
+	}
+	// Not while a trial's own refund runs (refundTrial takes the same turn).
+	unlock, _ := s.trialRefunds.lock(context.Background(), id)
+	defer unlock()
+	refundedAt := sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}
+	n, err := s.d.Store.Q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: refundedAt, ID: id})
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotRefunable // applied or refunded meanwhile
+	}
+	if s.d.Promo != nil {
+		if err := s.d.Promo.ReleasePayment(ctx, id); err != nil {
+			s.d.Log.Warn("billing: release promo of a payment refunded by hand", "payment", id, "err", err)
+		}
+	}
+	s.d.Log.Info("billing: refunded by hand", "payment", id, "provider", p.Provider)
+	if tg := s.telegram(); tg != nil {
+		p.Status, p.RefundedAt, p.Error = PaymentRefunded, refundedAt, ""
+		tg.Refunded(ctx, p, db.User{}, false)
 	}
 	return nil
 }

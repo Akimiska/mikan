@@ -40,6 +40,7 @@ type words struct {
 	notForSale, payUnavailable, tooManyInvoices, payStale, paidNew, paidRenew                                       string
 	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                     string
 	trialPaid, trialTitle                                                                                           string // the priced trial: its button with the price, its title over the ways to pay
+	trialNotGiven                                                                                                   string // a paid trial not given, its money back by hand
 	pickTerm, priceFrom                                                                                             string
 	poolOut                                                                                                         string // a traffic pool used up
 
@@ -123,6 +124,7 @@ var ru = words{
 	trialFail:       "Не получилось выдать пробный период. Попробуйте позже или напишите в поддержку.",
 	trialPaid:       "🎁 Попробовать за %s",
 	trialTitle:      "🎁 Пробный период",
+	trialNotGiven:   "🎁 Пробный период у вас уже был, поэтому платёж %s не засчитан и подписка не выдана. Деньги вернём: напишите в поддержку.",
 	paidNew:         "✅ Оплата получена — подписка «%s» готова (тариф «%s»).\n\nДобавьте ссылку в приложение:\n<code>%s</code>",
 	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
 	poolOut:         "закончился до сброса",
@@ -213,6 +215,7 @@ var en = words{
 	trialFail:       "Could not give the trial. Try later or message support.",
 	trialPaid:       "🎁 Try it for %s",
 	trialTitle:      "🎁 Trial",
+	trialNotGiven:   "🎁 You have had the trial already, so the payment of %s is not counted and no subscription is given. The money comes back: message support.",
 	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
 	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
 	poolOut:         "used up until the reset",

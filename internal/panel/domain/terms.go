@@ -3,6 +3,8 @@ package domain
 import (
 	"context"
 	"database/sql"
+	"strings"
+	"unicode/utf8"
 
 	"mikan/internal/panel/store/db"
 )
@@ -98,4 +100,25 @@ func termDays(t db.Tariff, term sql.NullInt64) int64 {
 		return term.Int64
 	}
 	return t.DurationDays
+}
+
+// What a tariff's description may hold: it goes under the tariff's name in the bot and in
+// the Mini App, so a screenful at most.
+const (
+	MaxDescriptionRunes = 300
+	MaxDescriptionLines = 5
+)
+
+// CleanDescription is the admin's text for buyers as it is stored: line breaks as \n, the
+// ends trimmed. A text over MaxDescriptionRunes characters or MaxDescriptionLines lines is
+// refused, and the error names the field as the API does; empty is allowed (nothing to add).
+func CleanDescription(s string) (string, error) {
+	s = strings.TrimSpace(strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(s))
+	if utf8.RuneCountInString(s) > MaxDescriptionRunes {
+		return "", fieldErr("description", "description_too_long")
+	}
+	if s != "" && strings.Count(s, "\n")+1 > MaxDescriptionLines {
+		return "", fieldErr("description", "description_too_many_lines")
+	}
+	return s, nil
 }

@@ -25,6 +25,7 @@ type TariffView struct {
 	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period"`
 	BillingDay    *int64      `json:"billing_day" doc:"День месяца, в который заканчивается срок; null — срок в днях"`
 	PriceLabel    string      `json:"price_label"`
+	Description   string      `json:"description" doc:"Текст для покупателей: чем тариф отличается, когда лимиты этого не показывают; до 300 символов, до 5 строк, пустой — только строка из лимитов"`
 	PriceStars    *int64      `json:"price_stars" doc:"Цена в Telegram Stars; null — не продаётся за Stars"`
 	PriceRub      *int64      `json:"price_rub" doc:"Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли"`
 	OnSale        bool        `json:"on_sale" doc:"Продаётся в боте и Mini App"`
@@ -43,7 +44,7 @@ type TermView struct {
 func viewTariff(t db.Tariff, terms []db.TariffTerm) TariffView {
 	v := TariffView{ID: t.ID, Name: t.Name, TrafficLimit: ptrInt(t.TrafficLimit.Int64, t.TrafficLimit.Valid),
 		DurationDays: t.DurationDays, DeviceLimit: ptrInt(t.DeviceLimit.Int64, t.DeviceLimit.Valid),
-		SpeedLimit: ptrInt(t.SpeedLimit.Int64, t.SpeedLimit.Valid), ResetStrategy: t.ResetStrategy, BillingDay: ptrInt(t.BillingDay.Int64, t.BillingDay.Valid), PriceLabel: t.PriceLabel, Sort: t.Sort,
+		SpeedLimit: ptrInt(t.SpeedLimit.Int64, t.SpeedLimit.Valid), ResetStrategy: t.ResetStrategy, BillingDay: ptrInt(t.BillingDay.Int64, t.BillingDay.Valid), PriceLabel: t.PriceLabel, Description: t.Description, Sort: t.Sort,
 		PriceStars: ptrInt(t.PriceStars.Int64, t.PriceStars.Valid), PriceRub: ptrInt(t.PriceRub.Int64, t.PriceRub.Valid), OnSale: t.OnSale != 0}
 	for _, term := range domain.TariffTerms(t, terms) {
 		v.Terms = append(v.Terms, TermView{Days: term.Days, PriceStars: ptrInt(term.PriceStars.Int64, term.PriceStars.Valid), PriceRub: ptrInt(term.PriceRub.Int64, term.PriceRub.Valid)})
@@ -71,6 +72,7 @@ type tariffBody struct {
 	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period" default:"none"`
 	BillingDay    *int64      `json:"billing_day,omitempty" minimum:"1" maximum:"31" doc:"Срок до этого числа месяца: месяц = от дня оплаты до дня оплаты"`
 	PriceLabel    string      `json:"price_label,omitempty" maxLength:"40"`
+	Description   string      `json:"description,omitempty" doc:"Текст для покупателей, виден в боте и Mini App рядом со строкой из лимитов: чем тариф отличается, когда лимиты этого не показывают («с белыми списками»). Простой текст до 300 символов и до 5 строк; не передан или пустой — только строка из лимитов"`
 	PriceStars    *int64      `json:"price_stars,omitempty" minimum:"1" maximum:"10000" doc:"Цена в Telegram Stars"`
 	PriceRub      *int64      `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 19900 — 199 ₽"`
 	OnSale        bool        `json:"on_sale,omitempty" doc:"Продавать в боте и Mini App; нужна хотя бы одна цена"`
@@ -125,6 +127,10 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 	if err != nil {
 		return nil, err
 	}
+	description, err := cleanDescription(b.Description)
+	if err != nil {
+		return nil, err
+	}
 	first := terms[0]
 	var t db.Tariff
 	// The catalog holds no invariant across rows (a pool deleted meanwhile fails on its
@@ -134,7 +140,7 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 		t, err = q.CreateTariff(ctx, db.CreateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: domain.NullInt(b.TrafficLimit),
 			DurationDays: first.Days, DeviceLimit: domain.NullInt(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
 			Sort: b.Sort, CreatedAt: h.d.Now().Unix(), BillingDay: domain.NullInt(b.BillingDay), PriceStars: first.PriceStars, PriceRub: first.PriceRub, OnSale: domain.Flag(b.OnSale),
-			SpeedLimit: domain.NullInt(b.SpeedLimit)})
+			SpeedLimit: domain.NullInt(b.SpeedLimit), Description: description})
 		if err != nil {
 			return err
 		}
@@ -152,8 +158,12 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 
 func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*tariffOutput, error) {
 	b := in.Body
+	description, err := cleanDescription(b.Description)
+	if err != nil {
+		return nil, err
+	}
 	var t db.Tariff
-	err := h.d.Store.TxRC(ctx, func(q *db.Queries) error {
+	err = h.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		// Without terms in the body the tariff keeps the ones after the first.
 		var kept []domain.Term
 		if b.Terms == nil {
@@ -173,7 +183,7 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 		t, err = q.UpdateTariff(ctx, db.UpdateTariffParams{Name: strings.TrimSpace(b.Name), TrafficLimit: domain.NullInt(b.TrafficLimit),
 			DurationDays: first.Days, DeviceLimit: domain.NullInt(b.DeviceLimit), ResetStrategy: b.ResetStrategy, PriceLabel: b.PriceLabel,
 			Sort: b.Sort, BillingDay: domain.NullInt(b.BillingDay), PriceStars: first.PriceStars, PriceRub: first.PriceRub, OnSale: domain.Flag(b.OnSale), ID: in.ID,
-			SpeedLimit: domain.NullInt(b.SpeedLimit)})
+			SpeedLimit: domain.NullInt(b.SpeedLimit), Description: description})
 		if err != nil {
 			return err
 		}
@@ -222,6 +232,17 @@ func (h *handlers) applyTariffPools(ctx context.Context, in *userIDInput) (*appl
 	out := &applyPoolsOutput{}
 	out.Body.Applied = n
 	return out, nil
+}
+
+// cleanDescription is the tariff's description as stored; a text that is too long or has
+// too many lines is refused under the field's name, like the other checks of the body.
+func cleanDescription(s string) (string, error) {
+	out, err := domain.CleanDescription(s)
+	var fe *domain.FieldError
+	if errors.As(err, &fe) {
+		return "", fieldErr("body."+fe.Field, fe.Code)
+	}
+	return out, err
 }
 
 // terms are the tariff's terms after this body: the body's own, or the first from its

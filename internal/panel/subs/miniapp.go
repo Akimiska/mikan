@@ -236,9 +236,12 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		ID          int64  `json:"id"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
-		Stars       int64  `json:"stars,omitempty"`
-		Rub         int64  `json:"rub,omitempty"`
-		Terms       []term `json:"terms"`
+		// Note is the admin's own text about the tariff, shown under the line built from the
+		// limits; plain text with line breaks, never markup.
+		Note  string `json:"note,omitempty"`
+		Stars int64  `json:"stars,omitempty"`
+		Rub   int64  `json:"rub,omitempty"`
+		Terms []term `json:"terms"`
 	}
 	// Marketplace adapters take rubles; the buyer sees each by its own name.
 	type addon struct {
@@ -256,13 +259,13 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 		Providers: map[string]bool{billing.Stars: av.Stars}}
 	if to, _, ok := h.shop.TrialOffer(ctx, tgID); ok {
-		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
+		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Note: to.Tariff.Description, Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
 	}
 	for _, id := range av.Addons {
 		out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
 	}
 	for _, o := range offers {
-		v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.DescribeOffer(o, cfg.Lang), Stars: o.Stars, Rub: o.Rub}
+		v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.DescribeOffer(o, cfg.Lang), Note: o.Tariff.Description, Stars: o.Stars, Rub: o.Rub}
 		for _, t := range o.Terms {
 			v.Terms = append(v.Terms, term{Days: t.Days, Label: billing.TermLabel(o.Tariff, t.Days, cfg.Lang),
 				Description: billing.Describe(o.Tariff, t.Days, cfg.Lang), Stars: t.Stars, Rub: t.Rub})

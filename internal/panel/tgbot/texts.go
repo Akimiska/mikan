@@ -40,6 +40,7 @@ type words struct {
 	notForSale, payUnavailable, tooManyInvoices, payStale, paidNew, paidRenew                                       string
 	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                     string
 	trialPaid, trialTitle                                                                                           string // the priced trial: its button with the price, its title over the ways to pay
+	tokenConflict                                                                                                   string // to the admin: another program takes this bot's updates
 	pickTerm, priceFrom                                                                                             string
 	poolOut                                                                                                         string // a traffic pool used up
 
@@ -123,6 +124,7 @@ var ru = words{
 	trialFail:       "Не получилось выдать пробный период. Попробуйте позже или напишите в поддержку.",
 	trialPaid:       "🎁 Попробовать за %s",
 	trialTitle:      "🎁 Пробный период",
+	tokenConflict:   "⚠️ Бот не получает сообщения: этот токен уже использует другая программа или сервер (старая панель, второй бот). Отправка работает, а нажатия и команды до бота не доходят.\n\nОстановите ту программу или выпустите новый токен в @BotFather (/revoke) и вставьте его в панели: Telegram → Подключение.",
 	paidNew:         "✅ Оплата получена — подписка «%s» готова (тариф «%s»).\n\nДобавьте ссылку в приложение:\n<code>%s</code>",
 	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
 	poolOut:         "закончился до сброса",
@@ -213,6 +215,7 @@ var en = words{
 	trialFail:       "Could not give the trial. Try later or message support.",
 	trialPaid:       "🎁 Try it for %s",
 	trialTitle:      "🎁 Trial",
+	tokenConflict:   "⚠️ The bot gets no messages: another program or server uses this token (an old panel, a second bot). Sending works, but taps and commands do not reach the bot.\n\nStop that program, or make a new token in @BotFather (/revoke) and paste it in the panel: Telegram → Connection.",
 	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
 	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
 	poolOut:         "used up until the reset",

@@ -4437,7 +4437,7 @@ export interface components {
             /** @description Встроенные тексты на языке бота: пустое поле берёт их */
             defaults: components["schemas"]["Texts"];
             enabled: boolean;
-            /** @description token_invalid, token_revoked, unreachable или ответ Telegram */
+            /** @description token_invalid, token_revoked, token_conflict (токен опрашивает ещё одна программа), unreachable или ответ Telegram */
             error?: string;
             infrastructure: components["schemas"]["AlertsConfig"];
             /**

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/promo"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store/db"
 )
@@ -280,11 +281,16 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 	if cur.Status != PaymentPaid {
 		return nil
 	}
-	refundErr := errors.New("the payment carries no provider id to refund")
-	switch {
-	case s.validatePromoProvider(ctx, cur.Provider) != nil:
-		refundErr = errors.New("the payment method cannot refund: refund it by hand")
-	case cur.ExternalID.Valid && cur.ExternalID.String != "":
+	refundErr := errors.New("the payment method cannot refund: refund it by hand")
+	switch err := s.validatePromoProvider(ctx, cur.Provider); {
+	case errors.Is(err, promo.ErrRefundUnsupported):
+	case err != nil:
+		// The adapter did not say what it can do (not answering now): not a refund by
+		// hand, the next pass asks again.
+		return err
+	case !cur.ExternalID.Valid || cur.ExternalID.String == "":
+		refundErr = errors.New("the payment carries no provider id to refund")
+	default:
 		refundErr = s.refundCharge(ctx, cur, cur.ExternalID.String, "mikan-trial-"+strconv.FormatInt(cur.ID, 10))
 	}
 	if refundErr != nil {

@@ -1,9 +1,12 @@
 package billing
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -314,6 +317,43 @@ func TestPaidTrialThroughAnyAdapter(t *testing.T) {
 				t.Fatalf("an adapter without refunds was asked to refund: %v", fa.refundCalls)
 			}
 		})
+	}
+}
+
+// An adapter that is not running when the money should go back is not one without
+// refunds: the payment waits for the next pass instead of being left for a refund by hand,
+// and goes back once the adapter runs again.
+func TestPaidTrialRefundWaitsForTheAdapter(t *testing.T) {
+	e, fa, dir := adapterEnv(t, "fake")
+	runAdapter(t, dir, "fake", fa)
+	ctx := context.Background()
+	if _, err := e.s.SetAddonConfig(ctx, "fake", true, addons.Settings{"shop_id": "12", "secret_key": adapterSecret}); err != nil {
+		t.Fatal(err)
+	}
+	e.priceTrial()
+	p, err := e.s.TrialInvoice(ctx, 927, "addon:fake")
+	must(t, err)
+	_, err = e.st.Q.TakeTrial(ctx, db.TakeTrialParams{TgID: 927, CreatedAt: e.now.Unix()})
+	must(t, err)
+	n, err := e.st.Q.MarkPaymentPaid(ctx, db.MarkPaymentPaidParams{ExternalID: p.ExternalID, PaidAt: sql.NullInt64{Int64: e.now.Unix(), Valid: true}, ID: p.ID})
+	must(t, err)
+	if n != 1 {
+		t.Fatal("the trial payment not marked paid")
+	}
+	state := filepath.Join(dir, "addons", "state.json")
+	running, err := os.ReadFile(state)
+	must(t, err)
+	must(t, os.WriteFile(state, bytes.Replace(running, []byte(`"status":"running"`), []byte(`"status":"failed"`), 1), 0o600))
+	if err := e.s.Apply(ctx, p.ID); err == nil {
+		t.Fatal("a refund through an adapter that is not running passed as done")
+	}
+	if got := e.payment(p.ID); got.Status != "paid" || got.Error == "trial_refund_failed" || got.Error == "" {
+		t.Fatalf("the payment while the adapter is down: %+v", got)
+	}
+	must(t, os.WriteFile(state, running, 0o600))
+	must(t, e.s.Apply(ctx, p.ID))
+	if got := e.payment(p.ID); got.Status != "refunded" || len(fa.refundCalls) != 1 {
+		t.Fatalf("the refund once the adapter runs: %+v %v", got, fa.refundCalls)
 	}
 }
 

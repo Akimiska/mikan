@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -77,6 +78,42 @@ func TestTokensExpire(t *testing.T) {
 	now = now.Add(TTL + time.Second)
 	if s.Pending() != 0 || s.Listening() {
 		t.Fatal("an expired token is still answered")
+	}
+}
+
+// The timer that expires the first token arms itself again for a token still pending:
+// nothing else may come to expire it.
+func TestExpiryTimerRearmsForLaterTokens(t *testing.T) {
+	var clock atomic.Int64
+	start := time.Now()
+	clock.Store(start.UnixNano())
+	s := New("127.0.0.1:0")
+	s.now = func() time.Time { return time.Unix(0, clock.Load()) }
+	defer s.Close()
+	if err := s.Present(token, keyAuth); err != nil {
+		t.Fatal(err)
+	}
+	// The second token comes just before the first runs out: the timer is due in about a
+	// second and a half, when only the first has expired.
+	clock.Store(start.Add(TTL - 500*time.Millisecond).UnixNano())
+	other := strings.Repeat("b", 43)
+	if err := s.Present(other, other+".9jg46WB3rR_AHD-EBXdN7cBkH1WOu0tA3M9fm21mqTI"); err != nil {
+		t.Fatal(err)
+	}
+	clock.Store(start.Add(TTL + time.Second).UnixNano())
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		_, first := s.tokens[token]
+		armed := !first && s.timer != nil && s.timer.Stop()
+		s.mu.Unlock()
+		if armed {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no timer is armed for the token left (first still there: %v)", first)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

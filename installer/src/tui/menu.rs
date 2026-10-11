@@ -55,7 +55,7 @@ impl Section {
 
     fn lead(self) -> &'static str {
         match self {
-            Section::Status => "Containers, resources and the release. Refreshes every 5 seconds.",
+            Section::Status => "Containers, resources and the release. Refreshes every 10 seconds.",
             Section::Update => "Updates pull the signed release, back up first and go back if the new version does not start.",
             Section::Logs => "The last lines of the panel and the node, live.",
             Section::Access => "The panel's link and the admin's login.",

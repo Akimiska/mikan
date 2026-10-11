@@ -428,6 +428,12 @@ export function JoinProgress({ id, actions }: { id: number; actions: FixActions 
     queryFn: ({ signal }) => unwrap(api.POST("/api/v1/nodes/{id}/check", { params: { path: { id } }, signal })),
     enabled: ready,
     staleTime: Infinity,
+    // Each opened drawer asks afresh: a node rekeyed later is a new join.
+    gcTime: 0,
+    // The node's way out may come up a little after its protocols: a failed line is asked
+    // again until it passes or the drawer closes.
+    refetchInterval: (q) =>
+      q.state.status === "error" || q.state.data?.items.find((i) => i.id === "node_internet")?.status === "fail" ? 10_000 : false,
     retry: 1,
   });
   const net = internet.data?.items.find((i) => i.id === "node_internet");

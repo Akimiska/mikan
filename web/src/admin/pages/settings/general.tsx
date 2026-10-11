@@ -162,11 +162,14 @@ function NotesList({ lines }: { lines: string[] }) {
   const [long, setLong] = useState(false);
   const ref = useRef<HTMLUListElement>(null);
   const id = useId();
-  // Folded only when it is taller than the fold: a short list shows as it is.
+  // Folded only when it is taller than the fold: a short list shows as it is. Measured
+  // folded, never open (an open list fits itself), and again once it folds back; keyed by
+  // the text, as the polled card hands in a new array on every render.
+  const text = lines.join("\n");
   useLayoutEffect(() => {
     const el = ref.current;
-    if (el) setLong(el.scrollHeight > el.clientHeight + 4);
-  }, [lines]);
+    if (el && !open) setLong(el.scrollHeight > el.clientHeight + 4);
+  }, [text, open]);
   return (
     <>
       <ul ref={ref} id={id} className={clsx("notes", !open && "notes-folded", !open && long && "notes-fade")}>

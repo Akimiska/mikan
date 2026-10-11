@@ -69,13 +69,13 @@ func TestMoveBuiltin(t *testing.T) {
 
 	// The host is asked for the adapter; until it runs, nothing is offered for rubles.
 	e.s.Reconcile(ctx)
-	if r, ok := e.s.d.Addons.Pending(); !ok || r.Action != "install" || r.ID != legacyYooKassa {
-		t.Fatalf("install request: %+v %v", r, ok)
+	if q := e.s.d.Addons.Pending(); len(q) != 1 || q[0].Action != "install" || q[0].ID != legacyYooKassa {
+		t.Fatalf("install request: %+v", q)
 	}
 	if e.s.Available(ctx).Rub() {
 		t.Fatal("rubles offered before the adapter runs")
 	}
-	must(t, os.Remove(filepath.Join(dir, "addons", "request.json")))
+	must(t, os.RemoveAll(filepath.Join(dir, "addons", "requests")))
 	runAdapter(t, dir, legacyYooKassa, fa)
 	fa.set("yk-1", func(s *addons.Status) { s.Status, s.Amount, s.Currency = "pending", 19900, "RUB" })
 	e.s.Reconcile(ctx)

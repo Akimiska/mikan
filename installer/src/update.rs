@@ -358,7 +358,7 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
         && addon::pending()
         && let Err(e) = addon::apply(&install.version(), say)
     {
-        say(&format!("Payment adapters: {e:#}"));
+        say(&format!("Addons: {e:#}"));
     }
     // The admin pressed Update and waits for an answer, and an update that began must end
     // in one: ok, failed, never "running" for good. What the upgraded command said about

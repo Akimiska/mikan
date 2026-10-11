@@ -621,7 +621,7 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
             say(&format!("mikan did not start again: {e:#}"));
         }
         if !install.node
-            && let Err(e) = crate::addon::resume()
+            && let Err(e) = crate::addon::resume(say)
         {
             say(&format!("Payment adapters did not start again: {e:#}"));
         }
@@ -691,7 +691,7 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
         )));
     }
     if !install.node {
-        crate::addon::resume()?;
+        crate::addon::resume(say)?;
     }
     Ok(())
 }

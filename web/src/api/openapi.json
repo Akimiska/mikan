@@ -291,7 +291,14 @@
           },
           "pending": {
             "$ref": "#/components/schemas/AddonRequest",
-            "description": "Заявка, которую сервер ещё не взял"
+            "description": "Первая заявка в очереди: сервер ещё не взял её"
+          },
+          "queue": {
+            "description": "Все заявки, которые сервер ещё не взял, по порядку",
+            "items": {
+              "$ref": "#/components/schemas/AddonRequest"
+            },
+            "type": "array"
           },
           "supported": {
             "description": "Панель видит каталог данных сервера; иначе ставить адаптеры нельзя",

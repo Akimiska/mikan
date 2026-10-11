@@ -2045,8 +2045,10 @@ export interface components {
             installed: components["schemas"]["AddonView"][];
             /** @description Как сервер выполнил последнюю заявку */
             last?: components["schemas"]["AddonResult"];
-            /** @description Заявка, которую сервер ещё не взял */
+            /** @description Первая заявка в очереди: сервер ещё не взял её */
             pending?: components["schemas"]["AddonRequest"];
+            /** @description Все заявки, которые сервер ещё не взял, по порядку */
+            queue?: components["schemas"]["AddonRequest"][];
             /** @description Панель видит каталог данных сервера; иначе ставить адаптеры нельзя */
             supported: boolean;
         };

@@ -127,6 +127,20 @@ func SecurityHeaders(h http.Header) {
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
 }
 
+// FrameCSP is the policy of an addon's admin pages (docs/pipeline/addons.md, section 9). The
+// sandbox gives the frame an opaque origin even when it is opened directly: no cookies, no
+// storage, no admin API, no parent, no navigation of the top window.
+const FrameCSP = "sandbox allow-scripts; default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
+
+// FrameHeaders replace SecurityHeaders' framing rules for an addon's pages: the admin panel
+// may frame them, and CORP is cross-origin because the opaque frame could not load its
+// own scripts with same-origin. nosniff and no-referrer stay.
+func FrameHeaders(h http.Header) {
+	h.Set("Content-Security-Policy", FrameCSP)
+	h.Set("X-Frame-Options", "SAMEORIGIN")
+	h.Set("Cross-Origin-Resource-Policy", "cross-origin")
+}
+
 func NotFound(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Type", "text/plain; charset=utf-8")

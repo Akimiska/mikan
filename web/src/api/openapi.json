@@ -193,6 +193,89 @@
         ],
         "type": "object"
       },
+      "AddonPageView": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "Unix-время, после которого адрес не откроет файлы страницы",
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Название страницы по языкам",
+            "type": "object"
+          },
+          "url": {
+            "description": "Адрес страницы относительно адреса админки (addons-ui/\u003cid\u003e/\u003cподпись\u003e/…); подпись действует 10 минут",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "AddonRPCInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "Любой JSON для аддона"
+          },
+          "lang": {
+            "description": "Язык админки; пусто — язык панели",
+            "enum": [
+              "ru",
+              "en"
+            ],
+            "type": "string"
+          },
+          "method": {
+            "description": "Метод для аддона; GET не пишется в журнал",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Путь для аддона, начинается с /",
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^/[^\\x00-\\x1f\\x7f]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "path"
+        ],
+        "type": "object"
+      },
+      "AddonRPCResult": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "JSON аддона как есть, до 1 МиБ"
+          },
+          "status": {
+            "description": "Код ответа аддона: ошибки аддона тоже приходят сюда",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "body"
+        ],
+        "type": "object"
+      },
       "AddonRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8848,6 +8931,102 @@
         "summary": "Удалить адаптер: заявка серверу",
         "tags": [
           "payments"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/addons/{id}/ui": {
+      "get": {
+        "operationId": "get-addon-page",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonPageView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Подписанный адрес страницы аддона в админке",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/addons/{id}/ui/rpc": {
+      "post": {
+        "operationId": "call-addon-page",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddonRPCInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonRPCResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Вызов страницы аддона: панель передаёт его аддону",
+        "tags": [
+          "addons"
         ],
         "x-session-only": true
       }

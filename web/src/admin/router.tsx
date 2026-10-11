@@ -129,6 +129,12 @@ export function createAppRouter(queryClient: QueryClient) {
       open: MARKET_OPEN.includes(s.open as (typeof MARKET_OPEN)[number]) ? (s.open as MarketSearch["open"]) : undefined,
     }),
   });
+  // An addon's own page (protocol 2, permission ui), framed in a sandbox.
+  const addonApp = createRoute({
+    getParentRoute: () => app,
+    path: "/addons/app/$id",
+    component: page(() => import("./pages/addon-app"), "AddonAppPage"),
+  });
   // The bot was a section of the menu until it moved to the addons: old links still work.
   const telegramOld = createRoute({
     getParentRoute: () => app,
@@ -159,7 +165,7 @@ export function createAppRouter(queryClient: QueryClient) {
   // The API section lived in the sidebar until 0.4.2: old links land on its new place.
   const apiDocsOld = createRoute({ getParentRoute: () => app, path: "/api-docs", beforeLoad: () => { throw redirect({ to: "/settings/api" }); } });
 
-  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, promocodes, payments, addons, telegram, torrent, filters, market, telegramOld, apiDocs, apiDocsOld, settings])]);
+  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, promocodes, payments, addons, telegram, torrent, filters, market, addonApp, telegramOld, apiDocs, apiDocsOld, settings])]);
   return createRouter({
     routeTree,
     basepath: basePath || "/",

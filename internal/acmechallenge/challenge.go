@@ -223,6 +223,11 @@ func (s *Server) schedule() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.expire()
+		// A later token is still pending: its own expiry needs a timer too, or a panel gone
+		// mid-challenge leaves port 80 held.
+		if len(s.tokens) > 0 {
+			s.schedule()
+		}
 	})
 }
 

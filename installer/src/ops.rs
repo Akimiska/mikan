@@ -95,6 +95,15 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
         bail!("{domain:?} is not a domain or an IP address: give the address clients reach this server by");
     }
     let mut install = Install::load()?;
+    // recreate writes this release's compose file, which runs the panel on PostgreSQL: a
+    // panel still on SQLite moves there only through `mikan update`. Asked only where
+    // something is about to change.
+    let movable = |install: &Install| -> Result<()> {
+        if !install.node && install.env.get("MIKAN_DATABASE_URL").is_none() {
+            bail!("this panel still keeps its data in SQLite (mikan 0.4): run `mikan update` first, then this command");
+        }
+        Ok(())
+    };
     let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
     let what = if install.node { "node" } else { "panel" };
     let owner = system::port_owner(80, system::Proto::Tcp);
@@ -104,6 +113,7 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
             Ok(())
         }
         acme::Port80::Own { drop: true } => {
+            movable(&install)?;
             install.env.remove("MIKAN_ACME_LISTEN");
             install.env.save()?;
             recreate(&install)?;
@@ -115,6 +125,7 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
             port = acme::free_port()
         ),
         acme::Port80::Front(front, port) => {
+            movable(&install)?;
             let question = format!(
                 "{} holds port 80, where Let's Encrypt checks {domain}. Add a rule that passes only those checks to the {what}? Its config is backed up and tested before a reload.",
                 front.name()

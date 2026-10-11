@@ -86,6 +86,20 @@ func TestMergeDeliveryResultsPreservesNewItems(t *testing.T) {
 	}
 }
 
+// A round that rewrote the summary while the old text was being sent keeps the new text
+// queued: the channel would show the old one until a level changes again.
+func TestMergeDeliveryResultsKeepsRewrittenSummary(t *testing.T) {
+	before := []delivery{{Key: "summary/current", Target: targetSummary, Text: "A"}}
+	latest := []delivery{{Key: "summary/current", Target: targetSummary, Text: "B"}}
+	got := mergeDeliveryResults(latest, before, nil)
+	if len(got) != 1 || got[0].Text != "B" {
+		t.Fatalf("merged queue = %+v", got)
+	}
+	if got := mergeDeliveryResults(before, before, nil); len(got) != 0 {
+		t.Fatalf("the sent text stays queued: %+v", got)
+	}
+}
+
 func TestObserveDeduplicatesSampleAfterStateRoundTrip(t *testing.T) {
 	st, ctx := testMonitorStore(t)
 	now := time.Unix(1_800_000_000, 0).UTC()

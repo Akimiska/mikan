@@ -123,7 +123,11 @@ func mergeDeliveryResults(latest, before, after []delivery) []delivery {
 		}
 		updated, remains := afterByKey[old.Key]
 		if !remains {
-			result = append(result[:position], result[position+1:]...)
+			// A round may have put new text under the same key meanwhile (the summary): that
+			// text is not sent yet and stays queued.
+			if result[position].Text == old.Text {
+				result = append(result[:position], result[position+1:]...)
+			}
 			continue
 		}
 		result[position].Attempts = updated.Attempts

@@ -75,7 +75,13 @@ fn latest_with(key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Manifest> {
     let url = latest_url();
     let data = fetch(&url, 1 << 20).context("download the release manifest")?.context("no release is published yet")?;
     let sig = fetch(&format!("{url}.sig"), 4096).context("download the manifest's signature")?.context("the manifest has no signature")?;
-    parse(&data, &String::from_utf8_lossy(&sig), key)
+    let manifest = parse(&data, &String::from_utf8_lossy(&sig), key)?;
+    // Its own record, not the index's: the index is published again with every beta, so
+    // the latest stable release is often older than the index seen.
+    if let Some(seen) = latest_seen() {
+        not_older(seen, &data, "published", "the latest release")?;
+    }
+    Ok(manifest)
 }
 
 /// Downloads a URL whole, at most limit bytes; None when it is not there (net::get_opt).
@@ -316,6 +322,12 @@ fn from_index(current: &str, channel: Channel, upto: Option<&str>, key: &Verifyi
 /// The newest release index this server has accepted ("published"); tests keep none.
 fn index_seen() -> Option<&'static Path> {
     if cfg!(test) { None } else { Some(Path::new("/opt/mikan/release/index-published")) }
+}
+
+/// The newest manifest of GitHub's latest release this server has accepted: a stale one
+/// handed in when the index fails must not take the place of a newer one.
+fn latest_seen() -> Option<&'static Path> {
+    if cfg!(test) { None } else { Some(Path::new("/opt/mikan/release/latest-published")) }
 }
 
 /// A signed document stays validly signed for ever: an old copy served again (a cache, a

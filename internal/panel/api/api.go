@@ -274,6 +274,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerAddons()
 	h.registerMarketplace()
 	h.registerBotSlot()
+	h.registerAddonStorage()
 	h.registerAddonPages()
 	h.registerWarp()
 	h.registerCascade()

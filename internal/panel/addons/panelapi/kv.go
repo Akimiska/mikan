@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 )
 
@@ -19,10 +20,9 @@ import (
 // compare-and-set; if_absent makes a lock or a dedupe mark (an event handled once).
 
 const (
-	MaxValue   = 64 << 10  // one value
-	MaxKVBytes = 100 << 20 // all of one addon's live keys and values, by default (Deps.KVQuota)
-	MaxTTL     = 366 * 24 * 60 * 60
-	maxList    = 1000
+	MaxValue = 64 << 10 // one value
+	MaxTTL   = 366 * 24 * 60 * 60
+	maxList  = 1000
 )
 
 // validKey: printable and path-like, so keys list and read well.
@@ -129,12 +129,14 @@ func (s *Server) kvPut(w http.ResponseWriter, r *http.Request) {
 		if absent && live || conditional && (!live || old.Version != want) {
 			return errConflict
 		}
-		size, err := tx.AddonKVSize(r.Context(), db.AddonKVSizeParams{AddonID: c.ID, Key: k, Now: now})
-		if err != nil {
-			return err
-		}
-		if size+int64(len(k)+len(value)) > s.kvQuota() {
-			return errQuota
+		if quota := s.kvQuota(r.Context()); quota > 0 {
+			size, err := tx.AddonKVSize(r.Context(), db.AddonKVSizeParams{AddonID: c.ID, Key: k, Now: now})
+			if err != nil {
+				return err
+			}
+			if size+int64(len(k)+len(value)) > quota {
+				return errQuota
+			}
 		}
 		// The version goes on from an expired value too, so its old ETag never matches again.
 		version = old.Version + 1
@@ -245,11 +247,24 @@ func (s *Server) internal(w http.ResponseWriter, what string, err error) {
 	Fail(w, http.StatusInternalServerError, "internal", "the panel could not do it")
 }
 
-// kvQuota is how much one addon may keep: enough for any bot, and a bound so that an addon
-// writing without end cannot fill the server's disk under the panel.
-func (s *Server) kvQuota() int64 {
+// KVLimitKey is the setting of how many MiB one addon may keep in kv: absent is
+// DefaultKVMiB, 0 no bound at all (the admin's choice, made past a warning: an addon that
+// writes without end then fills the server's disk, and big stores bloat every backup).
+const KVLimitKey = "addons.kv_limit_mib"
+
+// DefaultKVMiB is far more than a bot keeps, and small enough for the backups.
+const DefaultKVMiB = 256
+
+// kvQuota is how many bytes one addon may keep; 0: no bound.
+func (s *Server) kvQuota(ctx context.Context) int64 {
 	if s.d.KVQuota > 0 {
 		return s.d.KVQuota
 	}
-	return MaxKVBytes
+	mib := int64(DefaultKVMiB)
+	if s.d.Settings != nil {
+		if v, ok, err := settings.Get[int64](ctx, s.d.Settings, KVLimitKey); err == nil && ok && v >= 0 {
+			mib = v
+		}
+	}
+	return mib << 20
 }

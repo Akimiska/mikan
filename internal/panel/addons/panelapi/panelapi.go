@@ -43,7 +43,7 @@ type Deps struct {
 	Addons  *addons.Manager
 	Grants  Grants
 	Store   *store.Store // nil: no kv and no events (tests of access alone)
-	KVQuota int64        // bytes one addon keeps in kv; 0: MaxKVBytes
+	KVQuota int64        // bytes one addon may keep in kv, over the setting (tests); 0: the setting
 	Hub     *events.Hub
 	Log     *slog.Logger
 	Now     func() time.Time

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/store/storetest"
 )
@@ -154,12 +155,9 @@ func TestKVLimits(t *testing.T) {
 	if r := kv(s, newToken, http.MethodPut, "/t?ttl=0", []byte("v"), nil); r.status != 400 {
 		t.Fatalf("ttl 0: %d", r.status)
 	}
-	// A small quota of this test's own: the default is too big to fill quickly.
+	// No bound by default; a quota set in Deps bounds an addon's store.
 	const quota = 1 << 20
 	s.d.KVQuota = quota
-	if s.kvQuota() != quota || (&Server{}).kvQuota() != MaxKVBytes {
-		t.Fatal("the quota is not taken from Deps")
-	}
 	value := bytes.Repeat([]byte("x"), MaxValue)
 	n := 0
 	for ; n < quota/MaxValue+2; n++ {
@@ -178,6 +176,19 @@ func TestKVLimits(t *testing.T) {
 	if r := kv(s, newToken, http.MethodPut, "/fill/000", value, nil); r.status != 200 {
 		t.Fatalf("a rewrite at the quota: %d %s", r.status, r.body)
 	}
+	// the admin's setting: 256 MiB when not set, none when set to 0
+	s.d.KVQuota = 0
+	s.d.Settings = settings.New(s.d.Store.Q)
+	if got := s.kvQuota(context.Background()); got != DefaultKVMiB<<20 {
+		t.Fatalf("the default quota: %d", got)
+	}
+	if err := settings.Set(context.Background(), s.d.Settings, KVLimitKey, int64(0)); err != nil {
+		t.Fatal(err)
+	}
+	if r := kv(s, newToken, http.MethodPut, "/more", value, nil); r.status != 200 {
+		t.Fatalf("a write with no quota: %d %s", r.status, r.body)
+	}
+	s.d.KVQuota = quota
 	// another addon has its own room
 	if r := kv(s, botToken, http.MethodPut, "/x", value, nil); r.status != 200 {
 		t.Fatalf("another addon: %d", r.status)

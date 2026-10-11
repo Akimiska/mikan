@@ -377,7 +377,8 @@
       "catalog_unavailable": "The catalog did not load. Check that the server reaches GitHub.",
       "addon_unknown": "The catalog has no such addon.",
       "addon_current": "This version is installed already.",
-      "addon_no_bot": "This addon has no permission to run the bot.",
+      "limit_required": "Set a limit in MiB or turn on \"No limit\".",
+      "addon_no_bot":"This addon has no permission to run the bot.",
       "host_outdated":"mikan on the server is too old for addons: update the server with mikan update.",
       "permissions_changed": "The addon now asks for other permissions. Check the list and approve again.",
       "addon_not_installed": "The addon is not installed or not running.",
@@ -2831,7 +2832,7 @@
       "events": "Events",
       "eventsText": "learns about the panel's events: payments and refunds",
       "kv": "Storage",
-      "kvText": "keeps its own data in the panel's database, up to 100 MB",
+      "kvText": "keeps its own data in the panel's database (256 MB by default)",
       "ui": "Pages",
       "uiText": "adds its own pages to the admin panel"
     },

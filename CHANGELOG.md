@@ -49,6 +49,7 @@ the signed manifest, and the panel shows the one in its language.
 - Lighter on a big panel: metrics, period resets and the alerts' checks of WARP and exits no longer read every user or wait for one slow node after another; adapters that do not answer no longer hold the other invoices' checks.
 - The installer reads the node's files safely, retries failed downloads, keeps the old web server config backup private, and does not take an older signed release list than one it has seen. The update runs up to two hours before systemd stops it.
 - Fields with a unit ("Mbit/s", "GB", "₽") no longer cover the number you type.
+- The server's CPU on the node card no longer counts the time the hosting gives to its other machines (steal): on a busy host it showed load the server did not have.
 
 ### ru
 - Платежи через Platega висели в «Ждёт оплаты», хотя покупатель заплатил: после выбора способа Platega добавляет свою комиссию сверху (5% для СБП), а панель не принимала сумму, отличную от счёта. Теперь оплата, покрывающая счёт, засчитывается; меньше или в другой валюте по-прежнему отклоняется. Обновите и дополнение Platega до 1.0.5: прежнее не читало сумму в том виде, в каком её присылает Platega, поэтому каждая проверка падала, а Platega показывала уведомления неуспешными. Платежи, которые уже истекли в ожидании, нужно выдать вручную.
@@ -95,6 +96,7 @@ the signed manifest, and the panel shows the one in its language.
 - Легче на большой панели: метрики, сброс периодов и проверки WARP и выходов в алертах больше не читают всех пользователей и не ждут медленные ноды по очереди; неотвечающие дополнения не задерживают проверку остальных счетов.
 - Установщик безопасно читает файлы ноды, повторяет неудачные загрузки, не делает резервную копию конфига веб-сервера доступной всем и не принимает список релизов старше уже виденного. Обновление идёт до двух часов, прежде чем systemd его остановит.
 - Поля с единицей измерения («Мбит/с», «ГБ», «₽») больше не перекрывают вводимое число.
+- Процессор сервера на карточке ноды больше не считает время, которое хостинг отдаёт соседним машинам (steal): на загруженном хосте он показывал нагрузку, которой у сервера не было.
 
 ## 0.5.0.4
 ### en

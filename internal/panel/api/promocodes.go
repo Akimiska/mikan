@@ -266,6 +266,8 @@ func (h *handlers) listPromocodes(ctx context.Context, in *promoListInput) (*pro
 	}
 	o := &promoListOutput{}
 	o.Body.Total = n
+	// An empty list is [], not null: the page reads its length.
+	o.Body.Items = make([]PromoCodeView, 0, len(xs))
 	for _, p := range xs {
 		o.Body.Items = append(o.Body.Items, promoView(p, h.d.Now()))
 	}
@@ -365,6 +367,7 @@ func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemp
 	}
 	o := &promoRedemptionsOutput{}
 	o.Body.Total = n
+	o.Body.Items = make([]PromoRedemptionView, 0, len(xs))
 	for _, row := range xs {
 		r := row
 		o.Body.Items = append(o.Body.Items, PromoRedemptionView{ID: r.ID, PromoID: r.PromoID, UserID: func() *int64 {

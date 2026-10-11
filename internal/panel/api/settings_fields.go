@@ -106,4 +106,6 @@ var settingFields = []settingField{
 	value("quiet_hour_utc", settings.KeyQuietHour, false, func(b *patchSettingsBody) *int { return b.QuietHourUTC }),
 	value("auto_port", settings.KeyAutoPort, false, func(b *patchSettingsBody) *bool { return b.AutoPort }),
 	value("auto_sni", settings.KeyAutoSNI, false, func(b *patchSettingsBody) *bool { return b.AutoSNI }),
+	// Ports past the pool are not opened in the firewall: the panel's admin decides, not a key.
+	value("any_port", settings.KeyAnyPort, true, func(b *patchSettingsBody) *bool { return b.AnyPort }),
 }

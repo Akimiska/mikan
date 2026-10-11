@@ -391,6 +391,11 @@
   .update-chip:hover { background: color-mix(in srgb, var(--mikan-500) 16%, transparent); border-color: color-mix(in srgb, var(--mikan-500) 50%, transparent); }
   .notes { display: flex; flex-direction: column; gap: 4px; padding-left: 16px; list-style: disc; font-size: 13px; }
   .notes li::marker { color: var(--mikan-500); }
+  /* Release notes folded to about six lines; the last ones fade out into the card. */
+  .notes-folded { max-height: 132px; overflow: hidden; }
+  .notes-fade { -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent); mask-image: linear-gradient(to bottom, #000 50%, transparent); }
+  .notes-toggle { display: inline-flex; align-items: center; gap: 4px; margin: 8px 0 0 -8px; padding: 4px 8px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--mikan-600); }
+  .notes-toggle:hover { background: var(--hover); }
   .opt:disabled:not([aria-checked="true"]) { opacity: 0.55; }
   .switch { position: relative; width: 40px; height: 24px; border-radius: 999px; background: var(--ink-200); transition: background-color 0.2s; flex: none; }
   .switch[data-state="checked"] { background: var(--fill); }

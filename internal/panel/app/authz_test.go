@@ -118,6 +118,8 @@ func TestFullKeyCannotTakeOverThePanel(t *testing.T) {
 		"sub_template": {"sub_template": "rules: [MATCH,DIRECT]\n"},
 		// Which apps get a subscription at all.
 		"device_require_hwid": {"device_require_hwid": true}, "device_binding": {"device_binding": true},
+		// Ports the firewall does not open.
+		"any_port": {"any_port": true},
 	} {
 		resp, out := k.asKey(k.full, http.MethodPatch, "/settings", body)
 		if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(out), "session_only") || !strings.Contains(string(out), field) {

@@ -39,8 +39,14 @@ func TestInboundAddPrintsPortForHostScript(t *testing.T) {
 	if out.String() != "2083/tcp\n" {
 		t.Fatalf("stdout must be port/network, got %q", out.String())
 	}
-	if err := inboundCmd(ctx, st, []string{"add", "anytls"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "anytls") {
-		t.Fatalf("a taken port must name the owner: %v", err)
+	if err := inboundCmd(ctx, st, []string{"add", "anytls", "--port", "2083"}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "anytls") {
+		t.Fatalf("a taken port named by the admin must name the owner: %v", err)
+	}
+	// With no port named, the second one takes a free port of the pool, and the host
+	// script opens that one.
+	out.Reset()
+	if err := inboundCmd(ctx, st, []string{"add", "anytls"}, &out, &errOut); err != nil || out.String() == "2083/tcp\n" || !strings.HasSuffix(out.String(), "/tcp\n") {
+		t.Fatalf("the second anytls: %v %q", err, out.String())
 	}
 	out.Reset()
 	if err := inboundCmd(ctx, st, []string{"list"}, &out, &errOut); err != nil || !strings.Contains(out.String(), "2083/tcp") {

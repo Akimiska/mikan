@@ -154,6 +154,7 @@ func (t *Tuner) Run(ctx context.Context) {
 type world struct {
 	now          time.Time
 	portOn       bool
+	anyPort      bool // settings.AnyPort: moves may go past domain.PortPool
 	sniOn        bool
 	nodes        []db.Node              // enabled nodes
 	inbounds     map[int64][]db.Inbound // by node id, enabled or not
@@ -234,6 +235,9 @@ func (t *Tuner) load(ctx context.Context) (*world, error) {
 	q := t.st.Q
 	var err error
 	if w.portOn, err = t.set.On(ctx, settings.AutoPort); err != nil {
+		return nil, err
+	}
+	if w.anyPort, err = t.set.On(ctx, settings.AnyPort); err != nil {
 		return nil, err
 	}
 	if w.sniOn, err = t.set.On(ctx, settings.AutoSNI); err != nil {
@@ -549,7 +553,7 @@ func (t *Tuner) movePort(ctx context.Context, w *world, n db.Node, x db.Inbound,
 	}
 	abandoned := t.leftPorts(w.events, n.ID, network, w.now)
 	abandoned[x.Port] = true
-	free := FreePorts(ports, network, abandoned)
+	free := FreePorts(ports, network, abandoned, w.anyPort)
 	if len(free) == 0 {
 		t.setStuck(x.ID, "no_port")
 		return

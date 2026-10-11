@@ -49,6 +49,9 @@ the signed manifest, and the panel shows the one in its language.
 - Lighter on a big panel: metrics, period resets and the alerts' checks of WARP and exits no longer read every user or wait for one slow node after another; adapters that do not answer no longer hold the other invoices' checks.
 - The installer reads the node's files safely, retries failed downloads, keeps the old web server config backup private, and does not take an older signed release list than one it has seen. The update runs up to two hours before systemd stops it.
 - Fields with a unit ("Mbit/s", "GB", "₽") no longer cover the number you type.
+- A second protocol of the same kind can be added without picking a port: when the preset's port is taken (by another protocol or a program on the server), the panel takes the first free spare port (2053, 2083…) and says which. A port you type is still refused when it is taken. Thanks to Roman.
+- **Any free port** (Settings → System → Automatic fixes, off by default): when every spare port is taken, the panel picks a free one in 20000-32767 for a new protocol without a port and for automatic moves. It asks first: the installer does not open those ports in the firewall.
+- The release notes on the Updates card are folded to a few lines with "Show all changes": a long list no longer pushes the update button off the screen.
 - The server's CPU on the node card no longer counts the time the hosting gives to its other machines (steal): on a busy host it showed load the server did not have.
 
 ### ru
@@ -96,6 +99,9 @@ the signed manifest, and the panel shows the one in its language.
 - Легче на большой панели: метрики, сброс периодов и проверки WARP и выходов в алертах больше не читают всех пользователей и не ждут медленные ноды по очереди; неотвечающие дополнения не задерживают проверку остальных счетов.
 - Установщик безопасно читает файлы ноды, повторяет неудачные загрузки, не делает резервную копию конфига веб-сервера доступной всем и не принимает список релизов старше уже виденного. Обновление идёт до двух часов, прежде чем systemd его остановит.
 - Поля с единицей измерения («Мбит/с», «ГБ», «₽») больше не перекрывают вводимое число.
+- Второй протокол того же вида добавляется без выбора порта: если порт пресета занят (другим протоколом или программой на сервере), панель берёт первый свободный запасной порт (2053, 2083…) и пишет, какой. Указанный вручную занятый порт по-прежнему отклоняется. Спасибо Роману.
+- **Любой свободный порт** («Настройки → Система → Автоподбор», по умолчанию выключено): когда все запасные порты заняты, панель берёт свободный из 20000-32767 для нового протокола без порта и при автопереносе. Перед включением предупреждает: эти порты установщик в файрволе не открывает.
+- Список изменений в карточке «Обновления» свёрнут до нескольких строк с кнопкой «Показать все изменения»: длинный список больше не уводит кнопку обновления вниз.
 - Процессор сервера на карточке ноды больше не считает время, которое хостинг отдаёт соседним машинам (steal): на загруженном хосте он показывал нагрузку, которой у сервера не было.
 
 ## 0.5.0.4

@@ -44,6 +44,9 @@ const (
 	// Automatic moves (internal/panel/autotune), on unless switched off.
 	KeyAutoPort = "auto_port" // move an inbound whose port is blocked on the way to clients
 	KeyAutoSNI  = "auto_sni"  // replace a REALITY target that stopped working
+	// KeyAnyPort lets the panel's own port picks go past domain.PortPool when every port
+	// of it is taken: a new inbound with no port named, an automatic move.
+	KeyAnyPort = "any_port"
 	// Devices (domain.Devices): bind subscriptions to devices, on unless switched off;
 	// refuse apps that send no device id instead of seating them together, off by default.
 	KeyDeviceBinding = "device_binding"
@@ -114,6 +117,7 @@ type Switch struct {
 var (
 	AutoPort      = Switch{KeyAutoPort, true}
 	AutoSNI       = Switch{KeyAutoSNI, true}
+	AnyPort       = Switch{KeyAnyPort, false}
 	DeviceBinding = Switch{KeyDeviceBinding, true}
 	RequireHWID   = Switch{KeyRequireHWID, false}
 	AutoUpdate    = Switch{KeyAutoUpdate, false}

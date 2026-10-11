@@ -4314,6 +4314,9 @@
             "maxLength": 254,
             "type": "string"
           },
+          "any_port": {
+            "type": "boolean"
+          },
           "app_branding": {
             "type": "boolean"
           },
@@ -5977,6 +5980,10 @@
           "admin_url": {
             "type": "string"
           },
+          "any_port": {
+            "description": "Когда запасные порты (2053, 2083…) заняты, панель сама берёт любой свободный из 20000-32767: для нового подключения без порта и при автопереносе. Эти порты установщик в файрволе не открывает",
+            "type": "boolean"
+          },
           "app_branding": {
             "description": "Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки",
             "type": "boolean"
@@ -6154,6 +6161,7 @@
           "client_fingerprint",
           "auto_port",
           "auto_sni",
+          "any_port",
           "device_binding",
           "device_require_hwid",
           "device_unbind",

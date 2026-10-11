@@ -3468,6 +3468,7 @@ export interface components {
             acme_eab_hmac?: string;
             acme_eab_kid?: string;
             acme_email?: string;
+            any_port?: boolean;
             app_branding?: boolean;
             auto_port?: boolean;
             auto_sni?: boolean;
@@ -4054,6 +4055,8 @@ export interface components {
             /** @description E-mail для центра сертификации; ZeroSSL привязывает к нему аккаунт */
             acme_email: string;
             admin_url: string;
+            /** @description Когда запасные порты (2053, 2083…) заняты, панель сама берёт любой свободный из 20000-32767: для нового подключения без порта и при автопереносе. Эти порты установщик в файрволе не открывает */
+            any_port: boolean;
             /** @description Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки */
             app_branding: boolean;
             /** @description Переносить подключение на другой порт, если клиенты перестали до него доходить */

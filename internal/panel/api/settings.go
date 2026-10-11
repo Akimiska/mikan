@@ -48,6 +48,7 @@ type SettingsView struct {
 	Fingerprint  string      `json:"client_fingerprint" doc:"Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение"`
 	AutoPort     bool        `json:"auto_port" doc:"Переносить подключение на другой порт, если клиенты перестали до него доходить"`
 	AutoSNI      bool        `json:"auto_sni" doc:"Менять сайт маскировки REALITY, если он перестал подходить"`
+	AnyPort      bool        `json:"any_port" doc:"Когда запасные порты (2053, 2083…) заняты, панель сама берёт любой свободный из 20000-32767: для нового подключения без порта и при автопереносе. Эти порты установщик в файрволе не открывает"`
 	// Devices: see domain.Devices.
 	DeviceBinding bool `json:"device_binding" doc:"Привязывать подписку к устройствам: у каждого устройства свои ключи"`
 	RequireHWID   bool `json:"device_require_hwid" doc:"Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место)"`
@@ -103,6 +104,7 @@ type patchSettingsBody = struct {
 	Fingerprint   *string             `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
 	AutoPort      *bool               `json:"auto_port,omitempty"`
 	AutoSNI       *bool               `json:"auto_sni,omitempty"`
+	AnyPort       *bool               `json:"any_port,omitempty"`
 	DeviceBinding *bool               `json:"device_binding,omitempty"`
 	RequireHWID   *bool               `json:"device_require_hwid,omitempty"`
 	DeviceUnbind  *domain.UnbindRules `json:"device_unbind,omitempty"`
@@ -203,6 +205,9 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 		return v, err
 	}
 	if v.AutoSNI, err = h.d.Settings.On(ctx, settings.AutoSNI); err != nil {
+		return v, err
+	}
+	if v.AnyPort, err = h.d.Settings.On(ctx, settings.AnyPort); err != nil {
 		return v, err
 	}
 	if v.DeviceBinding, err = h.d.Settings.On(ctx, settings.DeviceBinding); err != nil {

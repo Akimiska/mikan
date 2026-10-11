@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { RefreshCw } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { ChevronDown, RefreshCw } from "lucide-react";
+import { useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../../api/client";
 import { qk, useUpdates } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
@@ -108,6 +108,8 @@ export function LanguageCard({ s }: { s: Schemas["SettingsView"] }) {
 /** Global switches of the automatic fixes; each connection can opt out in its settings. */
 export function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
+  // Ports past the pool are the admin's to open in the firewall: said before it goes on.
+  const [warnAny, setWarnAny] = useState(false);
   const rows = [
     { key: "auto_port", title: t("settings.autoPort"), sub: t("settings.autoPortSub"), on: s.auto_port },
     { key: "auto_sni", title: t("settings.autoSni"), sub: t("settings.autoSniSub"), on: s.auto_sni },
@@ -126,9 +128,59 @@ export function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
             <SwitchRow label={r.title} sub={r.sub} checked={r.on} disabled={save.isPending} onChange={(v) => save.mutate({ [r.key]: v })} />
           </li>
         ))}
+        <li>
+          <SwitchRow
+            label={t("settings.anyPort")}
+            sub={t("settings.anyPortSub")}
+            checked={s.any_port}
+            disabled={save.isPending}
+            onChange={(v) => (v ? setWarnAny(true) : save.mutate({ any_port: false }))}
+          />
+          {s.any_port ? <p className="banner warn mb-3 text-xs">{t("settings.anyPortOn")}</p> : null}
+        </li>
       </ul>
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.autoNote")}</p>
+      <Confirm
+        open={warnAny}
+        onOpenChange={setWarnAny}
+        title={t("settings.anyPortConfirmTitle")}
+        text={t("settings.anyPortConfirmText")}
+        confirm={t("settings.anyPortConfirm")}
+        loading={save.isPending}
+        onConfirm={() => save.mutate({ any_port: true }, { onSuccess: () => setWarnAny(false) })}
+      />
     </section>
+  );
+}
+
+/**
+ * A release's notes, folded to a few lines that fade out, with a button to unfold them: a
+ * long list no longer pushes the update button and the switches off the screen.
+ */
+function NotesList({ lines }: { lines: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  const ref = useRef<HTMLUListElement>(null);
+  const id = useId();
+  // Folded only when it is taller than the fold: a short list shows as it is.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) setLong(el.scrollHeight > el.clientHeight + 4);
+  }, [lines]);
+  return (
+    <>
+      <ul ref={ref} id={id} className={clsx("notes", !open && "notes-folded", !open && long && "notes-fade")}>
+        {lines.map((l, i) => (
+          <li key={i}>{inlineMarkdown(l.replace(/^[-*]\s*/, ""))}</li>
+        ))}
+      </ul>
+      {long || open ? (
+        <button type="button" className="notes-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
+          {open ? t("settings.notesLess") : t("settings.notesMore", { n: lines.length })}
+          <ChevronDown size={16} aria-hidden className={clsx("transition-transform", open && "rotate-180")} />
+        </button>
+      ) : null}
+    </>
   );
 }
 
@@ -229,14 +281,7 @@ export function UpdatesCard() {
       {v.available && notes ? (
         <div className="panel-soft mt-4 p-3">
           <div className="mb-2 text-xs font-semibold text-[var(--ink-500)]">{t("settings.updatesChanges", { v: v.latest })}</div>
-          <ul className="notes">
-            {notes
-              .split("\n")
-              .filter((l) => l.trim())
-              .map((l, i) => (
-                <li key={i}>{inlineMarkdown(l.replace(/^[-*]\s*/, ""))}</li>
-              ))}
-          </ul>
+          <NotesList key={v.latest} lines={notes.split("\n").filter((l) => l.trim())} />
         </div>
       ) : null}
       {v.available || waiting ? (

@@ -2816,6 +2816,81 @@
         ],
         "type": "object"
       },
+      "MarketCustomInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "description": "Админ подтвердил, что доверяет этому коду: mikan его не проверял",
+            "type": "boolean"
+          },
+          "digest": {
+            "description": "custom: sha256:\u003c64 hex\u003e",
+            "maxLength": 71,
+            "type": "string"
+          },
+          "id": {
+            "description": "Имя аддона: a-z, 0-9 и дефис, не из каталога",
+            "maxLength": 32,
+            "type": "string"
+          },
+          "image": {
+            "description": "custom: образ без тега, например ghcr.io/me/bot",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "bot",
+              "ui",
+              "generic"
+            ],
+            "type": "string"
+          },
+          "mem_mb": {
+            "description": "Память контейнера, 64–256 МБ; 0 — по умолчанию 128",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mode": {
+            "description": "http — аддон отвечает панели на /v2/*; client — только сам ходит в панель",
+            "enum": [
+              "http",
+              "client"
+            ],
+            "type": "string"
+          },
+          "permissions": {
+            "description": "Права, которые админ даёт аддону",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "source": {
+            "description": "custom — свой образ по дайджесту; external — свой процесс на 127.0.0.1",
+            "enum": [
+              "custom",
+              "external"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "description": "external: http://127.0.0.1:\u003cпорт\u003e; клиенту панели (mode client) можно не указывать",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "kind",
+          "mode",
+          "permissions",
+          "confirm"
+        ],
+        "type": "object"
+      },
       "MarketEntry": {
         "additionalProperties": false,
         "properties": {
@@ -2909,6 +2984,10 @@
       "MarketInstalled": {
         "additionalProperties": false,
         "properties": {
+          "digest": {
+            "description": "Дайджест образа аддона админа (custom)",
+            "type": "string"
+          },
           "error": {
             "description": "Почему контейнер не работает",
             "type": "string"
@@ -2923,11 +3002,36 @@
           "id": {
             "type": "string"
           },
+          "image": {
+            "description": "Образ аддона админа (custom)",
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "bot",
               "ui",
               "generic"
+            ],
+            "type": "string"
+          },
+          "mem_mb": {
+            "description": "Память контейнера, МБ; 0 — по умолчанию 128",
+            "format": "int64",
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "http",
+              "client"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "description": "official — из подписанного каталога; custom и external — аддон админа, mikan его не проверял",
+            "enum": [
+              "official",
+              "custom",
+              "external"
             ],
             "type": "string"
           },
@@ -2938,7 +3042,12 @@
             ],
             "type": "string"
           },
+          "url": {
+            "description": "Адрес внешнего аддона (external); пусто у клиента панели",
+            "type": "string"
+          },
           "version": {
+            "description": "Пусто у аддона админа: версию знает только каталог",
             "type": "string"
           }
         },
@@ -2946,6 +3055,8 @@
           "id",
           "version",
           "kind",
+          "mode",
+          "source",
           "status",
           "granted"
         ],
@@ -10008,6 +10119,48 @@
           }
         },
         "summary": "Маркетплейс аддонов: боты, страницы и прочее",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/marketplace/custom": {
+      "post": {
+        "operationId": "install-custom-addon",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketCustomInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Установить свой аддон: образ по дайджесту или процесс на 127.0.0.1, без проверки mikan",
         "tags": [
           "addons"
         ],

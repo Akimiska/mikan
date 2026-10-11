@@ -101,10 +101,10 @@ var (
 	validComponent = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$`)
 )
 
-// validImage: an image the admin named, in docker's plain grammar and nothing more,
+// ValidImage: an image the admin named, in docker's plain grammar and nothing more,
 // lowercase and without a tag (the digest goes apart): [host[:port]/]path/name. The host
 // checks the same (valid_reference in installer/src/addon.rs).
-func validImage(r string) bool {
+func ValidImage(r string) bool {
 	if r == "" || len(r) > 255 {
 		return false
 	}
@@ -124,8 +124,8 @@ func validImage(r string) bool {
 	return true
 }
 
-// validURL: an external addon's address, http://127.0.0.1:<unprivileged port> and nothing more.
-func validURL(u string) bool {
+// ValidURL: an external addon's address, http://127.0.0.1:<unprivileged port> and nothing more.
+func ValidURL(u string) bool {
 	port, ok := strings.CutPrefix(strings.TrimSuffix(u, "/"), "http://127.0.0.1:")
 	n, err := strconv.Atoi(port)
 	return ok && err == nil && n >= 1024 && n <= 65535 && strconv.Itoa(n) == port
@@ -256,7 +256,8 @@ type Installed struct {
 	Mode        string   `json:"mode,omitempty"`        // "" is http
 	Permissions []string `json:"permissions,omitempty"` // approved for an addon of the admin's own
 	PanelToken  string   `json:"panel_token,omitempty"`
-	Status      string   `json:"status"` // running | failed
+	MemMB       int      `json:"mem_mb,omitempty"` // 0 is the host's default
+	Status      string   `json:"status"`           // running | failed
 	Error       string   `json:"error,omitempty"`
 	At          string   `json:"at"`
 }
@@ -324,10 +325,10 @@ type Request struct {
 	At          string   `json:"at"`
 }
 
-// valid checks a request as the host will (sound in installer/src/addon.rs): one for the
+// Valid checks a request as the host will (sound in installer/src/addon.rs): one for the
 // catalog carries nothing else; an addon of the admin's own is protocol 2, with an image by
 // its digest or a loopback URL (none for a client of the panel, which serves nothing).
-func (r Request) valid() bool {
+func (r Request) Valid() bool {
 	if !ValidID(r.ID) || r.Action != "install" && r.Action != "remove" {
 		return false
 	}
@@ -338,9 +339,9 @@ func (r Request) valid() bool {
 	case r.Action != "install":
 		return false
 	case r.Source == SourceCustom:
-		return validImage(r.Image) && release.ValidDigest(r.Digest) && r.URL == "" && own.normalize()
+		return ValidImage(r.Image) && release.ValidDigest(r.Digest) && r.URL == "" && own.normalize()
 	case r.Source == SourceExternal:
-		return r.Image == "" && r.Digest == "" && (validURL(r.URL) || r.URL == "" && r.Mode == ModeClient) && own.normalize()
+		return r.Image == "" && r.Digest == "" && (ValidURL(r.URL) || r.URL == "" && r.Mode == ModeClient) && own.normalize()
 	}
 	return false
 }
@@ -513,7 +514,7 @@ func (m *Manager) Ask(r Request) error {
 	if m.dir == "" {
 		return ErrUnavailable
 	}
-	if !r.valid() {
+	if !r.Valid() {
 		return ErrUnknown
 	}
 	m.ask.Lock()

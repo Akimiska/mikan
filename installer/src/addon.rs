@@ -275,7 +275,7 @@ fn valid_image(i: &str) -> bool {
 
 /// An image the admin named: any registry, but docker's own grammar and nothing more,
 /// lowercase and without a tag (the digest goes apart): [host[:port]/]path/name, so no value
-/// can carry YAML. The panel checks the same (validImage in internal/panel/addons).
+/// can carry YAML. The panel checks the same (ValidImage in internal/panel/addons).
 fn valid_reference(r: &str) -> bool {
     if r.is_empty() || r.len() > 255 {
         return false;

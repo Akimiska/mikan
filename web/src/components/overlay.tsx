@@ -225,6 +225,7 @@ export function Confirm({
   danger,
   loading,
   onConfirm,
+  children,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -234,6 +235,8 @@ export function Confirm({
   danger?: boolean;
   loading?: boolean;
   onConfirm: () => void;
+  /** What the text cannot hold: a list to approve, a warning. */
+  children?: ReactNode;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -259,6 +262,7 @@ export function Confirm({
                 <Dialog.Description asChild>
                   <p className="muted mt-2">{text}</p>
                 </Dialog.Description>
+                {children}
                 <div className="mt-6 flex justify-end gap-2">
                   <Dialog.Close asChild>
                     <Button variant="ghost">{t("common.cancel")}</Button>

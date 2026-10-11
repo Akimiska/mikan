@@ -65,3 +65,20 @@ ON CONFLICT (addon_id) DO UPDATE SET last_id = GREATEST(addon_cursors.last_id, E
 
 -- name: PruneAddonEvents :execrows
 DELETE FROM addon_events WHERE created_at < sqlc.arg(before)::BIGINT;
+
+-- name: AddAddonUpdate :exec
+INSERT INTO addon_updates (update_id, body, created_at) VALUES ($1, $2, $3)
+ON CONFLICT (update_id) DO NOTHING;
+
+-- name: CountAddonUpdates :one
+SELECT count(*) FROM addon_updates;
+
+-- name: ListAddonUpdates :many
+SELECT update_id, body FROM addon_updates WHERE update_id >= sqlc.arg(from_id)::BIGINT
+ORDER BY update_id LIMIT sqlc.arg(lim)::INT;
+
+-- name: AckAddonUpdates :exec
+DELETE FROM addon_updates WHERE update_id < sqlc.arg(below)::BIGINT;
+
+-- name: PruneAddonUpdates :execrows
+DELETE FROM addon_updates WHERE created_at < sqlc.arg(before)::BIGINT;

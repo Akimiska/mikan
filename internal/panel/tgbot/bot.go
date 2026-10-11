@@ -32,6 +32,9 @@ type Deps struct {
 	Gateway Transport
 	Log     *slog.Logger
 	Now     func() time.Time
+	// Off: a bot addon holds the bot (the panel's API for addons); its screens, notices and
+	// payment messages are the addon's then, and these keep quiet. nil: never off.
+	Off func(ctx context.Context) bool
 }
 
 // Bot is the bot's screens: the menu, the shop, the notices, the broadcasts. It gets its
@@ -106,7 +109,13 @@ func (b *Bot) Started(ctx context.Context, c *tgate.Client) {
 
 // Update implements tgate.Handler: a message or a press in a private chat, the flood guard
 // passed. It is answered, or dropped, as it comes.
-func (b *Bot) Update(ctx context.Context, c *tgate.Client, out *tgate.Outbox, up tgate.Update) {
+// Update always takes the update: what the screens cannot do is answered in the chat.
+func (b *Bot) Update(ctx context.Context, c *tgate.Client, out *tgate.Outbox, up tgate.Update) error {
+	b.update(ctx, c, out, up)
+	return nil
+}
+
+func (b *Bot) update(ctx context.Context, c *tgate.Client, out *tgate.Outbox, up tgate.Update) {
 	switch {
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil:
 		if cmd, _, _ := strings.Cut(up.CallbackQuery.Data, ":"); cmd == "ta" || cmd == "tx" {
@@ -420,3 +429,6 @@ func labelOf(cfg Config, action, def string) string {
 
 // MiniAppURL is where the bot's Mini App opens; "" when Telegram could not load it.
 func (b *Bot) MiniAppURL(ctx context.Context) string { return b.miniAppURL(ctx, b.Config(ctx)) }
+
+// off: a bot addon speaks for the bot now.
+func (b *Bot) off(ctx context.Context) bool { return b.d.Off != nil && b.d.Off(ctx) }

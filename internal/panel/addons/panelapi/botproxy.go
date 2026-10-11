@@ -1,0 +1,424 @@
+package panelapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"hash/fnv"
+	"io"
+	"math"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgate"
+)
+
+// The Bot API proxy: the addon that holds the bot (permission bot, chosen by the admin) runs
+// on any Telegram framework pointed at MIKAN_BOT_API_URL with MIKAN_BOT_TOKEN. The panel keeps
+// the real token, the polling and the payments: getUpdates reads what the gateway buffered,
+// the calls an addon may make go to Telegram through the gateway's outbox (its limits) and
+// come back with Telegram's own answer, and the rest is refused as Telegram would.
+
+// SlotKey is the setting naming the addon that holds the bot; "" or absent: the panel's own
+// screens.
+const SlotKey = "addons.bot"
+
+const (
+	maxBuffered   = 2000           // updates kept for an addon that does not read them
+	keepUpdates   = 24 * time.Hour // as long as Telegram keeps them itself
+	maxUpdateWait = 50             // seconds of a long poll
+	maxCall       = 1 << 20        // a call that carries no file
+	maxUpload     = tgate.MaxDocument + 1<<20
+)
+
+// Telegram is the gateway as the proxy needs it.
+type Telegram interface {
+	Client() *tgate.Client
+	Outbox() *tgate.Outbox
+}
+
+// direct calls carry no message to a chat: they go to Telegram at once.
+var direct = map[string]bool{
+	"getMe": true, "getChat": true, "getChatMember": true, "answerCallbackQuery": true,
+	"setMyCommands": true, "getMyCommands": true, "deleteMyCommands": true,
+	"setChatMenuButton": true, "getChatMenuButton": true,
+}
+
+// queued calls send to a chat (chat_id): they wait their turn in the outbox.
+var queued = map[string]bool{
+	"sendMessage": true, "editMessageText": true, "editMessageReplyMarkup": true, "editMessageCaption": true,
+	"editMessageMedia": true, "deleteMessage": true, "deleteMessages": true, "sendPhoto": true,
+	"sendDocument": true, "sendMediaGroup": true, "sendChatAction": true, "copyMessage": true,
+	"forwardMessage": true, "sendSticker": true, "sendAnimation": true, "sendVideo": true,
+	"sendAudio": true, "sendVoice": true, "sendLocation": true, "pinChatMessage": true, "unpinChatMessage": true,
+}
+
+// Slot is the addon holding the bot: the one the admin chose, while it still has a grant
+// with bot. Without it the panel's own screens answer.
+func (s *Server) Slot(ctx context.Context) string {
+	if s.d.Settings == nil {
+		return ""
+	}
+	id, _, err := settings.Get[string](ctx, s.d.Settings, SlotKey)
+	if err != nil || id == "" {
+		return ""
+	}
+	g, err := s.d.Grants.GetAddonGrant(ctx, id)
+	if err != nil {
+		return ""
+	}
+	var perms []string
+	if json.Unmarshal([]byte(g.Permissions), &perms) != nil || !(Caller{Permissions: perms}).Can("bot") {
+		return ""
+	}
+	return id
+}
+
+// BotSlot is the gateway's handler: the addon's buffer while an addon holds the bot, the
+// panel's screens (fallback) otherwise.
+type BotSlot struct {
+	s        *Server
+	fallback tgate.Handler
+
+	mu       sync.Mutex
+	toldFull time.Time
+}
+
+func (s *Server) BotSlot(fallback tgate.Handler) *BotSlot { return &BotSlot{s: s, fallback: fallback} }
+
+func (b *BotSlot) Started(ctx context.Context, c *tgate.Client) {
+	// An addon sets up its own commands and menu button through the proxy.
+	if b.s.Slot(ctx) == "" && b.fallback != nil {
+		b.fallback.Started(ctx, c)
+	}
+}
+
+func (b *BotSlot) Update(ctx context.Context, c *tgate.Client, out *tgate.Outbox, up tgate.Update) error {
+	if b.s.Slot(ctx) == "" {
+		if b.fallback == nil {
+			return nil
+		}
+		return b.fallback.Update(ctx, c, out, up)
+	}
+	n, err := b.s.d.Store.Q.CountAddonUpdates(ctx)
+	if err != nil {
+		return err
+	}
+	if n >= maxBuffered {
+		// The addon does not read: what comes now is dropped, said once a minute.
+		b.mu.Lock()
+		if time.Since(b.toldFull) > time.Minute {
+			b.toldFull = time.Now()
+			b.s.d.Log.Warn("addons api: the bot addon does not take its updates, new ones are dropped", "kept", n)
+		}
+		b.mu.Unlock()
+		return nil
+	}
+	if err := b.s.d.Store.Q.AddAddonUpdate(ctx, db.AddAddonUpdateParams{UpdateID: up.UpdateID, Body: string(up.Raw), CreatedAt: b.s.d.Now().Unix()}); err != nil {
+		return err
+	}
+	b.s.updates.Kick()
+	return nil
+}
+
+// tgFail answers as the Bot API refuses.
+func tgFail(w http.ResponseWriter, code int, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": code, "description": description})
+}
+
+func tgOK(w http.ResponseWriter, result any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result})
+}
+
+// botAPI serves /bot<n>:<token>/<method>.
+func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/bot")
+	token, method, ok := strings.Cut(rest, "/")
+	if _, secret, found := strings.Cut(token, ":"); found {
+		token = secret
+	} else {
+		ok = false
+	}
+	if !ok || method == "" || strings.Contains(method, "/") {
+		tgFail(w, http.StatusNotFound, "Not Found")
+		return
+	}
+	c, status, _ := s.authenticateToken(r.Context(), token)
+	if status != 0 || !c.Can("bot") || s.Slot(r.Context()) != c.ID {
+		tgFail(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	limit := int64(maxCall)
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		limit = maxUpload
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		tgFail(w, http.StatusBadRequest, "Bad Request: the body could not be read")
+		return
+	}
+	if int64(len(body)) > limit {
+		tgFail(w, http.StatusRequestEntityTooLarge, "Request Entity Too Large")
+		return
+	}
+	ct := r.Header.Get("Content-Type")
+	if len(body) == 0 && r.URL.RawQuery != "" {
+		// Parameters in the URL go to Telegram as a form: the token stays out of any URL.
+		body, ct = []byte(r.URL.RawQuery), "application/x-www-form-urlencoded"
+	}
+	p, err := params(ct, body)
+	if err != nil {
+		tgFail(w, http.StatusBadRequest, "Bad Request: "+err.Error())
+		return
+	}
+	switch {
+	case method == "getUpdates":
+		s.getUpdates(w, r, p)
+		return
+	case method == "deleteWebhook":
+		// Frameworks drop a webhook before they poll: there is none, and the buffer is theirs.
+		if p["drop_pending_updates"] == "true" {
+			if err := s.d.Store.Q.AckAddonUpdates(r.Context(), math.MaxInt64); err != nil {
+				s.d.Log.Warn("addons api: drop updates", "err", err)
+			}
+		}
+		tgOK(w, true)
+		return
+	case !direct[method] && !queued[method]:
+		tgFail(w, http.StatusForbidden, "Forbidden: "+method+" is not allowed for addons")
+		return
+	}
+	if err := s.checkButtons(r.Context(), p); err != nil {
+		tgFail(w, http.StatusBadRequest, "Bad Request: "+err.Error())
+		return
+	}
+	tg := s.d.Telegram
+	var cl *tgate.Client
+	var out *tgate.Outbox
+	if tg != nil {
+		cl, out = tg.Client(), tg.Outbox()
+	}
+	if cl == nil || out == nil {
+		tgFail(w, http.StatusBadGateway, "Bad Gateway: the bot is not running")
+		return
+	}
+	if direct[method] {
+		code, answer, err := cl.Forward(r.Context(), method, ct, body)
+		s.answer(w, code, answer, err)
+		return
+	}
+	chat, ok := chatKey(p["chat_id"])
+	if !ok {
+		tgFail(w, http.StatusBadRequest, "Bad Request: chat_id is required")
+		return
+	}
+	var (
+		code   int
+		answer []byte
+	)
+	done := make(chan error, 1)
+	out.Do(chat, r.Header.Get("X-Mikan-Priority"), func(ctx context.Context, c *tgate.Client) error {
+		var err error
+		code, answer, err = c.Forward(ctx, method, ct, body)
+		return err
+	}, func(err error) { done <- err })
+	select {
+	case err := <-done:
+		s.answer(w, code, answer, err)
+	case <-r.Context().Done():
+	}
+}
+
+// answer passes Telegram's answer on; a way to Telegram that failed is a 502.
+func (s *Server) answer(w http.ResponseWriter, code int, answer []byte, err error) {
+	var ae *tgate.APIError
+	if err != nil && !errors.As(err, &ae) || code == 0 {
+		tgFail(w, http.StatusBadGateway, "Bad Gateway: Telegram is out of reach")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_, _ = w.Write(answer)
+}
+
+// getUpdates is Telegram's: what follows offset (acknowledging what is below it), up to
+// limit, waiting up to timeout seconds for something new.
+func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, p map[string]string) {
+	num := func(k string, def, lo, hi int64) int64 {
+		n, err := strconv.ParseInt(p[k], 10, 64)
+		if err != nil {
+			return def
+		}
+		return min(max(n, lo), hi)
+	}
+	offset := num("offset", 0, 0, math.MaxInt64)
+	limit := num("limit", 100, 1, 100)
+	timeout := num("timeout", 0, 0, maxUpdateWait)
+	if offset > 0 {
+		if err := s.d.Store.Q.AckAddonUpdates(r.Context(), offset); err != nil {
+			tgFail(w, http.StatusInternalServerError, "Internal Server Error")
+			return
+		}
+	}
+	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+	for {
+		woken := s.updates.Wait()
+		rows, err := s.d.Store.Q.ListAddonUpdates(r.Context(), db.ListAddonUpdatesParams{FromID: offset, Lim: int32(limit)})
+		if err != nil {
+			if r.Context().Err() == nil {
+				tgFail(w, http.StatusInternalServerError, "Internal Server Error")
+			}
+			return
+		}
+		if len(rows) > 0 || !time.Now().Before(deadline) {
+			ups := make([]json.RawMessage, 0, len(rows))
+			for _, u := range rows {
+				ups = append(ups, json.RawMessage(u.Body))
+			}
+			tgOK(w, ups)
+			return
+		}
+		t := time.NewTimer(min(time.Until(deadline), time.Second))
+		select {
+		case <-r.Context().Done():
+			t.Stop()
+			return
+		case <-woken:
+		case <-t.C:
+		}
+		t.Stop()
+	}
+}
+
+// params reads a call's parameters as the Bot API takes them: JSON, a form, or multipart
+// (its fields, not its files). A JSON value that is no string stays as its JSON text.
+func params(ct string, body []byte) (map[string]string, error) {
+	out := map[string]string{}
+	if len(body) == 0 {
+		return out, nil
+	}
+	mt, mp, _ := mime.ParseMediaType(ct)
+	switch mt {
+	case "application/json":
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(body, &m); err != nil {
+			return nil, errors.New("the body is not a JSON object")
+		}
+		for k, v := range m {
+			var s string
+			if json.Unmarshal(v, &s) == nil {
+				out[k] = s
+			} else {
+				out[k] = string(v)
+			}
+		}
+	case "application/x-www-form-urlencoded":
+		v, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, errors.New("the form cannot be read")
+		}
+		for k := range v {
+			out[k] = v.Get(k)
+		}
+	case "multipart/form-data":
+		mr := multipart.NewReader(bytes.NewReader(body), mp["boundary"])
+		for {
+			part, err := mr.NextPart()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return nil, errors.New("the multipart body cannot be read")
+			}
+			if part.FileName() == "" {
+				v, _ := io.ReadAll(io.LimitReader(part, maxCall))
+				out[part.FormName()] = string(v)
+			}
+			part.Close()
+		}
+	default:
+		return nil, errors.New("unsupported content type")
+	}
+	return out, nil
+}
+
+// chatKey is the chat the outbox paces a call by: the id, or a channel's @name made a number.
+func chatKey(v string) (int64, bool) {
+	if v == "" {
+		return 0, false
+	}
+	if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+		return n, true
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(v))
+	return int64(h.Sum64() >> 1), true
+}
+
+// checkButtons: a Mini App button or a login link opens a page that gets the user's signed
+// data, so it may open only the panel's own pages, never one the addon picks.
+func (s *Server) checkButtons(ctx context.Context, p map[string]string) error {
+	base := ""
+	if s.d.SubBase != nil {
+		base = s.d.SubBase(ctx)
+	}
+	allowed := func(u string) bool { return base != "" && strings.HasPrefix(u, base+"/") }
+	var walk func(v any) error
+	walk = func(v any) error {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, inner := range x {
+				if k == "web_app" || k == "login_url" {
+					m, _ := inner.(map[string]any)
+					if u, _ := m["url"].(string); !allowed(u) {
+						return errors.New(k + " may open only the panel's own pages")
+					}
+					continue
+				}
+				if err := walk(inner); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, inner := range x {
+				if err := walk(inner); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	for _, k := range []string{"reply_markup", "menu_button"} {
+		raw := p[k]
+		if raw == "" {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal([]byte(raw), &v); err != nil {
+			return errors.New(k + " is not JSON")
+		}
+		if err := walk(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneUpdates drops what no addon took for a day: Telegram would not have kept it either.
+func (s *Server) pruneUpdates(ctx context.Context) {
+	if _, err := s.d.Store.Q.PruneAddonUpdates(ctx, s.d.Now().Add(-keepUpdates).Unix()); err != nil && ctx.Err() == nil {
+		s.d.Log.Warn("addons api: prune updates", "err", err)
+	}
+}

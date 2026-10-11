@@ -208,6 +208,18 @@ type Update struct {
 	Message          *Message          `json:"message"`
 	CallbackQuery    *CallbackQuery    `json:"callback_query"`
 	PreCheckoutQuery *PreCheckoutQuery `json:"pre_checkout_query"`
+	// Raw is the update as Telegram sent it: a bot addon gets it whole, with what these
+	// types leave out.
+	Raw json.RawMessage `json:"-"`
+}
+
+func (u *Update) UnmarshalJSON(b []byte) error {
+	type plain Update
+	if err := json.Unmarshal(b, (*plain)(u)); err != nil {
+		return err
+	}
+	u.Raw = append(json.RawMessage(nil), b...)
+	return nil
 }
 
 // Button is an inline keyboard button: one of callback data, a link or the Mini App.
@@ -453,3 +465,53 @@ func (c *Client) RefundStars(ctx context.Context, user int64, chargeID string) e
 	}
 	return err
 }
+
+// Forward makes a call of the Bot API as an addon put it (the Bot API proxy): the body as it
+// came, with its content type, and Telegram's answer as it is. Only a way to Telegram that
+// fails is an error; a refusal comes back in the answer, and as an *APIError when it is a
+// 429, so the outbox waits it out. The token never leaves this client.
+func (c *Client) Forward(parent context.Context, method, contentType string, body []byte) (int, []byte, error) {
+	timeout := c.callTimeout
+	if strings.HasPrefix(contentType, "multipart/") {
+		timeout = documentTimeout
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/"+method, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		if parent.Err() != nil {
+			return 0, nil, parent.Err()
+		}
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	defer resp.Body.Close()
+	answer, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
+	if err != nil {
+		return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		var r struct {
+			Description string `json:"description"`
+			Parameters  struct {
+				RetryAfter int `json:"retry_after"`
+			} `json:"parameters"`
+		}
+		_ = json.Unmarshal(answer, &r)
+		return resp.StatusCode, answer, &APIError{Code: 429, Description: r.Description, RetryAfter: time.Duration(r.Parameters.RetryAfter) * time.Second}
+	}
+	return resp.StatusCode, answer, nil
+}
+
+// maxAnswer bounds an answer of the Bot API read for an addon.
+const maxAnswer = 4 << 20

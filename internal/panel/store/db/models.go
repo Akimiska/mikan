@@ -41,6 +41,12 @@ type AddonKv struct {
 	UpdatedAt int64
 }
 
+type AddonUpdate struct {
+	UpdateID  int64
+	Body      string
+	CreatedAt int64
+}
+
 type Admin struct {
 	ID            int64
 	Username      string

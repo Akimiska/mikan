@@ -354,3 +354,17 @@ func (o *Outbox) finish(j *job, err error) {
 		j.done(err)
 	}
 }
+
+// Do runs a call of a bot addon in its chat's turn, at the level it asked for ("notice",
+// "bulk", else a reply), and calls done once with how it ended: the Bot API proxy waits for
+// Telegram's own answer, so nothing is merged by key here.
+func (o *Outbox) Do(chat int64, level string, do func(context.Context, *Client) error, done func(error)) {
+	prio := prioReply
+	switch level {
+	case "notice":
+		prio = prioNotice
+	case "bulk":
+		prio = prioBulk
+	}
+	o.add(&job{chat: chat, prio: prio, do: do, done: done})
+}

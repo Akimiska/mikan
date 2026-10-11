@@ -270,6 +270,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerPromocodes()
 	h.registerAddons()
 	h.registerMarketplace()
+	h.registerBotSlot()
 	h.registerWarp()
 	h.registerCascade()
 	h.registerPools()

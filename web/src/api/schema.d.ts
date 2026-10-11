@@ -1545,6 +1545,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/telegram/bot-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Кто отвечает в боте подписчиков */
+        get: operations["get-bot-addon"];
+        /** Отдать бота аддону или вернуть экраны панели */
+        put: operations["set-bot-addon"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/telegram/broadcast": {
         parameters: {
             query?: never;
@@ -2265,6 +2283,14 @@ export interface components {
             password_set: boolean;
             /** @description Бэкап делается прямо сейчас */
             sending: boolean;
+        };
+        BotSlotInputBody: {
+            /** @description id аддона с правом bot или пусто */
+            addon: string;
+        };
+        BotSlotView: {
+            /** @description Аддон, который отвечает в боте; пусто — собственные экраны панели */
+            addon: string;
         };
         BoundDeviceView: {
             app: string;
@@ -8870,6 +8896,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-bot-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotSlotView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-bot-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotSlotInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotSlotView"];
                 };
             };
             /** @description Error */

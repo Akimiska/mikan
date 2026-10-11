@@ -528,7 +528,12 @@ pub fn compose_yaml(adapters: &BTreeMap<String, Installed>, panel_api: &str, pan
             token = a.token
         ));
         if a.v2() {
-            y.push_str(&format!("      MIKAN_PANEL_URL: \"http://{api}/panel/v2\"\n      MIKAN_PANEL_TOKEN: \"{}\"\n", a.panel_token));
+            // The same token opens the Bot API proxy; the number before it means nothing
+            // (frameworks want one), the bot's id comes from getMe.
+            y.push_str(&format!(
+                "      MIKAN_PANEL_URL: \"http://{api}/panel/v2\"\n      MIKAN_PANEL_TOKEN: \"{t}\"\n      MIKAN_BOT_API_URL: \"http://{api}\"\n      MIKAN_BOT_TOKEN: \"0:{t}\"\n",
+                t = a.panel_token
+            ));
         }
     }
     if bridged {
@@ -1784,6 +1789,8 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
             "mem_limit: 192m",
             "MIKAN_PANEL_URL: \"http://127.0.0.1:41990/panel/v2\"",
             &format!("MIKAN_PANEL_TOKEN: \"{}\"", "b".repeat(48)),
+            "MIKAN_BOT_API_URL: \"http://127.0.0.1:41990\"",
+            &format!("MIKAN_BOT_TOKEN: \"0:{}\"", "b".repeat(48)),
             "network_mode: host",
             "read_only: true",
         ] {

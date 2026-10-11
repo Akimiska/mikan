@@ -244,15 +244,16 @@ type screens struct{}
 
 func (screens) Started(context.Context, *Client) {}
 
-func (screens) Update(_ context.Context, _ *Client, out *Outbox, up Update) {
+func (screens) Update(_ context.Context, _ *Client, out *Outbox, up Update) error {
 	if up.Message == nil {
-		return
+		return nil
 	}
 	chat := up.Message.Chat.ID
 	out.Reply(chat, "", 1, func(ctx context.Context, c *Client) error {
 		_, err := c.Send(ctx, chat, "menu", nil, false)
 		return err
 	})
+	return nil
 }
 
 type env struct {

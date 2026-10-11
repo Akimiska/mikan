@@ -22,6 +22,7 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -45,6 +46,11 @@ type Deps struct {
 	Hub    *events.Hub
 	Log    *slog.Logger
 	Now    func() time.Time
+	// The Bot API proxy (botproxy.go): the gateway, the settings that name the addon holding
+	// the bot, and where the panel's own pages are (SubBase, for Mini App buttons).
+	Telegram Telegram
+	Settings *settings.Settings
+	SubBase  func(ctx context.Context) string
 }
 
 // Caller is the addon a request came from and what it may do.
@@ -86,14 +92,15 @@ func Write(w http.ResponseWriter, status int, v any) {
 type Server struct {
 	d Deps
 
-	mux *http.ServeMux // the routes, each behind its permission
+	mux     *http.ServeMux // the routes, each behind its permission
+	updates *events.Hub    // wakes getUpdates of the bot addon
 
 	mu    sync.Mutex
 	addrs map[string]bool // what it listens on: the Host a request must name
 }
 
 func New(d Deps) *Server {
-	s := &Server{d: d, mux: http.NewServeMux()}
+	s := &Server{d: d, mux: http.NewServeMux(), updates: events.NewHub()}
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		Fail(w, http.StatusNotFound, "not_found", "no such method")
 	})
@@ -136,6 +143,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Fail(w, http.StatusMisdirectedRequest, "bad_request", "unknown host")
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/bot") && s.d.Store != nil {
+		s.botAPI(w, r)
+		return
+	}
 	c, status, code := s.authenticate(r)
 	if status != 0 {
 		Fail(w, status, code, code)
@@ -149,7 +160,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // it answers a status and a code when there is none.
 func (s *Server) authenticate(r *http.Request) (Caller, int, string) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || token == "" {
+	if !ok {
+		token = ""
+	}
+	return s.authenticateToken(r.Context(), token)
+}
+
+// authenticateToken is authenticate for a token taken from elsewhere (the Bot API proxy's path).
+func (s *Server) authenticateToken(ctx context.Context, token string) (Caller, int, string) {
+	if token == "" {
 		return Caller{}, http.StatusUnauthorized, "unauthorized"
 	}
 	st, err := s.d.Addons.State()
@@ -168,7 +187,7 @@ func (s *Server) authenticate(r *http.Request) (Caller, int, string) {
 	if id == "" {
 		return Caller{}, http.StatusUnauthorized, "unauthorized"
 	}
-	g, err := s.d.Grants.GetAddonGrant(r.Context(), id)
+	g, err := s.d.Grants.GetAddonGrant(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Caller{}, http.StatusForbidden, "not_approved"
 	}
@@ -296,6 +315,7 @@ func (s *Server) Run(ctx context.Context) {
 		case <-prune.C:
 			if s.d.Store != nil {
 				s.pruneKV(ctx)
+				s.pruneUpdates(ctx)
 				if _, err := events.Prune(ctx, s.d.Store.Q, s.d.Now()); err != nil && ctx.Err() == nil {
 					s.d.Log.Warn("addons api: prune events", "err", err)
 				}

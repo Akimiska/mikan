@@ -29,6 +29,15 @@ func (q *Queries) AckAddonEvents(ctx context.Context, arg AckAddonEventsParams) 
 	return err
 }
 
+const ackAddonUpdates = `-- name: AckAddonUpdates :exec
+DELETE FROM addon_updates WHERE update_id < $1::BIGINT
+`
+
+func (q *Queries) AckAddonUpdates(ctx context.Context, below int64) error {
+	_, err := q.db.ExecContext(ctx, ackAddonUpdates, below)
+	return err
+}
+
 const addAddonEvent = `-- name: AddAddonEvent :exec
 INSERT INTO addon_events (type, user_id, tg_id, data, dedupe_key, created_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -56,6 +65,22 @@ func (q *Queries) AddAddonEvent(ctx context.Context, arg AddAddonEventParams) er
 	return err
 }
 
+const addAddonUpdate = `-- name: AddAddonUpdate :exec
+INSERT INTO addon_updates (update_id, body, created_at) VALUES ($1, $2, $3)
+ON CONFLICT (update_id) DO NOTHING
+`
+
+type AddAddonUpdateParams struct {
+	UpdateID  int64
+	Body      string
+	CreatedAt int64
+}
+
+func (q *Queries) AddAddonUpdate(ctx context.Context, arg AddAddonUpdateParams) error {
+	_, err := q.db.ExecContext(ctx, addAddonUpdate, arg.UpdateID, arg.Body, arg.CreatedAt)
+	return err
+}
+
 const addonKVSize = `-- name: AddonKVSize :one
 SELECT COALESCE(sum(octet_length(value) + octet_length(key)), 0)::BIGINT AS size
 FROM addon_kv WHERE addon_id = $1 AND key <> $2 AND (expires_at IS NULL OR expires_at > $3::BIGINT)
@@ -72,6 +97,17 @@ func (q *Queries) AddonKVSize(ctx context.Context, arg AddonKVSizeParams) (int64
 	var size int64
 	err := row.Scan(&size)
 	return size, err
+}
+
+const countAddonUpdates = `-- name: CountAddonUpdates :one
+SELECT count(*) FROM addon_updates
+`
+
+func (q *Queries) CountAddonUpdates(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAddonUpdates)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const deleteAddonGrant = `-- name: DeleteAddonGrant :exec
@@ -279,6 +315,44 @@ func (q *Queries) ListAddonKeys(ctx context.Context, arg ListAddonKeysParams) ([
 	return items, nil
 }
 
+const listAddonUpdates = `-- name: ListAddonUpdates :many
+SELECT update_id, body FROM addon_updates WHERE update_id >= $1::BIGINT
+ORDER BY update_id LIMIT $2::INT
+`
+
+type ListAddonUpdatesParams struct {
+	FromID int64
+	Lim    int32
+}
+
+type ListAddonUpdatesRow struct {
+	UpdateID int64
+	Body     string
+}
+
+func (q *Queries) ListAddonUpdates(ctx context.Context, arg ListAddonUpdatesParams) ([]ListAddonUpdatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAddonUpdates, arg.FromID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAddonUpdatesRow{}
+	for rows.Next() {
+		var i ListAddonUpdatesRow
+		if err := rows.Scan(&i.UpdateID, &i.Body); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAddonEvents = `-- name: LockAddonEvents :exec
 SELECT pg_advisory_xact_lock($1::BIGINT)
 `
@@ -329,6 +403,18 @@ DELETE FROM addon_kv WHERE expires_at IS NOT NULL AND expires_at <= $1::BIGINT
 
 func (q *Queries) PruneAddonKV(ctx context.Context, now int64) (int64, error) {
 	result, err := q.db.ExecContext(ctx, pruneAddonKV, now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const pruneAddonUpdates = `-- name: PruneAddonUpdates :execrows
+DELETE FROM addon_updates WHERE created_at < $1::BIGINT
+`
+
+func (q *Queries) PruneAddonUpdates(ctx context.Context, before int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneAddonUpdates, before)
 	if err != nil {
 		return 0, err
 	}

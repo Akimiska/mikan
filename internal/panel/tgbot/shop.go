@@ -258,6 +258,9 @@ func (b *Bot) lang(ctx context.Context) string { return b.Config(ctx).Lang }
 // Paid implements billing.Notifier: the buyer learns the subscription is ready (with the
 // link for a new one) or the traffic package is added, and gets a fresh menu that shows it.
 func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
+	if b.off(ctx) {
+		return
+	}
 	out := b.d.Gateway.Outbox()
 	if out == nil {
 		return
@@ -288,6 +291,9 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 // Refunded implements billing.Notifier: the buyer learns the payment was refunded and what
 // it gave is taken back.
 func (b *Bot) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool) {
+	if b.off(ctx) {
+		return
+	}
 	out := b.d.Gateway.Outbox()
 	if out == nil {
 		return
@@ -390,6 +396,9 @@ func (b *Bot) trialInvoice(ctx context.Context, w *words, chat int64, code strin
 // as the account had its trial, and that its money comes back through support (the payment
 // method cannot refund it), with the support link when the panel has one.
 func (b *Bot) TrialNotGiven(ctx context.Context, p db.Payment) {
+	if b.off(ctx) {
+		return
+	}
 	out := b.d.Gateway.Outbox()
 	if out == nil {
 		return

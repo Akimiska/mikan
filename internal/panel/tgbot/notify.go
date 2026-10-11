@@ -160,6 +160,9 @@ func night(t time.Time) bool {
 // Notify queues the notices that are due, each until it is delivered, and not twice at
 // once. The outbox paces them behind the replies to people in their chats.
 func (b *Bot) Notify(ctx context.Context) {
+	if b.off(ctx) {
+		return
+	}
 	out := b.d.Gateway.Outbox()
 	if out == nil {
 		return

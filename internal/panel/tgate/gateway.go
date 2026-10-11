@@ -69,7 +69,8 @@ type Handler interface {
 	// Update is a message or a button press in a private chat, past the flood guard, that
 	// the gateway does not handle itself. It is acknowledged to Telegram after the call:
 	// what it sends goes through out, and what must not hold up the loop goes through Go.
-	Update(ctx context.Context, c *Client, out *Outbox, up Update)
+	// An error offers the update again (a bot addon's buffer that could not take it).
+	Update(ctx context.Context, c *Client, out *Outbox, up Update) error
 }
 
 // Status is what the admin panel shows.
@@ -152,6 +153,9 @@ func (g *Gateway) setStatus(fn func(*Status)) {
 
 // Outbox is the running bot's outbox; nil while the bot is off.
 func (g *Gateway) Outbox() *Outbox { return g.out.Load() }
+
+// Client is the running bot's client; nil while the bot is off.
+func (g *Gateway) Client() *Client { return g.client.Load() }
 
 // Go runs f as work of the gateway's: Run returns only after it has.
 func (g *Gateway) Go(f func()) { g.running.Go(f) }
@@ -657,7 +661,7 @@ func (g *Gateway) handle(ctx context.Context, c *Client, up Update) error {
 			return nil
 		}
 		if h := g.handlerOf(); h != nil {
-			h.Update(ctx, c, out, up)
+			return h.Update(ctx, c, out, up)
 		}
 	case up.Message != nil && up.Message.From != nil && up.Message.Chat.Type == "private":
 		m := up.Message
@@ -667,7 +671,7 @@ func (g *Gateway) handle(ctx context.Context, c *Client, up Update) error {
 		}
 		_ = g.d.Store.Q.UpsertTgChat(ctx, db.UpsertTgChatParams{TgID: chat, Username: m.From.Username, FirstName: m.From.FirstName, CreatedAt: now, UpdatedAt: now})
 		if h := g.handlerOf(); h != nil {
-			h.Update(ctx, c, out, up)
+			return h.Update(ctx, c, out, up)
 		}
 	}
 	return nil

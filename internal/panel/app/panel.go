@@ -219,7 +219,6 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
 	hub := events.NewHub()
-	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Hub: hub, Log: o.Log, Now: o.Now})
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
 	deps.CheckHost = o.CheckHost
@@ -236,13 +235,19 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		tunnel = p.Nodes.Tunnel
 	}
 	p.Gateway = tgate.New(tgate.Deps{Store: st, Settings: set, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing, Tunnel: tunnel})
+	// The panel's API for addons, with the Bot API proxy over the gateway for the addon that
+	// holds the bot.
+	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
+		Telegram: p.Gateway, Settings: set, SubBase: subBase})
 	// The bot's screens see the panel through a Backend: in process here, over the Panel
 	// API once they run as an addon.
 	backend := &tgbot.Local{Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
-	p.Telegram = tgbot.New(tgbot.Deps{Backend: backend, Gateway: p.Gateway, Log: o.Log, Now: o.Now})
-	p.Gateway.SetHandler(p.Telegram)
+	p.Telegram = tgbot.New(tgbot.Deps{Backend: backend, Gateway: p.Gateway, Log: o.Log, Now: o.Now,
+		Off: func(ctx context.Context) bool { return p.AddonsAPI.Slot(ctx) != "" }})
+	// An addon holding the bot gets the updates through the proxy; the screens otherwise.
+	p.Gateway.SetHandler(p.AddonsAPI.BotSlot(p.Telegram))
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
 	p.Billing.SetTelegram(p.Gateway)
 	p.Billing.SetNotifier(p.Telegram)

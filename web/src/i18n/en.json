@@ -2132,6 +2132,7 @@
       "token_invalid": "Telegram refused the token: check it with @BotFather",
       "token_revoked": "The token was revoked in @BotFather: paste a new one",
       "unreachable": "Telegram is unreachable: the bot will reconnect by itself. If Telegram is blocked on the server, send the bot through a node or a proxy in “Way to Telegram”.",
+      "token_conflict": "Another program or server uses this token (an old panel, a second bot), and the updates go there. Stop it, or make a new token in @BotFather (/revoke) and paste it here.",
       "route_invalid": "The way to Telegram does not work: check the node or the proxy in “Way to Telegram”."
     },
     "menu": "Main menu",

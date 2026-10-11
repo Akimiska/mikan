@@ -401,6 +401,8 @@ func (b *Bot) poll(ctx context.Context, c *Client) {
 	offset := b.loadOffset(ctx, me.ID)
 	fails := map[int64]int{} // update → times it failed to be handled
 	backoff := time.Second
+	var conflictSince time.Time // another program polls this token (or set a webhook) since
+	conflictTold := false
 	for ctx.Err() == nil {
 		ups, err := c.Updates(ctx, offset)
 		if err != nil {
@@ -412,11 +414,26 @@ func (b *Bot) poll(ctx context.Context, c *Client) {
 				b.setStatus(func(s *Status) { *s = Status{Error: "token_revoked"} })
 				return
 			}
-			b.setStatus(func(s *Status) { s.Error = errText(err) })
+			code := errText(err)
+			if errors.As(err, &ae) && ae.Code == http.StatusConflict {
+				// A restart of this bot conflicts for a few seconds too, while Telegram drops
+				// the old poll; only one that lasts is another program on the token.
+				code = "token_conflict"
+				if conflictSince.IsZero() {
+					conflictSince = time.Now()
+				}
+				if !conflictTold && time.Since(conflictSince) > conflictLasting {
+					conflictTold = true
+					b.d.Log.Warn("telegram: another program polls this bot's token", "err", ae.Description)
+					b.tellConflict(ctx, out)
+				}
+			}
+			b.setStatus(func(s *Status) { s.Error = code })
 			sleep(ctx, backoff)
 			backoff = min(2*backoff, time.Minute)
 			continue
 		}
+		conflictSince, conflictTold = time.Time{}, false
 		backoff = time.Second
 		b.setStatus(func(s *Status) { s.Error = "" })
 		for _, up := range ups {
@@ -507,6 +524,23 @@ func (b *Bot) retryLater(ctx context.Context) {
 			b.Reload()
 		}
 	})
+}
+
+// conflictLasting: a getUpdates conflict this long is not this bot's own restart.
+var conflictLasting = 2 * time.Minute
+
+// tellConflict tells the admin's chat, once a conflict lasts, that another program takes
+// this bot's updates: sending still works while polling does not.
+func (b *Bot) tellConflict(ctx context.Context, out *Outbox) {
+	chat, ok, err := b.InfrastructureAdminChat(ctx)
+	if err != nil || !ok {
+		return
+	}
+	text := wordsFor(b.Config(ctx).Lang).tokenConflict
+	out.Notice(chat, func(ctx context.Context, c *Client) error {
+		_, err := c.Send(ctx, chat, text, nil, false)
+		return err
+	}, func(error) {})
 }
 
 func errText(err error) string {

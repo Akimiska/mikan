@@ -34,6 +34,8 @@ type fakeTelegram struct {
 	blocked map[int64]bool // chats that blocked the bot
 	broken  map[string]bool
 	stall   map[string]time.Duration
+	// conflict: another program polls the token, so getUpdates gets Telegram's 409
+	conflict bool
 }
 
 // set breaks (answers with something that is no Bot API reply) or fixes a method.
@@ -61,6 +63,14 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok(User{ID: 1, IsBot: true, FirstName: "Mikan", Username: "mikan_test_bot"})
 		return
 	case "getUpdates":
+		f.mu.Lock()
+		conflict := f.conflict
+		f.mu.Unlock()
+		if conflict {
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 409,
+				"description": "Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"})
+			return
+		}
 		off, _ := body["offset"].(float64)
 		f.mu.Lock()
 		f.offsets = append(f.offsets, int64(off))
@@ -755,5 +765,41 @@ func TestRemoveSubscriptionFromTheBot(t *testing.T) {
 	}
 	if u, err := e.st.Q.GetUser(e.ctx, e.user.ID); err != nil || u.Status != e.user.Status || u.SubToken != e.user.SubToken {
 		t.Fatalf("the subscription itself changed: %+v %v", u, err)
+	}
+}
+
+// Another program on the token: the status names the conflict rather than Telegram's
+// English, and once it lasts the admin's chat is told, once; polling again clears it.
+func TestBotTokenConflict(t *testing.T) {
+	defer func(d time.Duration) { conflictLasting = d }(conflictLasting)
+	conflictLasting = 0
+	e := setup(t)
+	if err := settings.Set(e.ctx, e.set, KeyInfraAdminChat, int64(4242)); err != nil {
+		t.Fatal(err)
+	}
+	from := len(e.tg.calls)
+	e.tg.mu.Lock()
+	e.tg.conflict = true
+	e.tg.mu.Unlock()
+	sent := e.tg.wait(t, from, "sendMessage")
+	if c := sent[len(sent)-1]; c.body["chat_id"] != float64(4242) || !strings.Contains(c.body["text"].(string), "BotFather") {
+		t.Fatalf("the admin was told %+v", c.body)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for e.bot.Status().Error != "token_conflict" {
+		if time.Now().After(deadline) {
+			t.Fatalf("status %+v", e.bot.Status())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e.tg.mu.Lock()
+	e.tg.conflict = false
+	e.tg.mu.Unlock()
+	deadline = time.Now().Add(5 * time.Second)
+	for e.bot.Status().Error != "" {
+		if time.Now().After(deadline) {
+			t.Fatalf("the conflict stays after it ended: %+v", e.bot.Status())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

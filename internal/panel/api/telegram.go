@@ -29,7 +29,7 @@ type TelegramView struct {
 	TokenSet       bool                     `json:"token_set" doc:"Токен сохранён"`
 	TokenHint      string                   `json:"token_hint,omitempty" doc:"ID бота из токена"`
 	Running        bool                     `json:"running"`
-	Error          string                   `json:"error,omitempty" doc:"token_invalid, token_revoked, unreachable или ответ Telegram"`
+	Error          string                   `json:"error,omitempty" doc:"token_invalid, token_revoked, token_conflict (токен опрашивает ещё одна программа), unreachable или ответ Telegram"`
 	Bot            *TelegramBot             `json:"bot,omitempty"`
 	Config         tgbot.Config             `json:"config"`
 	Defaults       tgbot.Texts              `json:"defaults" doc:"Встроенные тексты на языке бота: пустое поле берёт их"`

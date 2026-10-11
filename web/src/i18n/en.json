@@ -377,7 +377,7 @@
       "catalog_unavailable": "The catalog did not load. Check that the server reaches GitHub.",
       "addon_unknown": "The catalog has no such addon.",
       "addon_current": "This version is installed already.",
-      "limit_required": "Set a limit in MiB or turn on \"No limit\".",
+      "limit_required": "Set how much space an addon gets, or turn on \"No limit\".",
       "addon_no_bot": "This addon has no permission to run the bot.",
       "host_outdated": "mikan on the server is too old for addons: update the server with mikan update.",
       "permissions_changed": "The addon now asks for other permissions. Check the list and approve again.",
@@ -2794,7 +2794,7 @@
     "source": {
       "official": "mikan catalog",
       "custom": "own image",
-      "external": "own process"
+      "external": "own program on the server"
     },
     "kind": {
       "bot": "Telegram bot",
@@ -2802,15 +2802,15 @@
       "generic": "Addon"
     },
     "mode": {
-      "http": "Serves the panel",
-      "client": "Panel client only"
+      "http": "Runs as a service",
+      "client": "Runs in the background"
     },
     "granted": "Approved permissions",
     "noPerms": "No permissions in the panel",
     "version": "Version {version}",
-    "image": "Image",
+    "image": "Docker image",
     "address": "Address",
-    "noAddress": "no address: it only calls the panel",
+    "noAddress": "no address: runs in the background",
     "perm": {
       "bot": "Telegram bot",
       "botText": "runs the Telegram bot on behalf of the panel: gets the clients' messages and answers them",
@@ -2821,9 +2821,9 @@
       "invoice": "Invoices",
       "invoiceText": "creates invoices, gives trials and free plans through the panel's payment methods",
       "events": "Events",
-      "eventsText": "learns about the panel's events: payments and refunds",
+      "eventsText": "learns about payments, refunds and subscriptions or traffic running out",
       "kv": "Storage",
-      "kvText": "keeps its own data in the panel's database (256 MB by default)",
+      "kvText": "keeps its own data in the panel (256 MB by default)",
       "ui": "Pages",
       "uiText": "adds its own pages to the admin panel"
     },
@@ -2865,6 +2865,20 @@
     "ownUpdate": "Update"
   },
   "addons": {
+    "storage": {
+      "title": "Addon storage",
+      "sub": "How much space each addon may take for its data",
+      "limitShort": "up to {mib} MB",
+      "unlimitedShort": "no limit",
+      "lead": "Addons keep their data in the panel. Each gets up to {mib} MB by default: plenty for any bot.",
+      "limit": "Space for one addon, MB",
+      "limitHint": "{mib} MB by default. The bot's subscriptions, payments and links do not count: the panel keeps them apart.",
+      "badLimit": "Enter a whole number from 1 to 1048576.",
+      "unlimited": "No limit",
+      "unlimitedSub": "An addon may take as much space as it wants",
+      "unlimitedWarning": "With no limit, an addon with a bug or someone else's code can fill the server's whole disk, and the panel stops working. Addon data goes into every backup: backups get bigger and slower, and sending one to Telegram (up to 50 MB) may stop working.",
+      "saved": "Saved"
+    },
     "filtersSub": "Ports, networks and domains users may not reach; who may connect",
     "subtitle": "The bot, payment methods, pages in the admin panel and built-in tools",
     "torrentSub": "The nodes recognise BitTorrent and ban who uses it",

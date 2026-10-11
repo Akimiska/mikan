@@ -337,6 +337,47 @@
         ],
         "type": "object"
       },
+      "AddonStorageInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "limit_mib": {
+            "description": "1 МиБ … 1 ТиБ; при unlimited не нужен",
+            "format": "int64",
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "unlimited": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "AddonStorageView": {
+        "additionalProperties": false,
+        "properties": {
+          "default_mib": {
+            "description": "Лимит по умолчанию",
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit_mib": {
+            "description": "Сколько МиБ один аддон может хранить; при unlimited не действует",
+            "format": "int64",
+            "type": "integer"
+          },
+          "unlimited": {
+            "description": "Без лимита: аддон может занять весь диск сервера",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "unlimited",
+          "limit_mib",
+          "default_mib"
+        ],
+        "type": "object"
+      },
       "AddonView": {
         "additionalProperties": false,
         "properties": {
@@ -8764,6 +8805,78 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/addon-storage": {
+      "get": {
+        "operationId": "get-addon-storage",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonStorageView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Сколько аддон может хранить в своём хранилище",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      },
+      "put": {
+        "operationId": "set-addon-storage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddonStorageInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddonStorageView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Лимит хранилища аддона или без лимита",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/addons": {
       "get": {
         "operationId": "list-addons",

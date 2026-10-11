@@ -4,6 +4,24 @@
  */
 
 export interface paths {
+    "/api/v1/addon-storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сколько аддон может хранить в своём хранилище */
+        get: operations["get-addon-storage"];
+        /** Лимит хранилища аддона или без лимита */
+        put: operations["set-addon-storage"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/addons": {
         parameters: {
             query?: never;
@@ -2202,6 +2220,28 @@ export interface components {
             id: string;
             /** @enum {string} */
             state: "done" | "failed";
+        };
+        AddonStorageInputBody: {
+            /**
+             * Format: int64
+             * @description 1 МиБ … 1 ТиБ; при unlimited не нужен
+             */
+            limit_mib?: number;
+            unlimited?: boolean;
+        };
+        AddonStorageView: {
+            /**
+             * Format: int64
+             * @description Лимит по умолчанию
+             */
+            default_mib: number;
+            /**
+             * Format: int64
+             * @description Сколько МиБ один аддон может хранить; при unlimited не действует
+             */
+            limit_mib: number;
+            /** @description Без лимита: аддон может занять весь диск сервера */
+            unlimited: boolean;
         };
         AddonView: {
             /** @description Принимает оплату прямо сейчас: включён, настроен, работает */
@@ -5313,6 +5353,68 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "get-addon-storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonStorageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-addon-storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddonStorageInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonStorageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-addons": {
         parameters: {
             query?: never;

@@ -15,6 +15,7 @@ import type { AddonKind } from "../search";
 import { useRemoveAddon, useInstallPayment, useRequested, useUpdateMarket } from "./market-dialogs";
 import { KIND_ICONS, entryOf, hasPages, marketName, pagesPath, useBotSlot, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
 import { useAddons } from "./payment-addons";
+import { StorageRow } from "./addons-storage";
 
 type Payments = Schemas["AddonsView"];
 type Payment = Schemas["AddonView"];
@@ -108,6 +109,7 @@ export function InstalledTab({ market, pay, act }: { market: UseQueryResult<Mark
       <Group title={t("addons.groupBuiltin")} i={4}>
         <TorrentRow />
         <FiltersRow />
+        <StorageRow Row={Row} />
       </Group>
     </>
   );

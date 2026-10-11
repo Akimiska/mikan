@@ -351,11 +351,36 @@ func (b *Bot) emitNotices(ctx context.Context) {
 	}
 }
 
+// noticeKind is the kind of notice an event names; days is the user.expiring event's.
+func noticeKind(typ string, days int) string {
+	switch typ {
+	case EventExpired:
+		return "expired"
+	case EventTraffic90:
+		return "traffic_90"
+	case EventTraffic100:
+		return "traffic_100"
+	}
+	if days == 1 {
+		return "expire_1d"
+	}
+	return "expire_3d"
+}
+
 // noticeMessage is a notice of kind about u, as the admin worded it, with its buttons.
 func (b *Bot) noticeMessage(ctx context.Context, cfg Config, w *words, u db.User, kind string, now time.Time) (string, *tgate.Keyboard) {
-	vars := b.vars(ctx, w, u, now)
-	text := render(map[string]string{"expire_3d": pick(cfg.Texts.Expiring, w.expiring), "expire_1d": pick(cfg.Texts.Expiring, w.expiring),
-		"expired": pick(cfg.Texts.Expired, w.expired), "traffic_90": pick(cfg.Texts.Traffic90, w.traffic90), "traffic_100": pick(cfg.Texts.TrafficEnd, w.trafficEnd)}[kind], vars)
+	var tpl string
+	switch kind {
+	case "expire_3d", "expire_1d":
+		tpl = pick(cfg.Texts.Expiring, w.expiring)
+	case "expired":
+		tpl = pick(cfg.Texts.Expired, w.expired)
+	case "traffic_90":
+		tpl = pick(cfg.Texts.Traffic90, w.traffic90)
+	case "traffic_100":
+		tpl = pick(cfg.Texts.TrafficEnd, w.trafficEnd)
+	}
+	text := render(tpl, b.vars(ctx, w, u, now))
 	var rows [][]tgate.Button
 	// Traffic running out: the packages there are for this subscription, a tap away.
 	if kind == "traffic_90" || kind == "traffic_100" {

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -96,19 +95,15 @@ func (h *handlers) registerMarketplace() {
 }
 
 // granted is the addon's approved permissions; nil when it has no grant.
-func (h *handlers) granted(ctx context.Context, id string) (*db.AddonGrant, []string, error) {
+func (h *handlers) granted(ctx context.Context, id string) ([]string, error) {
 	g, err := h.d.Store.Q.GetAddonGrant(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, nil
+		return nil, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	var perms []string
-	if err := json.Unmarshal([]byte(g.Permissions), &perms); err != nil {
-		return nil, nil, err
-	}
-	return &g, perms, nil
+	return addons.DecodePermissions(g.Permissions)
 }
 
 func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
@@ -137,7 +132,7 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 	grants := map[string][]string{}
 	for _, id := range slices.Sorted(maps.Keys(installed)) {
 		a := installed[id]
-		_, perms, err := h.granted(ctx, id)
+		perms, err := h.granted(ctx, id)
 		if err != nil {
 			return v, err
 		}

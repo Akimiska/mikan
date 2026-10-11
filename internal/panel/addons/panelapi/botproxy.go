@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/panel/addons"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
@@ -65,22 +66,36 @@ var queued = map[string]bool{
 // Slot is the addon holding the bot: the one the admin chose, while it still has a grant
 // with bot. Without it the panel's own screens answer.
 func (s *Server) Slot(ctx context.Context) string {
-	if s.d.Settings == nil {
-		return ""
-	}
-	id, _, err := settings.Get[string](ctx, s.d.Settings, SlotKey)
-	if err != nil || id == "" {
+	id := s.slotSetting(ctx)
+	if id == "" {
 		return ""
 	}
 	g, err := s.d.Grants.GetAddonGrant(ctx, id)
 	if err != nil {
 		return ""
 	}
-	var perms []string
-	if json.Unmarshal([]byte(g.Permissions), &perms) != nil || !(Caller{Permissions: perms}).Can("bot") {
+	if perms, err := addons.DecodePermissions(g.Permissions); err != nil || !(Caller{Permissions: perms}).Can("bot") {
 		return ""
 	}
 	return id
+}
+
+// slotSetting is the addon the admin chose, grant or not.
+func (s *Server) slotSetting(ctx context.Context) string {
+	if s.d.Settings == nil {
+		return ""
+	}
+	id, _, err := settings.Get[string](ctx, s.d.Settings, SlotKey)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
+// holds is Slot for a caller whose grant authenticate has just read: it needs the setting
+// alone, not the grant a second time.
+func (s *Server) holds(ctx context.Context, c Caller) bool {
+	return c.Can("bot") && s.slotSetting(ctx) == c.ID
 }
 
 // BotSlot is the gateway's handler: the addon's buffer while an addon holds the bot, the
@@ -155,7 +170,7 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, status, _ := s.authenticateToken(r.Context(), token)
-	if status != 0 || !c.Can("bot") || s.Slot(r.Context()) != c.ID {
+	if status != 0 || !s.holds(r.Context(), c) {
 		tgFail(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -271,33 +286,19 @@ func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, p map[string
 			return
 		}
 	}
-	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-	for {
-		woken := s.updates.Wait()
-		rows, err := s.d.Store.Q.ListAddonUpdates(r.Context(), db.ListAddonUpdatesParams{FromID: offset, Lim: int32(limit)})
-		if err != nil {
-			if r.Context().Err() == nil {
-				tgFail(w, http.StatusInternalServerError, "Internal Server Error")
-			}
-			return
+	rows, err := longPoll(r.Context(), s.updates, time.Duration(timeout)*time.Second, func() ([]db.ListAddonUpdatesRow, error) {
+		return s.d.Store.Q.ListAddonUpdates(r.Context(), db.ListAddonUpdatesParams{FromID: offset, Lim: int32(limit)})
+	})
+	switch {
+	case r.Context().Err() != nil:
+	case err != nil:
+		tgFail(w, http.StatusInternalServerError, "Internal Server Error")
+	default:
+		ups := make([]json.RawMessage, 0, len(rows))
+		for _, u := range rows {
+			ups = append(ups, json.RawMessage(u.Body))
 		}
-		if len(rows) > 0 || !time.Now().Before(deadline) {
-			ups := make([]json.RawMessage, 0, len(rows))
-			for _, u := range rows {
-				ups = append(ups, json.RawMessage(u.Body))
-			}
-			tgOK(w, ups)
-			return
-		}
-		t := time.NewTimer(min(time.Until(deadline), time.Second))
-		select {
-		case <-r.Context().Done():
-			t.Stop()
-			return
-		case <-woken:
-		case <-t.C:
-		}
-		t.Stop()
+		tgOK(w, ups)
 	}
 }
 
@@ -316,12 +317,14 @@ func params(ct string, body []byte) (map[string]string, error) {
 			return nil, errors.New("the body is not a JSON object")
 		}
 		for k, v := range m {
-			var s string
-			if json.Unmarshal(v, &s) == nil {
-				out[k] = s
-			} else {
+			// A number or an object is no string: told by its first byte, not by a failed decode.
+			if v[0] != '"' && string(v) != "null" {
 				out[k] = string(v)
+				continue
 			}
+			var s string
+			_ = json.Unmarshal(v, &s)
+			out[k] = s
 		}
 	case "application/x-www-form-urlencoded":
 		v, err := url.ParseQuery(string(body))
@@ -369,11 +372,17 @@ func chatKey(v string) (int64, bool) {
 // checkButtons: a Mini App button or a login link opens a page that gets the user's signed
 // data, so it may open only the panel's own pages, never one the addon picks.
 func (s *Server) checkButtons(ctx context.Context, p map[string]string) error {
-	base := ""
-	if s.d.SubBase != nil {
-		base = s.d.SubBase(ctx)
+	// Asked only when a call has such a button: most carry none.
+	base, asked := "", false
+	allowed := func(u string) bool {
+		if !asked {
+			asked = true
+			if s.d.SubBase != nil {
+				base = s.d.SubBase(ctx)
+			}
+		}
+		return base != "" && strings.HasPrefix(u, base+"/")
 	}
-	allowed := func(u string) bool { return base != "" && strings.HasPrefix(u, base+"/") }
 	var walk func(v any) error
 	walk = func(v any) error {
 		switch x := v.(type) {

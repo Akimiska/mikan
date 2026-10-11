@@ -27,34 +27,8 @@ type fakeTelegram struct {
 	calls   []call
 	nextID  int64
 	blocked map[int64]bool // chats that blocked the bot
-	broken  map[string]bool
-	stall   map[string]time.Duration
 	// conflict: another program polls the token, so getUpdates gets Telegram's 409
 	conflict bool
-	// The channel: who is in it (account → status; the bot is its admin unless notAdmin),
-	// and notAdmin, the bot is not, so getChatMember is refused.
-	members  map[int64]string
-	notAdmin bool
-}
-
-// join puts an account in the channel ("" takes it out).
-func (f *fakeTelegram) join(id int64, status string) {
-	f.mu.Lock()
-	if f.members == nil {
-		f.members = map[int64]string{}
-	}
-	f.members[id] = status
-	f.mu.Unlock()
-}
-
-// set breaks (answers with something that is no Bot API reply) or fixes a method.
-func (f *fakeTelegram) set(method string, broken bool) {
-	f.mu.Lock()
-	if f.broken == nil {
-		f.broken = map[string]bool{}
-	}
-	f.broken[method] = broken
-	f.mu.Unlock()
 }
 
 type call struct {
@@ -111,18 +85,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	blocked := f.blocked[int64(chat)]
 	f.nextID++
 	id := f.nextID
-	broken, stall := f.broken[method], f.stall[method]
 	f.mu.Unlock()
-	if stall > 0 {
-		select {
-		case <-time.After(stall):
-		case <-r.Context().Done():
-		}
-	}
-	if broken {
-		_, _ = w.Write([]byte("<html>bad gateway</html>"))
-		return
-	}
 	if blocked {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 403, "description": "Forbidden: bot was blocked by the user"})
 		return
@@ -132,21 +95,6 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok("https://t.me/$inv" + strconv.FormatInt(id, 10))
 	case "sendMessage":
 		ok(Message{MessageID: 1000 + id, Chat: Chat{ID: int64(chat), Type: "private"}})
-	case "getChatMember":
-		user, _ := body["user_id"].(float64)
-		f.mu.Lock()
-		status, notAdmin := f.members[int64(user)], f.notAdmin
-		f.mu.Unlock()
-		switch {
-		case notAdmin:
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: member list is inaccessible"})
-			return
-		case int64(user) == 1:
-			status = "administrator"
-		case status == "":
-			status = "left"
-		}
-		ok(ChatMember{Status: status, IsMember: status == "restricted"})
 	default:
 		ok(true)
 	}
@@ -216,27 +164,6 @@ func find(calls []call, method string) (call, bool) {
 }
 
 func text(c call) string { s, _ := c.body["text"].(string); return s }
-
-// buttons flattens a keyboard: text → callback data, url or web app url.
-func buttons(c call) map[string]string {
-	out := map[string]string{}
-	kb, _ := c.body["reply_markup"].(map[string]any)
-	rows, _ := kb["inline_keyboard"].([]any)
-	for _, r := range rows {
-		for _, b := range r.([]any) {
-			m := b.(map[string]any)
-			v, _ := m["callback_data"].(string)
-			if u, ok := m["url"].(string); ok {
-				v = u
-			}
-			if wa, ok := m["web_app"].(map[string]any); ok {
-				v = "webapp:" + wa["url"].(string)
-			}
-			out[m["text"].(string)] = v
-		}
-	}
-	return out
-}
 
 // screens stands in for the bot's screens (tgbot): every message gets a menu back, as it
 // does in the bot.
@@ -324,8 +251,4 @@ func start(t *testing.T, h Handler, with ...func(e *env, d *Deps)) *env {
 func (e *env) say(from int64, s string) {
 	e.msgID++
 	e.tg.push(Update{Message: &Message{MessageID: e.msgID, From: &User{ID: from, FirstName: "Anna", Username: "anna"}, Chat: Chat{ID: from, Type: "private"}, Text: s}})
-}
-
-func (e *env) press(from, msg int64, data string) {
-	e.tg.push(Update{CallbackQuery: &CallbackQuery{ID: "cb" + data, From: User{ID: from}, Message: &Message{MessageID: msg, Chat: Chat{ID: from, Type: "private"}}, Data: data}})
 }

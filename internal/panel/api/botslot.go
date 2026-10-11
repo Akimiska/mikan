@@ -58,7 +58,7 @@ func (h *handlers) setBotSlot(ctx context.Context, in *botSlotInput) (*botSlotOu
 		if a, ok := st.Adapters[id]; !ok || a.Protocol != addons.Protocol2 {
 			return nil, huma.Error404NotFound("addon_not_installed")
 		}
-		_, perms, err := h.granted(ctx, id)
+		perms, err := h.granted(ctx, id)
 		if err != nil {
 			return nil, err
 		}

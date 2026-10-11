@@ -16,6 +16,13 @@ func EncodePermissions(perms []string) string {
 	return string(data)
 }
 
+// DecodePermissions reads what EncodePermissions stored.
+func DecodePermissions(stored string) ([]string, error) {
+	var perms []string
+	err := json.Unmarshal([]byte(stored), &perms)
+	return perms, err
+}
+
 // Covers: every permission asked for was approved.
 func Covers(approved, asked []string) bool {
 	for _, p := range asked {

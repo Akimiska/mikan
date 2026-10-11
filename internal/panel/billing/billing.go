@@ -96,8 +96,8 @@ type Telegram interface {
 	Subscribed(ctx context.Context, tgID int64) (bool, error)
 }
 
-// Notifier tells buyers what came of their payments: the bot's screens (tgbot.Bot) now,
-// panel events that the bot addon takes later.
+// Notifier tells buyers what came of their payments: the panel writes them as events
+// (tgbot.Notifications) and the bot addon, which holds the bot's screens, words and sends them.
 type Notifier interface {
 	// Paid tells the buyer the subscription is ready.
 	Paid(ctx context.Context, p db.Payment, u db.User, created bool)

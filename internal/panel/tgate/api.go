@@ -3,8 +3,8 @@
 // offset, the outbox with Telegram's limits, the flood guard, the accounts that wrote to
 // the bot, Telegram Stars, link codes and the Mini App's sign-in, the infrastructure
 // admin's chat and the bot's channel. The bot's screens (tgbot) get the updates the gateway
-// does not handle itself and send through its outbox; later an addon does the same over
-// HTTP (docs/pipeline/addons.md).
+// does not handle itself and send through its outbox; the bot addon does the same over the
+// Bot API proxy (addons/panelapi, docs/pipeline/addons.md).
 package tgate
 
 import (
@@ -91,19 +91,25 @@ func (c *Client) call(parent context.Context, method string, in, out any) error 
 	return c.do(parent, req, out)
 }
 
+// unreachable is the error of a request that got no answer: the caller's own when its
+// context ended, else ErrUnreachable. The error text would carry the URL, and the URL the
+// token: only the cause is kept.
+func unreachable(parent context.Context, err error) error {
+	if parent.Err() != nil {
+		return parent.Err()
+	}
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		err = ue.Err
+	}
+	return fmt.Errorf("%w: %v", ErrUnreachable, err)
+}
+
 // do sends a request made for the Bot API and reads its answer into out.
 func (c *Client) do(parent context.Context, req *http.Request, out any) error {
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		if parent.Err() != nil {
-			return parent.Err()
-		}
-		// The error text would carry the URL, and the URL the token: only the cause is kept.
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			err = ue.Err
-		}
-		return fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return unreachable(parent, err)
 	}
 	defer resp.Body.Close()
 	var r struct {
@@ -285,7 +291,7 @@ func (c *Client) Updates(ctx context.Context, offset int64) ([]Update, error) {
 // Send posts an HTML message; kb may be nil. A silent one arrives without a sound.
 func (c *Client) Send(ctx context.Context, chat int64, text string, kb *Keyboard, silent bool) (Message, error) {
 	var m Message
-	in := map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	in := htmlText(chat, text)
 	if silent {
 		in["disable_notification"] = true
 	}
@@ -337,7 +343,7 @@ func PlainText(s string) string {
 // SendTo is Send for a Telegram channel target: its numeric chat id or @username.
 func (c *Client) SendTo(ctx context.Context, chat string, text string, silent bool) (Message, error) {
 	var m Message
-	in := map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	in := htmlText(chat, text)
 	if silent {
 		in["disable_notification"] = true
 	}
@@ -347,13 +353,9 @@ func (c *Client) SendTo(ctx context.Context, chat string, text string, silent bo
 
 // EditTo edits a message in a channel identified by numeric id or @username.
 func (c *Client) EditTo(ctx context.Context, chat string, msg int64, text string) error {
-	err := c.call(ctx, "editMessageText", map[string]any{"chat_id": chat, "message_id": msg, "text": text,
-		"parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}, nil)
-	var ae *APIError
-	if errors.As(err, &ae) && strings.Contains(ae.Description, "message is not modified") {
-		return nil
-	}
-	return err
+	in := htmlText(chat, text)
+	in["message_id"] = msg
+	return notModified(c.call(ctx, "editMessageText", in, nil))
 }
 
 // PinTo pins a channel message without notifying subscribers.
@@ -363,7 +365,8 @@ func (c *Client) PinTo(ctx context.Context, chat string, msg int64) error {
 
 // Edit replaces a message's text and buttons. An edit to the same content is not an error.
 func (c *Client) Edit(ctx context.Context, chat, msg int64, text string, kb *Keyboard) error {
-	in := map[string]any{"chat_id": chat, "message_id": msg, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
+	in := htmlText(chat, text)
+	in["message_id"] = msg
 	if kb != nil {
 		in["reply_markup"] = kb
 	}
@@ -372,11 +375,22 @@ func (c *Client) Edit(ctx context.Context, chat, msg int64, text string, kb *Key
 		asPlain(in, text)
 		err = c.call(ctx, "editMessageText", in, nil)
 	}
+	return notModified(err)
+}
+
+// notModified: an edit to the same content is no error.
+func notModified(err error) error {
 	var ae *APIError
 	if errors.As(err, &ae) && strings.Contains(ae.Description, "message is not modified") {
 		return nil
 	}
 	return err
+}
+
+// htmlText is the start of a request that sends or edits an HTML text in chat (a numeric id
+// or a channel's @username), with no link preview.
+func htmlText(chat any, text string) map[string]any {
+	return map[string]any{"chat_id": chat, "text": text, "parse_mode": "HTML", "link_preview_options": map[string]any{"is_disabled": true}}
 }
 
 func (c *Client) Delete(ctx context.Context, chat, msg int64) error {
@@ -486,14 +500,7 @@ func (c *Client) Forward(parent context.Context, method, contentType string, bod
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		if parent.Err() != nil {
-			return 0, nil, parent.Err()
-		}
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			err = ue.Err
-		}
-		return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return 0, nil, unreachable(parent, err)
 	}
 	defer resp.Body.Close()
 	answer, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))

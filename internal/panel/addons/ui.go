@@ -24,10 +24,8 @@ const (
 	MaxRPCAnswer = 1 << 20 // one answer to a call of the pages
 )
 
-var (
-	ErrNoUI      = errors.New("addon_no_ui")      // the addon serves no pages
-	ErrBadAnswer = errors.New("addon_bad_answer") // too large, not JSON, a redirect
-)
+// ErrBadAnswer: an addon's answer that is too large, not JSON, or a redirect.
+var ErrBadAnswer = errors.New("addon_bad_answer")
 
 // UI is where an addon's pages start and what the admin panel calls them.
 type UI struct {

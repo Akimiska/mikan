@@ -61,7 +61,8 @@ type Deps struct {
 	stars func(ctx context.Context, tgID int64, payload, chargeID, currency string, amount int64) error
 }
 
-// Handler is the bot's side of the gateway: its screens (tgbot.Bot), later an addon.
+// Handler is the bot's side of the gateway: its screens (tgbot.Bot), or the buffer an addon
+// reads through the Bot API proxy (panelapi.BotSlot).
 type Handler interface {
 	// Started: the gateway reached Telegram as the bot and is about to take updates; c sets
 	// up what the chats show (the commands, the menu button).
@@ -366,7 +367,7 @@ func (g *Gateway) InfrastructureEnabled(ctx context.Context) bool {
 }
 
 func (g *Gateway) infrastructure(ctx context.Context, set *settings.Settings) bool {
-	enabled, err := set.On(ctx, settings.Switch{Key: KeyEnabled})
+	enabled, err := set.On(ctx, Enabled)
 	if err != nil || !enabled {
 		return false
 	}

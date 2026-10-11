@@ -8,7 +8,7 @@
         "ru": "Перенос панели на новый сервер одной командой: клиенты, тарифы, ноды и настройки переезжают, ссылки подписок продолжают работать.",
         "en": "Move the panel to a new server with one command: clients, plans, nodes and settings come along, subscription links keep working."
       },
-      "target": 100, "raised": 1, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qS"
+      "target": 100, "raised": 11, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qS"
     },
     {
       "id": "external-subs",
@@ -189,6 +189,24 @@
         "en": "An auto choice group with your own name, as in Clash apps, for Happ, v2RayTun and other Xray apps too: the app keeps the fastest working server by itself."
       },
       "target": 50, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6s0"
+    },
+    {
+      "id": "auto-renew",
+      "title": {"ru": "Автопродление подписки", "en": "Subscription auto-renewal"},
+      "about": {
+        "ru": "Подписка продлевается сама: клиент один раз соглашается на автоплатёж, и в день окончания с карты (ЮKassa) или Stars (подписка Telegram) списывается оплата за следующий срок. Отключить можно в боте и Mini App.",
+        "en": "The subscription renews itself: the client agrees to autopay once, and on the last day the next term is charged to the card (YooKassa) or in Stars (a Telegram subscription). It can be turned off in the bot and the Mini App."
+      },
+      "target": 50, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6ta"
+    },
+    {
+      "id": "franchise",
+      "title": {"ru": "Франшиза: свои реселлеры", "en": "Franchise: resellers of your own"},
+      "about": {
+        "ru": "Дайте партнёру свою витрину на ваших серверах: его бот, бренд, тарифы и цены, а вы видите его продажи и получаете свою долю с каждой оплаты.",
+        "en": "Give a partner a shop of their own on your servers: their bot, brand, plans and prices, while you see their sales and take your share of every payment."
+      },
+      "target": 150, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6tb"
     },
     {
       "id": "vless-tls",

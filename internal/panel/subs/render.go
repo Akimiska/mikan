@@ -335,10 +335,19 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		rules = append(rules, "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT")
 		cfg["geodata-mode"], cfg["geox-url"] = false, geoxURL
 		// GEOIP,ru makes the app resolve every domain itself. DoH straight from Russia
-		// stalls under TSPU throttling, so it goes through the tunnel (the alias group has
-		// a fixed name: "&" or "=" in a renamed group would break the "#group" suffix).
-		// Russian domains resolve with Yandex DNS directly and keep working without the VPN.
-		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + AliasGroup, "https://8.8.8.8/dns-query#" + AliasGroup}
+		// stalls under TSPU throttling, so it goes through the tunnel via the main
+		// group's "#group" suffix. It MUST be the real group name (g.Main, e.g.
+		// "AoiVPN"), not the AliasGroup constant "PROXY": after the fork renamed the
+		// main group, "#PROXY" pointed at a group that does not exist, so mihomo could
+		// not route DNS through the tunnel and fell back to resolving straight from the
+		// device (RU DNS) — leaking the region (claude.ai "wrong region", whoer "DNS
+		// differs") especially on mieru. A '#' in a renamed group would break the
+		// suffix, so fall back to AliasGroup only then (admins can't use '#').
+		dnsGroup := g.Main
+		if strings.ContainsAny(dnsGroup, "#") {
+			dnsGroup = AliasGroup
+		}
+		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + dnsGroup, "https://8.8.8.8/dns-query#" + dnsGroup}
 		dns["proxy-server-nameserver"] = []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"}
 		dns["nameserver-policy"] = map[string]any{"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"}}
 	}

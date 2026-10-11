@@ -226,9 +226,12 @@ func TestRouting(t *testing.T) {
 	}
 	// Every domain gets resolved on the client for GEOIP,ru: through the tunnel, except
 	// Russian ones and the server's own name (resolving it through itself would deadlock).
+	// The "#group" suffix MUST name the real main group (default "VPN"), not the fixed
+	// AliasGroup "PROXY" — a renamed main group with "#PROXY" points at nothing and mihomo
+	// falls back to resolving straight from the device (region leak).
 	for _, ns := range ru.DNS.Nameserver {
-		if !strings.HasSuffix(ns, "#PROXY") {
-			t.Errorf("nameserver %q must go through the tunnel", ns)
+		if !strings.HasSuffix(ns, "#VPN") {
+			t.Errorf("nameserver %q must go through the main group", ns)
 		}
 	}
 	if len(ru.DNS.ProxyServer) == 0 || strings.Contains(strings.Join(ru.DNS.ProxyServer, ""), "#") {
@@ -238,10 +241,15 @@ func TestRouting(t *testing.T) {
 		t.Errorf("Russian domains need a Russian resolver: %v", ru.DNS.Policy)
 	}
 
-	// The "#PROXY" suffix must name a group even when the admin calls the main group PROXY.
-	named := render(Groups{Main: "PROXY"}, RoutingRUDirect)
-	if named.Groups[0].Name != "PROXY" || named.Rules[len(named.Rules)-1] != "MATCH,PROXY" {
-		t.Fatalf("main group named PROXY: %+v %v", named.Groups, named.Rules)
+	// A renamed main group: the DNS "#group" suffix must follow it, not stay on "PROXY".
+	named := render(Groups{Main: "AoiVPN"}, RoutingRUDirect)
+	if named.Groups[0].Name != "AoiVPN" || named.Rules[len(named.Rules)-1] != "MATCH,AoiVPN" {
+		t.Fatalf("main group renamed: %+v %v", named.Groups, named.Rules)
+	}
+	for _, ns := range named.DNS.Nameserver {
+		if !strings.HasSuffix(ns, "#AoiVPN") {
+			t.Errorf("nameserver %q must follow the renamed main group", ns)
+		}
 	}
 
 	all := render(Groups{}, RoutingAll)

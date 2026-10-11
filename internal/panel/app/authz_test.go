@@ -91,6 +91,8 @@ func TestFullKeyCannotTakeOverThePanel(t *testing.T) {
 		"warp-register":      {http.MethodPost, "/nodes/1/warp/register", map[string]any{}},
 		"warp-import":        {http.MethodPost, "/nodes/1/warp/import", map[string]any{"config": "x"}},
 		"cascade":            {http.MethodPatch, "/nodes/1/cascade", map[string]any{"outbound": "direct"}},
+		// A code field is a script an addon runs.
+		"update-addon": {http.MethodPatch, "/addons/telegram", map[string]any{"settings": map[string]any{"script": "print(1)"}}},
 		// The subscription page every subscriber opens: its links, text, CSS and images.
 		"update-sub-page":       {http.MethodPut, "/sub-page", map[string]any{"config": map[string]any{}}},
 		"put-sub-page-image":    {http.MethodPut, "/sub-page/images/logo", map[string]any{"data": "iVBORw0KGgo="}},

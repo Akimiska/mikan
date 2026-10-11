@@ -17,14 +17,50 @@ import (
 // with every call and the adapter keeps none of them.
 type Settings map[string]any
 
+// Field types. Any other is a type this panel does not know: the field cannot be filled
+// in or saved (billing.fieldValue), and the admin is told so.
+const (
+	FieldString = "string" // one line, up to 4096 characters, an optional pattern
+	FieldBool   = "bool"
+	FieldSelect = "select" // one of Options
+	FieldNumber = "number" // an integer, optionally within Min..Max
+	FieldText   = "text"   // several lines, up to 4096 characters
+	FieldCode   = "code"   // several lines of code, up to MaxCode bytes; set from a session only
+)
+
+// MaxCode is the longest value of a code field, in bytes.
+const MaxCode = 64 << 10
+
+// KnownField says whether the panel can render and validate a setting of this type.
+func KnownField(t string) bool {
+	switch t {
+	case FieldString, FieldBool, FieldSelect, FieldNumber, FieldText, FieldCode:
+		return true
+	}
+	return false
+}
+
+// Option is one choice of a select field.
+type Option struct {
+	Value string `json:"value"`
+	Label Text   `json:"label"`
+}
+
 // Field is one setting the adapter asks for.
 type Field struct {
-	Key      string `json:"key"`
-	Label    Text   `json:"label"`
-	Type     string `json:"type"` // string | bool
-	Secret   bool   `json:"secret"`
-	Required bool   `json:"required"`
-	Pattern  string `json:"pattern,omitempty"`
+	Key      string   `json:"key"`
+	Label    Text     `json:"label"`
+	Type     string   `json:"type"` // string | bool | select | number | text | code
+	Secret   bool     `json:"secret"`
+	Required bool     `json:"required"`
+	Pattern  string   `json:"pattern,omitempty"` // string only
+	Options  []Option `json:"options,omitempty"` // select only
+	Min      *int64   `json:"min,omitempty"`     // number only
+	Max      *int64   `json:"max,omitempty"`     // number only
+	// Default is shown as the placeholder. The panel does not store it: an addon applies
+	// it itself while the key is absent.
+	Default any  `json:"default,omitempty"`
+	Help    Text `json:"help,omitempty"`
 }
 
 // Info is an adapter's description of itself.

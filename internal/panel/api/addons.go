@@ -28,15 +28,26 @@ type AddonCatalogEntry struct {
 	Update      bool              `json:"update" doc:"Установлен, а в каталоге другая сборка"`
 }
 
+type AddonOption struct {
+	Value string            `json:"value"`
+	Label map[string]string `json:"label"`
+}
+
 type AddonField struct {
-	Key      string            `json:"key"`
-	Label    map[string]string `json:"label"`
-	Type     string            `json:"type" enum:"string,bool"`
-	Secret   bool              `json:"secret" doc:"Значение API не отдаёт; пусто при сохранении — оставить прежнее"`
-	Required bool              `json:"required"`
-	Pattern  string            `json:"pattern,omitempty"`
-	Value    any               `json:"value,omitempty" doc:"Текущее значение, кроме секретов"`
-	Set      bool              `json:"set" doc:"Значение сохранено"`
+	Key         string            `json:"key"`
+	Label       map[string]string `json:"label"`
+	Type        string            `json:"type" enum:"string,bool,select,number,text,code" doc:"Другой тип панель не знает: см. unsupported"`
+	Unsupported bool              `json:"unsupported,omitempty" doc:"Панель не знает этот тип: поле не заполнить и не сохранить"`
+	Secret      bool              `json:"secret" doc:"Значение API не отдаёт; пусто при сохранении — оставить прежнее"`
+	Required    bool              `json:"required"`
+	Pattern     string            `json:"pattern,omitempty" doc:"Только для string"`
+	Options     []AddonOption     `json:"options,omitempty" doc:"Только для select"`
+	Min         *int64            `json:"min,omitempty" doc:"Только для number"`
+	Max         *int64            `json:"max,omitempty" doc:"Только для number"`
+	Default     any               `json:"default,omitempty" doc:"Подсказка в пустом поле; панель его не сохраняет, адаптер применяет сам"`
+	Help        map[string]string `json:"help,omitempty"`
+	Value       any               `json:"value,omitempty" doc:"Текущее значение, кроме секретов"`
+	Set         bool              `json:"set" doc:"Значение сохранено"`
 }
 
 type AddonView struct {
@@ -167,12 +178,7 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 			} else {
 				av.Name, av.Help = orEmpty(info.Name), orEmpty(info.Help)
 				for _, f := range info.Settings {
-					val, set := cfg.Values[f.Key]
-					field := AddonField{Key: f.Key, Label: orEmpty(f.Label), Type: f.Type, Secret: f.Secret, Required: f.Required, Pattern: f.Pattern, Set: set}
-					if !f.Secret {
-						field.Value = val
-					}
-					av.Settings = append(av.Settings, field)
+					av.Settings = append(av.Settings, addonField(f, cfg.Values))
 				}
 			}
 		}
@@ -254,7 +260,13 @@ func (h *handlers) removeAddon(ctx context.Context, in *addonIDInput) (*addonsOu
 	return h.listAddons(ctx, nil)
 }
 
+// patchAddon: the operation is session only, which the API key middleware enforces before
+// this runs. The check here is the same refusal again: a code field is a script the addon
+// runs, so setting one must never reach an API key if the operation's mark is ever lost.
 func (h *handlers) patchAddon(ctx context.Context, in *patchAddonInput) (*addonsOutput, error) {
+	if err := requireSession(ctx, "settings"); err != nil {
+		return nil, err
+	}
 	cfg, err := h.d.Billing.AddonConfig(ctx, in.ID)
 	if err != nil {
 		return nil, err
@@ -293,4 +305,31 @@ func (h *handlers) patchAddon(ctx context.Context, in *patchAddonInput) (*addons
 	slices.Sort(changed)
 	h.audit(ctx, sessionOf(ctx).AdminID, "addon.settings", "addon", in.ID, map[string]any{"enabled": enabled, "changed": changed})
 	return h.listAddons(ctx, nil)
+}
+
+// addonField is one setting as the admin form needs it. A secret's value never leaves; a
+// type the panel does not know is flagged and carries nothing but its name.
+func addonField(f addons.Field, values addons.Settings) AddonField {
+	val, set := values[f.Key]
+	out := AddonField{Key: f.Key, Label: orEmpty(f.Label), Type: f.Type, Secret: f.Secret, Required: f.Required, Set: set, Help: orEmpty(f.Help)}
+	if !addons.KnownField(f.Type) {
+		out.Unsupported = true
+		return out
+	}
+	switch f.Type {
+	case addons.FieldString:
+		out.Pattern = f.Pattern
+	case addons.FieldSelect:
+		out.Options = make([]AddonOption, 0, len(f.Options))
+		for _, o := range f.Options {
+			out.Options = append(out.Options, AddonOption{Value: o.Value, Label: orEmpty(o.Label)})
+		}
+	case addons.FieldNumber:
+		out.Min, out.Max = f.Min, f.Max
+	}
+	out.Default = f.Default
+	if !f.Secret {
+		out.Value = val
+	}
+	return out
 }

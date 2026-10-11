@@ -2035,20 +2035,49 @@ export interface components {
             version: string;
         };
         AddonField: {
+            /** @description Подсказка в пустом поле; панель его не сохраняет, адаптер применяет сам */
+            default?: unknown;
+            help?: {
+                [key: string]: string;
+            };
             key: string;
             label: {
                 [key: string]: string;
             };
+            /**
+             * Format: int64
+             * @description Только для number
+             */
+            max?: number;
+            /**
+             * Format: int64
+             * @description Только для number
+             */
+            min?: number;
+            /** @description Только для select */
+            options?: components["schemas"]["AddonOption"][];
+            /** @description Только для string */
             pattern?: string;
             required: boolean;
             /** @description Значение API не отдаёт; пусто при сохранении — оставить прежнее */
             secret: boolean;
             /** @description Значение сохранено */
             set: boolean;
-            /** @enum {string} */
-            type: "string" | "bool";
+            /**
+             * @description Другой тип панель не знает: см. unsupported
+             * @enum {string}
+             */
+            type: "string" | "bool" | "select" | "number" | "text" | "code";
+            /** @description Панель не знает этот тип: поле не заполнить и не сохранить */
+            unsupported?: boolean;
             /** @description Текущее значение, кроме секретов */
             value?: unknown;
+        };
+        AddonOption: {
+            label: {
+                [key: string]: string;
+            };
+            value: string;
         };
         AddonRequest: {
             /** @enum {string} */

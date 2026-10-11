@@ -94,6 +94,15 @@
       "AddonField": {
         "additionalProperties": false,
         "properties": {
+          "default": {
+            "description": "Подсказка в пустом поле; панель его не сохраняет, адаптер применяет сам"
+          },
+          "help": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "key": {
             "type": "string"
           },
@@ -103,7 +112,25 @@
             },
             "type": "object"
           },
+          "max": {
+            "description": "Только для number",
+            "format": "int64",
+            "type": "integer"
+          },
+          "min": {
+            "description": "Только для number",
+            "format": "int64",
+            "type": "integer"
+          },
+          "options": {
+            "description": "Только для select",
+            "items": {
+              "$ref": "#/components/schemas/AddonOption"
+            },
+            "type": "array"
+          },
           "pattern": {
+            "description": "Только для string",
             "type": "string"
           },
           "required": {
@@ -118,11 +145,20 @@
             "type": "boolean"
           },
           "type": {
+            "description": "Другой тип панель не знает: см. unsupported",
             "enum": [
               "string",
-              "bool"
+              "bool",
+              "select",
+              "number",
+              "text",
+              "code"
             ],
             "type": "string"
+          },
+          "unsupported": {
+            "description": "Панель не знает этот тип: поле не заполнить и не сохранить",
+            "type": "boolean"
           },
           "value": {
             "description": "Текущее значение, кроме секретов"
@@ -135,6 +171,25 @@
           "secret",
           "required",
           "set"
+        ],
+        "type": "object"
+      },
+      "AddonOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
         ],
         "type": "object"
       },

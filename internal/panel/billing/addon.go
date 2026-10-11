@@ -3,13 +3,16 @@ package billing
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/promo"
@@ -76,6 +79,15 @@ func (s *Service) SetAddonConfig(ctx context.Context, id string, enabled bool, v
 	next := AddonConfig{Enabled: enabled, Values: addons.Settings{}}
 	for _, f := range info.Settings {
 		v, given := values[f.Key]
+		if !addons.KnownField(f.Type) {
+			// A type this panel cannot check is not saved. It is refused only if the
+			// request sets it, so the rest of the form still saves; switching on still
+			// needs it when it is required.
+			if v != nil {
+				return AddonConfig{}, &AddonSettingError{Key: f.Key}
+			}
+			continue
+		}
 		var ok bool
 		if !given || f.Secret && v == "" {
 			v = old.Values[f.Key]
@@ -108,10 +120,11 @@ func (s *Service) SetAddonConfig(ctx context.Context, id string, enabled bool, v
 	return next, settings.Set(ctx, s.d.Settings, addonKey(id), next)
 }
 
-// fieldValue checks one setting by the adapter's description; nil is "not set".
+// fieldValue checks one setting by the adapter's description; nil is "not set". A type the
+// panel does not know never passes: it could not say what the value may be.
 func fieldValue(f addons.Field, v any) (any, bool) {
 	switch f.Type {
-	case "bool":
+	case addons.FieldBool:
 		b, ok := v.(bool)
 		if v == nil {
 			return nil, true
@@ -120,7 +133,21 @@ func fieldValue(f addons.Field, v any) (any, bool) {
 			return nil, false
 		}
 		return b, true
-	default:
+	case addons.FieldSelect:
+		str, ok := v.(string)
+		if v != nil && !ok {
+			return nil, false
+		}
+		if str == "" {
+			return nil, true
+		}
+		if !slices.ContainsFunc(f.Options, func(o addons.Option) bool { return o.Value == str }) {
+			return nil, false
+		}
+		return str, true
+	case addons.FieldNumber:
+		return numberValue(f, v)
+	case addons.FieldString, addons.FieldText:
 		str, ok := v.(string)
 		if v != nil && !ok {
 			return nil, false
@@ -129,16 +156,70 @@ func fieldValue(f addons.Field, v any) (any, bool) {
 		switch {
 		case str == "":
 			return nil, true
-		case len(str) > 4096:
+		case utf8.RuneCountInString(str) > maxAddonText:
 			return nil, false
-		case f.Pattern != "":
+		case f.Type == addons.FieldString && f.Pattern != "":
 			re, err := regexp.Compile(f.Pattern)
 			if err != nil || !re.MatchString(str) {
 				return nil, false
 			}
 		}
 		return str, true
+	case addons.FieldCode:
+		// Not trimmed: the indentation of a script is part of it.
+		str, ok := v.(string)
+		if v != nil && !ok {
+			return nil, false
+		}
+		switch {
+		case strings.TrimSpace(str) == "":
+			return nil, true
+		case len(str) > addons.MaxCode, !utf8.ValidString(str):
+			return nil, false
+		}
+		return str, true
 	}
+	return nil, false
+}
+
+// maxAddonText is the longest value of a string or text setting, in characters.
+const maxAddonText = 4096
+
+// numberValue reads an integer setting: a JSON number without a fraction (or an empty
+// string for "not set"), within the field's Min and Max. Stored as int64.
+func numberValue(f addons.Field, v any) (any, bool) {
+	var n int64
+	switch x := v.(type) {
+	case nil:
+		return nil, true
+	case string:
+		if x == "" {
+			return nil, true
+		}
+		return nil, false
+	case float64:
+		// 2^53 is where a float stops holding every integer.
+		if x != math.Trunc(x) || math.Abs(x) > 1<<53 {
+			return nil, false
+		}
+		n = int64(x)
+	case int:
+		n = int64(x)
+	case int64:
+		n = x
+	case json.Number:
+		i, err := x.Int64()
+		if err != nil {
+			return nil, false
+		}
+		n = i
+	default:
+		return nil, false
+	}
+	if f.Min != nil && n < *f.Min || f.Max != nil && n > *f.Max {
+		return nil, false
+	}
+	return n, true
 }
 
 // availableAddons are the adapters that take rubles now: installed and running, switched

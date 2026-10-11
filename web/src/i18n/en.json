@@ -2800,7 +2800,16 @@
     "homepage": "Details",
     "installed": "Installed",
     "install": "Install",
-    "update": "Update"
+    "update": "Update",
+    "form": {
+      "unsupported": "“{label}” has a type this panel version does not know ({type}), so it cannot be filled in here. Update the panel.",
+      "notChosen": "Not chosen",
+      "byDefault": "By default: {value}",
+      "codeHint": "Code. Kept as typed, indentation included. Only an admin signed in to the panel can change it, not an API key.",
+      "range": "A whole number from {min} to {max}",
+      "atLeast": "A whole number, {min} or more",
+      "atMost": "A whole number, {max} or less"
+    }
   },
   "packages": {
     "title": "Traffic packages",

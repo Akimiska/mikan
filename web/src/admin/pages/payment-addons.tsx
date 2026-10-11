@@ -5,10 +5,11 @@ import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
+import { ManifestForm, localized, manifestInitial, manifestPayload, type ManifestValues } from "../../components/manifest-form";
 import { QueryBoundary } from "../../components/query";
 import { Switch } from "../../components/switch";
-import { Button, EmptyState, ErrorState, Field, Pill, Skeleton, Spinner } from "../../components/ui";
-import { getLocale, t } from "../../i18n";
+import { Button, EmptyState, ErrorState, Pill, Skeleton, Spinner } from "../../components/ui";
+import { t } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { useDraft } from "../../lib/draft";
 import { fieldErrors } from "../../lib/fields";
@@ -25,12 +26,6 @@ export function useAddons() {
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/addons", { signal })),
     refetchInterval: (q) => (q.state.data?.pending ? 3_000 : false),
   });
-}
-
-/** A text the adapter gives per language, in the panel's. */
-function localized(m: Record<string, string> | undefined, fallback: string): string {
-  if (!m) return fallback;
-  return m[getLocale()] || m.en || Object.values(m)[0] || fallback;
 }
 
 /** "addon:yookassa" as the admin knows it: the adapter's own name. */
@@ -92,26 +87,15 @@ function Addons({ d, selling, onRetry, retrying }: { d: Addons; selling: boolean
   );
 }
 
-type Values = Record<string, string | boolean>;
-
-function initial(a: Addon): Values {
-  const v: Values = {};
-  for (const f of a.settings) {
-    if (f.type === "bool") v[f.key] = f.value === true;
-    else v[f.key] = f.secret ? "" : typeof f.value === "string" ? f.value : "";
-  }
-  return v;
-}
-
 function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
   // The secrets in the draft start empty (the API never sends them) and are cleared after a
   // save, so a saved form is not dirty.
-  const { draft, setDraft } = useDraft({ enabled: a.enabled, values: initial(a) });
+  const { draft, setDraft } = useDraft({ enabled: a.enabled, values: manifestInitial(a.settings) });
   const { enabled, values } = draft;
   const setEnabled = (on: boolean) => setDraft((d) => ({ ...d, enabled: on }));
-  const setValues = (fn: (v: Values) => Values) => setDraft((d) => ({ ...d, values: fn(d.values) }));
+  const setValues = (fn: (v: ManifestValues) => ManifestValues) => setDraft((d) => ({ ...d, values: fn(d.values) }));
   const [remove, setRemove] = useState(false);
   const name = localized(a.name, a.id);
   const save = useMutation({
@@ -120,7 +104,7 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
       qc.setQueryData(qk.addons, v);
       void qc.invalidateQueries({ queryKey: qk.paymentSettings });
       const now = v.installed.find((x) => x.id === a.id);
-      if (now) setDraft({ enabled: now.enabled, values: initial(now) });
+      if (now) setDraft({ enabled: now.enabled, values: manifestInitial(now.settings) });
       toast.ok(t("addons.saved", { name }));
     },
   });
@@ -137,13 +121,7 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
   const general = save.error && !Object.keys(errors).some((k) => k.startsWith("settings.")) ? errors.settings || errorText(save.error) : "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    const settings: Record<string, unknown> = {};
-    for (const f of a.settings) {
-      const v = values[f.key];
-      if (f.secret && v === "") continue; // empty keeps the saved secret
-      settings[f.key] = typeof v === "string" ? v.trim() : v;
-    }
-    save.mutate({ enabled, settings });
+    save.mutate({ enabled, settings: manifestPayload(a.settings, values) });
   };
   const failed = a.status === "failed";
   return (
@@ -168,34 +146,7 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
       {enabled && !a.info_error ? (
         <>
           {localized(a.help, "") ? <p className="mb-3 text-xs text-[var(--ink-500)]">{localized(a.help, "")}</p> : null}
-          <div className="grid gap-x-3 sm:grid-cols-2">
-            {a.settings.map((f) => {
-              const id = `addon-${a.id}-${f.key}`;
-              const label = localized(f.label, f.key);
-              const err = errors[`settings.${f.key}`];
-              if (f.type === "bool")
-                return (
-                  <label key={f.key} className="mb-3 flex items-center gap-2 text-[13px] sm:col-span-2">
-                    <input type="checkbox" className="check" checked={values[f.key] === true} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.checked }))} /> {label}
-                  </label>
-                );
-              return (
-                <Field key={f.key} label={label} htmlFor={id} error={err}>
-                  <input
-                    id={id}
-                    className="input mono"
-                    type={f.secret ? "password" : "text"}
-                    value={String(values[f.key] ?? "")}
-                    onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                    placeholder={f.secret && f.set ? t("payments.keySaved") : ""}
-                    autoComplete={f.secret ? "new-password" : "off"}
-                    aria-invalid={!!err}
-                    required={f.required}
-                  />
-                </Field>
-              );
-            })}
-          </div>
+          <ManifestForm idPrefix={`addon-${a.id}`} fields={a.settings} values={values} onChange={(key, v) => setValues((cur) => ({ ...cur, [key]: v }))} errors={errors} disabled={save.isPending} />
           <Webhook label={t("addons.webhook")} url={a.webhook_url} />
         </>
       ) : null}

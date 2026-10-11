@@ -581,7 +581,7 @@
   --pattern-size: auto; --pattern-opacity: 1;
 }
 /* Unbounded's tight tracking squeezes a monospace face. */
-[data-theme="terminal"] :is(.page-title, .kpi-value, .kpi-value small, .brand-name, .dr-title h2, .dialog h2, .state-box h2, .gauge-label b, .metric-value, .section-title) { letter-spacing: -0.01em; }
+[data-theme="terminal"] :is(.page-title, .kpi-value, .kpi-value small, .brand-name, .dr-title h2, .dialog h2, .state-box h2, .gauge-label b, .metric-value) { letter-spacing: -0.01em; }
 
 /* ---------- what every dark theme does to the components ---------- */
 

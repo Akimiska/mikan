@@ -544,20 +544,29 @@
   .topbar[data-stuck] { background: var(--surface-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 
-/* The addons: tiles that lead to a tool or a payment method. */
-.section-title { font: 600 15px/20px var(--font-display-stack); margin: 4px 4px 12px; color: var(--ink-700); }
-/* Three across the page on wide screens, both sections on the same columns. */
-.addon-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-@media (min-width: 760px) { .addon-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1280px) { .addon-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-.addon-tile { display: flex; flex-direction: column; gap: 16px; min-height: 200px; padding: 24px; transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s; }
-.addon-tile:hover { border-color: color-mix(in srgb, var(--mikan-500) 40%, var(--glass-edge)); background: var(--raised); box-shadow: var(--shadow-lg); }
-.addon-tile.add { border-style: dashed; border-color: var(--ink-200); background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
-.addon-tile.add:hover { border-color: var(--mikan-500); background: var(--surface-soft); }
-.addon-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: color-mix(in srgb, var(--mikan-500) 14%, transparent); color: var(--mikan-600); flex-shrink: 0; }
-.addon-title { display: block; font: 600 16px/22px var(--font-ui-stack); letter-spacing: -0.01em; color: var(--ink-900); }
-.addon-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-top: 16px; border-top: 1px solid var(--hairline); }
-.addon-action { margin-top: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; color: var(--mikan-700); }
-.addon-action svg { transition: transform 0.2s var(--ease-out); }
-.addon-tile:hover .addon-action svg { transform: translateX(3px); }
-@media (prefers-reduced-motion: reduce) { .addon-tile:hover .addon-action svg { transform: none; } }
+/* The addons: what is installed in dense rows, grouped; the catalog in cards. */
+.addon-group-title { margin: 0 4px 8px; font: 600 13px/16px var(--font-ui-stack); color: var(--ink-500); }
+/* The rows of a group share their columns (subgrid), so states and buttons stand in line;
+   the columns' least widths keep them in line from one group to the next as well. */
+.addon-list { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(176px, max-content) minmax(240px, max-content); column-gap: 16px; padding: 0; }
+.addon-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; row-gap: 8px; padding: 12px 16px; min-height: 64px; }
+.addon-row + .addon-row { border-top: 1px solid var(--hairline); }
+.addon-row-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: color-mix(in srgb, var(--mikan-500) 14%, transparent); color: var(--mikan-600); flex-shrink: 0; }
+.addon-row-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink-900); }
+.addon-row-sub { margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--ink-500); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.addon-row-err { margin-top: 4px; font-size: 12px; line-height: 16px; color: var(--berry-600); overflow-wrap: anywhere; }
+.addon-row-side { display: contents; }
+.addon-row-state { justify-self: start; }
+.addon-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+/* A phone: the state and the actions go under the text, the menu to the far right. */
+@media (max-width: 640px) {
+  .addon-list { display: block; }
+  .addon-row { grid-template-columns: 40px minmax(0, 1fr); column-gap: 12px; }
+  .addon-row-side { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .addon-row-actions { flex: 1; flex-wrap: wrap; }
+}
+.addon-catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.addon-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; min-width: 0; }
+.addon-card-title { font: 600 15px/20px var(--font-ui-stack); letter-spacing: -0.01em; color: var(--ink-900); overflow-wrap: anywhere; }
+.addon-card-text { font-size: 13px; line-height: 20px; color: var(--ink-600); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.addon-card-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; border-top: 1px solid var(--hairline); }

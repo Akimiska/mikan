@@ -16,7 +16,7 @@ import { useDraft } from "../../lib/draft";
 import { dateShort, days, money, num, time } from "../../lib/format";
 import { isKopecks, isStars, rubKopecks } from "../../lib/validate";
 import { PAYMENT_TABS, type PaymentsSearch } from "../search";
-import { AddonsCard, addonName, useAddons } from "./payment-addons";
+import { addonName, useAddons } from "./payment-addons";
 import { PromoSection } from "./promocodes";
 
 type Settings = Schemas["PaymentSettingsView"];
@@ -89,10 +89,10 @@ export function PaymentsPage() {
           <QueryBoundary query={settings} pending={<Skeleton style={{ height: 320, borderRadius: 20 }} />} wrap={(state) => <section className="card glass">{state}</section>}>
             {(v) =>
               shown === "methods" ? (
-                // The payment systems take the width, Stars sit beside them.
-                <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
-                  <AddonsCard selling={v.enabled} />
+                // Stars are built in; the other payment methods are addons, set up in Addons.
+                <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2 lg:items-start">
                   <StarsCard s={v} />
+                  <AddonMethodsCard />
                 </div>
               ) : (
                 <div className="flex max-w-[960px] flex-col gap-4">
@@ -311,7 +311,7 @@ function useSavePayments() {
   });
 }
 
-/** Telegram Stars, the way to take payments built into the panel; the others come from the marketplace below. */
+/** Telegram Stars, the way to take payments built into the panel; the others are addons. */
 function StarsCard({ s }: { s: Settings }) {
   const save = useSavePayments();
   const { draft: stars, setDraft: setStars, dirty, reset } = useDraft(s.stars);
@@ -324,9 +324,42 @@ function StarsCard({ s }: { s: Settings }) {
       <form onSubmit={submit} noValidate>
         {save.error ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
         <Provider title={t("payments.providers.stars")} sub={t("payments.starsSub")} on={stars} onChange={setStars} live={s.available.stars} selling={s.enabled} offline={s.enabled && stars && !s.available.stars ? t("payments.starsBotOff") : ""} />
-        <p className="text-xs text-[var(--ink-500)]">{t("payments.rublesInMarketplace")}</p>
         <FormActions dirty={dirty} saving={save.isPending} onReset={reset} />
       </form>
+    </section>
+  );
+}
+
+/** The payment methods of the marketplace are addons: what is installed, and the way to them. */
+function AddonMethodsCard() {
+  const addons = useAddons().data;
+  const installed = addons?.installed ?? [];
+  return (
+    <section className="card glass reveal">
+      <div className="card-head">
+        <div className="min-w-0">
+          <h2 className="card-title">{t("payments.addonMethods")}</h2>
+          <div className="card-sub">{t("payments.addonMethodsSub")}</div>
+        </div>
+      </div>
+      {!addons ? (
+        <Skeleton style={{ height: 20, width: "60%", borderRadius: 8 }} />
+      ) : installed.length ? (
+        <ul className="flex flex-wrap gap-2" aria-label={t("payments.addonMethods")}>
+          {installed.map((a) => (
+            <li key={a.id}>
+              <span className="tag">{addonName(a.id, addons)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[13px] text-[var(--ink-500)]">{t("payments.addonMethodsNone")}</p>
+      )}
+      <div className="mt-4 flex justify-end">
+        <Link to="/addons" className="btn btn-glass btn-sm">
+          {t("payments.openAddons")}
+        </Link>
+      </div>
     </section>
   );
 }

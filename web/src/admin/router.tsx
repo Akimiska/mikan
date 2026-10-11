@@ -4,7 +4,7 @@ import { ApiError, basePath, setCsrf } from "../api/client";
 import { meQuery } from "../api/hooks";
 import { useLocale } from "../i18n";
 import { NotFoundPage, PageLoading, RouteError } from "./route-states";
-import { MARKET_OPEN, PAYMENT_TABS, PROMO_TABS, SETTINGS_PARTS, SETTINGS_TABS, TARIFF_TABS, TELEGRAM_TABS, USER_SOURCES, USER_STATES, type MarketSearch, type PaymentsSearch, type SettingsSearch, type TariffsSearch, type TelegramSearch, type UsersSearch } from "./search";
+import { ADDON_KINDS, ADDON_TABS, PAYMENT_TABS, PROMO_TABS, SETTINGS_PARTS, SETTINGS_TABS, TARIFF_TABS, TELEGRAM_TABS, USER_SOURCES, USER_STATES, type AddonsSearch, type PaymentsSearch, type SettingsSearch, type TariffsSearch, type TelegramSearch, type UsersSearch } from "./search";
 import { Shell } from "./shell";
 
 /**
@@ -95,12 +95,17 @@ export function createAppRouter(queryClient: QueryClient) {
       return { tab, part: parts && typeof s.part === "string" && parts.includes(s.part) ? s.part : undefined };
     },
   });
-  // The addons: the built-in tools (the Telegram bot, the torrent blocker) and the
-  // marketplace's payment methods.
+  // The addons: what is installed (the bot, payment methods, pages, the built-in tools) and
+  // the catalog of the marketplace.
   const addons = createRoute({
     getParentRoute: () => app,
     path: "/addons",
     component: page(() => import("./pages/addons"), "AddonsPage"),
+    validateSearch: (s: Record<string, unknown>): AddonsSearch => ({
+      tab: ADDON_TABS.includes(s.tab as (typeof ADDON_TABS)[number]) && s.tab !== "installed" ? (s.tab as AddonsSearch["tab"]) : undefined,
+      q: typeof s.q === "string" && s.q.trim() ? s.q.slice(0, 100) : undefined,
+      kind: ADDON_KINDS.includes(s.kind as (typeof ADDON_KINDS)[number]) ? (s.kind as AddonsSearch["kind"]) : undefined,
+    }),
   });
   const telegram = createRoute({
     getParentRoute: () => app,
@@ -120,14 +125,13 @@ export function createAppRouter(queryClient: QueryClient) {
     path: "/addons/filters",
     component: page(() => import("./pages/filters"), "FiltersPage"),
   });
-  // The marketplace of protocol 2 addons (bots, pages): the catalog, what runs, one's own.
+  // The marketplace had a page of its own until 0.5.1.0: old links land on the catalog.
   const market = createRoute({
     getParentRoute: () => app,
     path: "/addons/market",
-    component: page(() => import("./pages/marketplace"), "MarketplacePage"),
-    validateSearch: (s: Record<string, unknown>): MarketSearch => ({
-      open: MARKET_OPEN.includes(s.open as (typeof MARKET_OPEN)[number]) ? (s.open as MarketSearch["open"]) : undefined,
-    }),
+    beforeLoad: () => {
+      throw redirect({ to: "/addons", search: { tab: "catalog" } });
+    },
   });
   // An addon's own page (protocol 2, permission ui), framed in a sandbox.
   const addonApp = createRoute({

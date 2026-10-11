@@ -32,7 +32,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::envfile::EnvFile;
 use crate::lock::{self, Wait};
@@ -1061,12 +1060,11 @@ fn self_update(m: &release::Manifest, say: &mut dyn FnMut(&str)) -> bool {
     if release::newer(crate::version(), &m.version) {
         return false;
     }
-    let sha = |b: &[u8]| Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>();
-    if fs::read(host::BIN).map(|b| sha(&b)).ok().as_deref() == Some(asset.sha256.as_str()) {
+    if fs::read(host::BIN).map(|b| release::sha256_hex(&b)).ok().as_deref() == Some(asset.sha256.as_str()) {
         return false;
     }
     let result = net::get(&asset.url, 64 << 20).and_then(|data| {
-        if sha(&data) != asset.sha256 {
+        if release::sha256_hex(&data) != asset.sha256 {
             bail!("the downloaded installer does not match the release manifest");
         }
         host::replace_bin(&data, Some(&m.version))

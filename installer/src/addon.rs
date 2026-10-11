@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::net::Ipv4Addr;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -29,15 +30,15 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::lock::{self, Wait};
 use crate::panelfs::Dir;
-use crate::{docker, net, panelfs, release, setup};
+use crate::{clock, docker, net, panelfs, release, setup};
 
 pub const CATALOG_URL: &str = "https://github.com/getmikan/marketplace/releases/latest/download/index.json";
-/// The payment adapters' protocol, and that of every other kind (internal/panel/addons).
+/// The payment adapters' protocol (internal/panel/addons).
 const PROTOCOL: u32 = 1;
+/// That of every other kind.
 const PROTOCOL_2: u32 = 2;
 const KINDS_2: [&str; 3] = ["bot", "ui", "generic"];
 const MODES: [&str; 2] = ["http", "client"];
@@ -103,7 +104,7 @@ pub struct Entry {
     pub name: BTreeMap<String, String>,
 }
 
-#[derive(Deserialize, Debug, Clone, Default, PartialEq)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct Resources {
     #[serde(default)]
     pub mem_mb: u32,
@@ -116,10 +117,7 @@ impl Entry {
     fn normalize(&mut self) -> bool {
         match self.protocol {
             PROTOCOL => {
-                let plain = (self.kind.is_empty() || self.kind == "payment")
-                    && (self.mode.is_empty() || self.mode == "http")
-                    && self.permissions.is_empty()
-                    && self.resources == Resources::default();
+                let plain = plain_payment(&self.kind, &self.mode, &self.permissions, self.resources.mem_mb);
                 self.kind = "payment".into();
                 self.mode = "http".into();
                 plain
@@ -128,20 +126,27 @@ impl Entry {
                 if self.mode.is_empty() {
                     self.mode = "http".into();
                 }
-                KINDS_2.contains(&self.kind.as_str())
-                    && MODES.contains(&self.mode.as_str())
-                    && permissions_ok(&self.permissions)
-                    && (self.resources.mem_mb == 0 || MEM_MB.contains(&self.resources.mem_mb))
+                shape_2_ok(&self.kind, &self.mode, &self.permissions, self.resources.mem_mb)
             }
             _ => false,
         }
     }
 }
 
-/// Known permissions, each once.
-fn permissions_ok(p: &[String]) -> bool {
+/// A payment adapter (protocol 1) carries nothing of protocol 2: an empty or its own kind and
+/// mode, no permissions, no memory of its own.
+fn plain_payment(kind: &str, mode: &str, permissions: &[String], mem_mb: u32) -> bool {
+    (kind.is_empty() || kind == "payment") && (mode.is_empty() || mode == "http") && permissions.is_empty() && mem_mb == 0
+}
+
+/// What protocol 2 allows, whoever names it (the catalog, the state): a known kind and mode,
+/// known permissions each once, sane memory.
+fn shape_2_ok(kind: &str, mode: &str, permissions: &[String], mem_mb: u32) -> bool {
     let mut seen = std::collections::BTreeSet::new();
-    p.iter().all(|p| PERMISSIONS.contains(&p.as_str()) && seen.insert(p.as_str()))
+    KINDS_2.contains(&kind)
+        && MODES.contains(&mode)
+        && permissions.iter().all(|p| PERMISSIONS.contains(&p.as_str()) && seen.insert(p.as_str()))
+        && (mem_mb == 0 || MEM_MB.contains(&mem_mb))
 }
 
 #[derive(Deserialize)]
@@ -257,7 +262,7 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 fn valid_digest(d: &str) -> bool {
-    d.strip_prefix("sha256:").is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    d.strip_prefix("sha256:").is_some_and(release::is_sha256_hex)
 }
 
 /// Where the marketplace's adapters live. A signed catalog could name another registry, but
@@ -448,21 +453,8 @@ fn plain_token(t: &str) -> bool {
 fn sound(id: &str, a: &Installed) -> bool {
     let version_ok = a.version.len() <= 32 && a.version.bytes().all(|b| b.is_ascii_alphanumeric() || b".-+".contains(&b));
     let protocol_ok = match a.protocol {
-        0 | PROTOCOL => {
-            (a.kind.is_empty() || a.kind == "payment")
-                && (a.mode.is_empty() || a.mode == "http")
-                && a.panel_token.is_empty()
-                && a.mem_mb == 0
-                && a.permissions.is_empty()
-                && a.source.is_empty()
-        }
-        PROTOCOL_2 => {
-            KINDS_2.contains(&a.kind.as_str())
-                && MODES.contains(&a.mode.as_str())
-                && plain_token(&a.panel_token)
-                && (a.mem_mb == 0 || MEM_MB.contains(&a.mem_mb))
-                && permissions_ok(&a.permissions)
-        }
+        0 | PROTOCOL => plain_payment(&a.kind, &a.mode, &a.permissions, a.mem_mb) && a.panel_token.is_empty() && a.source.is_empty(),
+        PROTOCOL_2 => shape_2_ok(&a.kind, &a.mode, &a.permissions, a.mem_mb) && plain_token(&a.panel_token),
         _ => false,
     };
     // Only the catalog's images are ever loaded from an archive and run by their ID.
@@ -542,7 +534,8 @@ pub fn compose_yaml(adapters: &BTreeMap<String, Installed>, panel_api: &str, pan
     y
 }
 
-fn compose(args: &[&str]) -> Result<()> {
+/// `docker compose` for the addons' project; what it wrote to stdout.
+fn compose(args: &[&str]) -> Result<String> {
     let file = format!("{COMPOSE_DIR}/compose.yml");
     let out = Command::new("docker")
         .args(["compose", "-p", PROJECT, "-f", &file])
@@ -553,7 +546,7 @@ fn compose(args: &[&str]) -> Result<()> {
     if !out.status.success() {
         bail!("docker compose {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Runs what the state lists, and nothing else. Every image is fetched first; an addon whose
@@ -562,10 +555,7 @@ fn compose(args: &[&str]) -> Result<()> {
 fn up(state: &mut State, say: &mut dyn FnMut(&str)) -> Result<()> {
     let dir = Path::new(COMPOSE_DIR);
     fs::create_dir_all(dir)?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-    }
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
     let mut problems = Vec::new();
     let mut running = BTreeMap::new();
     // An external addon has no container: nothing to fetch or run.
@@ -759,11 +749,6 @@ fn firewall_plan(have: &[Door], want: Option<Door>) -> Vec<Vec<String>> {
     plan
 }
 
-/// The text of `ufw status` when ufw is there and on.
-pub fn ufw_status() -> Option<String> {
-    crate::system::output("ufw", &["status"]).filter(|s| s.contains("Status: active"))
-}
-
 /// Opens the panel's API on the bridge in ufw while a custom addon runs (panel_api_bridge is
 /// set), closes it when none does, and replaces it when the gateway or the port moved. Does
 /// nothing without an active ufw, or when the install keeps mikan out of it (MIKAN_UFW=0).
@@ -773,7 +758,7 @@ fn sync_firewall(panel_api_bridge: &str, say: &mut dyn FnMut(&str)) {
     if crate::ops::Install::load().is_ok_and(|i| !i.ufw()) {
         return;
     }
-    let Some(status) = ufw_status() else { return };
+    let Some(status) = crate::system::ufw_status() else { return };
     for args in firewall_plan(&parse_doors(&status), door(panel_api_bridge)) {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         if let Err(e) = crate::system::run_quiet("ufw", &args) {
@@ -834,20 +819,7 @@ fn wait_running(id: &str, limit: Duration) -> Result<()> {
 }
 
 fn running_services() -> Result<Vec<String>> {
-    let file = format!("{COMPOSE_DIR}/compose.yml");
-    let out = Command::new("docker")
-        .args(["compose", "-p", PROJECT, "-f", &file, "ps", "--status", "running", "--services"])
-        .stdin(Stdio::null())
-        .output()
-        .context("docker compose ps")?;
-    if !out.status.success() {
-        bail!("docker compose ps: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned).collect())
-}
-
-fn now() -> String {
-    crate::clock::rfc3339()
+    Ok(compose(&["ps", "--status", "running", "--services"])?.lines().map(str::to_owned).collect())
 }
 
 fn new_token() -> String {
@@ -971,7 +943,7 @@ fn put(id: &str, mut next: Installed, say: &mut dyn FnMut(&str)) -> Result<()> {
         }
     }
     next.status = "running".into();
-    next.at = now();
+    next.at = clock::rfc3339();
     if !sound(id, &next) {
         bail!("the request for {id} is not sound");
     }
@@ -1116,10 +1088,9 @@ pub fn apply(panel: &str, say: &mut dyn FnMut(&str)) -> Result<()> {
     };
     drain(&dir, queue.as_ref(), say, &mut |req: &Request, say: &mut dyn FnMut(&str)| -> Result<()> {
         let result = match (req.action.as_str(), req.source.as_str()) {
-            _ if !valid_id(&req.id) => Err(anyhow::anyhow!("unknown request {} {:?}", req.action, req.id)),
-            ("install", "" | "official") => install(&req.id, panel, say),
-            ("install", _) => install_own(req, say),
-            ("remove", _) => remove(&req.id, say),
+            ("install", "" | "official") if valid_id(&req.id) => install(&req.id, panel, say),
+            ("install", _) if valid_id(&req.id) => install_own(req, say),
+            ("remove", _) if valid_id(&req.id) => remove(&req.id, say),
             _ => Err(anyhow::anyhow!("unknown request {} {:?}", req.action, req.id)),
         };
         let mut state = load_state()?;
@@ -1128,7 +1099,7 @@ pub fn apply(panel: &str, say: &mut dyn FnMut(&str)) -> Result<()> {
             action: req.action.clone(),
             state: if result.is_ok() { "done" } else { "failed" }.into(),
             error: result.as_ref().err().map(|e| format!("{e:#}")).unwrap_or_default(),
-            at: now(),
+            at: clock::rfc3339(),
         });
         save_state(&mut state)?;
         result
@@ -1177,9 +1148,9 @@ fn archive_image(tar: &Path) -> Result<Archived> {
 
 /// A JSON blob of the archive, refused unless it hashes to its digest.
 fn blob(tar: &Path, digest: &str) -> Result<serde_json::Value> {
-    let data = tar_member(tar, &format!("blobs/sha256/{}", &digest["sha256:".len()..]))?;
-    let sum: String = Sha256::digest(&data).iter().map(|x| format!("{x:02x}")).collect();
-    if digest != format!("sha256:{sum}") {
+    let hex = &digest["sha256:".len()..];
+    let data = tar_member(tar, &format!("blobs/sha256/{hex}"))?;
+    if release::sha256_hex(&data) != hex {
         bail!("{digest} in the archive does not match its content");
     }
     serde_json::from_slice(&data).with_context(|| format!("{digest} in the archive is not JSON"))
@@ -2103,7 +2074,7 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("blobs/sha256")).unwrap();
         let put = |data: &str| {
-            let sum: String = Sha256::digest(data.as_bytes()).iter().map(|x| format!("{x:02x}")).collect();
+            let sum = release::sha256_hex(data.as_bytes());
             fs::write(root.join(format!("blobs/sha256/{sum}")), if corrupt { format!("{data} ") } else { data.to_owned() }).unwrap();
             format!("sha256:{sum}")
         };

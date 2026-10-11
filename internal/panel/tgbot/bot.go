@@ -353,9 +353,10 @@ func (b *Bot) onTransfer(ctx context.Context, c *tgate.Client, out *tgate.Outbox
 		}, nil)
 	}
 	now := b.d.Now()
+	// Asked before the lock: over the Panel API it is a call, which must not hold the bot up.
+	owner, err := b.d.Backend.Owner(ctx, userID)
 	b.mu.Lock()
 	t, open := b.transfers[userID]
-	owner, err := b.d.Backend.Owner(ctx, userID)
 	if !open || t.to != to || now.After(t.until) || err != nil || owner != chat {
 		b.mu.Unlock()
 		say(w.transferStale)

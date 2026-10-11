@@ -81,19 +81,13 @@ func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
 			b.TrialNotGiven(ctx, m.Payment)
 		}
 	case EventExpiring, EventExpired, EventTraffic90, EventTraffic100:
-		var n NoticeEvent
-		_ = json.Unmarshal(e.Data, &n)
-		kind := map[string]string{EventExpired: "expired", EventTraffic90: "traffic_90", EventTraffic100: "traffic_100"}[e.Type]
-		if e.Type == EventExpiring {
-			kind = "expire_3d"
-			if n.Days == 1 {
-				kind = "expire_1d"
-			}
-		}
 		out := b.d.Gateway.Outbox()
 		if out == nil || e.TgID == 0 {
 			return nil
 		}
+		var n NoticeEvent
+		_ = json.Unmarshal(e.Data, &n)
+		kind := noticeKind(e.Type, n.Days)
 		u, err := b.d.Backend.User(ctx, e.UserID)
 		if err != nil {
 			return err

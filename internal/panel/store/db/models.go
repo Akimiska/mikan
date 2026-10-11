@@ -367,6 +367,7 @@ type Tariff struct {
 	PriceRub      sql.NullInt64
 	OnSale        int64
 	SpeedLimit    sql.NullInt64
+	Description   string
 }
 
 type TariffPool struct {

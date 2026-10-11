@@ -100,13 +100,23 @@ func (b *Bot) shopList(ctx context.Context, w *words, title, prefix, notice stri
 	rows := [][]Button{}
 	for _, o := range offers {
 		desc := billing.DescribeOffer(o, lang)
-		lines = append(lines, "• <b>"+html.EscapeString(o.Tariff.Name)+"</b> — "+html.EscapeString(desc))
+		lines = append(lines, "• <b>"+html.EscapeString(o.Tariff.Name)+"</b> — "+html.EscapeString(desc)+noteOf(o.Tariff.Description))
 		rows = append(rows, []Button{{Text: o.Tariff.Name + " · " + w.cheapest(o), CallbackData: prefix + ":" + strconv.FormatInt(o.Tariff.ID, 10)}})
 	}
 	if len(offers) == 0 {
 		lines = append(lines, html.EscapeString(w.payUnavailable))
 	}
 	return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
+}
+
+// noteOf is the admin's description of a tariff to follow the line built from its limits:
+// on lines of its own, escaped for the HTML parse mode, its line breaks kept. Empty without
+// a description, so a tariff that has none looks as it did.
+func noteOf(description string) string {
+	if description == "" {
+		return ""
+	}
+	return "\n" + html.EscapeString(description)
 }
 
 // cheapest is the price a list shows: rubles when sold for them, else Stars; "from" the
@@ -172,7 +182,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 				label := billing.TermLabel(o.Tariff, t.Days, lang) + " · " + w.cheapest(billing.Offer{Stars: t.Stars, Rub: t.Rub})
 				rows = append(rows, []Button{{Text: label, CallbackData: prefix + ":" + ref + "." + strconv.FormatInt(t.Days, 10)}})
 			}
-			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + "\n\n" + w.pickTerm, &Keyboard{append(rows, back)}
+			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + noteOf(o.Tariff.Description) + "\n\n" + w.pickTerm, &Keyboard{append(rows, back)}
 		}
 		t, ok := o.Term(days)
 		if !ok {
@@ -181,7 +191,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 		if days != nil {
 			ref += "." + strconv.FormatInt(t.Days, 10)
 		}
-		text := name + html.EscapeString(billing.Describe(o.Tariff, t.Days, lang)) + "\n\n" + w.payHow
+		text := name + html.EscapeString(billing.Describe(o.Tariff, t.Days, lang)) + noteOf(o.Tariff.Description) + "\n\n" + w.payHow
 		rows := w.payButtons(pay+":"+ref+":", t.Stars, t.Rub, av, b.addonName(ctx))
 		return text, &Keyboard{append(rows, back)}
 	}

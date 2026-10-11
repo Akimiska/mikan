@@ -10,7 +10,7 @@ import { okData, postJSON } from "./net";
 
 /** A term of a plan sold for several: its own price; label is "30 days", "3 months". */
 type Term = { days: number; label: string; description: string; stars?: number; rub?: number };
-type Offer = { id: number; name: string; description: string; stars?: number; rub?: number; terms?: Term[] };
+type Offer = { id: number; name: string; description: string; note?: string; stars?: number; rub?: number; terms?: Term[] };
 export type ShopData = {
   allow_new: boolean;
   providers: { stars: boolean };
@@ -157,6 +157,7 @@ export function Shop({
               <span className="num text-[13px] text-[var(--ink-700)]">{listPrice(o)}</span>
             </span>
             <span className="text-xs text-[var(--ink-500)]">{o.description}</span>
+            {o.note ? <span className="whitespace-pre-line text-xs text-[var(--ink-700)]">{o.note}</span> : null}
           </button>
         ))}
       </div>

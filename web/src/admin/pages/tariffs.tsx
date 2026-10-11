@@ -18,6 +18,10 @@ import { TARIFF_TABS } from "../search";
 import { PackagesCard } from "./packages";
 import { PoolLimitsField, PoolsCard } from "./pools";
 
+/** What the server accepts of a description for buyers (domain.CleanDescription). */
+const DESCRIPTION_MAX = 300;
+const DESCRIPTION_LINES = 5;
+
 /** How long a term on the tariff runs: days, or months up to the billing day. */
 function tariffTerm(tr: Tariff): string {
   if (!tr.duration_days) return t("time.forever");
@@ -137,6 +141,7 @@ export function TariffsPage() {
                         <div>
                           <h2 className="font-display text-xl font-medium tracking-tight">{tr.name}</h2>
                           {tr.price_label ? <div className="mt-1 text-[13px] font-medium text-[var(--mikan-700)]">{tr.price_label}</div> : null}
+                          {tr.description ? <p className="mt-2 whitespace-pre-line text-[13px] text-[var(--ink-700)]">{tr.description}</p> : null}
                           {selling && tr.on_sale ? (
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-600)]">
                               <Pill tone="ok">{t("tariffs.onSale")}</Pill>
@@ -228,6 +233,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   const [speedUnlimited, setSpeedUnlimited] = useState(true);
   const [reset, setReset] = useState<Tariff["reset_strategy"]>("period");
   const [price, setPrice] = useState("");
+  const [description, setDescription] = useState("");
   const [onSale, setOnSale] = useState(false);
   const allPools = usePools();
   // With selling off the sale block is hidden; its values stay as they were.
@@ -256,6 +262,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setSpeed(String(tr?.speed_limit ?? 100));
     setReset(tr?.reset_strategy ?? "period");
     setPrice(tr?.price_label ?? "");
+    setDescription(tr?.description ?? "");
     setOnSale(tr?.on_sale ?? false);
     setPoolGB(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / GiB).toFixed(2)) : ""])));
     setPoolClosed(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, !!p.excluded])));
@@ -303,6 +310,8 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     if (poolLimits.some((p) => p.traffic_limit !== null && (!Number.isFinite(p.traffic_limit) || p.traffic_limit <= 0))) errs.pools = t("pools.errLimit");
     const toDay = term === "day";
     if (!name.trim()) errs.name = t("tariffs.errName");
+    if ([...description.trim()].length > DESCRIPTION_MAX) errs.description = t("errors.api.description_too_long");
+    else if (description.trim().split("\n").length > DESCRIPTION_LINES) errs.description = t("errors.api.description_too_many_lines");
     if (!unlimited && (!Number.isFinite(gbN) || gbN <= 0)) errs.traffic_limit = t("tariffs.errTraffic");
     if (!toDay && (!Number.isInteger(durN) || durN < 0 || durN > 3650)) errs.duration_days = t("tariffs.errDuration");
     if (toDay && (!Number.isInteger(monN) || monN < 0 || monN > 120)) errs.duration_days = t("tariffs.errMonths");
@@ -344,6 +353,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       speed_limit: speedUnlimited ? undefined : speedN,
       reset_strategy: unlimited ? "none" : reset,
       price_label: price.trim() || undefined,
+      description: description.trim() || undefined,
       price_stars: stars.trim() ? starsN : undefined,
       price_rub: rub.trim() ? rubN : undefined,
       terms,
@@ -369,6 +379,18 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       <form id="tariff-form" onSubmit={submit} className="pt-5" noValidate>
         <Field label={t("tariffs.name")} htmlFor="t-name" error={errors.name}>
           <input id="t-name" className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder={t("tariffs.namePlaceholder")} autoFocus />
+        </Field>
+        <Field
+          label={t("tariffs.description")}
+          htmlFor="t-description"
+          hint={
+            <>
+              {t("tariffs.descriptionHint")} <span className="num">{[...description.trim()].length}/{DESCRIPTION_MAX}</span>
+            </>
+          }
+          error={errors.description}
+        >
+          <textarea id="t-description" className="input min-h-[96px]" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t("tariffs.descriptionPlaceholder")} aria-invalid={!!errors.description} />
         </Field>
         <Field label={t("tariffs.trafficPerPeriod")} htmlFor="t-gb" error={errors.traffic_limit}>
           <div className="flex items-center gap-2">

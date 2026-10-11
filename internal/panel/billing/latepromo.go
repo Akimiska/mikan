@@ -25,11 +25,21 @@ func paymentTime(p db.Payment, fallback int64) int64 {
 }
 
 func (s *Service) refundPromoPayment(ctx context.Context, p db.Payment, externalID string) error {
+	return s.refundCharge(ctx, p, externalID, "mikan-promo-late-"+strconv.FormatInt(p.ID, 10))
+}
+
+// refundCharge gives a payment's money back through the provider it came by: Stars
+// through the bot, an adapter's payment through the adapter, with key as the adapter's
+// idempotency key (one per payment and reason), so a retry after a restart does not
+// refund twice. The adapter is asked for the invoice's amount: a provider's fee the buyer
+// paid on top (Platega adds its own) is not known to the panel and stays with the
+// provider, for a late promo payment and a trial alike.
+func (s *Service) refundCharge(ctx context.Context, p db.Payment, externalID, key string) error {
 	switch {
 	case p.Provider == Stars:
 		tg := s.telegram()
 		if tg == nil {
-			return errors.New("cannot refund expired Stars promo payment: Telegram bot is unavailable")
+			return errors.New("cannot refund a Stars payment: Telegram bot is unavailable")
 		}
 		return tg.RefundStars(ctx, p.TgID, externalID)
 	case AddonID(p.Provider) != "":
@@ -37,9 +47,9 @@ func (s *Service) refundPromoPayment(ctx context.Context, p db.Payment, external
 		if err != nil {
 			return err
 		}
-		return cl.Refund(ctx, cfg.Values, externalID, p.Amount, "mikan-promo-late-"+strconv.FormatInt(p.ID, 10))
+		return cl.Refund(ctx, cfg.Values, externalID, p.Amount, key)
 	default:
-		return errors.New("cannot refund expired promo payment from this provider")
+		return errors.New("cannot refund a payment from this provider")
 	}
 }
 

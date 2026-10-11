@@ -59,6 +59,12 @@ UPDATE promo_codes SET used_count=CASE WHEN used_count>0 THEN used_count-1 ELSE 
 -- name: CountUserPaidPayments :one
 SELECT COUNT(*) FROM payments WHERE tg_id=sqlc.arg(tg_id) AND status IN ('paid','applied');
 
+-- name: CountUserPaidPaymentsExcept :one
+-- The same, apart from the trial's own payments: whether the account paid for anything
+-- besides the trial being applied. Another trial payment paid meanwhile does not count:
+-- TakeTrial gives the trial to one of them and the other goes back.
+SELECT COUNT(*) FROM payments WHERE tg_id=sqlc.arg(tg_id) AND status IN ('paid','applied') AND id <> sqlc.arg(id) AND kind <> 'trial';
+
 -- name: CountPromoUser :one
 SELECT COUNT(*) FROM promo_redemptions WHERE promo_id=sqlc.arg(promo_id) AND (tg_id=sqlc.arg(tg_id) OR user_id=sqlc.arg(user_id)) AND status IN ('reserved','applied');
 

@@ -119,6 +119,25 @@ func (q *Queries) CountUserPaidPayments(ctx context.Context, tgID int64) (int64,
 	return count, err
 }
 
+const countUserPaidPaymentsExcept = `-- name: CountUserPaidPaymentsExcept :one
+SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied') AND id <> $2 AND kind <> 'trial'
+`
+
+type CountUserPaidPaymentsExceptParams struct {
+	TgID int64
+	ID   int64
+}
+
+// The same, apart from the trial's own payments: whether the account paid for anything
+// besides the trial being applied. Another trial payment paid meanwhile does not count:
+// TakeTrial gives the trial to one of them and the other goes back.
+func (q *Queries) CountUserPaidPaymentsExcept(ctx context.Context, arg CountUserPaidPaymentsExceptParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUserPaidPaymentsExcept, arg.TgID, arg.ID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createPromoCode = `-- name: CreatePromoCode :one
 INSERT INTO promo_codes
 (code,name,description,type,value,currency,starts_at,ends_at,max_uses,per_user_limit,discount_ttl,min_order,max_discount,tariff_ids,pool_id,first_purchase_only,new_users_only,enabled,deleted,created_at,created_by)

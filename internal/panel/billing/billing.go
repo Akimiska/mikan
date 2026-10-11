@@ -58,7 +58,15 @@ type Config struct {
 	// TrialTariffID is the tariff of the free trial a Telegram account may take once in
 	// the bot; 0: no trial. It works with selling off too: it takes no payment.
 	TrialTariffID int64 `json:"trial_tariff_id,omitempty"`
+	// TrialStars and TrialRub (kopecks) put a price on the trial; both 0: it is free. A
+	// priced trial is bought in the bot and the Mini App, once per account like the free
+	// one, through the providers that take its price: it needs selling on.
+	TrialStars int64 `json:"trial_stars,omitempty"`
+	TrialRub   int64 `json:"trial_rub,omitempty"`
 }
+
+// TrialPaid: the trial has a price and is bought, not taken.
+func (c Config) TrialPaid() bool { return c.TrialStars > 0 || c.TrialRub > 0 }
 
 // DefaultConfig: selling off until the admin turns it on; then Stars (it needs nothing but
 // the bot) and new buyers are welcome.
@@ -101,6 +109,7 @@ type Service struct {
 	promoRefunds keyedLock // by payment: one late-promo refund of it at a time
 	tg           Telegram
 	buyers       keyedLock // by Telegram account: one invoice opened at a time
+	trialRefunds keyedLock // by payment: one refund of a trial that may not be given at a time
 }
 
 func New(d Deps) *Service {
@@ -680,6 +689,22 @@ func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency
 	if p.Kind == KindPackage {
 		return s.packageOnSale(ctx, p)
 	}
+	if p.Kind == KindTrial {
+		// The trial's tariff is seldom on sale itself: the price is the trial's. What has
+		// to hold is the offer, as at the invoice: a priced trial on this very tariff,
+		// and an account that may still be given it. Stars are not taken otherwise.
+		if t, ok := s.TrialTariff(ctx); !ok || !s.Config(ctx).TrialPaid() || t.ID != p.TariffID.Int64 {
+			return ErrTrialOff
+		}
+		allowed, err := s.trialAllowed(ctx, s.d.Store.Q, tgID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrTrialUsed
+		}
+		return nil
+	}
 	t, err := s.d.Store.Q.GetTariff(ctx, p.TariffID.Int64)
 	if err != nil || t.Archived != 0 || t.OnSale == 0 {
 		return ErrNotForSale
@@ -821,6 +846,16 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			}
 			return markApplied(ctx, q, id, u.ID, s.d.Now())
 		}
+		if pay.Kind == KindTrial {
+			if u, err = s.applyTrial(ctx, q, pay); err != nil {
+				return err
+			}
+			created = true
+			if err := markApplied(ctx, q, id, u.ID, s.d.Now()); err != nil {
+				return err
+			}
+			return q.SetPaymentRevert(ctx, db.SetPaymentRevertParams{Revert: purchaseRevert(true, false, db.User{}, u), ID: id})
+		}
 		var userID int64
 		var prior db.User
 		hadPrior := false
@@ -834,7 +869,8 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 				return err
 			}
 		}
-		if u, created, err = s.d.Users.Purchase(ctx, q, userID, pay.TariffID.Int64, pay.TermDays, buyerName(ctx, q, pay.TgID), reset); err != nil {
+		if u, created, err = s.d.Users.Purchase(ctx, q, domain.PurchaseInput{UserID: userID, TariffID: pay.TariffID.Int64,
+			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), ResetTraffic: reset}); err != nil {
 			return err
 		}
 		if created {
@@ -861,6 +897,20 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		if err = s.d.Users.RefillSlots(ctx); err == nil {
 			err = s.d.Store.Tx(ctx, run)
 		}
+	}
+	if errors.Is(err, ErrTrialUsed) {
+		// The account may no longer be given the trial it paid for: nothing was made, so
+		// the money goes back instead of the payment waiting for an apply that never comes.
+		if err := s.refundTrial(ctx, pay); err != nil {
+			// The admin sees why on the Payments page, as for an apply that failed; a
+			// refund the provider refused has said so already (trial_refund_failed).
+			if cur, qerr := s.d.Store.Q.GetPayment(ctx, id); qerr == nil && cur.Error == "" {
+				_ = s.d.Store.Q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: errCode(err), ID: id})
+			}
+			s.d.Log.Error("billing: refund of a trial", "payment", id, "err", err)
+			return err
+		}
+		return nil
 	}
 	if err != nil {
 		// Paid but not applied: the reconcile pass tries again, the admin sees why.

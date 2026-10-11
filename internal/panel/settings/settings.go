@@ -47,6 +47,9 @@ const (
 	// KeyAnyPort lets the panel's own port picks go past domain.PortPool when every port
 	// of it is taken: a new inbound with no port named, an automatic move.
 	KeyAnyPort = "any_port"
+	// KeyWideScan lets the search for REALITY sites go past the node's /24 to the rest of
+	// its /16 (scan.Options.Wide): more candidates, and many more connections.
+	KeyWideScan = "wide_sni_scan"
 	// Devices (domain.Devices): bind subscriptions to devices, on unless switched off;
 	// refuse apps that send no device id instead of seating them together, off by default.
 	KeyDeviceBinding = "device_binding"
@@ -118,6 +121,7 @@ var (
 	AutoPort      = Switch{KeyAutoPort, true}
 	AutoSNI       = Switch{KeyAutoSNI, true}
 	AnyPort       = Switch{KeyAnyPort, false}
+	WideScan      = Switch{KeyWideScan, false}
 	DeviceBinding = Switch{KeyDeviceBinding, true}
 	RequireHWID   = Switch{KeyRequireHWID, false}
 	AutoUpdate    = Switch{KeyAutoUpdate, false}

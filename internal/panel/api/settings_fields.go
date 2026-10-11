@@ -108,4 +108,6 @@ var settingFields = []settingField{
 	value("auto_sni", settings.KeyAutoSNI, false, func(b *patchSettingsBody) *bool { return b.AutoSNI }),
 	// Ports past the pool are not opened in the firewall: the panel's admin decides, not a key.
 	value("any_port", settings.KeyAnyPort, true, func(b *patchSettingsBody) *bool { return b.AnyPort }),
+	// Thousands of connections from the server, which a hoster may take for a scan.
+	value("wide_sni_scan", settings.KeyWideScan, true, func(b *patchSettingsBody) *bool { return b.WideScan }),
 }

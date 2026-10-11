@@ -3525,6 +3525,7 @@ export interface components {
             sub_title?: string;
             /** @description https://… или tg://… */
             support_url?: string;
+            wide_sni_scan?: boolean;
         };
         PatchTelegramInputBody: {
             config?: components["schemas"]["Config"];
@@ -4154,6 +4155,8 @@ export interface components {
             /** @description Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего; без срока или лимита — ∞ */
             sub_title: string;
             support_url: string;
+            /** @description Искать сайты маскировки REALITY не только в /24 ноды, но и в соседних /24 её /16, пока не найдётся достаточно (до 2 минут). Много подключений: хостер может принять это за сканирование сети */
+            wide_sni_scan: boolean;
         };
         SpeedTestView: {
             /** Format: date-time */

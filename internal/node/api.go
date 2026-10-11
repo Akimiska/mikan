@@ -178,13 +178,19 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 			return
 		}
 		defer scanning.Unlock()
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		took := nodeapi.ScanTime
+		if req.Wide {
+			took = nodeapi.WideScanTime
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), took)
 		defer cancel()
 		limit := req.Limit
 		if limit <= 0 || limit > 32 {
 			limit = 12
 		}
-		res, scanned, err := scan.Neighbors(ctx, req.IP, limit, e.TargetOptions())
+		o := e.TargetOptions()
+		o.Wide = req.Wide
+		res, scanned, err := scan.Neighbors(ctx, req.IP, limit, o)
 		if err != nil && ctx.Err() == nil {
 			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_request", Message: err.Error()})
 			return

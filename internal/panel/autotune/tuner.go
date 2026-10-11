@@ -697,7 +697,12 @@ func (t *Tuner) replaceTarget(ctx context.Context, w *world, n db.Node, x db.Inb
 		t.setStuck(x.ID, "no_target")
 		return false
 	}
-	found, err := t.nodes.ScanTargets(ctx, n.ID, nodeapi.TargetScanRequest{IP: ip, Limit: 16})
+	wide, err := t.set.On(ctx, settings.WideScan)
+	if err != nil {
+		t.log.Warn("autotune: scan targets: settings", "node", n.ID, "err", err)
+		return false
+	}
+	found, err := t.nodes.ScanTargets(ctx, n.ID, nodeapi.TargetScanRequest{IP: ip, Limit: 16, Wide: wide})
 	if err != nil {
 		t.log.Warn("autotune: scan targets", "node", n.ID, "err", err)
 		return false

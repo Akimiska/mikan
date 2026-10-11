@@ -317,11 +317,20 @@ type TargetCheckRequest struct {
 }
 
 // TargetScanRequest asks the node for REALITY targets in the /24 around IP, its public
-// address.
+// address; Wide lets it go on through the rest of the /16 (scan.Options.Wide). A node
+// older than 0.5.1.0 ignores Wide and scans the /24.
 type TargetScanRequest struct {
 	IP    string `json:"ip"`
 	Limit int    `json:"limit,omitempty"`
+	Wide  bool   `json:"wide,omitempty"`
 }
+
+// Scan times: the /24 is quick; a wide scan stops itself at WideScanTime, and the panel
+// waits a little longer than that for its answer.
+const (
+	ScanTime     = 30 * time.Second
+	WideScanTime = 2 * time.Minute
+)
 
 type TargetResult = scan.Result
 

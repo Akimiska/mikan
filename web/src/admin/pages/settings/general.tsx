@@ -108,12 +108,16 @@ export function LanguageCard({ s }: { s: Schemas["SettingsView"] }) {
 /** Global switches of the automatic fixes; each connection can opt out in its settings. */
 export function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
-  // Ports past the pool are the admin's to open in the firewall: said before it goes on.
-  const [warnAny, setWarnAny] = useState(false);
   const rows = [
     { key: "auto_port", title: t("settings.autoPort"), sub: t("settings.autoPortSub"), on: s.auto_port },
     { key: "auto_sni", title: t("settings.autoSni"), sub: t("settings.autoSniSub"), on: s.auto_sni },
   ] as const;
+  // Switches with a cost the admin takes on: said before they go on, and kept in view while on.
+  const risky = [
+    { key: "any_port", on: s.any_port, text: "anyPort" },
+    { key: "wide_sni_scan", on: s.wide_sni_scan, text: "wideScan" },
+  ] as const;
+  const [warn, setWarn] = useState<(typeof risky)[number] | null>(null);
   return (
     <section className="card glass reveal" style={{ "--i": 3 } as React.CSSProperties}>
       <div className="card-head">
@@ -128,26 +132,28 @@ export function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
             <SwitchRow label={r.title} sub={r.sub} checked={r.on} disabled={save.isPending} onChange={(v) => save.mutate({ [r.key]: v })} />
           </li>
         ))}
-        <li>
-          <SwitchRow
-            label={t("settings.anyPort")}
-            sub={t("settings.anyPortSub")}
-            checked={s.any_port}
-            disabled={save.isPending}
-            onChange={(v) => (v ? setWarnAny(true) : save.mutate({ any_port: false }))}
-          />
-          {s.any_port ? <p className="banner warn mb-3 text-xs">{t("settings.anyPortOn")}</p> : null}
-        </li>
+        {risky.map((r) => (
+          <li key={r.key}>
+            <SwitchRow
+              label={t(`settings.${r.text}`)}
+              sub={t(`settings.${r.text}Sub`)}
+              checked={r.on}
+              disabled={save.isPending}
+              onChange={(v) => (v ? setWarn(r) : save.mutate({ [r.key]: false }))}
+            />
+            {r.on ? <p className="banner warn mb-3 text-xs">{t(`settings.${r.text}On`)}</p> : null}
+          </li>
+        ))}
       </ul>
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.autoNote")}</p>
       <Confirm
-        open={warnAny}
-        onOpenChange={setWarnAny}
-        title={t("settings.anyPortConfirmTitle")}
-        text={t("settings.anyPortConfirmText")}
-        confirm={t("settings.anyPortConfirm")}
+        open={!!warn}
+        onOpenChange={(v) => !v && setWarn(null)}
+        title={warn ? t(`settings.${warn.text}ConfirmTitle`) : ""}
+        text={warn ? t(`settings.${warn.text}ConfirmText`) : ""}
+        confirm={warn ? t(`settings.${warn.text}Confirm`) : ""}
         loading={save.isPending}
-        onConfirm={() => save.mutate({ any_port: true }, { onSuccess: () => setWarnAny(false) })}
+        onConfirm={() => warn && save.mutate({ [warn.key]: true }, { onSuccess: () => setWarn(null) })}
       />
     </section>
   );

@@ -210,7 +210,11 @@ func (c *Client) CheckTarget(ctx context.Context, req TargetCheckRequest) (Targe
 // ScanTargets opens ~250 connections on the node; it runs one scan at a time.
 func (c *Client) ScanTargets(ctx context.Context, req TargetScanRequest) (TargetScan, error) {
 	var r TargetScan
-	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, 45*time.Second)
+	wait := ScanTime + 15*time.Second
+	if req.Wide {
+		wait = WideScanTime + 15*time.Second
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, wait)
 	return r, err
 }
 

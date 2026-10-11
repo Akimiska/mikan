@@ -84,6 +84,9 @@ type Telegram interface {
 	Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool)
 	// BotURL is https://t.me/<bot>, "" while the bot is off.
 	BotURL(ctx context.Context) string
+	// TrialNotGiven tells the buyer a paid trial was not given (the account had its trial)
+	// and the money comes back by hand: the payment method cannot refund it.
+	TrialNotGiven(ctx context.Context, p db.Payment)
 }
 
 type Deps struct {
@@ -1030,6 +1033,9 @@ func (s *Service) Reconcile(ctx context.Context) {
 	for _, p := range paid {
 		if ctx.Err() != nil {
 			return
+		}
+		if p.Error == TrialRefundByHand {
+			continue // the admin's now: nothing a pass can do (RefundedByHand closes it)
 		}
 		if err := s.Apply(ctx, p.ID); errors.Is(err, promo.ErrReservationExpired) && s.d.Promo != nil && p.ExternalID.Valid {
 			if _, refundErr := s.refundLatePromoPayment(ctx, p.ID, p.ExternalID.String, func(current db.Payment) error {

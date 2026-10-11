@@ -1,6 +1,7 @@
 package tgbot
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 )
 
 // The free trial in the bot: the welcome offers it to a new account, a tap gives the
@@ -69,11 +71,36 @@ func TestBotTrial(t *testing.T) {
 func TestTrialTexts(t *testing.T) {
 	for name, w := range map[string]*words{"ru": &ru, "en": &en} {
 		for field, s := range map[string]string{"trial": w.trial, "trialDone": w.trialDone, "trialUsed": w.trialUsed, "trialOff": w.trialOff, "trialOpen": w.trialOpen, "trialFail": w.trialFail,
-			"trialPaid": w.trialPaid, "trialTitle": w.trialTitle} {
+			"trialPaid": w.trialPaid, "trialTitle": w.trialTitle, "trialNotGiven": w.trialNotGiven} {
 			if s == "" || strings.ContainsAny(s, "—–") {
 				t.Errorf("%s.%s is empty or has a dash: %q", name, field, s)
 			}
 		}
+	}
+}
+
+// A paid trial that is not given (the account had its trial) and cannot be refunded by
+// the payment method: the buyer hears why and that the money comes back through support,
+// with the support link.
+func TestBotTrialNotGiven(t *testing.T) {
+	e := setup(t)
+	if err := settings.Set(e.ctx, e.set, settings.KeySupportURL, "https://t.me/demo_support"); err != nil {
+		t.Fatal(err)
+	}
+	e.tg.mu.Lock()
+	from := len(e.tg.calls)
+	e.tg.mu.Unlock()
+	e.bot.TrialNotGiven(e.ctx, db.Payment{TgID: 4242, Amount: 100, Currency: "RUB"})
+	var sent map[string]any
+	for _, c := range e.tg.wait(t, from, "sendMessage") {
+		if c.method == "sendMessage" {
+			sent = c.body
+		}
+	}
+	text, _ := sent["text"].(string)
+	kb, _ := json.Marshal(sent["reply_markup"])
+	if sent["chat_id"] != 4242.0 || !strings.Contains(text, "1 ₽") || !strings.Contains(text, "поддержку") || !strings.Contains(string(kb), "https://t.me/demo_support") {
+		t.Fatalf("the message: %v", sent)
 	}
 }
 

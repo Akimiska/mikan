@@ -251,17 +251,12 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		Addons    []addon         `json:"addons"`
 		Offers    []offer         `json:"offers"`
 		Packages  []shopPackage   `json:"packages"`
-		// Trial is the priced trial this account may buy now, if any; TrialAddons are the
-		// adapters it is sold through, those that can refund it (Stars are in Providers).
-		Trial       *offer  `json:"trial,omitempty"`
-		TrialAddons []addon `json:"trial_addons,omitempty"`
+		// Trial is the priced trial this account may buy now, if any.
+		Trial *offer `json:"trial,omitempty"`
 	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 		Providers: map[string]bool{billing.Stars: av.Stars}}
-	if to, tav, ok := h.shop.TrialOffer(ctx, tgID); ok {
+	if to, _, ok := h.shop.TrialOffer(ctx, tgID); ok {
 		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
-		for _, id := range tav.Addons {
-			out.TrialAddons = append(out.TrialAddons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
-		}
 	}
 	for _, id := range av.Addons {
 		out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})

@@ -466,3 +466,24 @@ func (b *Bot) trialInvoice(ctx context.Context, w *words, chat int64, code strin
 	text := fmt.Sprintf(w.invoice, html.EscapeString(w.trialTitle+" · "+p.TariffName), html.EscapeString(w.price(p.Amount, p.Currency)), w.payNew)
 	return text, &Keyboard{[][]Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
 }
+
+// TrialNotGiven tells the buyer a paid trial was not given, as the account had its trial,
+// and that its money comes back through support (the payment method cannot refund it), with
+// the support link when the panel has one.
+func (b *Bot) TrialNotGiven(ctx context.Context, p db.Payment) {
+	out := b.out.Load()
+	if out == nil {
+		return
+	}
+	w := wordsFor(b.lang(ctx))
+	text := fmt.Sprintf(w.trialNotGiven, html.EscapeString(w.price(p.Amount, p.Currency)))
+	var kb *Keyboard
+	if sup := b.supportURL(ctx); sup != "" {
+		kb = &Keyboard{[][]Button{{{Text: w.support, URL: sup}}}}
+	}
+	chat := p.TgID
+	out.Notice(chat, func(ctx context.Context, c *Client) error {
+		_, err := c.Send(ctx, chat, text, kb, false)
+		return err
+	}, nil)
+}

@@ -22,7 +22,7 @@ type PaymentSettingsView struct {
 	RenewResetsTraffic bool   `json:"renew_resets_traffic" doc:"Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок"`
 	TrialTariffID      *int64 `json:"trial_tariff_id" doc:"Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже"`
 	TrialStars         int64  `json:"trial_stars" doc:"Цена пробного периода в Stars; 0 вместе с trial_rub — бесплатно"`
-	TrialRub           int64  `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App через Stars или способ оплаты с возвратом денег, нужна включённая продажа"`
+	TrialRub           int64  `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App, нужна включённая продажа"`
 	Trials             int64  `json:"trials" doc:"Сколько пробных подписок выдано"`
 	Available          struct {
 		Stars  bool     `json:"stars"`
@@ -100,6 +100,7 @@ func (h *handlers) registerPayments() {
 	huma.Register(h.api, huma.Operation{OperationID: "update-payment-settings", Method: http.MethodPatch, Path: "/api/v1/payments/settings", Summary: "Изменить настройки оплаты", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.updatePaymentSettings)
 	huma.Register(h.api, huma.Operation{OperationID: "list-payments", Method: http.MethodGet, Path: "/api/v1/payments", Summary: "История платежей", Tags: tags}, h.listPayments)
 	huma.Register(h.api, huma.Operation{OperationID: "refund-payment", Method: http.MethodPost, Path: "/api/v1/payments/{id}/refund", Summary: "Вернуть Stars покупателю", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.refundPayment)
+	huma.Register(h.api, huma.Operation{OperationID: "mark-payment-refunded", Method: http.MethodPost, Path: "/api/v1/payments/{id}/refunded-by-hand", Summary: "Отметить, что деньги возвращены вручную", Description: "Оплата через способ оплаты из маркетплейса, оплаченная, но не применённая (например, пробный период, который уже нельзя выдать): админ вернул деньги в кабинете платёжной системы, платёж становится возвращённым, покупателю приходит сообщение. Stars возвращаются через refund.", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.refundedByHand)
 }
 
 func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, error) {
@@ -212,6 +213,26 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 		return nil, err
 	}
 	return &paymentSettingsOutput{Body: v}, nil
+}
+
+// refundedByHand closes a payment the admin refunded in the provider's dashboard: paid
+// through an adapter and never applied (billing.RefundedByHand).
+func (h *handlers) refundedByHand(ctx context.Context, in *userIDInput) (*paymentOutput, error) {
+	err := h.d.Billing.RefundedByHand(ctx, in.ID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, huma.Error404NotFound("not_found")
+	case errors.Is(err, billing.ErrNotRefunable):
+		return nil, huma.Error409Conflict("not_refundable")
+	case err != nil:
+		return nil, err
+	}
+	h.audit(ctx, sessionOf(ctx).AdminID, "payment.refunded_by_hand", "payment", "", map[string]any{"id": in.ID})
+	p, err := h.d.Store.Q.GetPayment(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &paymentOutput{Body: h.viewPayment(ctx, p)}, nil
 }
 
 func unixPtr(n sql.NullInt64) *time.Time {

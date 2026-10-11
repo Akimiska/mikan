@@ -7,21 +7,23 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgbot"
 )
 
 // A priced trial over HTTP: the admin sets its price, the Mini App offers it to an
-// account without a subscription through the card adapter (it can refund), the card
-// payment gives the trial subscription, and the offer is gone after that. Turning the
+// account without a subscription through the card adapter (one without refunds), the
+// card payment gives the trial subscription, and the offer is gone after that. Turning the
 // trial off clears its price.
 func TestPaidTrialOverHTTP(t *testing.T) {
-	yk := &ykAdapter{pays: map[string]addons.Status{}, refund: true}
+	yk := &ykAdapter{pays: map[string]addons.Status{}}
 	srv := httptest.NewServer(yk)
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
@@ -71,11 +73,8 @@ func TestPaidTrialOverHTTP(t *testing.T) {
 	shop := "/" + subPath + "/tg/shop"
 	pay := "/" + subPath + "/tg/pay"
 	type shopView struct {
-		Offers      []json.RawMessage `json:"offers"`
-		TrialAddons []struct {
-			Provider string `json:"provider"`
-		} `json:"trial_addons"`
-		Trial *struct {
+		Offers []json.RawMessage `json:"offers"`
+		Trial  *struct {
 			ID    int64  `json:"id"`
 			Name  string `json:"name"`
 			Rub   int64  `json:"rub"`
@@ -84,8 +83,7 @@ func TestPaidTrialOverHTTP(t *testing.T) {
 	}
 	var sv shopView
 	resp, body = h.do(http.MethodPost, shop, map[string]any{"init_data": initData(tgToken, 556, h.now)}, same)
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &sv) != nil || len(sv.Offers) != 0 || sv.Trial == nil || sv.Trial.ID != trial.ID || sv.Trial.Rub != 100 || sv.Trial.Stars != 0 ||
-		len(sv.TrialAddons) != 1 || sv.TrialAddons[0].Provider != "addon:yookassa" {
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &sv) != nil || len(sv.Offers) != 0 || sv.Trial == nil || sv.Trial.ID != trial.ID || sv.Trial.Rub != 100 || sv.Trial.Stars != 0 {
 		t.Fatalf("shop with a priced trial: %d %s", resp.StatusCode, body)
 	}
 	if resp, body := h.do(http.MethodPost, pay, map[string]any{"init_data": initData(tgToken, 556, h.now), "trial": true, "provider": "addon:yookassa", "promo_code": "X"}, same); resp.StatusCode != http.StatusBadRequest {
@@ -129,6 +127,40 @@ func TestPaidTrialOverHTTP(t *testing.T) {
 	if resp, body := h.do(http.MethodGet, api+"/payments/settings", nil, nil); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"trials":1`) {
 		t.Fatalf("trials counted: %d %s", resp.StatusCode, body)
 	}
+	// Another account takes its trial while its invoice is open, then the card payment
+	// comes: the adapter cannot refund, so the payment waits for the admin, who refunds it
+	// in YooKassa's dashboard and closes it here.
+	resp, body = h.do(http.MethodPost, pay, map[string]any{"init_data": initData(tgToken, 557, h.now), "trial": true, "provider": "addon:yookassa"}, same)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("second trial invoice: %d %s", resp.StatusCode, body)
+	}
+	if _, err := h.st.Q.TakeTrial(ctx, db.TakeTrialParams{TgID: 557, CreatedAt: h.now.Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	yk.paid("yk-2")
+	h.p.Billing.Reconcile(ctx)
+	resp, body = h.do(http.MethodGet, api+"/payments?status=paid", nil, nil)
+	var waiting struct {
+		Items []struct {
+			ID    int64  `json:"id"`
+			Error string `json:"error"`
+		} `json:"items"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &waiting) != nil || len(waiting.Items) != 1 || waiting.Items[0].Error != "trial_refund_manual" {
+		t.Fatalf("the trial waiting for a refund by hand: %d %s", resp.StatusCode, body)
+	}
+	byHand := api + "/payments/" + strconv.FormatInt(waiting.Items[0].ID, 10) + "/refunded-by-hand"
+	if resp, _ := h.do(http.MethodPost, byHand, nil, nil); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("refunded by hand without the CSRF token: %d", resp.StatusCode)
+	}
+	resp, body = h.do(http.MethodPost, byHand, nil, csrf)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"status":"refunded"`) {
+		t.Fatalf("refunded by hand: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := h.do(http.MethodPost, byHand, nil, csrf); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("refunded by hand twice: %d", resp.StatusCode)
+	}
+
 	// The trial off through the API takes its price along, as the form does: the next
 	// trial starts free.
 	resp, body = h.do(http.MethodPatch, api+"/payments/settings", map[string]any{"trial_tariff_id": 0}, csrf)

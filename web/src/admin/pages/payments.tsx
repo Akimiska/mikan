@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { History as HistoryIcon, ListChecks, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
+import { HandCoins, History as HistoryIcon, ListChecks, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, usePaymentSettings, useTariffs } from "../../api/hooks";
@@ -146,6 +146,7 @@ function History() {
   const [status, setStatus] = useState<Status | "">("");
   const [provider, setProvider] = useState<Provider | "">("");
   const [refund, setRefund] = useState<Payment | null>(null);
+  const [byHand, setByHand] = useState<Payment | null>(null);
   const addons = useAddons().data;
   const providers = [...BUILT_IN, ...(addons?.installed.map((a) => `addon:${a.id}`) ?? [])];
   const list = useInfiniteQuery({
@@ -162,6 +163,17 @@ function History() {
       void qc.invalidateQueries({ queryKey: qk.payments });
       setRefund(null);
       toast.ok(t("payments.refunded"));
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  // A payment paid through an adapter and never applied, refunded by the admin in the
+  // provider's dashboard: the panel only records it.
+  const doByHand = useMutation({
+    mutationFn: (id: number) => unwrap(api.POST("/api/v1/payments/{id}/refunded-by-hand", { params: { path: { id } } })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.payments });
+      setByHand(null);
+      toast.ok(t("payments.byHandDone"));
     },
     onError: (e) => toast.error(errorText(e)),
   });
@@ -212,7 +224,7 @@ function History() {
             <>
               <ul className="row-list" aria-busy={list.isFetching}>
                 {items.map((p) => (
-                  <PaymentRow key={p.id} p={p} provider={providerName(p.provider, addons)} onRefund={() => setRefund(p)} />
+                  <PaymentRow key={p.id} p={p} provider={providerName(p.provider, addons)} onRefund={() => setRefund(p)} onByHand={() => setByHand(p)} />
                 ))}
               </ul>
               {list.hasNextPage ? (
@@ -234,11 +246,20 @@ function History() {
         loading={doRefund.isPending}
         onConfirm={() => refund && doRefund.mutate(refund.id)}
       />
+      <Confirm
+        open={!!byHand}
+        onOpenChange={(v) => !v && setByHand(null)}
+        title={t("payments.byHandTitle", { sum: byHand ? money(byHand.amount, byHand.currency) : "" })}
+        text={t("payments.byHandText")}
+        confirm={t("payments.byHand")}
+        loading={doByHand.isPending}
+        onConfirm={() => byHand && doByHand.mutate(byHand.id)}
+      />
     </section>
   );
 }
 
-function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; onRefund: () => void }) {
+function PaymentRow({ p, provider, onRefund, onByHand }: { p: Payment; provider: string; onRefund: () => void; onByHand: () => void }) {
   const buyer = p.tg_username ? `@${p.tg_username}` : `tg ${p.tg_id}`;
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
@@ -260,12 +281,18 @@ function PaymentRow({ p, provider, onRefund }: { p: Payment; provider: string; o
           ) : null}
         </div>
         {p.error ? (
-          <div className="mt-1 text-xs text-[var(--berry-600)]">{t(p.status === "failed" ? "payments.invoiceFailed" : "payments.notApplied", { error: paymentError(p.error) })}</div>
+          <div className="mt-1 text-xs text-[var(--berry-600)]">
+            {t(p.status === "failed" ? "payments.invoiceFailed" : p.error === "trial_refund_manual" ? "payments.notAppliedByHand" : "payments.notApplied", { error: paymentError(p.error) })}
+          </div>
         ) : null}
       </div>
       {p.provider === "stars" && (p.status === "applied" || p.status === "paid") ? (
         <Button size="sm" variant="ghost" onClick={onRefund}>
           <Undo2 size={16} aria-hidden /> {t("payments.refund")}
+        </Button>
+      ) : p.provider !== "stars" && p.status === "paid" ? (
+        <Button size="sm" variant="ghost" onClick={onByHand}>
+          <HandCoins size={16} aria-hidden /> {t("payments.byHand")}
         </Button>
       ) : null}
     </li>

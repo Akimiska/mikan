@@ -943,6 +943,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/{id}/refunded-by-hand": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отметить, что деньги возвращены вручную
+         * @description Оплата через способ оплаты из маркетплейса, оплаченная, но не применённая (например, пробный период, который уже нельзя выдать): админ вернул деньги в кабинете платёжной системы, платёж становится возвращённым, покупателю приходит сообщение. Stars возвращаются через refund.
+         */
+        post: operations["mark-payment-refunded"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pools": {
         parameters: {
             query?: never;
@@ -3611,7 +3631,7 @@ export interface components {
             stars: boolean;
             /**
              * Format: int64
-             * @description Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App через Stars или способ оплаты с возвратом денег, нужна включённая продажа
+             * @description Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App, нужна включённая продажа
              */
             trial_rub: number;
             /**
@@ -7083,6 +7103,37 @@ export interface operations {
         };
     };
     "refund-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "mark-payment-refunded": {
         parameters: {
             query?: never;
             header?: never;

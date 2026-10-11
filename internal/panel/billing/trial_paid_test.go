@@ -1,9 +1,12 @@
 package billing
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -267,9 +270,12 @@ func TestPaidTrialBothPaidBeforeApply(t *testing.T) {
 	}
 }
 
-// A paid trial that may no longer be given goes back to the buyer, so it is sold only where
-// that refund can happen: Stars, and the adapters that advertise refunds.
-func TestPaidTrialOnlyWhereItCanBeRefunded(t *testing.T) {
+// A paid trial is sold through every payment method that takes its price, refunds or not.
+// One that cannot be given when it applies goes back where the method refunds. Through an
+// adapter without refunds the adapter is not asked: the payment stays paid with
+// trial_refund_manual, the buyer is told once, the reconcile pass leaves it alone, and the
+// admin closes it with RefundedByHand once the money is back. Nothing is given either way.
+func TestPaidTrialThroughAnyAdapter(t *testing.T) {
 	for _, refunds := range []bool{true, false} {
 		name := "an adapter that refunds"
 		if !refunds {
@@ -284,31 +290,118 @@ func TestPaidTrialOnlyWhereItCanBeRefunded(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.priceTrial()
-			if av := e.s.Available(ctx); len(av.Addons) != 1 {
-				t.Fatalf("the adapter sells plans either way: %+v", av)
-			}
 			o, av, ok := e.s.TrialOffer(ctx, 921)
-			_, err := e.s.TrialInvoice(ctx, 921, "addon:fake")
+			if !ok || o.Stars != 1 || o.Rub != 100 || len(av.Addons) != 1 {
+				t.Fatalf("the trial through the adapter: %+v %+v %v", o, av, ok)
+			}
+			p, err := e.s.TrialInvoice(ctx, 921, "addon:fake")
+			must(t, err)
+			// The account takes its trial in another chat while the invoice is open.
+			_, err = e.st.Q.TakeTrial(ctx, db.TakeTrialParams{TgID: 921, CreatedAt: e.now.Unix()})
+			must(t, err)
+			fa.set(p.ExternalID.String, func(s *addons.Status) { s.Status, s.Amount = "paid", p.Amount })
+			err = e.s.checkAddon(ctx, p.Provider, p.ExternalID.String)
+			got := e.payment(p.ID)
+			if e.users() != 0 {
+				t.Fatal("a trial that may not be given made a subscription")
+			}
 			if refunds {
-				if !ok || o.Stars != 1 || o.Rub != 100 || len(av.Addons) != 1 || err != nil {
-					t.Fatalf("the trial through an adapter that refunds: %+v %+v %v %v", o, av, ok, err)
+				if err != nil || got.Status != "refunded" || len(fa.refundCalls) != 1 {
+					t.Fatalf("refunded through the adapter: %v %+v %v", err, got, fa.refundCalls)
 				}
 				return
 			}
-			if !ok || o.Stars != 1 || o.Rub != 0 || len(av.Addons) != 0 {
-				t.Fatalf("the trial with an adapter that cannot refund: %+v %+v %v", o, av, ok)
+			if err != nil || got.Status != "paid" || got.Error != TrialRefundByHand {
+				t.Fatalf("the trial through an adapter without refunds: %v %+v", err, got)
 			}
-			if !errors.Is(err, ErrProviderOff) {
-				t.Fatalf("a trial invoice through an adapter that cannot refund: %v", err)
+			if len(fa.refundCalls) != 0 {
+				t.Fatalf("an adapter without refunds was asked to refund: %v", fa.refundCalls)
 			}
-			// Without Stars nothing the trial can be sold through is left.
-			c := e.s.Config(ctx)
-			c.Stars = false
-			must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, c))
-			if _, _, ok := e.s.TrialOffer(ctx, 921); ok {
-				t.Fatal("the trial offered through an adapter that cannot refund it")
+			// The reconcile pass and a repeated report leave it alone: told once.
+			e.s.Reconcile(ctx)
+			must(t, e.s.Apply(ctx, p.ID))
+			e.tg.mu.Lock()
+			told := len(e.tg.notGiven)
+			e.tg.mu.Unlock()
+			if told != 1 || e.payment(p.ID).Error != TrialRefundByHand || len(fa.refundCalls) != 0 {
+				t.Fatalf("after another pass: told %d times, %+v", told, e.payment(p.ID))
+			}
+			// The admin refunds it in the provider's dashboard and closes it.
+			must(t, e.s.RefundedByHand(ctx, p.ID))
+			got = e.payment(p.ID)
+			if got.Status != "refunded" || !got.RefundedAt.Valid || got.Error != "" {
+				t.Fatalf("refunded by hand: %+v", got)
+			}
+			if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].p.ID != p.ID || notes[0].u.ID != 0 {
+				t.Fatalf("the buyer was told %+v", notes)
+			}
+			if err := e.s.RefundedByHand(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
+				t.Fatalf("refunded by hand twice: %v", err)
 			}
 		})
+	}
+}
+
+// An adapter that is not running when the money should go back is not one without
+// refunds: the payment waits for the next pass instead of being left for a refund by hand,
+// and goes back once the adapter runs again.
+func TestPaidTrialRefundWaitsForTheAdapter(t *testing.T) {
+	e, fa, dir := adapterEnv(t, "fake")
+	runAdapter(t, dir, "fake", fa)
+	ctx := context.Background()
+	if _, err := e.s.SetAddonConfig(ctx, "fake", true, addons.Settings{"shop_id": "12", "secret_key": adapterSecret}); err != nil {
+		t.Fatal(err)
+	}
+	e.priceTrial()
+	p, err := e.s.TrialInvoice(ctx, 927, "addon:fake")
+	must(t, err)
+	_, err = e.st.Q.TakeTrial(ctx, db.TakeTrialParams{TgID: 927, CreatedAt: e.now.Unix()})
+	must(t, err)
+	n, err := e.st.Q.MarkPaymentPaid(ctx, db.MarkPaymentPaidParams{ExternalID: p.ExternalID, PaidAt: sql.NullInt64{Int64: e.now.Unix(), Valid: true}, ID: p.ID})
+	must(t, err)
+	if n != 1 {
+		t.Fatal("the trial payment not marked paid")
+	}
+	state := filepath.Join(dir, "addons", "state.json")
+	running, err := os.ReadFile(state)
+	must(t, err)
+	must(t, os.WriteFile(state, bytes.Replace(running, []byte(`"status":"running"`), []byte(`"status":"failed"`), 1), 0o600))
+	if err := e.s.Apply(ctx, p.ID); err == nil {
+		t.Fatal("a refund through an adapter that is not running passed as done")
+	}
+	if got := e.payment(p.ID); got.Status != "paid" || got.Error == "trial_refund_failed" || got.Error == "" {
+		t.Fatalf("the payment while the adapter is down: %+v", got)
+	}
+	must(t, os.WriteFile(state, running, 0o600))
+	must(t, e.s.Apply(ctx, p.ID))
+	if got := e.payment(p.ID); got.Status != "refunded" || len(fa.refundCalls) != 1 {
+		t.Fatalf("the refund once the adapter runs: %+v %v", got, fa.refundCalls)
+	}
+}
+
+// "Refunded by hand" is for a payment through an adapter that was paid and never applied:
+// Stars go back through the panel, and what was applied or never paid is not closed so.
+func TestRefundedByHandOnlyPaidAdapterPayments(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.priceTrial()
+	stars, err := e.s.TrialInvoice(ctx, 928, Stars)
+	must(t, err)
+	if err := e.s.RefundedByHand(ctx, stars.ID); !errors.Is(err, ErrNotRefunable) {
+		t.Fatalf("an open Stars invoice closed by hand: %v", err)
+	}
+	must(t, e.s.StarsPaid(ctx, 928, stars.Payload, "ch-928", "XTR", 1))
+	if err := e.s.RefundedByHand(ctx, stars.ID); !errors.Is(err, ErrNotRefunable) {
+		t.Fatalf("an applied Stars payment closed by hand: %v", err)
+	}
+	p, err := e.st.Q.CreatePayment(ctx, db.CreatePaymentParams{Provider: "addon:fake", Payload: "pending-929", TgID: 929, Kind: "new",
+		TariffID: sql.NullInt64{Int64: e.sale.ID, Valid: true}, TariffName: e.sale.Name, Amount: 100, Currency: "RUB", CreatedAt: e.now.Unix()})
+	must(t, err)
+	if err := e.s.RefundedByHand(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
+		t.Fatalf("an unpaid invoice closed by hand: %v", err)
+	}
+	if got := e.payment(p.ID); got.Status != "pending" {
+		t.Fatalf("the unpaid invoice: %+v", got)
 	}
 }
 

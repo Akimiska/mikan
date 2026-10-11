@@ -35,6 +35,9 @@ type Deps struct {
 	// Off: a bot addon holds the bot (the panel's API for addons); its screens, notices and
 	// payment messages are the addon's then, and these keep quiet. nil: never off.
 	Off func(ctx context.Context) bool
+	// Emit tells the addon holding the bot of a notice it should send (the panel's feed of
+	// events, internal/panel/events); dedupe makes a second emit a no-op. nil: none.
+	Emit func(ctx context.Context, typ string, userID, tgID int64, data any, dedupe string) error
 }
 
 // Bot is the bot's screens: the menu, the shop, the notices, the broadcasts. It gets its

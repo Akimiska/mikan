@@ -161,6 +161,7 @@ func night(t time.Time) bool {
 // once. The outbox paces them behind the replies to people in their chats.
 func (b *Bot) Notify(ctx context.Context) {
 	if b.off(ctx) {
+		b.emitNotices(ctx)
 		return
 	}
 	out := b.d.Gateway.Outbox()
@@ -304,4 +305,64 @@ func (b *Bot) Progress() BroadcastProgress {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.bcast
+}
+
+// Events of the notices, for an addon that holds the bot.
+const (
+	EventExpiring   = "user.expiring"
+	EventExpired    = "user.expired"
+	EventTraffic90  = "traffic.90"
+	EventTraffic100 = "traffic.100"
+)
+
+// NoticeEvent is what the addon is told of a notice: which subscription, and what is due.
+type NoticeEvent struct {
+	Days       int   `json:"days,omitempty"`        // user.expiring: 3 or 1
+	ExpiresAt  int64 `json:"expires_at,omitempty"`  // unix seconds
+	PeriodFrom int64 `json:"period_from,omitempty"` // traffic: the period it is about
+}
+
+// emitNotices is Notify while an addon holds the bot: the same notices, by the admin's
+// switches and once each (tg_notices), as events for the addon to word and send.
+func (b *Bot) emitNotices(ctx context.Context) {
+	if b.d.Emit == nil {
+		return
+	}
+	cfg := b.Config(ctx)
+	now := b.d.Now()
+	subs, err := b.d.Backend.Notices(ctx, now)
+	if err != nil {
+		b.d.Log.Error("telegram: notices", "err", err)
+		return
+	}
+	for _, l := range subs {
+		u := l.User
+		for _, n := range due(u, l.GrantsLeft, now, cfg.Notify) {
+			sent, err := b.d.Backend.NoticeSent(ctx, u.ID, n.kind, n.period)
+			if err != nil || sent {
+				continue
+			}
+			typ, data := EventExpiring, NoticeEvent{ExpiresAt: u.ExpiresAt.Int64}
+			switch n.kind {
+			case "expire_3d":
+				data.Days = 3
+			case "expire_1d":
+				data.Days = 1
+			case "expired":
+				typ = EventExpired
+			case "traffic_90":
+				typ, data = EventTraffic90, NoticeEvent{PeriodFrom: n.period}
+			case "traffic_100":
+				typ, data = EventTraffic100, NoticeEvent{PeriodFrom: n.period}
+			}
+			dedupe := "notice:" + n.kind + ":" + strconv.FormatInt(u.ID, 10) + ":" + strconv.FormatInt(n.period, 10)
+			if err := b.d.Emit(ctx, typ, u.ID, l.TgID, data, dedupe); err != nil {
+				b.d.Log.Error("telegram: notice event", "user", u.ID, "err", err)
+				continue
+			}
+			if err := b.d.Backend.NoticeDelivered(ctx, u.ID, n.kind, n.period, now); err != nil {
+				b.d.Log.Error("telegram: notices", "err", err)
+			}
+		}
+	}
 }

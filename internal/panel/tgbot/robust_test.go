@@ -2,6 +2,8 @@ package tgbot
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -230,5 +232,39 @@ func TestBroadcastFeedStopsWithTheOutbox(t *testing.T) {
 	b.feed(o, []int64{1, 2, 3}, func(int64) {})
 	if p := b.Progress(); p.Failed != 3 || p.Active() {
 		t.Fatalf("what a stopped outbox did not send is failed, and the progress ends: %+v", p)
+	}
+}
+
+// While an addon holds the bot the panel sends no notice itself: each due notice becomes an
+// event for the addon, once, and is recorded as told.
+func TestNoticesBecomeEventsWhileAnAddonHoldsTheBot(t *testing.T) {
+	e := setup(t)
+	const anna = 555
+	e.link(anna)
+	e.expireIn(2 * 24 * time.Hour)
+	type emitted struct {
+		typ          string
+		user, tg     int64
+		data, dedupe string
+	}
+	var got []emitted
+	e.bot.d.Off = func(context.Context) bool { return true }
+	e.bot.d.Emit = func(_ context.Context, typ string, user, tg int64, data any, dedupe string) error {
+		raw, _ := json.Marshal(data)
+		got = append(got, emitted{typ, user, tg, string(raw), dedupe})
+		return nil
+	}
+	n := e.tg.count()
+	e.bot.Notify(e.ctx)
+	e.bot.Notify(e.ctx)
+	time.Sleep(100 * time.Millisecond)
+	if e.sendsTo(anna, n) != 0 {
+		t.Fatal("the panel sent a notice while an addon holds the bot")
+	}
+	if len(got) != 1 || got[0].typ != EventExpiring || got[0].user != e.user.ID || got[0].tg != anna || !strings.Contains(got[0].data, `"days":3`) {
+		t.Fatalf("events: %+v", got)
+	}
+	if e.noticeRows() != 1 {
+		t.Fatal("the notice told as an event is not recorded")
 	}
 }

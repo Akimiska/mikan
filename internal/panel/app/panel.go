@@ -245,7 +245,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
 	p.Telegram = tgbot.New(tgbot.Deps{Backend: backend, Gateway: p.Gateway, Log: o.Log, Now: o.Now,
-		Off: func(ctx context.Context) bool { return p.AddonsAPI.Slot(ctx) != "" }})
+		Off: func(ctx context.Context) bool { return p.AddonsAPI.Slot(ctx) != "" },
+		Emit: func(ctx context.Context, typ string, userID, tgID int64, data any, dedupe string) error {
+			err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, o.Now(), typ, userID, tgID, data, dedupe) })
+			if err == nil {
+				hub.Kick()
+			}
+			return err
+		}})
 	// An addon holding the bot gets the updates through the proxy; the screens otherwise.
 	p.Gateway.SetHandler(p.AddonsAPI.BotSlot(p.Telegram))
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway

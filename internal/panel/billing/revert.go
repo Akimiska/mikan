@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/store/db"
 )
 
@@ -283,8 +284,10 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 				return err
 			}
 			done = true
-			rv, u, err = s.takeBack(ctx, q, p)
-			return err
+			if rv, u, err = s.takeBack(ctx, q, p); err != nil {
+				return err
+			}
+			return emitPayment(ctx, q, s.d.Now(), events.PaymentRefunded, p, u.ID, false)
 		case PaymentPending, PaymentExpired, PaymentPaid, PaymentFailed:
 			// Refunded before it was applied: it never will be.
 			n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: at, ID: id})
@@ -304,6 +307,7 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 	if !done {
 		return rv, nil
 	}
+	s.d.Events.Kick()
 	s.d.Users.Changed()
 	s.d.Log.Info("billing: refunded", "payment", id, "action", rv.Action, "exact", rv.Exact)
 	if tg := s.telegram(); tg != nil {

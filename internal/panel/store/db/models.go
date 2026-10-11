@@ -8,6 +8,22 @@ import (
 	"database/sql"
 )
 
+type AddonCursor struct {
+	AddonID   string
+	LastID    int64
+	UpdatedAt int64
+}
+
+type AddonEvent struct {
+	ID        int64
+	Type      string
+	UserID    sql.NullInt64
+	TgID      sql.NullInt64
+	Data      string
+	DedupeKey sql.NullString
+	CreatedAt int64
+}
+
 type AddonGrant struct {
 	AddonID     string
 	Version     string

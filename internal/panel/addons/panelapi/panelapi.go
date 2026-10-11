@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -40,7 +41,8 @@ type Grants interface {
 type Deps struct {
 	Addons *addons.Manager
 	Grants Grants
-	Store  *store.Store // nil: no kv (tests of access alone)
+	Store  *store.Store // nil: no kv and no events (tests of access alone)
+	Hub    *events.Hub
 	Log    *slog.Logger
 	Now    func() time.Time
 }
@@ -98,6 +100,7 @@ func New(d Deps) *Server {
 	s.Handle(http.MethodGet, "/self", "", s.self)
 	if d.Store != nil {
 		s.handleKV()
+		s.handleEvents()
 	}
 	return s
 }
@@ -269,6 +272,9 @@ func (s *Server) Run(ctx context.Context) {
 		case <-prune.C:
 			if s.d.Store != nil {
 				s.pruneKV(ctx)
+				if _, err := events.Prune(ctx, s.d.Store.Q, s.d.Now()); err != nil && ctx.Err() == nil {
+					s.d.Log.Warn("addons api: prune events", "err", err)
+				}
 			}
 		}
 	}

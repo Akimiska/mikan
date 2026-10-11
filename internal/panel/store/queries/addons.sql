@@ -40,3 +40,28 @@ ORDER BY key LIMIT sqlc.arg(lim)::INT;
 
 -- name: PruneAddonKV :execrows
 DELETE FROM addon_kv WHERE expires_at IS NOT NULL AND expires_at <= sqlc.arg(now)::BIGINT;
+
+-- name: LockAddonEvents :exec
+SELECT pg_advisory_xact_lock(sqlc.arg(key)::BIGINT);
+
+-- name: AddAddonEvent :exec
+INSERT INTO addon_events (type, user_id, tg_id, data, dedupe_key, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (dedupe_key) DO NOTHING;
+
+-- name: ListAddonEvents :many
+SELECT * FROM addon_events
+WHERE id > sqlc.arg(after)::BIGINT
+  AND (COALESCE(cardinality(sqlc.arg(types)::TEXT[]), 0) = 0 OR type = ANY(sqlc.arg(types)::TEXT[]))
+ORDER BY id LIMIT sqlc.arg(lim)::INT;
+
+-- name: GetAddonCursor :one
+SELECT COALESCE((SELECT last_id FROM addon_cursors WHERE addon_id = $1), 0)::BIGINT AS last_id;
+
+-- name: AckAddonEvents :exec
+INSERT INTO addon_cursors (addon_id, last_id, updated_at)
+VALUES ($1, LEAST(sqlc.arg(last_id)::BIGINT, (SELECT COALESCE(max(id), 0) FROM addon_events)), $2)
+ON CONFLICT (addon_id) DO UPDATE SET last_id = GREATEST(addon_cursors.last_id, EXCLUDED.last_id), updated_at = EXCLUDED.updated_at;
+
+-- name: PruneAddonEvents :execrows
+DELETE FROM addon_events WHERE created_at < sqlc.arg(before)::BIGINT;

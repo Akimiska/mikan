@@ -26,6 +26,7 @@ import (
 	"mikan/internal/panel/checkhost"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
@@ -213,7 +214,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		return ep.URL() + "/" + paths.Sub
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
-	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Log: o.Log, Now: o.Now})
+	hub := events.NewHub()
+	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Hub: hub, Log: o.Log, Now: o.Now})
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
 	deps.CheckHost = o.CheckHost
@@ -222,7 +224,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
 		MaxLinks: tgbot.MaxLinks,
-		Addons:   deps.Addons, SubBase: subBase, Promo: promos})
+		Addons:   deps.Addons, SubBase: subBase, Promo: promos, Events: hub})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)

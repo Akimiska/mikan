@@ -23,6 +23,7 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
@@ -117,6 +118,9 @@ type Deps struct {
 	// SubBase is https://host:port/<sub path>, where the webhooks are; "" without an address.
 	SubBase func(ctx context.Context) string
 	Promo   *promo.Service
+	// Events wakes the addons reading the feed after a payment is applied or refunded; nil: no
+	// one waits (the events are written all the same).
+	Events *events.Hub
 }
 
 type Service struct {
@@ -911,11 +915,21 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		}
 		return q.SetPaymentRevert(ctx, db.SetPaymentRevertParams{Revert: purchaseRevert(created, hadPrior, prior, u), ID: id})
 	}
-	err = s.d.Store.Tx(ctx, run)
+	// The addons hear of it in the same transaction: never of a payment that rolled back.
+	told := func(q *db.Queries) error {
+		if err := run(q); err != nil || done {
+			return err
+		}
+		return emitPayment(ctx, q, s.d.Now(), events.PaymentPaid, pay, u.ID, created)
+	}
+	err = s.d.Store.Tx(ctx, told)
 	if errors.Is(err, domain.ErrNoSlots) {
 		if err = s.d.Users.RefillSlots(ctx); err == nil {
-			err = s.d.Store.Tx(ctx, run)
+			err = s.d.Store.Tx(ctx, told)
 		}
+	}
+	if err == nil && !done {
+		s.d.Events.Kick()
 	}
 	if errors.Is(err, ErrTrialUsed) {
 		// The account may no longer be given the trial it paid for: nothing was made, so

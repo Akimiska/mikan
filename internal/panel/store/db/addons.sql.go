@@ -8,7 +8,53 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	"github.com/lib/pq"
 )
+
+const ackAddonEvents = `-- name: AckAddonEvents :exec
+INSERT INTO addon_cursors (addon_id, last_id, updated_at)
+VALUES ($1, LEAST($3::BIGINT, (SELECT COALESCE(max(id), 0) FROM addon_events)), $2)
+ON CONFLICT (addon_id) DO UPDATE SET last_id = GREATEST(addon_cursors.last_id, EXCLUDED.last_id), updated_at = EXCLUDED.updated_at
+`
+
+type AckAddonEventsParams struct {
+	AddonID   string
+	UpdatedAt int64
+	LastID    int64
+}
+
+func (q *Queries) AckAddonEvents(ctx context.Context, arg AckAddonEventsParams) error {
+	_, err := q.db.ExecContext(ctx, ackAddonEvents, arg.AddonID, arg.UpdatedAt, arg.LastID)
+	return err
+}
+
+const addAddonEvent = `-- name: AddAddonEvent :exec
+INSERT INTO addon_events (type, user_id, tg_id, data, dedupe_key, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (dedupe_key) DO NOTHING
+`
+
+type AddAddonEventParams struct {
+	Type      string
+	UserID    sql.NullInt64
+	TgID      sql.NullInt64
+	Data      string
+	DedupeKey sql.NullString
+	CreatedAt int64
+}
+
+func (q *Queries) AddAddonEvent(ctx context.Context, arg AddAddonEventParams) error {
+	_, err := q.db.ExecContext(ctx, addAddonEvent,
+		arg.Type,
+		arg.UserID,
+		arg.TgID,
+		arg.Data,
+		arg.DedupeKey,
+		arg.CreatedAt,
+	)
+	return err
+}
 
 const addonKVSize = `-- name: AddonKVSize :one
 SELECT COALESCE(sum(octet_length(value) + octet_length(key)), 0)::BIGINT AS size
@@ -54,6 +100,17 @@ func (q *Queries) DeleteAddonValue(ctx context.Context, arg DeleteAddonValuePara
 	return result.RowsAffected()
 }
 
+const getAddonCursor = `-- name: GetAddonCursor :one
+SELECT COALESCE((SELECT last_id FROM addon_cursors WHERE addon_id = $1), 0)::BIGINT AS last_id
+`
+
+func (q *Queries) GetAddonCursor(ctx context.Context, addonID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getAddonCursor, addonID)
+	var last_id int64
+	err := row.Scan(&last_id)
+	return last_id, err
+}
+
 const getAddonGrant = `-- name: GetAddonGrant :one
 SELECT addon_id, version, permissions, approved_by, approved_at FROM addon_grants WHERE addon_id = $1
 `
@@ -93,6 +150,50 @@ func (q *Queries) GetAddonValue(ctx context.Context, arg GetAddonValueParams) (A
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listAddonEvents = `-- name: ListAddonEvents :many
+SELECT id, type, user_id, tg_id, data, dedupe_key, created_at FROM addon_events
+WHERE id > $1::BIGINT
+  AND (COALESCE(cardinality($2::TEXT[]), 0) = 0 OR type = ANY($2::TEXT[]))
+ORDER BY id LIMIT $3::INT
+`
+
+type ListAddonEventsParams struct {
+	After int64
+	Types []string
+	Lim   int32
+}
+
+func (q *Queries) ListAddonEvents(ctx context.Context, arg ListAddonEventsParams) ([]AddonEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listAddonEvents, arg.After, pq.Array(arg.Types), arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AddonEvent{}
+	for rows.Next() {
+		var i AddonEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.UserID,
+			&i.TgID,
+			&i.Data,
+			&i.DedupeKey,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAddonGrants = `-- name: ListAddonGrants :many
@@ -178,6 +279,15 @@ func (q *Queries) ListAddonKeys(ctx context.Context, arg ListAddonKeysParams) ([
 	return items, nil
 }
 
+const lockAddonEvents = `-- name: LockAddonEvents :exec
+SELECT pg_advisory_xact_lock($1::BIGINT)
+`
+
+func (q *Queries) LockAddonEvents(ctx context.Context, key int64) error {
+	_, err := q.db.ExecContext(ctx, lockAddonEvents, key)
+	return err
+}
+
 const lockAddonValue = `-- name: LockAddonValue :one
 SELECT addon_id, key, value, version, expires_at, updated_at FROM addon_kv WHERE addon_id = $1 AND key = $2 FOR UPDATE
 `
@@ -199,6 +309,18 @@ func (q *Queries) LockAddonValue(ctx context.Context, arg LockAddonValueParams) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const pruneAddonEvents = `-- name: PruneAddonEvents :execrows
+DELETE FROM addon_events WHERE created_at < $1::BIGINT
+`
+
+func (q *Queries) PruneAddonEvents(ctx context.Context, before int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneAddonEvents, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const pruneAddonKV = `-- name: PruneAddonKV :execrows

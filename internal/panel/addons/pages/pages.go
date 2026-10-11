@@ -17,7 +17,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -94,8 +93,8 @@ func (p *Pages) Allowed(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	var perms []string
-	if err := json.Unmarshal([]byte(g.Permissions), &perms); err != nil {
+	perms, err := addons.DecodePermissions(g.Permissions)
+	if err != nil {
 		return err
 	}
 	if !slices.Contains(perms, Permission) {

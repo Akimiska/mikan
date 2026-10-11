@@ -209,8 +209,8 @@ func (s *Server) authenticateToken(ctx context.Context, token string) (Caller, i
 		s.d.Log.Warn("addons api: grant", "addon", id, "err", err)
 		return Caller{}, http.StatusServiceUnavailable, "unavailable"
 	}
-	var perms []string
-	if err := json.Unmarshal([]byte(g.Permissions), &perms); err != nil {
+	perms, err := addons.DecodePermissions(g.Permissions)
+	if err != nil {
 		s.d.Log.Warn("addons api: grant", "addon", id, "err", err)
 		return Caller{}, http.StatusServiceUnavailable, "unavailable"
 	}

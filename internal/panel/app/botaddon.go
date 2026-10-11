@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"time"
 
@@ -96,7 +95,6 @@ func (b *botAddon) granted(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	var perms []string
-	_ = json.Unmarshal([]byte(g.Permissions), &perms)
+	perms, _ := addons.DecodePermissions(g.Permissions)
 	return slices.Contains(perms, "bot")
 }

@@ -583,6 +583,8 @@ fn up(state: &mut State, say: &mut dyn FnMut(&str)) -> Result<()> {
             }
         }
     }
+    // Before the addons start: they call the panel at once.
+    sync_firewall(&state.panel_api_bridge, say);
     if running.is_empty() {
         if dir.join("compose.yml").exists() {
             compose(&["down", "--remove-orphans"])?;
@@ -664,6 +666,115 @@ fn parse_network(s: &str) -> Result<Ipv4Addr> {
         .filter_map(|w| w.parse::<Ipv4Addr>().ok())
         .find(|ip| gateway_ok(*ip))
         .with_context(|| format!("the network {NETWORK} has no IPv4 gateway"))
+}
+
+/// The panel's API on the bridge as ufw sees it: the gateway and the port.
+type Door = (Ipv4Addr, u16);
+
+/// The door from the panel's address on the bridge as the state holds it; None if it is no
+/// sound address.
+pub fn door(panel_api_bridge: &str) -> Option<Door> {
+    if !bridge_api(panel_api_bridge) {
+        return None;
+    }
+    let (ip, port) = panel_api_bridge.rsplit_once(':')?;
+    Some((ip.parse().ok()?, port.parse().ok()?))
+}
+
+/// The comment on our rule, for whoever reads `ufw show added`.
+const RULE_COMMENT: &str = "mikan-addons";
+
+/// The arguments of ufw for a rule that lets the bridge's containers reach the panel and
+/// nothing else of the host. Without it the default `deny incoming` drops their traffic to the
+/// gateway, where the panel listens for them. The values come from door(), so they are an
+/// IPv4 address and a number; each goes as an argument of its own, never through a shell.
+fn rule_args((ip, port): Door) -> Vec<String> {
+    ["allow", "in", "on", NETWORK, "to", &ip.to_string(), "port", &port.to_string(), "proto", "tcp"].map(str::to_owned).to_vec()
+}
+
+fn allow_args(door: Door) -> Vec<String> {
+    let mut args = rule_args(door);
+    args.extend(["comment".to_owned(), RULE_COMMENT.to_owned()]);
+    args
+}
+
+/// `--force` because ufw asks before it deletes; the comment is no part of what it matches.
+fn delete_args(door: Door) -> Vec<String> {
+    let mut args = vec!["--force".to_owned(), "delete".to_owned()];
+    args.extend(rule_args(door));
+    args
+}
+
+/// What an admin types to open the door by hand (mikan doctor).
+pub fn allow_command(door: Door) -> String {
+    format!("ufw {}", allow_args(door).join(" "))
+}
+
+/// The doors `ufw status` lists for the bridge: an allow rule from anywhere, into one IPv4
+/// address and a TCP port, on mikan-addons. Nothing else is read, so what the admin wrote for
+/// other interfaces is never touched, and a value that is no sound door is not taken.
+pub fn parse_doors(status: &str) -> Vec<Door> {
+    let on_bridge = |w: &[&str]| w.windows(2).any(|p| p[0] == "on" && p[1] == NETWORK);
+    let mut doors = Vec::new();
+    for line in status.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let Some(at) = words.iter().position(|w| *w == "ALLOW") else { continue };
+        let (to, rest) = (&words[..at], &words[at + 1..]);
+        // ufw writes the interface of an incoming rule with its destination.
+        if to.len() < 2 || !(on_bridge(to) || on_bridge(rest)) {
+            continue;
+        }
+        let rest = rest.strip_prefix(&["IN"]).unwrap_or(rest);
+        if !rest.first().is_some_and(|f| f.eq_ignore_ascii_case("anywhere")) {
+            continue;
+        }
+        let Some(port) = to[1].strip_suffix("/tcp") else { continue };
+        if let Some(d) = door(&format!("{}:{port}", to[0])) {
+            doors.push(d);
+        }
+    }
+    doors
+}
+
+/// What to run so that the bridge has the door that is wanted (None: no custom addon) and no
+/// other: an old one goes when the gateway or the port moved, the new one comes.
+fn firewall_plan(have: &[Door], want: Option<Door>) -> Vec<Vec<String>> {
+    let mut plan: Vec<Vec<String>> = Vec::new();
+    for d in have.iter().filter(|d| Some(**d) != want) {
+        let args = delete_args(*d);
+        if !plan.contains(&args) {
+            plan.push(args);
+        }
+    }
+    if let Some(w) = want
+        && !have.contains(&w)
+    {
+        plan.push(allow_args(w));
+    }
+    plan
+}
+
+/// The text of `ufw status` when ufw is there and on.
+pub fn ufw_status() -> Option<String> {
+    crate::system::output("ufw", &["status"]).filter(|s| s.contains("Status: active"))
+}
+
+/// Opens the panel's API on the bridge in ufw while a custom addon runs (panel_api_bridge is
+/// set), closes it when none does, and replaces it when the gateway or the port moved. Does
+/// nothing without an active ufw, or when the install keeps mikan out of it (MIKAN_UFW=0).
+/// A rule that cannot be made is told, not fatal: the addons run and only cannot call the
+/// panel, which doctor says.
+fn sync_firewall(panel_api_bridge: &str, say: &mut dyn FnMut(&str)) {
+    if crate::ops::Install::load().is_ok_and(|i| !i.ufw()) {
+        return;
+    }
+    let Some(status) = ufw_status() else { return };
+    for args in firewall_plan(&parse_doors(&status), door(panel_api_bridge)) {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let Err(e) = crate::system::run_quiet("ufw", &args) {
+            say(&format!("The firewall rule for the addons' bridge was not changed: {e:#}"));
+        }
+    }
 }
 
 /// Waits for the addon to come up: one serving HTTP answers its info as itself (/v1/info for
@@ -1187,6 +1298,8 @@ pub fn down() {
     if Path::new(COMPOSE_DIR).join("compose.yml").exists() {
         let _ = compose(&["down", "--remove-orphans"]);
     }
+    // No custom addon is left to call the panel there; a restore opens it again in resume.
+    sync_firewall("", &mut crate::out);
 }
 
 /// The bridge goes with mikan (mikan uninstall), after the addons are down.
@@ -1255,6 +1368,85 @@ mod tests {
         assert_eq!(fs::read_to_string(&seen).unwrap(), "2026-10-02T00:00:00Z");
         not_older(b"{}").unwrap();
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    const STATUS: &str = "Status: active
+
+To                         Action      From
+--                         ------      ----
+22/tcp                     ALLOW       Anywhere
+172.18.0.1 21355/tcp on mikan-addons ALLOW       Anywhere
+172.18.0.1 21355/tcp on mikan-addons ALLOW       Anywhere # mikan-addons
+fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
+172.18.0.1 80/udp on mikan-addons ALLOW       Anywhere
+172.18.0.1 22/tcp on mikan-addons ALLOW       Anywhere
+172.18.0.1 9000/tcp on mikan-addons DENY       Anywhere
+172.18.0.1 9001/tcp on mikan-addons ALLOW OUT   Anywhere
+172.18.0.1 9002/tcp on docker0 ALLOW       Anywhere
+172.18.0.1 9003/tcp on mikan-addons ALLOW       203.0.113.5
+10.0.0.1 9004/tcp ALLOW IN    Anywhere on mikan-addons
+";
+
+    #[test]
+    fn the_door_is_the_state_address() {
+        assert_eq!(door("172.18.0.1:21355"), Some((Ipv4Addr::new(172, 18, 0, 1), 21355)));
+        for bad in [
+            "",
+            "172.18.0.1",
+            "172.18.0.1:80",
+            "172.18.0.1:021355",
+            "0.0.0.0:21355",
+            "127.0.0.1:21355",
+            "fe80::1:21355",
+            "x; ufw reset:21355",
+        ] {
+            assert_eq!(door(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_rule_goes_as_separate_arguments() {
+        let d = door("172.18.0.1:21355").unwrap();
+        assert_eq!(
+            allow_args(d),
+            ["allow", "in", "on", "mikan-addons", "to", "172.18.0.1", "port", "21355", "proto", "tcp", "comment", "mikan-addons"]
+        );
+        assert_eq!(
+            delete_args(d),
+            ["--force", "delete", "allow", "in", "on", "mikan-addons", "to", "172.18.0.1", "port", "21355", "proto", "tcp"]
+        );
+        assert_eq!(allow_command(d), "ufw allow in on mikan-addons to 172.18.0.1 port 21355 proto tcp comment mikan-addons");
+    }
+
+    #[test]
+    fn only_our_doors_are_read_from_ufw_status() {
+        // allow rules from anywhere into an address and a TCP port on the bridge, nothing else:
+        // not other interfaces, denials, outgoing rules, rules for one address, IPv6, UDP, or
+        // a port that is not unprivileged
+        assert_eq!(
+            parse_doors(STATUS),
+            [(Ipv4Addr::new(172, 18, 0, 1), 21355), (Ipv4Addr::new(172, 18, 0, 1), 21355), (Ipv4Addr::new(10, 0, 0, 1), 9004)]
+        );
+        assert_eq!(parse_doors("Status: inactive\n"), Vec::new());
+    }
+
+    #[test]
+    fn the_firewall_follows_the_bridge() {
+        let a = (Ipv4Addr::new(172, 18, 0, 1), 21355);
+        let moved = (Ipv4Addr::new(172, 19, 0, 1), 21355);
+        let rerouted = (Ipv4Addr::new(172, 18, 0, 1), 31000);
+        // a custom addon starts: the door opens
+        assert_eq!(firewall_plan(&[], Some(a)), [allow_args(a)]);
+        // another run: nothing to do (idempotent)
+        assert!(firewall_plan(&[a], Some(a)).is_empty());
+        // the gateway or the port changed: the old rule goes, the new comes
+        assert_eq!(firewall_plan(&[a], Some(moved)), [delete_args(a), allow_args(moved)]);
+        assert_eq!(firewall_plan(&[a], Some(rerouted)), [delete_args(a), allow_args(rerouted)]);
+        // the last custom addon is gone: the door closes, once however many copies there are
+        assert_eq!(firewall_plan(&[a, a], None), [delete_args(a)]);
+        assert!(firewall_plan(&[], None).is_empty());
+        // a stale rule beside the right one is removed, the right one stays
+        assert_eq!(firewall_plan(&[moved, a], Some(a)), [delete_args(moved)]);
     }
 
     #[test]

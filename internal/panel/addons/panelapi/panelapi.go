@@ -51,6 +51,9 @@ type Deps struct {
 	Telegram Telegram
 	Settings *settings.Settings
 	SubBase  func(ctx context.Context) string
+	// Bot serves the bot's screens running as an addon (tgbot.RPCHandler): POST
+	// /panel/v2/bot/{method}, for the addon that holds the bot. nil: not served.
+	Bot http.Handler
 }
 
 // Caller is the addon a request came from and what it may do.
@@ -108,6 +111,16 @@ func New(d Deps) *Server {
 	if d.Store != nil {
 		s.handleKV()
 		s.handleEvents()
+	}
+	if d.Bot != nil {
+		s.Handle(http.MethodPost, "/bot/{method}", "bot", func(w http.ResponseWriter, r *http.Request) {
+			// The panel's data of the bot is the holder's alone, as its chats are.
+			if c, _ := CallerOf(r.Context()); s.Slot(r.Context()) != c.ID {
+				Fail(w, http.StatusForbidden, "forbidden", "the addon does not hold the bot")
+				return
+			}
+			d.Bot.ServeHTTP(w, r)
+		})
 	}
 	return s
 }

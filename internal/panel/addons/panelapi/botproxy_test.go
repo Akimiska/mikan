@@ -253,3 +253,35 @@ func TestBotCalls(t *testing.T) {
 		t.Fatalf("the bot off: %d %+v", code, a)
 	}
 }
+
+// The bot's data over the Panel API is the holder's alone.
+func TestBotRPCOnlyForTheHolder(t *testing.T) {
+	base, _ := proxyWorld(t)
+	d := base.d
+	d.Bot = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"results":["`+r.PathValue("method")+`"]}`)
+	})
+	s := New(d)
+	call := func(token string) (int, string) {
+		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:41990/panel/v2/bot/Owner", strings.NewReader(`[1]`))
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+	if code, _ := call(botToken); code != http.StatusForbidden {
+		t.Fatalf("no holder: %d", code)
+	}
+	if err := settings.Set(context.Background(), d.Settings, SlotKey, "telegram"); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := call(botToken); code != 200 || !strings.Contains(body, "Owner") {
+		t.Fatalf("the holder: %d %s", code, body)
+	}
+	if code, _ := call(strings.Repeat("k", 48)); code != http.StatusForbidden {
+		t.Fatalf("another addon with bot: %d", code)
+	}
+	if code, _ := call(newToken); code != http.StatusForbidden {
+		t.Fatalf("an addon without bot: %d", code)
+	}
+}

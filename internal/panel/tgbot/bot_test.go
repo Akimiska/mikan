@@ -295,6 +295,8 @@ type wiring struct {
 	Now      func() time.Time
 	Billing  *billing.Service
 	Limits   tgate.Limits
+	// RPC: the screens see the panel through Remote over HTTP, as the bot addon does.
+	RPC bool
 }
 
 // setup starts a bot and its gateway on a fake Bot API; with may change what they are
@@ -335,8 +337,16 @@ func setup(t *testing.T, with ...func(e *env, d *wiring)) *env {
 		f(e, &w)
 	}
 	e.gate = tgate.New(tgate.Deps{Store: w.Store, Settings: w.Settings, API: srv.URL, Log: w.Log, Now: w.Now, Limits: w.Limits, Billing: w.Billing})
-	e.bot = New(Deps{Backend: &Local{Store: w.Store, Settings: w.Settings, Binder: w.Devices, Users: w.Users, Billing: w.Billing, Gateway: e.gate,
-		SubBase: w.SubBase, MiniApp: w.MiniApp, Now: w.Now}, Gateway: e.gate, Log: w.Log, Now: w.Now})
+	var backend Backend = &Local{Store: w.Store, Settings: w.Settings, Binder: w.Devices, Users: w.Users, Billing: w.Billing, Gateway: e.gate,
+		SubBase: w.SubBase, MiniApp: w.MiniApp, Now: w.Now}
+	if w.RPC {
+		mux := http.NewServeMux()
+		mux.Handle("POST /bot/{method}", RPCHandler(backend, e.gate.Member))
+		rpc := httptest.NewServer(mux)
+		t.Cleanup(rpc.Close)
+		backend = NewRemote(rpc.URL, "token", nil)
+	}
+	e.bot = New(Deps{Backend: backend, Gateway: e.gate, Log: w.Log, Now: w.Now})
 	e.gate.SetHandler(e.bot)
 	go e.gate.Run(ctx)
 	go e.bot.Run(ctx)
@@ -371,8 +381,13 @@ func (e *env) press(from, msg int64, data string) {
 	e.tg.push(tgate.Update{CallbackQuery: &tgate.CallbackQuery{ID: "cb" + data, From: tgate.User{ID: from}, Message: &tgate.Message{MessageID: msg, Chat: tgate.Chat{ID: from, Type: "private"}}, Data: data}})
 }
 
-func TestBot(t *testing.T) {
-	e := setup(t)
+func TestBot(t *testing.T) { testBot(t) }
+
+// The same screens, seeing the panel only over the Panel API as the bot addon does.
+func TestBotOverRPC(t *testing.T) { testBot(t, func(_ *env, w *wiring) { w.RPC = true }) }
+
+func testBot(t *testing.T, with ...func(*env, *wiring)) {
+	e := setup(t, with...)
 	const anna, other = 555, 777
 
 	// The Mini App's button beside the input field is one short word: on a phone a long

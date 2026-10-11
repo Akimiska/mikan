@@ -123,6 +123,8 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	if err != nil {
 		return v, err
 	}
+	// The marketplace of payment methods: the other kinds have their own section.
+	payments := st.Of(addons.KindPayment)
 	v.Supported = m.Supported()
 	if l := st.Request; l != nil {
 		v.Last = &AddonResult{Action: l.Action, ID: l.ID, State: l.State, Error: l.Error, At: l.At}
@@ -133,8 +135,8 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	if c, err := h.catalog(ctx); err != nil {
 		v.CatalogError = "catalog_unavailable"
 	} else {
-		for _, e := range c.Adapters {
-			a, ok := st.Adapters[e.ID]
+		for _, e := range c.Of(addons.KindPayment) {
+			a, ok := payments[e.ID]
 			v.Catalog = append(v.Catalog, AddonCatalogEntry{ID: e.ID, Name: e.Name, Description: e.Description, Version: e.Version, Homepage: e.Homepage,
 				Installed: ok, Update: ok && a.Digest != e.Digest})
 		}
@@ -144,8 +146,8 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	if h.d.SubBase != nil {
 		sub = h.d.SubBase(ctx)
 	}
-	for _, id := range slices.Sorted(maps.Keys(st.Adapters)) {
-		a := st.Adapters[id]
+	for _, id := range slices.Sorted(maps.Keys(payments)) {
+		a := payments[id]
 		av := AddonView{ID: id, Version: a.Version, Status: a.Status, Error: a.Error, Name: map[string]string{}, Help: map[string]string{}, Settings: []AddonField{},
 			Available: slices.Contains(available, id), WebhookURL: h.d.Billing.AddonWebhookURL(ctx, id, sub)}
 		cfg, err := h.d.Billing.AddonConfig(ctx, id)
@@ -209,7 +211,8 @@ func (h *handlers) installAddon(ctx context.Context, in *addonIDInput) (*addonsO
 	if err != nil {
 		return nil, huma.Error502BadGateway("catalog_unavailable")
 	}
-	i := slices.IndexFunc(c.Adapters, func(e addons.Entry) bool { return e.ID == in.ID })
+	pay := c.Of(addons.KindPayment)
+	i := slices.IndexFunc(pay, func(e addons.Entry) bool { return e.ID == in.ID })
 	if i < 0 {
 		return nil, huma.Error404NotFound("addon_unknown")
 	}
@@ -217,13 +220,13 @@ func (h *handlers) installAddon(ctx context.Context, in *addonIDInput) (*addonsO
 	if err != nil {
 		return nil, err
 	}
-	if a, ok := st.Adapters[in.ID]; ok && a.Status == "running" && a.Digest == c.Adapters[i].Digest {
+	if a, ok := st.Adapters[in.ID]; ok && a.Status == "running" && a.Digest == pay[i].Digest {
 		return nil, huma.Error409Conflict("addon_current")
 	}
 	if err := h.d.Addons.Ask("install", in.ID); err != nil {
 		return nil, askErr(err)
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "addon.install", "addon", in.ID, map[string]any{"version": c.Adapters[i].Version, "digest": c.Adapters[i].Digest})
+	h.audit(ctx, sessionOf(ctx).AdminID, "addon.install", "addon", in.ID, map[string]any{"version": pay[i].Version, "digest": pay[i].Digest})
 	return h.listAddons(ctx, nil)
 }
 
@@ -237,7 +240,7 @@ func (h *handlers) removeAddon(ctx context.Context, in *addonIDInput) (*addonsOu
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := st.Adapters[in.ID]; !ok {
+	if _, ok := st.Of(addons.KindPayment)[in.ID]; !ok {
 		return nil, huma.Error404NotFound("addon_not_installed")
 	}
 	if err := h.d.Addons.Ask("remove", in.ID); err != nil {

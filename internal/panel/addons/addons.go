@@ -1,7 +1,7 @@
-// Package addons runs the payment adapters of the marketplace (getmikan/marketplace): the
-// signed catalog, what the host installed, the install and remove requests to the host,
-// and the adapter protocol (client.go). The contract is protocol v1, see PROTOCOL.md in the
-// marketplace repository.
+// Package addons runs the addons of the marketplace (getmikan/marketplace): the signed
+// catalog, what the host installed, the install and remove requests to the host, and the
+// adapter protocol (client.go). Payment adapters speak protocol 1 (PROTOCOL.md in the
+// marketplace repository); every other kind speaks protocol 2 (PROTOCOL-v2.md).
 //
 // The panel has no Docker socket: containers are the host's job. They talk through files
 // in the panel's data directory, as updates do:
@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 
@@ -34,8 +35,35 @@ import (
 // CatalogURL is where the signed catalog is published, next to its .sig.
 const CatalogURL = "https://github.com/getmikan/marketplace/releases/latest/download/index.json"
 
-// Protocol is the adapter protocol this panel speaks.
-const Protocol = 1
+// Protocol is the payment adapters' protocol; Protocol2 that of every other kind.
+const (
+	Protocol  = 1
+	Protocol2 = 2
+)
+
+// Kinds of addons. Payment adapters are protocol 1 only, the rest protocol 2 only.
+const (
+	KindPayment = "payment"
+	KindBot     = "bot"
+	KindUI      = "ui"
+	KindGeneric = "generic"
+)
+
+// Modes of a protocol 2 addon: it serves /v2/* to the panel, or it is only a client of
+// the panel (a bot on a framework with no HTTP server of its own).
+const (
+	ModeHTTP   = "http"
+	ModeClient = "client"
+)
+
+// Permissions an addon of protocol 2 may ask for; the admin approves them at install.
+var Permissions = []string{"bot", "users:read", "users:write", "billing:invoice", "events", "kv", "ui"}
+
+// MinMemMB and MaxMemMB bound what an addon may ask for; 0 is the host's default.
+const (
+	MinMemMB = 64
+	MaxMemMB = 256
+)
 
 // AdapterTimeout bounds one call to an adapter: some make two calls to their provider.
 const AdapterTimeout = 40 * time.Second
@@ -69,23 +97,74 @@ func (t Text) In(lang string) string {
 	return ""
 }
 
-// Entry is one adapter of the catalog.
+// Entry is one addon of the catalog. Kind, Mode, Permissions and Resources are protocol 2;
+// a protocol 1 entry is a payment adapter serving HTTP.
 type Entry struct {
-	ID          string `json:"id"`
-	Name        Text   `json:"name"`
-	Description Text   `json:"description"`
-	Version     string `json:"version"`
-	Protocol    int    `json:"protocol"`
-	Image       string `json:"image"`
-	Digest      string `json:"digest"`
-	MinPanel    string `json:"min_panel"`
-	Homepage    string `json:"homepage"`
+	ID          string    `json:"id"`
+	Name        Text      `json:"name"`
+	Description Text      `json:"description"`
+	Version     string    `json:"version"`
+	Protocol    int       `json:"protocol"`
+	Kind        string    `json:"kind,omitempty"`
+	Mode        string    `json:"mode,omitempty"`
+	Permissions []string  `json:"permissions,omitempty"`
+	Resources   Resources `json:"resources,omitzero"`
+	Image       string    `json:"image"`
+	Digest      string    `json:"digest"`
+	MinPanel    string    `json:"min_panel"`
+	Homepage    string    `json:"homepage"`
+}
+
+// Resources an addon asks the host for.
+type Resources struct {
+	MemMB int `json:"mem_mb,omitempty"`
 }
 
 type Catalog struct {
 	Version  int       `json:"version"`
 	Updated  time.Time `json:"updated"`
 	Adapters []Entry   `json:"adapters"`
+}
+
+// Of is the catalog's addons of one kind.
+func (c Catalog) Of(kind string) []Entry {
+	var out []Entry
+	for _, e := range c.Adapters {
+		if e.Kind == kind {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// normalize fills what protocol 1 leaves out and reports whether the entry is one this
+// panel can run: the right kind for its protocol, a known mode, known permissions, sane
+// resources. The host checks the same (installer/src/addon.rs).
+func (e *Entry) normalize() bool {
+	switch e.Protocol {
+	case Protocol:
+		if e.Kind != "" && e.Kind != KindPayment || e.Mode != "" && e.Mode != ModeHTTP || len(e.Permissions) > 0 || e.Resources != (Resources{}) {
+			return false
+		}
+		e.Kind, e.Mode = KindPayment, ModeHTTP
+		return true
+	case Protocol2:
+		if e.Mode == "" {
+			e.Mode = ModeHTTP
+		}
+		if e.Kind != KindBot && e.Kind != KindUI && e.Kind != KindGeneric || e.Mode != ModeHTTP && e.Mode != ModeClient {
+			return false
+		}
+		seen := map[string]bool{}
+		for _, p := range e.Permissions {
+			if seen[p] || !slices.Contains(Permissions, p) {
+				return false
+			}
+			seen[p] = true
+		}
+		return e.Resources.MemMB == 0 || e.Resources.MemMB >= MinMemMB && e.Resources.MemMB <= MaxMemMB
+	}
+	return false
 }
 
 // ParseCatalog checks the signature over the exact bytes, then the entries: what this
@@ -100,7 +179,7 @@ func ParseCatalog(data []byte, sig string, pub ed25519.PublicKey, panelVersion s
 	}
 	out := c.Adapters[:0]
 	for _, e := range c.Adapters {
-		if !ValidID(e.ID) || e.Protocol != Protocol || e.Image == "" || !release.ValidDigest(e.Digest) {
+		if !ValidID(e.ID) || !e.normalize() || e.Image == "" || !release.ValidDigest(e.Digest) {
 			continue
 		}
 		if e.MinPanel != "" && panelVersion != "dev" && release.Newer(e.MinPanel, panelVersion) {
@@ -112,15 +191,28 @@ func ParseCatalog(data []byte, sig string, pub ed25519.PublicKey, panelVersion s
 	return c, nil
 }
 
-// Installed is an adapter the host runs.
+// Installed is an addon the host runs. Token is what the panel calls the addon with;
+// PanelToken (protocol 2) what the addon calls the panel with.
 type Installed struct {
-	Version string `json:"version"`
-	Digest  string `json:"digest"`
-	Listen  string `json:"listen"`
-	Token   string `json:"token"`
-	Status  string `json:"status"` // running | failed
-	Error   string `json:"error,omitempty"`
-	At      string `json:"at"`
+	Version    string `json:"version"`
+	Digest     string `json:"digest"`
+	Listen     string `json:"listen"`
+	Token      string `json:"token"`
+	Protocol   int    `json:"protocol,omitempty"` // 0 is 1: states written before protocol 2
+	Kind       string `json:"kind,omitempty"`     // "" is payment
+	Mode       string `json:"mode,omitempty"`     // "" is http
+	PanelToken string `json:"panel_token,omitempty"`
+	Status     string `json:"status"` // running | failed
+	Error      string `json:"error,omitempty"`
+	At         string `json:"at"`
+}
+
+// KindOf is the addon's kind; states before protocol 2 hold payment adapters only.
+func (a Installed) KindOf() string {
+	if a.Kind == "" {
+		return KindPayment
+	}
+	return a.Kind
 }
 
 // LastRequest is how the host handled the panel's last request.
@@ -132,9 +224,24 @@ type LastRequest struct {
 	At     string `json:"at"`
 }
 
+// State is the host's report. PanelAPI is the loopback address the host gave the panel's
+// API for addons (protocol 2), HostVersion the version of the host that wrote it.
 type State struct {
-	Adapters map[string]Installed `json:"adapters"`
-	Request  *LastRequest         `json:"request,omitempty"`
+	Adapters    map[string]Installed `json:"adapters"`
+	Request     *LastRequest         `json:"request,omitempty"`
+	PanelAPI    string               `json:"panel_api,omitempty"`
+	HostVersion string               `json:"host_version,omitempty"`
+}
+
+// Of is the installed addons of one kind.
+func (s State) Of(kind string) map[string]Installed {
+	out := map[string]Installed{}
+	for id, a := range s.Adapters {
+		if a.KindOf() == kind {
+			out[id] = a
+		}
+	}
+	return out
 }
 
 // Request is what the panel asks the host to do.
@@ -301,20 +408,20 @@ func (m *Manager) Client(id string) (*Client, error) {
 		return nil, err
 	}
 	a, ok := s.Adapters[id]
-	if !ok || a.Status != "running" || a.Listen == "" {
+	if !ok || a.Status != "running" || a.Listen == "" || a.KindOf() != KindPayment {
 		return nil, ErrNotInstalled
 	}
 	return NewClient("http://"+a.Listen, a.Token, m.adapters), nil
 }
 
-// Info is the adapter's own description, asked once per installed image.
+// Info is the payment adapter's own description, asked once per installed image.
 func (m *Manager) Info(ctx context.Context, id string) (Info, error) {
 	s, err := m.State()
 	if err != nil {
 		return Info{}, err
 	}
 	a, ok := s.Adapters[id]
-	if !ok || a.Status != "running" {
+	if !ok || a.Status != "running" || a.KindOf() != KindPayment {
 		return Info{}, ErrNotInstalled
 	}
 	m.mu.Lock()

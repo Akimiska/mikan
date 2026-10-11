@@ -152,7 +152,7 @@ func (s *Service) availableAddons(ctx context.Context) []string {
 		return nil
 	}
 	var out []string
-	for id, a := range st.Adapters {
+	for id, a := range st.Of(addons.KindPayment) {
 		if a.Status != "running" {
 			continue
 		}

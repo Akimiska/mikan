@@ -62,6 +62,79 @@ func TestParseCatalog(t *testing.T) {
 	}
 }
 
+// Protocol 2 brings the other kinds: each with its mode, known permissions and sane
+// resources. A payment adapter stays protocol 1, and protocol 1 carries none of it.
+func TestParseCatalogProtocol2(t *testing.T) {
+	img := "ghcr.io/getmikan/telegram"
+	c := Catalog{Version: 1, Adapters: []Entry{
+		{ID: "telegram", Protocol: 2, Kind: KindBot, Mode: ModeHTTP, Permissions: []string{"bot", "kv"}, Resources: Resources{MemMB: 128}, Image: img, Digest: digest},
+		{ID: "script", Protocol: 2, Kind: KindBot, Mode: ModeClient, Image: img, Digest: digest},
+		{ID: "page", Protocol: 2, Kind: KindUI, Image: img, Digest: digest},
+		{ID: "yookassa", Protocol: 1, Image: img, Digest: digest},
+		{ID: "no-kind", Protocol: 2, Image: img, Digest: digest},
+		{ID: "pay-v2", Protocol: 2, Kind: KindPayment, Image: img, Digest: digest},
+		{ID: "odd-mode", Protocol: 2, Kind: KindBot, Mode: "socket", Image: img, Digest: digest},
+		{ID: "root", Protocol: 2, Kind: KindBot, Permissions: []string{"admin"}, Image: img, Digest: digest},
+		{ID: "twice", Protocol: 2, Kind: KindBot, Permissions: []string{"kv", "kv"}, Image: img, Digest: digest},
+		{ID: "greedy", Protocol: 2, Kind: KindBot, Resources: Resources{MemMB: 4096}, Image: img, Digest: digest},
+		{ID: "tiny", Protocol: 2, Kind: KindBot, Resources: Resources{MemMB: 8}, Image: img, Digest: digest},
+		{ID: "v1-bot", Protocol: 1, Kind: KindBot, Image: img, Digest: digest},
+		{ID: "v1-perms", Protocol: 1, Permissions: []string{"kv"}, Image: img, Digest: digest},
+		{ID: "v3", Protocol: 3, Kind: KindBot, Image: img, Digest: digest},
+	}}
+	data, sig, pub := signed(t, c)
+	got, err := ParseCatalog(data, sig, pub, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, e := range got.Adapters {
+		ids = append(ids, e.ID)
+	}
+	if strings.Join(ids, ",") != "telegram,script,page,yookassa" {
+		t.Fatalf("kept %v", ids)
+	}
+	if e := got.Adapters[2]; e.Mode != ModeHTTP {
+		t.Fatalf("a protocol 2 entry without a mode serves HTTP: %+v", e)
+	}
+	if e := got.Adapters[3]; e.Kind != KindPayment || e.Mode != ModeHTTP {
+		t.Fatalf("a protocol 1 entry is a payment adapter: %+v", e)
+	}
+	if pay := got.Of(KindPayment); len(pay) != 1 || pay[0].ID != "yookassa" {
+		t.Fatalf("payments: %+v", pay)
+	}
+}
+
+// Before protocol 2 the host wrote payment adapters only, with no kind: they stay payment
+// adapters, and the payment side sees nothing else.
+func TestStateKinds(t *testing.T) {
+	s := State{Adapters: map[string]Installed{
+		"yookassa": {Status: "running"},
+		"telegram": {Protocol: Protocol2, Kind: KindBot, Status: "running", Listen: "127.0.0.1:1", Token: "tok"},
+	}}
+	if pay := s.Of(KindPayment); len(pay) != 1 || pay["yookassa"].Status != "running" {
+		t.Fatalf("payments: %+v", pay)
+	}
+	if bots := s.Of(KindBot); len(bots) != 1 {
+		t.Fatalf("bots: %+v", bots)
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "addons"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(s)
+	if err := os.WriteFile(filepath.Join(dir, "addons", "state.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := New(dir, "", "dev", slog.New(slog.DiscardHandler), time.Now)
+	if _, err := m.Client("telegram"); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("a bot is no payment adapter to call: %v", err)
+	}
+	if _, err := m.Info(context.Background(), "telegram"); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("a bot has no payment description: %v", err)
+	}
+}
+
 // fakeAdapter answers protocol v1 behind a token.
 func fakeAdapter(t *testing.T, infos *atomic.Int64) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

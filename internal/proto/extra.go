@@ -164,8 +164,12 @@ func (c *clientBuilder) finishExtra() (Client, bool) {
 		c.y["username"], c.y["password"], c.y["sni"], c.y["alpn"], c.y["udp"] = s.Name, s.Secret, sni, alpn, true
 		return Client{Mihomo: c.y}, true
 	case "mieru":
-		// mihomo 1.19.31 does not tell the node who sends UDP over Mieru: TCP only.
-		c.y["transport"], c.y["username"], c.y["password"], c.y["udp"] = "TCP", s.Name, s.Secret, false
+		// mieru runs over TCP, but mihomo 1.19.32's mieru client tunnels UDP over that
+		// stream (SupportUOT + ListenPacketContext). udp:true is needed so QUIC/HTTP3
+		// (claude.ai, Cloudflare) goes through the tunnel — with udp:false those UDP
+		// flows had nowhere to go and the site showed "region unavailable" on mieru
+		// while every other protocol worked.
+		c.y["transport"], c.y["username"], c.y["password"], c.y["udp"] = "TCP", s.Name, s.Secret, true
 		return Client{Mihomo: c.y}, true
 	case "shadowsocks":
 		cipher, key := c.t.str("cipher"), c.t.str("password")

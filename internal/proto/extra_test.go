@@ -59,7 +59,7 @@ func TestExtraTypes(t *testing.T) {
 			}
 			m := c.Mihomo
 			// mihomo 1.19.31 does not tell the node who sends UDP over Mieru: TCP only.
-			if m["type"] != "mieru" || m["transport"] != "TCP" || m["username"] != "s000001" || m["password"] != "S3cr3t+/=" || m["udp"] != false {
+			if m["type"] != "mieru" || m["transport"] != "TCP" || m["username"] != "s000001" || m["password"] != "S3cr3t+/=" || m["udp"] != true {
 				t.Errorf("mieru client: %v", m)
 			}
 		}},

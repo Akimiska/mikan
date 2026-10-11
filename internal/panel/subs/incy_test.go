@@ -25,15 +25,23 @@ func TestIncyRoutingLine(t *testing.T) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		t.Fatalf("json: %v", err)
 	}
-	// Russian geo goes direct, default is proxy, match order resolves IP only as fallback.
+	// Russian domains go direct by plain-domain match (NO geosite: — incy's geosite.dat
+	// has no RU code and one unknown tag rejects the whole Xray routing config).
 	hasRU := false
+	hasGeosite := false
 	for _, s := range p.DirectSites {
-		if s == "geosite:ru" || s == "geosite:category-ru" {
+		if s == "ru" || s == "yandex.net" || s == "vk.com" {
 			hasRU = true
+		}
+		if strings.HasPrefix(s, "geosite:") {
+			hasGeosite = true
 		}
 	}
 	if !hasRU {
-		t.Errorf("DirectSites must carry Russian geosite: %v", p.DirectSites)
+		t.Errorf("DirectSites must carry plain RU domains: %v", p.DirectSites)
+	}
+	if hasGeosite {
+		t.Errorf("DirectSites must NOT use geosite: (breaks incy Xray config): %v", p.DirectSites)
 	}
 	hasRUIP := false
 	for _, s := range p.DirectIP {

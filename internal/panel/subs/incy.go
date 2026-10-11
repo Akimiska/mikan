@@ -26,6 +26,27 @@ type incyRoutingProfile struct {
 	LastUpdated    int64    `json:"LastUpdated"`
 }
 
+// ruDirectDomains are the Russian services sent past the tunnel by plain-domain match
+// (incy accepts "конкретные домены" without a geosite .dat). geoip:ru below already
+// catches everything hosted on RU IPs; this list covers big RU brands that may sit on
+// foreign CDNs. NO geosite: entries — incy's bundled geosite.dat has no "ru"/"category-ru"
+// code, and one unknown geosite tag makes Xray reject the WHOLE routing config
+// ("illegal domain rule: geosite:ru > failed to check code RU from geosite.dat").
+var ruDirectDomains = []string{
+	// TLDs as suffix matches (incy/Xray treat a bare domain as suffix).
+	"ru", "рф", "xn--p1ai", "su",
+	// Major RU services whose domains are not .ru.
+	"yandex.net", "yandex.com", "ya.ru", "yastatic.net", "yandexcloud.net",
+	"vk.com", "vk.cc", "vk-cdn.net", "vkuservideo.net", "userapi.com", "mycdn.me",
+	"mail.ru", "mradio.ru", "ok.ru", "odnoklassniki.ru",
+	"gosuslugi.ru", "sberbank.ru", "sber.ru", "sbrf.ru",
+	"wildberries.ru", "wbbasket.ru", "wildberries.by",
+	"ozon.ru", "ozon.com", "ozonusercontent.com",
+	"avito.ru", "avito.st", "2gis.com", "2gis.ru",
+	"kinopoisk.ru", "rutube.ru", "dzeninfra.ru", "zen.yandex.ru",
+	"gismeteo.ru", "rbc.ru", "ria.ru", "tinkoff.ru", "tbank.ru",
+}
+
 // incyRoutingLine builds the "://routing/onadd/{base64}" subscription line carrying the
 // RU-direct split for an incy-family client. Returns "" when routing must stay global
 // (RoutingAll) — then everything goes through the tunnel and no profile is sent.
@@ -38,10 +59,11 @@ func incyRoutingLine(r Routing, lastUpdated int64) string {
 	}
 	prof := incyRoutingProfile{
 		Name: "AoiVPN",
-		// Russian sites and IPs go direct: they must see the real RU IP, and routing them
-		// through a foreign exit is what makes services flag the VPN.
-		DirectSites: []string{"geosite:ru", "geosite:category-ru", "geosite:yandex", "geosite:category-gov-ru"},
-		DirectIP:    []string{"geoip:ru", "geoip:private"},
+		// Russian domains + RU-geo IPs go direct: they must see the real RU IP, routing
+		// them through a foreign exit is what makes services flag the VPN. No geosite —
+		// see ruDirectDomains above.
+		DirectSites: ruDirectDomains,
+		DirectIP:    []string{"geoip:ru", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"},
 		// Everything else proxied by default; no explicit proxy matchers needed.
 		ProxySites:  []string{},
 		ProxyIP:     []string{},
@@ -72,5 +94,6 @@ func incyRoutingHeader(r Routing, lastUpdated int64) string {
 }
 
 // incyRoutingEpoch is bumped by hand whenever incyRoutingLine's rule set changes, so the
-// client replaces its stored "AoiVPN" profile. 2026-10-11: first version.
-const incyRoutingEpoch = 1760140800
+// client replaces its stored "AoiVPN" profile. 2026-10-11 v2: dropped geosite:* (incy's
+// geosite.dat has no RU code → Xray rejected the whole config), plain RU domains + geoip:ru.
+const incyRoutingEpoch = 1760200000

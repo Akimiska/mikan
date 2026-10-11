@@ -426,6 +426,29 @@ func TestPaidTrialRefundReportedMeanwhile(t *testing.T) {
 	}
 }
 
+// The trial's money went back, but the payment moved on meanwhile (another pass applied
+// it): the error is the admin's to settle, so the payment carries it for the Payments page.
+func TestPaidTrialChangedWhileRefunded(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.priceTrial()
+	p, err := e.s.TrialInvoice(ctx, 926, Stars)
+	must(t, err)
+	_, err = e.st.Q.TakeTrial(ctx, db.TakeTrialParams{TgID: 926, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.tg.onRefund = func() {
+		if _, err := e.st.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: PaymentApplied, ID: p.ID, OldStatus: PaymentPaid}); err != nil {
+			t.Error(err)
+		}
+	}
+	if err := e.s.StarsPaid(ctx, 926, p.Payload, "ch-changed", "XTR", 1); err == nil {
+		t.Fatal("a trial payment that changed while refunded passed as done")
+	}
+	if got := e.payment(p.ID); got.Status != "applied" || got.Error != "the trial payment changed while its money was going back" {
+		t.Fatalf("the payment that changed: %+v", got)
+	}
+}
+
 // What was true at the invoice is asked again before the Stars are taken: an account that
 // became a customer in between pays nothing.
 func TestPaidTrialPreCheckoutAsksAgain(t *testing.T) {

@@ -901,7 +901,16 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 	if errors.Is(err, ErrTrialUsed) {
 		// The account may no longer be given the trial it paid for: nothing was made, so
 		// the money goes back instead of the payment waiting for an apply that never comes.
-		return s.refundTrial(ctx, pay)
+		if err := s.refundTrial(ctx, pay); err != nil {
+			// The admin sees why on the Payments page, as for an apply that failed; a
+			// refund the provider refused has said so already (trial_refund_failed).
+			if cur, qerr := s.d.Store.Q.GetPayment(ctx, id); qerr == nil && cur.Error == "" {
+				_ = s.d.Store.Q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: errCode(err), ID: id})
+			}
+			s.d.Log.Error("billing: refund of a trial", "payment", id, "err", err)
+			return err
+		}
+		return nil
 	}
 	if err != nil {
 		// Paid but not applied: the reconcile pass tries again, the admin sees why.

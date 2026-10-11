@@ -116,7 +116,7 @@ func New(d Deps) *Server {
 	if d.Bot != nil {
 		s.Handle(http.MethodPost, "/bot/{method}", "bot", func(w http.ResponseWriter, r *http.Request) {
 			// The panel's data of the bot is the holder's alone, as its chats are.
-			if c, _ := CallerOf(r.Context()); s.Slot(r.Context()) != c.ID {
+			if c, _ := CallerOf(r.Context()); !s.holds(r.Context(), c) {
 				Fail(w, http.StatusForbidden, "forbidden", "the addon does not hold the bot")
 				return
 			}
@@ -168,6 +168,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBody)
 	s.mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, c)))
+}
+
+// longPoll is what both feeds (events, getUpdates) wait with: read until it finds something
+// or wait is over, sleeping on the hub between tries. A kick may come before the commit it
+// announces, so a try that finds nothing sleeps at most a second, not until the next kick.
+// An error is read's, or ctx's when the request ended meanwhile.
+func longPoll[T any](ctx context.Context, hub *events.Hub, wait time.Duration, read func() ([]T, error)) ([]T, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		// Taken before the read: what is committed after the read kicks it.
+		woken := hub.Wait()
+		rows, err := read()
+		if err != nil || len(rows) > 0 || !time.Now().Before(deadline) {
+			return rows, err
+		}
+		t := time.NewTimer(min(time.Until(deadline), time.Second))
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-woken:
+		case <-t.C:
+		}
+		t.Stop()
+	}
 }
 
 // authenticate finds the running addon of protocol 2 the token belongs to, and its grant;

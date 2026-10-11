@@ -69,36 +69,24 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 		}
 		after = cur
 	}
-	deadline := time.Now().Add(time.Duration(wait) * time.Second)
-	for {
-		// Taken before the read: an event committed after the read kicks it.
-		woken := s.d.Hub.Wait()
-		rows, err := s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, Lim: int32(limit)})
-		if err != nil {
-			s.internal(w, "events", err)
-			return
-		}
-		if len(rows) > 0 || !time.Now().Before(deadline) {
-			out := struct {
-				Events []events.Event `json:"events"`
-			}{Events: make([]events.Event, 0, len(rows))}
-			for _, e := range rows {
-				out.Events = append(out.Events, events.Event{ID: e.ID, Type: e.Type, At: time.Unix(e.CreatedAt, 0).UTC(),
-					UserID: e.UserID.Int64, TgID: e.TgID.Int64, Data: json.RawMessage(e.Data)})
-			}
-			Write(w, http.StatusOK, out)
-			return
-		}
-		t := time.NewTimer(min(time.Until(deadline), time.Second))
-		select {
-		case <-r.Context().Done():
-			t.Stop()
-			return
-		case <-woken:
-		case <-t.C:
-		}
-		t.Stop()
+	rows, err := longPoll(r.Context(), s.d.Hub, time.Duration(wait)*time.Second, func() ([]db.AddonEvent, error) {
+		return s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, Lim: int32(limit)})
+	})
+	if r.Context().Err() != nil {
+		return
 	}
+	if err != nil {
+		s.internal(w, "events", err)
+		return
+	}
+	out := struct {
+		Events []events.Event `json:"events"`
+	}{Events: make([]events.Event, 0, len(rows))}
+	for _, e := range rows {
+		out.Events = append(out.Events, events.Event{ID: e.ID, Type: e.Type, At: time.Unix(e.CreatedAt, 0).UTC(),
+			UserID: e.UserID.Int64, TgID: e.TgID.Int64, Data: json.RawMessage(e.Data)})
+	}
+	Write(w, http.StatusOK, out)
 }
 
 func (s *Server) eventsAck(w http.ResponseWriter, r *http.Request) {

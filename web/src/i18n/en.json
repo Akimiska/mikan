@@ -2831,7 +2831,7 @@
       "events": "Events",
       "eventsText": "learns about the panel's events: payments and refunds",
       "kv": "Storage",
-      "kvText": "keeps its own data in the panel's database, up to 5 MB",
+      "kvText": "keeps its own data in the panel's database, up to 100 MB",
       "ui": "Pages",
       "uiText": "adds its own pages to the admin panel"
     },

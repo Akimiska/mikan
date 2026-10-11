@@ -40,12 +40,13 @@ type Grants interface {
 }
 
 type Deps struct {
-	Addons *addons.Manager
-	Grants Grants
-	Store  *store.Store // nil: no kv and no events (tests of access alone)
-	Hub    *events.Hub
-	Log    *slog.Logger
-	Now    func() time.Time
+	Addons  *addons.Manager
+	Grants  Grants
+	Store   *store.Store // nil: no kv and no events (tests of access alone)
+	KVQuota int64        // bytes one addon keeps in kv; 0: MaxKVBytes
+	Hub     *events.Hub
+	Log     *slog.Logger
+	Now     func() time.Time
 	// The Bot API proxy (botproxy.go): the gateway, the settings that name the addon holding
 	// the bot, and where the panel's own pages are (SubBase, for Mini App buttons).
 	Telegram Telegram

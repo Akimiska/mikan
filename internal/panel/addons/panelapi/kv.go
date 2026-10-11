@@ -19,8 +19,8 @@ import (
 // compare-and-set; if_absent makes a lock or a dedupe mark (an event handled once).
 
 const (
-	MaxValue   = 64 << 10 // one value
-	MaxKVBytes = 5 << 20  // all of one addon's live keys and values
+	MaxValue   = 64 << 10  // one value
+	MaxKVBytes = 100 << 20 // all of one addon's live keys and values, by default (Deps.KVQuota)
 	MaxTTL     = 366 * 24 * 60 * 60
 	maxList    = 1000
 )
@@ -133,7 +133,7 @@ func (s *Server) kvPut(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if size+int64(len(k)+len(value)) > MaxKVBytes {
+		if size+int64(len(k)+len(value)) > s.kvQuota() {
 			return errQuota
 		}
 		// The version goes on from an expired value too, so its old ETag never matches again.
@@ -144,7 +144,7 @@ func (s *Server) kvPut(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errConflict):
 		Fail(w, http.StatusConflict, "conflict", "the value is not what the condition expects")
 	case errors.Is(err, errQuota):
-		Fail(w, http.StatusInsufficientStorage, "quota_exceeded", "an addon keeps at most 5 MiB")
+		Fail(w, http.StatusInsufficientStorage, "quota_exceeded", "the addon's store is full")
 	case err != nil:
 		s.internal(w, "kv put", err)
 	default:
@@ -243,4 +243,13 @@ func (s *Server) pruneKV(ctx context.Context) {
 func (s *Server) internal(w http.ResponseWriter, what string, err error) {
 	s.d.Log.Error("addons api: "+what, "err", err)
 	Fail(w, http.StatusInternalServerError, "internal", "the panel could not do it")
+}
+
+// kvQuota is how much one addon may keep: enough for any bot, and a bound so that an addon
+// writing without end cannot fill the server's disk under the panel.
+func (s *Server) kvQuota() int64 {
+	if s.d.KVQuota > 0 {
+		return s.d.KVQuota
+	}
+	return MaxKVBytes
 }

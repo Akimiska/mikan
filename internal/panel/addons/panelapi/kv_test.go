@@ -154,9 +154,15 @@ func TestKVLimits(t *testing.T) {
 	if r := kv(s, newToken, http.MethodPut, "/t?ttl=0", []byte("v"), nil); r.status != 400 {
 		t.Fatalf("ttl 0: %d", r.status)
 	}
+	// A small quota of this test's own: the default is too big to fill quickly.
+	const quota = 1 << 20
+	s.d.KVQuota = quota
+	if s.kvQuota() != quota || (&Server{}).kvQuota() != MaxKVBytes {
+		t.Fatal("the quota is not taken from Deps")
+	}
 	value := bytes.Repeat([]byte("x"), MaxValue)
 	n := 0
-	for ; n < MaxKVBytes/MaxValue+2; n++ {
+	for ; n < quota/MaxValue+2; n++ {
 		r := kv(s, newToken, http.MethodPut, fmt.Sprintf("/fill/%03d", n), value, nil)
 		if r.status == http.StatusInsufficientStorage {
 			break
@@ -165,7 +171,7 @@ func TestKVLimits(t *testing.T) {
 			t.Fatalf("fill %d: %d %s", n, r.status, r.body)
 		}
 	}
-	if n == 0 || n > MaxKVBytes/MaxValue {
+	if n == 0 || n > quota/MaxValue {
 		t.Fatalf("the quota took %d values of 64 KiB", n)
 	}
 	// rewriting a key in place is not counted twice

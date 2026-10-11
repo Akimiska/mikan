@@ -1342,7 +1342,7 @@
     "updatesChecked": "checked {ago}",
     "updatesError": "Could not check: {e}",
     "wideScan": "Search wider for camouflage sites",
-    "wideScanSub": "The REALITY site search checks not only the node's /24 neighbours but the other /24s of its /16 too, the nearest first, until it finds enough (up to 2 minutes). More sites to choose from.",
+    "wideScanSub": "The REALITY site search checks not only the node's /24 neighbours but the other /24s of its /16 too, the nearest first, and stops at 20 sites found or after 2 minutes. More sites to choose from.",
     "wideScanOn": "Each search opens up to a few thousand connections from the node's server: a hoster may take it for a network scan.",
     "wideScanConfirmTitle": "Search the whole /16 for camouflage sites?",
     "wideScanConfirmText": "Instead of ~250 addresses the node checks up to a few thousand nearby addresses on port 443. Some hosters (Hetzner, OVH and others) treat that as a network scan and may send an abuse report or limit the server. Turn it on when there are too few good sites nearby.",

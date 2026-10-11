@@ -191,9 +191,13 @@ func classify(err error) string {
 	return "handshake"
 }
 
+// WideEnough is where a wide search stops: this many sites found is plenty to choose from,
+// and every further connection is one more the hoster may count.
+const WideEnough = 20
+
 // Neighbors scans the /24 around ip for usable targets and returns the best ones by RTT.
 // With o.Wide it goes on through the /24s next to it in the /16 (wideBlocks) until it has
-// limit sites or ctx ends.
+// enough sites (limit, at most WideEnough) or ctx ends.
 func Neighbors(ctx context.Context, ip string, limit int, o Options) (found []Result, scanned int, err error) {
 	self, err := netip.ParseAddr(ip)
 	if err != nil || !self.Is4() {
@@ -208,12 +212,24 @@ func Neighbors(ctx context.Context, ip string, limit int, o Options) (found []Re
 	if o.Wide {
 		blocks = append(blocks, wideBlocks(self)...)
 	}
+	enough := 0 // the own /24 is scanned whole, as it always was
+	if o.Wide {
+		enough = WideEnough
+		if limit > 0 && limit < enough {
+			enough = limit
+		}
+	}
 	seen := map[string]bool{}
 	for i, block := range blocks {
-		if i > 0 && (ctx.Err() != nil || limit > 0 && len(found) >= limit) {
+		if i > 0 && (ctx.Err() != nil || len(found) >= enough) {
 			break
 		}
-		f, n := scanBlock(ctx, block, self, o, seen)
+		// Past the own /24 a block stops as soon as the search has enough.
+		want := 0
+		if i > 0 {
+			want = enough - len(found)
+		}
+		f, n := scanBlock(ctx, block, self, o, seen, want)
 		found, scanned = append(found, f...), scanned+n
 	}
 	sort.Slice(found, func(i, j int) bool { return found[i].RTTms < found[j].RTTms })
@@ -245,8 +261,11 @@ func wideBlocks(self netip.Addr) []netip.Prefix {
 }
 
 // scanBlock checks every host of one /24 for a usable target; seen keeps a name found in
-// another block from coming twice.
-func scanBlock(ctx context.Context, prefix netip.Prefix, self netip.Addr, o Options, seen map[string]bool) (found []Result, scanned int) {
+// another block from coming twice. With want > 0 it starts no more connections once it
+// has found that many.
+func scanBlock(ctx context.Context, prefix netip.Prefix, self netip.Addr, o Options, seen map[string]bool, want int) (found []Result, scanned int) {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	var (
 		mu  sync.Mutex
 		wg  sync.WaitGroup
@@ -283,9 +302,12 @@ func scanBlock(ctx context.Context, prefix netip.Prefix, self netip.Addr, o Opti
 				return
 			}
 			mu.Lock()
-			if !seen[r.SNI] {
+			if !seen[r.SNI] && (want == 0 || len(found) < want) {
 				seen[r.SNI] = true
 				found = append(found, r)
+				if want > 0 && len(found) >= want {
+					stop() // enough: the connections still open end, no new ones start
+				}
 			}
 			mu.Unlock()
 		}(a)

@@ -174,15 +174,20 @@ func (d Deps) Scan(ctx context.Context, req ScanRequest) (Scan, error) {
 		r := d.check(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(PanelPort(ctx, d.Settings))), domain)
 		res.SelfSteal = &r
 	}
-	// Past the /24 only when the admin allowed it: many more connections.
+	// Past the /24 only when the admin allowed it: many more connections, and up to
+	// scan.WideEnough sites to choose from.
 	wide, err := d.Settings.On(ctx, settings.WideScan)
 	if err != nil {
 		return res, err
 	}
+	limit := ScanLimit
+	if wide {
+		limit = scan.WideEnough
+	}
 	// The node scans its own network, so RTTs are what REALITY will see. A node older than
 	// 0.3 cannot: then the panel scans for it.
 	if d.ScanTargets != nil {
-		if r, err := d.ScanTargets(ctx, nodeapi.TargetScanRequest{IP: ip, Limit: ScanLimit, Wide: wide}); err == nil {
+		if r, err := d.ScanTargets(ctx, nodeapi.TargetScanRequest{IP: ip, Limit: limit, Wide: wide}); err == nil {
 			res.Scanned, res.FromNode = r.Scanned, true
 			if r.Results != nil {
 				res.Results = r.Results
@@ -201,7 +206,7 @@ func (d Deps) Scan(ctx context.Context, req ScanRequest) (Scan, error) {
 	sctx, cancel := context.WithTimeout(ctx, took)
 	defer cancel()
 	// Public addresses only: never the neighborhood of this host's own network.
-	found, scanned, err := neighbors(sctx, ip, ScanLimit, scan.Options{Wide: wide})
+	found, scanned, err := neighbors(sctx, ip, limit, scan.Options{Wide: wide})
 	if err != nil && sctx.Err() == nil {
 		return res, &NoIPError{Host: ip, Err: err}
 	}

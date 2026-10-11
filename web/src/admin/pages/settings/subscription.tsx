@@ -8,6 +8,7 @@ import { t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { fieldErrors } from "../../../lib/fields";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
+import { ReissueRules } from "./reissue-rules";
 import { useSaveSettings } from "./shared";
 import { LimitPicker } from "../user/limit-picker";
 
@@ -272,6 +273,7 @@ export function DevicesCard({ s }: { s: Schemas["SettingsView"] }) {
         </li>
       </ul>
       {s.device_binding ? <UnbindRules s={s} /> : null}
+      <ReissueRules s={s} />
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.devicesNote")}</p>
     </section>
   );

@@ -97,3 +97,14 @@ ON CONFLICT (slot_id) DO UPDATE SET up = slot_traffic.up + excluded.up, down = s
 -- What each of a user's bound devices used since it was bound.
 SELECT d.id AS device_id, COALESCE(t.up, 0)::bigint AS up, COALESCE(t.down, 0)::bigint AS down
 FROM bound_devices d LEFT JOIN slot_traffic t ON t.slot_id = d.slot_id WHERE d.user_id = $1;
+
+-- name: AddLinkReissue :exec
+-- The subscriber reissued their link: it counts against the admin's limit.
+INSERT INTO link_reissues (user_id, at) VALUES ($1, $2);
+
+-- name: ListLinkReissuesSince :many
+-- The subscriber's own reissues after a moment, the oldest first.
+SELECT at FROM link_reissues WHERE user_id = $1 AND at > $2 ORDER BY at;
+
+-- name: DeleteLinkReissuesBefore :exec
+DELETE FROM link_reissues WHERE at < $1;

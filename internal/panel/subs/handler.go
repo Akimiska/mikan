@@ -76,12 +76,19 @@ type Binder interface {
 	Banned(ctx context.Context, userID int64, hwid string) (bool, error)
 }
 
+// Reissuer gives a subscription a new link at its subscriber's request (domain.Users).
+type Reissuer interface {
+	ReissueByOwner(ctx context.Context, userID int64, via string) (db.User, error)
+	ReissueState(ctx context.Context, userID int64) (domain.ReissueState, error)
+}
+
 type Handler struct {
-	st      *store.Store
-	cfg     func(ctx context.Context) (Config, error)
-	page    http.Handler // browser page (SPA entry); nil = plain links
-	now     func() time.Time
-	devices Binder
+	st       *store.Store
+	cfg      func(ctx context.Context) (Config, error)
+	page     http.Handler // browser page (SPA entry); nil = plain links
+	now      func() time.Time
+	devices  Binder
+	reissuer Reissuer // nil: the Mini App has no new-link button
 	// trustProxy takes the client's IP from X-Forwarded-For (a reverse proxy in front).
 	trustProxy bool
 	tg         Telegram         // nil: no bot
@@ -100,6 +107,9 @@ type Telegram interface {
 	LinkURL(ctx context.Context, userID int64) string
 	MiniAppUser(ctx context.Context, initData string) (int64, []db.User, error)
 }
+
+// SetReissuer lets subscribers get a new link from the Mini App.
+func (h *Handler) SetReissuer(r Reissuer) { h.reissuer = r }
 
 // SetTelegram plugs in the bot.
 func (h *Handler) SetTelegram(tg Telegram) { h.tg = tg }
@@ -465,7 +475,7 @@ func (h *Handler) operatorHeaders(w http.ResponseWriter, r *http.Request, u db.U
 	devices := int64(-1)
 	var bot string
 	if cfg.App.Enabled {
-		if cfg.Binding && u.DeviceLimit.Valid {
+		if cfg.Binding && u.DeviceLimit.Valid && domain.BindsDevices(u.DeviceMode) {
 			if n, err := h.st.Q.CountBoundDevices(r.Context(), u.ID); err == nil {
 				devices = n
 			}
@@ -495,9 +505,19 @@ type Info struct {
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	ResetsAt   *time.Time `json:"resets_at,omitempty"`
 	Devices    int        `json:"device_limit"`
-	Speed      int64      `json:"speed_limit,omitempty"` // Mbit/s each way; 0: no cap
-	Protocols  []string   `json:"protocols"`
-	Locations  []string   `json:"locations,omitempty"`
+	// DeviceMode is how the limit counts (domain.DeviceMode*): "online" means the number of
+	// devices online at once, not of bound ones.
+	DeviceMode string `json:"device_mode" enum:"bound,online"`
+	// The subscriber's own new link (domain.ReissueRules), for the Mini App to offer it.
+	// Reissue is absent when the panel has no such button at all.
+	Reissue      bool       `json:"reissue,omitempty" doc:"The Mini App may offer a new link"`
+	ReissueOff   bool       `json:"reissue_off,omitempty" doc:"Only the admin reissues links"`
+	ReissueLimit int        `json:"reissue_limit,omitempty" doc:"New links allowed per reissue_days; 0: no limit"`
+	ReissueDays  int        `json:"reissue_days,omitempty"`
+	ReissueAfter *time.Time `json:"reissue_after,omitempty" doc:"The subscriber may reissue the link again from then"`
+	Speed        int64      `json:"speed_limit,omitempty"` // Mbit/s each way; 0: no cap
+	Protocols    []string   `json:"protocols"`
+	Locations    []string   `json:"locations,omitempty"`
 	// Telegram opens the bot with this subscription tied to the account; empty without a bot.
 	Telegram string `json:"telegram,omitempty"`
 	// Bound devices, when binding is on. The device id itself stays in the admin panel.
@@ -597,6 +617,18 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 	}
 	if u.DeviceLimit.Valid {
 		out.Devices = int(u.DeviceLimit.Int64)
+	}
+	out.DeviceMode = u.DeviceMode
+	if h.reissuer != nil && h.tg != nil {
+		out.Reissue = true
+		st, err := h.reissuer.ReissueState(ctx, u.ID)
+		if err != nil {
+			h.log.Warn("subs: reissue rules not read", "user", u.ID, "err", err)
+		}
+		if !st.Next.IsZero() {
+			out.ReissueAfter = &st.Next
+		}
+		out.ReissueOff, out.ReissueLimit, out.ReissueDays = st.Rules.Off, st.Rules.Limit, st.Rules.Days
 	}
 	if u.SpeedLimit.Valid {
 		out.Speed = u.SpeedLimit.Int64

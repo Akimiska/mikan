@@ -25,6 +25,7 @@ type userState struct {
 	TrafficLimit  *int64 `json:"traffic_limit"`
 	DeviceLimit   *int64 `json:"device_limit"`
 	SpeedLimit    *int64 `json:"speed_limit,omitempty"` // payments before speed caps have none: no cap then
+	DeviceMode    string `json:"device_mode,omitempty"` // payments before the modes have none: the user keeps theirs
 	ResetStrategy string `json:"reset_strategy"`
 	BillingDay    *int64 `json:"billing_day"`
 	ExpiresAt     *int64 `json:"expires_at"`
@@ -47,7 +48,7 @@ func nullPtr(n sql.NullInt64) *int64 {
 
 func stateOf(u db.User) *userState {
 	return &userState{Status: u.Status, TariffID: nullPtr(u.TariffID), TrafficLimit: nullPtr(u.TrafficLimit), DeviceLimit: nullPtr(u.DeviceLimit),
-		SpeedLimit: nullPtr(u.SpeedLimit), ResetStrategy: u.ResetStrategy, BillingDay: nullPtr(u.BillingDay), ExpiresAt: nullPtr(u.ExpiresAt)}
+		SpeedLimit: nullPtr(u.SpeedLimit), DeviceMode: u.DeviceMode, ResetStrategy: u.ResetStrategy, BillingDay: nullPtr(u.BillingDay), ExpiresAt: nullPtr(u.ExpiresAt)}
 }
 
 // sameOffer: the user still has the tariff and limits the payment set. The term and the
@@ -55,7 +56,7 @@ func stateOf(u db.User) *userState {
 func (s *userState) sameOffer(u db.User) bool {
 	o := stateOf(u)
 	return eqPtr(s.TariffID, o.TariffID) && eqPtr(s.TrafficLimit, o.TrafficLimit) && eqPtr(s.DeviceLimit, o.DeviceLimit) && eqPtr(s.SpeedLimit, o.SpeedLimit) && eqPtr(s.BillingDay, o.BillingDay) &&
-		s.ResetStrategy == o.ResetStrategy
+		s.ResetStrategy == o.ResetStrategy && (s.DeviceMode == "" || s.DeviceMode == o.DeviceMode)
 }
 
 func eqPtr(a, b *int64) bool {
@@ -159,6 +160,13 @@ func (s *Service) takeBackTariff(ctx context.Context, q *db.Queries, p db.Paymen
 	}
 	if u, err = q.UpdateUser(ctx, par); err != nil {
 		return rv, u, err
+	}
+	if rv.TariffRestored && ri.Prior.DeviceMode != "" && u.DeviceMode != ri.Prior.DeviceMode {
+		// The mode comes back with the limit it counts.
+		if err = q.SetUserDeviceMode(ctx, db.SetUserDeviceModeParams{DeviceMode: ri.Prior.DeviceMode, UpdatedAt: now, ID: u.ID}); err != nil {
+			return rv, u, err
+		}
+		u.DeviceMode = ri.Prior.DeviceMode
 	}
 	switch {
 	case !rv.TariffRestored:

@@ -21,6 +21,7 @@ type TariffView struct {
 	TrafficLimit  *int64      `json:"traffic_limit" doc:"Байты; null — без лимита"`
 	DurationDays  int64       `json:"duration_days" doc:"0 — бессрочно"`
 	DeviceLimit   *int64      `json:"device_limit"`
+	DeviceMode    string      `json:"device_mode" enum:"bound,online" doc:"Как считается лимит устройств: bound: привязанные устройства (места), online: любое число устройств, считаются только одновременно онлайн"`
 	SpeedLimit    *int64      `json:"speed_limit" doc:"Мбит/с в каждую сторону; null — без ограничения"`
 	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period"`
 	BillingDay    *int64      `json:"billing_day" doc:"День месяца, в который заканчивается срок; null — срок в днях"`
@@ -43,7 +44,7 @@ type TermView struct {
 
 func viewTariff(t db.Tariff, terms []db.TariffTerm) TariffView {
 	v := TariffView{ID: t.ID, Name: t.Name, TrafficLimit: ptrInt(t.TrafficLimit.Int64, t.TrafficLimit.Valid),
-		DurationDays: t.DurationDays, DeviceLimit: ptrInt(t.DeviceLimit.Int64, t.DeviceLimit.Valid),
+		DurationDays: t.DurationDays, DeviceLimit: ptrInt(t.DeviceLimit.Int64, t.DeviceLimit.Valid), DeviceMode: t.DeviceMode,
 		SpeedLimit: ptrInt(t.SpeedLimit.Int64, t.SpeedLimit.Valid), ResetStrategy: t.ResetStrategy, BillingDay: ptrInt(t.BillingDay.Int64, t.BillingDay.Valid), PriceLabel: t.PriceLabel, Description: t.Description, Sort: t.Sort,
 		PriceStars: ptrInt(t.PriceStars.Int64, t.PriceStars.Valid), PriceRub: ptrInt(t.PriceRub.Int64, t.PriceRub.Valid), OnSale: t.OnSale != 0}
 	for _, term := range domain.TariffTerms(t, terms) {
@@ -68,6 +69,7 @@ type tariffBody struct {
 	TrafficLimit  *int64      `json:"traffic_limit,omitempty" minimum:"1"`
 	DurationDays  int64       `json:"duration_days" minimum:"0" maximum:"3650"`
 	DeviceLimit   *int64      `json:"device_limit,omitempty" minimum:"1" maximum:"100"`
+	DeviceMode    string      `json:"device_mode,omitempty" enum:"bound,online" doc:"bound: лимит это число привязанных устройств; online: привязывать можно любое число, считаются устройства, одновременно подключённые к серверам. Не передан: у нового тарифа bound, у существующего без изменений"`
 	SpeedLimit    *int64      `json:"speed_limit,omitempty" minimum:"1" maximum:"100000" doc:"Скорость, Мбит/с в каждую сторону; не передана — без ограничения"`
 	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period" default:"none"`
 	BillingDay    *int64      `json:"billing_day,omitempty" minimum:"1" maximum:"31" doc:"Срок до этого числа месяца: месяц = от дня оплаты до дня оплаты"`
@@ -144,6 +146,9 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 		if err != nil {
 			return err
 		}
+		if err := setTariffMode(ctx, q, &t, b.DeviceMode); err != nil {
+			return err
+		}
 		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil || b.Pools == nil {
 			return err
 		}
@@ -187,6 +192,9 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 		if err != nil {
 			return err
 		}
+		if err := setTariffMode(ctx, q, &t, b.DeviceMode); err != nil {
+			return err
+		}
 		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil || b.Pools == nil {
 			return err
 		}
@@ -203,6 +211,22 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.update", "tariff", strconv.FormatInt(t.ID, 10), nil)
 	return h.tariffOut(ctx, t)
+}
+
+// setTariffMode writes the mode the body names on the tariff t (just written) and in t; an
+// empty one leaves the tariff's own, which a new tariff has as "bound".
+func setTariffMode(ctx context.Context, q *db.Queries, t *db.Tariff, mode string) error {
+	if mode == "" || mode == t.DeviceMode {
+		return nil
+	}
+	if !domain.ValidDeviceMode(mode) {
+		return huma.Error422UnprocessableEntity("bad_device_mode", &huma.ErrorDetail{Location: "body.device_mode", Message: "bad_device_mode"})
+	}
+	if err := q.SetTariffDeviceMode(ctx, db.SetTariffDeviceModeParams{DeviceMode: mode, ID: t.ID}); err != nil {
+		return err
+	}
+	t.DeviceMode = mode
+	return nil
 }
 
 func (h *handlers) archiveTariff(ctx context.Context, in *userIDInput) (*struct{}, error) {

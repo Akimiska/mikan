@@ -17,6 +17,17 @@ export type Info = {
   expires_at?: string;
   resets_at?: string;
   device_limit: number;
+  /** How the limit counts: "online" is devices online at once, not bound ones. */
+  device_mode?: "bound" | "online";
+  /** The Mini App may offer a new link (the bot and the Mini App only). */
+  reissue?: boolean;
+  /** Only the admin reissues links. */
+  reissue_off?: boolean;
+  /** The admin's rules: so many new links per reissue_days (0: no limit). */
+  reissue_limit?: number;
+  reissue_days?: number;
+  /** The subscriber may reissue the link again from then. */
+  reissue_after?: string;
   speed_limit?: number;
   protocols: string[];
   binding: boolean;

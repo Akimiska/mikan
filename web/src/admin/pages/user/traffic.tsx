@@ -26,7 +26,7 @@ export function TariffSection({ u }: { u: User }) {
         <div className="min-w-0">
           <div className="font-display text-base font-medium tracking-tight">{current?.name ?? t("userDrawer.customTerms")}</div>
           <div className="mt-0.5 text-xs text-[var(--ink-500)]">
-            {u.traffic_limit != null ? bytes(u.traffic_limit) : t("userDrawer.noTrafficLimit")} · {u.device_limit != null ? t("userDrawer.devicesShort", { n: u.device_limit }) : t("userDrawer.noDeviceLimit")}
+            {u.traffic_limit != null ? bytes(u.traffic_limit) : t("userDrawer.noTrafficLimit")} · {u.device_limit != null ? t(u.device_mode === "online" ? "deviceMode.shortOnline" : "userDrawer.devicesShort", { n: u.device_limit }) : t("userDrawer.noDeviceLimit")}
             {u.speed_limit != null ? ` · ${t("tariffs.speedShort", { n: u.speed_limit })}` : ""}
             {current?.price_label ? ` · ${current.price_label}` : ""}
           </div>

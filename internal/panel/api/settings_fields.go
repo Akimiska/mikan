@@ -74,6 +74,7 @@ var settingFields = []settingField{
 	value("device_binding", settings.KeyDeviceBinding, true, func(b *patchSettingsBody) *bool { return b.DeviceBinding }),
 	value("device_require_hwid", settings.KeyRequireHWID, true, func(b *patchSettingsBody) *bool { return b.RequireHWID }),
 	value("device_unbind", settings.KeyUnbindRules, true, func(b *patchSettingsBody) *domain.UnbindRules { return b.DeviceUnbind }),
+	value("link_reissue", settings.KeyReissueRules, true, func(b *patchSettingsBody) *domain.ReissueRules { return b.LinkReissue }),
 	// What Happ is told to apply, to hide, and where the subscription address goes.
 	text("happ_routing", settings.KeyHappRouting, true, func(b *patchSettingsBody) *string { return b.HappRouting }),
 	custom("happ_provider_id", true, func(b *patchSettingsBody) *string { return b.HappProvider }, func(ctx context.Context, set *settings.Settings, v string) error {

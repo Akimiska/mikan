@@ -53,6 +53,19 @@ With the **Only apps with a device ID** switch, other apps get no subscription. 
 
 A subscriber unbinds devices themselves on the subscription page, in the Mini App or in the bot, under the rules of **Settings → Subscription → Devices**: how many devices per period (one a day by default; a week, a month, your own number, no limit, or "Not allowed": then only an administrator unbinds) and how soon an unbound device may connect again (a day by default, so that an app left open on it does not take the place back; "Never": until an administrator lets it). An administrator unbinds any time in the user card, and sees the pause after an unbind among the banned devices, where it can be lifted earlier. An unbound device is cut off immediately. Only bound devices take places, so a phone moving from Wi-Fi to mobile data does not turn into two devices.
 
+### How the device limit counts
+
+On a plan and on each client the device limit counts in one of two ways (in the plan form and in the client card, the Devices block):
+
+- **Bound devices**: as described above, each device with an ID takes a place, and no more than the limit can be bound.
+- **Online at once**: any number of devices may be bound, and only the ones connected at the same moment count. The server turns the extra ones away; it tells devices apart by address, so a phone on mobile data and a laptop at home count as two. Handy when a client cares more about switching between their own devices than about staying within places. The bot, the Mini App and the subscription page say "up to N at once".
+
+A client takes the plan's mode with its other limits when created, paid for or moved to another plan, and the client card can change it separately.
+
+### A new link by the subscriber
+
+In the bot (Subscription → "🔄 New link") and in the Mini App ("Change the link") a subscriber replaces the subscription link themselves if it fell into the wrong hands. The old link and the keys of all their devices stop working at once, so a confirmation comes first, and the new link after it: it has to be added to the apps. The administrator sets the limit in **Settings → Subscription → Devices → New link by the client**: "Not allowed" (only the administrator), or so many a day, a week, a month or an own number of days (once a day by default), or no limit. At the limit the button is gone and a line tells when it comes back. The audit log gets a `user.reissue` entry by the subscriber. The administrator reissues the link in the client card any time.
+
 ### Device names
 
 A device is called what its app reports: the model, the system or the app itself. The administrator (the pencil in the user card) or the subscriber (on the subscription page and in the Mini App) can give it a name of up to 40 characters. An empty name brings back the one from the app. The bot lists devices by these names.

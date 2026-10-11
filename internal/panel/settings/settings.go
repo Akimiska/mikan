@@ -57,6 +57,9 @@ const (
 	// KeyUnbindRules is how the subscriber may unbind devices (domain.UnbindRules); unset:
 	// domain.DefaultUnbindRules.
 	KeyUnbindRules = "device_unbind"
+	// KeyReissueRules is how often the subscriber may reissue their own link
+	// (domain.ReissueRules); unset: domain.DefaultReissueRules.
+	KeyReissueRules = "link_reissue"
 	// KeyDefaultLang is the language chosen at install: the admin panel and the subscription
 	// page open in it until a visitor picks one, and new names (tariffs, the auto group, the
 	// bot's menu) are written in it. "auto" or unset: the visitor's browser decides.

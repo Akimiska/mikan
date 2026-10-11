@@ -55,8 +55,10 @@ type SettingsView struct {
 	RequireHWID   bool `json:"device_require_hwid" doc:"Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место)"`
 	// DeviceUnbind is how subscribers may unbind devices themselves (the admin is not held by it).
 	DeviceUnbind domain.UnbindRules `json:"device_unbind" doc:"Сколько устройств подписчик может отвязать сам и через сколько отвязанное может вернуться"`
-	DefaultLang  string             `json:"default_lang" enum:"auto,ru,en" doc:"Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота"`
-	Certificate  acme.Status        `json:"certificate"`
+	// LinkReissue is how often subscribers may replace their own link (the admin is not held by it).
+	LinkReissue domain.ReissueRules `json:"link_reissue" doc:"Как часто подписчик может сменить свою ссылку подписки сам (бот и Mini App)"`
+	DefaultLang string              `json:"default_lang" enum:"auto,ru,en" doc:"Язык админки и страницы подписки, пока человек не выбрал свой; auto — по языку браузера. На нём же названия по умолчанию: группа автовыбора и меню ненастроенного бота"`
+	Certificate acme.Status         `json:"certificate"`
 	// The certificate authority of the panel and its nodes.
 	ACMECA      string `json:"acme_ca" enum:"letsencrypt,zerossl,google" doc:"Центр сертификации панели и нод: letsencrypt, zerossl (нужен e-mail) или google (нужен ключ EAB). IP-адреса всегда получают сертификат Let's Encrypt"`
 	ACMEEmail   string `json:"acme_email" doc:"E-mail для центра сертификации; ZeroSSL привязывает к нему аккаунт"`
@@ -81,41 +83,42 @@ type patchSettingsInput struct {
 // patchSettingsBody is the body of PATCH /settings; an alias of the struct, so the API's
 // schema keeps its name (PatchSettingsInputBody). settingFields says how each is written.
 type patchSettingsBody = struct {
-	Brand         *string             `json:"brand,omitempty" maxLength:"40"`
-	SupportURL    *string             `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
-	SubTitle      *string             `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
-	Announce      *string             `json:"sub_announce,omitempty" maxLength:"1000" doc:"До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов"`
-	AnnounceURL   *string             `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
-	AppBranding   *bool               `json:"app_branding,omitempty"`
-	BrandAccent   *string             `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
-	BrandLogoURL  *string             `json:"brand_logo_url,omitempty" maxLength:"500" doc:"https://… или пусто"`
-	HappRouting   *string             `json:"happ_routing,omitempty" maxLength:"65536" doc:"happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать"`
-	HappProvider  *string             `json:"happ_provider_id,omitempty" maxLength:"64"`
-	HappHide      *bool               `json:"happ_hide_settings,omitempty"`
-	HappCrypt     *string             `json:"happ_crypt,omitempty" enum:"off,api,local"`
-	PublicHost    *string             `json:"public_host,omitempty" maxLength:"253"`
-	Domain        *string             `json:"domain,omitempty" maxLength:"253"`
-	QuietHourUTC  *int                `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
-	SubGroupMain  *string             `json:"sub_group_main,omitempty" maxLength:"200"`
-	SubGroupAuto  *string             `json:"sub_group_auto,omitempty" maxLength:"200"`
-	SubRouting    *string             `json:"sub_routing,omitempty" enum:"ru_direct,all,blocked"`
-	SubRoutes     *subs.Routes        `json:"sub_routes,omitempty"`
-	SubTemplate   *string             `json:"sub_template,omitempty" maxLength:"524288" doc:"Свой профиль Clash; пусто — вернуть встроенный"`
-	SubRules      *string             `json:"sub_rules,omitempty" maxLength:"65536" doc:"Свои правила Clash, до 500 строк; ошибка указывает номер строки"`
-	Fingerprint   *string             `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
-	AutoPort      *bool               `json:"auto_port,omitempty"`
-	AutoSNI       *bool               `json:"auto_sni,omitempty"`
-	AnyPort       *bool               `json:"any_port,omitempty"`
-	WideScan      *bool               `json:"wide_sni_scan,omitempty"`
-	DeviceBinding *bool               `json:"device_binding,omitempty"`
-	RequireHWID   *bool               `json:"device_require_hwid,omitempty"`
-	DeviceUnbind  *domain.UnbindRules `json:"device_unbind,omitempty"`
-	DefaultLang   *string             `json:"default_lang,omitempty" enum:"auto,ru,en"`
-	SubPort       *int                `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
-	ACMECA        *string             `json:"acme_ca,omitempty" enum:"letsencrypt,zerossl,google" doc:"Смена центра выпускает сертификаты панели и нод заново"`
-	ACMEEmail     *string             `json:"acme_email,omitempty" maxLength:"254"`
-	ACMEEABKID    *string             `json:"acme_eab_kid,omitempty" maxLength:"256"`
-	ACMEEABHMAC   *string             `json:"acme_eab_hmac,omitempty" maxLength:"512" doc:"Ключ HMAC (base64url); пусто — убрать. Обратно не показывается"`
+	Brand         *string              `json:"brand,omitempty" maxLength:"40"`
+	SupportURL    *string              `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+	SubTitle      *string              `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
+	Announce      *string              `json:"sub_announce,omitempty" maxLength:"1000" doc:"До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов"`
+	AnnounceURL   *string              `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+	AppBranding   *bool                `json:"app_branding,omitempty"`
+	BrandAccent   *string              `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
+	BrandLogoURL  *string              `json:"brand_logo_url,omitempty" maxLength:"500" doc:"https://… или пусто"`
+	HappRouting   *string              `json:"happ_routing,omitempty" maxLength:"65536" doc:"happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать"`
+	HappProvider  *string              `json:"happ_provider_id,omitempty" maxLength:"64"`
+	HappHide      *bool                `json:"happ_hide_settings,omitempty"`
+	HappCrypt     *string              `json:"happ_crypt,omitempty" enum:"off,api,local"`
+	PublicHost    *string              `json:"public_host,omitempty" maxLength:"253"`
+	Domain        *string              `json:"domain,omitempty" maxLength:"253"`
+	QuietHourUTC  *int                 `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
+	SubGroupMain  *string              `json:"sub_group_main,omitempty" maxLength:"200"`
+	SubGroupAuto  *string              `json:"sub_group_auto,omitempty" maxLength:"200"`
+	SubRouting    *string              `json:"sub_routing,omitempty" enum:"ru_direct,all,blocked"`
+	SubRoutes     *subs.Routes         `json:"sub_routes,omitempty"`
+	SubTemplate   *string              `json:"sub_template,omitempty" maxLength:"524288" doc:"Свой профиль Clash; пусто — вернуть встроенный"`
+	SubRules      *string              `json:"sub_rules,omitempty" maxLength:"65536" doc:"Свои правила Clash, до 500 строк; ошибка указывает номер строки"`
+	Fingerprint   *string              `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
+	AutoPort      *bool                `json:"auto_port,omitempty"`
+	AutoSNI       *bool                `json:"auto_sni,omitempty"`
+	AnyPort       *bool                `json:"any_port,omitempty"`
+	WideScan      *bool                `json:"wide_sni_scan,omitempty"`
+	DeviceBinding *bool                `json:"device_binding,omitempty"`
+	RequireHWID   *bool                `json:"device_require_hwid,omitempty"`
+	DeviceUnbind  *domain.UnbindRules  `json:"device_unbind,omitempty"`
+	LinkReissue   *domain.ReissueRules `json:"link_reissue,omitempty"`
+	DefaultLang   *string              `json:"default_lang,omitempty" enum:"auto,ru,en"`
+	SubPort       *int                 `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
+	ACMECA        *string              `json:"acme_ca,omitempty" enum:"letsencrypt,zerossl,google" doc:"Смена центра выпускает сертификаты панели и нод заново"`
+	ACMEEmail     *string              `json:"acme_email,omitempty" maxLength:"254"`
+	ACMEEABKID    *string              `json:"acme_eab_kid,omitempty" maxLength:"256"`
+	ACMEEABHMAC   *string              `json:"acme_eab_hmac,omitempty" maxLength:"512" doc:"Ключ HMAC (base64url); пусто — убрать. Обратно не показывается"`
 }
 
 type resetPathOutput struct {
@@ -224,6 +227,9 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if v.DeviceUnbind, err = domain.LoadUnbindRules(ctx, h.d.Settings); err != nil {
 		return v, err
 	}
+	if v.LinkReissue, err = domain.LoadReissueRules(ctx, h.d.Settings); err != nil {
+		return v, err
+	}
 	if v.AppBranding, err = h.d.Settings.On(ctx, settings.AppBranding); err != nil {
 		return v, err
 	}
@@ -301,6 +307,12 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		var fe *domain.FieldError
 		if err := b.DeviceUnbind.Validate(); errors.As(err, &fe) {
 			details = append(details, &huma.ErrorDetail{Location: "body.device_unbind." + fe.Field, Message: fe.Code})
+		}
+	}
+	if b.LinkReissue != nil {
+		var fe *domain.FieldError
+		if err := b.LinkReissue.Validate(); errors.As(err, &fe) {
+			details = append(details, &huma.ErrorDetail{Location: "body.link_reissue." + fe.Field, Message: fe.Code})
 		}
 	}
 	if b.Domain != nil && *b.Domain != "" && !hostname.Valid(*b.Domain) {

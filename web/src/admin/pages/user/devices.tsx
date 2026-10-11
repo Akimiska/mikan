@@ -9,6 +9,7 @@ import { Button, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { DEVICE_NAME_MAX, desktopOS, deviceDetails, deviceLabel, reportedName } from "../../../lib/devices";
 import { ago, bytes, dateShort, maskIP, time } from "../../../lib/format";
+import { DeviceModePicker, modeOf } from "./device-mode";
 import { LimitPicker } from "./limit-picker";
 import { Section } from "./section";
 
@@ -20,11 +21,11 @@ export function DevicesSection({ u }: { u: User }) {
   const update = useUserMutation(userActions.update);
   return (
     <Section title={t("userDrawer.devices")} aside={
-        binding
+        binding && modeOf(u) === "bound"
           ? t("userDrawer.devicesAsideBound", { used: u.bound_devices, limit: u.device_limit ?? "∞", online: u.online_ips.length })
           : t("userDrawer.devicesAside", { online: u.online_ips.length, limit: u.device_limit ?? "∞" })
       }>
-      <div className="mb-4">
+      <div className="mb-4 flex flex-col gap-3">
         <LimitPicker
           label={t("userDrawer.deviceLimit")}
           value={u.device_limit}
@@ -36,6 +37,14 @@ export function DevicesSection({ u }: { u: User }) {
             update.mutate({ id: u.id, body: n === null ? { devices_unlimited: true } : { device_limit: n } }, { onSuccess: done, onError: (e) => toast.error(errorText(e)) })
           }
         />
+        {u.device_limit != null ? (
+          <DeviceModePicker
+            label={t("deviceMode.label")}
+            value={modeOf(u)}
+            busy={update.isPending}
+            onChange={(m) => update.mutate({ id: u.id, body: { device_mode: m } }, { onError: (e) => toast.error(errorText(e)) })}
+          />
+        ) : null}
       </div>
       <BoundDevices u={u} />
       <h4 className="mt-5 mb-2 text-xs font-medium text-[var(--ink-500)]">{t("userDrawer.addresses")}</h4>
@@ -99,7 +108,7 @@ function BoundDevices({ u }: { u: User }) {
     <>
       <h4 className="mb-2 flex justify-between gap-2 text-xs font-medium text-[var(--ink-500)]">
         {t("userDrawer.boundTitle")}
-        {bound.data ? <span className="num">{u.device_limit != null ? t("userDrawer.boundCount", { n: list.length, limit: u.device_limit }) : list.length}</span> : null}
+        {bound.data ? <span className="num">{u.device_limit != null && modeOf(u) === "bound" ? t("userDrawer.boundCount", { n: list.length, limit: u.device_limit }) : list.length}</span> : null}
       </h4>
       <QueryBoundary query={bound} pending={<Skeleton style={{ height: 52, borderRadius: 16 }} />}>
         {(devs) =>

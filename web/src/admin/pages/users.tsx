@@ -399,7 +399,8 @@ function openLink(id: number, onOpen: (id: number) => void) {
 // subscribes to the language itself.
 const UserRow = memo(function UserRow({ u, tariff, folder, selected, binding, onToggle, onOpen }: { u: User; tariff?: Tariff; folder?: Folder; selected: boolean; binding: boolean; onToggle: (id: number) => void; onOpen: (id: number) => void }) {
   useLocale();
-  const devices = binding ? u.bound_devices : u.online_ips.length;
+  // The online mode counts the addresses online at once, not the places taken.
+  const devices = binding && u.device_mode !== "online" ? u.bound_devices : u.online_ips.length;
   // The row is clickable for the mouse; the keyboard and screen readers use the link in
   // the name cell and the checkbox, each a control of its own.
   return (

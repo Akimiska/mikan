@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/store/db"
@@ -32,6 +33,8 @@ func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
 		h.servePage(w, r, cfg)
 	case r.Method == http.MethodPost && rest == "session" && sameOrigin(r):
 		h.miniAppSession(w, r)
+	case r.Method == http.MethodPost && rest == "reissue" && sameOrigin(r) && h.reissuer != nil:
+		h.miniAppReissue(w, r)
 	case r.Method == http.MethodPost && (rest == "shop" || rest == "pay") && sameOrigin(r) && h.shop != nil:
 		h.miniAppShop(w, r, rest)
 	case r.Method == http.MethodPost && (rest == "promo" || rest == "promo-history") && sameOrigin(r) && h.promos != nil:
@@ -481,4 +484,53 @@ func invoiceFailure(err error) (status int, code string, unexplained bool) {
 		return http.StatusBadGateway, "invoice_failed", false
 	}
 	return http.StatusBadGateway, "invoice_failed", true
+}
+
+// reissueRequest is the body of "reissue": the subscription to give a new link.
+type reissueRequest struct {
+	miniAuth
+	Token string `json:"token"`
+}
+
+// valid: a new link is for one subscription, which has to be named.
+func (in *reissueRequest) valid() bool { return in.Token != "" }
+
+// miniAppReissue replaces the link of one of the account's subscriptions within the admin's
+// rules (domain.ReissueRules) and answers with the new token, which the page opens at once:
+// the old link, the keys and every bound device stop working. Unlike the unbind of the page
+// itself, which the link alone authorises, this takes Telegram's proof of who asks: the link
+// is what a leak exposes, and whoever holds a leaked link must not be able to cut its owner
+// off by reissuing it.
+func (h *Handler) miniAppReissue(w http.ResponseWriter, r *http.Request) {
+	var in reissueRequest
+	_, users, fail, ok := h.mini(w, r, &in)
+	if !ok {
+		return
+	}
+	userID, ok := ownerOf(users, in.Token)
+	if !ok || userID == 0 {
+		fail(http.StatusForbidden, billing.ErrNotYours.Error())
+		return
+	}
+	u, err := h.reissuer.ReissueByOwner(r.Context(), userID, "miniapp")
+	switch {
+	case err == nil:
+		h.log.Info("subs: the subscriber reissued their link", "user", userID)
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": u.SubToken})
+	case errors.Is(err, domain.ErrReissueCooldown):
+		w.WriteHeader(http.StatusTooManyRequests)
+		out := map[string]any{"code": "reissue_cooldown"}
+		// Without the moment the page says only that it cannot: never a date of year one.
+		if st, err := h.reissuer.ReissueState(r.Context(), userID); err == nil && !st.Next.IsZero() {
+			out["reissue_after"] = st.Next
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	case errors.Is(err, domain.ErrReissueOff):
+		fail(http.StatusForbidden, "reissue_off")
+	case errors.Is(err, domain.ErrNotFound):
+		fail(http.StatusNotFound, "not_found")
+	default:
+		h.log.Warn("subs: the link was not reissued", "user", userID, "err", err)
+		fail(http.StatusInternalServerError, "internal")
+	}
 }

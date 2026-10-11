@@ -125,12 +125,14 @@ func TestMarketplaceGrants(t *testing.T) {
 	if g, ok := grant(); !ok || g != `["bot","kv"]` {
 		t.Fatalf("grant: %q %v", g, ok)
 	}
-	if r, ok := h.p.Addons.Pending(); !ok || r.Action != "install" || r.ID != "telegram" {
-		t.Fatalf("the host is not asked: %+v", r)
+	if q := h.p.Addons.Pending(); len(q) != 1 || q[0].Action != "install" || q[0].ID != "telegram" {
+		t.Fatalf("the host is not asked: %+v", q)
 	}
 
 	// The host ran it; the next build asks for more.
-	_ = os.Remove(filepath.Join(dir, "addons", "request.json"))
+	if err := os.RemoveAll(filepath.Join(dir, "addons", "requests")); err != nil {
+		t.Fatal(err)
+	}
 	host(addons.State{HostVersion: "0.5.1.0", Adapters: map[string]addons.Installed{"telegram": {Version: "1.0.0", Digest: digest,
 		Protocol: 2, Kind: addons.KindBot, Status: "running"}}})
 	wider := entry

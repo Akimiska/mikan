@@ -141,6 +141,14 @@ enum AddonCmd {
     Install { id: String },
     /// Stop and remove an adapter; the panel keeps its settings and payments
     Remove { id: String },
+    /// Load an addon's image from an archive (docker save image@digest), for a server
+    /// that cannot reach the registry; only the build the marketplace pins is taken
+    Load {
+        tar: PathBuf,
+        /// The addon the archive must hold; without it, the one pinned to its digest
+        #[arg(long)]
+        id: Option<String>,
+    },
     /// Do what the panel asked for (the update request unit runs this)
     Apply,
 }
@@ -262,6 +270,7 @@ fn addon_cmd(c: AddonCmd) -> anyhow::Result<()> {
         AddonCmd::List => addon::list(&panel),
         AddonCmd::Install { id } => addon::install(&id, &panel, &mut say),
         AddonCmd::Remove { id } => addon::remove(&id, &mut say),
+        AddonCmd::Load { tar, id } => addon::load(&tar, id.as_deref(), &panel, &mut say),
         AddonCmd::Apply => addon::apply(&panel, &mut say),
     }
 }

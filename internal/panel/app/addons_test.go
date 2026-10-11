@@ -122,7 +122,7 @@ func TestAddonsMarketplace(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(os.Remove(filepath.Join(dir, "addons", "request.json")))
+	must(os.RemoveAll(filepath.Join(dir, "addons", "requests")))
 	state, _ := json.Marshal(addons.State{Adapters: map[string]addons.Installed{"fake": {Version: "1.0.0", Digest: digest, Status: "running",
 		Listen: strings.TrimPrefix(adapter.URL, "http://"), Token: "tok"}}})
 	must(os.WriteFile(filepath.Join(dir, "addons", "state.json"), state, 0o600))

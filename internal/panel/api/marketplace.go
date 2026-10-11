@@ -102,8 +102,8 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 	if l := st.Request; l != nil {
 		v.Last = &AddonResult{Action: l.Action, ID: l.ID, State: l.State, Error: l.Error, At: l.At}
 	}
-	if r, ok := m.Pending(); ok {
-		v.Pending = &AddonRequest{Action: r.Action, ID: r.ID, At: r.At}
+	if q := m.Pending(); len(q) > 0 {
+		v.Pending = &AddonRequest{Action: q[0].Action, ID: q[0].ID, At: q[0].At}
 	}
 	installed := map[string]addons.Installed{}
 	for id, a := range st.Adapters {
@@ -182,7 +182,7 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 	if !addons.SamePermissions(in.Body.Permissions, e.Permissions) {
 		return nil, huma.Error409Conflict("permissions_changed")
 	}
-	if _, busy := h.d.Addons.Pending(); busy {
+	if queued(h.d.Addons, e.ID) {
 		return nil, huma.Error409Conflict("addon_busy")
 	}
 	admin := sessionOf(ctx).AdminID
@@ -190,7 +190,7 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 		Permissions: addons.EncodePermissions(e.Permissions), ApprovedBy: sql.NullInt64{Int64: admin, Valid: true}, ApprovedAt: h.d.Now().Unix()}); err != nil {
 		return nil, err
 	}
-	if err := h.d.Addons.Ask("install", e.ID); err != nil {
+	if err := h.d.Addons.Ask(addons.Request{Action: "install", ID: e.ID}); err != nil {
 		return nil, askErr(err)
 	}
 	h.audit(ctx, admin, "addon.install", "addon", e.ID, map[string]any{"version": e.Version, "digest": e.Digest, "permissions": e.Permissions})
@@ -210,15 +210,21 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *addonIDInput) (*ma
 	if a, ok := st.Adapters[in.ID]; !ok || a.Protocol != addons.Protocol2 {
 		return nil, huma.Error404NotFound("addon_not_installed")
 	}
-	if _, busy := h.d.Addons.Pending(); busy {
+	if queued(h.d.Addons, in.ID) {
 		return nil, huma.Error409Conflict("addon_busy")
 	}
 	if err := h.d.Store.Q.DeleteAddonGrant(ctx, in.ID); err != nil {
 		return nil, err
 	}
-	if err := h.d.Addons.Ask("remove", in.ID); err != nil {
+	if err := h.d.Addons.Ask(addons.Request{Action: "remove", ID: in.ID}); err != nil {
 		return nil, askErr(err)
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "addon.remove", "addon", in.ID, nil)
 	return h.listMarketplace(ctx, nil)
+}
+
+// queued: a request for the addon still waits for the host; the grant is not touched under
+// it, so the approval and the request the host takes never disagree.
+func queued(m *addons.Manager, id string) bool {
+	return slices.ContainsFunc(m.Pending(), func(r addons.Request) bool { return r.ID == id })
 }

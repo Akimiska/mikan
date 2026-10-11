@@ -88,8 +88,8 @@ type Server struct {
 
 	mux *http.ServeMux // the routes, each behind its permission
 
-	mu   sync.Mutex
-	addr string // what it listens on, "" while it does not
+	mu    sync.Mutex
+	addrs map[string]bool // what it listens on: the Host a request must name
 }
 
 func New(d Deps) *Server {
@@ -130,9 +130,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The Host must be the address listened on, so a name that resolves to loopback does
 	// not let a page in (DNS rebinding).
 	s.mu.Lock()
-	addr := s.addr
+	known := len(s.addrs) == 0 || s.addrs[r.Host]
 	s.mu.Unlock()
-	if addr != "" && r.Host != addr {
+	if !known {
 		Fail(w, http.StatusMisdirectedRequest, "bad_request", "unknown host")
 		return
 	}
@@ -196,67 +196,91 @@ func Loopback(addr string) bool {
 	return err == nil && ap.Addr() == netip.MustParseAddr("127.0.0.1") && ap.Port() >= 1024
 }
 
-// Run keeps the listener on the address of the host's state: none while no addon of
-// protocol 2 was installed, a new one when the address changes (a restored backup).
+// Bridge: the gateway of the host's bridge for custom addons, a private IPv4 address with an
+// unprivileged port, as the host gives out.
+func Bridge(addr string) bool {
+	ap, err := netip.ParseAddrPort(addr)
+	return err == nil && ap.Addr().Is4() && ap.Addr().IsPrivate() && ap.Port() >= 1024
+}
+
+// wanted is what the host's state asks to be listened on: the loopback address for the
+// official addons, and the bridge gateway while a custom addon runs.
+func wanted(st addons.State) map[string]bool {
+	out := map[string]bool{}
+	if Loopback(st.PanelAPI) {
+		out[st.PanelAPI] = true
+	}
+	if Bridge(st.PanelAPIBridge) {
+		out[st.PanelAPIBridge] = true
+	}
+	return out
+}
+
+// Run keeps a listener on each address of the host's state: none while no addon of protocol
+// 2 was installed, new ones when they change (a restored backup, the bridge coming and going).
 func (s *Server) Run(ctx context.Context) {
-	var srv *http.Server
+	servers := map[string]*http.Server{}
 	// Run returns only after the requests in flight are done: the database closes after it.
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	stop := func() {
-		if srv != nil {
-			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = srv.Shutdown(sctx)
-			cancel()
-			srv = nil
-		}
+	stop := func(addr string) {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = servers[addr].Shutdown(sctx)
+		cancel()
+		delete(servers, addr)
+	}
+	publish := func() {
 		s.mu.Lock()
-		s.addr = ""
+		s.addrs = map[string]bool{}
+		for a := range servers {
+			s.addrs[a] = true
+		}
 		s.mu.Unlock()
 	}
-	defer stop()
-	failed := "" // the address that would not bind: told once, tried again quietly
+	defer func() {
+		for a := range servers {
+			stop(a)
+		}
+		publish()
+	}()
+	failed := map[string]bool{} // addresses that would not bind: told once, tried again quietly
 	check := func() {
 		st, err := s.d.Addons.State()
 		if err != nil {
 			return
 		}
-		want := st.PanelAPI
-		if !Loopback(want) {
-			want = ""
-		}
-		s.mu.Lock()
-		cur := s.addr
-		s.mu.Unlock()
-		if want == cur && (want == "") == (srv == nil) {
-			return
-		}
-		stop()
-		if want == "" {
-			return
-		}
-		ln, err := net.Listen("tcp", want)
-		if err != nil {
-			if failed != want {
-				s.d.Log.Warn("addons api: listen", "addr", want, "err", err)
+		want := wanted(st)
+		for a := range servers {
+			if !want[a] {
+				stop(a)
 			}
-			failed = want
-			return
 		}
-		failed = ""
-		srv = &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
-			WriteTimeout: 90 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}
-		s.mu.Lock()
-		s.addr = want
-		s.mu.Unlock()
-		wg.Add(1)
-		go func(srv *http.Server) {
-			defer wg.Done()
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				s.d.Log.Warn("addons api: serve", "err", err)
+		for a := range want {
+			if servers[a] != nil {
+				continue
 			}
-		}(srv)
-		s.d.Log.Info("addons api: listening", "addr", want)
+			ln, err := net.Listen("tcp", a)
+			if err != nil {
+				if !failed[a] {
+					s.d.Log.Warn("addons api: listen", "addr", a, "err", err)
+				}
+				failed[a] = true
+				continue
+			}
+			delete(failed, a)
+			srv := &http.Server{Handler: s, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
+				WriteTimeout: 90 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10}
+			servers[a] = srv
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					s.d.Log.Warn("addons api: serve", "err", err)
+				}
+			}()
+			s.d.Log.Info("addons api: listening", "addr", a)
+		}
+		publish()
 	}
 	check()
 	t := time.NewTicker(5 * time.Second)

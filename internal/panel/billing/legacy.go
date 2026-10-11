@@ -156,7 +156,7 @@ func (s *Service) installMoved(ctx context.Context) {
 	if len(left) == 0 || !s.d.Addons.Supported() {
 		return
 	}
-	if _, waiting := s.d.Addons.Pending(); waiting {
+	if len(s.d.Addons.Pending()) > 0 {
 		return
 	}
 	// A request the host failed is not repeated every minute: the admin sees why on the
@@ -164,7 +164,7 @@ func (s *Service) installMoved(ctx context.Context) {
 	if r := st.Request; r != nil && r.ID == left[0] && r.Action == "install" && r.State == "failed" {
 		return
 	}
-	if err := s.d.Addons.Ask("install", left[0]); err != nil && !errors.Is(err, addons.ErrBusy) {
+	if err := s.d.Addons.Ask(addons.Request{Action: "install", ID: left[0]}); err != nil && !errors.Is(err, addons.ErrBusy) {
 		s.d.Log.Warn("billing: ask the host for an adapter", "addon", left[0], "err", err)
 	}
 }

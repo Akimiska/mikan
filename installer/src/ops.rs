@@ -369,6 +369,7 @@ pub fn uninstall() -> Result<bool> {
     let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
     docker::compose_run(&["down"])?;
     addon::down();
+    addon::drop_network();
     host::remove_units();
     if fs::remove_file(host::SYSCTL).is_ok() {
         let _ = system::succeeds("sysctl", &["--system"]);

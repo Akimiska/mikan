@@ -73,7 +73,8 @@ type AddonsView struct {
 	Catalog      []AddonCatalogEntry `json:"catalog"`
 	CatalogError string              `json:"catalog_error,omitempty" doc:"catalog_unavailable — каталог не загрузился"`
 	Installed    []AddonView         `json:"installed"`
-	Pending      *AddonRequest       `json:"pending,omitempty" doc:"Заявка, которую сервер ещё не взял"`
+	Pending      *AddonRequest       `json:"pending,omitempty" doc:"Первая заявка в очереди: сервер ещё не взял её"`
+	Queue        []AddonRequest      `json:"queue,omitempty" doc:"Все заявки, которые сервер ещё не взял, по порядку"`
 	Last         *AddonResult        `json:"last,omitempty" doc:"Как сервер выполнил последнюю заявку"`
 	Supported    bool                `json:"supported" doc:"Панель видит каталог данных сервера; иначе ставить адаптеры нельзя"`
 }
@@ -129,8 +130,11 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	if l := st.Request; l != nil {
 		v.Last = &AddonResult{Action: l.Action, ID: l.ID, State: l.State, Error: l.Error, At: l.At}
 	}
-	if r, ok := m.Pending(); ok {
-		v.Pending = &AddonRequest{Action: r.Action, ID: r.ID, At: r.At}
+	for _, r := range m.Pending() {
+		v.Queue = append(v.Queue, AddonRequest{Action: r.Action, ID: r.ID, At: r.At})
+	}
+	if len(v.Queue) > 0 {
+		v.Pending = &v.Queue[0]
 	}
 	if c, err := h.catalog(ctx); err != nil {
 		v.CatalogError = "catalog_unavailable"
@@ -223,7 +227,7 @@ func (h *handlers) installAddon(ctx context.Context, in *addonIDInput) (*addonsO
 	if a, ok := st.Adapters[in.ID]; ok && a.Status == "running" && a.Digest == pay[i].Digest {
 		return nil, huma.Error409Conflict("addon_current")
 	}
-	if err := h.d.Addons.Ask("install", in.ID); err != nil {
+	if err := h.d.Addons.Ask(addons.Request{Action: "install", ID: in.ID}); err != nil {
 		return nil, askErr(err)
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "addon.install", "addon", in.ID, map[string]any{"version": pay[i].Version, "digest": pay[i].Digest})
@@ -243,7 +247,7 @@ func (h *handlers) removeAddon(ctx context.Context, in *addonIDInput) (*addonsOu
 	if _, ok := st.Of(addons.KindPayment)[in.ID]; !ok {
 		return nil, huma.Error404NotFound("addon_not_installed")
 	}
-	if err := h.d.Addons.Ask("remove", in.ID); err != nil {
+	if err := h.d.Addons.Ask(addons.Request{Action: "remove", ID: in.ID}); err != nil {
 		return nil, askErr(err)
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "addon.remove", "addon", in.ID, nil)

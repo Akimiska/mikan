@@ -115,7 +115,7 @@ func TestAccess(t *testing.T) {
 		{"the right method, the wrong verb", "GET", "/panel/v2/kv/x", botToken, nil, 404, "not_found"},
 	}
 	s.mu.Lock()
-	s.addr = "127.0.0.1:41990"
+	s.addrs = map[string]bool{"127.0.0.1:41990": true}
 	s.mu.Unlock()
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -182,7 +182,10 @@ func TestListener(t *testing.T) {
 	listening := func() string {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return s.addr
+		for a := range s.addrs {
+			return a
+		}
+		return ""
 	}
 	wait := func(want string) {
 		t.Helper()
@@ -237,5 +240,24 @@ func TestLoopback(t *testing.T) {
 		if Loopback(addr) != want {
 			t.Errorf("%q: %v", addr, !want)
 		}
+	}
+}
+
+func TestBridge(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"172.18.0.1:41990": true, "10.0.0.1:41990": true, "172.18.0.1:80": false, "127.0.0.1:41990": false,
+		"8.8.8.8:41990": false, "0.0.0.0:41990": false, "[fd00::1]:41990": false, "": false,
+	} {
+		if Bridge(addr) != want {
+			t.Errorf("%q: %v", addr, !want)
+		}
+	}
+	// What is listened on: the loopback address, and the bridge only when it is sound.
+	got := wanted(addons.State{PanelAPI: "127.0.0.1:41990", PanelAPIBridge: "172.18.0.1:41990"})
+	if len(got) != 2 {
+		t.Fatalf("wanted: %v", got)
+	}
+	if got := wanted(addons.State{PanelAPI: "0.0.0.0:1", PanelAPIBridge: "8.8.8.8:41990"}); len(got) != 0 {
+		t.Fatalf("wanted: %v", got)
 	}
 }

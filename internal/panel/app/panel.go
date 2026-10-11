@@ -18,6 +18,7 @@ import (
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
+	addonpages "mikan/internal/panel/addons/pages"
 	"mikan/internal/panel/addons/panelapi"
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/auth"
@@ -221,6 +222,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	hub := events.NewHub()
 	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Hub: hub, Log: o.Log, Now: o.Now})
 	deps.Addons = p.Addons
+	addonPages := addonpages.New(addonpages.Deps{Addons: p.Addons, Store: st.Q, Log: o.Log, Now: o.Now})
+	deps.Pages = addonPages
 	deps.DNS = o.DNS
 	deps.CheckHost = o.CheckHost
 	deps.DataDir = o.DataDir
@@ -428,6 +431,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)
+	adminMux.Handle(addonpages.Prefix, addonPages)
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
 	p.server.SetLegacy(subHandler.Legacy())

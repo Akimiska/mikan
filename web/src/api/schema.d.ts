@@ -72,6 +72,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/addons/{id}/ui": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Подписанный адрес страницы аддона в админке */
+        get: operations["get-addon-page"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addons/{id}/ui/rpc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Вызов страницы аддона: панель передаёт его аддону */
+        post: operations["call-addon-page"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/api-keys": {
         parameters: {
             query?: never;
@@ -2078,6 +2112,44 @@ export interface components {
                 [key: string]: string;
             };
             value: string;
+        };
+        AddonPageView: {
+            /**
+             * Format: int64
+             * @description Unix-время, после которого адрес не откроет файлы страницы
+             */
+            expires_at: number;
+            /** @description Название страницы по языкам */
+            title: {
+                [key: string]: string;
+            };
+            /** @description Адрес страницы относительно адреса админки (addons-ui/<id>/<подпись>/…); подпись действует 10 минут */
+            url: string;
+        };
+        AddonRPCInputBody: {
+            /** @description Любой JSON для аддона */
+            body?: unknown;
+            /**
+             * @description Язык админки; пусто — язык панели
+             * @enum {string}
+             */
+            lang?: "ru" | "en";
+            /**
+             * @description Метод для аддона; GET не пишется в журнал
+             * @enum {string}
+             */
+            method: "GET" | "POST" | "PUT" | "DELETE";
+            /** @description Путь для аддона, начинается с / */
+            path: string;
+        };
+        AddonRPCResult: {
+            /** @description JSON аддона как есть, до 1 МиБ */
+            body: unknown;
+            /**
+             * Format: int64
+             * @description Код ответа аддона: ошибки аддона тоже приходят сюда
+             */
+            status: number;
         };
         AddonRequest: {
             /** @enum {string} */
@@ -5261,6 +5333,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddonsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-addon-page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonPageView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "call-addon-page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddonRPCInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddonRPCResult"];
                 };
             };
             /** @description Error */

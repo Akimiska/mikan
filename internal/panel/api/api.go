@@ -16,6 +16,7 @@ import (
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/addons/pages"
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
@@ -120,6 +121,8 @@ type Deps struct {
 	NodeUpdates *nodeupdate.Service
 	// Addons are the marketplace's payment adapters; nil in tests.
 	Addons *addons.Manager
+	// Pages are the addons' own pages in the admin panel; nil: none.
+	Pages *pages.Pages
 	// Resolve looks a name up for what the panel dials on the admin's word (a REALITY
 	// target); nil asks the system's resolver.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
@@ -270,6 +273,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerPromocodes()
 	h.registerAddons()
 	h.registerMarketplace()
+	h.registerAddonPages()
 	h.registerWarp()
 	h.registerCascade()
 	h.registerPools()

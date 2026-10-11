@@ -352,6 +352,7 @@ type Manager struct {
 	pub            ed25519.PublicKey
 	version        string
 	hc, adapters   *http.Client
+	pages          *http.Client // an addon's admin pages: no redirects followed
 	log            *slog.Logger
 	now            func() time.Time
 
@@ -359,6 +360,7 @@ type Manager struct {
 	catalog *Catalog
 	fetched time.Time
 	infos   map[string]cachedInfo
+	infos2  map[string]cachedInfoV2
 
 	ask sync.Mutex // one request queued at a time: the number and the busy check
 }
@@ -376,7 +378,9 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 	}
 	pub, _ := release.Key(release.PublicKey)
 	m := &Manager{catalogURL: catalogURL, pub: pub, version: panelVersion, log: log, now: now,
-		hc: &http.Client{Timeout: 15 * time.Second}, adapters: &http.Client{Timeout: AdapterTimeout}, infos: map[string]cachedInfo{}}
+		hc: &http.Client{Timeout: 15 * time.Second}, adapters: &http.Client{Timeout: AdapterTimeout}, infos: map[string]cachedInfo{}, infos2: map[string]cachedInfoV2{},
+		// The panel fetches what the addon names and nothing it points elsewhere to.
+		pages: &http.Client{Timeout: AdapterTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	if dataDir != "" {
 		m.dir, m.updateDir = filepath.Join(dataDir, "addons"), filepath.Join(dataDir, "update")
 	}

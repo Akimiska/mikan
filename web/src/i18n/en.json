@@ -117,6 +117,9 @@
     "pageNotFoundText": "The address is wrong or the page has moved.",
     "toOverview": "To the overview",
     "api": {
+      "addon_no_pages": "The addon is not installed, not running or shows no pages in the panel.",
+      "addon_ui_forbidden": "The addon is not approved to show pages in the panel (ui).",
+      "addon_bad_answer": "The addon broke the protocol: the answer is too large, not JSON or a redirect.",
       "wrong_password": "Wrong current password",
       "bad_speed_limit": "Speed is 1 to 100,000 Mbit/s",
       "bad_device_mode": "The device limit counts bound devices or devices online at once",
@@ -2567,6 +2570,18 @@
     "invoiceFailed": "The invoice did not open: {error}.",
     "rublesInMarketplace": "Rubles (YooKassa, CryptoBot and more) are set up in the Payment methods card.",
     "moving": "YooKassa and CryptoBot moved to the catalog and their keys came along. The server is installing the payment method ({names}): it takes no payments until then."
+  },
+  "addonApp": {
+    "sub": "The page of the addon “{id}”. It runs in a sandbox: without your session or cookies, its data goes through the panel.",
+    "reload": "Reload",
+    "loading": "Loading the addon's page",
+    "noPagesTitle": "The addon has no page",
+    "noPagesText": "The addon “{id}” is not installed, not running or shows no pages in the panel.",
+    "forbiddenTitle": "The page is not approved",
+    "forbiddenText": "The addon was installed without the “ui” permission. Reinstall it from the marketplace and approve its permissions.",
+    "unreachableTitle": "The addon does not answer",
+    "unreachableText": "Check its container on the server: mikan addon list",
+    "expired": "The page has been open for over 10 minutes and will not load new files. If something stopped working, reload it."
   },
   "warp": {
     "title": "WARP",

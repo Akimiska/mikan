@@ -17,10 +17,11 @@ import (
 )
 
 // A priced trial over HTTP: the admin sets its price, the Mini App offers it to an
-// account without a subscription, the card payment gives the trial subscription, and the
-// offer is gone after that.
+// account without a subscription through the card adapter (it can refund), the card
+// payment gives the trial subscription, and the offer is gone after that. Turning the
+// trial off clears its price.
 func TestPaidTrialOverHTTP(t *testing.T) {
-	yk := &ykAdapter{pays: map[string]addons.Status{}}
+	yk := &ykAdapter{pays: map[string]addons.Status{}, refund: true}
 	srv := httptest.NewServer(yk)
 	t.Cleanup(srv.Close)
 	dir := t.TempDir()
@@ -70,8 +71,11 @@ func TestPaidTrialOverHTTP(t *testing.T) {
 	shop := "/" + subPath + "/tg/shop"
 	pay := "/" + subPath + "/tg/pay"
 	type shopView struct {
-		Offers []json.RawMessage `json:"offers"`
-		Trial  *struct {
+		Offers      []json.RawMessage `json:"offers"`
+		TrialAddons []struct {
+			Provider string `json:"provider"`
+		} `json:"trial_addons"`
+		Trial *struct {
 			ID    int64  `json:"id"`
 			Name  string `json:"name"`
 			Rub   int64  `json:"rub"`
@@ -80,7 +84,8 @@ func TestPaidTrialOverHTTP(t *testing.T) {
 	}
 	var sv shopView
 	resp, body = h.do(http.MethodPost, shop, map[string]any{"init_data": initData(tgToken, 556, h.now)}, same)
-	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &sv) != nil || len(sv.Offers) != 0 || sv.Trial == nil || sv.Trial.ID != trial.ID || sv.Trial.Rub != 100 || sv.Trial.Stars != 0 {
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &sv) != nil || len(sv.Offers) != 0 || sv.Trial == nil || sv.Trial.ID != trial.ID || sv.Trial.Rub != 100 || sv.Trial.Stars != 0 ||
+		len(sv.TrialAddons) != 1 || sv.TrialAddons[0].Provider != "addon:yookassa" {
 		t.Fatalf("shop with a priced trial: %d %s", resp.StatusCode, body)
 	}
 	if resp, body := h.do(http.MethodPost, pay, map[string]any{"init_data": initData(tgToken, 556, h.now), "trial": true, "provider": "addon:yookassa", "promo_code": "X"}, same); resp.StatusCode != http.StatusBadRequest {
@@ -123,5 +128,17 @@ func TestPaidTrialOverHTTP(t *testing.T) {
 	}
 	if resp, body := h.do(http.MethodGet, api+"/payments/settings", nil, nil); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"trials":1`) {
 		t.Fatalf("trials counted: %d %s", resp.StatusCode, body)
+	}
+	// The trial off through the API takes its price along, as the form does: the next
+	// trial starts free.
+	resp, body = h.do(http.MethodPatch, api+"/payments/settings", map[string]any{"trial_tariff_id": 0}, csrf)
+	ps.TrialRub, ps.TrialStars = -1, -1
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &ps) != nil || ps.TrialRub != 0 || ps.TrialStars != 0 {
+		t.Fatalf("the trial turned off keeps its price: %d %s", resp.StatusCode, body)
+	}
+	resp, body = h.do(http.MethodPatch, api+"/payments/settings", map[string]any{"trial_tariff_id": trial.ID}, csrf)
+	ps.TrialRub, ps.TrialStars = -1, -1
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &ps) != nil || ps.TrialRub != 0 || ps.TrialStars != 0 {
+		t.Fatalf("the trial turned on again: %d %s", resp.StatusCode, body)
 	}
 }

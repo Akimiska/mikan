@@ -31,7 +31,9 @@ func (s *Service) refundPromoPayment(ctx context.Context, p db.Payment, external
 // refundCharge gives a payment's money back through the provider it came by: Stars
 // through the bot, an adapter's payment through the adapter, with key as the adapter's
 // idempotency key (one per payment and reason), so a retry after a restart does not
-// refund twice.
+// refund twice. The adapter is asked for the invoice's amount: a provider's fee the buyer
+// paid on top (Platega adds its own) is not known to the panel and stays with the
+// provider, for a late promo payment and a trial alike.
 func (s *Service) refundCharge(ctx context.Context, p db.Payment, externalID, key string) error {
 	switch {
 	case p.Provider == Stars:

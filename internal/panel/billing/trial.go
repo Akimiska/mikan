@@ -143,16 +143,17 @@ type TrialOffer struct {
 	Rub    int64 // kopecks
 }
 
-// TrialOffer is the priced trial tgID may buy now; ok false when the trial is free or
-// off, the account may not take it, or no available provider takes its price. A hint for
-// the bot and the Mini App; TrialInvoice and Apply decide on their own.
+// TrialOffer is the priced trial tgID may buy now, with the providers it is sold through
+// (trialProviders); ok false when the trial is free or off, the account may not take it,
+// or none of those providers takes its price. A hint for the bot and the Mini App;
+// TrialInvoice and Apply decide on their own.
 func (s *Service) TrialOffer(ctx context.Context, tgID int64) (TrialOffer, Available, bool) {
 	c := s.Config(ctx)
 	t, ok := s.TrialTariff(ctx)
 	if !ok || !c.TrialPaid() {
 		return TrialOffer{}, Available{}, false
 	}
-	av := s.Available(ctx)
+	av := s.trialProviders(ctx)
 	o := TrialOffer{Tariff: t}
 	o.Stars, o.Rub = av.prices(trialPrice(c.TrialStars), trialPrice(c.TrialRub))
 	if o.Stars == 0 && o.Rub == 0 {
@@ -165,17 +166,33 @@ func (s *Service) TrialOffer(ctx context.Context, tgID int64) (TrialOffer, Avail
 // trialPrice: a price of the trial as a tariff term's, unset when 0.
 func trialPrice(n int64) sql.NullInt64 { return sql.NullInt64{Int64: n, Valid: n > 0} }
 
+// trialProviders are the available providers that can give the money back: Stars, and the
+// adapters that advertise refunds (validatePromoProvider, as for a discounted payment). A
+// paid trial that may no longer be given when it applies is refunded, so it is sold only
+// where that refund can happen.
+func (s *Service) trialProviders(ctx context.Context) Available {
+	av := s.Available(ctx)
+	out := Available{Stars: av.Stars}
+	for _, id := range av.Addons {
+		if s.validatePromoProvider(ctx, AddonPrefix+id) == nil {
+			out.Addons = append(out.Addons, id)
+		}
+	}
+	return out
+}
+
 // TrialInvoice opens a payment for the priced trial: the trial tariff for its term at the
-// trial's price. Only an account that may take the trial gets one (no trial, subscription
-// or payment yet); the trial is taken when the payment applies. An open invoice for the
-// same provider made in the last minutes is returned again.
+// trial's price, through one of trialProviders. Only an account that may take the trial
+// gets one (no trial, subscription or payment yet); the trial is taken when the payment
+// applies. An open invoice for the same provider made in the last minutes is returned
+// again, to an account that may still take the trial.
 func (s *Service) TrialInvoice(ctx context.Context, tgID int64, provider string) (db.Payment, error) {
 	c := s.Config(ctx)
 	t, ok := s.TrialTariff(ctx)
 	if !ok || !c.TrialPaid() {
 		return db.Payment{}, ErrTrialOff
 	}
-	amount, currency, ok := s.Available(ctx).price(provider, trialPrice(c.TrialStars), trialPrice(c.TrialRub))
+	amount, currency, ok := s.trialProviders(ctx).price(provider, trialPrice(c.TrialStars), trialPrice(c.TrialRub))
 	if !ok {
 		return db.Payment{}, ErrProviderOff
 	}
@@ -187,20 +204,30 @@ func (s *Service) TrialInvoice(ctx context.Context, tgID int64, provider string)
 	now := s.d.Now()
 	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
 	termDays := sql.NullInt64{Int64: t.DurationDays, Valid: true}
+	// Asked on the invoice's transaction, under the account's lock, whether an open invoice
+	// is given again or a new one made: a customer since the offer, or an account that
+	// took its trial meanwhile, gets no pay link.
+	eligible := func(q *db.Queries) error {
+		allowed, err := s.trialAllowed(ctx, q, tgID)
+		if err == nil && !allowed {
+			err = ErrTrialUsed
+		}
+		return err
+	}
 	p, open, err := s.newPayment(ctx, tgID, now,
 		func(q *db.Queries) ([]db.Payment, error) {
 			return q.FindOpenPayments(ctx, db.FindOpenPaymentsParams{TgID: tgID, TariffID: tariffID, Provider: provider, Kind: KindTrial,
 				Since: now.Add(-invoiceReuse).Unix()})
 		},
-		func(_ *db.Queries, existing db.Payment) (bool, error) {
+		func(q *db.Queries, existing db.Payment) (bool, error) {
+			if err := eligible(q); err != nil {
+				return false, err
+			}
 			return existing.Amount == amount && existing.TermDays == termDays, nil
 		},
 		func(q *db.Queries) (db.Payment, error) {
-			// Checked under the account's lock: a customer since the offer gets no trial.
-			if allowed, err := s.trialAllowed(ctx, q, tgID); err != nil {
+			if err := eligible(q); err != nil {
 				return db.Payment{}, err
-			} else if !allowed {
-				return db.Payment{}, ErrTrialUsed
 			}
 			return q.CreatePayment(ctx, db.CreatePaymentParams{Provider: provider, Payload: secure.Token(32), TgID: tgID, Kind: KindTrial,
 				TariffID: tariffID, TariffName: t.Name, Amount: amount, Currency: currency, CreatedAt: now.Unix(), TermDays: termDays})
@@ -282,10 +309,19 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 		return err
 	}
 	if n != 1 {
-		// The provider gave the money back, but the payment moved on while it did (another
-		// pass applied it). Said loudly: this one is the admin's to settle.
-		s.d.Log.Error("billing: the trial payment changed while its money was going back", "payment", cur.ID)
-		return errors.New("the trial payment changed while its money was going back")
+		// Marked refunded meanwhile by another way (Telegram's refunded_payment for the
+		// Stars just returned, the admin's refund): the money is back all the same, and
+		// none of those tells the buyer about a payment that gave nothing. Anything else
+		// (another pass applied it) is the admin's to settle, said loudly.
+		latest, err := s.d.Store.Q.GetPayment(ctx, cur.ID)
+		if err != nil {
+			return err
+		}
+		if latest.Status != PaymentRefunded {
+			s.d.Log.Error("billing: the trial payment changed while its money was going back", "payment", cur.ID, "status", latest.Status)
+			return errors.New("the trial payment changed while its money was going back")
+		}
+		refundedAt = latest.RefundedAt
 	}
 	s.d.Log.Warn("billing: a paid trial the account may not take was refunded", "payment", cur.ID, "provider", cur.Provider, "tg", cur.TgID)
 	if tg := s.telegram(); tg != nil {

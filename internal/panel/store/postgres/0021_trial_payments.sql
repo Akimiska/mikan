@@ -5,6 +5,8 @@ ALTER TABLE payments DROP CONSTRAINT payments_kind_check;
 ALTER TABLE payments ADD CONSTRAINT payments_kind_check CHECK (kind IN ('new', 'renew', 'package', 'trial'));
 
 -- +goose Down
-DELETE FROM payments WHERE kind = 'trial';
+-- Trial payments stay: they are money taken, with the subscriptions they gave. The old check
+-- comes back for new rows only (NOT VALID), so the rows it does not know do not stop the
+-- rollback.
 ALTER TABLE payments DROP CONSTRAINT payments_kind_check;
-ALTER TABLE payments ADD CONSTRAINT payments_kind_check CHECK (kind IN ('new', 'renew', 'package'));
+ALTER TABLE payments ADD CONSTRAINT payments_kind_check CHECK (kind IN ('new', 'renew', 'package')) NOT VALID;

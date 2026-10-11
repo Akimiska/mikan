@@ -273,9 +273,10 @@ function SubPage() {
     ) : null;
 
   // The priced trial comes first for an account without a subscription; plans after it.
+  // It is paid only through the methods that can refund it.
   const trialShop = shop?.trial ? (
     <Shop
-      data={shop}
+      data={{ ...shop, addons: shop.trial_addons ?? [] }}
       offers={[shop.trial]}
       field="trial"
       pick={t("sub.trialPick")}

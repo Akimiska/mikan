@@ -2457,7 +2457,7 @@
     "trialOff": "Off",
     "trialsGiven": "Trials given: {n}",
     "trialPrice": "Trial price",
-    "trialPriceSub": "Empty: free. With a price the trial is bought once in the bot and the Mini App, and after it only the regular plans. Needs selling on and a payment method for this price.",
+    "trialPriceSub": "Empty: free. With a price the trial is bought once in the bot and the Mini App, and after it only the regular plans. Needs selling on and Stars or a payment method that can refund: a paid trial that can no longer be given is refunded. “Sell to new people” may stay off.",
     "nothingOnSale": "The bot sells nothing yet: mark a plan “On sale” and set a price.",
     "openTariffs": "Open plans",
     "salesOff": "Selling is off: the bot and the Mini App sell nothing. Payment methods can be set up beforehand.",

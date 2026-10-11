@@ -267,6 +267,165 @@ func TestPaidTrialBothPaidBeforeApply(t *testing.T) {
 	}
 }
 
+// A paid trial that may no longer be given goes back to the buyer, so it is sold only where
+// that refund can happen: Stars, and the adapters that advertise refunds.
+func TestPaidTrialOnlyWhereItCanBeRefunded(t *testing.T) {
+	for _, refunds := range []bool{true, false} {
+		name := "an adapter that refunds"
+		if !refunds {
+			name = "an adapter that cannot refund"
+		}
+		t.Run(name, func(t *testing.T) {
+			e, fa, dir := adapterEnv(t, "fake")
+			fa.noRefund = !refunds
+			runAdapter(t, dir, "fake", fa)
+			ctx := context.Background()
+			if _, err := e.s.SetAddonConfig(ctx, "fake", true, addons.Settings{"shop_id": "12", "secret_key": adapterSecret}); err != nil {
+				t.Fatal(err)
+			}
+			e.priceTrial()
+			if av := e.s.Available(ctx); len(av.Addons) != 1 {
+				t.Fatalf("the adapter sells plans either way: %+v", av)
+			}
+			o, av, ok := e.s.TrialOffer(ctx, 921)
+			_, err := e.s.TrialInvoice(ctx, 921, "addon:fake")
+			if refunds {
+				if !ok || o.Stars != 1 || o.Rub != 100 || len(av.Addons) != 1 || err != nil {
+					t.Fatalf("the trial through an adapter that refunds: %+v %+v %v %v", o, av, ok, err)
+				}
+				return
+			}
+			if !ok || o.Stars != 1 || o.Rub != 0 || len(av.Addons) != 0 {
+				t.Fatalf("the trial with an adapter that cannot refund: %+v %+v %v", o, av, ok)
+			}
+			if !errors.Is(err, ErrProviderOff) {
+				t.Fatalf("a trial invoice through an adapter that cannot refund: %v", err)
+			}
+			// Without Stars nothing the trial can be sold through is left.
+			c := e.s.Config(ctx)
+			c.Stars = false
+			must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, c))
+			if _, _, ok := e.s.TrialOffer(ctx, 921); ok {
+				t.Fatal("the trial offered through an adapter that cannot refund it")
+			}
+		})
+	}
+}
+
+// An open invoice of the last minutes is given again only to an account that may still
+// take the trial: one that became a customer, or took its trial, meanwhile gets no pay link.
+func TestPaidTrialOpenInvoiceAsksAgain(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		become func(e *env, tg int64)
+	}{
+		{"a subscription linked", func(e *env, tg int64) {
+			u, err := e.s.d.Users.Create(context.Background(), domain.CreateInput{Name: "bought one", TariffID: e.sale.ID})
+			must(e.t, err)
+			must(e.t, e.st.Q.LinkTg(context.Background(), db.LinkTgParams{UserID: u.ID, TgID: tg, CreatedAt: e.now.Unix()}))
+		}},
+		{"the trial taken", func(e *env, tg int64) {
+			_, err := e.st.Q.TakeTrial(context.Background(), db.TakeTrialParams{TgID: tg, CreatedAt: e.now.Unix()})
+			must(e.t, err)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			ctx := context.Background()
+			e.priceTrial()
+			first, err := e.s.TrialInvoice(ctx, 922, Stars)
+			must(t, err)
+			again, err := e.s.TrialInvoice(ctx, 922, Stars)
+			must(t, err)
+			if again.ID != first.ID {
+				t.Fatal("the open invoice was not given again")
+			}
+			tc.become(e, 922)
+			if p, err := e.s.TrialInvoice(ctx, 922, Stars); !errors.Is(err, ErrTrialUsed) {
+				t.Fatalf("the open invoice given again: %+v %v", p, err)
+			}
+		})
+	}
+}
+
+// What the account did between the invoice and the payment counts when the trial applies,
+// not only a trial taken: a plan paid for, or a subscription linked to it, and the trial's
+// money goes back with nothing made.
+func TestPaidTrialAppliedToACustomer(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		become func(e *env, tg int64)
+	}{
+		{"a plan paid for", func(e *env, tg int64) {
+			ctx := context.Background()
+			p, err := e.st.Q.CreatePayment(ctx, db.CreatePaymentParams{Provider: Stars, Payload: "plan-923", TgID: tg, Kind: "new",
+				TariffID: sql.NullInt64{Int64: e.sale.ID, Valid: true}, TariffName: e.sale.Name, Amount: 50, Currency: "XTR", CreatedAt: e.now.Unix()})
+			must(e.t, err)
+			n, err := e.st.Q.MarkPaymentPaid(ctx, db.MarkPaymentPaidParams{ExternalID: sql.NullString{String: "ch-plan", Valid: true},
+				PaidAt: sql.NullInt64{Int64: e.now.Unix(), Valid: true}, ID: p.ID})
+			must(e.t, err)
+			if n != 1 {
+				e.t.Fatal("the plan's payment not marked paid")
+			}
+		}},
+		{"a subscription linked", func(e *env, tg int64) {
+			u, err := e.s.d.Users.Create(context.Background(), domain.CreateInput{Name: "bought one", TariffID: e.sale.ID})
+			must(e.t, err)
+			must(e.t, e.st.Q.LinkTg(context.Background(), db.LinkTgParams{UserID: u.ID, TgID: tg, CreatedAt: e.now.Unix()}))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			ctx := context.Background()
+			e.priceTrial()
+			p, err := e.s.TrialInvoice(ctx, 923, Stars)
+			must(t, err)
+			must(t, e.s.PreCheckout(ctx, 923, p.Payload, "XTR", 1))
+			tc.become(e, 923)
+			users := e.users()
+			must(t, e.s.StarsPaid(ctx, 923, p.Payload, "ch-trial-923", "XTR", 1))
+			if got := e.payment(p.ID); got.Status != "refunded" || got.Error != "" {
+				t.Fatalf("the trial paid by a customer: %+v", got)
+			}
+			if e.users() != users {
+				t.Fatal("the trial made a subscription for a customer")
+			}
+			if has, err := e.st.Q.HasTrial(ctx, 923); err != nil || has {
+				t.Fatalf("the trial taken by a payment that went back: %v %v", has, err)
+			}
+			if refunds := append([]string(nil), e.tg.refunds...); len(refunds) != 1 || refunds[0] != "ch-trial-923" {
+				t.Fatalf("refunds %v", refunds)
+			}
+		})
+	}
+}
+
+// Telegram reports the Stars it has just returned (refunded_payment) before the trial's
+// refund is recorded: the payment ends refunded all the same, without an error, and the
+// buyer is told once.
+func TestPaidTrialRefundReportedMeanwhile(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.priceTrial()
+	p, err := e.s.TrialInvoice(ctx, 924, Stars)
+	must(t, err)
+	_, err = e.st.Q.TakeTrial(ctx, db.TakeTrialParams{TgID: 924, CreatedAt: e.now.Unix()})
+	must(t, err)
+	e.tg.onRefund = func() {
+		// The update for an unapplied payment asks nothing of the bot, so it may run here.
+		if err := e.s.StarsRefunded(ctx, 924, "ch-meanwhile"); err != nil {
+			t.Error(err)
+		}
+	}
+	must(t, e.s.StarsPaid(ctx, 924, p.Payload, "ch-meanwhile", "XTR", 1))
+	if got := e.payment(p.ID); got.Status != "refunded" || !got.RefundedAt.Valid || got.Error != "" {
+		t.Fatalf("the trial refunded meanwhile: %+v", got)
+	}
+	if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].p.ID != p.ID || notes[0].u.ID != 0 {
+		t.Fatalf("the buyer was told %+v", notes)
+	}
+}
+
 // What was true at the invoice is asked again before the Stars are taken: an account that
 // became a customer in between pays nothing.
 func TestPaidTrialPreCheckoutAsksAgain(t *testing.T) {

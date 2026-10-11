@@ -22,7 +22,7 @@ type PaymentSettingsView struct {
 	RenewResetsTraffic bool   `json:"renew_resets_traffic" doc:"Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок"`
 	TrialTariffID      *int64 `json:"trial_tariff_id" doc:"Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже"`
 	TrialStars         int64  `json:"trial_stars" doc:"Цена пробного периода в Stars; 0 вместе с trial_rub — бесплатно"`
-	TrialRub           int64  `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App, нужна включённая продажа"`
+	TrialRub           int64  `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App через Stars или способ оплаты с возвратом денег, нужна включённая продажа"`
 	Trials             int64  `json:"trials" doc:"Сколько пробных подписок выдано"`
 	Available          struct {
 		Stars  bool     `json:"stars"`
@@ -45,7 +45,7 @@ type patchPaymentSettingsInput struct {
 		TrialTariffID      *int64 `json:"trial_tariff_id,omitempty" minimum:"0" doc:"Тариф пробного периода; 0 — выключить"`
 		// The bounds are domain.MaxPriceStars and domain.MaxPriceRub, which a tag cannot
 		// name; the handler checks the prices against them.
-		TrialStars *int64 `json:"trial_stars,omitempty" minimum:"0" maximum:"10000" doc:"Цена пробного периода в Stars; 0 — не за Stars"`
+		TrialStars *int64 `json:"trial_stars,omitempty" minimum:"0" maximum:"10000" doc:"Цена пробного периода в Stars; 0 — не за Stars. Без пробного периода (trial_tariff_id 0) обе цены сбрасываются"`
 		TrialRub   *int64 `json:"trial_rub,omitempty" minimum:"0" maximum:"100000000" doc:"Цена пробного периода в копейках, от 100 (1 ₽); 0 — не за рубли. Обе 0 — пробный период бесплатный"`
 	}
 }
@@ -193,6 +193,11 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 			if v != nil {
 				*dst = *v
 			}
+		}
+		// No trial, no price, as in the form: a price kept for a trial turned off would
+		// come back with the next one.
+		if c.TrialTariffID == 0 {
+			c.TrialStars, c.TrialRub = 0, 0
 		}
 		return settings.Set(ctx, set, billing.KeyConfig, c)
 	})

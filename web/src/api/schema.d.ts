@@ -3459,7 +3459,7 @@ export interface components {
             trial_rub?: number;
             /**
              * Format: int64
-             * @description Цена пробного периода в Stars; 0 — не за Stars
+             * @description Цена пробного периода в Stars; 0 — не за Stars. Без пробного периода (trial_tariff_id 0) обе цены сбрасываются
              */
             trial_stars?: number;
             /**
@@ -3609,7 +3609,7 @@ export interface components {
             stars: boolean;
             /**
              * Format: int64
-             * @description Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App, нужна включённая продажа
+             * @description Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App через Stars или способ оплаты с возвратом денег, нужна включённая продажа
              */
             trial_rub: number;
             /**

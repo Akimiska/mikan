@@ -340,13 +340,8 @@ func health() error {
 	}
 	// Liveness of the local listener only; the certificate is not what is being checked.
 	c := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-	resp, err := c.Get(scheme + "://" + net.JoinHostPort(host, port) + "/")
-	if err != nil {
+	if err := probe(c, scheme+"://"+net.JoinHostPort(host, port)+"/"); err != nil {
 		return err
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	// A panel that answers but has lost its database serves nothing but errors. One bare
 	// query on a connection of its own: no pool, no migrations.
@@ -360,6 +355,21 @@ func health() error {
 		return fmt.Errorf("database: %w", err)
 	}
 	fmt.Println("ok")
+	return nil
+}
+
+// probe asks the panel's root: any answer short of a server error means it serves. The
+// root is a 404, or the admin's own site (data/www) with its 200: a health check that
+// wanted the 404 called a panel with a site unhealthy, and updates gave it up.
+func probe(c *http.Client, url string) error {
+	resp, err := c.Get(url)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
 	return nil
 }
 

@@ -267,3 +267,16 @@ func TestBackupIsPrivateAndConsistent(t *testing.T) {
 		t.Fatal("a path that cannot be written")
 	}
 }
+
+// The health check takes any answer of the panel but a server error: the root is a 404, or
+// the admin's own site with its 200, and a panel with a site was called unhealthy.
+func TestHealthProbeTakesTheOwnSite(t *testing.T) {
+	for status, ok := range map[int]bool{http.StatusNotFound: true, http.StatusOK: true, http.StatusBadGateway: false} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+		err := probe(srv.Client(), srv.URL+"/")
+		srv.Close()
+		if (err == nil) != ok {
+			t.Errorf("status %d: %v", status, err)
+		}
+	}
+}

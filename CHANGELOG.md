@@ -53,6 +53,7 @@ the signed manifest, and the panel shows the one in its language.
 - A second protocol of the same kind can be added without picking a port: when the preset's port is taken (by another protocol or a program on the server), the panel takes the first free spare port (2053, 2083…) and says which. A port you type is still refused when it is taken. Thanks to Roman.
 - **Any free port** (Settings → System → Automatic fixes, off by default): when every spare port is taken, the panel picks a free one in 20000-32767 for a new protocol without a port and for automatic moves. It asks first: the installer does not open those ports in the firewall.
 - The release notes on the Updates card are folded to a few lines with "Show all changes": a long list no longer pushes the update button off the screen.
+- A panel with its own site (an `index.html` in `data/www`) is no longer marked unhealthy: its health check wanted a 404 at the root, so Docker showed the panel down and updates stopped as failed although the panel worked.
 - The server's CPU on the node card no longer counts the time the hosting gives to its other machines (steal): on a busy host it showed load the server did not have.
 
 ### ru
@@ -104,6 +105,7 @@ the signed manifest, and the panel shows the one in its language.
 - Второй протокол того же вида добавляется без выбора порта: если порт пресета занят (другим протоколом или программой на сервере), панель берёт первый свободный запасной порт (2053, 2083…) и пишет, какой. Указанный вручную занятый порт по-прежнему отклоняется. Спасибо Роману.
 - **Любой свободный порт** («Настройки → Система → Автоподбор», по умолчанию выключено): когда все запасные порты заняты, панель берёт свободный из 20000-32767 для нового протокола без порта и при автопереносе. Перед включением предупреждает: эти порты установщик в файрволе не открывает.
 - Список изменений в карточке «Обновления» свёрнут до нескольких строк с кнопкой «Показать все изменения»: длинный список больше не уводит кнопку обновления вниз.
+- Панель со своим сайтом (`index.html` в `data/www`) больше не считается неработающей: проверка здоровья ждала на главной странице 404, поэтому Docker показывал панель упавшей, а обновление останавливалось как неудачное, хотя панель работала.
 - Процессор сервера на карточке ноды больше не считает время, которое хостинг отдаёт соседним машинам (steal): на загруженном хосте он показывал нагрузку, которой у сервера не было.
 
 ## 0.5.0.4

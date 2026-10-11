@@ -53,6 +53,7 @@ ON CONFLICT (dedupe_key) DO NOTHING;
 SELECT * FROM addon_events
 WHERE id > sqlc.arg(after)::BIGINT
   AND (COALESCE(cardinality(sqlc.arg(types)::TEXT[]), 0) = 0 OR type = ANY(sqlc.arg(types)::TEXT[]))
+  AND (sqlc.arg(bot_too)::BOOLEAN OR type NOT LIKE 'bot.%')
 ORDER BY id LIMIT sqlc.arg(lim)::INT;
 
 -- name: GetAddonCursor :one
@@ -82,3 +83,9 @@ DELETE FROM addon_updates WHERE update_id < sqlc.arg(below)::BIGINT;
 
 -- name: PruneAddonUpdates :execrows
 DELETE FROM addon_updates WHERE created_at < sqlc.arg(before)::BIGINT;
+
+-- name: DeleteAddonData :exec
+DELETE FROM addon_kv WHERE addon_id = $1;
+
+-- name: DeleteAddonCursor :exec
+DELETE FROM addon_cursors WHERE addon_id = $1;

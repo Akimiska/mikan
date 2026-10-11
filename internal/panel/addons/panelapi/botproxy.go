@@ -58,8 +58,8 @@ var direct = map[string]bool{
 var queued = map[string]bool{
 	"sendMessage": true, "editMessageText": true, "editMessageReplyMarkup": true, "editMessageCaption": true,
 	"editMessageMedia": true, "deleteMessage": true, "deleteMessages": true, "sendPhoto": true,
-	"sendDocument": true, "sendMediaGroup": true, "sendChatAction": true, "copyMessage": true,
-	"forwardMessage": true, "sendSticker": true, "sendAnimation": true, "sendVideo": true,
+	"sendDocument": true, "sendMediaGroup": true, "sendChatAction": true,
+	"sendSticker": true, "sendAnimation": true, "sendVideo": true,
 	"sendAudio": true, "sendVoice": true, "sendLocation": true, "pinChatMessage": true, "unpinChatMessage": true,
 }
 
@@ -177,6 +177,14 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 	limit := int64(maxCall)
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
 		limit = maxUpload
+		// A file is held in memory on its way: a few at a time, so that a burst cannot take
+		// the panel's memory.
+		select {
+		case s.uploads <- struct{}{}:
+			defer func() { <-s.uploads }()
+		case <-r.Context().Done():
+			return
+		}
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
@@ -297,6 +305,7 @@ func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, p map[string
 		ups := make([]json.RawMessage, 0, len(rows))
 		for _, u := range rows {
 			ups = append(ups, json.RawMessage(u.Body))
+			s.talk.markUpdate([]byte(u.Body))
 		}
 		tgOK(w, ups)
 	}
@@ -312,9 +321,9 @@ func params(ct string, body []byte) (map[string]string, error) {
 	mt, mp, _ := mime.ParseMediaType(ct)
 	switch mt {
 	case "application/json":
-		var m map[string]json.RawMessage
-		if err := json.Unmarshal(body, &m); err != nil {
-			return nil, errors.New("the body is not a JSON object")
+		m, err := jsonObject(body)
+		if err != nil {
+			return nil, err
 		}
 		for k, v := range m {
 			// A number or an object is no string: told by its first byte, not by a failed decode.
@@ -331,8 +340,11 @@ func params(ct string, body []byte) (map[string]string, error) {
 		if err != nil {
 			return nil, errors.New("the form cannot be read")
 		}
-		for k := range v {
-			out[k] = v.Get(k)
+		for k, vs := range v {
+			if len(vs) > 1 {
+				return nil, errors.New(k + " is given twice")
+			}
+			out[k] = vs[0]
 		}
 	case "multipart/form-data":
 		mr := multipart.NewReader(bytes.NewReader(body), mp["boundary"])
@@ -344,6 +356,10 @@ func params(ct string, body []byte) (map[string]string, error) {
 			if err != nil {
 				return nil, errors.New("the multipart body cannot be read")
 			}
+			if _, twice := out[part.FormName()]; twice {
+				return nil, errors.New(part.FormName() + " is given twice")
+			}
+			out[part.FormName()] = ""
 			if part.FileName() == "" {
 				v, _ := io.ReadAll(io.LimitReader(part, maxCall))
 				out[part.FormName()] = string(v)
@@ -429,4 +445,33 @@ func (s *Server) pruneUpdates(ctx context.Context) {
 	if _, err := s.d.Store.Q.PruneAddonUpdates(ctx, s.d.Now().Add(-keepUpdates).Unix()); err != nil && ctx.Err() == nil {
 		s.d.Log.Warn("addons api: prune updates", "err", err)
 	}
+}
+
+// jsonObject reads a JSON object's members, refusing one given twice: the checks here would
+// see one of them and Telegram might take the other.
+func jsonObject(body []byte) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil, errors.New("the body is not a JSON object")
+	}
+	m := map[string]json.RawMessage{}
+	for dec.More() {
+		t, err := dec.Token()
+		k, ok := t.(string)
+		if err != nil || !ok {
+			return nil, errors.New("the body is not a JSON object")
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return nil, errors.New("the body is not a JSON object")
+		}
+		if _, twice := m[k]; twice {
+			return nil, errors.New(k + " is given twice")
+		}
+		m[k] = v
+	}
+	if t, err := dec.Token(); err != nil || t != json.Delim('}') || dec.More() {
+		return nil, errors.New("the body is not a JSON object")
+	}
+	return m, nil
 }

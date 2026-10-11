@@ -69,8 +69,10 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 		}
 		after = cur
 	}
+	// The bot's messages (bot.*) carry whole subscriptions and payments: the holder's alone.
+	holder := s.holds(r.Context(), c)
 	rows, err := longPoll(r.Context(), s.d.Hub, time.Duration(wait)*time.Second, func() ([]db.AddonEvent, error) {
-		return s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, Lim: int32(limit)})
+		return s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, BotToo: holder, Lim: int32(limit)})
 	})
 	if r.Context().Err() != nil {
 		return
@@ -83,6 +85,9 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 		Events []events.Event `json:"events"`
 	}{Events: make([]events.Event, 0, len(rows))}
 	for _, e := range rows {
+		if holder {
+			s.talk.mark(e.TgID.Int64) // the bot is about to write to this account
+		}
 		out.Events = append(out.Events, events.Event{ID: e.ID, Type: e.Type, At: time.Unix(e.CreatedAt, 0).UTC(),
 			UserID: e.UserID.Int64, TgID: e.TgID.Int64, Data: json.RawMessage(e.Data)})
 	}

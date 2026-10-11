@@ -110,6 +110,24 @@ func (q *Queries) CountAddonUpdates(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const deleteAddonCursor = `-- name: DeleteAddonCursor :exec
+DELETE FROM addon_cursors WHERE addon_id = $1
+`
+
+func (q *Queries) DeleteAddonCursor(ctx context.Context, addonID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonCursor, addonID)
+	return err
+}
+
+const deleteAddonData = `-- name: DeleteAddonData :exec
+DELETE FROM addon_kv WHERE addon_id = $1
+`
+
+func (q *Queries) DeleteAddonData(ctx context.Context, addonID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonData, addonID)
+	return err
+}
+
 const deleteAddonGrant = `-- name: DeleteAddonGrant :exec
 DELETE FROM addon_grants WHERE addon_id = $1
 `
@@ -192,17 +210,24 @@ const listAddonEvents = `-- name: ListAddonEvents :many
 SELECT id, type, user_id, tg_id, data, dedupe_key, created_at FROM addon_events
 WHERE id > $1::BIGINT
   AND (COALESCE(cardinality($2::TEXT[]), 0) = 0 OR type = ANY($2::TEXT[]))
-ORDER BY id LIMIT $3::INT
+  AND ($3::BOOLEAN OR type NOT LIKE 'bot.%')
+ORDER BY id LIMIT $4::INT
 `
 
 type ListAddonEventsParams struct {
-	After int64
-	Types []string
-	Lim   int32
+	After  int64
+	Types  []string
+	BotToo bool
+	Lim    int32
 }
 
 func (q *Queries) ListAddonEvents(ctx context.Context, arg ListAddonEventsParams) ([]AddonEvent, error) {
-	rows, err := q.db.QueryContext(ctx, listAddonEvents, arg.After, pq.Array(arg.Types), arg.Lim)
+	rows, err := q.db.QueryContext(ctx, listAddonEvents,
+		arg.After,
+		pq.Array(arg.Types),
+		arg.BotToo,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

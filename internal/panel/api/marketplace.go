@@ -347,7 +347,17 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *addonIDInput) (*ma
 	if queued(h.d.Addons, in.ID) {
 		return nil, huma.Error409Conflict("addon_busy")
 	}
-	if err := h.d.Store.Q.DeleteAddonGrant(ctx, in.ID); err != nil {
+	// The grant goes first, and the addon's store and its place in the feed with it: another
+	// addon installed later under the same id starts with nothing of this one's.
+	if err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if err := q.DeleteAddonGrant(ctx, in.ID); err != nil {
+			return err
+		}
+		if err := q.DeleteAddonData(ctx, in.ID); err != nil {
+			return err
+		}
+		return q.DeleteAddonCursor(ctx, in.ID)
+	}); err != nil {
 		return nil, err
 	}
 	if err := h.d.Addons.Ask(addons.Request{Action: "remove", ID: in.ID}); err != nil {

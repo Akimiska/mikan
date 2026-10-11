@@ -109,7 +109,7 @@ func TestAddonEndToEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := st.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: "telegram", Version: "1", Permissions: `["bot","events","kv","users:read"]`, ApprovedAt: 1}); err != nil {
+	if err := st.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: "telegram", Version: "1", Permissions: `["bot","users:read","users:write","billing:invoice","events","kv"]`, ApprovedAt: 1}); err != nil {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("t", 48)

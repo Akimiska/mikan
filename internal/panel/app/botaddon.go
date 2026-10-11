@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
+	"mikan/internal/panel/tgbot"
 )
 
 // The panel has no screens of its own in the subscribers' bot: they are the official bot
@@ -20,6 +22,9 @@ import (
 
 // OfficialBot is the id of the official bot addon in the catalog.
 const OfficialBot = "telegram"
+
+// officialBotPermissions bound what the official bot is granted when it installs itself.
+var officialBotPermissions = []string{"bot", "users:read", "users:write", "billing:invoice", "events", "kv"}
 
 // botAddonAgain: how long a failed install waits before it is asked again.
 const botAddonAgain = time.Hour
@@ -76,6 +81,12 @@ func (b *botAddon) check(ctx context.Context) {
 		return // not in the catalog yet
 	}
 	e := c.Adapters[i]
+	// Installed without the admin's look, so never with more than the official bot needs,
+	// whatever a catalog says.
+	if !addons.Covers(officialBotPermissions, e.Permissions) {
+		p.log.Warn("bot addon: the catalog asks for more than the official bot may have", "permissions", e.Permissions)
+		return
+	}
 	if err := p.st.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: e.ID, Version: e.Version,
 		Permissions: addons.EncodePermissions(e.Permissions), ApprovedAt: p.now().Unix()}); err != nil {
 		p.log.Error("bot addon: grant", "err", err)
@@ -97,4 +108,15 @@ func (b *botAddon) granted(ctx context.Context) bool {
 	}
 	perms, _ := addons.DecodePermissions(g.Permissions)
 	return slices.Contains(perms, "bot")
+}
+
+// channelMember is the channel check the bot addon may ask: about the bot's own channel
+// only, so it cannot probe other chats or reset what the gateway knows about members.
+func channelMember(b *tgbot.Local, g *tgate.Gateway) tgbot.Member {
+	return func(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error) {
+		if ch := b.Config(ctx).Channel.Chat; ch == "" || chat != ch {
+			return false, errors.New("not the bot's channel")
+		}
+		return g.Member(ctx, chat, tgID, fresh)
+	}
 }

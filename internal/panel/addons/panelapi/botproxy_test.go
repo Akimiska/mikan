@@ -8,12 +8,17 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
 
@@ -263,7 +268,7 @@ func TestBotRPCOnlyForTheHolder(t *testing.T) {
 	})
 	s := New(d)
 	call := func(token string) (int, string) {
-		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:41990/panel/v2/bot/Owner", strings.NewReader(`[1]`))
+		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:41990/panel/v2/bot/Config", strings.NewReader(`[]`))
 		r.Header.Set("Authorization", "Bearer "+token)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
@@ -275,7 +280,7 @@ func TestBotRPCOnlyForTheHolder(t *testing.T) {
 	if err := settings.Set(context.Background(), d.Settings, SlotKey, "telegram"); err != nil {
 		t.Fatal(err)
 	}
-	if code, body := call(botToken); code != 200 || !strings.Contains(body, "Owner") {
+	if code, body := call(botToken); code != 200 || !strings.Contains(body, "Config") {
 		t.Fatalf("the holder: %d %s", code, body)
 	}
 	if code, _ := call(strings.Repeat("k", 48)); code != http.StatusForbidden {
@@ -285,3 +290,163 @@ func TestBotRPCOnlyForTheHolder(t *testing.T) {
 		t.Fatalf("an addon without bot: %d", code)
 	}
 }
+
+// Each method of the bot's RPC needs its permission and acts only for accounts talking to
+// the bot now: an addon cannot read or move a subscription by an id it made up.
+func TestBotRPCRules(t *testing.T) {
+	base, _ := proxyWorld(t)
+	ctx := context.Background()
+	d := base.d
+	d.Bot = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"results":[]}`)
+	})
+	s := New(d)
+	if err := settings.Set(ctx, d.Settings, SlotKey, "telegram"); err != nil {
+		t.Fatal(err)
+	}
+	grant := func(perms string) {
+		if err := d.Store.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: "telegram", Version: "1", Permissions: perms, ApprovedAt: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(method, args string) (int, string) {
+		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:41990/panel/v2/bot/"+method, strings.NewReader(args))
+		r.Header.Set("Authorization", "Bearer "+botToken)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		var e Error
+		_ = json.Unmarshal(w.Body.Bytes(), &e)
+		return w.Code, e.Code
+	}
+	// a subscription of account 777, which never wrote to the bot
+	if err := domain.Seed(ctx, d.Store, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ts, _ := d.Store.Q.ListTariffs(ctx)
+	u, err := domain.NewUsers(d.Store, domain.NewPool(d.Store, time.Now), noChanges{}, time.Now).Create(ctx, domain.CreateInput{Name: "x", TariffID: ts[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Store.Q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: 777, CreatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	uid := strconvItoa(u.ID)
+
+	grant(`["bot"]`)
+	if code, ec := call("Context", `[555]`); code != 403 || ec != "forbidden" {
+		t.Fatalf("users:read missing: %d %s", code, ec)
+	}
+	if code, _ := call("Config", `[]`); code != 200 {
+		t.Fatalf("no data of anyone: %d", code)
+	}
+	if code, _ := call("Store", `[]`); code != 403 {
+		t.Fatalf("a method not open to addons: %d", code)
+	}
+	grant(`["bot","users:read","users:write","billing:invoice"]`)
+	if code, ec := call("Context", `[555]`); code != 403 || ec != "not_talking" {
+		t.Fatalf("an account that never wrote: %d %s", code, ec)
+	}
+	s.talk.markUpdate([]byte(`{"update_id":1,"message":{"from":{"id":555},"chat":{"id":555}}}`))
+	if code, ec := call("Context", `[555]`); code != 200 {
+		t.Fatalf("an account that wrote: %d %s", code, ec)
+	}
+	for _, c := range []struct{ method, args string }{
+		{"User", "[" + uid + "]"},
+		{"Transfer", "[" + uid + ",555]"},
+		{"Reissue", "[" + uid + "]"},
+		{"Shop.Trial", "[777]"},
+		{"Shop.Invoice", `[{"TgID":777}]`},
+	} {
+		if code, ec := call(c.method, c.args); code != 403 || ec != "not_talking" {
+			t.Fatalf("%s of a silent account: %d %s", c.method, code, ec)
+		}
+	}
+	if code, _ := call("Shop.Invoice", `[{"TgID":555}]`); code != 200 {
+		t.Fatalf("an invoice for the account that wrote: %d", code)
+	}
+	s.talk.mark(777)
+	if code, _ := call("User", "["+uid+"]"); code != 200 {
+		t.Fatalf("the owner wrote: %d", code)
+	}
+}
+
+// The bot's payment messages carry whole subscriptions: an addon that does not hold the bot
+// never reads them from the feed.
+func TestBotEventsOnlyForTheHolder(t *testing.T) {
+	s, _ := proxyWorld(t)
+	ctx := context.Background()
+	for id, perms := range map[string]string{"telegram": `["bot","events"]`, "fresh": `["events"]`} {
+		if err := s.d.Store.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: id, Version: "1", Permissions: perms, ApprovedAt: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := settings.Set(ctx, s.d.Settings, SlotKey, "telegram"); err != nil {
+		t.Fatal(err)
+	}
+	for _, typ := range []string{"bot.paid", "payment.paid"} {
+		if err := s.d.Store.Tx(ctx, func(q *db.Queries) error {
+			return events.Emit(ctx, q, time.Unix(1, 0), typ, 1, 555, map[string]string{"sub_token": "secret"}, "")
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(token string) []string {
+		r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:41990/panel/v2/events", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		var f feed
+		_ = json.Unmarshal(w.Body.Bytes(), &f)
+		var types []string
+		for _, e := range f.Events {
+			types = append(types, e.Type)
+		}
+		return types
+	}
+	if got := strings.Join(read(newToken), ","); got != "payment.paid" {
+		t.Fatalf("an addon not holding the bot read %q", got)
+	}
+	if got := strings.Join(read(botToken), ","); got != "bot.paid,payment.paid" {
+		t.Fatalf("the holder read %q", got)
+	}
+}
+
+// A parameter given twice is refused: the checks would see one, Telegram might take the
+// other (a foreign Mini App behind a harmless keyboard).
+func TestBotParamsGivenTwice(t *testing.T) {
+	s, _ := proxyWorld(t)
+	if err := settings.Set(context.Background(), s.d.Settings, SlotKey, "telegram"); err != nil {
+		t.Fatal(err)
+	}
+	evil := `{"inline_keyboard":[[{"text":"a","web_app":{"url":"https://evil.example"}}]]}`
+	safe := `{"inline_keyboard":[[{"text":"a","callback_data":"x"}]]}`
+	for _, c := range []struct{ ct, body string }{
+		{"application/x-www-form-urlencoded", "chat_id=555&reply_markup=" + url.QueryEscape(safe) + "&reply_markup=" + url.QueryEscape(evil)},
+		{"application/json", `{"chat_id":555,"reply_markup":` + safe + `,"reply_markup":` + evil + `}`},
+	} {
+		if code, a := bot(s, botToken, "sendMessage", c.ct, []byte(c.body)); code != 400 || !strings.Contains(a.Description, "twice") {
+			t.Fatalf("%s: %d %+v", c.ct, code, a)
+		}
+	}
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("chat_id", "555")
+	_ = mw.WriteField("reply_markup", safe)
+	_ = mw.WriteField("reply_markup", evil)
+	_ = mw.Close()
+	if code, _ := bot(s, botToken, "sendMessage", mw.FormDataContentType(), buf.Bytes()); code != 400 {
+		t.Fatalf("multipart given twice: %d", code)
+	}
+	for _, m := range []string{"copyMessage", "forwardMessage"} {
+		if code, _ := bot(s, botToken, m, "application/json", []byte(`{"chat_id":555,"from_chat_id":1,"message_id":1}`)); code != 403 {
+			t.Fatalf("%s reads another chat: %d", m, code)
+		}
+	}
+}
+
+func strconvItoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+type noChanges struct{}
+
+func (noChanges) PoliciesChanged() {}
+func (noChanges) SlotsChanged()    {}

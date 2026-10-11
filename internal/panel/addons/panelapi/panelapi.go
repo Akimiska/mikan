@@ -98,13 +98,15 @@ type Server struct {
 
 	mux     *http.ServeMux // the routes, each behind its permission
 	updates *events.Hub    // wakes getUpdates of the bot addon
+	talk    talking        // the accounts the bot addon is talking to (botrpc.go)
+	uploads chan struct{}  // files on their way through the Bot API proxy
 
 	mu    sync.Mutex
 	addrs map[string]bool // what it listens on: the Host a request must name
 }
 
 func New(d Deps) *Server {
-	s := &Server{d: d, mux: http.NewServeMux(), updates: events.NewHub()}
+	s := &Server{d: d, mux: http.NewServeMux(), updates: events.NewHub(), uploads: make(chan struct{}, 4)}
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		Fail(w, http.StatusNotFound, "not_found", "no such method")
 	})
@@ -118,6 +120,9 @@ func New(d Deps) *Server {
 			// The panel's data of the bot is the holder's alone, as its chats are.
 			if c, _ := CallerOf(r.Context()); !s.holds(r.Context(), c) {
 				Fail(w, http.StatusForbidden, "forbidden", "the addon does not hold the bot")
+				return
+			}
+			if c, _ := CallerOf(r.Context()); !s.guardRPC(w, r, c) {
 				return
 			}
 			d.Bot.ServeHTTP(w, r)

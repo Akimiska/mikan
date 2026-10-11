@@ -1121,6 +1121,25 @@ struct Archived {
 fn archive_image(tar: &Path) -> Result<Archived> {
     let index: serde_json::Value =
         serde_json::from_slice(&tar_member(tar, "index.json")?).context("index.json in the archive is malformed")?;
+    // `docker load` loads and names every image of the archive: one image, named only under
+    // the marketplace's organization, so that it cannot put its own image under the name of
+    // the panel's, the database's or another addon's.
+    if index["manifests"].as_array().map_or(0, Vec::len) != 1 {
+        bail!("the archive must hold exactly one image");
+    }
+    if !names_ours(&index["manifests"][0]["annotations"]) {
+        bail!("the archive names its image outside {IMAGE_PREFIX}");
+    }
+    if let Ok(raw) = tar_member(tar, "manifest.json") {
+        let docker: serde_json::Value = serde_json::from_slice(&raw).context("manifest.json in the archive is malformed")?;
+        let entries = docker.as_array().map_or(&[][..], Vec::as_slice);
+        let tags_ours = entries.iter().all(|e| {
+            e["RepoTags"].as_array().is_none_or(|tags| tags.iter().all(|t| t.as_str().is_some_and(|t| t.starts_with(IMAGE_PREFIX))))
+        });
+        if entries.len() > 1 || !tags_ours {
+            bail!("the archive must hold exactly one image, named only under {IMAGE_PREFIX}");
+        }
+    }
     let digest = index["manifests"][0]["digest"]
         .as_str()
         .filter(|d| valid_digest(d))
@@ -1154,6 +1173,17 @@ fn blob(tar: &Path, digest: &str) -> Result<serde_json::Value> {
         bail!("{digest} in the archive does not match its content");
     }
     serde_json::from_slice(&data).with_context(|| format!("{digest} in the archive is not JSON"))
+}
+
+/// The names an archive's index gives its image, if any, are all under the marketplace's
+/// organization (a bare tag, as `org.opencontainers.image.ref.name` may be, names nothing;
+/// `postgres:18` would name an image).
+fn names_ours(annotations: &serde_json::Value) -> bool {
+    ["io.containerd.image.name", "org.opencontainers.image.ref.name"].iter().all(|k| match annotations[k].as_str() {
+        None => true,
+        Some(n) if !n.contains(['/', ':']) => *k == "org.opencontainers.image.ref.name",
+        Some(n) => n.starts_with(IMAGE_PREFIX),
+    })
 }
 
 /// One member of a tar (GNU tar reads a gzipped one too), at most MEMBER_LIMIT bytes.
@@ -1313,6 +1343,27 @@ pub fn resume(say: &mut dyn FnMut(&str)) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `docker load` names what the archive names: nothing outside the marketplace's organization.
+    #[test]
+    fn archive_names() {
+        use serde_json::json;
+        for ok in [
+            json!({}),
+            json!({"org.opencontainers.image.ref.name": "0.5.1.0-rc.6"}),
+            json!({"io.containerd.image.name": "ghcr.io/getmikan/tool-telegram:0.5.1.0"}),
+        ] {
+            assert!(names_ours(&ok), "{ok}");
+        }
+        for bad in [
+            json!({"io.containerd.image.name": "postgres:18-alpine"}),
+            json!({"io.containerd.image.name": "ghcr.io/miroshka000/mikan:latest"}),
+            json!({"org.opencontainers.image.ref.name": "postgres:18"}),
+            json!({"org.opencontainers.image.ref.name": "docker.io/library/postgres"}),
+        ] {
+            assert!(!names_ours(&bad), "{bad}");
+        }
+    }
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
     use ed25519_dalek::{Signer, SigningKey};

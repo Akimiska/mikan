@@ -38,11 +38,10 @@ type words struct {
 
 	// The shop.
 	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew string
-	notForSale, payUnavailable, tooManyInvoices, payStale, paidNew, paidRenew                                       string
+	notForSale, payUnavailable, tooManyInvoices, paidNew, paidRenew                                                 string
 	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                     string
 	trialPaid, trialTitle                                                                                           string // the priced trial: its button with the price, its title over the ways to pay
 	trialNotGiven                                                                                                   string // a paid trial not given, its money back by hand
-	tokenConflict                                                                                                   string // to the admin: another program takes this bot's updates
 	pickTerm, priceFrom                                                                                             string
 	poolOut                                                                                                         string // a traffic pool used up
 
@@ -123,7 +122,6 @@ var ru = words{
 	priceFrom:       "от %s",
 	payUnavailable:  "Оплата сейчас недоступна. Попробуйте позже или напишите в поддержку.",
 	tooManyInvoices: "Слишком много счетов подряд. Попробуйте через час.",
-	payStale:        "Счёт устарел. Откройте меню бота и оплатите заново.",
 	trial:           "🎁 Попробовать бесплатно",
 	trialDone:       "🎁 Пробная подписка готова: %s.\n\nСсылка и инструкции в меню.",
 	trialUsed:       "Пробный период даётся один раз, и только тем, у кого ещё не было подписки.",
@@ -133,7 +131,6 @@ var ru = words{
 	trialPaid:       "🎁 Попробовать за %s",
 	trialTitle:      "🎁 Пробный период",
 	trialNotGiven:   "🎁 Пробный период у вас уже был, поэтому платёж %s не засчитан и подписка не выдана. Деньги вернём: напишите в поддержку.",
-	tokenConflict:   "⚠️ Бот не получает сообщения: этот токен уже использует другая программа или сервер (старая панель, второй бот). Отправка работает, а нажатия и команды до бота не доходят.\n\nОстановите ту программу или выпустите новый токен в @BotFather (/revoke) и вставьте его в панели: Telegram → Подключение.",
 	paidNew:         "✅ Оплата получена — подписка «%s» готова (тариф «%s»).\n\nДобавьте ссылку в приложение:\n<code>%s</code>",
 	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
 	poolOut:         "закончился до сброса",
@@ -226,7 +223,6 @@ var en = words{
 	priceFrom:       "from %s",
 	payUnavailable:  "Payment is not available right now. Try later or message support.",
 	tooManyInvoices: "Too many invoices in a row. Try again in an hour.",
-	payStale:        "The invoice is out of date. Open the bot's menu and pay again.",
 	trial:           "🎁 Try it for free",
 	trialDone:       "🎁 Your trial subscription is ready: %s.\n\nThe link and instructions are in the menu.",
 	trialUsed:       "The trial is given once, and only to people who have not had a subscription.",
@@ -236,7 +232,6 @@ var en = words{
 	trialPaid:       "🎁 Try it for %s",
 	trialTitle:      "🎁 Trial",
 	trialNotGiven:   "🎁 You have had the trial already, so the payment of %s is not counted and no subscription is given. The money comes back: message support.",
-	tokenConflict:   "⚠️ The bot gets no messages: another program or server uses this token (an old panel, a second bot). Sending works, but taps and commands do not reach the bot.\n\nStop that program, or make a new token in @BotFather (/revoke) and paste it in the panel: Telegram → Connection.",
 	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
 	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
 	poolOut:         "used up until the reset",

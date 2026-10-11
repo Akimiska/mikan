@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/tgate"
 )
 
 // menuTexts is the main menu as rows of button labels, and fails on an empty row.
-func menuTexts(t *testing.T, kb *Keyboard) [][]string {
+func menuTexts(t *testing.T, kb *tgate.Keyboard) [][]string {
 	t.Helper()
 	var out [][]string
 	for _, r := range kb.InlineKeyboard {
@@ -67,7 +68,7 @@ func TestPromoButtonInMenu(t *testing.T) {
 	if len(rows) != 4 || len(rows[0]) != 2 || len(rows[1]) != 1 || len(rows[2]) != 2 || len(rows[3]) != 1 {
 		t.Fatalf("the rest of the menu is unchanged: %v", rows)
 	}
-	var page *Button
+	var page *tgate.Button
 	for _, r := range kb.InlineKeyboard {
 		for i := range r {
 			if r[i].WebApp != nil {

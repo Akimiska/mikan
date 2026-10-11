@@ -11,10 +11,11 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgate"
 )
 
 // withChannel saves the default bot with ch as its channel.
-func (e *env) withChannel(ch Channel, texts ...func(*Texts)) {
+func (e *env) withChannel(ch tgate.Channel, texts ...func(*Texts)) {
 	e.t.Helper()
 	cfg := Default("ru")
 	cfg.Channel = ch
@@ -54,7 +55,7 @@ func (e *env) tap(from int64, data string) call {
 func TestBotChannelGate(t *testing.T) {
 	e := setup(t)
 	const visitor, anna = 790, 555
-	e.withChannel(Channel{Required: true, Chat: "@mikan_news"})
+	e.withChannel(tgate.Channel{Required: true, Chat: "@mikan_news"})
 	gate := e.start(visitor)
 	if !strings.Contains(text(gate), "подпишитесь на наш канал") || buttons(gate)["📢 Подписаться на канал"] != "https://t.me/mikan_news" || buttons(gate)["✅ Проверить"] != "gc" {
 		t.Fatalf("the channel's screen: %q %v", text(gate), buttons(gate))
@@ -89,7 +90,7 @@ func TestBotChannelGate(t *testing.T) {
 	if gone := e.tap(visitor, "gc"); !strings.Contains(text(gone), "Пока не видим вас") {
 		t.Fatalf("the check trusted the cache: %q", text(gone))
 	}
-	if code := e.bot.ChannelError(e.ctx); code != "" {
+	if code := e.gate.ChannelError(e.ctx); code != "" {
 		t.Fatalf("a channel the bot runs: %q", code)
 	}
 }
@@ -97,18 +98,18 @@ func TestBotChannelGate(t *testing.T) {
 // A channel the bot is not an admin of locks nobody out, and the admin's page says why.
 func TestBotChannelNotAdmin(t *testing.T) {
 	e := setup(t)
-	e.withChannel(Channel{Required: true, Chat: "-1001234567890", URL: "https://t.me/+invite"})
+	e.withChannel(tgate.Channel{Required: true, Chat: "-1001234567890", URL: "https://t.me/+invite"})
 	e.tg.mu.Lock()
 	e.tg.notAdmin = true
 	e.tg.mu.Unlock()
 	if menu := e.start(792); strings.Contains(text(menu), "подпишитесь") || !strings.Contains(text(menu), "Mikan VPN") {
 		t.Fatalf("a channel the bot cannot ask about locked a visitor out: %q", text(menu))
 	}
-	if code := e.bot.ChannelError(e.ctx); code != "channel_not_admin" {
+	if code := e.gate.ChannelError(e.ctx); code != "channel_not_admin" {
 		t.Fatalf("the admin is not told: %q", code)
 	}
 	// The switch off: nothing stands in front of the menu, whatever the channel.
-	e.withChannel(Channel{Chat: "@mikan_news"})
+	e.withChannel(tgate.Channel{Chat: "@mikan_news"})
 	e.tg.mu.Lock()
 	e.tg.notAdmin = false
 	e.tg.mu.Unlock()
@@ -121,12 +122,13 @@ func TestBotChannelNotAdmin(t *testing.T) {
 // the plan needs it, a subscription from the free plan, and no second one while it runs.
 func TestBotFreePlan(t *testing.T) {
 	var svc *billing.Service
-	e := setup(t, func(e *env, d *Deps) {
+	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
 		d.Billing = svc
 	})
-	svc.SetTelegram(e.bot)
+	svc.SetTelegram(e.gate)
+	svc.SetNotifier(e.bot)
 	const visitor = 795
 	if _, ok := buttons(e.start(visitor))["🎁 Бесплатный тариф"]; ok {
 		t.Fatal("a free plan nobody offers")
@@ -139,7 +141,7 @@ func TestBotFreePlan(t *testing.T) {
 	if _, ok := buttons(e.start(visitor))["🎁 Бесплатный тариф"]; ok {
 		t.Fatal("a free plan for a channel nobody set up")
 	}
-	e.withChannel(Channel{Chat: "@mikan_news"}, func(t *Texts) { t.FreeButton = "🎁 Даром" })
+	e.withChannel(tgate.Channel{Chat: "@mikan_news"}, func(t *Texts) { t.FreeButton = "🎁 Даром" })
 	if buttons(e.start(visitor))["🎁 Даром"] != "fp" {
 		t.Fatal("the welcome does not offer the free plan")
 	}
@@ -192,17 +194,17 @@ func TestChannelTexts(t *testing.T) {
 // The channel is one Telegram can be asked about and joined.
 func TestChannelValidate(t *testing.T) {
 	for _, c := range []struct {
-		ch   Channel
+		ch   tgate.Channel
 		want error
 	}{
-		{Channel{}, nil},
-		{Channel{Required: true}, ErrChannel},
-		{Channel{Chat: "@abc"}, ErrChannel},
-		{Channel{Chat: "mikan_news"}, ErrChannel},
-		{Channel{Required: true, Chat: " @mikan_news "}, nil},
-		{Channel{Chat: "-1001234567890"}, ErrChannelURL},
-		{Channel{Chat: "-1001234567890", URL: "https://t.me/+abcdef"}, nil},
-		{Channel{Chat: "@mikan_news", URL: "http://t.me/mikan_news"}, ErrChannelURL},
+		{tgate.Channel{}, nil},
+		{tgate.Channel{Required: true}, tgate.ErrChannel},
+		{tgate.Channel{Chat: "@abc"}, tgate.ErrChannel},
+		{tgate.Channel{Chat: "mikan_news"}, tgate.ErrChannel},
+		{tgate.Channel{Required: true, Chat: " @mikan_news "}, nil},
+		{tgate.Channel{Chat: "-1001234567890"}, tgate.ErrChannelURL},
+		{tgate.Channel{Chat: "-1001234567890", URL: "https://t.me/+abcdef"}, nil},
+		{tgate.Channel{Chat: "@mikan_news", URL: "http://t.me/mikan_news"}, tgate.ErrChannelURL},
 	} {
 		cfg := Default("ru")
 		cfg.Channel = c.ch

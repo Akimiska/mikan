@@ -18,7 +18,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 // The marketplace end to end on the panel's side: the signed catalog, the request to the
@@ -160,7 +160,7 @@ func TestAddonsMarketplace(t *testing.T) {
 	// The Mini App offers it by its own name and opens its invoice.
 	ctx := t.Context()
 	must(domain.Seed(ctx, h.st, h.now))
-	must(settings.Set(ctx, settings.New(h.st.Q), tgbot.KeyToken, tgToken))
+	must(settings.Set(ctx, settings.New(h.st.Q), tgate.KeyToken, tgToken))
 	ts, err := h.st.Q.ListTariffs(ctx)
 	must(err)
 	sale, err := h.st.Q.UpdateTariff(ctx, db.UpdateTariffParams{Name: "Месяц", TrafficLimit: ts[1].TrafficLimit, DurationDays: 30, DeviceLimit: ts[1].DeviceLimit,

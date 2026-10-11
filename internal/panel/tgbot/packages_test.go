@@ -12,6 +12,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgate"
 )
 
 // "Докупить трафик" in the subscription screen lists the packages for the main traffic
@@ -19,13 +20,14 @@ import (
 // traffic line.
 func TestBuyTraffic(t *testing.T) {
 	var svc *billing.Service
-	e := setup(t, func(e *env, d *Deps) {
+	e := setup(t, func(e *env, d *wiring) {
 		pool := domain.NewPool(e.st, e.clock)
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, pool, noChanges{}, e.clock),
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
 		d.Billing = svc
 	})
-	svc.SetTelegram(e.bot)
+	svc.SetTelegram(e.gate)
+	svc.SetNotifier(e.bot)
 	const owner = 555
 	q := e.st.Q
 	must := func(err error) {
@@ -87,8 +89,8 @@ func TestBuyTraffic(t *testing.T) {
 	payload, _ := link.body["payload"].(string)
 
 	n = e.tg.count()
-	e.tg.push(Update{Message: &Message{MessageID: 99, From: &User{ID: owner}, Chat: Chat{ID: owner, Type: "private"},
-		SuccessfulPayment: &SuccessfulPayment{Currency: "XTR", TotalAmount: 75, InvoicePayload: payload, ChargeID: "tg-pack-1"}}})
+	e.tg.push(tgate.Update{Message: &tgate.Message{MessageID: 99, From: &tgate.User{ID: owner}, Chat: tgate.Chat{ID: owner, Type: "private"},
+		SuccessfulPayment: &tgate.SuccessfulPayment{Currency: "XTR", TotalAmount: 75, InvoicePayload: payload, ChargeID: "tg-pack-1"}}})
 	e.tg.until(t, n, func(cs []call) bool {
 		for _, c := range cs {
 			if c.method == "sendMessage" && strings.Contains(text(c), "пакет «+50 ГБ» начислен на подписку «Анна»") {

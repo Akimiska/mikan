@@ -11,6 +11,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgate"
 )
 
 // The free trial in the bot: the welcome offers it to a new account, a tap gives the
@@ -18,12 +19,13 @@ import (
 // message is told why not.
 func TestBotTrial(t *testing.T) {
 	var svc *billing.Service
-	e := setup(t, func(e *env, d *Deps) {
+	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
 		d.Billing = svc
 	})
-	svc.SetTelegram(e.bot)
+	svc.SetTelegram(e.gate)
+	svc.SetNotifier(e.bot)
 	const visitor = 779
 	welcome := func() call {
 		t.Helper()
@@ -107,12 +109,13 @@ func TestBotTrialNotGiven(t *testing.T) {
 // A trial that fails for a reason of ours says so, not "payment is not available".
 func TestBotTrialFailure(t *testing.T) {
 	var svc *billing.Service
-	e := setup(t, func(e *env, d *Deps) {
+	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
 		d.Billing = svc
 	})
-	svc.SetTelegram(e.bot)
+	svc.SetTelegram(e.gate)
+	svc.SetNotifier(e.bot)
 	ts, _ := e.st.Q.ListTariffs(e.ctx)
 	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{TrialTariffID: ts[0].ID}); err != nil {
 		t.Fatal(err)
@@ -133,12 +136,13 @@ func TestBotTrialFailure(t *testing.T) {
 // the invoice is for the trial's price, and paying gives the trial subscription once.
 func TestBotPaidTrial(t *testing.T) {
 	var svc *billing.Service
-	e := setup(t, func(e *env, d *Deps) {
+	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
 		d.Billing = svc
 	})
-	svc.SetTelegram(e.bot)
+	svc.SetTelegram(e.gate)
+	svc.SetNotifier(e.bot)
 	const visitor = 781
 	ts, _ := e.st.Q.ListTariffs(e.ctx)
 	// Selling is on for the trial alone: no tariff is on sale and new subscriptions are off.
@@ -186,13 +190,13 @@ func TestBotPaidTrial(t *testing.T) {
 	}
 	payload, _ := link.body["payload"].(string)
 	n = e.tg.count()
-	e.tg.push(Update{PreCheckoutQuery: &PreCheckoutQuery{ID: "pc-trial", From: User{ID: visitor}, Currency: "XTR", TotalAmount: 1, InvoicePayload: payload}})
+	e.tg.push(tgate.Update{PreCheckoutQuery: &tgate.PreCheckoutQuery{ID: "pc-trial", From: tgate.User{ID: visitor}, Currency: "XTR", TotalAmount: 1, InvoicePayload: payload}})
 	if ans, _ := find(e.tg.wait(t, n, "answerPreCheckoutQuery"), "answerPreCheckoutQuery"); ans.body["ok"] != true {
 		t.Fatalf("pre-checkout of the trial refused: %v", ans.body)
 	}
 	n = e.tg.count()
-	e.tg.push(Update{Message: &Message{MessageID: 99, From: &User{ID: visitor}, Chat: Chat{ID: visitor, Type: "private"},
-		SuccessfulPayment: &SuccessfulPayment{Currency: "XTR", TotalAmount: 1, InvoicePayload: payload, ChargeID: "tg-trial-1"}}})
+	e.tg.push(tgate.Update{Message: &tgate.Message{MessageID: 99, From: &tgate.User{ID: visitor}, Chat: tgate.Chat{ID: visitor, Type: "private"},
+		SuccessfulPayment: &tgate.SuccessfulPayment{Currency: "XTR", TotalAmount: 1, InvoicePayload: payload, ChargeID: "tg-trial-1"}}})
 	e.tg.until(t, n, func(cs []call) bool {
 		for _, c := range cs {
 			if c.method == "sendMessage" && strings.Contains(text(c), "Оплата получена") {

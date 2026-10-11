@@ -33,7 +33,7 @@ import (
 	"github.com/metacubex/age"
 
 	"mikan/internal/panel/settings"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 const (
@@ -76,9 +76,10 @@ var (
 	ErrUnavailable = errors.New("backup_unavailable") // the panel has no data directory
 )
 
-// Bot is the part of the Telegram bot the backups use (tgbot.Bot).
+// Bot is the part of the Telegram gateway the backups use (tgate.Gateway): no screens of
+// the bot, only its token, route and the admin's chat.
 type Bot interface {
-	InfrastructureClient(ctx context.Context) (*tgbot.Client, error)
+	InfrastructureClient(ctx context.Context) (*tgate.Client, error)
 	InfrastructureAdminChat(ctx context.Context) (int64, bool, error)
 }
 
@@ -271,16 +272,16 @@ func (s *Service) Send(ctx context.Context) (State, error) {
 // Code is the error code State keeps for err: never pg_dump's or Telegram's own text, which
 // may name hosts, ports and databases.
 func Code(err error) string {
-	var ae *tgbot.APIError
+	var ae *tgate.APIError
 	for _, known := range []error{ErrNoChat, ErrNoPassword, ErrTooBig, ErrBusy, ErrDump, ErrUnavailable} {
 		if errors.Is(err, known) {
 			return known.Error()
 		}
 	}
 	switch {
-	case errors.Is(err, tgbot.ErrOff):
+	case errors.Is(err, tgate.ErrOff):
 		return "bot_off"
-	case errors.Is(err, tgbot.ErrUnreachable), errors.As(err, &ae), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, tgate.ErrUnreachable), errors.As(err, &ae), errors.Is(err, context.DeadlineExceeded):
 		return "tg_unreachable"
 	}
 	return "backup_failed"
@@ -362,7 +363,7 @@ func Make(ctx context.Context, dump Dumper, dir, password string, now time.Time)
 	if err != nil {
 		return "", 0, err
 	}
-	if fi.Size() > tgbot.MaxDocument-packOverhead {
+	if fi.Size() > tgate.MaxDocument-packOverhead {
 		return "", 0, ErrTooBig
 	}
 	r, err := age.NewScryptRecipient(password)
@@ -401,7 +402,7 @@ func Make(ctx context.Context, dump Dumper, dir, password string, now time.Time)
 	if err != nil {
 		return "", 0, err
 	}
-	if st.Size() > tgbot.MaxDocument {
+	if st.Size() > tgate.MaxDocument {
 		os.Remove(path)
 		return "", 0, ErrTooBig
 	}

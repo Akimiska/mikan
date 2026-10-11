@@ -33,6 +33,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
@@ -87,8 +88,11 @@ type Deps struct {
 	Tuner interface {
 		Status(inboundID int64) (autotune.Status, bool)
 	}
-	// Telegram is the subscription owners' bot.
+	// Telegram is the subscription owners' bot: its menu, texts and broadcasts.
 	Telegram *tgbot.Bot
+	// Gateway is the panel's side of Telegram: the token, the route, the bot's status, the
+	// admin's chat and the channel.
+	Gateway *tgate.Gateway
 	// Backups send the database to the admin's Telegram chat; nil in tests.
 	Backups *tgbackup.Service
 	// Importer brings users over from another panel; nil in tests that do not need it.

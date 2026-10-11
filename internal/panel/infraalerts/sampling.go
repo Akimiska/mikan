@@ -124,7 +124,7 @@ func (m *Monitor) round(ctx context.Context) {
 	cfg := m.config(ctx)
 	lang := "ru"
 	if m.bot != nil {
-		lang = m.bot.PolledConfig(ctx).Lang
+		lang = m.bot.PolledLang(ctx)
 	}
 	t := textsFor(lang)
 	w, err := m.loadWorld(ctx)

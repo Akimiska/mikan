@@ -26,7 +26,7 @@ type noChanges struct{}
 func (noChanges) PoliciesChanged() {}
 func (noChanges) SlotsChanged()    {}
 
-// fakeTG is the bot: Stars links, refunds and what buyers were told.
+// fakeTG is the gateway and the bot: Stars links, refunds and what buyers were told.
 type fakeTG struct {
 	mu        sync.Mutex
 	paid      []db.Payment
@@ -137,6 +137,7 @@ func newEnv(t *testing.T) *env {
 	e.s = New(Deps{Store: e.st, Settings: set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, clock), noChanges{}, clock),
 		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})), Now: clock})
 	e.s.SetTelegram(e.tg)
+	e.s.SetNotifier(e.tg)
 	must(t, settings.Set(ctx, set, KeyConfig, Config{Enabled: true, Stars: true, AllowNew: true, RenewResetsTraffic: true}))
 	ts, _ := e.st.Q.ListTariffs(ctx)
 	std := ts[1]
@@ -528,6 +529,7 @@ func TestConcurrentInvoices(t *testing.T) {
 	ctx := context.Background()
 	other := New(e.s.d)
 	other.SetTelegram(e.tg)
+	other.SetNotifier(e.tg)
 	// Tap i goes through services[i % len]: across services only the database's lock holds.
 	taps := func(n int, tariff func(i int) int64, services ...*Service) []error {
 		var wg sync.WaitGroup

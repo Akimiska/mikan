@@ -64,8 +64,8 @@ func (h *handlers) backupView(ctx context.Context) (BackupView, error) {
 		return v, err
 	}
 	v.PasswordSet = len(pw) >= tgbackup.MinPassword
-	if h.d.Telegram != nil {
-		_, v.AdminChatSet, _ = h.d.Telegram.InfrastructureAdminChat(ctx)
+	if h.d.Gateway != nil {
+		_, v.AdminChatSet, _ = h.d.Gateway.InfrastructureAdminChat(ctx)
 	}
 	st, _, err := settings.Get[tgbackup.State](ctx, h.d.Settings, tgbackup.KeyState)
 	if err != nil {

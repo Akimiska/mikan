@@ -20,7 +20,7 @@ import (
 func TestShopTerms(t *testing.T) {
 	var sale db.Tariff
 	var svc *billing.Service
-	e := setup(t, func(e *env, d *Deps) {
+	e := setup(t, func(e *env, d *wiring) {
 		ts, _ := e.st.Q.ListTariffs(e.ctx)
 		var err error
 		sale, err = e.st.Q.UpdateTariff(e.ctx, db.UpdateTariffParams{Name: "Std", TrafficLimit: ts[1].TrafficLimit, DurationDays: 30, DeviceLimit: ts[1].DeviceLimit,
@@ -36,7 +36,8 @@ func TestShopTerms(t *testing.T) {
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
 		d.Billing = svc
 	})
-	svc.SetTelegram(e.bot)
+	svc.SetTelegram(e.gate)
+	svc.SetNotifier(e.bot)
 	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{Enabled: true, Stars: true, AllowNew: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestShopTerms(t *testing.T) {
 func TestShopOnlyALaterTerm(t *testing.T) {
 	var sale db.Tariff
 	var svc *billing.Service
-	e := setup(t, func(e *env, d *Deps) {
+	e := setup(t, func(e *env, d *wiring) {
 		ts, _ := e.st.Q.ListTariffs(e.ctx)
 		var err error
 		sale, err = e.st.Q.UpdateTariff(e.ctx, db.UpdateTariffParams{Name: "Std", TrafficLimit: ts[1].TrafficLimit, DurationDays: 30, DeviceLimit: ts[1].DeviceLimit,
@@ -103,7 +104,8 @@ func TestShopOnlyALaterTerm(t *testing.T) {
 			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
 		d.Billing = svc
 	})
-	svc.SetTelegram(e.bot)
+	svc.SetTelegram(e.gate)
+	svc.SetNotifier(e.bot)
 	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{Enabled: true, Stars: true, AllowNew: true}); err != nil {
 		t.Fatal(err)
 	}

@@ -493,8 +493,8 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		return nil, err
 	}
 	// The bot's Mini App button points at the subscription page.
-	if b.SubPort != nil && h.d.Telegram != nil {
-		h.d.Telegram.Reload()
+	if b.SubPort != nil && h.d.Gateway != nil {
+		h.d.Gateway.Reload()
 	}
 	// The certificate is for the domain, or the address without one: a new name gets its
 	// certificate now, not at the next six-hourly check.

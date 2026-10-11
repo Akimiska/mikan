@@ -183,7 +183,7 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 			}
 		}
 	}
-	if b.FreeCondition != nil && *b.FreeCondition == "channel" && (h.d.Telegram == nil || h.d.Telegram.Config(ctx).Channel.Chat == "") {
+	if b.FreeCondition != nil && *b.FreeCondition == "channel" && (h.d.Gateway == nil || h.d.Gateway.ChannelConfig(ctx).Chat == "") {
 		return nil, fieldErr("body.free_condition", "free_no_channel")
 	}
 	// The trial costs what a tariff may cost (domain.CheckPrices); 0 is no price at all,

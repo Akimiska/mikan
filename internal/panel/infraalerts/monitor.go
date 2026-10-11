@@ -13,7 +13,7 @@ import (
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/updates"
 )
 
@@ -42,18 +42,18 @@ type NodeUpdateSource interface {
 	Failures(ctx context.Context) []nodeupdate.Failure
 }
 
-// Telegram is what the monitor asks of the Telegram bot (*tgbot.Bot): the language of the
-// alerts, whether the infrastructure alerts are on, the chat of the admin who receives them
-// and a client that sends. The monitor sees nothing else of the bot, and a test supplies a
-// fake that sends nowhere.
+// Telegram is what the monitor asks of the Telegram gateway (*tgate.Gateway): the language
+// of the alerts, whether the infrastructure alerts are on, the chat of the admin who
+// receives them and a client that sends. The monitor sees nothing else of the bot, needs
+// none of its screens, and a test supplies a fake that sends nowhere.
 type Telegram interface {
-	// PolledConfig and PolledInfrastructure are the bot's settings as the polling loops read
+	// PolledLang and PolledInfrastructure are the bot's settings as the polling loops read
 	// them (cached); InfrastructureEnabled is the same answer read straight, for delivery.
-	PolledConfig(ctx context.Context) tgbot.Config
+	PolledLang(ctx context.Context) string
 	PolledInfrastructure(ctx context.Context) bool
 	InfrastructureEnabled(ctx context.Context) bool
 	InfrastructureAdminChat(ctx context.Context) (int64, bool, error)
-	InfrastructureClient(ctx context.Context) (*tgbot.Client, error)
+	InfrastructureClient(ctx context.Context) (*tgate.Client, error)
 }
 
 type Monitor struct {

@@ -38,6 +38,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subpage"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
@@ -55,24 +56,27 @@ type Panel struct {
 	Tuner  *autotune.Tuner // nil without nodes
 	// NodeUpdates updates the remote nodes to the panel's version; nil without nodes.
 	NodeUpdates *nodeupdate.Service
-	Telegram    *tgbot.Bot
-	Billing     *billing.Service
-	Updates     *updates.Checker
-	Alerts      *infraalerts.Monitor
-	Backups     *tgbackup.Service
-	Importer    *panelimport.Importer
-	Addons      *addons.Manager
-	AddonsAPI   *panelapi.Server
-	server      *server.Server
-	spa         *server.SPA
-	subPage     *server.SPA
-	sessions    *auth.Sessions
-	st          *store.Store
-	devices     *domain.Devices
-	ipLimit     *auth.Limiter
-	userLimit   *auth.Limiter
-	now         func() time.Time
-	log         *slog.Logger
+	// Gateway is the panel's side of Telegram: the token, polling, Stars, the alerts' way
+	// out; Telegram is the bot's screens on top of it.
+	Gateway   *tgate.Gateway
+	Telegram  *tgbot.Bot
+	Billing   *billing.Service
+	Updates   *updates.Checker
+	Alerts    *infraalerts.Monitor
+	Backups   *tgbackup.Service
+	Importer  *panelimport.Importer
+	Addons    *addons.Manager
+	AddonsAPI *panelapi.Server
+	server    *server.Server
+	spa       *server.SPA
+	subPage   *server.SPA
+	sessions  *auth.Sessions
+	st        *store.Store
+	devices   *domain.Devices
+	ipLimit   *auth.Limiter
+	userLimit *auth.Limiter
+	now       func() time.Time
+	log       *slog.Logger
 }
 
 type Options struct {
@@ -223,7 +227,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	promos := promo.New(st, o.Now)
 	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
-		MaxLinks: tgbot.MaxLinks,
+		MaxLinks: tgate.MaxLinks,
 		Addons:   deps.Addons, SubBase: subBase, Promo: promos, Events: hub})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
@@ -231,18 +235,24 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	if p.Nodes != nil {
 		tunnel = p.Nodes.Tunnel
 	}
-	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, Users: deps.Users, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing,
+	p.Gateway = tgate.New(tgate.Deps{Store: st, Settings: set, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing, Tunnel: tunnel})
+	// The bot's screens see the panel through a Backend: in process here, over the Panel
+	// API once they run as an addon.
+	backend := &tgbot.Local{Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
-		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }, Tunnel: tunnel})
-	deps.Telegram = p.Telegram
-	p.Billing.SetTelegram(p.Telegram)
+		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
+	p.Telegram = tgbot.New(tgbot.Deps{Backend: backend, Gateway: p.Gateway, Log: o.Log, Now: o.Now})
+	p.Gateway.SetHandler(p.Telegram)
+	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
+	p.Billing.SetTelegram(p.Gateway)
+	p.Billing.SetNotifier(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
 	var certStatus infraalerts.CertificateSource
 	if o.Certs != nil {
 		certStatus = o.Certs.Status
 	}
-	p.Alerts = infraalerts.New(st, settings.Cached(st.Q, loopSettingsTTL), p.Nodes, p.Tuner, certStatus, p.Updates, p.Telegram, o.Log, o.Now)
+	p.Alerts = infraalerts.New(st, settings.Cached(st.Q, loopSettingsTTL), p.Nodes, p.Tuner, certStatus, p.Updates, p.Gateway, o.Log, o.Now)
 	if p.NodeUpdates != nil {
 		p.Alerts.WatchNodeUpdates(p.NodeUpdates)
 	}
@@ -254,7 +264,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		h, _ := set.String(ctx, settings.KeyPublicHost)
 		return h
 	}
-	p.Backups = tgbackup.New(selfDump, set, p.Telegram, o.DataDir, serverName, o.Now, o.Log)
+	p.Backups = tgbackup.New(selfDump, set, p.Gateway, o.DataDir, serverName, o.Now, o.Log)
 	deps.Backups = p.Backups
 	deps.Warp = warp.Client{API: o.WarpAPI}
 	importer := panelimport.NewImporter(st, deps.Users, nil, o.Now, o.Log)
@@ -410,7 +420,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	subCfg := func(ctx context.Context) (subs.Config, error) { return cache.get(ctx, buildSubCfg) }
 	subHandler = subs.NewHandler(st, subCfg, subPageHandler, o.Now, deps.Devices, o.TrustProxy)
 	subHandler.SetLogger(o.Log)
-	subHandler.SetTelegram(p.Telegram)
+	subHandler.SetTelegram(p.Gateway)
 	subHandler.SetReissuer(deps.Users)
 	subHandler.SetShop(p.Billing)
 	subHandler.SetPromo(promos)
@@ -489,7 +499,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.NodeUpdates != nil {
 		workers = append(workers, p.NodeUpdates.Run)
 	}
-	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
+	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

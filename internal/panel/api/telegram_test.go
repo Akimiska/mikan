@@ -29,13 +29,17 @@ func TestReadKeyDoesNotGetTheSubPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	const sub = "s3cr3t-sub-path"
+	now := func() time.Time { return time.Unix(1_800_000_000, 0) }
 	bot := tgbot.New(tgbot.Deps{
-		Store:    st,
-		Settings: set,
-		Now:      func() time.Time { return time.Unix(1_800_000_000, 0) },
-		SubBase:  func(context.Context) string { return "https://203.0.113.10/" + sub },
-		MiniApp:  func() bool { return true },
-		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Backend: &tgbot.Local{
+			Store:    st,
+			Settings: set,
+			Now:      now,
+			SubBase:  func(context.Context) string { return "https://203.0.113.10/" + sub },
+			MiniApp:  func() bool { return true },
+		},
+		Now: now,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	h := &handlers{d: Deps{Store: st, Settings: set, Telegram: bot}}
 

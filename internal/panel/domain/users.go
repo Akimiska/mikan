@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/secure"
+	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -77,13 +78,14 @@ type Changes interface {
 
 type Users struct {
 	st      *store.Store
+	set     *settings.Settings
 	now     func() time.Time
 	pool    *Pool
 	changes Changes
 }
 
 func NewUsers(st *store.Store, pool *Pool, changes Changes, now func() time.Time) *Users {
-	return &Users{st: st, now: now, pool: pool, changes: changes}
+	return &Users{st: st, set: settings.New(st.Q), now: now, pool: pool, changes: changes}
 }
 
 // Where a user came from, kept for the admin's list (users.source). It is a record, not a
@@ -184,6 +186,9 @@ func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, any
 	if err != nil {
 		return u, err
 	}
+	if err := setDeviceMode(ctx, q, &u, t.DeviceMode, now); err != nil {
+		return u, err
+	}
 	return u, ApplyTariffPools(ctx, q, u.ID, t.ID)
 }
 
@@ -244,6 +249,9 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, in PurchaseInput) (
 		UpdatedAt: now.Unix(), ID: u.ID,
 	})
 	if err != nil {
+		return u, false, err
+	}
+	if err := setDeviceMode(ctx, q, &u, t.DeviceMode, now.Unix()); err != nil {
 		return u, false, err
 	}
 	if err := ApplyTariffPools(ctx, q, u.ID, t.ID); err != nil {
@@ -336,6 +344,9 @@ type Patch struct {
 	// Hidden takes the user off the admin's list (or back on it). It changes nothing else:
 	// the subscription, the billing and the nodes see the same user.
 	Hidden *bool
+	// DeviceMode changes how the device limit counts (DeviceModeBound, DeviceModeOnline);
+	// a tariff in the same patch sets it first, and this one wins.
+	DeviceMode *string
 	// FolderID puts the user into a folder; ClearFolder takes the user out of theirs.
 	FolderID    *int64
 	ClearFolder bool
@@ -418,6 +429,7 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 		PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart, ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds,
 		BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID,
 	}
+	mode := u.DeviceMode
 	if p.TariffID != nil {
 		t, err := q.GetTariff(ctx, *p.TariffID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && t.Archived != 0) {
@@ -428,7 +440,7 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 		}
 		par.TariffID = sql.NullInt64{Int64: t.ID, Valid: true}
 		par.TrafficLimit, par.DeviceLimit, par.ResetStrategy, par.BillingDay = t.TrafficLimit, t.DeviceLimit, t.ResetStrategy, t.BillingDay
-		par.SpeedLimit = t.SpeedLimit
+		par.SpeedLimit, mode = t.SpeedLimit, t.DeviceMode
 		par.ExpiresAt = tariffExpiry(time.Unix(now, 0), durationTariff{t.DurationDays, t.BillingDay})
 		if err := ApplyTariffPools(ctx, q, u.ID, t.ID); err != nil {
 			return db.User{}, err
@@ -478,6 +490,12 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 	case p.DeviceLimit != nil:
 		par.DeviceLimit = NullInt(p.DeviceLimit)
 	}
+	if p.DeviceMode != nil {
+		if !ValidDeviceMode(*p.DeviceMode) {
+			return db.User{}, fieldErr("device_mode", "bad_device_mode")
+		}
+		mode = *p.DeviceMode
+	}
 	switch {
 	case p.ClearSpeedLimit:
 		par.SpeedLimit = sql.NullInt64{}
@@ -507,6 +525,9 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 	}
 	out, err := q.UpdateUser(ctx, par)
 	if err != nil {
+		return out, err
+	}
+	if err := setDeviceMode(ctx, q, &out, mode, now); err != nil {
 		return out, err
 	}
 	// Where the user is listed is not one of the fields above: it changes on its own
@@ -592,36 +613,39 @@ func (s *Users) Reissue(ctx context.Context, id int64) (db.User, error) {
 
 func (s *Users) reissue(ctx context.Context, id int64) error {
 	now := s.now().Unix()
-	return s.st.Tx(ctx, func(q *db.Queries) error {
-		u, err := q.GetUser(ctx, id)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
+	return s.st.Tx(ctx, func(q *db.Queries) error { return s.reissueOn(ctx, q, id, now) })
+}
+
+// reissueOn gives the user a new slot and token on q's transaction; the caller tells the nodes.
+func (s *Users) reissueOn(ctx context.Context, q *db.Queries, id, now int64) error {
+	u, err := q.GetUser(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	slot, err := q.TakeFreeSlot(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNoSlots
+	}
+	if err != nil {
+		return err
+	}
+	if u.SlotID.Valid {
+		if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: u.SlotID.Int64}); err != nil {
 			return err
 		}
-		slot, err := q.TakeFreeSlot(ctx)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNoSlots
-		}
-		if err != nil {
-			return err
-		}
-		if u.SlotID.Valid {
-			if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: u.SlotID.Int64}); err != nil {
-				return err
-			}
-		}
-		// A new link: every bound device registers again with it.
-		if err := burnDevices(ctx, q, id, now); err != nil {
-			return err
-		}
-		// The old panel's links go too: a leaked one must not serve the new keys.
-		if err := q.DeleteLegacySubTokensOf(ctx, id); err != nil {
-			return err
-		}
-		return q.SetUserCredentials(ctx, db.SetUserCredentialsParams{SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, SubToken: secure.Token(24), UpdatedAt: now, ID: id})
-	})
+	}
+	// A new link: every bound device registers again with it.
+	if err := burnDevices(ctx, q, id, now); err != nil {
+		return err
+	}
+	// The old panel's links go too: a leaked one must not serve the new keys.
+	if err := q.DeleteLegacySubTokensOf(ctx, id); err != nil {
+		return err
+	}
+	return q.SetUserCredentials(ctx, db.SetUserCredentialsParams{SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, SubToken: secure.Token(24), UpdatedAt: now, ID: id})
 }
 
 func (s *Users) Delete(ctx context.Context, id int64) error {

@@ -17,7 +17,8 @@ import (
 
 // Callback data: m main, s subscription, d devices, dc:<id> confirm unbind, du:<id>
 // unbind, c connect, r renew, p:<button> the admin's page, w switch list, u:<user> show
-// that subscription, rm confirm removing it from the account, rd:<user> remove it.
+// that subscription, rm confirm removing it from the account, rd:<user> remove it, rl
+// confirm a new link, rn:<user> issue it (reissue.go).
 
 // screen renders what the chat sees for a press: text (HTML) and buttons.
 func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice string) (string, *Keyboard) {
@@ -71,9 +72,16 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			lines = append(lines, html.EscapeString(fmt.Sprintf(w.resets, r)))
 		}
 		lines = append(lines, "📱 "+html.EscapeString(vars["devices"]))
+		newLink, linkLine := b.reissueRow(ctx, w, u)
+		if linkLine != "" {
+			lines = append(lines, linkLine)
+		}
 		rows := [][]Button{}
 		if offers := b.packageOffers(ctx, u.ID); len(offers) > 0 {
 			rows = append(rows, []Button{{Text: w.buyTraffic, CallbackData: "x"}})
+		}
+		if newLink != nil {
+			rows = append(rows, []Button{*newLink})
 		}
 		rows = append(rows, []Button{{Text: w.removeSub, CallbackData: "rm"}})
 		return withNotice(strings.Join(lines, "\n")), &Keyboard{append(rows, back)}
@@ -82,6 +90,13 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		// one that was asked about, not the one shown now.
 		return withNotice(html.EscapeString(fmt.Sprintf(w.confirmRemove, u.Name))), &Keyboard{[][]Button{
 			{{Text: w.yesRemove, CallbackData: "rd:" + strconv.FormatInt(u.ID, 10)}, {Text: w.cancel, CallbackData: "s"}}}}
+	case "rl":
+		text, kb, ok := b.reissueConfirm(ctx, w, u)
+		if !ok {
+			// Stale button: the subscription screen says why there is none now.
+			return b.screen(ctx, cfg, chat, "s", text)
+		}
+		return withNotice(text), kb
 	case "x", "xk", "xp":
 		return b.trafficShop(ctx, w, chat, u, cmd, arg, notice)
 	case "d", "dc":
@@ -292,6 +307,9 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 	}
 	if len(devs) > 0 {
 		note := []string{w.devicesNote}
+		if !domain.BindsDevices(u.DeviceMode) {
+			note = append(note, linkWordsFor(w).onlineNote)
+		}
 		switch r := rules.Rules.ReturnHours; {
 		case rules.Rules.Off:
 			note = append(note, w.unbindOff)
@@ -360,6 +378,11 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 			}
 		}
 		return "d", ""
+	case "rn":
+		if b.d.Users == nil {
+			return "s", ""
+		}
+		return b.reissueAct(ctx, chat, id)
 	case "u", "xu":
 		// "xu" is the buy button of a traffic notice: that subscription's packages, not the
 		// one the menu shows now. Only a subscription of this account is switched to.
@@ -444,7 +467,12 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 	}
 	n, _ := b.d.Store.Q.CountBoundDevices(ctx, u.ID)
 	v["devices"] = strconv.FormatInt(n, 10)
-	if u.DeviceLimit.Valid {
+	switch {
+	case u.DeviceLimit.Valid && !domain.BindsDevices(u.DeviceMode):
+		// "3 of 3" would tell of places that this limit does not have: it counts the devices
+		// online at once, whichever and however many are bound.
+		v["devices"] = fmt.Sprintf(linkWordsFor(w).onlineLimit, strconv.FormatInt(u.DeviceLimit.Int64, 10))
+	case u.DeviceLimit.Valid:
 		v["devices"] = fmt.Sprintf(w.trafficOf, v["devices"], strconv.FormatInt(u.DeviceLimit.Int64, 10))
 	}
 	return v

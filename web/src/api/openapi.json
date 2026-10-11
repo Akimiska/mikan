@@ -4400,6 +4400,9 @@
             "maxLength": 65536,
             "type": "string"
           },
+          "link_reissue": {
+            "$ref": "#/components/schemas/ReissueRules"
+          },
           "public_host": {
             "maxLength": 253,
             "type": "string"
@@ -4560,6 +4563,14 @@
             "maximum": 100,
             "minimum": 1,
             "type": "integer"
+          },
+          "device_mode": {
+            "description": "Как считается лимит устройств: bound: привязанные устройства, online: любое число, считаются только одновременно онлайн",
+            "enum": [
+              "bound",
+              "online"
+            ],
+            "type": "string"
           },
           "devices_unlimited": {
             "type": "boolean"
@@ -5509,6 +5520,34 @@
         ],
         "type": "object"
       },
+      "ReissueRules": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "За сколько дней считается лимит (скользящее окно)",
+            "format": "int64",
+            "maximum": 365,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "Сколько раз подписчик может сменить ссылку за days; 0: без ограничения",
+            "format": "int64",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "off": {
+            "description": "Подписчик не меняет ссылку сам, только админ",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "limit",
+          "days"
+        ],
+        "type": "object"
+      },
       "RenameDeviceInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -6089,6 +6128,10 @@
             "description": "Профиль маршрутизации Happ: ссылка happ://routing/onadd/… (добавить и включить), happ://routing/add/… или happ://routing/off; auto — панель собирает его сама из маршрутизации Clash-профиля (Настройки → Маршрутизация); уходит только в Happ заголовком routing",
             "type": "string"
           },
+          "link_reissue": {
+            "$ref": "#/components/schemas/ReissueRules",
+            "description": "Как часто подписчик может сменить свою ссылку подписки сам (бот и Mini App)"
+          },
           "panel_port": {
             "format": "int64",
             "type": "integer"
@@ -6200,6 +6243,7 @@
           "device_binding",
           "device_require_hwid",
           "device_unbind",
+          "link_reissue",
           "default_lang",
           "certificate",
           "acme_ca",
@@ -6548,6 +6592,14 @@
             "minimum": 1,
             "type": "integer"
           },
+          "device_mode": {
+            "description": "bound: лимит это число привязанных устройств; online: привязывать можно любое число, считаются устройства, одновременно подключённые к серверам. Не передан: у нового тарифа bound, у существующего без изменений",
+            "enum": [
+              "bound",
+              "online"
+            ],
+            "type": "string"
+          },
           "duration_days": {
             "format": "int64",
             "maximum": 3650,
@@ -6648,6 +6700,14 @@
               "null"
             ]
           },
+          "device_mode": {
+            "description": "Как считается лимит устройств: bound: привязанные устройства (места), online: любое число устройств, считаются только одновременно онлайн",
+            "enum": [
+              "bound",
+              "online"
+            ],
+            "type": "string"
+          },
           "duration_days": {
             "description": "0 — бессрочно",
             "format": "int64",
@@ -6732,6 +6792,7 @@
           "traffic_limit",
           "duration_days",
           "device_limit",
+          "device_mode",
           "speed_limit",
           "reset_strategy",
           "billing_day",
@@ -7648,6 +7709,14 @@
               "null"
             ]
           },
+          "device_mode": {
+            "description": "Как считается лимит устройств: bound: привязанные устройства, online: любое число устройств, считаются только одновременно онлайн",
+            "enum": [
+              "bound",
+              "online"
+            ],
+            "type": "string"
+          },
           "expires_at": {
             "format": "date-time",
             "type": [
@@ -7822,6 +7891,7 @@
           "total_up",
           "total_down",
           "device_limit",
+          "device_mode",
           "speed_limit",
           "reset_strategy",
           "resets_at",

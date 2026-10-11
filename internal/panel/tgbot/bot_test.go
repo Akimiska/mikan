@@ -225,6 +225,7 @@ type env struct {
 	mu    sync.Mutex
 	user  db.User
 	devs  *domain.Devices
+	users *domain.Users
 	msgID int64
 }
 
@@ -269,13 +270,14 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	}
 	pool := domain.NewPool(e.st, e.clock)
 	tariffs, _ := e.st.Q.ListTariffs(ctx)
-	if e.user, err = domain.NewUsers(e.st, pool, noChanges{}, e.clock).Create(ctx, domain.CreateInput{Name: "Анна", TariffID: tariffs[1].ID}); err != nil {
+	e.users = domain.NewUsers(e.st, pool, noChanges{}, e.clock)
+	if e.user, err = e.users.Create(ctx, domain.CreateInput{Name: "Анна", TariffID: tariffs[1].ID}); err != nil {
 		t.Fatal(err)
 	}
 	e.devs = domain.NewDevices(e.st, pool, noChanges{}, e.clock)
 	srv := httptest.NewServer(e.tg)
 	t.Cleanup(srv.Close)
-	deps := Deps{Store: e.st, Settings: e.set, Devices: e.devs, API: srv.URL, Now: e.clock,
+	deps := Deps{Store: e.st, Settings: e.set, Devices: e.devs, Users: e.users, API: srv.URL, Now: e.clock,
 		SubBase: func(context.Context) string { return "https://vpn.example.com:21355/sub" },
 		MiniApp: func() bool { return true }, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Limits: fast}
 	for _, f := range with {

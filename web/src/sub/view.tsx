@@ -192,7 +192,7 @@ function Traffic({ block: b, info }: { block: PageBlock; info: Info }) {
         {info.device_limit ? (
           <div>
             {t("sub.devices")}
-            <b className="num block text-base font-medium text-[var(--ink-900)]">{t("sub.upTo", { n: info.device_limit })}</b>
+            <b className="num block text-base font-medium text-[var(--ink-900)]">{t(info.device_mode === "online" ? "sub.upToOnline" : "sub.upTo", { n: info.device_limit })}</b>
           </div>
         ) : null}
         {info.speed_limit ? (

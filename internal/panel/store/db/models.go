@@ -131,6 +131,12 @@ type LegacySubToken struct {
 	NotBefore int64
 }
 
+type LinkReissue struct {
+	ID     int64
+	UserID int64
+	At     int64
+}
+
 type MikanSqliteImport struct {
 	ID     int64
 	Report string
@@ -367,6 +373,7 @@ type Tariff struct {
 	PriceRub      sql.NullInt64
 	OnSale        int64
 	SpeedLimit    sql.NullInt64
+	DeviceMode    string
 }
 
 type TariffPool struct {
@@ -510,6 +517,7 @@ type User struct {
 	Hidden        int64
 	FolderID      sql.NullInt64
 	SpeedLimit    sql.NullInt64
+	DeviceMode    string
 }
 
 type UserFolder struct {

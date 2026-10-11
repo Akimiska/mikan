@@ -160,10 +160,14 @@ func holdUnbound(ctx context.Context, q *db.Queries, rules UnbindRules, userID i
 // unbindKeep is how long unbinds are kept: the longest window there may be.
 const unbindKeep = (MaxUnbindDays + 1) * 24 * time.Hour
 
-// Prune drops the pauses that have ended and the unbinds no window reaches any more.
+// Prune drops the pauses that have ended and the unbinds and link reissues no window
+// reaches any more (the windows of both are at most a year long).
 func (d *Devices) Prune(ctx context.Context) error {
 	now := d.now()
 	if err := d.st.Q.DeleteExpiredBans(ctx, sql.NullInt64{Int64: now.Unix(), Valid: true}); err != nil {
+		return err
+	}
+	if err := d.st.Q.DeleteLinkReissuesBefore(ctx, now.Add(-unbindKeep).Unix()); err != nil {
 		return err
 	}
 	return d.st.Q.DeleteUnbindsBefore(ctx, now.Add(-unbindKeep).Unix())

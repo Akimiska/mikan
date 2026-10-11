@@ -17,6 +17,7 @@ import { isKopecks, isStars, parseDecimal, rubKopecks } from "../../lib/validate
 import { TARIFF_TABS } from "../search";
 import { PackagesCard } from "./packages";
 import { PoolLimitsField, PoolsCard } from "./pools";
+import { DeviceModePicker, modeOf, type DeviceMode } from "./user/device-mode";
 
 /** How long a term on the tariff runs: days, or months up to the billing day. */
 function tariffTerm(tr: Tariff): string {
@@ -34,7 +35,7 @@ export function tariffSummary(tr: Tariff): string {
   const parts = [
     tr.traffic_limit != null ? bytes(tr.traffic_limit) : t("users.unlimited"),
     tariffTerm(tr),
-    tr.device_limit != null ? t("userDrawer.devicesShort", { n: tr.device_limit }) : t("tariffs.devicesUnlimitedShort"),
+    tr.device_limit != null ? t(modeOf(tr) === "online" ? "deviceMode.shortOnline" : "userDrawer.devicesShort", { n: tr.device_limit }) : t("tariffs.devicesUnlimitedShort"),
     ...(tr.speed_limit != null ? [t("tariffs.speedShort", { n: tr.speed_limit })] : []),
   ];
   return parts.join(" · ");
@@ -163,7 +164,7 @@ export function TariffsPage() {
                       <dl className="mt-5 grid grid-cols-2 gap-3 text-xs text-[var(--ink-500)]">
                         <Item label={t("users.colTraffic")} value={tr.traffic_limit != null ? bytes(tr.traffic_limit) : t("users.unlimited")} />
                         <Item label={t("users.colExpiry")} value={tariffTerm(tr)} />
-                        <Item label={t("users.colDevices")} value={tr.device_limit != null ? String(tr.device_limit) : t("users.unlimited")} />
+                        <Item label={t("users.colDevices")} value={tr.device_limit != null ? (modeOf(tr) === "online" ? t("deviceMode.shortOnline", { n: tr.device_limit }) : String(tr.device_limit)) : t("users.unlimited")} />
                         <Item label={t("tariffs.speed")} value={tr.speed_limit != null ? t("tariffs.speedShort", { n: tr.speed_limit }) : t("users.unlimited")} />
                         <Item label={t("tariffs.reset")} value={resetLabel(tr)} />
                         {poolLimitsText(tr, poolNames) ? (
@@ -224,6 +225,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   const [billingDay, setBillingDay] = useState("1");
   const [devices, setDevices] = useState("3");
   const [devicesUnlimited, setDevicesUnlimited] = useState(false);
+  const [deviceMode, setDeviceMode] = useState<DeviceMode>("bound");
   const [speed, setSpeed] = useState("100");
   const [speedUnlimited, setSpeedUnlimited] = useState(true);
   const [reset, setReset] = useState<Tariff["reset_strategy"]>("period");
@@ -252,6 +254,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setBillingDay(String(tr?.billing_day ?? new Date().getDate()));
     setDevicesUnlimited(tr ? tr.device_limit == null : false);
     setDevices(String(tr?.device_limit ?? 3));
+    setDeviceMode(tr ? modeOf(tr) : "bound");
     setSpeedUnlimited(tr?.speed_limit == null);
     setSpeed(String(tr?.speed_limit ?? 100));
     setReset(tr?.reset_strategy ?? "period");
@@ -341,6 +344,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       duration_days: toDay ? monN * 30 : durN,
       billing_day: toDay ? dayN : undefined,
       device_limit: devicesUnlimited ? undefined : devN,
+      device_mode: deviceMode,
       speed_limit: speedUnlimited ? undefined : speedN,
       reset_strategy: unlimited ? "none" : reset,
       price_label: price.trim() || undefined,
@@ -425,6 +429,11 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
             </label>
           </div>
         </Field>
+        {devicesUnlimited ? null : (
+          <Field label={t("deviceMode.label")}>
+            <DeviceModePicker value={deviceMode} onChange={setDeviceMode} />
+          </Field>
+        )}
         <Field label={t("tariffs.speed")} htmlFor="t-speed" hint={t("tariffs.speedHint")} error={errors.speed_limit}>
           <div className="flex items-center gap-2">
             <label className="input-unit max-w-[160px] flex-1">

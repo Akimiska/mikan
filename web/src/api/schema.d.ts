@@ -3501,6 +3501,7 @@ export interface components {
             happ_provider_id?: string;
             /** @description happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать */
             happ_routing?: string;
+            link_reissue?: components["schemas"]["ReissueRules"];
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
@@ -3559,6 +3560,11 @@ export interface components {
             contact?: string;
             /** Format: int64 */
             device_limit?: number;
+            /**
+             * @description Как считается лимит устройств: bound: привязанные устройства, online: любое число, считаются только одновременно онлайн
+             * @enum {string}
+             */
+            device_mode?: "bound" | "online";
             devices_unlimited?: boolean;
             disabled?: boolean;
             /** Format: date-time */
@@ -3917,6 +3923,20 @@ export interface components {
             /** @description Показываются один раз */
             recovery_codes: string[];
         };
+        ReissueRules: {
+            /**
+             * Format: int64
+             * @description За сколько дней считается лимит (скользящее окно)
+             */
+            days: number;
+            /**
+             * Format: int64
+             * @description Сколько раз подписчик может сменить ссылку за days; 0: без ограничения
+             */
+            limit: number;
+            /** @description Подписчик не меняет ссылку сам, только админ */
+            off?: boolean;
+        };
         RenameDeviceInputBody: {
             /** @description Своё имя устройства, до 40 символов одной строкой; пустое — вернуть имя от приложения */
             name: string;
@@ -4115,6 +4135,8 @@ export interface components {
             happ_provider_id: string;
             /** @description Профиль маршрутизации Happ: ссылка happ://routing/onadd/… (добавить и включить), happ://routing/add/… или happ://routing/off; auto — панель собирает его сама из маршрутизации Clash-профиля (Настройки → Маршрутизация); уходит только в Happ заголовком routing */
             happ_routing: string;
+            /** @description Как часто подписчик может сменить свою ссылку подписки сам (бот и Mini App) */
+            link_reissue: components["schemas"]["ReissueRules"];
             /** Format: int64 */
             panel_port: number;
             public_host: string;
@@ -4289,6 +4311,11 @@ export interface components {
             billing_day?: number;
             /** Format: int64 */
             device_limit?: number;
+            /**
+             * @description bound: лимит это число привязанных устройств; online: привязывать можно любое число, считаются устройства, одновременно подключённые к серверам. Не передан: у нового тарифа bound, у существующего без изменений
+             * @enum {string}
+             */
+            device_mode?: "bound" | "online";
             /** Format: int64 */
             duration_days: number;
             name: string;
@@ -4332,6 +4359,11 @@ export interface components {
             billing_day: number | null;
             /** Format: int64 */
             device_limit: number | null;
+            /**
+             * @description Как считается лимит устройств: bound: привязанные устройства (места), online: любое число устройств, считаются только одновременно онлайн
+             * @enum {string}
+             */
+            device_mode: "bound" | "online";
             /**
              * Format: int64
              * @description 0 — бессрочно
@@ -4734,6 +4766,11 @@ export interface components {
             created_at: string;
             /** Format: int64 */
             device_limit: number | null;
+            /**
+             * @description Как считается лимит устройств: bound: привязанные устройства, online: любое число устройств, считаются только одновременно онлайн
+             * @enum {string}
+             */
+            device_mode: "bound" | "online";
             /** Format: date-time */
             expires_at: string | null;
             /**

@@ -226,7 +226,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	if p.Nodes != nil {
 		tunnel = p.Nodes.Tunnel
 	}
-	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing,
+	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, Users: deps.Users, SubBase: subBase, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }, Tunnel: tunnel})
 	deps.Telegram = p.Telegram
@@ -406,6 +406,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	subHandler = subs.NewHandler(st, subCfg, subPageHandler, o.Now, deps.Devices, o.TrustProxy)
 	subHandler.SetLogger(o.Log)
 	subHandler.SetTelegram(p.Telegram)
+	subHandler.SetReissuer(deps.Users)
 	subHandler.SetShop(p.Billing)
 	subHandler.SetPromo(promos)
 	subHandler.SetPages(pages)

@@ -101,7 +101,9 @@ export function Devices({ info, subURL, reload, title }: { info: Info; subURL: s
   // The button that opened the confirmation: focus goes back to it, not to the page's top.
   const opener = useRef<number | null>(null);
   const list = info.devices ?? [];
-  const full = info.device_limit > 0 && list.length >= info.device_limit;
+  // The online mode has no places to run out of: the limit is for devices connected at once.
+  const online = info.device_mode === "online";
+  const full = !online && info.device_limit > 0 && list.length >= info.device_limit;
   const wait = info.unbind_after && new Date(info.unbind_after).getTime() > Date.now() ? info.unbind_after : "";
   const returnHours = info.return_hours ?? 0;
   const left = info.unbinds_left ?? -1;
@@ -109,6 +111,7 @@ export function Devices({ info, subURL, reload, title }: { info: Info; subURL: s
   const off = !!info.unbind_off;
   const note = [
     t("sub.devicesNote"),
+    online ? t("sub.devicesNoteOnline") : "",
     off ? t("sub.unbindOff") : "",
     !off && left >= 0 && !wait ? t("sub.unbindLeft", { left, limit: info.unbind_limit ?? 0, period: period(info.unbind_days ?? 1) }) : "",
     !off && returnHours > 0 ? t("sub.returnNote", { pause: pause(returnHours) }) : "",
@@ -166,7 +169,9 @@ export function Devices({ info, subURL, reload, title }: { info: Info; subURL: s
         <h2 id="devices-title" tabIndex={-1} className="text-[15px] font-semibold">
           {title || t("sub.devicesTitle")}
         </h2>
-        {info.device_limit > 0 ? <Pill tone={full ? "warn" : "ok"}>{t("sub.devicesCount", { n: list.length, limit: info.device_limit })}</Pill> : null}
+        {info.device_limit > 0 ? (
+          <Pill tone={full ? "warn" : "ok"}>{online ? t("sub.devicesOnline", { limit: info.device_limit }) : t("sub.devicesCount", { n: list.length, limit: info.device_limit })}</Pill>
+        ) : null}
       </div>
       {full ? <p className="mb-3 rounded-2xl bg-[var(--hover)] p-3 text-[13px] text-[var(--ink-700)]">{t("sub.devicesFull")}</p> : null}
       {wait && list.length > 0 ? (

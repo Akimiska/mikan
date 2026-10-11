@@ -196,3 +196,10 @@ ON CONFLICT (key) DO UPDATE SET value = excluded.value;
 
 -- name: DeleteNodeStateOf :exec
 DELETE FROM node_state WHERE key LIKE '%/' || CAST(sqlc.arg(node_id) AS TEXT);
+
+-- name: SetTariffDeviceMode :exec
+-- A statement of its own, beside CreateTariff and UpdateTariff, which stay as they are.
+UPDATE tariffs SET device_mode = $1 WHERE id = $2;
+
+-- name: SetUserDeviceMode :exec
+UPDATE users SET device_mode = $1, updated_at = $2 WHERE id = $3;

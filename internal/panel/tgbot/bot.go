@@ -52,6 +52,8 @@ type Deps struct {
 	Store    *store.Store
 	Settings *settings.Settings
 	Devices  *domain.Devices
+	// Users reissues a subscription's link at its subscriber's request.
+	Users *domain.Users
 	// SubBase is https://host:port/<sub path>, "" while the panel has no public address.
 	SubBase func(ctx context.Context) string
 	// MiniApp: the panel's certificate is one Telegram apps accept (not self-signed).

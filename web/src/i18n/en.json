@@ -119,6 +119,7 @@
     "api": {
       "wrong_password": "Wrong current password",
       "bad_speed_limit": "Speed is 1 to 100,000 Mbit/s",
+      "bad_device_mode": "The device limit counts bound devices or devices online at once",
       "channel_required": "To share the channel, set its width",
       "invalid_totp": "The code did not match. Check the time on your phone",
       "invalid_password_or_code": "Wrong password or code",
@@ -1847,7 +1848,21 @@
     "unbindOff": "Not allowed",
     "unbindNever": "Never",
     "unbindSummaryOff": "The client does not unbind devices themselves: only you, on the client's card. The bot, the subscription page and the Mini App show no unbind buttons.",
-    "unbindSummaryNever": "An unbound device does not connect again until you let it on the client's card."
+    "unbindSummaryNever": "An unbound device does not connect again until you let it on the client's card.",
+    "reissueTitle": "New link by the client",
+    "reissueSub": "How often a client may replace their own subscription link in the bot and the Mini App. The old link and keys stop working at once and the apps need the new link. You reissue the link on the client's card without limits.",
+    "reissueLimit": "Times",
+    "reissueSummary": "The client replaces the link at most {n, plural, one {# time} other {# times}} per {period}.",
+    "reissueSummaryFree": "The client replaces the link whenever they like.",
+    "reissueSummaryOff": "The client does not replace the link themselves: only you on the client's card. There is no “New link” button in the bot or the Mini App."
+  },
+  "deviceMode": {
+    "label": "How to count:",
+    "bound": "Bound devices",
+    "online": "Online at once",
+    "boundHint": "Each device with an ID takes a place; no more than the limit can be bound.",
+    "onlineHint": "Any number of devices may be bound; only the ones connected at once count, and the server turns the extra ones away.",
+    "shortOnline": "{n} online"
   },
   "goals": {
     "title": "What we are working on",
@@ -2012,7 +2027,19 @@
     "pauseHours": "{n} h",
     "unbindOff": "Only the administrator can unbind a device: write to support.",
     "returnNever": "An unbound device can connect again only if the administrator lets it.",
-    "unbindWarnNever": "Close the app on it first: it can connect again only if the administrator lets it."
+    "unbindWarnNever": "Close the app on it first: it can connect again only if the administrator lets it.",
+    "upToOnline": "up to {n} at once",
+    "devicesOnline": "up to {limit} at once",
+    "devicesNoteOnline": "The limit counts only the devices connected at once: you can add as many as you like.",
+    "reissueTitle": "New link",
+    "reissueText": "If the link fell into the wrong hands, replace it: the old one stops working at once.",
+    "reissueButton": "Change the link",
+    "reissueWarn": "The old link stops working at once and all bound devices are disconnected. The apps need the new link: add it to each of them.",
+    "reissueYes": "Yes, issue a new one",
+    "reissueFailed": "The link was not changed. Reload the page and try again.",
+    "reissueOff": "Only the administrator can change the link: write to support.",
+    "reissueAfter": "You can issue a new link again on {date} at {time}.",
+    "reissueLimit": "At most {n, plural, one {# time} other {# times}} per {period}."
   },
   "nodes": {
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",

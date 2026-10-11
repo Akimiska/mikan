@@ -666,7 +666,10 @@ func DescribeLimits(t db.Tariff, lang string) string {
 	} else {
 		parts = append(parts, pick("трафик без лимита", "unlimited traffic"))
 	}
-	if t.DeviceLimit.Valid {
+	if t.DeviceLimit.Valid && t.DeviceMode == domain.DeviceModeOnline {
+		// The buyer is not told of places: any number of devices, so many online at once.
+		parts = append(parts, fmt.Sprintf(pick("устройств одновременно: %d", "devices at once: %d"), t.DeviceLimit.Int64))
+	} else if t.DeviceLimit.Valid {
 		parts = append(parts, fmt.Sprintf(pick("устройств: %d", "devices: %d"), t.DeviceLimit.Int64))
 	}
 	if t.SpeedLimit.Valid {

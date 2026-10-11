@@ -42,6 +42,39 @@ func ValidHWID(s string) bool { return hwidRe.MatchString(s) }
 // could otherwise use the pool up and make the nodes rebuild their listeners.
 const MaxDevices = 50
 
+// How a device limit counts, per tariff and per user (users.device_mode).
+const (
+	// DeviceModeBound: the devices bound to the subscription by their ids are the places
+	// of the limit; a new one is refused when they are all taken.
+	DeviceModeBound = "bound"
+	// DeviceModeOnline: any number of devices may bind, and only the ones online at once
+	// count; the nodes enforce it (Policy.DeviceLimit).
+	DeviceModeOnline = "online"
+)
+
+// ValidDeviceMode says whether s is a mode the panel takes.
+func ValidDeviceMode(s string) bool { return s == DeviceModeBound || s == DeviceModeOnline }
+
+// BindsDevices says whether the device limit of a user with this mode is the number of
+// bound devices; in the online mode it is not.
+func BindsDevices(mode string) bool { return mode != DeviceModeOnline }
+
+// setDeviceMode gives u the mode, written down only when it differs: a user takes the
+// tariff's mode with its other limits, and that is the same one nearly always.
+func setDeviceMode(ctx context.Context, q *db.Queries, u *db.User, mode string, now int64) error {
+	if mode == "" {
+		mode = DeviceModeBound
+	}
+	if u.DeviceMode == mode {
+		return nil
+	}
+	if err := q.SetUserDeviceMode(ctx, db.SetUserDeviceModeParams{DeviceMode: mode, UpdatedAt: now, ID: u.ID}); err != nil {
+		return err
+	}
+	u.DeviceMode = mode
+	return nil
+}
+
 // DeviceIdle: a device not seen for this long is forgotten, and its keys burn.
 const DeviceIdle = 90 * 24 * time.Hour
 
@@ -163,8 +196,11 @@ func (d *Devices) bind(ctx context.Context, u db.User, hwid string, in DeviceInf
 		if err != nil {
 			return err
 		}
+		// In the online mode the limit is not about places: any number of devices may
+		// bind, and the nodes turn away the ones past the limit that are online at once
+		// (their addresses, across all the user's slots). Only the ceiling stays.
 		limit := int64(MaxDevices)
-		if u.DeviceLimit.Valid {
+		if u.DeviceLimit.Valid && u.DeviceMode != DeviceModeOnline {
 			limit = u.DeviceLimit.Int64
 		}
 		if n >= limit {

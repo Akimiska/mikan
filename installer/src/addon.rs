@@ -758,11 +758,6 @@ fn firewall_plan(have: &[Door], want: Option<Door>) -> Vec<Vec<String>> {
     plan
 }
 
-/// The text of `ufw status` when ufw is there and on.
-pub fn ufw_status() -> Option<String> {
-    crate::system::output("ufw", &["status"]).filter(|s| s.contains("Status: active"))
-}
-
 /// Opens the panel's API on the bridge in ufw while a custom addon runs (panel_api_bridge is
 /// set), closes it when none does, and replaces it when the gateway or the port moved. Does
 /// nothing without an active ufw, or when the install keeps mikan out of it (MIKAN_UFW=0).
@@ -772,7 +767,7 @@ fn sync_firewall(panel_api_bridge: &str, say: &mut dyn FnMut(&str)) {
     if crate::ops::Install::load().is_ok_and(|i| !i.ufw()) {
         return;
     }
-    let Some(status) = ufw_status() else { return };
+    let Some(status) = crate::system::ufw_status() else { return };
     for args in firewall_plan(&parse_doors(&status), door(panel_api_bridge)) {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         if let Err(e) = crate::system::run_quiet("ufw", &args) {

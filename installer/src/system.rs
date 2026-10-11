@@ -281,8 +281,13 @@ pub fn global_ipv6() -> Vec<Ipv6Addr> {
         .collect()
 }
 
+/// The text of `ufw status` when ufw is there and on.
+pub fn ufw_status() -> Option<String> {
+    output("ufw", &["status"]).filter(|s| s.contains("Status: active"))
+}
+
 pub fn ufw_active() -> bool {
-    output("ufw", &["status"]).is_some_and(|s| s.contains("Status: active"))
+    ufw_status().is_some()
 }
 
 /// The ports every install needs: the protocols listen on 443 and 8443, TCP and UDP.

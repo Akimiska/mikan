@@ -456,7 +456,7 @@ fn firewall(install: &Install) -> Vec<Item> {
     if !install.ufw() {
         return Vec::new();
     }
-    let Some(status) = system::output("ufw", &["status"]).filter(|s| s.contains("Status: active")) else {
+    let Some(status) = system::ufw_status() else {
         return vec![Item::ok("Firewall (ufw)", "off; a firewall in the hoster's panel is not checked here")];
     };
     // The node's container writes the file: read as panelfs reads it, no link, FIFO or huge file.

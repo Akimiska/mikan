@@ -8,6 +8,23 @@ import (
 	"database/sql"
 )
 
+type AddonGrant struct {
+	AddonID     string
+	Version     string
+	Permissions string
+	ApprovedBy  sql.NullInt64
+	ApprovedAt  int64
+}
+
+type AddonKv struct {
+	AddonID   string
+	Key       string
+	Value     []byte
+	Version   int64
+	ExpiresAt sql.NullInt64
+	UpdatedAt int64
+}
+
 type Admin struct {
 	ID            int64
 	Username      string

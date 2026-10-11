@@ -517,6 +517,57 @@ export interface paths {
         patch: operations["update-inbound"];
         trace?: never;
     };
+    "/api/v1/marketplace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Маркетплейс аддонов: боты, страницы и прочее */
+        get: operations["list-marketplace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/{id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Одобрить права и установить или обновить аддон: заявка серверу */
+        post: operations["install-marketplace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Удалить аддон и отозвать его права: заявка серверу */
+        post: operations["remove-marketplace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/metrics": {
         parameters: {
             query?: never;
@@ -2917,6 +2968,59 @@ export interface components {
             /** @description Код из приложения или резервный код */
             totp?: string;
             username: string;
+        };
+        MarketEntry: {
+            description: {
+                [key: string]: string;
+            };
+            homepage: string;
+            id: string;
+            installed: boolean;
+            /** @enum {string} */
+            kind: "bot" | "ui" | "generic";
+            /** @enum {string} */
+            mode: "http" | "client";
+            /** @description Название по языкам */
+            name: {
+                [key: string]: string;
+            };
+            /** @description Что аддон просит: это и одобряет админ при установке */
+            permissions: string[];
+            /** @description Установлен, а в каталоге другая сборка */
+            update: boolean;
+            version: string;
+            /** @description Сборка каталога просит больше прав, чем одобрено: обновление ждёт нового одобрения */
+            wider: boolean;
+        };
+        MarketInstallInputBody: {
+            /** @description Права, которые админ видел и одобрил: ровно те, что просит сборка каталога */
+            permissions: string[];
+        };
+        MarketInstalled: {
+            /** @description Почему контейнер не работает */
+            error?: string;
+            /** @description Одобренные права */
+            granted: string[];
+            id: string;
+            /** @enum {string} */
+            kind: "bot" | "ui" | "generic";
+            /** @enum {string} */
+            status: "running" | "failed";
+            version: string;
+        };
+        MarketView: {
+            catalog: components["schemas"]["MarketEntry"][];
+            /** @description catalog_unavailable — каталог не загрузился */
+            catalog_error?: string;
+            /** @description mikan на сервере умеет аддоны протокола 2; иначе сначала обновить сервер */
+            host_ready: boolean;
+            installed: components["schemas"]["MarketInstalled"][];
+            /** @description Как сервер выполнил последнюю заявку */
+            last?: components["schemas"]["AddonResult"];
+            /** @description Заявка, которую сервер ещё не взял */
+            pending?: components["schemas"]["AddonRequest"];
+            /** @description Панель видит каталог данных сервера; иначе ставить аддоны нельзя */
+            supported: boolean;
         };
         MeBody: {
             admin: components["schemas"]["AdminView"];
@@ -6154,6 +6258,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-marketplace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "install-marketplace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketInstallInputBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "remove-marketplace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketView"];
                 };
             };
             /** @description Error */

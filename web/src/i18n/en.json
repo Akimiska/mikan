@@ -374,6 +374,8 @@
       "catalog_unavailable": "The catalog did not load. Check that the server reaches GitHub.",
       "addon_unknown": "The catalog has no such payment method.",
       "addon_current": "This version is installed already.",
+      "host_outdated": "mikan on the server is too old for addons: update the server with mikan update.",
+      "permissions_changed": "The addon now asks for other permissions. Check the list and approve again.",
       "addon_not_installed": "The payment method is not installed or not running.",
       "addon_setting_invalid": "Check the value.",
       "addon_settings_refused": "The payment provider refused the settings ({value}).",

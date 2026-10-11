@@ -2754,6 +2754,185 @@
         ],
         "type": "object"
       },
+      "MarketEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "homepage": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "bot",
+              "ui",
+              "generic"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "http",
+              "client"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Название по языкам",
+            "type": "object"
+          },
+          "permissions": {
+            "description": "Что аддон просит: это и одобряет админ при установке",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "update": {
+            "description": "Установлен, а в каталоге другая сборка",
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          },
+          "wider": {
+            "description": "Сборка каталога просит больше прав, чем одобрено: обновление ждёт нового одобрения",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "version",
+          "kind",
+          "mode",
+          "permissions",
+          "homepage",
+          "installed",
+          "update",
+          "wider"
+        ],
+        "type": "object"
+      },
+      "MarketInstallInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "permissions": {
+            "description": "Права, которые админ видел и одобрил: ровно те, что просит сборка каталога",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "permissions"
+        ],
+        "type": "object"
+      },
+      "MarketInstalled": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "description": "Почему контейнер не работает",
+            "type": "string"
+          },
+          "granted": {
+            "description": "Одобренные права",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "bot",
+              "ui",
+              "generic"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "kind",
+          "status",
+          "granted"
+        ],
+        "type": "object"
+      },
+      "MarketView": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog": {
+            "items": {
+              "$ref": "#/components/schemas/MarketEntry"
+            },
+            "type": "array"
+          },
+          "catalog_error": {
+            "description": "catalog_unavailable — каталог не загрузился",
+            "type": "string"
+          },
+          "host_ready": {
+            "description": "mikan на сервере умеет аддоны протокола 2; иначе сначала обновить сервер",
+            "type": "boolean"
+          },
+          "installed": {
+            "items": {
+              "$ref": "#/components/schemas/MarketInstalled"
+            },
+            "type": "array"
+          },
+          "last": {
+            "$ref": "#/components/schemas/AddonResult",
+            "description": "Как сервер выполнил последнюю заявку"
+          },
+          "pending": {
+            "$ref": "#/components/schemas/AddonRequest",
+            "description": "Заявка, которую сервер ещё не взял"
+          },
+          "supported": {
+            "description": "Панель видит каталог данных сервера; иначе ставить аддоны нельзя",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "catalog",
+          "installed",
+          "supported",
+          "host_ready"
+        ],
+        "type": "object"
+      },
       "MeBody": {
         "additionalProperties": false,
         "properties": {
@@ -9739,6 +9918,134 @@
         "tags": [
           "inbounds"
         ]
+      }
+    },
+    "/api/v1/marketplace": {
+      "get": {
+        "operationId": "list-marketplace",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Маркетплейс аддонов: боты, страницы и прочее",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/marketplace/{id}/install": {
+      "post": {
+        "operationId": "install-marketplace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketInstallInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Одобрить права и установить или обновить аддон: заявка серверу",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/marketplace/{id}/remove": {
+      "post": {
+        "operationId": "remove-marketplace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketView"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить аддон и отозвать его права: заявка серверу",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/metrics": {

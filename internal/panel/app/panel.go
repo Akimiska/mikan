@@ -18,6 +18,7 @@ import (
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/addons/panelapi"
 	"mikan/internal/panel/api"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
@@ -60,6 +61,7 @@ type Panel struct {
 	Backups     *tgbackup.Service
 	Importer    *panelimport.Importer
 	Addons      *addons.Manager
+	AddonsAPI   *panelapi.Server
 	server      *server.Server
 	spa         *server.SPA
 	subPage     *server.SPA
@@ -211,6 +213,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		return ep.URL() + "/" + paths.Sub
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
+	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Log: o.Log, Now: o.Now})
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
 	deps.CheckHost = o.CheckHost
@@ -484,7 +487,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.NodeUpdates != nil {
 		workers = append(workers, p.NodeUpdates.Run)
 	}
-	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
+	workers = append(workers, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

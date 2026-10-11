@@ -5,8 +5,8 @@ import { qk } from "../../api/hooks";
 import { localized } from "../../components/manifest-form";
 import type { Key } from "../../i18n";
 
-// What the addons page and the marketplace share: the data and how an addon is named. Kept
-// apart from both so neither page imports the other.
+// The protocol 2 addons' data and how an addon is named: what the addons page, its dialogs
+// and the addon pages share.
 
 export type Market = Schemas["MarketView"];
 export type MarketEntry = Schemas["MarketEntry"];
@@ -19,6 +19,14 @@ export function useMarketplace() {
     queryKey: qk.marketplace,
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/marketplace", { signal })),
     refetchInterval: (q) => (q.state.data?.pending ? 3_000 : false),
+  });
+}
+
+/** Which addon answers in the subscribers' bot; empty while none does. */
+export function useBotSlot() {
+  return useQuery({
+    queryKey: qk.botSlot,
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram/bot-addon", { signal })),
   });
 }
 

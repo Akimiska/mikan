@@ -1,0 +1,509 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ShieldAlert } from "lucide-react";
+import { useId, useState, type FormEvent } from "react";
+import { ApiError, api, errorText, unwrap, type Schemas } from "../../api/client";
+import { qk } from "../../api/hooks";
+import { localized } from "../../components/manifest-form";
+import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
+import { useToast } from "../../components/toast";
+import { Field, Pill, Segmented } from "../../components/ui";
+import { t } from "../../i18n";
+import { fieldErrors } from "../../lib/fields";
+import { PERMISSIONS, actsAsAdmin, sortPermissions, type Kind, type MarketEntry, type MarketInstalled } from "./market-common";
+
+// The dialogs of the protocol 2 addons, shared by both tabs of the addons page: approving
+// what an addon may do, its details, and an addon of the admin's own. Each one gets exactly
+// the permissions the admin approved; an addon of the admin's own (an image by its digest, a
+// process on the server) is code mikan has not seen, and says so everywhere.
+
+/** The server's queue is one for both kinds of addons: a request of either shows in both. */
+export function useRequested() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.addons });
+    void qc.invalidateQueries({ queryKey: qk.marketplace });
+    toast.ok(t("addons.requested"));
+  };
+}
+
+function shortDigest(digest = ""): string {
+  return digest.length > 19 ? `${digest.slice(0, 19)}…` : digest;
+}
+
+export function permLabel(p: string): string {
+  const k = PERMISSIONS.find((x) => x.id === p);
+  return k ? t(k.label) : p;
+}
+
+/** The permissions an addon asks for, each with what it lets the addon do; new ones marked. */
+export function PermissionList({ perms, fresh = [] }: { perms: string[]; fresh?: string[] }) {
+  if (!perms.length) return <p className="mt-4 text-[13px]">{t("market.approveNone")}</p>;
+  return (
+    <ul className="mt-4 flex flex-col gap-3">
+      {sortPermissions(perms).map((p) => {
+        const k = PERMISSIONS.find((x) => x.id === p);
+        return (
+          <li key={p} className="text-[13px]">
+            <div className="flex flex-wrap items-center gap-2 font-semibold">
+              {k ? t(k.label) : p}
+              <span className="mono text-xs font-normal text-[var(--ink-500)]">{p}</span>
+              {fresh.includes(p) ? <Pill tone="warn">{t("market.permNew")}</Pill> : null}
+            </div>
+            {k ? <div className="mt-1 text-xs text-[var(--ink-500)]">{t(k.text)}</div> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function AdminWarning() {
+  return (
+    <div className="banner err mt-4 items-start" role="alert">
+      <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1">{t("market.adminWarn")}</span>
+    </div>
+  );
+}
+
+/**
+ * The approval: the admin sees exactly what the catalog's build asks for and sends that very
+ * list back; a catalog that changed in between is refused by the server and shown again.
+ */
+export function ApproveDialog({ entry, granted, onClose }: { entry: MarketEntry | null; granted: string[]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const requested = useRequested();
+  const install = useMutation({
+    mutationFn: (e: MarketEntry) => unwrap(api.POST("/api/v1/marketplace/{id}/install", { params: { path: { id: e.id } }, body: { permissions: e.permissions } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.marketplace, v);
+      requested();
+      onClose();
+    },
+    onError: (e) => {
+      toast.error(errorText(e));
+      if (e instanceof ApiError && e.detail === "permissions_changed") {
+        void qc.invalidateQueries({ queryKey: qk.marketplace });
+        onClose();
+      }
+    },
+  });
+  const name = entry ? localized(entry.name, entry.id) : "";
+  const fresh = entry?.installed ? entry.permissions.filter((p) => !granted.includes(p)) : [];
+  return (
+    <Confirm
+      open={!!entry}
+      onOpenChange={(v) => !v && onClose()}
+      title={t(entry?.installed ? "market.approveUpdateTitle" : "market.approveTitle", { name })}
+      text={t("market.approveText")}
+      confirm={t(entry?.installed ? "market.approveUpdate" : "market.approve")}
+      loading={install.isPending}
+      onConfirm={() => entry && install.mutate(entry)}
+    >
+      {entry ? (
+        <>
+          <PermissionList perms={entry.permissions} fresh={fresh} />
+          {actsAsAdmin(entry.permissions) ? <AdminWarning /> : null}
+        </>
+      ) : null}
+    </Confirm>
+  );
+}
+
+/** What an installed addon is: where it comes from, how it runs and what it was allowed. */
+export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null; name: string; onClose: () => void }) {
+  return (
+    <Drawer open={!!a} onOpenChange={(v) => !v && onClose()} title={name} meta={a ? `${t(`market.kind.${a.kind}`)} · ${t(`market.source.${a.source}`)}` : undefined}>
+      {a ? (
+        <div className="flex flex-col gap-4 pt-1 text-[13px]">
+          {a.source !== "official" ? (
+            <div className="banner warn items-start" role="note">
+              <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+              <span className="min-w-0 flex-1">{t("market.unverifiedHint")}</span>
+            </div>
+          ) : null}
+          {a.status === "failed" ? (
+            <div className="banner err" role="alert">
+              <span className="min-w-0 flex-1 break-words">{a.error || t("market.failed")}</span>
+            </div>
+          ) : null}
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2">
+            {a.version ? (
+              <>
+                <dt className="text-[var(--ink-500)]">{t("addons.version")}</dt>
+                <dd className="num">{a.version}</dd>
+              </>
+            ) : null}
+            <dt className="text-[var(--ink-500)]">{t("market.ownMode")}</dt>
+            <dd>{t(`market.mode.${a.mode}`)}</dd>
+            {a.source === "custom" ? (
+              <>
+                <dt className="text-[var(--ink-500)]">{t("market.image")}</dt>
+                <dd className="mono break-all" title={a.digest}>{`${a.image}@${shortDigest(a.digest)}`}</dd>
+              </>
+            ) : a.source === "external" ? (
+              <>
+                <dt className="text-[var(--ink-500)]">{t("market.address")}</dt>
+                <dd className={a.url ? "mono break-all" : undefined}>{a.url || t("market.noAddress")}</dd>
+              </>
+            ) : null}
+          </dl>
+          <div>
+            <h3 className="font-semibold">{t("market.granted")}</h3>
+            {a.granted.length ? <PermissionList perms={a.granted} /> : <p className="mt-2 text-[var(--ink-500)]">{t("market.noPerms")}</p>}
+            {actsAsAdmin(a.granted) ? <AdminWarning /> : null}
+          </div>
+        </div>
+      ) : null}
+    </Drawer>
+  );
+}
+
+type Own = {
+  source: "custom" | "external";
+  id: string;
+  image: string;
+  digest: string;
+  url: string;
+  kind: Kind;
+  mode: "http" | "client";
+  permissions: string[];
+  mem: string;
+  confirm: boolean;
+};
+
+const ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const DIGEST_RE = /^sha256:[a-f0-9]{64}$/;
+// The host's grammar is checked on the server; this catches what an admin types most often.
+const IMAGE_RE = /^[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$/;
+const URL_RE = /^http:\/\/127\.0\.0\.1:([0-9]{4,5})\/?$/;
+
+/** What is wrong before asking the server, as the server would say it. */
+function check(o: Own): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!ID_RE.test(o.id)) out.id = t("errors.api.addon_id_invalid");
+  if (o.source === "custom") {
+    const last = o.image.split("/").pop() ?? "";
+    if (last.includes(":") || o.image.includes("@")) out.image = t("market.ownImageTagged");
+    else if (!IMAGE_RE.test(o.image) || o.image.length > 255) out.image = t("errors.api.addon_image_invalid");
+    if (!DIGEST_RE.test(o.digest)) out.digest = t("errors.api.addon_digest_invalid");
+  } else {
+    const m = URL_RE.exec(o.url);
+    const port = m ? Number(m[1]) : 0;
+    if (o.url ? !(port >= 1024 && port <= 65535 && String(port) === m?.[1]) : o.mode !== "client") out.url = t("errors.api.addon_url_invalid");
+  }
+  if (o.mem) {
+    const n = Number(o.mem);
+    if (!Number.isInteger(n) || n < 64 || n > 256) out.mem_mb = t("errors.api.addon_mem_invalid");
+  }
+  return out;
+}
+
+function ownOf(a: MarketInstalled | null): Own {
+  if (!a) return { source: "custom", id: "", image: "", digest: "", url: "", kind: "bot", mode: "http", permissions: [], mem: "", confirm: false };
+  return {
+    source: a.source === "external" ? "external" : "custom",
+    id: a.id,
+    image: a.image ?? "",
+    digest: a.digest ?? "",
+    url: a.url ?? "",
+    kind: a.kind,
+    mode: a.mode,
+    permissions: a.granted,
+    mem: a.mem_mb ? String(a.mem_mb) : "",
+    confirm: false,
+  };
+}
+
+/** An addon of the admin's own, new or a new build of one: nothing signed vouches for it. */
+export function OwnDrawer({ open, onOpenChange, update }: { open: boolean; onOpenChange: (v: boolean) => void; update: MarketInstalled | null }) {
+  const qc = useQueryClient();
+  const requested = useRequested();
+  const [o, setO] = useState<Own>(() => ownOf(update));
+  const [tried, setTried] = useState(false);
+  const install = useMutation({
+    mutationFn: (body: Schemas["MarketCustomInputBody"]) => unwrap(api.POST("/api/v1/marketplace/custom", { body })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.marketplace, v);
+      requested();
+      onOpenChange(false);
+    },
+  });
+  // Each opening starts from the addon it is for (or from nothing), not from the last attempt.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setO(ownOf(update));
+      setTried(false);
+      install.reset();
+    }
+  }
+  const local = check(o);
+  const server = fieldErrors(install.error);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setTried(true);
+    if (Object.keys(local).length || !o.confirm || install.isPending) return;
+    install.mutate({
+      id: o.id,
+      source: o.source,
+      image: o.source === "custom" ? o.image : undefined,
+      digest: o.source === "custom" ? o.digest : undefined,
+      url: o.source === "external" && o.url ? o.url.replace(/\/$/, "") : undefined,
+      kind: o.kind,
+      mode: o.mode,
+      permissions: o.permissions,
+      mem_mb: o.source === "custom" && o.mem ? Number(o.mem) : undefined,
+      confirm: o.confirm,
+    });
+  };
+  return (
+    <Drawer
+      open={open}
+      onOpenChange={onOpenChange}
+      title={update ? t("market.ownUpdateTitle", { name: update.id }) : t("market.ownTitle")}
+      meta={t("market.ownMeta")}
+      footer={
+        <DrawerFooter form="own-addon" onCancel={() => onOpenChange(false)} loading={install.isPending} disabled={!o.confirm}>
+          {update ? t("market.ownUpdate") : t("market.ownInstall")}
+        </DrawerFooter>
+      }
+    >
+      <OwnForm
+        o={o}
+        set={(p) => setO((cur) => ({ ...cur, ...p }))}
+        update={!!update}
+        errors={{ ...(tried ? local : {}), ...server }}
+        general={install.error && !Object.keys(server).length ? errorText(install.error) : ""}
+        onSubmit={submit}
+      />
+    </Drawer>
+  );
+}
+
+function OwnForm({
+  o,
+  set,
+  update,
+  errors,
+  general,
+  onSubmit,
+}: {
+  o: Own;
+  set: (p: Partial<Own>) => void;
+  update: boolean;
+  errors: Record<string, string>;
+  general: string;
+  onSubmit: (e: FormEvent) => void;
+}) {
+  const uid = useId();
+  const toggle = (p: string) => set({ permissions: o.permissions.includes(p) ? o.permissions.filter((x) => x !== p) : [...o.permissions, p] });
+  const trustNote = `${uid}-trust-note`;
+  return (
+    <form id="own-addon" onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
+      <div className="banner warn items-start" role="note">
+        <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1">{t("market.ownWarn")}</span>
+      </div>
+      {general ? (
+        <div className="banner err" role="alert">
+          {general}
+        </div>
+      ) : null}
+      {update ? null : (
+        <Field label={t("market.ownSource")} hint={t("market.ownSourceHint")}>
+          <Segmented
+            label={t("market.ownSource")}
+            value={o.source}
+            onChange={(source) => set({ source })}
+            options={[
+              { value: "custom", label: t("market.ownSourceCustom") },
+              { value: "external", label: t("market.ownSourceExternal") },
+            ]}
+          />
+        </Field>
+      )}
+      <Field label={t("market.ownId")} htmlFor={`${uid}-id`} hint={t("market.ownIdHint")} error={errors.id}>
+        <input
+          id={`${uid}-id`}
+          className="input mono"
+          value={o.id}
+          maxLength={32}
+          readOnly={update}
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={!!errors.id}
+          onChange={(e) => set({ id: e.target.value.trim() })}
+        />
+      </Field>
+      {o.source === "custom" ? (
+        <>
+          <Field label={t("market.ownImage")} htmlFor={`${uid}-image`} hint={t("market.ownImageHint")} error={errors.image}>
+            <input
+              id={`${uid}-image`}
+              className="input mono"
+              value={o.image}
+              maxLength={255}
+              placeholder="ghcr.io/owner/name"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={!!errors.image}
+              onChange={(e) => set({ image: e.target.value.trim() })}
+            />
+          </Field>
+          <Field label={t("market.ownDigest")} htmlFor={`${uid}-digest`} hint={t("market.ownDigestHint")} error={errors.digest}>
+            <input
+              id={`${uid}-digest`}
+              className="input mono"
+              value={o.digest}
+              maxLength={71}
+              placeholder="sha256:…"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={!!errors.digest}
+              onChange={(e) => set({ digest: e.target.value.trim() })}
+            />
+          </Field>
+        </>
+      ) : (
+        <Field label={t("market.ownUrl")} htmlFor={`${uid}-url`} hint={t("market.ownUrlHint")} error={errors.url}>
+          <input
+            id={`${uid}-url`}
+            className="input mono"
+            value={o.url}
+            maxLength={64}
+            placeholder="http://127.0.0.1:8080"
+            autoComplete="off"
+            spellCheck={false}
+            aria-invalid={!!errors.url}
+            onChange={(e) => set({ url: e.target.value.trim() })}
+          />
+        </Field>
+      )}
+      <Field label={t("market.ownKind")}>
+        <Segmented
+          label={t("market.ownKind")}
+          value={o.kind}
+          onChange={(kind) => set({ kind })}
+          options={(["bot", "ui", "generic"] as const).map((k) => ({ value: k, label: t(`market.kind.${k}`) }))}
+        />
+      </Field>
+      <Field label={t("market.ownMode")} hint={t("market.ownModeHint")}>
+        <Segmented
+          label={t("market.ownMode")}
+          value={o.mode}
+          onChange={(mode) => set({ mode })}
+          options={(["http", "client"] as const).map((m) => ({ value: m, label: t(`market.mode.${m}`) }))}
+        />
+      </Field>
+      <Field label={t("market.ownPerms")} hint={t("market.ownPermsHint")} error={errors.permissions}>
+        <div className="flex flex-col gap-3">
+          {PERMISSIONS.map((p) => (
+            <label key={p.id} className="flex items-start gap-2 text-[13px]">
+              <input type="checkbox" className="check mt-0.5 shrink-0" checked={o.permissions.includes(p.id)} onChange={() => toggle(p.id)} />
+              <span className="min-w-0">
+                <span className="font-semibold">{t(p.label)}</span> <span className="mono text-xs text-[var(--ink-500)]">{p.id}</span>
+                <span className="mt-0.5 block text-xs text-[var(--ink-500)]">{t(p.text)}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </Field>
+      {actsAsAdmin(o.permissions) ? <AdminWarning /> : null}
+      {o.source === "custom" ? (
+        <Field label={t("market.ownMem")} htmlFor={`${uid}-mem`} hint={t("market.ownMemHint")} error={errors.mem_mb}>
+          <input
+            id={`${uid}-mem`}
+            className="input num max-w-[160px]"
+            inputMode="numeric"
+            value={o.mem}
+            maxLength={3}
+            placeholder="128"
+            aria-invalid={!!errors.mem_mb}
+            onChange={(e) => set({ mem: e.target.value.replace(/\D/g, "") })}
+          />
+        </Field>
+      ) : null}
+      <div className="field">
+        <label className="flex items-start gap-2 text-[13px] font-semibold">
+          <input
+            type="checkbox"
+            className="check mt-0.5 shrink-0"
+            checked={o.confirm}
+            aria-invalid={!!errors.confirm}
+            aria-describedby={trustNote}
+            onChange={(e) => set({ confirm: e.target.checked })}
+          />
+          <span>{t("market.ownTrust")}</span>
+        </label>
+        {errors.confirm ? (
+          <span className="err" role="alert" id={trustNote}>
+            {errors.confirm}
+          </span>
+        ) : (
+          <span className="hint" id={trustNote}>
+            {t("market.ownTrustHint")}
+          </span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/** Install or update a payment method from the catalog: a request to the server. */
+export function useInstallPayment() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const requested = useRequested();
+  return useMutation({
+    mutationFn: (id: string) => unwrap(api.POST("/api/v1/addons/{id}/install", { params: { path: { id } } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.addons, v);
+      requested();
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+}
+
+/**
+ * A new build of an addon of the catalog that asks for nothing more than it was allowed: the
+ * permissions it asks for are sent as approved. One that asks for more goes through
+ * ApproveDialog instead, never here.
+ */
+export function useUpdateMarket() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const requested = useRequested();
+  return useMutation({
+    mutationFn: (e: MarketEntry) => unwrap(api.POST("/api/v1/marketplace/{id}/install", { params: { path: { id: e.id } }, body: { permissions: e.permissions } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.marketplace, v);
+      requested();
+    },
+    onError: (e) => {
+      toast.error(errorText(e));
+      void qc.invalidateQueries({ queryKey: qk.marketplace });
+    },
+  });
+}
+
+/** Remove an addon of either kind: a request to the server. */
+export function useRemoveAddon(kind: "payment" | "market", onDone: () => void) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const requested = useRequested();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (kind === "payment") qc.setQueryData(qk.addons, await unwrap(api.POST("/api/v1/addons/{id}/remove", { params: { path: { id } } })));
+      else qc.setQueryData(qk.marketplace, await unwrap(api.POST("/api/v1/marketplace/{id}/remove", { params: { path: { id } } })));
+    },
+    onSuccess: () => {
+      requested();
+      onDone();
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+}

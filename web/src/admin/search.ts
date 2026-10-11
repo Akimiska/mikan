@@ -41,6 +41,8 @@ export const PROMO_TABS = ["codes", "history"] as const;
 export const TELEGRAM_TABS = ["connect", "menu", "notify", "infra", "broadcast"] as const;
 export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };
 
-/** The addons marketplace may open on its catalog or on the form for an addon of one's own. */
-export const MARKET_OPEN = ["catalog", "own"] as const;
-export type MarketSearch = { open?: (typeof MARKET_OPEN)[number] };
+/** The addons open on what is installed; the catalog keeps its search and its filter by kind. */
+export const ADDON_TABS = ["installed", "catalog"] as const;
+export const ADDON_KINDS = ["bot", "payment", "ui"] as const;
+export type AddonKind = (typeof ADDON_KINDS)[number];
+export type AddonsSearch = { tab?: (typeof ADDON_TABS)[number]; q?: string; kind?: AddonKind };

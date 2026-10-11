@@ -35,8 +35,6 @@ type ykAdapter struct {
 	count int
 	// failCreate answers a new invoice with the adapter's own failure.
 	failCreate bool
-	// refund: the adapter advertises refunds, which a priced trial needs.
-	refund bool
 }
 
 func (f *ykAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,11 +47,7 @@ func (f *ykAdapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == "/v1/info" {
-		caps := `["webhook"]`
-		if f.refund {
-			caps = `["webhook","refund"]`
-		}
-		_, _ = w.Write([]byte(`{"id":"yookassa","protocol":1,"version":"1.0.1","name":{"ru":"ЮKassa","en":"YooKassa"},"currencies":["RUB"],"capabilities":` + caps + `,
+		_, _ = w.Write([]byte(`{"id":"yookassa","protocol":1,"version":"1.0.1","name":{"ru":"ЮKassa","en":"YooKassa"},"currencies":["RUB"],"capabilities":["webhook"],
 			"settings":[{"key":"shop_id","type":"string","required":true,"pattern":"^[0-9]{1,20}$"},{"key":"secret_key","type":"string","secret":true,"required":true}]}`))
 		return
 	}

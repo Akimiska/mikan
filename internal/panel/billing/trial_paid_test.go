@@ -267,9 +267,11 @@ func TestPaidTrialBothPaidBeforeApply(t *testing.T) {
 	}
 }
 
-// A paid trial that may no longer be given goes back to the buyer, so it is sold only where
-// that refund can happen: Stars, and the adapters that advertise refunds.
-func TestPaidTrialOnlyWhereItCanBeRefunded(t *testing.T) {
+// A paid trial is sold through every payment method that takes its price, refunds or not.
+// One that cannot be given when it applies goes back where the method refunds; through an
+// adapter without refunds the adapter is not asked, and the payment stays paid with
+// trial_refund_failed for the admin to refund by hand. Nothing is given either way.
+func TestPaidTrialThroughAnyAdapter(t *testing.T) {
 	for _, refunds := range []bool{true, false} {
 		name := "an adapter that refunds"
 		if !refunds {
@@ -284,29 +286,32 @@ func TestPaidTrialOnlyWhereItCanBeRefunded(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.priceTrial()
-			if av := e.s.Available(ctx); len(av.Addons) != 1 {
-				t.Fatalf("the adapter sells plans either way: %+v", av)
-			}
 			o, av, ok := e.s.TrialOffer(ctx, 921)
-			_, err := e.s.TrialInvoice(ctx, 921, "addon:fake")
+			if !ok || o.Stars != 1 || o.Rub != 100 || len(av.Addons) != 1 {
+				t.Fatalf("the trial through the adapter: %+v %+v %v", o, av, ok)
+			}
+			p, err := e.s.TrialInvoice(ctx, 921, "addon:fake")
+			must(t, err)
+			// The account takes its trial in another chat while the invoice is open.
+			_, err = e.st.Q.TakeTrial(ctx, db.TakeTrialParams{TgID: 921, CreatedAt: e.now.Unix()})
+			must(t, err)
+			fa.set(p.ExternalID.String, func(s *addons.Status) { s.Status, s.Amount = "paid", p.Amount })
+			err = e.s.checkAddon(ctx, p.Provider, p.ExternalID.String)
+			got := e.payment(p.ID)
+			if e.users() != 0 {
+				t.Fatal("a trial that may not be given made a subscription")
+			}
 			if refunds {
-				if !ok || o.Stars != 1 || o.Rub != 100 || len(av.Addons) != 1 || err != nil {
-					t.Fatalf("the trial through an adapter that refunds: %+v %+v %v %v", o, av, ok, err)
+				if err != nil || got.Status != "refunded" || len(fa.refundCalls) != 1 {
+					t.Fatalf("refunded through the adapter: %v %+v %v", err, got, fa.refundCalls)
 				}
 				return
 			}
-			if !ok || o.Stars != 1 || o.Rub != 0 || len(av.Addons) != 0 {
-				t.Fatalf("the trial with an adapter that cannot refund: %+v %+v %v", o, av, ok)
+			if err == nil || got.Status != "paid" || got.Error != "trial_refund_failed" {
+				t.Fatalf("the trial through an adapter without refunds: %v %+v", err, got)
 			}
-			if !errors.Is(err, ErrProviderOff) {
-				t.Fatalf("a trial invoice through an adapter that cannot refund: %v", err)
-			}
-			// Without Stars nothing the trial can be sold through is left.
-			c := e.s.Config(ctx)
-			c.Stars = false
-			must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, c))
-			if _, _, ok := e.s.TrialOffer(ctx, 921); ok {
-				t.Fatal("the trial offered through an adapter that cannot refund it")
+			if len(fa.refundCalls) != 0 {
+				t.Fatalf("an adapter without refunds was asked to refund: %v", fa.refundCalls)
 			}
 		})
 	}

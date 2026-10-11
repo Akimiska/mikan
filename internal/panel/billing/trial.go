@@ -143,17 +143,17 @@ type TrialOffer struct {
 	Rub    int64 // kopecks
 }
 
-// TrialOffer is the priced trial tgID may buy now, with the providers it is sold through
-// (trialProviders); ok false when the trial is free or off, the account may not take it,
-// or none of those providers takes its price. A hint for the bot and the Mini App;
-// TrialInvoice and Apply decide on their own.
+// TrialOffer is the priced trial tgID may buy now, with the providers available; ok false
+// when the trial is free or off, the account may not take it, or no available provider
+// takes its price. A hint for the bot and the Mini App; TrialInvoice and Apply decide on
+// their own.
 func (s *Service) TrialOffer(ctx context.Context, tgID int64) (TrialOffer, Available, bool) {
 	c := s.Config(ctx)
 	t, ok := s.TrialTariff(ctx)
 	if !ok || !c.TrialPaid() {
 		return TrialOffer{}, Available{}, false
 	}
-	av := s.trialProviders(ctx)
+	av := s.Available(ctx)
 	o := TrialOffer{Tariff: t}
 	o.Stars, o.Rub = av.prices(trialPrice(c.TrialStars), trialPrice(c.TrialRub))
 	if o.Stars == 0 && o.Rub == 0 {
@@ -166,23 +166,8 @@ func (s *Service) TrialOffer(ctx context.Context, tgID int64) (TrialOffer, Avail
 // trialPrice: a price of the trial as a tariff term's, unset when 0.
 func trialPrice(n int64) sql.NullInt64 { return sql.NullInt64{Int64: n, Valid: n > 0} }
 
-// trialProviders are the available providers that can give the money back: Stars, and the
-// adapters that advertise refunds (validatePromoProvider, as for a discounted payment). A
-// paid trial that may no longer be given when it applies is refunded, so it is sold only
-// where that refund can happen.
-func (s *Service) trialProviders(ctx context.Context) Available {
-	av := s.Available(ctx)
-	out := Available{Stars: av.Stars}
-	for _, id := range av.Addons {
-		if s.validatePromoProvider(ctx, AddonPrefix+id) == nil {
-			out.Addons = append(out.Addons, id)
-		}
-	}
-	return out
-}
-
 // TrialInvoice opens a payment for the priced trial: the trial tariff for its term at the
-// trial's price, through one of trialProviders. Only an account that may take the trial
+// trial's price, through any available provider. Only an account that may take the trial
 // gets one (no trial, subscription or payment yet); the trial is taken when the payment
 // applies. An open invoice for the same provider made in the last minutes is returned
 // again, to an account that may still take the trial.
@@ -192,7 +177,7 @@ func (s *Service) TrialInvoice(ctx context.Context, tgID int64, provider string)
 	if !ok || !c.TrialPaid() {
 		return db.Payment{}, ErrTrialOff
 	}
-	amount, currency, ok := s.trialProviders(ctx).price(provider, trialPrice(c.TrialStars), trialPrice(c.TrialRub))
+	amount, currency, ok := s.Available(ctx).price(provider, trialPrice(c.TrialStars), trialPrice(c.TrialRub))
 	if !ok {
 		return db.Payment{}, ErrProviderOff
 	}
@@ -278,9 +263,10 @@ func (s *Service) applyTrial(ctx context.Context, q *db.Queries, pay db.Payment)
 
 // refundTrial gives back a paid trial that may no longer be given: the account took its
 // trial, became a customer, or paid two trial invoices at once. Nothing was made for the
-// payment, so it goes back whole and ends as refunded. A provider that cannot refund (or
-// a bot that is down) leaves it paid with trial_refund_failed on it: the admin sees it on
-// the Payments page and the reconcile pass keeps trying.
+// payment, so it goes back whole and ends as refunded. A refund that fails (a bot that is
+// down) leaves it paid with trial_refund_failed on it: the admin sees it on the Payments
+// page and the reconcile pass keeps trying. An adapter without refunds is not asked at
+// all: the same mark tells the admin to refund it by hand in the provider's dashboard.
 func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 	// One refund of the payment at a time; it never gives up, as a refund already started
 	// must finish.
@@ -295,7 +281,10 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 		return nil
 	}
 	refundErr := errors.New("the payment carries no provider id to refund")
-	if cur.ExternalID.Valid && cur.ExternalID.String != "" {
+	switch {
+	case s.validatePromoProvider(ctx, cur.Provider) != nil:
+		refundErr = errors.New("the payment method cannot refund: refund it by hand")
+	case cur.ExternalID.Valid && cur.ExternalID.String != "":
 		refundErr = s.refundCharge(ctx, cur, cur.ExternalID.String, "mikan-trial-"+strconv.FormatInt(cur.ID, 10))
 	}
 	if refundErr != nil {

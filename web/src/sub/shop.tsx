@@ -20,8 +20,6 @@ export type ShopData = {
   packages?: Offer[];
   /** The priced trial the account may buy now: once, before any plan. */
   trial?: Offer;
-  /** The adapters the trial is sold through: those that can refund it. */
-  trial_addons?: { provider: `addon:${string}`; name: string }[];
 };
 type Provider = "stars" | `addon:${string}`;
 

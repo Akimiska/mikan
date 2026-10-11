@@ -231,6 +231,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }, Tunnel: tunnel})
 	deps.Telegram = p.Telegram
 	p.Billing.SetTelegram(p.Telegram)
+	p.Billing.SetNotifier(p.Telegram)
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
 	var certStatus infraalerts.CertificateSource

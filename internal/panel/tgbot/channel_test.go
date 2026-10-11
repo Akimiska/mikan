@@ -127,6 +127,7 @@ func TestBotFreePlan(t *testing.T) {
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.bot)
+	svc.SetNotifier(e.bot)
 	const visitor = 795
 	if _, ok := buttons(e.start(visitor))["🎁 Бесплатный тариф"]; ok {
 		t.Fatal("a free plan nobody offers")

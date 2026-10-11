@@ -349,7 +349,7 @@ func (b *Bot) BotURL(context.Context) string {
 	return "https://t.me/" + st.Bot.Username
 }
 
-// Paid implements billing.Telegram: the buyer learns the subscription is ready (with the
+// Paid implements billing.Notifier: the buyer learns the subscription is ready (with the
 // link for a new one) or the traffic package is added, and gets a fresh menu that shows it.
 func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	out := b.out.Load()
@@ -379,7 +379,7 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	b.freshMenu(out, chat, "")
 }
 
-// Refunded implements billing.Telegram: the buyer learns the payment was refunded and what
+// Refunded implements billing.Notifier: the buyer learns the payment was refunded and what
 // it gave is taken back.
 func (b *Bot) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool) {
 	out := b.out.Load()
@@ -477,9 +477,9 @@ func (b *Bot) trialInvoice(ctx context.Context, w *words, chat int64, code strin
 	return text, &Keyboard{[][]Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
 }
 
-// TrialNotGiven tells the buyer a paid trial was not given, as the account had its trial,
-// and that its money comes back through support (the payment method cannot refund it), with
-// the support link when the panel has one.
+// TrialNotGiven implements billing.Notifier: it tells the buyer a paid trial was not given,
+// as the account had its trial, and that its money comes back through support (the payment
+// method cannot refund it), with the support link when the panel has one.
 func (b *Bot) TrialNotGiven(ctx context.Context, p db.Payment) {
 	out := b.out.Load()
 	if out == nil {

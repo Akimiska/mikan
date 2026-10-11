@@ -325,10 +325,10 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 		refundedAt = latest.RefundedAt
 	}
 	s.d.Log.Warn("billing: a paid trial the account may not take was refunded", "payment", cur.ID, "provider", cur.Provider, "tg", cur.TgID)
-	if tg := s.telegram(); tg != nil {
+	if n := s.notifier(); n != nil {
 		// Nothing was made for the payment, so the buyer hears only that it came back.
 		cur.Status, cur.RefundedAt = PaymentRefunded, refundedAt
-		tg.Refunded(ctx, cur, db.User{}, false)
+		n.Refunded(ctx, cur, db.User{}, false)
 	}
 	return nil
 }
@@ -345,8 +345,8 @@ func (s *Service) trialByHand(ctx context.Context, p db.Payment) error {
 		return err
 	}
 	s.d.Log.Warn("billing: a paid trial the account may not take waits for a refund by hand", "payment", p.ID, "provider", p.Provider, "tg", p.TgID)
-	if tg := s.telegram(); tg != nil {
-		tg.TrialNotGiven(ctx, p)
+	if n := s.notifier(); n != nil {
+		n.TrialNotGiven(ctx, p)
 	}
 	return nil
 }
@@ -381,9 +381,9 @@ func (s *Service) RefundedByHand(ctx context.Context, id int64) error {
 		}
 	}
 	s.d.Log.Info("billing: refunded by hand", "payment", id, "provider", p.Provider)
-	if tg := s.telegram(); tg != nil {
+	if n := s.notifier(); n != nil {
 		p.Status, p.RefundedAt, p.Error = PaymentRefunded, refundedAt, ""
-		tg.Refunded(ctx, p, db.User{}, false)
+		n.Refunded(ctx, p, db.User{}, false)
 	}
 	return nil
 }

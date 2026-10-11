@@ -306,9 +306,9 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 	}
 	s.d.Users.Changed()
 	s.d.Log.Info("billing: refunded", "payment", id, "action", rv.Action, "exact", rv.Exact)
-	if tg := s.telegram(); tg != nil {
+	if n := s.notifier(); n != nil {
 		p.Status = PaymentRefunded
-		tg.Refunded(ctx, p, u, rv.Action == "disabled")
+		n.Refunded(ctx, p, u, rv.Action == "disabled")
 	}
 	return rv, nil
 }

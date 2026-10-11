@@ -79,27 +79,33 @@ func (c Config) TrialPaid() bool { return c.TrialStars > 0 || c.TrialRub > 0 }
 // the bot) and new buyers are welcome.
 var DefaultConfig = Config{Stars: true, AllowNew: true, RenewResetsTraffic: true}
 
-// Telegram is the bot's part: Stars invoices and refunds, and telling buyers.
+// Telegram is the Telegram gateway's part (tgate.Gateway): Stars invoices and refunds, the
+// bot's link and its channel. It stays in the panel whatever runs the bot's screens.
 type Telegram interface {
 	// InvoiceLink makes a Stars invoice link (createInvoiceLink); "" when the bot is off.
 	InvoiceLink(ctx context.Context, title, description, payload string, stars int64) (string, error)
 	RefundStars(ctx context.Context, tgID int64, chargeID string) error
-	// Paid tells the buyer the subscription is ready.
-	Paid(ctx context.Context, p db.Payment, u db.User, created bool)
-	// Refunded tells the buyer the payment was refunded and what it gave is taken back:
-	// u is the subscription after that (zero when it is gone), disabled that it was turned off.
-	Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool)
 	// BotURL is https://t.me/<bot>, "" while the bot is off.
 	BotURL(ctx context.Context) string
-	// TrialNotGiven tells the buyer a paid trial was not given (the account had its trial)
-	// and the money comes back by hand: the payment method cannot refund it.
-	TrialNotGiven(ctx context.Context, p db.Payment)
 	// Channel is the link to join the bot's channel (the one its mandatory subscription
 	// asks for); ok is false while no channel is set up.
 	Channel(ctx context.Context) (url string, ok bool)
 	// Subscribed: the account is a member of the bot's channel. An error when the bot
 	// cannot ask: it is off, or it is not an admin of the channel.
 	Subscribed(ctx context.Context, tgID int64) (bool, error)
+}
+
+// Notifier tells buyers what came of their payments: the bot's screens (tgbot.Bot) now,
+// panel events that the bot addon takes later.
+type Notifier interface {
+	// Paid tells the buyer the subscription is ready.
+	Paid(ctx context.Context, p db.Payment, u db.User, created bool)
+	// Refunded tells the buyer the payment was refunded and what it gave is taken back:
+	// u is the subscription after that (zero when it is gone), disabled that it was turned off.
+	Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool)
+	// TrialNotGiven tells the buyer a paid trial was not given (the account had its trial)
+	// and the money comes back by hand: the payment method cannot refund it.
+	TrialNotGiven(ctx context.Context, p db.Payment)
 }
 
 type Deps struct {
@@ -124,6 +130,7 @@ type Service struct {
 	mu           sync.Mutex
 	promoRefunds keyedLock // by payment: one late-promo refund of it at a time
 	tg           Telegram
+	notify       Notifier
 	buyers       keyedLock // by Telegram account: one invoice opened at a time
 	trialRefunds keyedLock // by payment: one refund of a trial that may not be given at a time
 }
@@ -146,6 +153,19 @@ func (s *Service) telegram() Telegram {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.tg
+}
+
+// SetNotifier connects what tells buyers; until then nobody is told.
+func (s *Service) SetNotifier(n Notifier) {
+	s.mu.Lock()
+	s.notify = n
+	s.mu.Unlock()
+}
+
+func (s *Service) notifier() Notifier {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.notify
 }
 
 // Errors the bot and the Mini App show to buyers.
@@ -943,8 +963,8 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 	s.d.Users.Changed()
 	pay.Status, pay.UserID = PaymentApplied, sql.NullInt64{Int64: u.ID, Valid: true}
 	s.d.Log.Info("billing: applied", "payment", id, "user", u.ID, "created", created)
-	if tg := s.telegram(); tg != nil {
-		tg.Paid(ctx, pay, u, created)
+	if n := s.notifier(); n != nil {
+		n.Paid(ctx, pay, u, created)
 	}
 	return nil
 }

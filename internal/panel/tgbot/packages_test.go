@@ -26,6 +26,7 @@ func TestBuyTraffic(t *testing.T) {
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.bot)
+	svc.SetNotifier(e.bot)
 	const owner = 555
 	q := e.st.Q
 	must := func(err error) {

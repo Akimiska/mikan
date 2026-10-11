@@ -34,6 +34,7 @@ func TestShopStars(t *testing.T) {
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.bot)
+	svc.SetNotifier(e.bot)
 	const buyer = 777
 
 	// Selling is off on a panel that never turned it on: the welcome has no shop.

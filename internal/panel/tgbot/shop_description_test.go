@@ -38,6 +38,7 @@ func TestShopDescription(t *testing.T) {
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.bot)
+	svc.SetNotifier(e.bot)
 	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{Enabled: true, Stars: true, AllowNew: true}); err != nil {
 		t.Fatal(err)
 	}

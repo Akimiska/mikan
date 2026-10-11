@@ -24,6 +24,7 @@ func TestBotTrial(t *testing.T) {
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.bot)
+	svc.SetNotifier(e.bot)
 	const visitor = 779
 	welcome := func() call {
 		t.Helper()
@@ -113,6 +114,7 @@ func TestBotTrialFailure(t *testing.T) {
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.bot)
+	svc.SetNotifier(e.bot)
 	ts, _ := e.st.Q.ListTariffs(e.ctx)
 	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{TrialTariffID: ts[0].ID}); err != nil {
 		t.Fatal(err)
@@ -139,6 +141,7 @@ func TestBotPaidTrial(t *testing.T) {
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.bot)
+	svc.SetNotifier(e.bot)
 	const visitor = 781
 	ts, _ := e.st.Q.ListTariffs(e.ctx)
 	// Selling is on for the trial alone: no tariff is on sale and new subscriptions are off.

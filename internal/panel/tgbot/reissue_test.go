@@ -16,12 +16,8 @@ import (
 func TestBotReissuesTheLink(t *testing.T) {
 	e := setup(t)
 	const anna, other = 555, 777
-	secret, err := e.bot.secret(e.ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	n := e.tg.count()
-	e.say(anna, "/start "+LinkCode(secret, e.user.ID, e.clock()))
+	e.say(anna, "/start "+e.code(e.user.ID))
 	e.tg.wait(t, n, "sendMessage")
 	chat, _ := e.st.Q.GetTgChat(e.ctx, anna)
 	menu := chat.MenuMsgID
@@ -105,9 +101,8 @@ func TestBotReissuesTheLink(t *testing.T) {
 func TestBotDevicesInTheOnlineMode(t *testing.T) {
 	e := setup(t)
 	const anna = 555
-	secret, _ := e.bot.secret(e.ctx)
 	n := e.tg.count()
-	e.say(anna, "/start "+LinkCode(secret, e.user.ID, e.clock()))
+	e.say(anna, "/start "+e.code(e.user.ID))
 	e.tg.wait(t, n, "sendMessage")
 	chat, _ := e.st.Q.GetTgChat(e.ctx, anna)
 	tap := func(data string) call {

@@ -18,7 +18,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 	"mikan/internal/release"
 )
 
@@ -406,7 +406,7 @@ func (h *handlers) nodeUnused(ctx context.Context, q *db.Queries, id int64) erro
 		return err
 	}
 	set := settings.New(q)
-	route, _, err := settings.Get[tgbot.Route](ctx, set, tgbot.KeyRoute)
+	route, _, err := settings.Get[tgate.Route](ctx, set, tgate.KeyRoute)
 	if err != nil {
 		return err
 	}
@@ -445,7 +445,7 @@ func (h *handlers) nodeUnused(ctx context.Context, q *db.Queries, id int64) erro
 		}
 		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_relays", Value: strings.Join(list, ", ")})
 	}
-	if route.Mode == tgbot.RouteNode && route.NodeID == id {
+	if route.Mode == tgate.RouteNode && route.NodeID == id {
 		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_telegram"})
 	}
 	if len(details) > 0 {
@@ -472,11 +472,11 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 		// The bot's route may still name it from when it went through it: the admin
 		// panel would offer a node that is gone.
 		set := settings.New(q)
-		if route, ok, err := settings.Get[tgbot.Route](ctx, set, tgbot.KeyRoute); err != nil {
+		if route, ok, err := settings.Get[tgate.Route](ctx, set, tgate.KeyRoute); err != nil {
 			return err
 		} else if ok && route.NodeID == n.ID {
 			route.NodeID = 0
-			if err := settings.Set(ctx, set, tgbot.KeyRoute, route); err != nil {
+			if err := settings.Set(ctx, set, tgate.KeyRoute, route); err != nil {
 				return err
 			}
 		}

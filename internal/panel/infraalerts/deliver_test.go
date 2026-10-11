@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 // fakeSender records what the queue sends and answers from fields, so the delivery runs
@@ -20,14 +20,14 @@ type fakeSender struct {
 	message int64
 }
 
-func (f *fakeSender) Send(_ context.Context, chat int64, text string, _ *tgbot.Keyboard, _ bool) (tgbot.Message, error) {
+func (f *fakeSender) Send(_ context.Context, chat int64, text string, _ *tgate.Keyboard, _ bool) (tgate.Message, error) {
 	f.calls = append(f.calls, "send "+text)
-	return tgbot.Message{MessageID: f.message}, f.sendErr
+	return tgate.Message{MessageID: f.message}, f.sendErr
 }
 
-func (f *fakeSender) SendTo(_ context.Context, chat string, text string, silent bool) (tgbot.Message, error) {
+func (f *fakeSender) SendTo(_ context.Context, chat string, text string, silent bool) (tgate.Message, error) {
 	f.calls = append(f.calls, "sendto "+chat+" "+text)
-	return tgbot.Message{MessageID: f.message}, f.sendErr
+	return tgate.Message{MessageID: f.message}, f.sendErr
 }
 
 func (f *fakeSender) EditTo(_ context.Context, chat string, msg int64, text string) error {
@@ -106,7 +106,7 @@ func TestSendPendingRetriesAndDropsStale(t *testing.T) {
 
 func TestSendPendingPermanentErrorIsDropped(t *testing.T) {
 	m := quietMonitor(time.Unix(1000, 0))
-	f := &fakeSender{sendErr: &tgbot.APIError{Code: 403, Description: "Forbidden: bot was blocked"}}
+	f := &fakeSender{sendErr: &tgate.APIError{Code: 403, Description: "Forbidden: bot was blocked"}}
 	cfg := Default()
 	cfg.AdminEnabled = true
 	st := persistentState{Pending: []delivery{{Key: "a", Target: targetAdmin, Text: "x"}}}
@@ -118,7 +118,7 @@ func TestSendPendingPermanentErrorIsDropped(t *testing.T) {
 
 func TestSendSummaryForgetsAMessageTheChannelLost(t *testing.T) {
 	m := quietMonitor(time.Unix(1000, 0))
-	f := &fakeSender{editErr: &tgbot.APIError{Code: 400, Description: "Bad Request: message to edit not found"}}
+	f := &fakeSender{editErr: &tgate.APIError{Code: 400, Description: "Bad Request: message to edit not found"}}
 	cfg := Default()
 	cfg.PublicEnabled, cfg.PublicChannel = true, "@channel"
 	st := persistentState{PublicMessage: 9, PublicPinned: true}

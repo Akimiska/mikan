@@ -9,7 +9,7 @@ import (
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 // The free plan over HTTP: the admin picks its tariff (one with a term) and may not ask
@@ -22,7 +22,7 @@ func TestFreePlanOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := settings.New(h.st.Q)
-	for k, v := range map[string]any{settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355, tgbot.KeyToken: tgToken} {
+	for k, v := range map[string]any{settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355, tgate.KeyToken: tgToken} {
 		if err := settings.Set(ctx, set, k, v); err != nil {
 			t.Fatal(err)
 		}

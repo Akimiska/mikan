@@ -1,7 +1,11 @@
-// Package tgbot is the panel's Telegram bot for subscription owners: a menu on inline
-// buttons that edits one message in place, linking a subscription to a Telegram account,
-// notifications about the term and traffic, broadcasts, and the Mini App's sign-in.
-package tgbot
+// Package tgate is the panel's Telegram gateway: everything that touches the bot's token,
+// money and access. It keeps the way to Telegram (route.go), the update loop with its
+// offset, the outbox with Telegram's limits, the flood guard, the accounts that wrote to
+// the bot, Telegram Stars, link codes and the Mini App's sign-in, the infrastructure
+// admin's chat and the bot's channel. The bot's screens (tgbot) get the updates the gateway
+// does not handle itself and send through its outbox; later an addon does the same over
+// HTTP (docs/pipeline/addons.md).
+package tgate
 
 import (
 	"bytes"
@@ -9,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -292,8 +297,29 @@ func unparsable(err error) bool {
 
 // asPlain makes a request's HTML text plain.
 func asPlain(in map[string]any, text string) {
-	in["text"] = plainText(text)
+	in["text"] = PlainText(text)
 	delete(in, "parse_mode")
+}
+
+// PlainText is what an HTML message reads as text: for the rare text Telegram still
+// refuses, sent again without formatting rather than not at all.
+func PlainText(s string) string {
+	var out strings.Builder
+	for {
+		i := strings.IndexByte(s, '<')
+		if i < 0 {
+			break
+		}
+		out.WriteString(s[:i])
+		j := strings.IndexByte(s[i:], '>')
+		if j < 0 {
+			s = s[i+1:]
+			continue
+		}
+		s = s[i+j+1:]
+	}
+	out.WriteString(s)
+	return html.UnescapeString(out.String())
 }
 
 // SendTo is Send for a Telegram channel target: its numeric chat id or @username.

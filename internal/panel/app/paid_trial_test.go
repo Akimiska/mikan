@@ -15,7 +15,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 // A priced trial over HTTP: the admin sets its price, the Mini App offers it to an
@@ -41,7 +41,7 @@ func TestPaidTrialOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := settings.New(h.st.Q)
-	for k, v := range map[string]any{settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355, tgbot.KeyToken: tgToken} {
+	for k, v := range map[string]any{settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355, tgate.KeyToken: tgToken} {
 		if err := settings.Set(ctx, set, k, v); err != nil {
 			t.Fatal(err)
 		}

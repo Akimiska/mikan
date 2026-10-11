@@ -1,4 +1,4 @@
-package tgbot
+package tgate
 
 import (
 	"context"
@@ -88,8 +88,8 @@ func ProxyHost(raw string) string {
 
 // LoadRoute is the saved route. A read error is returned, not hidden: a change built
 // on a fallback and saved would lose the admin's proxy.
-func (b *Bot) LoadRoute(ctx context.Context) (Route, error) {
-	r, _, err := settings.Get[Route](ctx, b.d.Settings, KeyRoute)
+func (g *Gateway) LoadRoute(ctx context.Context) (Route, error) {
+	r, _, err := settings.Get[Route](ctx, g.d.Settings, KeyRoute)
 	if err != nil {
 		return Route{}, err
 	}
@@ -100,8 +100,8 @@ func (b *Bot) LoadRoute(ctx context.Context) (Route, error) {
 }
 
 // Route is how the bot reaches Telegram now; straight when the setting cannot be read.
-func (b *Bot) Route(ctx context.Context) Route {
-	r, err := b.LoadRoute(ctx)
+func (g *Gateway) Route(ctx context.Context) Route {
+	r, err := g.LoadRoute(ctx)
 	if err != nil {
 		return Route{Mode: RouteDirect}
 	}
@@ -109,7 +109,7 @@ func (b *Bot) Route(ctx context.Context) Route {
 }
 
 // transport for a route; nil is Go's default, straight to Telegram.
-func (b *Bot) transport(r Route) (http.RoundTripper, error) {
+func (g *Gateway) transport(r Route) (http.RoundTripper, error) {
 	switch r.Mode {
 	case RouteProxy:
 		u, err := ParseProxy(r.Proxy)
@@ -120,13 +120,13 @@ func (b *Bot) transport(r Route) (http.RoundTripper, error) {
 		t.Proxy = http.ProxyURL(u)
 		return t, nil
 	case RouteNode:
-		if b.d.Tunnel == nil || r.NodeID == 0 {
+		if g.d.Tunnel == nil || r.NodeID == 0 {
 			return nil, ErrRouteNode
 		}
 		id := r.NodeID
 		t := http.DefaultTransport.(*http.Transport).Clone()
 		t.Proxy = nil
-		t.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) { return b.d.Tunnel(ctx, id, addr) }
+		t.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) { return g.d.Tunnel(ctx, id, addr) }
 		return t, nil
 	}
 	return nil, nil
@@ -135,23 +135,23 @@ func (b *Bot) transport(r Route) (http.RoundTripper, error) {
 // CheckRoute tries a route before it is saved. With a token Telegram has to answer
 // getMe (any answer: the token is checked on its own); without one, the Bot API has to
 // answer at all.
-func (b *Bot) CheckRoute(ctx context.Context, r Route, token string) error {
+func (g *Gateway) CheckRoute(ctx context.Context, r Route, token string) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	rt, err := b.transport(r)
+	rt, err := g.transport(r)
 	if err != nil {
 		return err
 	}
 	if token != "" {
-		_, err := NewClient(b.d.API, token, rt).Me(ctx)
+		_, err := NewClient(g.d.API, token, rt).Me(ctx)
 		var ae *APIError
 		if err == nil || errors.As(err, &ae) {
 			return nil
 		}
-		b.routeFailed(r, err)
+		g.routeFailed(r, err)
 		return ErrUnreachable
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.d.API+"/", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.d.API+"/", nil)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (b *Bot) CheckRoute(ctx context.Context, r Route, token string) error {
 	hc := &http.Client{Transport: rt, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := hc.Do(req)
 	if err != nil {
-		b.routeFailed(r, err)
+		g.routeFailed(r, err)
 		return ErrUnreachable
 	}
 	resp.Body.Close()
@@ -169,6 +169,6 @@ func (b *Bot) CheckRoute(ctx context.Context, r Route, token string) error {
 
 // routeFailed logs why a route did not reach Telegram: the admin sees only that it did not.
 // The error carries no token: Client.do keeps the cause, not the URL.
-func (b *Bot) routeFailed(r Route, err error) {
-	b.d.Log.Warn("telegram: route check failed", "mode", r.Mode, "node", r.NodeID, "err", err)
+func (g *Gateway) routeFailed(r Route, err error) {
+	g.d.Log.Warn("telegram: route check failed", "mode", r.Mode, "node", r.NodeID, "err", err)
 }

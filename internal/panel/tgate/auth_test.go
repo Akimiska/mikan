@@ -1,4 +1,4 @@
-package tgbot
+package tgate
 
 import (
 	"crypto/hmac"

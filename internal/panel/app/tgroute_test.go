@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"mikan/internal/panel/settings"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 // The bot's way to Telegram over the admin API: a bad proxy or node is refused before
@@ -111,20 +111,20 @@ func TestTelegramRouteOverHTTP(t *testing.T) {
 	// the admin panel is not offered that node back, or its form would send the old id
 	// while showing another node.
 	set := settings.New(h.st.Q)
-	if err := settings.Set(context.Background(), set, tgbot.KeyRoute, tgbot.Route{Mode: tgbot.RouteDirect, NodeID: 777}); err != nil {
+	if err := settings.Set(context.Background(), set, tgate.KeyRoute, tgate.Route{Mode: tgate.RouteDirect, NodeID: 777}); err != nil {
 		t.Fatal(err)
 	}
 	if resp, body := h.do(http.MethodGet, api, nil, nil); resp.StatusCode != http.StatusOK || strings.Contains(string(body), `"node_id":777`) {
 		t.Fatalf("a gone node in the view: %d %s", resp.StatusCode, body)
 	}
 	// Deleting the node the route names takes it out of the route too.
-	if err := settings.Set(context.Background(), set, tgbot.KeyRoute, tgbot.Route{Mode: tgbot.RouteDirect, NodeID: id}); err != nil {
+	if err := settings.Set(context.Background(), set, tgate.KeyRoute, tgate.Route{Mode: tgate.RouteDirect, NodeID: id}); err != nil {
 		t.Fatal(err)
 	}
 	if resp, body := h.do(http.MethodDelete, "/"+adminPath+"/api/v1/nodes/"+strconv.FormatInt(id, 10), nil, csrf); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete the node: %d %s", resp.StatusCode, body)
 	}
-	if r, _, err := settings.Get[tgbot.Route](context.Background(), set, tgbot.KeyRoute); err != nil || r.NodeID != 0 || r.Mode != tgbot.RouteDirect {
+	if r, _, err := settings.Get[tgate.Route](context.Background(), set, tgate.KeyRoute); err != nil || r.NodeID != 0 || r.Mode != tgate.RouteDirect {
 		t.Fatalf("the route after the node went: %+v %v", r, err)
 	}
 }

@@ -2,7 +2,10 @@ package tgbot
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,23 +13,26 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/store/storetest"
+	"mikan/internal/panel/tgate"
 )
 
 // fakeTelegram is the Bot API for tests: it hands out queued updates and records calls.
 type fakeTelegram struct {
 	mu      sync.Mutex
-	updates []Update // not yet confirmed by an offset past them, as at Telegram
+	updates []tgate.Update // not yet confirmed by an offset past them, as at Telegram
 	seq     int64
 	offsets []int64 // the offset of each getUpdates
 	calls   []call
@@ -74,7 +80,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ok := func(result any) { _ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
 	switch method {
 	case "getMe":
-		ok(User{ID: 1, IsBot: true, FirstName: "Mikan", Username: "mikan_test_bot"})
+		ok(tgate.User{ID: 1, IsBot: true, FirstName: "Mikan", Username: "mikan_test_bot"})
 		return
 	case "getUpdates":
 		f.mu.Lock()
@@ -99,7 +105,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			f.updates = keep
-			ups := append([]Update(nil), keep...)
+			ups := append([]tgate.Update(nil), keep...)
 			f.mu.Unlock()
 			if len(ups) > 0 {
 				ok(ups)
@@ -107,7 +113,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		ok([]Update{})
+		ok([]tgate.Update{})
 		return
 	}
 	f.mu.Lock()
@@ -136,7 +142,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "createInvoiceLink":
 		ok("https://t.me/$inv" + strconv.FormatInt(id, 10))
 	case "sendMessage":
-		ok(Message{MessageID: 1000 + id, Chat: Chat{ID: int64(chat), Type: "private"}})
+		ok(tgate.Message{MessageID: 1000 + id, Chat: tgate.Chat{ID: int64(chat), Type: "private"}})
 	case "getChatMember":
 		user, _ := body["user_id"].(float64)
 		f.mu.Lock()
@@ -151,13 +157,13 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case status == "":
 			status = "left"
 		}
-		ok(ChatMember{Status: status, IsMember: status == "restricted"})
+		ok(tgate.ChatMember{Status: status, IsMember: status == "restricted"})
 	default:
 		ok(true)
 	}
 }
 
-func (f *fakeTelegram) push(u Update) {
+func (f *fakeTelegram) push(u tgate.Update) {
 	f.mu.Lock()
 	f.seq++
 	u.UpdateID = 1000 + f.seq
@@ -249,6 +255,7 @@ type env struct {
 	st    *store.Store
 	set   *settings.Settings
 	tg    *fakeTelegram
+	gate  *tgate.Gateway
 	bot   *Bot
 	now   time.Time
 	mu    sync.Mutex
@@ -276,8 +283,23 @@ type noChanges struct{}
 func (noChanges) PoliciesChanged() {}
 func (noChanges) SlotsChanged()    {}
 
-// setup starts a bot on a fake Bot API; with may change its deps before it starts.
-func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
+// wiring is what setup builds the gateway and the bot from.
+type wiring struct {
+	Store    *store.Store
+	Settings *settings.Settings
+	Devices  *domain.Devices
+	Users    *domain.Users
+	SubBase  func(ctx context.Context) string
+	MiniApp  func() bool
+	Log      *slog.Logger
+	Now      func() time.Time
+	Billing  *billing.Service
+	Limits   tgate.Limits
+}
+
+// setup starts a bot and its gateway on a fake Bot API; with may change what they are
+// built from before they start.
+func setup(t *testing.T, with ...func(e *env, d *wiring)) *env {
 	t.Helper()
 	e := &env{t: t, now: time.Unix(1_800_000_000, 0), tg: &fakeTelegram{blocked: map[int64]bool{}}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -292,7 +314,7 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 		t.Fatal(err)
 	}
 	e.set = settings.New(e.st.Q)
-	for k, v := range map[string]any{KeyEnabled: true, KeyToken: "123:test", "brand": "Mikan VPN", "support_url": "https://t.me/mikan_support"} {
+	for k, v := range map[string]any{tgate.KeyEnabled: true, tgate.KeyToken: "123:test", "brand": "Mikan VPN", "support_url": "https://t.me/mikan_support"} {
 		if err := settings.Set(ctx, e.set, k, v); err != nil {
 			t.Fatal(err)
 		}
@@ -306,32 +328,47 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	e.devs = domain.NewDevices(e.st, pool, noChanges{}, e.clock)
 	srv := httptest.NewServer(e.tg)
 	t.Cleanup(srv.Close)
-	deps := Deps{Store: e.st, Settings: e.set, Devices: e.devs, Users: e.users, API: srv.URL, Now: e.clock,
+	w := wiring{Store: e.st, Settings: e.set, Devices: e.devs, Users: e.users, Now: e.clock,
 		SubBase: func(context.Context) string { return "https://vpn.example.com:21355/sub" },
 		MiniApp: func() bool { return true }, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Limits: fast}
 	for _, f := range with {
-		f(e, &deps)
+		f(e, &w)
 	}
-	e.bot = New(deps)
+	e.gate = tgate.New(tgate.Deps{Store: w.Store, Settings: w.Settings, API: srv.URL, Log: w.Log, Now: w.Now, Limits: w.Limits, Billing: w.Billing})
+	e.bot = New(Deps{Store: w.Store, Settings: w.Settings, Devices: w.Devices, Users: w.Users, SubBase: w.SubBase, MiniApp: w.MiniApp,
+		Log: w.Log, Now: w.Now, Billing: w.Billing, Gateway: e.gate})
+	e.gate.SetHandler(e.bot)
+	go e.gate.Run(ctx)
 	go e.bot.Run(ctx)
 	deadline := time.Now().Add(3 * time.Second)
-	for !e.bot.Status().Running {
+	for !e.gate.Status().Running {
 		if time.Now().After(deadline) {
-			t.Fatalf("the bot did not start: %+v", e.bot.Status())
+			t.Fatalf("the bot did not start: %+v", e.gate.Status())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	return e
 }
 
+// code is the /start code of the subscription page's link to the bot for user.
+func (e *env) code(user int64) string {
+	e.t.Helper()
+	link := e.gate.LinkURL(e.ctx, user)
+	code, ok := strings.CutPrefix(link, "https://t.me/mikan_test_bot?start=")
+	if !ok {
+		e.t.Fatalf("the link to the bot: %q", link)
+	}
+	return code
+}
+
 // say sends a message from the Telegram user 555.
 func (e *env) say(from int64, s string) {
 	e.msgID++
-	e.tg.push(Update{Message: &Message{MessageID: e.msgID, From: &User{ID: from, FirstName: "Anna", Username: "anna"}, Chat: Chat{ID: from, Type: "private"}, Text: s}})
+	e.tg.push(tgate.Update{Message: &tgate.Message{MessageID: e.msgID, From: &tgate.User{ID: from, FirstName: "Anna", Username: "anna"}, Chat: tgate.Chat{ID: from, Type: "private"}, Text: s}})
 }
 
 func (e *env) press(from, msg int64, data string) {
-	e.tg.push(Update{CallbackQuery: &CallbackQuery{ID: "cb" + data, From: User{ID: from}, Message: &Message{MessageID: msg, Chat: Chat{ID: from, Type: "private"}}, Data: data}})
+	e.tg.push(tgate.Update{CallbackQuery: &tgate.CallbackQuery{ID: "cb" + data, From: tgate.User{ID: from}, Message: &tgate.Message{MessageID: msg, Chat: tgate.Chat{ID: from, Type: "private"}}, Data: data}})
 }
 
 func TestBot(t *testing.T) {
@@ -363,13 +400,9 @@ func TestBot(t *testing.T) {
 	}
 
 	// The subscription page's link ties the subscription to the account.
-	secret, err := e.bot.secret(e.ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	e.later()
 	n = e.tg.count()
-	e.say(anna, "/start "+LinkCode(secret, e.user.ID, e.clock()))
+	e.say(anna, "/start "+e.code(e.user.ID))
 	calls = e.tg.wait(t, n, "sendMessage")
 	send, _ = find(calls, "sendMessage")
 	menu := buttons(send)
@@ -541,7 +574,7 @@ func TestBot(t *testing.T) {
 
 	// The Mini App signs in with Telegram's initData.
 	vals := url.Values{"auth_date": {strconv.FormatInt(e.clock().Unix(), 10)}, "user": {`{"id":555,"first_name":"Anna"}`}}
-	_, subs, err := e.bot.MiniAppUser(e.ctx, signed("123:test", vals))
+	_, subs, err := e.gate.MiniAppUser(e.ctx, signed("123:test", vals))
 	if err != nil || len(subs) != 1 || subs[0].ID != e.user.ID {
 		t.Fatalf("mini app: %v %v", subs, err)
 	}
@@ -666,32 +699,6 @@ func TestBot(t *testing.T) {
 	}
 }
 
-func TestInfrastructureAdminLinkIsOneTime(t *testing.T) {
-	e := setup(t)
-	link, err := e.bot.BeginInfrastructureAdminConnect(e.ctx)
-	if err != nil || !strings.Contains(link, "https://t.me/mikan_test_bot?start=infra_") {
-		t.Fatalf("admin connect link: %q %v", link, err)
-	}
-	code := strings.TrimPrefix(link, "https://t.me/mikan_test_bot?start=infra_")
-	e.say(555, "/start infra_"+code)
-	e.tg.until(t, 0, func(cs []call) bool {
-		for _, c := range cs {
-			if c.method == "sendMessage" && c.body["chat_id"] == float64(555) && strings.Contains(text(c), "подключён") {
-				return true
-			}
-		}
-		return false
-	})
-	if id, ok, err := e.bot.InfrastructureAdminChat(e.ctx); err != nil || !ok || id != 555 {
-		t.Fatalf("connected admin: %d %v %v", id, ok, err)
-	}
-	e.say(777, "/start infra_"+code)
-	time.Sleep(80 * time.Millisecond)
-	if id, ok, err := e.bot.InfrastructureAdminChat(e.ctx); err != nil || !ok || id != 555 {
-		t.Fatalf("one-time link was reused: %d %v %v", id, ok, err)
-	}
-}
-
 func TestConfigSavedBefore(t *testing.T) {
 	ctx := context.Background()
 	st, err := storetest.Open(ctx, t.TempDir())
@@ -751,12 +758,8 @@ func TestConfigValidate(t *testing.T) {
 func TestRemoveSubscriptionFromTheBot(t *testing.T) {
 	e := setup(t)
 	const anna, other = 555, 777
-	secret, err := e.bot.secret(e.ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	n := e.tg.count()
-	e.say(anna, "/start "+LinkCode(secret, e.user.ID, e.clock()))
+	e.say(anna, "/start "+e.code(e.user.ID))
 	e.tg.wait(t, n, "sendMessage")
 	chat, _ := e.st.Q.GetTgChat(e.ctx, anna)
 	menu := chat.MenuMsgID
@@ -799,42 +802,6 @@ func TestRemoveSubscriptionFromTheBot(t *testing.T) {
 	}
 }
 
-// Another program on the token: the status names the conflict rather than Telegram's
-// English, and once it lasts the admin's chat is told, once; polling again clears it.
-func TestBotTokenConflict(t *testing.T) {
-	defer func(d time.Duration) { conflictLasting = d }(conflictLasting)
-	conflictLasting = 0
-	e := setup(t)
-	if err := settings.Set(e.ctx, e.set, KeyInfraAdminChat, int64(4242)); err != nil {
-		t.Fatal(err)
-	}
-	from := len(e.tg.calls)
-	e.tg.mu.Lock()
-	e.tg.conflict = true
-	e.tg.mu.Unlock()
-	sent := e.tg.wait(t, from, "sendMessage")
-	if c := sent[len(sent)-1]; c.body["chat_id"] != float64(4242) || !strings.Contains(c.body["text"].(string), "BotFather") {
-		t.Fatalf("the admin was told %+v", c.body)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for e.bot.Status().Error != "token_conflict" {
-		if time.Now().After(deadline) {
-			t.Fatalf("status %+v", e.bot.Status())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	e.tg.mu.Lock()
-	e.tg.conflict = false
-	e.tg.mu.Unlock()
-	deadline = time.Now().Add(5 * time.Second)
-	for e.bot.Status().Error != "" {
-		if time.Now().After(deadline) {
-			t.Fatalf("the conflict stays after it ended: %+v", e.bot.Status())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // {link} is the subscriber's own subscription link, for an admin's menu text.
 func TestBotLinkVariable(t *testing.T) {
 	e := setup(t)
@@ -842,4 +809,23 @@ func TestBotLinkVariable(t *testing.T) {
 	if !strings.HasPrefix(v["link"], "https://vpn.example.com:21355/sub/") || !strings.Contains(v["link"], e.user.SubToken) {
 		t.Fatalf("link %q", v["link"])
 	}
+}
+
+// signed builds initData the way Telegram does.
+func signed(token string, vals url.Values) string {
+	keys := make([]string, 0, len(vals))
+	for k := range vals {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, len(keys))
+	for i, k := range keys {
+		lines[i] = k + "=" + vals.Get(k)
+	}
+	secret := hmac.New(sha256.New, []byte("WebAppData"))
+	secret.Write([]byte(token))
+	m := hmac.New(sha256.New, secret.Sum(nil))
+	m.Write([]byte(strings.Join(lines, "\n")))
+	vals.Set("hash", hex.EncodeToString(m.Sum(nil)))
+	return vals.Encode()
 }

@@ -10,7 +10,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 // The Mini App's new link: Telegram's signature and the account's own subscription decide,
@@ -33,7 +33,7 @@ func TestMiniAppReissue(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := settings.New(h.st.Q)
-	if err := settings.Set(ctx, set, tgbot.KeyToken, tgToken); err != nil {
+	if err := settings.Set(ctx, set, tgate.KeyToken, tgToken); err != nil {
 		t.Fatal(err)
 	}
 	for _, l := range []db.LinkTgParams{{UserID: mine.ID, TgID: 555}, {UserID: theirs.ID, TgID: 777}} {

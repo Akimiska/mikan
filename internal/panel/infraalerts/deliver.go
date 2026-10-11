@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"mikan/internal/panel/tgbot"
+	"mikan/internal/panel/tgate"
 )
 
 // deliveryTarget says where a queued message goes and how it is sent. The value is stored in
@@ -51,11 +51,11 @@ type delivery struct {
 	NextAttemptAt int64          `json:"next_attempt_at,omitempty"`
 }
 
-// sender is the Telegram client's calls the queue makes (*tgbot.Client): a test hands the
+// sender is the Telegram client's calls the queue makes (*tgate.Client): a test hands the
 // delivery a fake and no network.
 type sender interface {
-	Send(ctx context.Context, chat int64, text string, kb *tgbot.Keyboard, silent bool) (tgbot.Message, error)
-	SendTo(ctx context.Context, chat string, text string, silent bool) (tgbot.Message, error)
+	Send(ctx context.Context, chat int64, text string, kb *tgate.Keyboard, silent bool) (tgate.Message, error)
+	SendTo(ctx context.Context, chat string, text string, silent bool) (tgate.Message, error)
 	EditTo(ctx context.Context, chat string, msg int64, text string) error
 	PinTo(ctx context.Context, chat string, msg int64) error
 }
@@ -254,7 +254,7 @@ func (m *Monitor) sendSummary(ctx context.Context, st *persistentState, cfg Aler
 	defer cancel()
 	var err error
 	if st.PublicMessage == 0 {
-		var msg tgbot.Message
+		var msg tgate.Message
 		msg, err = client.SendTo(ctx, cfg.PublicChannel, text, true)
 		if err == nil {
 			st.PublicMessage = msg.MessageID
@@ -267,7 +267,7 @@ func (m *Monitor) sendSummary(ctx context.Context, st *persistentState, cfg Aler
 	}
 	if err == nil {
 		err = client.EditTo(ctx, cfg.PublicChannel, st.PublicMessage, text)
-		var ae *tgbot.APIError
+		var ae *tgate.APIError
 		if errors.As(err, &ae) && strings.Contains(strings.ToLower(ae.Description), "message to edit not found") {
 			st.PublicMessage, st.PublicPinned, st.PublicPinAttempted = 0, false, false
 		}
@@ -309,7 +309,7 @@ func retryDelivery(d *delivery, now int64, err error) bool {
 		return false
 	}
 	delay := retryBaseDelay * time.Duration(1<<min(d.Attempts-1, retryMaxShift))
-	var ae *tgbot.APIError
+	var ae *tgate.APIError
 	if errors.As(err, &ae) && ae.Code == 429 && ae.RetryAfter > delay {
 		delay = ae.RetryAfter
 	}
@@ -321,6 +321,6 @@ func retryDelivery(d *delivery, now int64, err error) bool {
 }
 
 func permanentTelegramError(err error) bool {
-	var ae *tgbot.APIError
+	var ae *tgate.APIError
 	return errors.As(err, &ae) && ae.Code >= 400 && ae.Code < 500 && ae.Code != 429
 }

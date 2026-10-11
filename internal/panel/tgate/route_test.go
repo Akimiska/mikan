@@ -1,4 +1,4 @@
-package tgbot
+package tgate
 
 import (
 	"bytes"
@@ -125,14 +125,14 @@ func TestCheckRoute(t *testing.T) {
 	}
 	dead := ln.Addr().String()
 	ln.Close()
-	if err := e.bot.CheckRoute(e.ctx, Route{Mode: RouteProxy, Proxy: "socks5://" + dead}, "123:test"); err == nil {
+	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteProxy, Proxy: "socks5://" + dead}, "123:test"); err == nil {
 		t.Fatal("a dead proxy passed the check")
 	}
-	if err := e.bot.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 3}, ""); !errors.Is(err, ErrRouteNode) {
+	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 3}, ""); !errors.Is(err, ErrRouteNode) {
 		t.Fatalf("node route without nodes: %v", err)
 	}
 	proxy, _, _ := forwardProxy(t)
-	if err := e.bot.CheckRoute(e.ctx, Route{Mode: RouteProxy, Proxy: "http://" + proxy.Listener.Addr().String()}, ""); err != nil {
+	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteProxy, Proxy: "http://" + proxy.Listener.Addr().String()}, ""); err != nil {
 		t.Fatalf("a working proxy without a token: %v", err)
 	}
 }
@@ -164,13 +164,13 @@ func TestCheckRouteThroughNode(t *testing.T) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 		}
 	})
-	if err := e.bot.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 7}, ""); err != nil {
+	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 7}, ""); err != nil {
 		t.Fatalf("through the node without a token: %v", err)
 	}
-	if err := e.bot.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 8}, "123:s3cret"); !errors.Is(err, ErrUnreachable) {
+	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 8}, "123:s3cret"); !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("through a node that is down: %v", err)
 	}
-	if _, err := e.bot.CheckTokenVia(e.ctx, "123:s3cret", Route{Mode: RouteNode, NodeID: 8}); !errors.Is(err, ErrUnreachable) {
+	if _, err := e.gate.CheckTokenVia(e.ctx, "123:s3cret", Route{Mode: RouteNode, NodeID: 8}); !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("token through a node that is down: %v", err)
 	}
 	if got := logs.String(); strings.Count(got, "node unavailable") != 2 || strings.Contains(got, "s3cret") {

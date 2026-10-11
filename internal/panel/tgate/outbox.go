@@ -1,4 +1,4 @@
-package tgbot
+package tgate
 
 import (
 	"container/list"
@@ -174,6 +174,9 @@ func (o *Outbox) pending(p priority) int {
 	}
 	return n
 }
+
+// BulkPending is how many broadcast messages wait: a broadcast is fed in as they go.
+func (o *Outbox) BulkPending() int { return o.pending(prioBulk) }
 
 // next takes the first job allowed to go now, by priority, and its tokens; otherwise it
 // says how long until something could.

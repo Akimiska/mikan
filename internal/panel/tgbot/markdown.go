@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"mikan/internal/panel/tgate"
 )
 
 // The Markdown of the admin's texts (welcome, menu, pages, notices, broadcasts), turned
@@ -284,7 +286,7 @@ func safeLink(s string) bool {
 	if strings.HasPrefix(strings.ToLower(s), "http://") {
 		s = "https://" + s[len("http://"):]
 	}
-	return len(s) <= 2048 && safeURL(s)
+	return len(s) <= 2048 && tgate.SafeURL(s)
 }
 
 // emphasis reads a mark at s[i] with its closing pair, CommonMark's way: the opening one
@@ -368,25 +370,4 @@ func canClose(s string, start, end int, c byte) bool {
 	}
 	left := !unicode.IsSpace(after) && (!punct(after) || unicode.IsSpace(before) || punct(before))
 	return right && (!left || punct(after))
-}
-
-// plainText is what an HTML message reads as text: for the rare text Telegram still
-// refuses, sent again without formatting rather than not at all.
-func plainText(s string) string {
-	var out strings.Builder
-	for {
-		i := strings.IndexByte(s, '<')
-		if i < 0 {
-			break
-		}
-		out.WriteString(s[:i])
-		j := strings.IndexByte(s[i:], '>')
-		if j < 0 {
-			s = s[i+1:]
-			continue
-		}
-		s = s[i+j+1:]
-	}
-	out.WriteString(s)
-	return html.UnescapeString(out.String())
 }

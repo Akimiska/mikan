@@ -42,7 +42,7 @@ func TestPromoButtonInMenu(t *testing.T) {
 	w := wordsFor("ru")
 
 	cfg := Default("ru")
-	rows := menuTexts(t, e.bot.menu(e.ctx, cfg, w, 1))
+	rows := menuTexts(t, e.bot.menu(e.ctx, cfg, w, 555, 1))
 	if !hasPromo(rows) {
 		t.Fatalf("a default bot shows the promo codes button: %v", rows)
 	}
@@ -51,7 +51,7 @@ func TestPromoButtonInMenu(t *testing.T) {
 	}
 
 	cfg.PromoButton = false
-	kb := e.bot.menu(e.ctx, cfg, w, 1)
+	kb := e.bot.menu(e.ctx, cfg, w, 555, 1)
 	rows = menuTexts(t, kb)
 	if hasPromo(rows) {
 		t.Fatalf("hidden, the button is gone: %v", rows)
@@ -80,7 +80,7 @@ func TestPromoButtonInMenu(t *testing.T) {
 	}
 
 	// Subscriptions switcher still comes last and the menu has no empty row.
-	rows = menuTexts(t, e.bot.menu(e.ctx, cfg, w, 2))
+	rows = menuTexts(t, e.bot.menu(e.ctx, cfg, w, 555, 2))
 	if last := rows[len(rows)-1]; len(last) != 1 || !strings.HasPrefix(last[0], w.subscriptions) {
 		t.Fatalf("the subscriptions button: %v", rows)
 	}
@@ -88,7 +88,7 @@ func TestPromoButtonInMenu(t *testing.T) {
 	// Without the Mini App there is no promo button either way.
 	cfg.PromoButton = true
 	cfg.MiniApp = false
-	if rows = menuTexts(t, e.bot.menu(e.ctx, cfg, w, 1)); hasPromo(rows) {
+	if rows = menuTexts(t, e.bot.menu(e.ctx, cfg, w, 555, 1)); hasPromo(rows) {
 		t.Fatalf("no Mini App, no promo button: %v", rows)
 	}
 }
@@ -104,7 +104,7 @@ func TestMenuRowsAfterHiding(t *testing.T) {
 		}
 	}
 	cfg.PromoButton = false
-	rows := menuTexts(t, e.bot.menu(e.ctx, cfg, w, 1))
+	rows := menuTexts(t, e.bot.menu(e.ctx, cfg, w, 555, 1))
 	if len(rows[0]) != 1 || !strings.Contains(rows[0][0], "Устройства") {
 		t.Fatalf("the first button starts a row of its own: %v", rows)
 	}

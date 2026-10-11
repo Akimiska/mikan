@@ -3,6 +3,7 @@ package tgbot
 import (
 	"errors"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,7 +24,37 @@ type Config struct {
 	// PromoButton: «Промокоды» under the menu, opening the Mini App at the promo code field.
 	// It needs the Mini App. A bot saved before this option has it on.
 	PromoButton bool `json:"promo_button" doc:"Кнопка «Промокоды» в главном меню (нужен Mini App)"`
+	// Channel is the channel a subscriber must join before the bot shows its menu, and the
+	// one the free plan may ask for (billing.FreeChannel). Off by default.
+	Channel Channel `json:"channel"`
 }
+
+// Channel is the bot's channel and whether joining it is required. The bot checks members
+// with getChatMember, which in a channel only its admins may call.
+type Channel struct {
+	Required bool   `json:"required" doc:"Обязательная подписка: без неё бот показывает вместо меню экран с кнопкой канала"`
+	Chat     string `json:"chat" maxLength:"64" doc:"Публичный @username канала или его числовой ID (-100…); бот должен быть администратором канала"`
+	URL      string `json:"url,omitempty" maxLength:"256" doc:"Ссылка, по которой вступают (https://t.me/…); пусто: t.me/<username>. Для канала по числовому ID обязательна"`
+}
+
+// Link is where a subscriber joins the channel: the admin's link, or the public channel's
+// own; "" when there is neither.
+func (ch Channel) Link() string {
+	if ch.URL != "" {
+		return ch.URL
+	}
+	if name, ok := strings.CutPrefix(ch.Chat, "@"); ok {
+		return "https://t.me/" + name
+	}
+	return ""
+}
+
+// gate: the channel is required and set up. A switch without a channel locks nobody out.
+func (ch Channel) gate() bool { return ch.Required && ch.Chat != "" }
+
+// channelChat is a channel as Bot API methods take it: a public @username (5 to 32 letters,
+// digits and underscores, as Telegram allows) or a numeric chat id.
+var channelChat = regexp.MustCompile(`^(@[A-Za-z0-9_]{5,32}|-?[0-9]{1,20})$`)
 
 // MenuButton of the main menu. Built-in actions open screens; "url" opens a link, "page"
 // a text of the admin's.
@@ -47,6 +78,8 @@ type Texts struct {
 	Expired    string `json:"expired" doc:"Уведомление: подписка закончилась"`
 	Traffic90  string `json:"traffic_90" doc:"Уведомление: израсходовано 90% трафика"`
 	TrafficEnd string `json:"traffic_end" doc:"Уведомление: трафик закончился"`
+	Channel    string `json:"channel" doc:"Экран обязательной подписки на канал, вместо меню; {brand}: название сервиса"`
+	FreeButton string `json:"free_button" doc:"Надпись кнопки бесплатного тарифа, до 40 символов"`
 }
 
 type Notify struct {
@@ -104,6 +137,8 @@ var (
 	ErrButtonURL   = errors.New("tg_button_url")
 	ErrButtonText  = errors.New("tg_button_text")
 	ErrText        = errors.New("tg_text")
+	ErrChannel     = errors.New("tg_channel")
+	ErrChannelURL  = errors.New("tg_channel_url")
 )
 
 // Validate checks a config from the admin panel and fills in defaults.
@@ -150,10 +185,31 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
-	for _, t := range []string{c.Texts.Welcome, c.Texts.Main, c.Texts.Renew, c.Texts.Expiring, c.Texts.Expired, c.Texts.Traffic90, c.Texts.TrafficEnd} {
+	for _, t := range []string{c.Texts.Welcome, c.Texts.Main, c.Texts.Renew, c.Texts.Expiring, c.Texts.Expired, c.Texts.Traffic90, c.Texts.TrafficEnd, c.Texts.Channel} {
 		if utf8.RuneCountInString(t) > maxText {
 			return ErrText
 		}
+	}
+	c.Texts.FreeButton = strings.TrimSpace(c.Texts.FreeButton)
+	if utf8.RuneCountInString(c.Texts.FreeButton) > maxLabel {
+		return ErrButtonLabel
+	}
+	return c.Channel.validate()
+}
+
+// validate trims the channel and checks it can be asked about and joined: a channel by
+// its numeric id has no public link, so the admin's link is required for it.
+func (ch *Channel) validate() error {
+	ch.Chat, ch.URL = strings.TrimSpace(ch.Chat), strings.TrimSpace(ch.URL)
+	switch {
+	case ch.Chat == "" && ch.Required:
+		return ErrChannel
+	case ch.Chat != "" && !channelChat.MatchString(ch.Chat):
+		return ErrChannel
+	case ch.URL != "" && !safeURL(ch.URL):
+		return ErrChannelURL
+	case ch.Chat != "" && ch.Link() == "":
+		return ErrChannelURL
 	}
 	return nil
 }

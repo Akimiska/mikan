@@ -93,10 +93,11 @@ const (
 	UserFromBot    = "bot"    // bought in the Telegram bot
 	UserFromTrial  = "trial"  // the bot's free trial
 	UserFromImport = "import" // brought over from another panel
+	UserFromFree   = "free"   // the free plan, taken in the bot or the Mini App
 )
 
 // UserOrigins lists them in the order the list shows them.
-var UserOrigins = []string{UserFromAdmin, UserFromBot, UserFromTrial, UserFromImport}
+var UserOrigins = []string{UserFromAdmin, UserFromBot, UserFromTrial, UserFromFree, UserFromImport}
 
 // ValidOrigin tells a source the database accepts.
 func ValidOrigin(s string) bool { return slices.Contains(UserOrigins, s) }

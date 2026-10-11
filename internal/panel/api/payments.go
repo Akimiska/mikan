@@ -24,6 +24,9 @@ type PaymentSettingsView struct {
 	TrialStars         int64  `json:"trial_stars" doc:"Цена пробного периода в Stars; 0 вместе с trial_rub — бесплатно"`
 	TrialRub           int64  `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App через Stars или способ оплаты с возвратом денег, нужна включённая продажа"`
 	Trials             int64  `json:"trials" doc:"Сколько пробных подписок выдано"`
+	FreeTariffID       *int64 `json:"free_tariff_id" doc:"Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже"`
+	FreeCondition      string `json:"free_condition" enum:"none,channel" doc:"Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)"`
+	FreePlans          int64  `json:"free_plans" doc:"Сколько бесплатных подписок выдано"`
 	Available          struct {
 		Stars  bool     `json:"stars"`
 		Addons []string `json:"addons" doc:"Адаптеры маркетплейса, которые принимают оплату прямо сейчас"`
@@ -47,6 +50,10 @@ type patchPaymentSettingsInput struct {
 		// name; the handler checks the prices against them.
 		TrialStars *int64 `json:"trial_stars,omitempty" minimum:"0" maximum:"10000" doc:"Цена пробного периода в Stars; 0 — не за Stars. Без пробного периода (trial_tariff_id 0) обе цены сбрасываются"`
 		TrialRub   *int64 `json:"trial_rub,omitempty" minimum:"0" maximum:"100000000" doc:"Цена пробного периода в копейках, от 100 (1 ₽); 0 — не за рубли. Обе 0 — пробный период бесплатный"`
+		// The free plan: its tariff needs a term, as the trial's does, and the channel
+		// condition a channel set up in the bot.
+		FreeTariffID  *int64  `json:"free_tariff_id,omitempty" minimum:"0" doc:"Тариф бесплатного тарифа, нужен срок; 0: выключить"`
+		FreeCondition *string `json:"free_condition,omitempty" enum:"none,channel" doc:"none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram"`
 	}
 }
 
@@ -114,6 +121,13 @@ func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, er
 	if v.Trials, err = h.d.Store.Q.CountTrials(ctx); err != nil {
 		return v, err
 	}
+	if t, ok := h.d.Billing.FreeTariff(ctx); ok {
+		v.FreeTariffID = &t.ID
+	}
+	v.FreeCondition = freeConditionView(c.FreeCondition)
+	if v.FreePlans, err = h.d.Store.Q.CountFreePlans(ctx); err != nil {
+		return v, err
+	}
 	av := h.d.Billing.Available(ctx)
 	v.Available.Stars, v.Available.Addons = av.Stars, av.Addons
 	if v.Available.Addons == nil {
@@ -154,6 +168,22 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 				return nil, fieldErr("body.trial_tariff_id", "trial_no_term")
 			}
 		}
+	}
+	if b.FreeTariffID != nil {
+		if id := *b.FreeTariffID; id != 0 {
+			t, err := h.d.Store.Q.GetTariff(ctx, id)
+			if err != nil || t.Archived != 0 {
+				return nil, fieldErr("body.free_tariff_id", "tariff_not_found")
+			}
+			// Without a term a free subscription never ends, and the account never gets
+			// another: the plan would be a trial with no end.
+			if t.DurationDays <= 0 {
+				return nil, fieldErr("body.free_tariff_id", "free_no_term")
+			}
+		}
+	}
+	if b.FreeCondition != nil && *b.FreeCondition == "channel" && (h.d.Telegram == nil || h.d.Telegram.Config(ctx).Channel.Chat == "") {
+		return nil, fieldErr("body.free_condition", "free_no_channel")
 	}
 	// The trial costs what a tariff may cost (domain.CheckPrices); 0 is no price at all,
 	// and both prices at 0 make it free.
@@ -199,6 +229,15 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 		if c.TrialTariffID == 0 {
 			c.TrialStars, c.TrialRub = 0, 0
 		}
+		if b.FreeTariffID != nil {
+			c.FreeTariffID = *b.FreeTariffID
+		}
+		if b.FreeCondition != nil {
+			c.FreeCondition = billing.FreeNoCondition
+			if *b.FreeCondition == "channel" {
+				c.FreeCondition = billing.FreeChannel
+			}
+		}
 		return settings.Set(ctx, set, billing.KeyConfig, c)
 	})
 	if err != nil {
@@ -206,12 +245,20 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "payments.settings", "", "", map[string]any{"enabled": c.Enabled, "stars": c.Stars,
 		"allow_new": c.AllowNew, "renew_resets_traffic": c.RenewResetsTraffic, "trial_tariff_id": c.TrialTariffID,
-		"trial_stars": c.TrialStars, "trial_rub": c.TrialRub})
+		"trial_stars": c.TrialStars, "trial_rub": c.TrialRub, "free_tariff_id": c.FreeTariffID, "free_condition": freeConditionView(c.FreeCondition)})
 	v, err := h.paymentSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return &paymentSettingsOutput{Body: v}, nil
+}
+
+// freeConditionView is the free plan's condition as the API names it: "none" for none.
+func freeConditionView(c string) string {
+	if c == billing.FreeChannel {
+		return "channel"
+	}
+	return "none"
 }
 
 func unixPtr(n sql.NullInt64) *time.Time {

@@ -118,6 +118,7 @@ function TelegramBody({ v }: { v: View }) {
         ) : tab === "menu" ? (
           <WithPreview title={t("telegram.preview")} preview={preview}>
             <MenuCard draft={draft} setDraft={setDraft} />
+            <ChannelCard draft={draft} setDraft={setDraft} v={v} />
             <TextsCard draft={draft} setDraft={setDraft} defaults={v.defaults} />
           </WithPreview>
         ) : tab === "notify" ? (
@@ -193,6 +194,59 @@ function BotSummary({ v, onConnect }: { v: View; onConnect: () => void }) {
         <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">
           {tMaybe(`telegram.err.${v.error}`) ?? v.error}
         </p>
+      ) : null}
+      {v.channel_error && v.config.channel.required ? (
+        <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">
+          {channelErrorText(v.channel_error)}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** Why the bot cannot check its channel, in the admin's words. */
+function channelErrorText(code: string): string {
+  return tMaybe(`telegram.channel.err.${code}`) ?? t("telegram.channel.errOther", { error: code });
+}
+
+/**
+ * The channel a subscriber must join before the menu, and the one the free plan may ask
+ * for. The bot checks the channel as saved: an edit shows its state once it is.
+ */
+function ChannelCard({ draft, setDraft, v }: { draft: Config; setDraft: (c: Config) => void; v: View }) {
+  const ch = draft.channel;
+  const set = (patch: Partial<Config["channel"]>) => setDraft({ ...draft, channel: { ...ch, ...patch } });
+  const saved = v.config.channel;
+  const state = !saved.chat || !v.running ? null : saved.chat !== ch.chat.trim() ? "checking" : v.channel_error ? "error" : "ok";
+  return (
+    <section {...rise(2)}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t("telegram.channel.title")}</h2>
+          <div className="card-sub">{t("telegram.channel.sub")}</div>
+        </div>
+      </div>
+      <div className="row-list">
+        <SwitchRow label={t("telegram.channel.required")} sub={t("telegram.channel.requiredSub")} checked={ch.required} onChange={(on) => set({ required: on })} />
+      </div>
+      <div className="grid gap-x-3 pt-4 sm:grid-cols-2">
+        <Field label={t("telegram.channel.chat")} htmlFor="tg-channel" hint={t("telegram.channel.chatHint")}>
+          <input id="tg-channel" className="input mono" value={ch.chat} onChange={(e) => set({ chat: e.target.value })} placeholder="@my_channel" maxLength={64} autoComplete="off" spellCheck={false} />
+        </Field>
+        <Field label={t("telegram.channel.url")} htmlFor="tg-channel-url" hint={t("telegram.channel.urlHint")}>
+          <input id="tg-channel-url" className="input mono" value={ch.url ?? ""} onChange={(e) => set({ url: e.target.value })} placeholder="https://t.me/+…" maxLength={256} autoComplete="off" spellCheck={false} />
+        </Field>
+      </div>
+      {state === "error" ? (
+        <div className="banner err" role="alert">
+          <span>{channelErrorText(v.channel_error ?? "")}</span>
+        </div>
+      ) : state === "ok" ? (
+        <p className="text-xs text-[var(--leaf-700)]" role="status">
+          {t("telegram.channel.ok")}
+        </p>
+      ) : state === "checking" ? (
+        <p className="text-xs text-[var(--ink-500)]">{t("telegram.channel.checking")}</p>
       ) : null}
     </section>
   );
@@ -735,6 +789,7 @@ const TEXTS: { key: TextKey; label: string }[] = [
   { key: "expired", label: "telegram.text.expired" },
   { key: "traffic_90", label: "telegram.text.traffic_90" },
   { key: "traffic_end", label: "telegram.text.traffic_end" },
+  { key: "channel", label: "telegram.text.channel" },
 ];
 
 function TextsCard({ draft, setDraft, defaults }: { draft: Config; setDraft: (c: Config) => void; defaults: Schemas["Texts"] }) {
@@ -777,6 +832,16 @@ function TextsCard({ draft, setDraft, defaults }: { draft: Config; setDraft: (c:
           </>
         </Field>
       ))}
+      <Field label={t("telegram.freeButton")} htmlFor="tg-free-button" hint={t("telegram.freeButtonHint")}>
+        <input
+          id="tg-free-button"
+          className="input"
+          maxLength={40}
+          value={draft.texts.free_button}
+          placeholder={defaults.free_button}
+          onChange={(e) => setDraft({ ...draft, texts: { ...draft.texts, free_button: e.target.value } })}
+        />
+      </Field>
       <p className="text-xs text-[var(--ink-500)]">{t("telegram.variables")}</p>
       <div className="mt-2">
         <MarkdownHint />

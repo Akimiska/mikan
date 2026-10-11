@@ -2309,6 +2309,14 @@ export interface components {
             checked_at: string;
             checks: components["schemas"]["CertCheck"][];
         };
+        Channel: {
+            /** @description Публичный @username канала или его числовой ID (-100…); бот должен быть администратором канала */
+            chat: string;
+            /** @description Обязательная подписка: без неё бот показывает вместо меню экран с кнопкой канала */
+            required: boolean;
+            /** @description Ссылка, по которой вступают (https://t.me/…); пусто: t.me/<username>. Для канала по числовому ID обязательна */
+            url?: string;
+        };
         CheckItem: {
             /** @description Почему не ok: timeout, refused, pin_mismatch, behind, skew, busy и другие */
             code?: string;
@@ -2359,6 +2367,7 @@ export interface components {
         Config: {
             /** @description Кнопки главного меню по порядку */
             buttons: components["schemas"]["MenuButton"][];
+            channel: components["schemas"]["Channel"];
             /** @description Удалять сообщения пользователя, чтобы в чате было одно меню */
             clean_chat: boolean;
             /**
@@ -3450,6 +3459,16 @@ export interface components {
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
             enabled?: boolean;
+            /**
+             * @description none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram
+             * @enum {string}
+             */
+            free_condition?: "none" | "channel";
+            /**
+             * Format: int64
+             * @description Тариф бесплатного тарифа, нужен срок; 0: выключить
+             */
+            free_tariff_id?: number;
             renew_resets_traffic?: boolean;
             stars?: boolean;
             /**
@@ -3598,6 +3617,21 @@ export interface components {
             available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
             /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
             enabled: boolean;
+            /**
+             * @description Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)
+             * @enum {string}
+             */
+            free_condition: "none" | "channel";
+            /**
+             * Format: int64
+             * @description Сколько бесплатных подписок выдано
+             */
+            free_plans: number;
+            /**
+             * Format: int64
+             * @description Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже
+             */
+            free_tariff_id: number | null;
             /** @description Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит */
             moving: string[];
             /**
@@ -4436,6 +4470,8 @@ export interface components {
             bot?: components["schemas"]["TelegramBot"];
             /** @description Последняя рассылка с запуска панели */
             broadcast?: components["schemas"]["TelegramBroadcast"];
+            /** @description Почему бот не может проверить подписку на канал: channel_not_admin (бот не администратор канала), channel_not_found, unreachable или ответ Telegram. Пока ошибка есть, обязательная подписка никого не останавливает */
+            channel_error?: string;
             config: components["schemas"]["Config"];
             /** @description Встроенные тексты на языке бота: пустое поле берёт их */
             defaults: components["schemas"]["Texts"];
@@ -4493,10 +4529,14 @@ export interface components {
             price_stars: number | null;
         };
         Texts: {
+            /** @description Экран обязательной подписки на канал, вместо меню; {brand}: название сервиса */
+            channel: string;
             /** @description Уведомление: подписка закончилась */
             expired: string;
             /** @description Уведомление: подписка скоро закончится */
             expiring: string;
+            /** @description Надпись кнопки бесплатного тарифа, до 40 символов */
+            free_button: string;
             /** @description Шапка главного меню */
             main: string;
             /** @description Экран «Продлить» */
@@ -4763,10 +4803,10 @@ export interface components {
             /** Format: date-time */
             resets_at: string | null;
             /**
-             * @description Откуда пользователь: admin — создан в панели или по ключу API, bot — куплен в боте, trial — пробный период бота, import — перенесён из другой панели. Заполняется при создании, не меняется
+             * @description Откуда пользователь: admin — создан в панели или по ключу API, bot — куплен в боте, trial — пробный период бота, free — бесплатный тариф из бота или Mini App, import — перенесён из другой панели. Заполняется при создании, не меняется
              * @enum {string}
              */
-            source: "admin" | "bot" | "trial" | "import";
+            source: "admin" | "bot" | "trial" | "free" | "import";
             /**
              * Format: int64
              * @description Мбит/с в каждую сторону; null — без ограничения
@@ -8863,7 +8903,7 @@ export interface operations {
                 /** @description all — любая; none — вне папок; число — id папки */
                 folder?: string;
                 /** @description Откуда пользователь, см. source у пользователя */
-                source?: "all" | "admin" | "bot" | "trial" | "import";
+                source?: "all" | "admin" | "bot" | "trial" | "free" | "import";
                 /** @description show — вместе со скрытыми (по умолчанию: скрытие касается только списка в панели); hide — без скрытых; only — только скрытые */
                 hidden?: "hide" | "show" | "only";
                 limit?: number;

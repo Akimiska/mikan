@@ -22,6 +22,8 @@ export type ShopData = {
   trial?: Offer;
   /** The adapters the trial is sold through: those that can refund it. */
   trial_addons?: { provider: `addon:${string}`; name: string }[];
+  /** The free plan the account may take now; channel is the one it asks the account to join. */
+  free?: { name: string; description: string; channel?: string };
 };
 type Provider = "stars" | `addon:${string}`;
 
@@ -194,6 +196,75 @@ export function Shop({
             <RefreshCw size={14} aria-hidden /> {t("sub.shopRefresh")}
           </Button>
         </div>
+      ) : null}
+    </section>
+  );
+}
+
+const FREE_FAIL: Record<string, Key> = {
+  free_active: "sub.freeActive",
+  free_off: "sub.freeOff",
+  too_many_subs: "sub.shopTooManySubs",
+};
+
+/**
+ * The free plan: one tap gives the subscription. A plan for the channel's subscribers
+ * shows the channel next to it, and says so when the account is not in it yet.
+ */
+export function FreePlan({
+  offer,
+  subRoot,
+  initData,
+  openLink,
+  onTaken,
+}: {
+  offer: NonNullable<ShopData["free"]>;
+  subRoot: string;
+  initData: string;
+  openLink: (url: string) => void;
+  onTaken: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const take = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await postJSON<{ token: string; code: string }>(subRoot + "/tg/free", { init_data: initData });
+      if (r.ok && r.data.token) {
+        onTaken();
+        return;
+      }
+      const code = r.data.code ?? "";
+      setError(code === "free_channel" ? t("sub.freeChannelNeeded") : t(FREE_FAIL[code] ?? "sub.freeFail"));
+    } catch {
+      setError(t("sub.freeFail"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="glass sub-card p-4" aria-label={t("sub.freeTitle")}>
+      <h2 className="mb-1 text-[15px] font-semibold">{t("sub.freeTitle")}</h2>
+      <p className="mb-3 text-xs text-[var(--ink-500)]">{t("sub.freeAgain")}</p>
+      <div className="mb-3">
+        <div className="font-semibold">{offer.name}</div>
+        <div className="text-xs text-[var(--ink-500)]">{offer.description}</div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="primary" loading={busy} disabled={busy} onClick={() => void take()}>
+          {t("sub.freeTake")}
+        </Button>
+        {offer.channel ? (
+          <Button variant="glass" onClick={() => openLink(offer.channel!)}>
+            {t("sub.freeJoin")}
+          </Button>
+        ) : null}
+      </div>
+      {error ? (
+        <p className="mt-3 text-xs text-[var(--berry-600)]" role="alert">
+          {error}
+        </p>
       ) : null}
     </section>
   );

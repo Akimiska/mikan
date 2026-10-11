@@ -29,7 +29,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::lock::{self, Wait};
 use crate::panelfs::Dir;
@@ -257,7 +256,7 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 fn valid_digest(d: &str) -> bool {
-    d.strip_prefix("sha256:").is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    d.strip_prefix("sha256:").is_some_and(release::is_sha256_hex)
 }
 
 /// Where the marketplace's adapters live. A signed catalog could name another registry, but
@@ -1177,9 +1176,9 @@ fn archive_image(tar: &Path) -> Result<Archived> {
 
 /// A JSON blob of the archive, refused unless it hashes to its digest.
 fn blob(tar: &Path, digest: &str) -> Result<serde_json::Value> {
-    let data = tar_member(tar, &format!("blobs/sha256/{}", &digest["sha256:".len()..]))?;
-    let sum: String = Sha256::digest(&data).iter().map(|x| format!("{x:02x}")).collect();
-    if digest != format!("sha256:{sum}") {
+    let hex = &digest["sha256:".len()..];
+    let data = tar_member(tar, &format!("blobs/sha256/{hex}"))?;
+    if release::sha256_hex(&data) != hex {
         bail!("{digest} in the archive does not match its content");
     }
     serde_json::from_slice(&data).with_context(|| format!("{digest} in the archive is not JSON"))
@@ -2103,7 +2102,7 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("blobs/sha256")).unwrap();
         let put = |data: &str| {
-            let sum: String = Sha256::digest(data.as_bytes()).iter().map(|x| format!("{x:02x}")).collect();
+            let sum = release::sha256_hex(data.as_bytes());
             fs::write(root.join(format!("blobs/sha256/{sum}")), if corrupt { format!("{data} ") } else { data.to_owned() }).unwrap();
             format!("sha256:{sum}")
         };

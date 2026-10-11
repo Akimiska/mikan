@@ -10,6 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 /// The public half of the release signing key, the same as internal/release.PublicKey.
 pub const PUBLIC_KEY: &str = "Z3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8=";
@@ -374,17 +375,25 @@ pub fn parse(data: &[u8], sig: &str, key: &VerifyingKey) -> Result<Manifest> {
     if newer(&m.min_installer, &m.version) {
         bail!("the manifest requires an installer newer than its release");
     }
-    let hex = m.digest.strip_prefix("sha256:").unwrap_or("");
-    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) || !valid_image(&m.image) {
+    if !is_sha256_hex(m.digest.strip_prefix("sha256:").unwrap_or("")) || !valid_image(&m.image) {
         bail!("the manifest names a bad image {}@{}", m.image, m.digest);
     }
     for (arch, asset) in &m.installer {
-        let sha = asset.sha256.as_str();
-        if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) || !asset.url.starts_with("https://") {
+        if !is_sha256_hex(&asset.sha256) || !asset.url.starts_with("https://") {
             bail!("the manifest has a bad installer for {arch}");
         }
     }
     Ok(m)
+}
+
+/// A SHA-256 as 64 lowercase hex digits, the way digests are written.
+pub fn is_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The SHA-256 of data as lowercase hex.
+pub fn sha256_hex(data: &[u8]) -> String {
+    Sha256::digest(data).iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// The release image lives in the project's own namespace on GitHub Packages; the value

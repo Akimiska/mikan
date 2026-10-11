@@ -82,3 +82,20 @@ func TestFileName(t *testing.T) {
 		}
 	}
 }
+
+// The page's announcement keeps its lines and the blank line between paragraphs; the apps
+// get the same text as one line.
+func TestFillAnnounceKeepsLines(t *testing.T) {
+	vars := map[string]string{"name": "Анна", "date": "01.11.2026"}
+	text := "Привет, {name}!\r\n\nРаботы ночью.\n\tПодписка до {date}."
+	if got, want := fillAnnounce(text, vars), "Привет, Анна!\n\nРаботы ночью.\nПодписка до 01.11.2026."; got != want {
+		t.Fatalf("page: %q, want %q", got, want)
+	}
+	if got := fillTitle(text, vars); strings.Contains(got, "\n") {
+		t.Fatalf("the apps get line breaks: %q", got)
+	}
+	long := strings.Repeat("строка\n", AnnounceLines+5)
+	if got := strings.Count(fillAnnounce(long, nil), "\n"); got >= AnnounceLines {
+		t.Fatalf("%d line breaks kept", got)
+	}
+}

@@ -3146,6 +3146,11 @@
             },
             "type": "array"
           },
+          "since": {
+            "description": "Учёт по нодам начался позже начала периода: день, с которого он идёт",
+            "format": "date-time",
+            "type": "string"
+          },
           "total": {
             "description": "Сколько унесли все ноды вместе",
             "format": "int64",
@@ -4411,7 +4416,8 @@
             "type": "integer"
           },
           "sub_announce": {
-            "maxLength": 200,
+            "description": "До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов",
+            "maxLength": 1000,
             "type": "string"
           },
           "sub_announce_url": {

@@ -175,7 +175,7 @@ export function NodesPage() {
       <QueryBoundary
         query={nodes}
         pending={
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
             {[0, 1].map((i) => (
               <Skeleton key={i} style={{ height: 220, borderRadius: 20 }} />
             ))}
@@ -189,7 +189,7 @@ export function NodesPage() {
               <EmptyState title={t("nodes.emptyTitle")} text={t("nodes.emptyText")} />
             </section>
           ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
               {list.length > 1 && list.some((n) => n.local && !n.name) ? (
                 <div className="banner warn lg:col-span-2" role="status">
                   <Pencil size={18} className="shrink-0" aria-hidden />
@@ -316,12 +316,12 @@ function NodeCard({
 }) {
   const mem = n.mem_total ? Math.round((n.mem_used / n.mem_total) * 100) : 0;
   return (
-    <section className="card glass reveal flex flex-col" style={{ "--i": idx } as React.CSSProperties}>
+    <section className="card glass reveal flex min-w-0 flex-col" style={{ "--i": idx } as React.CSSProperties}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-display truncate text-lg font-medium tracking-tight">{nodeLabel(n)}</h2>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-500)]">
-            <span className="mono">{n.host || "—"}</span>
+            <span className="mono min-w-0 break-all">{n.host || "—"}</span>
             <span>·</span>
             <span>{n.local ? t("nodes.kindLocal") : t("nodes.kindRemote")}</span>
           </div>
@@ -346,7 +346,7 @@ function NodeCard({
       {n.status === "error" && n.enabled ? <NodeProblem n={n} onCheck={onCheck} actions={{ rekey: onRekey, update: updatable(n) ? onUpdate : undefined, edit: onEdit }} /> : null}
       {n.status === "ok" ? <SkewLine n={n} /> : null}
       <HelloLine n={n} actions={{ edit: onEdit }} />
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-[13px]">
+      <dl className="mt-4 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-4 gap-y-3 text-[13px] [&>div]:min-w-0">
         <div>
           <dt className="text-xs text-[var(--ink-500)]">{t("nodes.protocols")}</dt>
           <dd className="num">{n.status === "ok" ? t("nodes.listeners", { ok: n.listeners_ok, total: n.listeners }) : num(n.inbounds)}</dd>

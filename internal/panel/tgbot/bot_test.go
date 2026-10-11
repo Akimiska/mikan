@@ -803,3 +803,12 @@ func TestBotTokenConflict(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// {link} is the subscriber's own subscription link, for an admin's menu text.
+func TestBotLinkVariable(t *testing.T) {
+	e := setup(t)
+	v := e.bot.vars(e.ctx, wordsFor("ru"), e.user, e.now)
+	if !strings.HasPrefix(v["link"], "https://vpn.example.com:21355/sub/") || !strings.Contains(v["link"], e.user.SubToken) {
+		t.Fatalf("link %q", v["link"])
+	}
+}

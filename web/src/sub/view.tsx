@@ -387,7 +387,7 @@ function Announce({ block: b, text, url }: { block: PageBlock; text: string; url
   return (
     <section className="glass sub-card p-4" role="note">
       {b.title ? <Heading className="mb-1">{b.title}</Heading> : null}
-      <p className="text-[13px] leading-5 text-[var(--ink-700)]">{text}</p>
+      <p className="whitespace-pre-line text-[13px] leading-5 text-[var(--ink-700)]">{text}</p>
       {href ? (
         <a className="btn btn-glass btn-sm mt-3" href={href} target="_blank" rel="noreferrer noopener" {...outside(href)}>
           {t("sub.announceMore")}

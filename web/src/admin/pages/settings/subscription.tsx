@@ -174,7 +174,7 @@ export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
     e.preventDefault();
     save.mutate({ sub_title: form.sub_title.trim(), sub_announce: form.sub_announce.trim(), sub_announce_url: form.sub_announce_url.trim(), brand_accent: form.brand_accent.trim(), brand_logo_url: form.brand_logo_url.trim() });
   };
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   // A variable chip goes into the field last typed in: the title until the announcement is.
   const [target, setTarget] = useState<"sub_title" | "sub_announce">("sub_title");
   const insert = (v: string) => setForm((f) => ({ ...f, [target]: (f[target] ? f[target].replace(/\s*$/, " ") : "") + `{${v}}` }));
@@ -211,13 +211,14 @@ export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
           />
         </Field>
         <Field label={t("settings.announce")} htmlFor="s-announce" hint={withUnknown(t("settings.announceHint"), unknownAnnounce)} error={errors.sub_announce}>
-          <input
+          <textarea
             id="s-announce"
-            className="input"
+            className="input py-2"
+            rows={3}
             value={form.sub_announce}
             onChange={set("sub_announce")}
             onFocus={() => setTarget("sub_announce")}
-            maxLength={200}
+            maxLength={1000}
             aria-invalid={!!errors.sub_announce}
           />
         </Field>

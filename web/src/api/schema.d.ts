@@ -3079,6 +3079,11 @@ export interface components {
             /** @description Все ноды, больше всех сверху */
             items: components["schemas"]["NodeShare"][];
             /**
+             * Format: date-time
+             * @description Учёт по нодам начался позже начала периода: день, с которого он идёт
+             */
+            since?: string;
+            /**
              * Format: int64
              * @description Сколько унесли все ноды вместе
              */
@@ -3524,6 +3529,7 @@ export interface components {
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
+            /** @description До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов */
             sub_announce?: string;
             /** @description https://… или tg://… */
             sub_announce_url?: string;

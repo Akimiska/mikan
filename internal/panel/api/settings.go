@@ -84,7 +84,7 @@ type patchSettingsBody = struct {
 	Brand         *string             `json:"brand,omitempty" maxLength:"40"`
 	SupportURL    *string             `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
 	SubTitle      *string             `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
-	Announce      *string             `json:"sub_announce,omitempty" maxLength:"200"`
+	Announce      *string             `json:"sub_announce,omitempty" maxLength:"1000" doc:"До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов"`
 	AnnounceURL   *string             `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
 	AppBranding   *bool               `json:"app_branding,omitempty"`
 	BrandAccent   *string             `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
@@ -313,13 +313,12 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce_url", Message: "support_url_invalid"})
 	}
 	// A {word} that is no variable stays as text: an old announcement may hold one.
-	for field, v := range map[string]*string{"sub_title": b.SubTitle, "sub_announce": b.Announce} {
-		if v == nil {
-			continue
-		}
-		if strings.ContainsAny(*v, "\r\n") {
-			details = append(details, &huma.ErrorDetail{Location: "body." + field, Message: "one_line"})
-		}
+	if b.SubTitle != nil && strings.ContainsAny(*b.SubTitle, "\r\n") {
+		details = append(details, &huma.ErrorDetail{Location: "body.sub_title", Message: "one_line"})
+	}
+	// The announcement keeps its lines on the page and in the Mini App, a few of them.
+	if b.Announce != nil && strings.Count(*b.Announce, "\n") >= subs.AnnounceLines {
+		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce", Message: "announce_lines"})
 	}
 	if b.BrandAccent != nil && *b.BrandAccent != "" && !subs.ValidAccent(strings.TrimSpace(*b.BrandAccent)) {
 		details = append(details, &huma.ErrorDetail{Location: "body.brand_accent", Message: "color_invalid"})

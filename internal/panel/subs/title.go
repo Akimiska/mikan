@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
@@ -12,6 +13,13 @@ import (
 
 // TitleMax bounds a filled title or announcement: apps show one line.
 const TitleMax = 200
+
+// AnnounceMax and AnnounceLines bound the announcement as the page and the Mini App show it,
+// with its line breaks; the apps get it as one line of TitleMax.
+const (
+	AnnounceMax   = 1000
+	AnnounceLines = 10
+)
 
 // msk is the zone dates are written in, as the bot writes them: most users live there.
 var msk = time.FixedZone("MSK", 3*60*60)
@@ -45,6 +53,39 @@ func titleValues(u db.User, grants int64, cfg Config, now time.Time) map[string]
 // holds {something} itself is not filled again. The result is one line of at most
 // TitleMax letters.
 func fillTitle(s string, vars map[string]string) string {
+	line := strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, fillVars(s, vars))
+	return cut(line, TitleMax)
+}
+
+// fillAnnounce is the announcement as the page and the Mini App show it: filled like a
+// title, its lines kept (at most AnnounceLines, each cleaned as a title is), blank lines
+// between paragraphs too, at most AnnounceMax letters.
+func fillAnnounce(s string, vars map[string]string) string {
+	lines := strings.Split(strings.ReplaceAll(fillVars(s, vars), "\r\n", "\n"), "\n")
+	if len(lines) > AnnounceLines {
+		lines = lines[:AnnounceLines]
+	}
+	for i, l := range lines {
+		lines[i] = cut(strings.ReplaceAll(l, "\t", " "), AnnounceMax)
+	}
+	return strings.TrimSpace(cutText(strings.Join(lines, "\n"), AnnounceMax))
+}
+
+// cutText keeps at most n letters of s, line breaks included.
+func cutText(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
+}
+
+// fillVars puts the user's values in place of the variables, in one pass.
+func fillVars(s string, vars map[string]string) string {
 	var out strings.Builder
 	rest := s
 	for {
@@ -66,13 +107,7 @@ func fillTitle(s string, vars map[string]string) string {
 		rest = rest[i+1:]
 	}
 	out.WriteString(rest)
-	line := strings.Map(func(r rune) rune {
-		if r == '\r' || r == '\n' || r == '\t' {
-			return ' '
-		}
-		return r
-	}, out.String())
-	return cut(line, TitleMax)
+	return out.String()
 }
 
 // profileTitle is the name the apps show for the profile: the title filled for the user,

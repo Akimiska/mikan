@@ -38,7 +38,7 @@ type MenuButton struct {
 }
 
 // Texts the admin writes. Variables: {name} {brand} {until} {days} {used} {left} {limit}
-// {devices} {reset}; an empty text is the built-in one.
+// {devices} {reset} {link} (the subscription link); an empty text is the built-in one.
 type Texts struct {
 	Welcome    string `json:"welcome" doc:"Для тех, у кого ещё нет подписки в боте"`
 	Main       string `json:"main" doc:"Шапка главного меню"`

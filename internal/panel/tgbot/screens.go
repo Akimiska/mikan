@@ -447,6 +447,9 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 	if u.DeviceLimit.Valid {
 		v["devices"] = fmt.Sprintf(w.trafficOf, v["devices"], strconv.FormatInt(u.DeviceLimit.Int64, 10))
 	}
+	// The subscription link itself: an admin's own menu text can show it without the
+	// "Connect" screen.
+	v["link"] = b.subURL(ctx, u)
 	return v
 }
 

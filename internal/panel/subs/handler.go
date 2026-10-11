@@ -551,7 +551,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 		out.Telegram = h.tg.LinkURL(ctx, u.ID)
 	}
 	if cfg.Announce != "" {
-		out.Announce, out.AnnounceURL = fillTitle(cfg.Announce, titleValues(u, grants.Main(u.ID), cfg, now)), cfg.AnnounceURL
+		out.Announce, out.AnnounceURL = fillAnnounce(cfg.Announce, titleValues(u, grants.Main(u.ID), cfg, now)), cfg.AnnounceURL
 	}
 	if cfg.Happ.Crypt != "" && cfg.SubBase != "" {
 		if link, err := h.happ.Link(ctx, cfg.Happ.Crypt, cfg.SubBase+"/"+u.SubToken); err == nil {

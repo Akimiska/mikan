@@ -228,6 +228,33 @@ func (c *Client) Me(ctx context.Context) (User, error) {
 	return u, err
 }
 
+// ChatMember is getChatMember's answer: an account's place in a chat.
+type ChatMember struct {
+	// Status is creator, administrator, member, restricted, left or kicked.
+	Status string `json:"status"`
+	// IsMember: a restricted account is still in the chat.
+	IsMember bool `json:"is_member"`
+}
+
+// In: the account is in the chat, whatever its rights there.
+func (m ChatMember) In() bool {
+	switch m.Status {
+	case "creator", "administrator", "member":
+		return true
+	case "restricted":
+		return m.IsMember
+	}
+	return false
+}
+
+// ChatMember is getChatMember: where user is in chat, a numeric id or @username. In a
+// channel only its admins may ask.
+func (c *Client) ChatMember(ctx context.Context, chat string, user int64) (ChatMember, error) {
+	var m ChatMember
+	err := c.call(ctx, "getChatMember", map[string]any{"chat_id": chat, "user_id": user}, &m)
+	return m, err
+}
+
 // pollTimeout: how long getUpdates waits for news.
 const pollTimeout = 50 * time.Second
 

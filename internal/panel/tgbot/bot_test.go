@@ -36,6 +36,20 @@ type fakeTelegram struct {
 	stall   map[string]time.Duration
 	// conflict: another program polls the token, so getUpdates gets Telegram's 409
 	conflict bool
+	// The channel: who is in it (account → status; the bot is its admin unless notAdmin),
+	// and notAdmin, the bot is not, so getChatMember is refused.
+	members  map[int64]string
+	notAdmin bool
+}
+
+// join puts an account in the channel ("" takes it out).
+func (f *fakeTelegram) join(id int64, status string) {
+	f.mu.Lock()
+	if f.members == nil {
+		f.members = map[int64]string{}
+	}
+	f.members[id] = status
+	f.mu.Unlock()
 }
 
 // set breaks (answers with something that is no Bot API reply) or fixes a method.
@@ -123,6 +137,21 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ok("https://t.me/$inv" + strconv.FormatInt(id, 10))
 	case "sendMessage":
 		ok(Message{MessageID: 1000 + id, Chat: Chat{ID: int64(chat), Type: "private"}})
+	case "getChatMember":
+		user, _ := body["user_id"].(float64)
+		f.mu.Lock()
+		status, notAdmin := f.members[int64(user)], f.notAdmin
+		f.mu.Unlock()
+		switch {
+		case notAdmin:
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: member list is inaccessible"})
+			return
+		case int64(user) == 1:
+			status = "administrator"
+		case status == "":
+			status = "left"
+		}
+		ok(ChatMember{Status: status, IsMember: status == "restricted"})
 	default:
 		ok(true)
 	}

@@ -40,6 +40,7 @@ type TelegramView struct {
 	Route          TelegramRoute            `json:"route" doc:"Как бот ходит в Telegram"`
 	Infrastructure infraalerts.AlertsConfig `json:"infrastructure"`
 	AdminChatSet   bool                     `json:"admin_chat_set"`
+	ChannelError   string                   `json:"channel_error,omitempty" doc:"Почему бот не может проверить подписку на канал: channel_not_admin (бот не администратор канала), channel_not_found, unreachable или ответ Telegram. Пока ошибка есть, обязательная подписка никого не останавливает"`
 }
 
 type TelegramRoute struct {
@@ -190,6 +191,7 @@ func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 		if !hidesSecrets(ctx) {
 			v.MiniAppURL = h.d.Telegram.MiniAppURL(ctx)
 		}
+		v.ChannelError = h.d.Telegram.ChannelError(ctx)
 		if p := h.d.Telegram.Progress(); p.Total > 0 {
 			v.Broadcast = &TelegramBroadcast{Total: p.Total, Sent: p.Sent, Failed: p.Failed, Started: p.Started.Unix(), Active: p.Active()}
 		}

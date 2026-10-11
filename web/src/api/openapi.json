@@ -1061,6 +1061,30 @@
         ],
         "type": "object"
       },
+      "Channel": {
+        "additionalProperties": false,
+        "properties": {
+          "chat": {
+            "description": "Публичный @username канала или его числовой ID (-100…); бот должен быть администратором канала",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "required": {
+            "description": "Обязательная подписка: без неё бот показывает вместо меню экран с кнопкой канала",
+            "type": "boolean"
+          },
+          "url": {
+            "description": "Ссылка, по которой вступают (https://t.me/…); пусто: t.me/\u003cusername\u003e. Для канала по числовому ID обязательна",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
+        "required": [
+          "required",
+          "chat"
+        ],
+        "type": "object"
+      },
       "CheckItem": {
         "additionalProperties": false,
         "properties": {
@@ -1223,6 +1247,9 @@
             },
             "type": "array"
           },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
           "clean_chat": {
             "description": "Удалять сообщения пользователя, чтобы в чате было одно меню",
             "type": "boolean"
@@ -1262,7 +1289,8 @@
           "mini_app",
           "clean_chat",
           "quiet_night",
-          "promo_button"
+          "promo_button",
+          "channel"
         ],
         "type": "object"
       },
@@ -4279,6 +4307,20 @@
           "enabled": {
             "type": "boolean"
           },
+          "free_condition": {
+            "description": "none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram",
+            "enum": [
+              "none",
+              "channel"
+            ],
+            "type": "string"
+          },
+          "free_tariff_id": {
+            "description": "Тариф бесплатного тарифа, нужен срок; 0: выключить",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "renew_resets_traffic": {
             "type": "boolean"
           },
@@ -4667,6 +4709,27 @@
             "description": "Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются",
             "type": "boolean"
           },
+          "free_condition": {
+            "description": "Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)",
+            "enum": [
+              "none",
+              "channel"
+            ],
+            "type": "string"
+          },
+          "free_plans": {
+            "description": "Сколько бесплатных подписок выдано",
+            "format": "int64",
+            "type": "integer"
+          },
+          "free_tariff_id": {
+            "description": "Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "moving": {
             "description": "Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит",
             "items": {
@@ -4720,6 +4783,9 @@
           "trial_stars",
           "trial_rub",
           "trials",
+          "free_tariff_id",
+          "free_condition",
+          "free_plans",
           "available",
           "on_sale",
           "moving"
@@ -6973,6 +7039,10 @@
             "$ref": "#/components/schemas/TelegramBroadcast",
             "description": "Последняя рассылка с запуска панели"
           },
+          "channel_error": {
+            "description": "Почему бот не может проверить подписку на канал: channel_not_admin (бот не администратор канала), channel_not_found, unreachable или ответ Telegram. Пока ошибка есть, обязательная подписка никого не останавливает",
+            "type": "string"
+          },
           "config": {
             "$ref": "#/components/schemas/Config"
           },
@@ -7095,12 +7165,20 @@
       "Texts": {
         "additionalProperties": false,
         "properties": {
+          "channel": {
+            "description": "Экран обязательной подписки на канал, вместо меню; {brand}: название сервиса",
+            "type": "string"
+          },
           "expired": {
             "description": "Уведомление: подписка закончилась",
             "type": "string"
           },
           "expiring": {
             "description": "Уведомление: подписка скоро закончится",
+            "type": "string"
+          },
+          "free_button": {
+            "description": "Надпись кнопки бесплатного тарифа, до 40 символов",
             "type": "string"
           },
           "main": {
@@ -7131,7 +7209,9 @@
           "expiring",
           "expired",
           "traffic_90",
-          "traffic_end"
+          "traffic_end",
+          "channel",
+          "free_button"
         ],
         "type": "object"
       },
@@ -7806,11 +7886,12 @@
             ]
           },
           "source": {
-            "description": "Откуда пользователь: admin — создан в панели или по ключу API, bot — куплен в боте, trial — пробный период бота, import — перенесён из другой панели. Заполняется при создании, не меняется",
+            "description": "Откуда пользователь: admin — создан в панели или по ключу API, bot — куплен в боте, trial — пробный период бота, free — бесплатный тариф из бота или Mini App, import — перенесён из другой панели. Заполняется при создании, не меняется",
             "enum": [
               "admin",
               "bot",
               "trial",
+              "free",
               "import"
             ],
             "type": "string"
@@ -13436,6 +13517,7 @@
                 "admin",
                 "bot",
                 "trial",
+                "free",
                 "import"
               ],
               "type": "string"

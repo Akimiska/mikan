@@ -23,8 +23,19 @@ import (
 // screen renders what the chat sees for a press: text (HTML) and buttons.
 func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice string) (string, *Keyboard) {
 	w := wordsFor(cfg.Lang)
-	list, u, ok := b.subs(ctx, chat)
 	cmd, arg, _ := strings.Cut(data, ":")
+	// The channel stands in front of every screen but paying (ungated). Asked here, as the
+	// screen is drawn: off the update loop, a slow Telegram holds up this chat only.
+	switch {
+	case cmd == "gc":
+		if !b.passes(ctx, cfg, chat, true) {
+			return b.gateScreen(ctx, cfg, w, w.channelNotYet)
+		}
+		cmd = "m"
+	case !ungated[cmd] && !b.passes(ctx, cfg, chat, false):
+		return b.gateScreen(ctx, cfg, w, notice)
+	}
+	list, u, ok := b.subs(ctx, chat)
 	// Buying a new subscription works with or without one.
 	if b.canBuyNew(ctx) {
 		home := []Button{{Text: w.back, CallbackData: "m"}}
@@ -43,6 +54,8 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return b.takeTrial(ctx, w, chat)
 	case "tp":
 		return b.trialInvoice(ctx, w, chat, arg)
+	case "fp":
+		return b.takeFree(ctx, cfg, w, chat)
 	}
 	if !ok {
 		return b.welcome(ctx, cfg, w, chat, notice)
@@ -140,7 +153,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		}
 		return w.switchTitle, &Keyboard{append(rows, back)}
 	}
-	return withNotice(render(pick(cfg.Texts.Main, w.main), vars)), b.menu(ctx, cfg, w, len(list))
+	return withNotice(render(pick(cfg.Texts.Main, w.main), vars)), b.menu(ctx, cfg, w, chat, len(list))
 }
 
 func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, notice string) (string, *Keyboard) {
@@ -157,6 +170,9 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, not
 			rows = append(rows, []Button{{Text: w.trial, CallbackData: "tr"}})
 		}
 	}
+	if btn, ok := b.freeButton(ctx, cfg, w, chat); ok {
+		rows = append(rows, []Button{btn})
+	}
 	if b.canBuyNew(ctx) {
 		rows = append(rows, []Button{{Text: w.buy, CallbackData: "b"}})
 	}
@@ -170,7 +186,7 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, not
 }
 
 // menu is the admin's main menu as buttons.
-func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboard {
+func (b *Bot) menu(ctx context.Context, cfg Config, w *words, chat int64, subs int) *Keyboard {
 	var rows [][]Button
 	for _, mb := range cfg.Buttons {
 		if !mb.On {
@@ -209,6 +225,10 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 		} else {
 			rows = append(rows, []Button{btn})
 		}
+	}
+	// The free plan comes back to the menu once the account's free subscription has ended.
+	if btn, ok := b.freeButton(ctx, cfg, w, chat); ok {
+		rows = append(rows, []Button{btn})
 	}
 	// The promo codes entry is the admin's to hide; the Mini App page keeps its field.
 	if url := b.miniAppURL(ctx, cfg); url != "" && cfg.PromoButton {

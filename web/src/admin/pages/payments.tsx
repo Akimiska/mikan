@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { HandCoins, History as HistoryIcon, ListChecks, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk, usePaymentSettings, useTariffs } from "../../api/hooks";
+import { qk, usePaymentSettings, useTariffs, useTelegram } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { QueryBoundary } from "../../components/query";
@@ -331,16 +331,20 @@ function StarsCard({ s }: { s: Settings }) {
   );
 }
 
-/** Who may buy, what a renewal does to the traffic, and the free trial. */
+/** Who may buy, what a renewal does to the traffic, the free trial and the free plan. */
 function RulesCard({ s }: { s: Settings }) {
   const tariffs = useTariffs();
   const save = useSavePayments();
+  // The free plan's channel condition needs the bot's channel (Telegram → Menu and texts).
+  const hasChannel = !!useTelegram().data?.config.channel.chat;
   const { draft: form, setDraft: setForm, dirty, reset } = useDraft({
     allowNew: s.allow_new,
     resetTraffic: s.renew_resets_traffic,
     trial: s.trial_tariff_id ?? 0,
     trialStars: s.trial_stars ? String(s.trial_stars) : "",
     trialRub: s.trial_rub ? String(s.trial_rub / 100) : "",
+    free: s.free_tariff_id ?? 0,
+    freeCondition: s.free_condition,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const submit = (e: FormEvent) => {
@@ -360,6 +364,9 @@ function RulesCard({ s }: { s: Settings }) {
       // No trial, no price: a price left in the hidden fields does not come back later.
       trial_stars: form.trial && form.trialStars.trim() ? starsN : 0,
       trial_rub: form.trial && form.trialRub.trim() ? rubN : 0,
+      free_tariff_id: form.free,
+      // Sent only when changed: a channel removed from the bot since does not block saving the rest.
+      ...(form.freeCondition !== s.free_condition ? { free_condition: form.freeCondition } : {}),
     });
   };
   return (
@@ -404,6 +411,32 @@ function RulesCard({ s }: { s: Settings }) {
                 </Field>
                 <p className="text-xs text-[var(--ink-500)] sm:col-span-2">{t("payments.trialPriceSub")}</p>
               </div>
+            ) : null}
+          </div>
+          <div className="pt-4">
+            <Field label={t("payments.free")} htmlFor="pay-free" hint={`${t("payments.freeSub")}${s.free_plans ? ` ${t("payments.freeGiven", { n: s.free_plans })}` : ""}`}>
+              <select id="pay-free" className="input" value={form.free} onChange={(e) => setForm((f) => ({ ...f, free: Number(e.target.value) }))}>
+                <option value={0}>{t("payments.freeOff")}</option>
+                {(tariffs.data ?? []).map((tr) => (
+                  <option key={tr.id} value={tr.id}>
+                    {tr.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {form.free ? (
+              <Field
+                label={t("payments.freeCondition")}
+                htmlFor="pay-free-condition"
+                hint={form.freeCondition === "channel" ? t("payments.freeChannelHint") : !hasChannel ? t("payments.freeNoChannel") : undefined}
+              >
+                <select id="pay-free-condition" className="input" value={form.freeCondition} onChange={(e) => setForm((f) => ({ ...f, freeCondition: e.target.value as Settings["free_condition"] }))}>
+                  <option value="none">{t("payments.freeNone")}</option>
+                  <option value="channel" disabled={!hasChannel && form.freeCondition !== "channel"}>
+                    {t("payments.freeChannel")}
+                  </option>
+                </select>
+              </Field>
             ) : null}
           </div>
         </div>

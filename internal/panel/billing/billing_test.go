@@ -36,6 +36,10 @@ type fakeTG struct {
 	refunded  []refundNote
 	notGiven  []db.Payment // TrialNotGiven
 	onRefund  func()       // runs after Telegram accepted a refund
+	// The bot's channel: its link ("" none), who is in it, and why it cannot be asked.
+	channel   string
+	members   map[int64]bool
+	memberErr error
 }
 
 // refundNote is what the buyer was told about a refund.
@@ -84,6 +88,16 @@ func (f *fakeTG) refundNotes() []refundNote {
 	return append([]refundNote(nil), f.refunded...)
 }
 func (f *fakeTG) BotURL(context.Context) string { return "https://t.me/mikan_test_bot" }
+func (f *fakeTG) Channel(context.Context) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.channel, f.channel != ""
+}
+func (f *fakeTG) Subscribed(_ context.Context, tgID int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.members[tgID], f.memberErr
+}
 func (f *fakeTG) told() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

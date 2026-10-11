@@ -37,6 +37,8 @@ func (h *Handler) miniApp(w http.ResponseWriter, r *http.Request, rest string) {
 		h.miniAppReissue(w, r)
 	case r.Method == http.MethodPost && (rest == "shop" || rest == "pay") && sameOrigin(r) && h.shop != nil:
 		h.miniAppShop(w, r, rest)
+	case r.Method == http.MethodPost && rest == "free" && sameOrigin(r) && h.shop != nil:
+		h.miniAppFree(w, r)
 	case r.Method == http.MethodPost && (rest == "promo" || rest == "promo-history") && sameOrigin(r) && h.promos != nil:
 		if rest == "promo-history" {
 			h.miniAppPromoHistory(w, r)
@@ -259,8 +261,13 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		Packages  []shopPackage   `json:"packages"`
 		// Trial is the priced trial this account may buy now, if any.
 		Trial *offer `json:"trial,omitempty"`
+		// Free is the free plan this account may take now, if any.
+		Free *freeOffer `json:"free,omitempty"`
 	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 		Providers: map[string]bool{billing.Stars: av.Stars}}
+	if fo, ok := h.shop.FreeOffer(ctx, tgID); ok {
+		out.Free = &freeOffer{Name: fo.Tariff.Name, Description: billing.Describe(fo.Tariff, fo.Tariff.DurationDays, cfg.Lang), Channel: fo.Channel}
+	}
 	if to, _, ok := h.shop.TrialOffer(ctx, tgID); ok {
 		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Note: to.Tariff.Description, Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
 	}
@@ -276,6 +283,42 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		out.Offers = append(out.Offers, v)
 	}
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// freeOffer is the free plan in "shop": what it gives, and the channel it asks the account
+// to join ("" when it asks nothing).
+type freeOffer struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Channel     string `json:"channel,omitempty"`
+}
+
+// miniAppFree takes the free plan for the Telegram account: the token of the new
+// subscription, or the code of why not (free_off, free_active, free_channel with the
+// channel to join, too_many_subs).
+func (h *Handler) miniAppFree(w http.ResponseWriter, r *http.Request) {
+	var in miniAuth
+	tgID, _, fail, ok := h.mini(w, r, &in)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	u, err := h.shop.FreePlan(ctx, tgID)
+	switch {
+	case errors.Is(err, billing.ErrFreeChannel):
+		link, _ := h.shop.FreeOffer(ctx, tgID)
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": err.Error(), "channel": link.Channel})
+		return
+	case errors.Is(err, billing.ErrFreeOff), errors.Is(err, billing.ErrFreeActive), errors.Is(err, billing.ErrTooManySubs):
+		fail(http.StatusConflict, err.Error())
+		return
+	case err != nil:
+		h.log.Warn("mini app: the free plan was not given", "err", err)
+		fail(http.StatusInternalServerError, "internal")
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"token": u.SubToken, "name": u.Name})
 }
 
 // promoError is a code the buyer sent that cannot be used, as opposed to the panel failing.

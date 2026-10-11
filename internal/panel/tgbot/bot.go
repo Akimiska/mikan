@@ -105,6 +105,15 @@ type Bot struct {
 	infraMu    sync.Mutex
 	infraRT    http.RoundTripper // nil for the default route, see infraTransport
 	infraRoute Route
+
+	// The channel subscribers must join (channel.go): which one the rest is about, the
+	// accounts seen in it lately, why it could not be asked last time, and when the bot
+	// last asked about itself there.
+	chanMu   sync.Mutex
+	chanChat string
+	members  map[int64]time.Time // account → until when its membership counts as checked
+	chanErr  string
+	probedAt time.Time
 }
 
 // BroadcastProgress is the last broadcast as the admin panel shows it.
@@ -128,7 +137,7 @@ func New(d Deps) *Bot {
 		polled = settings.Cached(d.Store.Q, 15*time.Second)
 	}
 	return &Bot{d: d, polled: polled, reload: make(chan struct{}, 1), input: map[int64][]time.Time{},
-		transfers: map[int64]transfer{}, refused: map[string]time.Time{}, notices: map[string]*noticeState{}}
+		transfers: map[int64]transfer{}, refused: map[string]time.Time{}, notices: map[string]*noticeState{}, members: map[int64]time.Time{}}
 }
 
 // Status of the running bot.
@@ -146,6 +155,10 @@ func (b *Bot) setStatus(fn func(*Status)) {
 
 // Reload restarts the bot with the settings as they are now.
 func (b *Bot) Reload() {
+	// The admin may have just made the bot the channel's admin: the page asks again.
+	b.chanMu.Lock()
+	b.probedAt = time.Time{}
+	b.chanMu.Unlock()
 	select {
 	case b.reload <- struct{}{}:
 	default:

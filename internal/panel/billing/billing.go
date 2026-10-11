@@ -63,6 +63,13 @@ type Config struct {
 	// one, through the providers that take its price: it needs selling on.
 	TrialStars int64 `json:"trial_stars,omitempty"`
 	TrialRub   int64 `json:"trial_rub,omitempty"`
+	// FreeTariffID is the tariff of the free plan (free.go): unlike the trial, an account
+	// takes it again once its previous free subscription has ended; 0: no free plan. It
+	// takes no payment, so it works with selling off too.
+	FreeTariffID int64 `json:"free_tariff_id,omitempty"`
+	// FreeCondition is what the free plan asks of an account: FreeNoCondition, or
+	// FreeChannel, a subscription to the bot's channel.
+	FreeCondition string `json:"free_condition,omitempty"`
 }
 
 // TrialPaid: the trial has a price and is bought, not taken.
@@ -87,6 +94,12 @@ type Telegram interface {
 	// TrialNotGiven tells the buyer a paid trial was not given (the account had its trial)
 	// and the money comes back by hand: the payment method cannot refund it.
 	TrialNotGiven(ctx context.Context, p db.Payment)
+	// Channel is the link to join the bot's channel (the one its mandatory subscription
+	// asks for); ok is false while no channel is set up.
+	Channel(ctx context.Context) (url string, ok bool)
+	// Subscribed: the account is a member of the bot's channel. An error when the bot
+	// cannot ask: it is off, or it is not an admin of the channel.
+	Subscribed(ctx context.Context, tgID int64) (bool, error)
 }
 
 type Deps struct {

@@ -10,7 +10,7 @@ import { subDicts } from "../i18n/sub";
 import { APPS } from "./apps";
 import { hashParams, initData, json, okData, openOutside, pageURL, postJSON, request, subRoot, tgEvent, tgMode, tokenOf } from "./net";
 import { applyLook, readPage, titleOf, type DocView } from "./page";
-import { loadShop, Shop, type ShopData } from "./shop";
+import { FreePlan, loadShop, Shop, type ShopData } from "./shop";
 import { PromoSection } from "./promo";
 import { ReissueSection } from "./reissue";
 import type { Info, TgSub } from "./types";
@@ -289,8 +289,11 @@ function SubPage() {
       onRefresh={refresh}
     />
   ) : null;
+  // The free plan, for an account without a subscription and for one whose free
+  // subscription has ended: the subscription it gives shows once the session reloads.
+  const freePlan = shop?.free ? <FreePlan offer={shop.free} subRoot={subRoot} initData={initData} openLink={openOutside} onTaken={refresh} /> : null;
   const plansForNew = !!shop?.allow_new && !!shop.offers.length;
-  if (tg.state === "none" && (plansForNew || trialShop)) {
+  if (tg.state === "none" && (plansForNew || trialShop || freePlan)) {
     return (
       <Shell>
         <section className="glass sub-card p-6 text-center">
@@ -298,6 +301,7 @@ function SubPage() {
           <p className="mt-2 text-[13px] text-[var(--ink-500)]">{t("sub.tgNoSubText")}</p>
         </section>
         {trialShop}
+        {freePlan}
         {plansForNew ? (
           <>
             <PromoSection token="" activeCode={promoCode} onApplied={(c) => setPromoCode(c)} onBonusApplied={refresh} title={titleOf(config, "promo")} />
@@ -401,6 +405,7 @@ function SubPage() {
             <>
               {shopFor(token, titleOf(config, "shop") || t("sub.shop"))}
               {packagesShop}
+              {freePlan}
             </>
           ) : null
         }

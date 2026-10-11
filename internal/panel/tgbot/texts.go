@@ -11,6 +11,7 @@ import (
 // "admin" when set.
 type words struct {
 	welcome, main, renew, expiring, expired, traffic90, trafficEnd string // admin
+	channel, freeButton                                            string // admin: the channel's screen, the free plan's button
 
 	back, yesUnbind, cancel, subscriptions, openPage, support, promo   string
 	subTitle, devicesTitle, connectTitle, switchTitle                  string
@@ -45,6 +46,10 @@ type words struct {
 	pickTerm, priceFrom                                                                                             string
 	poolOut                                                                                                         string // a traffic pool used up
 
+	// The channel a subscriber must join, and the free plan.
+	channelJoin, channelCheck, channelNotYet             string
+	freeDone, freeActive, freeOff, freeFail, freeChannel string
+
 	// Traffic packages.
 	buyTraffic, trafficTitle, payPackage, packageGone, paidPackage, plusPackages string
 
@@ -60,6 +65,8 @@ var ru = words{
 	expired:    "⛔️ Подписка «{name}» закончилась. Чтобы продлить, напишите в поддержку.",
 	traffic90:  "📦 Израсходовано 90% трафика подписки «{name}»: осталось {left}.",
 	trafficEnd: "📦 Трафик подписки «{name}» на этот период закончился. Обновится {reset}.",
+	channel:    "Чтобы пользоваться ботом {brand}, подпишитесь на наш канал. Потом нажмите «Проверить».",
+	freeButton: "🎁 Бесплатный тариф",
 
 	back: "⬅️ Назад", promo: "🎟 Промокоды", yesUnbind: "✅ Да, отвязать", cancel: "↩️ Отмена", subscriptions: "🔁 Подписки", openPage: "🌐 Открыть страницу подписки", support: "💬 Поддержка",
 	subTitle: "Подписка «%s»", devicesTitle: "Устройства", connectTitle: "Подключить устройство", switchTitle: "Какую подписку показать?",
@@ -131,6 +138,15 @@ var ru = words{
 	paidRenew:       "✅ Оплата получена — подписка «%s» продлена до %s.",
 	poolOut:         "закончился до сброса",
 
+	channelJoin:   "📢 Подписаться на канал",
+	channelCheck:  "✅ Проверить",
+	channelNotYet: "Пока не видим вас в канале. Подпишитесь и нажмите «Проверить» ещё раз.",
+	freeDone:      "🎁 Бесплатная подписка готова: %s.\n\nСсылка и инструкции в меню.",
+	freeActive:    "Бесплатная подписка у вас уже есть. Новую можно взять, когда она закончится.",
+	freeOff:       "Бесплатный тариф сейчас недоступен.",
+	freeFail:      "Не получилось выдать бесплатный тариф. Попробуйте позже или напишите в поддержку.",
+	freeChannel:   "Бесплатный тариф для подписчиков нашего канала. Подпишитесь и нажмите «Проверить».",
+
 	buyTraffic:   "📦 Докупить трафик",
 	trafficTitle: "Трафик для подписки «%s»: выберите пакет",
 	payPackage:   "трафик начислится",
@@ -152,6 +168,8 @@ var en = words{
 	expired:    "⛔️ Subscription “{name}” has ended. Message support to renew it.",
 	traffic90:  "📦 90% of the traffic of “{name}” is used: {left} left.",
 	trafficEnd: "📦 The traffic of “{name}” for this period is used up. It renews {reset}.",
+	channel:    "To use the {brand} bot, join our channel, then tap “Check”.",
+	freeButton: "🎁 Free plan",
 
 	back: "⬅️ Back", promo: "🎟 Promo codes", yesUnbind: "✅ Yes, unbind", cancel: "↩️ Cancel", subscriptions: "🔁 Subscriptions", openPage: "🌐 Open the subscription page", support: "💬 Support",
 	subTitle: "Subscription “%s”", devicesTitle: "Devices", connectTitle: "Connect a device", switchTitle: "Which subscription to show?",
@@ -222,6 +240,15 @@ var en = words{
 	paidNew:         "✅ Payment received — subscription “%s” is ready (plan “%s”).\n\nAdd the link to your app:\n<code>%s</code>",
 	paidRenew:       "✅ Payment received — subscription “%s” is renewed until %s.",
 	poolOut:         "used up until the reset",
+
+	channelJoin:   "📢 Join the channel",
+	channelCheck:  "✅ Check",
+	channelNotYet: "We do not see you in the channel yet. Join it and tap “Check” again.",
+	freeDone:      "🎁 Your free subscription is ready: %s.\n\nThe link and instructions are in the menu.",
+	freeActive:    "You already have a free subscription. You can take a new one when it ends.",
+	freeOff:       "The free plan is not available now.",
+	freeFail:      "Could not give the free plan. Try later or message support.",
+	freeChannel:   "The free plan is for our channel's subscribers. Join it and tap “Check”.",
 
 	buyTraffic:   "📦 Buy more traffic",
 	trafficTitle: "Traffic for subscription “%s”: pick a package",
@@ -375,5 +402,6 @@ func (w *words) ago(t, now time.Time) string {
 // DefaultTexts are the built-in texts the admin's empty fields fall back to.
 func DefaultTexts(lang string) Texts {
 	w := wordsFor(lang)
-	return Texts{Welcome: w.welcome, Main: w.main, Renew: w.renew, Expiring: w.expiring, Expired: w.expired, Traffic90: w.traffic90, TrafficEnd: w.trafficEnd}
+	return Texts{Welcome: w.welcome, Main: w.main, Renew: w.renew, Expiring: w.expiring, Expired: w.expired, Traffic90: w.traffic90, TrafficEnd: w.trafficEnd,
+		Channel: w.channel, FreeButton: w.freeButton}
 }

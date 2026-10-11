@@ -80,6 +80,14 @@ type DeviceUnbind struct {
 	At     int64
 }
 
+type FreePlan struct {
+	TgID      int64
+	UserID    sql.NullInt64
+	TariffID  sql.NullInt64
+	Taken     int64
+	CreatedAt int64
+}
+
 type Inbound struct {
 	ID          int64
 	NodeID      int64

@@ -360,6 +360,10 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
     {
         say(&format!("Addons: {e:#}"));
     }
+    // The command that runs now says which addons it can run, whatever was asked of it.
+    if !install.node {
+        addon::touch(say);
+    }
     // The admin pressed Update and waits for an answer, and an update that began must end
     // in one: ok, failed, never "running" for good. What the upgraded command said about
     // its own work stays; it is told here only when it ended before telling.

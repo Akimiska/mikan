@@ -502,6 +502,10 @@ fn run(plan: &Plan, tx: &Sender<Event>) -> StepResult<()> {
     .map_err(kept)?;
     // Everything is done: the install is not unfinished any more.
     let _ = fs::remove_file(Path::new(DIR).join(UNFINISHED));
+    if plan.join.is_none() {
+        // The panel tells by it which addons this host can run.
+        crate::addon::touch(&mut |_| {});
+    }
 
     let port80 = match &plan.join {
         Some(key) => node_port80(system::port_owner(80, Proto::Tcp).as_deref(), node_host(&image, key).as_deref()),

@@ -1312,6 +1312,23 @@ pub fn drop_network() {
     let _ = crate::system::succeeds("docker", &["network", "rm", NETWORK]);
 }
 
+/// Writes this command's version into the state the panel reads when it is not there yet:
+/// the panel offers addons of protocol 2 only to a host that says it runs them, and a host
+/// that never installed one would otherwise never say so.
+pub fn touch(say: &mut dyn FnMut(&str)) {
+    let run = || -> Result<()> {
+        let _lock = lock::acquire(Wait::Block, &mut |_| {})?;
+        let mut state = load_state()?;
+        if state.host_version == crate::version() && panel_dir(false)?.is_some_and(|d| d.exists("state.json")) {
+            return Ok(());
+        }
+        save_state(&mut state)
+    };
+    if let Err(e) = run() {
+        say(&format!("Addons: the panel is not told this host's version: {e:#}"));
+    }
+}
+
 /// Rebuild compose from validated state after restore; never run a compose file supplied
 /// by a backup archive. Synchronize the panel's adapter tokens with root's state, and the
 /// bridge's gateway, which a new server may have elsewhere.

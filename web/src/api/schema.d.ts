@@ -534,6 +534,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/marketplace/custom": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Установить свой аддон: образ по дайджесту или процесс на 127.0.0.1, без проверки mikan */
+        post: operations["install-custom-addon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/marketplace/{id}/install": {
         parameters: {
             query?: never;
@@ -3026,6 +3043,37 @@ export interface components {
             totp?: string;
             username: string;
         };
+        MarketCustomInputBody: {
+            /** @description Админ подтвердил, что доверяет этому коду: mikan его не проверял */
+            confirm: boolean;
+            /** @description custom: sha256:<64 hex> */
+            digest?: string;
+            /** @description Имя аддона: a-z, 0-9 и дефис, не из каталога */
+            id: string;
+            /** @description custom: образ без тега, например ghcr.io/me/bot */
+            image?: string;
+            /** @enum {string} */
+            kind: "bot" | "ui" | "generic";
+            /**
+             * Format: int64
+             * @description Память контейнера, 64–256 МБ; 0 — по умолчанию 128
+             */
+            mem_mb?: number;
+            /**
+             * @description http — аддон отвечает панели на /v2/*; client — только сам ходит в панель
+             * @enum {string}
+             */
+            mode: "http" | "client";
+            /** @description Права, которые админ даёт аддону */
+            permissions: string[];
+            /**
+             * @description custom — свой образ по дайджесту; external — свой процесс на 127.0.0.1
+             * @enum {string}
+             */
+            source: "custom" | "external";
+            /** @description external: http://127.0.0.1:<порт>; клиенту панели (mode client) можно не указывать */
+            url?: string;
+        };
         MarketEntry: {
             description: {
                 [key: string]: string;
@@ -3054,15 +3102,34 @@ export interface components {
             permissions: string[];
         };
         MarketInstalled: {
+            /** @description Дайджест образа аддона админа (custom) */
+            digest?: string;
             /** @description Почему контейнер не работает */
             error?: string;
             /** @description Одобренные права */
             granted: string[];
             id: string;
+            /** @description Образ аддона админа (custom) */
+            image?: string;
             /** @enum {string} */
             kind: "bot" | "ui" | "generic";
+            /**
+             * Format: int64
+             * @description Память контейнера, МБ; 0 — по умолчанию 128
+             */
+            mem_mb?: number;
+            /** @enum {string} */
+            mode: "http" | "client";
+            /**
+             * @description official — из подписанного каталога; custom и external — аддон админа, mikan его не проверял
+             * @enum {string}
+             */
+            source: "official" | "custom" | "external";
             /** @enum {string} */
             status: "running" | "failed";
+            /** @description Адрес внешнего аддона (external); пусто у клиента панели */
+            url?: string;
+            /** @description Пусто у аддона админа: версию знает только каталог */
             version: string;
         };
         MarketView: {
@@ -6339,6 +6406,39 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "install-custom-addon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketCustomInputBody"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

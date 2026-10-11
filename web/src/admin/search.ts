@@ -40,3 +40,7 @@ export const PROMO_TABS = ["codes", "history"] as const;
 
 export const TELEGRAM_TABS = ["connect", "menu", "notify", "infra", "broadcast"] as const;
 export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };
+
+/** The addons marketplace may open on its catalog or on the form for an addon of one's own. */
+export const MARKET_OPEN = ["catalog", "own"] as const;
+export type MarketSearch = { open?: (typeof MARKET_OPEN)[number] };

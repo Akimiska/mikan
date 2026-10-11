@@ -309,7 +309,7 @@ func TestRequestValid(t *testing.T) {
 		{Action: "install", ID: "mine", Source: SourceExternal, Kind: KindBot, Mode: ModeClient},
 	}
 	for _, r := range good {
-		if !r.valid() {
+		if !r.Valid() {
 			t.Errorf("refused %+v", r)
 		}
 	}
@@ -338,7 +338,7 @@ func TestRequestValid(t *testing.T) {
 		"a bad id":                       with(custom, func(r *Request) { r.ID = "../x" }),
 	}
 	for what, r := range bad {
-		if r.valid() {
+		if r.Valid() {
 			t.Errorf("%s passed: %+v", what, r)
 		}
 	}

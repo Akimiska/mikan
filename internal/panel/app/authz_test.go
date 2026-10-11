@@ -93,6 +93,8 @@ func TestFullKeyCannotTakeOverThePanel(t *testing.T) {
 		"cascade":            {http.MethodPatch, "/nodes/1/cascade", map[string]any{"outbound": "direct"}},
 		// A code field is a script an addon runs.
 		"update-addon": {http.MethodPatch, "/addons/telegram", map[string]any{"settings": map[string]any{"script": "print(1)"}}},
+		// Code nothing signed vouches for, run on the server.
+		"install-custom-addon": {http.MethodPost, "/marketplace/custom", map[string]any{"id": "x", "source": "external", "kind": "generic", "mode": "client", "permissions": []string{"users:write"}, "confirm": true}},
 		// The subscription page every subscriber opens: its links, text, CSS and images.
 		"update-sub-page":       {http.MethodPut, "/sub-page", map[string]any{"config": map[string]any{}}},
 		"put-sub-page-image":    {http.MethodPut, "/sub-page/images/logo", map[string]any{"data": "iVBORw0KGgo="}},

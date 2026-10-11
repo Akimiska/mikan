@@ -4,7 +4,7 @@ import { ApiError, basePath, setCsrf } from "../api/client";
 import { meQuery } from "../api/hooks";
 import { useLocale } from "../i18n";
 import { NotFoundPage, PageLoading, RouteError } from "./route-states";
-import { PAYMENT_TABS, PROMO_TABS, SETTINGS_PARTS, SETTINGS_TABS, TARIFF_TABS, TELEGRAM_TABS, USER_SOURCES, USER_STATES, type PaymentsSearch, type SettingsSearch, type TariffsSearch, type TelegramSearch, type UsersSearch } from "./search";
+import { MARKET_OPEN, PAYMENT_TABS, PROMO_TABS, SETTINGS_PARTS, SETTINGS_TABS, TARIFF_TABS, TELEGRAM_TABS, USER_SOURCES, USER_STATES, type MarketSearch, type PaymentsSearch, type SettingsSearch, type TariffsSearch, type TelegramSearch, type UsersSearch } from "./search";
 import { Shell } from "./shell";
 
 /**
@@ -120,6 +120,15 @@ export function createAppRouter(queryClient: QueryClient) {
     path: "/addons/filters",
     component: page(() => import("./pages/filters"), "FiltersPage"),
   });
+  // The marketplace of protocol 2 addons (bots, pages): the catalog, what runs, one's own.
+  const market = createRoute({
+    getParentRoute: () => app,
+    path: "/addons/market",
+    component: page(() => import("./pages/marketplace"), "MarketplacePage"),
+    validateSearch: (s: Record<string, unknown>): MarketSearch => ({
+      open: MARKET_OPEN.includes(s.open as (typeof MARKET_OPEN)[number]) ? (s.open as MarketSearch["open"]) : undefined,
+    }),
+  });
   // The bot was a section of the menu until it moved to the addons: old links still work.
   const telegramOld = createRoute({
     getParentRoute: () => app,
@@ -150,7 +159,7 @@ export function createAppRouter(queryClient: QueryClient) {
   // The API section lived in the sidebar until 0.4.2: old links land on its new place.
   const apiDocsOld = createRoute({ getParentRoute: () => app, path: "/api-docs", beforeLoad: () => { throw redirect({ to: "/settings/api" }); } });
 
-  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, promocodes, payments, addons, telegram, torrent, filters, telegramOld, apiDocs, apiDocsOld, settings])]);
+  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, promocodes, payments, addons, telegram, torrent, filters, market, telegramOld, apiDocs, apiDocsOld, settings])]);
   return createRouter({
     routeTree,
     basepath: basePath || "/",

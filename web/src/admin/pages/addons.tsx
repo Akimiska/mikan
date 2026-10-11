@@ -7,11 +7,13 @@ import { PageHeader, Pill, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { num } from "../../lib/format";
 import { addonName, useAddons } from "./payment-addons";
+import { KIND_ICONS, hasPages, marketName, pagesPath, useMarketplace } from "./market-common";
 import { TorrentCard, TorrentHitsCard } from "./settings/torrent";
 
 /**
- * The addons: the tools built into the panel (the Telegram bot, the torrent blocker) and
- * the marketplace's payment methods, each with its state and the way to its settings. The
+ * The addons: the tools built into the panel (the Telegram bot, the torrent blocker), the
+ * marketplace's addons (bots, pages) and its payment methods, each with its state and the way
+ * to its settings. The
  * main menu keeps the everyday sections; what is switched on once lives here.
  */
 export function AddonsPage() {
@@ -24,6 +26,8 @@ export function AddonsPage() {
         <TorrentTile />
         <FiltersTile />
       </div>
+      <h2 className="section-title mt-6">{t("market.section")}</h2>
+      <MarketTiles />
       <h2 className="section-title mt-6">{t("addons.payments")}</h2>
       <PaymentTiles />
     </>
@@ -123,6 +127,64 @@ function FiltersTile() {
     ],
   ];
   return <Tile to="/addons/filters" icon={ListFilter} title={t("filters.title")} sub={t("addons.filtersSub")} state={state} facts={facts} i={3} />;
+}
+
+// The marketplace's other addons (bots, pages): installed ones with their state and where they
+// come from, and the way to the catalog. An addon with pages opens on them; the rest, and the
+// installing and removing, are on the marketplace's page.
+function MarketTiles() {
+  const q = useMarketplace();
+  return (
+    <QueryBoundary
+      query={q}
+      pending={
+        <div className="addon-grid">
+          <Skeleton style={{ height: 200, borderRadius: 20 }} />
+        </div>
+      }
+      wrap={(state) => <section className="card glass">{state}</section>}
+    >
+      {(d) => (
+        <div className="addon-grid">
+          {d.installed.map((a, i) => {
+            const pages = hasPages(a);
+            return (
+              <Tile
+                key={a.id}
+                to={pages ? pagesPath(a.id) : "/addons/market"}
+                icon={KIND_ICONS[a.kind]}
+                title={marketName(a.id, d)}
+                sub={t(`market.kind.${a.kind}`)}
+                state={
+                  <span className="flex flex-wrap justify-end gap-1">
+                    {a.source !== "official" ? <Pill tone="warn">{t("market.unverified")}</Pill> : null}
+                    {a.status === "failed" ? <Pill tone="bad">{t("addons.stateFailed")}</Pill> : <Pill tone="ok">{t("market.running")}</Pill>}
+                  </span>
+                }
+                facts={[
+                  [t("market.factSource"), t(`market.source.${a.source}`)],
+                  [t("market.factPerms"), t("market.permsN", { n: a.granted.length })],
+                ]}
+                action={pages ? t("market.openPages") : t("market.manage")}
+                i={4 + i}
+              />
+            );
+          })}
+          <Tile
+            to="/addons/market"
+            search={{ open: "catalog" }}
+            icon={Plus}
+            title={t("market.add")}
+            sub={t("market.addSub", { n: d.catalog.length })}
+            state={null}
+            action={t("addons.openCatalog")}
+            add
+            i={4 + d.installed.length}
+          />
+        </div>
+      )}
+    </QueryBoundary>
+  );
 }
 
 // The payment methods of the marketplace: installed ones with their state, and the way to

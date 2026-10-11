@@ -11,7 +11,6 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
-	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
@@ -164,10 +163,10 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, not
 		text = html.EscapeString(notice) + "\n\n" + text
 	}
 	var rows [][]tgate.Button
-	if b.d.Billing != nil {
-		if o, _, ok := b.d.Billing.TrialOffer(ctx, chat); ok {
+	if shop := b.d.Backend.Shop(); shop != nil {
+		if o, _, ok := shop.TrialOffer(ctx, chat); ok {
 			rows = append(rows, []tgate.Button{{Text: fmt.Sprintf(w.trialPaid, w.cheapest(billing.Offer{Stars: o.Stars, Rub: o.Rub})), CallbackData: "tr"}})
-		} else if b.d.Billing.TrialOpen(ctx, chat) {
+		} else if shop.TrialOpen(ctx, chat) {
 			rows = append(rows, []tgate.Button{{Text: w.trial, CallbackData: "tr"}})
 		}
 	}
@@ -252,7 +251,7 @@ func (b *Bot) pageButton(ctx context.Context, cfg Config, w *words, label string
 
 func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id int64, notice string, now time.Time) (string, *tgate.Keyboard) {
 	back := []tgate.Button{{Text: w.back, CallbackData: "m"}}
-	binding, _ := b.d.Settings.On(ctx, settings.DeviceBinding)
+	binding := b.d.Backend.DeviceBinding(ctx)
 	head := "<b>" + w.devicesTitle + "</b> · " + html.EscapeString(b.vars(ctx, w, u, now)["devices"])
 	if !binding {
 		limit := "∞"
@@ -261,18 +260,16 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		}
 		return head + "\n\n" + html.EscapeString(fmt.Sprintf(w.devicesOff, limit)), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
-	devs, err := b.d.Store.Q.ListBoundDevices(ctx, u.ID)
+	devs, err := b.d.Backend.Devices(ctx, u.ID)
 	if err != nil {
 		devs = nil
 	}
-	used := map[int64]int64{}
-	if rows, err := b.d.Store.Q.ListBoundDeviceTraffic(ctx, u.ID); err == nil {
-		for _, r := range rows {
-			used[r.DeviceID] = r.Up + r.Down
-		}
+	used, err := b.d.Backend.DeviceTraffic(ctx, u.ID)
+	if err != nil {
+		used = map[int64]int64{}
 	}
 	name := func(d db.BoundDevice) string { return deviceName(w, d) }
-	rules, err := b.d.Devices.UnbindState(ctx, u.ID)
+	rules, err := b.d.Backend.UnbindState(ctx, u.ID)
 	if err != nil {
 		b.d.Log.Warn("telegram: unbind rules", "err", err)
 	}
@@ -376,18 +373,18 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 		if !ok {
 			return "m", ""
 		}
-		devs, _ := b.d.Store.Q.ListBoundDevices(ctx, u.ID)
+		devs, _ := b.d.Backend.Devices(ctx, u.ID)
 		for _, d := range devs {
 			if d.ID != id {
 				continue
 			}
-			err := b.d.Devices.Unbind(ctx, u.ID, id, true)
+			err := b.d.Backend.Unbind(ctx, u.ID, id)
 			switch {
 			case err == nil:
 				b.d.Log.Info("telegram: the subscriber unbound a device", "user", u.ID, "device", id)
 				return "d", fmt.Sprintf(w.unbound, deviceName(w, d))
 			case errors.Is(err, domain.ErrUnbindCooldown):
-				st, _ := b.d.Devices.UnbindState(ctx, u.ID)
+				st, _ := b.d.Backend.UnbindState(ctx, u.ID)
 				return "d", fmt.Sprintf(w.wait, b.when(w, st.Next))
 			case errors.Is(err, domain.ErrNotFound):
 				return "d", ""
@@ -400,9 +397,6 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 		}
 		return "d", ""
 	case "rn":
-		if b.d.Users == nil {
-			return "s", ""
-		}
 		return b.reissueAct(ctx, chat, id)
 	case "u", "xu":
 		// "xu" is the buy button of a traffic notice: that subscription's packages, not the
@@ -410,7 +404,7 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 		list, _, _ := b.subs(ctx, chat)
 		for _, s := range list {
 			if s.ID == id {
-				_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: id, TgID: chat})
+				_ = b.d.Backend.SetCurrent(ctx, chat, id)
 				if cmd == "xu" {
 					return "x", ""
 				}
@@ -426,7 +420,7 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 			if s.ID != id {
 				continue
 			}
-			if err := b.d.Store.Q.UnlinkTg(ctx, id); err != nil {
+			if err := b.d.Backend.Unlink(ctx, id); err != nil {
 				b.d.Log.Warn("telegram: remove a subscription", "user", id, "err", err)
 				return "s", ""
 			}
@@ -447,7 +441,7 @@ func (b *Bot) when(w *words, t time.Time) string {
 
 // vars are the {variables} of the admin's texts for one subscription.
 func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[string]string {
-	grants, err := domain.UserGrantsLeft(ctx, b.d.Store.Q, u.ID, now)
+	grants, err := b.d.Backend.GrantsLeft(ctx, u.ID, now)
 	if err != nil {
 		b.d.Log.Warn("telegram: traffic packages", "err", err)
 	}
@@ -486,7 +480,7 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 	if t, ok := domain.NextReset(u, now); ok {
 		v["reset"] = w.shortDate(t)
 	}
-	n, _ := b.d.Store.Q.CountBoundDevices(ctx, u.ID)
+	n, _ := b.d.Backend.DeviceCount(ctx, u.ID)
 	v["devices"] = strconv.FormatInt(n, 10)
 	switch {
 	case u.DeviceLimit.Valid && !domain.BindsDevices(u.DeviceMode):
@@ -503,7 +497,7 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 }
 
 func (b *Bot) brand(ctx context.Context) string {
-	if s, _ := b.d.Settings.String(ctx, settings.KeyBrand); s != "" {
+	if s := b.d.Backend.Brand(ctx); s != "" {
 		return s
 	}
 	return "VPN"
@@ -511,7 +505,7 @@ func (b *Bot) brand(ctx context.Context) string {
 
 // supportURL is the panel's support link when Telegram can open it.
 func (b *Bot) supportURL(ctx context.Context) string {
-	s, _ := b.d.Settings.String(ctx, settings.KeySupportURL)
+	s := b.d.Backend.SupportURL(ctx)
 	if tgate.SafeURL(s) {
 		return s
 	}
@@ -519,38 +513,19 @@ func (b *Bot) supportURL(ctx context.Context) string {
 }
 
 func (b *Bot) subURL(ctx context.Context, u db.User) string {
-	if base := b.d.SubBase(ctx); base != "" {
-		return base + "/" + u.SubToken
-	}
-	return ""
+	return b.d.Backend.SubURL(ctx, u)
 }
 
 // poolLines: one line per traffic pool with a limit — "WL: 30 GB of 100 GB + packages 50 GB".
 func (b *Bot) poolLines(ctx context.Context, w *words, userID int64) []string {
-	rows, err := b.d.Store.Q.ListUserPools(ctx, userID)
-	if err != nil || len(rows) == 0 {
-		return nil
-	}
-	pools, err := b.d.Store.Q.ListTrafficPools(ctx)
+	pools, err := b.d.Backend.Pools(ctx, userID, b.d.Now())
 	if err != nil {
 		return nil
-	}
-	grants, err := domain.UserGrantsLeft(ctx, b.d.Store.Q, userID, b.d.Now())
-	if err != nil {
-		return nil
-	}
-	names := map[int64]string{}
-	for _, p := range pools {
-		names[p.ID] = p.Name
 	}
 	var out []string
-	for _, r := range rows {
-		if !r.TrafficLimit.Valid {
-			continue
-		}
-		extra := grants.Pool(userID, r.PoolID)
-		line := names[r.PoolID] + ": " + fmt.Sprintf(w.trafficOf, w.bytes(r.UsedUp+r.UsedDown), w.withPackages(r.TrafficLimit.Int64, extra))
-		if domain.PoolExhausted(r, extra) {
+	for _, p := range pools {
+		line := p.Name + ": " + fmt.Sprintf(w.trafficOf, w.bytes(p.Used), w.withPackages(p.Limit, p.Extra))
+		if p.Exhausted {
 			line += " — " + w.poolOut
 		}
 		out = append(out, line)

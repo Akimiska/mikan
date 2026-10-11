@@ -231,9 +231,12 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		tunnel = p.Nodes.Tunnel
 	}
 	p.Gateway = tgate.New(tgate.Deps{Store: st, Settings: set, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing, Tunnel: tunnel})
-	p.Telegram = tgbot.New(tgbot.Deps{Store: st, Settings: set, Devices: deps.Devices, Users: deps.Users, SubBase: subBase, Log: o.Log, Now: o.Now, Billing: p.Billing,
+	// The bot's screens see the panel through a Backend: in process here, over the Panel
+	// API once they run as an addon.
+	backend := &tgbot.Local{Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
-		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }, Gateway: p.Gateway})
+		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
+	p.Telegram = tgbot.New(tgbot.Deps{Backend: backend, Gateway: p.Gateway, Log: o.Log, Now: o.Now})
 	p.Gateway.SetHandler(p.Telegram)
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
 	p.Billing.SetTelegram(p.Gateway)

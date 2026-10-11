@@ -51,10 +51,11 @@ func channelButtons(cfg Config, w *words, data string) [][]tgate.Button {
 
 // freeButton is the free plan's button, while the account may take it.
 func (b *Bot) freeButton(ctx context.Context, cfg Config, w *words, chat int64) (tgate.Button, bool) {
-	if b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if shop == nil {
 		return tgate.Button{}, false
 	}
-	if _, ok := b.d.Billing.FreeOffer(ctx, chat); !ok {
+	if _, ok := shop.FreeOffer(ctx, chat); !ok {
 		return tgate.Button{}, false
 	}
 	return tgate.Button{Text: pick(cfg.Texts.FreeButton, w.freeButton), CallbackData: "fp"}, true
@@ -64,10 +65,11 @@ func (b *Bot) freeButton(ctx context.Context, cfg Config, w *words, chat int64) 
 // channel does not see yet gets the channel's buttons, the check taking the plan again.
 func (b *Bot) takeFree(ctx context.Context, cfg Config, w *words, chat int64) (string, *tgate.Keyboard) {
 	home := &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.back, CallbackData: "m"}}}}
-	if b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if shop == nil {
 		return html.EscapeString(w.freeOff), home
 	}
-	u, err := b.d.Billing.FreePlan(ctx, chat)
+	u, err := shop.FreePlan(ctx, chat)
 	switch {
 	case errors.Is(err, billing.ErrFreeChannel):
 		return html.EscapeString(w.freeChannel), &tgate.Keyboard{InlineKeyboard: append(channelButtons(cfg, w, "fp"), home.InlineKeyboard...)}
@@ -82,7 +84,7 @@ func (b *Bot) takeFree(ctx context.Context, cfg Config, w *words, chat int64) (s
 		return html.EscapeString(w.freeFail), home
 	}
 	what := u.Name
-	if t, err := b.d.Store.Q.GetTariff(ctx, u.TariffID.Int64); err == nil {
+	if t, err := b.d.Backend.Tariff(ctx, u.TariffID.Int64); err == nil {
 		what = billing.Describe(t, t.DurationDays, cfg.Lang)
 	}
 	return fmt.Sprintf(html.EscapeString(w.freeDone), html.EscapeString(what)), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.trialOpen, CallbackData: "m"}}}}

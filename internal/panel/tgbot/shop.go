@@ -49,15 +49,17 @@ func providerOf(code string) (string, bool) {
 // addonName names adapters on the buttons in the bot's language.
 func (b *Bot) addonName(ctx context.Context) func(id string) string {
 	lang := b.lang(ctx)
-	return func(id string) string { return b.d.Billing.AddonName(ctx, id, lang) }
+	shop := b.d.Backend.Shop()
+	return func(id string) string { return shop.AddonName(ctx, id, lang) }
 }
 
 // offers lists what the chat can buy; nil without payments.
 func (b *Bot) offers(ctx context.Context) ([]billing.Offer, billing.Available) {
-	if b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if shop == nil {
 		return nil, billing.Available{}
 	}
-	o, av, err := b.d.Billing.Offers(ctx)
+	o, av, err := shop.Offers(ctx)
 	if err != nil {
 		b.d.Log.Warn("telegram: offers", "err", err)
 		return nil, av
@@ -67,7 +69,7 @@ func (b *Bot) offers(ctx context.Context) ([]billing.Offer, billing.Available) {
 
 // canBuyNew: people without a subscription may buy one here.
 func (b *Bot) canBuyNew(ctx context.Context) bool {
-	if b.d.Billing == nil || !b.d.Billing.Config(ctx).AllowNew {
+	if shop := b.d.Backend.Shop(); shop == nil || !shop.Config(ctx).AllowNew {
 		return false
 	}
 	o, _ := b.offers(ctx)
@@ -214,10 +216,11 @@ func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg
 	ref, code, _ := strings.Cut(arg, ":")
 	id, days := tariffArg(ref)
 	provider, ok := providerOf(code)
-	if !ok || b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if !ok || shop == nil {
 		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
-	p, err := b.d.Billing.Invoice(ctx, billing.InvoiceRequest{TgID: chat, UserID: userID, TariffID: id, TermDays: days, Provider: provider})
+	p, err := shop.Invoice(ctx, billing.InvoiceRequest{TgID: chat, UserID: userID, TariffID: id, TermDays: days, Provider: provider})
 	if err != nil {
 		return html.EscapeString(w.payError(err)), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
@@ -228,7 +231,7 @@ func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg
 	name := p.TariffName
 	if days != nil && p.TermDays.Valid {
 		// A tariff sold for several terms: the invoice says which one.
-		if t, err := b.d.Store.Q.GetTariff(ctx, id); err == nil {
+		if t, err := b.d.Backend.Tariff(ctx, id); err == nil {
 			name += " · " + billing.TermLabel(t, p.TermDays.Int64, b.lang(ctx))
 		}
 	}
@@ -274,7 +277,7 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 		text = fmt.Sprintf(w.paidRenew, html.EscapeString(u.Name), html.EscapeString(until))
 	}
 	chat := p.TgID
-	_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: chat})
+	_ = b.d.Backend.SetCurrent(ctx, chat, u.ID)
 	out.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
 		_, err := c.Send(ctx, chat, text, nil, false)
 		return err
@@ -317,13 +320,14 @@ func (b *Bot) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bo
 // for a priced one; a chat that had one (or is a customer) is told why not.
 func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *tgate.Keyboard) {
 	home := &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.back, CallbackData: "m"}}}}
-	if b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if shop == nil {
 		return html.EscapeString(w.trialOff), home
 	}
-	if b.d.Billing.Config(ctx).TrialPaid() {
+	if shop.Config(ctx).TrialPaid() {
 		return b.trialPay(ctx, w, chat)
 	}
-	u, err := b.d.Billing.Trial(ctx, chat)
+	u, err := shop.Trial(ctx, chat)
 	switch {
 	case errors.Is(err, billing.ErrTrialUsed):
 		return html.EscapeString(w.trialUsed), home
@@ -334,7 +338,7 @@ func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *tga
 		return html.EscapeString(w.trialFail), home
 	}
 	what := u.Name
-	if t, err := b.d.Store.Q.GetTariff(ctx, u.TariffID.Int64); err == nil {
+	if t, err := b.d.Backend.Tariff(ctx, u.TariffID.Int64); err == nil {
 		what = billing.Describe(t, t.DurationDays, b.lang(ctx))
 	}
 	return fmt.Sprintf(html.EscapeString(w.trialDone), html.EscapeString(what)), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.trialOpen, CallbackData: "m"}}}}
@@ -343,13 +347,14 @@ func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *tga
 // trialPay shows what the priced trial gives and a button for each way to pay for it.
 func (b *Bot) trialPay(ctx context.Context, w *words, chat int64) (string, *tgate.Keyboard) {
 	home := []tgate.Button{{Text: w.back, CallbackData: "m"}}
-	o, av, ok := b.d.Billing.TrialOffer(ctx, chat)
+	shop := b.d.Backend.Shop()
+	o, av, ok := shop.TrialOffer(ctx, chat)
 	if !ok {
 		why := w.trialOff
-		if _, on := b.d.Billing.TrialTariff(ctx); on {
+		if _, on := shop.TrialTariff(ctx); on {
 			// Offered, but not to this account, or for a price nobody takes now.
 			why = w.payUnavailable
-			if !b.d.Billing.TrialAllowed(ctx, chat) {
+			if !shop.TrialAllowed(ctx, chat) {
 				why = w.trialUsed
 			}
 		}
@@ -364,10 +369,11 @@ func (b *Bot) trialPay(ctx context.Context, w *words, chat int64) (string, *tgat
 func (b *Bot) trialInvoice(ctx context.Context, w *words, chat int64, code string) (string, *tgate.Keyboard) {
 	back := []tgate.Button{{Text: w.back, CallbackData: "tr"}}
 	provider, ok := providerOf(code)
-	if !ok || b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if !ok || shop == nil {
 		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
-	p, err := b.d.Billing.TrialInvoice(ctx, chat, provider)
+	p, err := shop.TrialInvoice(ctx, chat, provider)
 	switch {
 	case errors.Is(err, billing.ErrTrialUsed):
 		return html.EscapeString(w.trialUsed), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.back, CallbackData: "m"}}}}

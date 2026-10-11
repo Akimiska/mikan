@@ -335,8 +335,8 @@ func setup(t *testing.T, with ...func(e *env, d *wiring)) *env {
 		f(e, &w)
 	}
 	e.gate = tgate.New(tgate.Deps{Store: w.Store, Settings: w.Settings, API: srv.URL, Log: w.Log, Now: w.Now, Limits: w.Limits, Billing: w.Billing})
-	e.bot = New(Deps{Store: w.Store, Settings: w.Settings, Devices: w.Devices, Users: w.Users, SubBase: w.SubBase, MiniApp: w.MiniApp,
-		Log: w.Log, Now: w.Now, Billing: w.Billing, Gateway: e.gate})
+	e.bot = New(Deps{Backend: &Local{Store: w.Store, Settings: w.Settings, Binder: w.Devices, Users: w.Users, Billing: w.Billing, Gateway: e.gate,
+		SubBase: w.SubBase, MiniApp: w.MiniApp, Now: w.Now}, Gateway: e.gate, Log: w.Log, Now: w.Now})
 	e.gate.SetHandler(e.bot)
 	go e.gate.Run(ctx)
 	go e.bot.Run(ctx)
@@ -706,7 +706,7 @@ func TestConfigSavedBefore(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	b := New(Deps{Store: st, Settings: settings.New(st.Q), Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	b := New(Deps{Backend: &Local{Store: st, Settings: settings.New(st.Q)}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if c := b.Config(ctx); !c.QuietNight || len(c.Buttons) != 6 {
 		t.Fatalf("a fresh bot: %+v", c)
 	}

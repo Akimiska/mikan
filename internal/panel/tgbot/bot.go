@@ -2,7 +2,6 @@ package tgbot
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"html"
@@ -15,11 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mikan/internal/panel/billing"
-	"mikan/internal/panel/domain"
-	"mikan/internal/panel/panelimport"
-	"mikan/internal/panel/settings"
-	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
@@ -31,23 +25,13 @@ const KeyConfig = tgate.KeyConfig
 // MaxLinks: subscriptions one Telegram account may hold.
 const MaxLinks = tgate.MaxLinks
 
-// Deps is what the bot needs from the panel.
+// Deps is what the bot needs: the panel's data and the Telegram gateway (backend.go).
 type Deps struct {
-	Store    *store.Store
-	Settings *settings.Settings
-	Devices  *domain.Devices
-	// Users reissues a subscription's link at its subscriber's request.
-	Users *domain.Users
-	// SubBase is https://host:port/<sub path>, "" while the panel has no public address.
-	SubBase func(ctx context.Context) string
-	// MiniApp: the panel's certificate is one Telegram apps accept (not self-signed).
-	MiniApp func() bool
+	Backend Backend
+	// Gateway sends what the bot says; the updates come from it through tgate.Handler.
+	Gateway Transport
 	Log     *slog.Logger
 	Now     func() time.Time
-	// Billing sells tariffs in the menu; nil: no shop.
-	Billing *billing.Service
-	// Gateway gets the updates to the bot and sends what it says.
-	Gateway *tgate.Gateway
 }
 
 // Bot is the bot's screens: the menu, the shop, the notices, the broadcasts. It gets its
@@ -105,21 +89,7 @@ func (b *Bot) Run(ctx context.Context) {
 }
 
 // Config is the admin's setup, or the default one in the panel's default language.
-func (b *Bot) Config(ctx context.Context) Config { return b.config(ctx, b.d.Settings) }
-
-func (b *Bot) config(ctx context.Context, set *settings.Settings) Config {
-	lang, _ := set.Lang(ctx)
-	// A setup saved before an option existed gets that option's default. A saved menu
-	// replaces the default one whole.
-	def := Default(lang)
-	def.Buttons = nil
-	cfg, ok, err := settings.GetOver(ctx, set, KeyConfig, def)
-	if err != nil || !ok {
-		return Default(lang)
-	}
-	_ = cfg.Validate()
-	return cfg
-}
+func (b *Bot) Config(ctx context.Context) Config { return b.d.Backend.Config(ctx) }
 
 // Started implements tgate.Handler: the command menu and the Mini App's button beside the
 // input field, in the bot's language.
@@ -193,10 +163,10 @@ func (b *Bot) sendMenu(ctx context.Context, c *tgate.Client, chat int64, notice 
 	if err != nil {
 		return err
 	}
-	if old, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil && old.MenuMsgID != 0 && old.MenuMsgID != sent.MessageID {
+	if old, err := b.d.Backend.Chat(ctx, chat); err == nil && old.MenuMsgID != 0 && old.MenuMsgID != sent.MessageID {
 		_ = c.Delete(ctx, chat, old.MenuMsgID)
 	}
-	_ = b.d.Store.Q.SetTgMenu(ctx, db.SetTgMenuParams{MenuMsgID: sent.MessageID, TgID: chat})
+	_ = b.d.Backend.SetMenu(ctx, chat, sent.MessageID)
 	return nil
 }
 
@@ -224,13 +194,13 @@ func (b *Bot) onPress(ctx context.Context, c *tgate.Client, out *tgate.Outbox, q
 			// Too old to edit, or gone: a new menu instead.
 			return b.sendMenu(ctx, c, chat, notice)
 		}
-		_ = b.d.Store.Q.SetTgMenu(ctx, db.SetTgMenuParams{MenuMsgID: msg, TgID: chat})
+		_ = b.d.Backend.SetMenu(ctx, chat, msg)
 		return nil
 	})
 }
 
 func (b *Bot) linkByCode(ctx context.Context, out *tgate.Outbox, w *words, chat int64, name, code string) string {
-	id, err := b.d.Gateway.UserOfCode(ctx, code)
+	id, err := b.d.Backend.UserOfCode(ctx, code)
 	switch {
 	case errors.Is(err, tgate.ErrLinkExpired):
 		return w.linkExpired
@@ -253,7 +223,7 @@ func (b *Bot) linkByAddress(ctx context.Context, out *tgate.Outbox, w *words, ch
 		if u.Path != "" && u.Path != "/" {
 			seen = true
 		}
-		if id, ok := b.userOfAddress(ctx, u.Path); ok {
+		if id, ok := b.d.Backend.UserOfAddress(ctx, u.Path); ok {
 			return b.link(ctx, out, w, chat, name, id)
 		}
 	}
@@ -263,70 +233,23 @@ func (b *Bot) linkByAddress(ctx context.Context, out *tgate.Outbox, w *words, ch
 	return ""
 }
 
-// userOfAddress finds whose subscription an address path leads to. The own token is a
-// path segment of 24 letters and digits. An old panel's address is taken as the panel
-// serves it (panelimport.LinkToken), and only while old links are set up; the signature
-// of a token Marzban or PasarGuard signed is checked as there (Verifier.User).
-func (b *Bot) userOfAddress(ctx context.Context, urlPath string) (int64, bool) {
-	for seg := range strings.SplitSeq(urlPath, "/") {
-		if !nativeToken.MatchString(seg) {
-			continue
-		}
-		if u, err := b.d.Store.Q.GetUserBySubToken(ctx, seg); err == nil {
-			return u.ID, true
-		}
-	}
-	if b.d.Settings == nil {
-		return 0, false
-	}
-	legacyPath, verifier, err := panelimport.LoadLegacy(ctx, b.d.Settings)
-	if err != nil {
-		return 0, false
-	}
-	token, _, ok := panelimport.LinkToken(urlPath, legacyPath)
-	if !ok {
-		return 0, false
-	}
-	if u, ok := verifier.User(ctx, b.d.Store.Q, token); ok {
-		return u.ID, true
-	}
-	return 0, false
-}
-
 // link ties a subscription to the chat's account. A subscription has one owner. The link
 // to it is no proof of being the owner (it gets forwarded, shown on screenshots), so one
 // that is already linked is moved only with its owner's yes, asked in the owner's own chat;
 // an owner who cannot be asked, as they blocked the bot, is not in the way.
 func (b *Bot) link(ctx context.Context, out *tgate.Outbox, w *words, chat int64, name string, userID int64) string {
-	u, err := b.d.Store.Q.GetUser(ctx, userID)
-	if err != nil {
-		return w.linkInvalid
-	}
-	prev, err := b.d.Store.Q.GetTgLink(ctx, userID)
+	res, err := b.d.Backend.Link(ctx, chat, userID)
 	switch {
-	case err == nil && prev.TgID == chat:
-		_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: userID, TgID: chat})
-		return fmt.Sprintf(w.alreadyLinked, u.Name)
-	case err != nil && !errors.Is(err, sql.ErrNoRows):
+	case err != nil:
 		return w.linkInvalid
-	}
-	if n, err := b.d.Store.Q.CountTgLinksOf(ctx, chat); err != nil || n >= MaxLinks {
+	case res.Status == LinkAlready:
+		return fmt.Sprintf(w.alreadyLinked, res.User.Name)
+	case res.Status == LinkLimit:
 		return fmt.Sprintf(w.linkLimit, MaxLinks)
+	case res.Status == LinkTaken:
+		return b.askOwner(ctx, out, w, chat, name, res.User, res.Owner)
 	}
-	if prev.TgID != 0 && b.reachable(ctx, prev.TgID) {
-		return b.askOwner(ctx, out, w, chat, name, u, prev.TgID)
-	}
-	if err := b.d.Store.Q.LinkTg(ctx, db.LinkTgParams{UserID: userID, TgID: chat, CreatedAt: b.d.Now().Unix()}); err != nil {
-		return w.linkInvalid
-	}
-	_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: userID, TgID: chat})
-	return fmt.Sprintf(w.linked, u.Name)
-}
-
-// reachable: the account has a chat with the bot and has not blocked it, so it can be asked.
-func (b *Bot) reachable(ctx context.Context, tgID int64) bool {
-	ch, err := b.d.Store.Q.GetTgChat(ctx, tgID)
-	return err == nil && ch.Blocked == 0
+	return fmt.Sprintf(w.linked, res.User.Name)
 }
 
 // who is how a Telegram account is named to the owner of a subscription it asks for.
@@ -420,8 +343,8 @@ func (b *Bot) onTransfer(ctx context.Context, c *tgate.Client, out *tgate.Outbox
 	now := b.d.Now()
 	b.mu.Lock()
 	t, open := b.transfers[userID]
-	link, err := b.d.Store.Q.GetTgLink(ctx, userID)
-	if !open || t.to != to || now.After(t.until) || err != nil || link.TgID != chat {
+	owner, err := b.d.Backend.Owner(ctx, userID)
+	if !open || t.to != to || now.After(t.until) || err != nil || owner != chat {
 		b.mu.Unlock()
 		say(w.transferStale)
 		return
@@ -438,7 +361,7 @@ func (b *Bot) onTransfer(ctx context.Context, c *tgate.Client, out *tgate.Outbox
 		}
 	}
 	b.mu.Unlock()
-	u, err := b.d.Store.Q.GetUser(ctx, userID)
+	u, err := b.d.Backend.User(ctx, userID)
 	if err != nil {
 		say(w.transferStale)
 		return
@@ -448,30 +371,30 @@ func (b *Bot) onTransfer(ctx context.Context, c *tgate.Client, out *tgate.Outbox
 		tell(to, w.transferDeniedNew)
 		return
 	}
-	if n, err := b.d.Store.Q.CountTgLinksOf(ctx, to); err != nil || n >= MaxLinks {
+	switch err := b.d.Backend.Transfer(ctx, userID, to); {
+	case errors.Is(err, ErrLinkLimit):
 		say(w.transferStale)
 		tell(to, fmt.Sprintf(w.linkLimit, MaxLinks))
 		return
-	}
-	if err := b.d.Store.Q.LinkTg(ctx, db.LinkTgParams{UserID: userID, TgID: to, CreatedAt: now.Unix()}); err != nil {
+	case err != nil:
 		say(w.transferStale)
 		return
 	}
-	_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: userID, TgID: to})
 	say(fmt.Sprintf(w.transferDone, u.Name))
 	b.freshMenu(out, to, fmt.Sprintf(w.transferNotice, u.Name))
 }
 
 // subs are the chat's subscriptions and the one it shows.
 func (b *Bot) subs(ctx context.Context, chat int64) ([]db.User, db.User, bool) {
-	list, err := b.d.Store.Q.ListTgLinksOf(ctx, chat)
+	acc, err := b.d.Backend.Context(ctx, chat)
+	list := acc.Links
 	if err != nil || len(list) == 0 {
 		return nil, db.User{}, false
 	}
 	cur := list[0]
-	if ch, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil {
+	if acc.HasChat {
 		for _, u := range list {
-			if u.ID == ch.Current {
+			if u.ID == acc.Chat.Current {
 				cur = u
 			}
 		}
@@ -480,11 +403,10 @@ func (b *Bot) subs(ctx context.Context, chat int64) ([]db.User, db.User, bool) {
 }
 
 func (b *Bot) miniAppURL(ctx context.Context, cfg Config) string {
-	base := b.d.SubBase(ctx)
-	if !cfg.MiniApp || base == "" || b.d.MiniApp == nil || !b.d.MiniApp() {
+	if !cfg.MiniApp {
 		return ""
 	}
-	return base + "/tg"
+	return b.d.Backend.MiniAppURL(ctx)
 }
 
 func labelOf(cfg Config, action, def string) string {

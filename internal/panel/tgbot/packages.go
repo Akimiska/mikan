@@ -19,10 +19,11 @@ import (
 
 // packageOffers lists the packages the subscription can buy; nil without payments.
 func (b *Bot) packageOffers(ctx context.Context, userID int64) []billing.PackageOffer {
-	if b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if shop == nil {
 		return nil
 	}
-	o, _, err := b.d.Billing.PackageOffers(ctx, userID)
+	o, _, err := shop.PackageOffers(ctx, userID)
 	if err != nil {
 		b.d.Log.Warn("telegram: package offers", "err", err)
 		return nil
@@ -61,10 +62,11 @@ func (b *Bot) trafficShop(ctx context.Context, w *words, chat int64, u db.User, 
 // trafficPackage: one package and a button per way to pay.
 func (b *Bot) trafficPackage(ctx context.Context, w *words, userID, id int64) (string, *tgate.Keyboard) {
 	back := []tgate.Button{{Text: w.back, CallbackData: "x"}}
-	if b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if shop == nil {
 		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
-	offers, av, err := b.d.Billing.PackageOffers(ctx, userID)
+	offers, av, err := shop.PackageOffers(ctx, userID)
 	if err != nil {
 		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
@@ -124,10 +126,11 @@ func (b *Bot) trafficInvoice(ctx context.Context, w *words, chat, userID int64, 
 	idStr, code, _ := strings.Cut(arg, ":")
 	id, _ := strconv.ParseInt(idStr, 10, 64)
 	provider, ok := providerOf(code)
-	if !ok || b.d.Billing == nil {
+	shop := b.d.Backend.Shop()
+	if !ok || shop == nil {
 		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
-	p, err := b.d.Billing.PackageInvoice(ctx, billing.PackageRequest{TgID: chat, UserID: userID, PackageID: id, Provider: provider})
+	p, err := shop.PackageInvoice(ctx, billing.PackageRequest{TgID: chat, UserID: userID, PackageID: id, Provider: provider})
 	if err != nil {
 		msg := w.payError(err)
 		if msg == w.notForSale {

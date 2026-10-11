@@ -85,7 +85,7 @@ func (b *Bot) claimNotice(ctx context.Context, userID int64, n notice, now time.
 	// Taken before the database is asked, which is asked without the lock held.
 	b.notices[key] = &noticeState{queued: true}
 	b.noticeMu.Unlock()
-	sent, err := b.d.Store.Q.TgNoticeSent(ctx, db.TgNoticeSentParams{UserID: userID, Kind: n.kind, Period: n.period})
+	sent, err := b.d.Backend.NoticeSent(ctx, userID, n.kind, n.period)
 	if err != nil || sent {
 		if err != nil {
 			b.d.Log.Error("telegram: notices", "err", err)
@@ -124,7 +124,7 @@ func (b *Bot) noticeDone(userID int64, n notice, key string, err error) {
 	// Written without the lock held; the notice stays queued meanwhile, so it is not claimed.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, werr := b.d.Store.Q.AddTgNotice(ctx, db.AddTgNoticeParams{UserID: userID, Kind: n.kind, Period: n.period, SentAt: b.d.Now().Unix()})
+	werr := b.d.Backend.NoticeDelivered(ctx, userID, n.kind, n.period, b.d.Now())
 	b.noticeMu.Lock()
 	defer b.noticeMu.Unlock()
 	st := b.notices[key]
@@ -169,7 +169,7 @@ func (b *Bot) Notify(ctx context.Context) {
 	now := b.d.Now()
 	silent := cfg.QuietNight && night(now)
 	b.forgetNotices(now)
-	subs, err := b.d.Store.Q.ListNoticeSubscriptions(ctx, now.Unix())
+	subs, err := b.d.Backend.Notices(ctx, now)
 	if err != nil {
 		b.d.Log.Error("telegram: notices", "err", err)
 		return
@@ -206,7 +206,7 @@ func (b *Bot) Notify(ctx context.Context) {
 		}
 	}
 	if now.Hour() == 3 && now.Minute() < 10 {
-		if err := b.d.Store.Q.PruneTgNotices(ctx, now.Add(-90*24*time.Hour).Unix()); err != nil {
+		if err := b.d.Backend.PruneNotices(ctx, now.Add(-90*24*time.Hour)); err != nil {
 			b.d.Log.Error("telegram: prune notices", "err", err)
 		}
 	}
@@ -228,7 +228,7 @@ func (b *Bot) Broadcast(ctx context.Context, text string) (int, error) {
 		b.mu.Unlock()
 		return 0, ErrBusy
 	}
-	targets, err := b.d.Store.Q.BroadcastTargets(ctx)
+	targets, err := b.d.Backend.BroadcastTargets(ctx)
 	if err != nil {
 		b.mu.Unlock()
 		return 0, err

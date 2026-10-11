@@ -69,10 +69,10 @@ func (b *Bot) in(w *words, t time.Time) string {
 // reissueState is what the subscriber may do about the link now; ok is false when the bot
 // cannot reissue at all.
 func (b *Bot) reissueState(ctx context.Context, u db.User) (domain.ReissueState, bool) {
-	if b.d.Users == nil {
-		return domain.ReissueState{}, false
+	st, err := b.d.Backend.ReissueState(ctx, u.ID)
+	if errors.Is(err, ErrUnavailable) {
+		return st, false
 	}
-	st, err := b.d.Users.ReissueState(ctx, u.ID)
 	if err != nil {
 		b.d.Log.Warn("telegram: reissue rules", "err", err)
 		return st, false
@@ -122,20 +122,22 @@ func (b *Bot) reissueAct(ctx context.Context, chat, id int64) (screen, notice st
 		if s.ID != id {
 			continue
 		}
-		_, err := b.d.Users.ReissueByOwner(ctx, id, "bot")
+		err := b.d.Backend.Reissue(ctx, id)
 		switch {
 		case err == nil:
 			// The connect screen shows the current subscription: the one just reissued.
-			_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: id, TgID: chat})
+			_ = b.d.Backend.SetCurrent(ctx, chat, id)
 			b.d.Log.Info("telegram: the subscriber reissued their link", "user", id)
 			return "c", lw.done
 		case errors.Is(err, domain.ErrReissueCooldown):
-			st, _ := b.d.Users.ReissueState(ctx, id)
+			st, _ := b.d.Backend.ReissueState(ctx, id)
 			return "s", fmt.Sprintf(lw.wait, b.in(w, st.Next))
 		case errors.Is(err, domain.ErrReissueOff):
 			return "s", lw.off
 		case errors.Is(err, domain.ErrNotFound):
 			return "m", ""
+		case errors.Is(err, ErrUnavailable):
+			return "s", ""
 		default:
 			b.d.Log.Warn("telegram: link not reissued", "user", id, "err", err)
 			return "s", lw.failed

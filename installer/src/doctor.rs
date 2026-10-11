@@ -17,7 +17,7 @@ use crate::docker::{self, Service};
 use crate::ops::Install;
 use crate::setup::mark;
 use crate::system::{self, Level, Proto};
-use crate::{DIR, acme, clock, hello, net};
+use crate::{DIR, acme, addon, clock, hello, net};
 
 /// How long one request to the outside may take.
 const NET_TIMEOUT: Duration = Duration::from_secs(8);
@@ -466,7 +466,29 @@ fn firewall(install: &Install) -> Vec<Item> {
         .and_then(|d| d.read("node-state.json", 16 << 20).ok().flatten())
         .and_then(|raw| serde_json::from_slice(&raw).ok());
     let panel = (!install.node).then(|| install.env.get("PANEL_PORT").and_then(|p| p.parse().ok())).flatten();
-    firewall_items(&status, &wants(install.node_port(), panel, state.as_ref()))
+    let mut items = firewall_items(&status, &wants(install.node_port(), panel, state.as_ref()));
+    if !install.node {
+        let bridge = addon::load_state().map(|s| s.panel_api_bridge).unwrap_or_default();
+        items.extend(addons_item(&status, &bridge));
+    }
+    items
+}
+
+/// Custom addons call the panel at the bridge's gateway, which ufw's default `deny incoming`
+/// drops unless a rule lets the bridge in; the host makes the rule with the addon. None while
+/// no custom addon runs (panel_api_bridge is empty then).
+fn addons_item(status: &str, panel_api_bridge: &str) -> Option<Item> {
+    const LABEL: &str = "Firewall (ufw)";
+    let door = addon::door(panel_api_bridge)?;
+    Some(if addon::parse_doors(status).contains(&door) {
+        Item::ok(LABEL, format!("custom addons reach the panel at {panel_api_bridge}"))
+    } else {
+        Item::warn(
+            LABEL,
+            format!("no rule lets the custom addons' network reach the panel at {panel_api_bridge}: they cannot call it"),
+            addon::allow_command(door),
+        )
+    })
 }
 
 /// Seconds this server's clock is ahead of the other side's, from its Date header.
@@ -715,6 +737,19 @@ Anywhere                   ALLOW       10.0.0.0/8
         assert_eq!((items[1].level, items[1].fix.as_deref()), (Level::Warn, Some("ufw allow 2053")));
         assert_eq!(items[0].lines()[1], "    fix: ufw allow 31235/tcp");
         assert_eq!(firewall_items("Status: active\n", &[]).len(), 1);
+    }
+
+    #[test]
+    fn custom_addons_need_the_bridge_open() {
+        let rule = "172.18.0.1 21355/tcp on mikan-addons ALLOW       Anywhere";
+        let open = format!("Status: active\n\n22/tcp ALLOW Anywhere\n{rule}\n");
+        assert!(addons_item(&open, "").is_none(), "no custom addon runs");
+        assert_eq!(addons_item(&open, "172.18.0.1:21355").unwrap().level, Level::Ok);
+        let closed = addons_item("Status: active\n\n22/tcp ALLOW Anywhere\n", "172.18.0.1:21355").unwrap();
+        assert_eq!(closed.level, Level::Warn);
+        assert_eq!(closed.fix.as_deref(), Some("ufw allow in on mikan-addons to 172.18.0.1 port 21355 proto tcp comment mikan-addons"));
+        // the rule of the gateway before it moved does not open the new one
+        assert_eq!(addons_item(&open, "172.19.0.1:21355").unwrap().level, Level::Warn);
     }
 
     #[test]

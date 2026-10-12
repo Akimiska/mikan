@@ -1,27 +1,25 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpCircle, Bot, Info, ListFilter, MoreHorizontal, PackagePlus, RefreshCw, Send, ShieldAlert, ShieldBan, Trash2, Wallet, type LucideIcon } from "lucide-react";
+import { ArrowUpCircle, Bot, Info, ListFilter, PackagePlus, RefreshCw, Send, ShieldAlert, ShieldBan, Trash2, Wallet } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk, useFilters, usePaymentSettings, useTelegram, useTorrent } from "../../api/hooks";
-import { localized } from "../../components/manifest-form";
+import { qk, useAddons, useBotSlot, useFilters, usePaymentSettings, useTelegram, useTorrent } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { StaleNotice } from "../../components/query";
 import { useToast } from "../../components/toast";
 import { Button, EmptyState, Pill, Skeleton } from "../../components/ui";
-import { t, tMaybe } from "../../i18n";
+import { t, tMaybe, type Key } from "../../i18n";
+import { localized } from "../../lib/localized";
 import type { AddonKind } from "../search";
-import { useRemoveAddon, useInstallPayment, useRequested, useUpdateMarket } from "./market-dialogs";
-import { KIND_ICONS, entryOf, hasPages, marketName, pagesPath, useBotSlot, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
-import { useAddons } from "./payment-addons";
+import { Group, Item, Row, RowMenu, type State } from "./addon-row";
 import { StorageRow } from "./addons-storage";
+import { useInstallMarket, useInstallPayment, useRemoveAddon, useRequested } from "./market-dialogs";
+import { KIND_ICONS, botStatus, entryOf, hasPages, installMarket, installPayment, marketName, marketReady, pagesPath, queuedIds, type BotPhase, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
 
 type Payments = Schemas["AddonsView"];
 type Payment = Schemas["AddonView"];
 type Telegram = Schemas["TelegramView"];
-type Tone = "ok" | "warn" | "bad" | "off";
-type State = { tone: Tone; text: string };
 
 /** What a row asks the page for: its dialogs and drawers, and the catalog. */
 export type AddonActions = {
@@ -35,15 +33,6 @@ export type AddonActions = {
 /** The official bot addon of the catalog. */
 const OFFICIAL_BOT = "telegram";
 
-/** Every addon the server has a request for: its actions wait until the server is done. */
-function queuedIds(m: Market | undefined, p: Payments | undefined): Set<string> {
-  const ids = new Set<string>();
-  for (const r of p?.queue ?? []) ids.add(r.id);
-  if (p?.pending) ids.add(p.pending.id);
-  if (m?.pending) ids.add(m.pending.id);
-  return ids;
-}
-
 /**
  * What is installed, one row each, in groups: the bot, the payment methods, pages and other
  * addons, the tools built into the panel. Each list shows as soon as its data is in.
@@ -55,7 +44,7 @@ export function InstalledTab({ market, pay, act }: { market: UseQueryResult<Mark
   const slot = useBotSlot().data?.addon;
   const selling = usePaymentSettings().data?.enabled;
   const queued = queuedIds(m, p);
-  const ready = !!m && m.supported && m.host_ready;
+  const ready = marketReady(m);
   const bots = m?.installed.filter((a) => a.kind === "bot" || a.id === slot) ?? [];
   const others = m?.installed.filter((a) => !bots.includes(a)) ?? [];
   const loading = (!m && !market.isError) || (!p && !pay.isError);
@@ -109,7 +98,7 @@ export function InstalledTab({ market, pay, act }: { market: UseQueryResult<Mark
       <Group title={t("addons.groupBuiltin")} i={4}>
         <TorrentRow />
         <FiltersRow />
-        <StorageRow Row={Row} />
+        <StorageRow />
       </Group>
     </>
   );
@@ -125,16 +114,6 @@ function LoadError({ text, error, onRetry, retrying }: { text: string; error: un
         {t("common.retry")}
       </Button>
     </div>
-  );
-}
-
-/** A group of rows under its label, in one bordered list. */
-function Group({ title, i, children }: { title: string; i: number; children: ReactNode }) {
-  return (
-    <section className="reveal" style={{ "--i": i } as React.CSSProperties} aria-label={title}>
-      <h2 className="addon-group-title">{title}</h2>
-      <ul className="addon-list card glass">{children}</ul>
-    </section>
   );
 }
 
@@ -165,83 +144,6 @@ function GroupSkeleton() {
   );
 }
 
-/**
- * One addon: its icon, its name with its marks and a line of what it is, its state, and its
- * actions. On a phone the state and the actions go under the text.
- */
-function Row({
-  icon: Icon,
-  name,
-  marks,
-  sub,
-  error,
-  state,
-  actions,
-  menu,
-}: {
-  icon: LucideIcon;
-  name: string;
-  marks?: ReactNode;
-  sub: ReactNode;
-  error?: ReactNode;
-  state: State | undefined;
-  actions?: ReactNode;
-  menu?: ReactNode;
-}) {
-  return (
-    <li className="addon-row">
-      <span className="addon-row-icon" aria-hidden>
-        <Icon size={20} />
-      </span>
-      <div className="min-w-0">
-        <div className="addon-row-title">
-          <span className="min-w-0 break-words">{name}</span>
-          {marks}
-        </div>
-        <div className="addon-row-sub">{sub}</div>
-        {error ? (
-          <div className="addon-row-err" role="alert">
-            {error}
-          </div>
-        ) : null}
-      </div>
-      <div className="addon-row-side">
-        <span className="addon-row-state">{state ? <Pill tone={state.tone}>{state.text}</Pill> : <Skeleton style={{ height: 24, width: 88, borderRadius: 999 }} />}</span>
-        <span className="addon-row-actions">
-          {actions}
-          {/* Rows without a menu keep its place, so the buttons stand in one column. */}
-          {menu ?? <span className="w-9 shrink-0" aria-hidden />}
-        </span>
-      </div>
-    </li>
-  );
-}
-
-function RowMenu({ name, children }: { name: string; children: ReactNode }) {
-  return (
-    <Menu.Root>
-      <Menu.Trigger asChild>
-        <button type="button" className="icon-btn shrink-0" aria-label={t("addons.moreActions", { name })}>
-          <MoreHorizontal size={18} aria-hidden />
-        </button>
-      </Menu.Trigger>
-      <Menu.Portal>
-        <Menu.Content className="menu glass-strong" align="end" sideOffset={6}>
-          {children}
-        </Menu.Content>
-      </Menu.Portal>
-    </Menu.Root>
-  );
-}
-
-function Item({ icon: Icon, onSelect, danger, children }: { icon: LucideIcon; onSelect: () => void; danger?: boolean; children: ReactNode }) {
-  return (
-    <Menu.Item className={danger ? "menu-item danger" : "menu-item"} onSelect={onSelect}>
-      <Icon size={16} aria-hidden /> {children}
-    </Menu.Item>
-  );
-}
-
 /** Where an addon of the marketplace comes from: checked by mikan or the admin's own. */
 function SourceMark({ a }: { a: MarketInstalled }) {
   return a.source === "official" ? (
@@ -254,37 +156,69 @@ function SourceMark({ a }: { a: MarketInstalled }) {
 }
 
 /** A new build in the catalog: one to take, or one that waits for more permissions. */
-function UpdateMark({ entry }: { entry: MarketEntry | undefined }) {
+function UpdateMark({ entry }: { entry: { wider?: boolean; update?: boolean } | undefined }) {
   if (entry?.wider) return <Pill tone="warn">{t("market.widerReady")}</Pill>;
   if (entry?.update) return <Pill tone="off">{t("market.updateReady")}</Pill>;
   return null;
 }
 
+/** The marks by an addon's name: its source (marketplace addons), a new build, a request waiting. */
+function AddonMarks({ a, entry, queued }: { a?: MarketInstalled; entry: { wider?: boolean; update?: boolean } | undefined; queued: boolean }) {
+  return (
+    <>
+      {a ? <SourceMark a={a} /> : null}
+      <UpdateMark entry={entry} />
+      {queued ? <Pill tone="off">{t("addons.queued")}</Pill> : null}
+    </>
+  );
+}
+
+/** The button to the addon's own pages in the admin panel; none while it has none. */
+function OpenPagesLink({ a, name }: { a: MarketInstalled; name: string }) {
+  if (!hasPages(a)) return null;
+  return (
+    <Link to={pagesPath(a.id)} className="btn btn-glass btn-sm" aria-label={t("market.openPagesLabel", { name })}>
+      {t("market.openPages")}
+    </Link>
+  );
+}
+
+/** Removing an addon of either kind, after the admin has seen what it means; note adds to it. */
+function RemoveConfirm({ kind, id, name, note, open, onOpenChange }: { kind: "payment" | "market"; id: string; name: string; note?: string; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const drop = useRemoveAddon(kind, () => onOpenChange(false));
+  return (
+    <Confirm
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t("addons.removeTitle", { name })}
+      text={[t(kind === "payment" ? "addons.removeText" : "market.removeText"), note].filter(Boolean).join(" ")}
+      confirm={t("addons.remove")}
+      danger
+      loading={drop.isPending}
+      onConfirm={() => drop.mutate(id)}
+    />
+  );
+}
+
+const BOT_WORDS: Record<BotPhase, Key> = { off: "addons.botOff", ok: "addons.botAnswers", reconnecting: "telegram.reconnecting", starting: "telegram.starting", down: "addons.botDown" };
+
 /** Who answers in the bot: the addon holding it, while the panel's bot is set up and runs. */
-function botState(a: MarketInstalled, holds: boolean, slot: string | undefined, tg: Telegram | undefined): State | undefined {
-  if (a.status === "failed") return { tone: "bad", text: t("addons.stateFailed") };
+function botState(holds: boolean, slot: string | undefined, tg: Telegram | undefined): State | undefined {
   if (slot === undefined) return undefined;
   if (!holds) return slot ? { tone: "off", text: t("addons.botElsewhere") } : { tone: "warn", text: t("addons.botWaiting") };
   if (!tg) return undefined;
   if (!tg.token_set) return { tone: "warn", text: t("addons.botNoToken") };
-  if (!tg.enabled) return { tone: "warn", text: t("addons.botOff") };
-  if (tg.running && !tg.error) return { tone: "ok", text: t("addons.botAnswers") };
-  if (tg.running) return { tone: "warn", text: t("telegram.reconnecting") };
-  if (!tg.error) return { tone: "off", text: t("telegram.starting") };
-  return { tone: "bad", text: t("addons.botDown") };
+  return botStatus(tg, BOT_WORDS);
 }
 
 function BotRow({ a, m, tg, slot, ready, queued, act }: { a: MarketInstalled; m: Market; tg: Telegram | undefined; slot: string | undefined; ready: boolean; queued: boolean; act: AddonActions }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [give, setGive] = useState(false);
-  const [remove, setRemove] = useState(false);
   const name = marketName(a.id, m);
   const entry = entryOf(a.id, m);
   const holds = !!slot && slot === a.id;
   const canHold = slot !== undefined && !holds && a.granted.includes("bot");
-  const update = useUpdateMarket();
-  const drop = useRemoveAddon("market", () => setRemove(false));
   const hand = useMutation({
     mutationFn: () => unwrap(api.PUT("/api/v1/telegram/bot-addon", { body: { addon: a.id } })),
     onSuccess: (v) => {
@@ -302,22 +236,16 @@ function BotRow({ a, m, tg, slot, ready, queued, act }: { a: MarketInstalled; m:
   ]
     .filter(Boolean)
     .join(" · ");
-  const error = a.status === "failed" ? a.error || t("market.failed") : holds && tg?.enabled && tg.error ? (tMaybe(`telegram.err.${tg.error}`) ?? tg.error) : null;
+  const error = holds && tg?.enabled && tg.error ? (tMaybe(`telegram.err.${tg.error}`) ?? tg.error) : null;
   const holder = slot ? marketName(slot, m) : "";
   return (
     <Row
       icon={Bot}
       name={name}
-      marks={
-        <>
-          <SourceMark a={a} />
-          <UpdateMark entry={entry} />
-          {queued ? <Pill tone="off">{t("addons.queued")}</Pill> : null}
-        </>
-      }
+      marks={<AddonMarks a={a} entry={entry} queued={queued} />}
       sub={sub}
       error={error}
-      state={botState(a, holds, slot, tg)}
+      state={botState(holds, slot, tg)}
       actions={
         <>
           {canHold ? (
@@ -325,11 +253,7 @@ function BotRow({ a, m, tg, slot, ready, queued, act }: { a: MarketInstalled; m:
               <Send size={16} aria-hidden /> {t("addons.giveBot")}
             </Button>
           ) : null}
-          {hasPages(a) ? (
-            <Link to={pagesPath(a.id)} className="btn btn-glass btn-sm" aria-label={t("market.openPagesLabel", { name })}>
-              {t("market.openPages")}
-            </Link>
-          ) : null}
+          <OpenPagesLink a={a} name={name} />
           {holds || a.id === OFFICIAL_BOT ? (
             <Link to="/addons/telegram" search={{ tab: "connect" }} className="btn btn-glass btn-sm">
               {t("addons.configure")}
@@ -339,7 +263,7 @@ function BotRow({ a, m, tg, slot, ready, queued, act }: { a: MarketInstalled; m:
       }
       menu={
         <>
-          <MarketMenu a={a} name={name} entry={entry} ready={ready} queued={queued} act={act} updating={update.isPending} onUpdate={() => entry && update.mutate(entry)} onRemove={() => setRemove(true)}>
+          <MarketMenu a={a} name={name} entry={entry} ready={ready} queued={queued} act={act} removeNote={holds ? t("addons.removeBotText") : undefined}>
             {canHold ? (
               <Item icon={Send} onSelect={() => setGive(true)}>
                 {t("addons.giveBot")}
@@ -355,23 +279,13 @@ function BotRow({ a, m, tg, slot, ready, queued, act }: { a: MarketInstalled; m:
             loading={hand.isPending}
             onConfirm={() => hand.mutate()}
           />
-          <Confirm
-            open={remove}
-            onOpenChange={setRemove}
-            title={t("addons.removeTitle", { name })}
-            text={holds ? `${t("market.removeText")} ${t("addons.removeBotText")}` : t("market.removeText")}
-            confirm={t("market.remove")}
-            danger
-            loading={drop.isPending}
-            onConfirm={() => drop.mutate(a.id)}
-          />
         </>
       }
     />
   );
 }
 
-/** The menu of an addon of the marketplace; a bot adds its own items. */
+/** The menu of an addon of the marketplace with its removal; a bot adds its own items and words. */
 function MarketMenu({
   a,
   name,
@@ -379,9 +293,7 @@ function MarketMenu({
   ready,
   queued,
   act,
-  updating,
-  onUpdate,
-  onRemove,
+  removeNote,
   children,
 }: {
   a: MarketInstalled;
@@ -390,94 +302,66 @@ function MarketMenu({
   ready: boolean;
   queued: boolean;
   act: AddonActions;
-  updating: boolean;
-  onUpdate: () => void;
-  onRemove: () => void;
+  removeNote?: string;
   children?: ReactNode;
 }) {
-  const busy = queued || !ready || updating;
+  const [remove, setRemove] = useState(false);
+  const update = useInstallMarket();
+  const busy = queued || !ready || update.isPending;
   return (
-    <RowMenu name={name}>
-      {!busy && entry?.wider ? (
-        <Item icon={ShieldAlert} onSelect={() => act.approve(entry)}>
-          {t("addons.reviewPerms")}
-        </Item>
-      ) : !busy && entry?.update ? (
-        <Item icon={ArrowUpCircle} onSelect={onUpdate}>
-          {t("market.update")}
-        </Item>
-      ) : null}
-      {!busy && a.source !== "official" ? (
-        <Item icon={RefreshCw} onSelect={() => act.own(a)}>
-          {t("addons.newBuild")}
-        </Item>
-      ) : null}
-      {queued ? null : children}
-      <Item icon={Info} onSelect={() => act.details(a)}>
-        {t("addons.details")}
-      </Item>
-      {busy ? null : (
-        <>
-          <Menu.Separator className="menu-sep" />
-          <Item icon={Trash2} danger onSelect={onRemove}>
-            {t("market.remove")}
+    <>
+      <RowMenu name={name}>
+        {!busy && entry?.wider ? (
+          <Item icon={ShieldAlert} onSelect={() => act.approve(entry)}>
+            {t("addons.reviewPerms")}
           </Item>
-        </>
-      )}
-    </RowMenu>
+        ) : !busy && entry?.update ? (
+          <Item icon={ArrowUpCircle} onSelect={() => update.mutate(entry)}>
+            {t("addons.update")}
+          </Item>
+        ) : null}
+        {!busy && a.source !== "official" ? (
+          <Item icon={RefreshCw} onSelect={() => act.own(a)}>
+            {t("addons.newBuild")}
+          </Item>
+        ) : null}
+        {queued ? null : children}
+        <Item icon={Info} onSelect={() => act.details(a)}>
+          {t("addons.details")}
+        </Item>
+        {busy ? null : (
+          <>
+            <Menu.Separator className="menu-sep" />
+            <Item icon={Trash2} danger onSelect={() => setRemove(true)}>
+              {t("addons.remove")}
+            </Item>
+          </>
+        )}
+      </RowMenu>
+      <RemoveConfirm kind="market" id={a.id} name={name} note={removeNote} open={remove} onOpenChange={setRemove} />
+    </>
   );
 }
 
 function MarketRow({ a, m, ready, queued, act }: { a: MarketInstalled; m: Market; ready: boolean; queued: boolean; act: AddonActions }) {
-  const [remove, setRemove] = useState(false);
   const name = marketName(a.id, m);
   const entry = entryOf(a.id, m);
-  const update = useUpdateMarket();
-  const drop = useRemoveAddon("market", () => setRemove(false));
   const sub = [t(`market.kind.${a.kind}`), a.version ? `v${a.version}` : t(`market.source.${a.source}`), `${t("market.factPerms")}: ${t("market.permsN", { n: a.granted.length })}`].join(" · ");
   return (
     <Row
       icon={KIND_ICONS[a.kind]}
       name={name}
-      marks={
-        <>
-          <SourceMark a={a} />
-          <UpdateMark entry={entry} />
-          {queued ? <Pill tone="off">{t("addons.queued")}</Pill> : null}
-        </>
-      }
+      marks={<AddonMarks a={a} entry={entry} queued={queued} />}
       sub={sub}
-      error={a.status === "failed" ? a.error || t("market.failed") : null}
-      state={a.status === "failed" ? { tone: "bad", text: t("addons.stateFailed") } : { tone: "ok", text: t("market.running") }}
-      actions={
-        hasPages(a) ? (
-          <Link to={pagesPath(a.id)} className="btn btn-glass btn-sm" aria-label={t("market.openPagesLabel", { name })}>
-            {t("market.openPages")}
-          </Link>
-        ) : null
-      }
-      menu={
-        <>
-          <MarketMenu a={a} name={name} entry={entry} ready={ready} queued={queued} act={act} updating={update.isPending} onUpdate={() => entry && update.mutate(entry)} onRemove={() => setRemove(true)} />
-          <Confirm
-            open={remove}
-            onOpenChange={setRemove}
-            title={t("addons.removeTitle", { name })}
-            text={t("market.removeText")}
-            confirm={t("market.remove")}
-            danger
-            loading={drop.isPending}
-            onConfirm={() => drop.mutate(a.id)}
-          />
-        </>
-      }
+      state={{ tone: "ok", text: t("market.running") }}
+      actions={<OpenPagesLink a={a} name={name} />}
+      menu={<MarketMenu a={a} name={name} entry={entry} ready={ready} queued={queued} act={act} />}
     />
   );
 }
 
 /** A payment method takes payments when it is on, set up, running and selling is on. */
 function paymentState(a: Payment, selling: boolean | undefined): State {
-  if (a.status === "failed") return { tone: "bad", text: t("addons.stateFailed") };
   if (a.info_error) return { tone: "bad", text: t("addons.payUnreachable") };
   if (!a.enabled) return { tone: "off", text: t("addons.off") };
   if (!a.available) return { tone: "warn", text: t("addons.payNotSet") };
@@ -490,24 +374,18 @@ function PaymentRow({ a, p, selling, queued, act }: { a: Payment; p: Payments; s
   const name = localized(a.name, a.id);
   const entry = p.catalog.find((e) => e.id === a.id);
   const install = useInstallPayment();
-  const drop = useRemoveAddon("payment", () => setRemove(false));
   const text = localized(entry?.description, "") || t("addons.kindPayment");
   const busy = queued || !p.supported;
   return (
     <Row
       icon={Wallet}
       name={name}
-      marks={
-        <>
-          {entry?.update ? <Pill tone="off">{t("market.updateReady")}</Pill> : null}
-          {queued ? <Pill tone="off">{t("addons.queued")}</Pill> : null}
-        </>
-      }
+      marks={<AddonMarks entry={entry} queued={queued} />}
       sub={`${text} · v${a.version}`}
-      error={a.status === "failed" ? a.error || t("addons.failed") : a.info_error ? t("addons.unreachable") : null}
+      error={a.info_error ? t("addons.unreachable") : null}
       state={paymentState(a, selling)}
       actions={
-        <Button size="sm" onClick={() => act.payment(a.id)} disabled={a.status === "failed"}>
+        <Button size="sm" onClick={() => act.payment(a.id)}>
           {t("addons.configure")}
         </Button>
       }
@@ -531,16 +409,7 @@ function PaymentRow({ a, p, selling, queued, act }: { a: Payment; p: Payments; s
               </>
             )}
           </RowMenu>
-          <Confirm
-            open={remove}
-            onOpenChange={setRemove}
-            title={t("addons.removeTitle", { name })}
-            text={t("addons.removeText")}
-            confirm={t("addons.remove")}
-            danger
-            loading={drop.isPending}
-            onConfirm={() => drop.mutate(a.id)}
-          />
+          <RemoveConfirm kind="payment" id={a.id} name={name} open={remove} onOpenChange={setRemove} />
         </>
       }
     />
@@ -611,8 +480,8 @@ function Updates({ m, p, ready, queued }: { m: Market | undefined; p: Payments |
       let failed = 0;
       for (const u of items) {
         try {
-          if (u.payment) await unwrap(api.POST("/api/v1/addons/{id}/install", { params: { path: { id: u.id } } }));
-          else if (u.entry) await unwrap(api.POST("/api/v1/marketplace/{id}/install", { params: { path: { id: u.id } }, body: { permissions: u.entry.permissions } }));
+          if (u.payment) await installPayment(u.id);
+          else if (u.entry) await installMarket(u.entry);
         } catch {
           failed++;
         }
@@ -645,4 +514,3 @@ function Updates({ m, p, ready, queued }: { m: Market | undefined; p: Payments |
     </div>
   );
 }
-

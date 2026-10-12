@@ -3,20 +3,20 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { HandCoins, History as HistoryIcon, ListChecks, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
-import { qk, usePaymentSettings, useTariffs, useTelegram } from "../../api/hooks";
+import { qk, useAddons, usePaymentSettings, useTariffs, useTelegram } from "../../api/hooks";
 import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { QueryBoundary } from "../../components/query";
 import { Switch, SwitchRow } from "../../components/switch";
 import { FormActions } from "../../components/layout";
 import { Tabs } from "../../components/tabs";
-import { Button, EmptyState, Field, PageHeader, Pill, Skeleton, Spinner } from "../../components/ui";
+import { Button, EmptyState, Field, PageHeader, Pill, Skeleton } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
 import { useDraft } from "../../lib/draft";
 import { dateShort, days, money, num, time } from "../../lib/format";
 import { isKopecks, isStars, rubKopecks } from "../../lib/validate";
 import { PAYMENT_TABS, type PaymentsSearch } from "../search";
-import { addonName, useAddons } from "./payment-addons";
+import { addonName } from "./payment-addons";
 import { PromoSection } from "./promocodes";
 
 type Settings = Schemas["PaymentSettingsView"];
@@ -59,7 +59,6 @@ export function PaymentsPage() {
   return (
     <>
       <PageHeader title={t("payments.title")} sub={t("payments.subtitle")} actions={<SellingSwitch s={s} />} />
-      {s?.moving.length ? <MovingBanner ids={s.moving} /> : null}
       {s && !s.enabled ? (
         <div className="banner warn" role="status">
           <TriangleAlert size={16} className="shrink-0" aria-hidden />
@@ -124,18 +123,6 @@ function SellingSwitch({ s }: { s?: Settings }) {
     <div className="flex h-10 items-center gap-3 rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--surface)] px-3">
       <span className="text-[13px] font-medium">{t("settings.sales")}</span>
       <Switch checked={s.enabled} label={t("settings.sales")} disabled={save.isPending} onChange={(on) => save.mutate(on)} />
-    </div>
-  );
-}
-
-/** The built-in YooKassa and CryptoBot moved to the marketplace: their adapters install after the update. */
-function MovingBanner({ ids }: { ids: string[] }) {
-  const addons = useAddons().data;
-  const names = ids.map((id) => addonName(id, addons)).join(", ");
-  return (
-    <div className="banner info" role="status">
-      <Spinner />
-      <span className="min-w-0 flex-1">{t("payments.moving", { names })}</span>
     </div>
   );
 }

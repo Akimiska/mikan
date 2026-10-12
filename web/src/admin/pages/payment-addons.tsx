@@ -1,31 +1,23 @@
-import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Copy } from "lucide-react";
 import { useId, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Drawer, DrawerFooter } from "../../components/overlay";
 import { useToast } from "../../components/toast";
-import { ManifestForm, localized, manifestInitial, manifestPayload, type ManifestValues } from "../../components/manifest-form";
+import { ManifestForm, manifestInitial, manifestPayload, type ManifestValues } from "../../components/manifest-form";
 import { SwitchRow } from "../../components/switch";
 import { t } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { useDraft } from "../../lib/draft";
 import { fieldErrors } from "../../lib/fields";
+import { localized } from "../../lib/localized";
 
 // The payment methods of the marketplace (protocol 1 adapters): their data, their names and
 // the settings of one, opened from its row on the addons page.
 
 type Addons = Schemas["AddonsView"];
 type Addon = Schemas["AddonView"];
-
-/** The payment methods: followed every few seconds while the server works on a request. */
-export function useAddons() {
-  return useQuery({
-    queryKey: qk.addons,
-    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/addons", { signal })),
-    refetchInterval: (q) => (q.state.data?.pending ? 3_000 : false),
-  });
-}
 
 /** "addon:yookassa" as the admin knows it: the adapter's own name. */
 export function addonName(id: string, data: Addons | undefined): string {
@@ -40,7 +32,7 @@ const KNOWN_NAMES: Record<string, string> = { yookassa: "ЮKassa", cryptobot: "C
 export function PaymentDrawer({ a, onClose }: { a: Addon | null; onClose: () => void }) {
   const formId = useId();
   const name = a ? localized(a.name, a.id) : "";
-  const blocked = !a || a.status === "failed" || !!a.info_error;
+  const blocked = !a || !!a.info_error;
   return (
     <Drawer
       open={!!a}
@@ -104,13 +96,6 @@ function PaymentForm({ a, id }: { a: Addon; id: string }) {
       },
     );
   };
-  if (a.status === "failed") {
-    return (
-      <div className="banner err" role="alert">
-        <span className="min-w-0 flex-1 break-words">{a.error || t("addons.failed")}</span>
-      </div>
-    );
-  }
   if (a.info_error) {
     return (
       <div className="banner warn" role="status">

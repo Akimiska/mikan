@@ -85,9 +85,9 @@ export function createAppRouter(queryClient: QueryClient) {
     },
     validateSearch: (s: Record<string, unknown>): SettingsSearch => {
       // Sections that moved keep their old links working: the Clash rules are a field of the
-      // simple routing now, the torrent blocker is in Security.
+      // simple routing now, the torrent blocker is an addon (its link goes on in beforeLoad).
       if (s.tab === "rules" || (s.tab === "routing" && s.part === "rules")) return { tab: "routing", part: "simple" };
-      if (s.tab === "routing" && s.part === "torrent") return { tab: "routing", part: "torrent" }; // to the addons, below
+      if (s.tab === "routing" && s.part === "torrent") return { tab: "routing", part: "torrent" };
       const tab = SETTINGS_TABS.includes(s.tab as SettingsSearch["tab"]) ? (s.tab as SettingsSearch["tab"]) : "general";
       // The routing has no parts in the list beside it, but its view is in the URL.
       if (tab === "routing") return { tab, part: s.part === "simple" || s.part === "yaml" ? s.part : undefined };
@@ -118,7 +118,7 @@ export function createAppRouter(queryClient: QueryClient) {
   const torrent = createRoute({
     getParentRoute: () => app,
     path: "/addons/torrent",
-    component: page(() => import("./pages/addons"), "TorrentPage"),
+    component: page(() => import("./pages/torrent-page"), "TorrentPage"),
   });
   const filters = createRoute({
     getParentRoute: () => app,

@@ -59,7 +59,7 @@ const USUAL: Partial<Record<BlockType, Key>> = {
   support: "sub.support",
 };
 
-export function useSubPage() {
+function useSubPage() {
   return useQuery({ queryKey: qk.subPage, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/sub-page", { signal })) });
 }
 

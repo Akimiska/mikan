@@ -1,24 +1,24 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import { ExternalLink, Search, Store, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { errorText } from "../../api/client";
-import { localized } from "../../components/manifest-form";
+import { errorText, type Schemas } from "../../api/client";
+import type { useAddons } from "../../api/hooks";
 import { Button, EmptyState, ErrorState, Pill, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { num } from "../../lib/format";
+import { localized } from "../../lib/localized";
 import { safeHref } from "../../lib/url";
 import { ADDON_KINDS, type AddonKind } from "../search";
 import type { AddonActions } from "./addons-installed";
-import { useInstallPayment, useUpdateMarket, permLabel } from "./market-dialogs";
-import { KIND_ICONS, actsAsAdmin, sortPermissions, type Market, type MarketEntry } from "./market-common";
-import type { useAddons } from "./payment-addons";
+import { useInstallMarket, useInstallPayment, permLabel } from "./market-dialogs";
+import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, type Kind, type Market, type MarketEntry } from "./market-common";
 
-type Kind = "bot" | "payment" | "ui" | "generic";
+type ItemKind = Kind | "payment";
 
 /** One entry of either catalog, as a card shows it. */
 type Item = {
   id: string;
-  kind: Kind;
+  kind: ItemKind;
   name: string;
   text: string;
   version: string;
@@ -29,10 +29,14 @@ type Item = {
   market?: MarketEntry;
 };
 
-const KIND_ORDER: Kind[] = ["bot", "payment", "ui", "generic"];
+const KIND_ORDER: ItemKind[] = ["bot", "payment", "ui", "generic"];
 
-function kindLabel(k: Kind): string {
+function kindLabel(k: ItemKind): string {
   return k === "payment" ? t("addons.kindPayment") : t(`market.kind.${k}`);
+}
+
+function toItem(e: Schemas["AddonCatalogEntry"] | MarketEntry, kind: ItemKind, market?: MarketEntry): Item {
+  return { id: e.id, kind, name: localized(e.name, e.id), text: localized(e.description, ""), version: e.version, homepage: e.homepage, installed: e.installed, update: e.update, market };
 }
 
 /**
@@ -86,10 +90,8 @@ export function CatalogTab({
     void pay.refetch();
     void market.refetch();
   };
-  const items: Item[] = [
-    ...(p?.catalog ?? []).map((e) => ({ id: e.id, kind: "payment" as const, name: localized(e.name, e.id), text: localized(e.description, ""), version: e.version, homepage: e.homepage, installed: e.installed, update: e.update })),
-    ...(m?.catalog ?? []).map((e) => ({ id: e.id, kind: e.kind, name: localized(e.name, e.id), text: localized(e.description, ""), version: e.version, homepage: e.homepage, installed: e.installed, update: e.update, market: e })),
-  ].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name));
+  const queued = queuedIds(m, p);
+  const items: Item[] = [...(p?.catalog ?? []).map((e) => toItem(e, "payment")), ...(m?.catalog ?? []).map((e) => toItem(e, e.kind, e))].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name));
   const needle = q.trim().toLowerCase();
   const found = needle ? items.filter((i) => [i.name, i.text, i.id, kindLabel(i.kind)].some((s) => s.toLowerCase().includes(needle))) : items;
   const shown = kind ? found.filter((i) => i.kind === kind) : found;
@@ -149,7 +151,7 @@ export function CatalogTab({
       ) : (
         <ul className="addon-catalog" aria-label={t("addons.tabs.catalog")}>
           {shown.map((i, n) => (
-            <CatalogCard key={`${i.kind === "payment" ? "p" : "m"}-${i.id}`} item={i} index={n} m={m} p={p} act={act} />
+            <CatalogCard key={`${i.kind === "payment" ? "p" : "m"}-${i.id}`} item={i} index={n} m={m} p={p} queued={queued.has(i.id)} act={act} />
           ))}
         </ul>
       )}
@@ -177,15 +179,13 @@ function CatalogSkeleton() {
   );
 }
 
-function CatalogCard({ item: i, index, m, p, act }: { item: Item; index: number; m: Market | undefined; p: ReturnType<typeof useAddons>["data"]; act: AddonActions }) {
+function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index: number; m: Market | undefined; p: ReturnType<typeof useAddons>["data"]; queued: boolean; act: AddonActions }) {
   const install = useInstallPayment();
-  const update = useUpdateMarket();
+  const update = useInstallMarket();
   const Icon = i.kind === "payment" ? Wallet : KIND_ICONS[i.kind];
   const href = safeHref(i.homepage);
   const e = i.market;
-  // The server takes one request per addon at a time; either list shows the whole queue.
-  const queued = !!p?.queue?.some((r) => r.id === i.id) || p?.pending?.id === i.id || m?.pending?.id === i.id;
-  const blocked = i.kind === "payment" ? !p?.supported : !(m && m.supported && m.host_ready);
+  const blocked = i.kind === "payment" ? !p?.supported : !marketReady(m);
   const busy = install.isPending || update.isPending;
   const act1 = () => {
     if (!e) install.mutate(i.id);

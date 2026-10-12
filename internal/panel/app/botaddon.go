@@ -17,7 +17,9 @@ import (
 // addon's. A panel whose bot is on and that no addon answers for installs that addon from
 // the signed catalog by itself, with the permissions the catalog gives it, and hands it the
 // bot once it runs. The admin may hand the bot to another addon (PUT
-// /api/v1/telegram/bot-addon); then this leaves it alone.
+// /api/v1/telegram/bot-addon); then this leaves it alone. Once the admin removes the bot
+// addon it stays removed (panelapi.AutoBotKey) until they turn the bot on again or install
+// a bot from the catalog.
 
 // OfficialBot is the id of the official bot addon in the catalog.
 const OfficialBot = "telegram"
@@ -46,6 +48,9 @@ func (b *botAddon) check(ctx context.Context) {
 	on, _, err := settings.Get[bool](ctx, p.Settings, tgate.KeyEnabled)
 	if err != nil || !on || p.AddonsAPI.Slot(ctx) != "" {
 		return
+	}
+	if auto, ok, err := settings.Get[bool](ctx, p.Settings, panelapi.AutoBotKey); err != nil || ok && !auto {
+		return // the admin removed the bot addon: theirs to bring back
 	}
 	st, err := p.Addons.State()
 	if err != nil || st.HostVersion == "" {

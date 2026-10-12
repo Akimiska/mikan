@@ -41,7 +41,8 @@ export function InstalledTab({ market, pay, act }: { market: UseQueryResult<Mark
   const m = market.data;
   const p = pay.data;
   const tg = useTelegram().data;
-  const slot = useBotSlot().data?.addon;
+  const slotView = useBotSlot().data;
+  const slot = slotView?.addon;
   const selling = usePaymentSettings().data?.enabled;
   const queued = queuedIds(m, p);
   const ready = marketReady(m);
@@ -64,6 +65,7 @@ export function InstalledTab({ market, pay, act }: { market: UseQueryResult<Mark
       {market.isError && !m ? <LoadError text={t("addons.loadMarketFailed")} error={market.error} onRetry={() => void market.refetch()} retrying={market.isFetching} /> : null}
       {pay.isError && !p ? <LoadError text={t("addons.loadPaymentsFailed")} error={pay.error} onRetry={() => void pay.refetch()} retrying={pay.isFetching} /> : null}
       <Updates m={m} p={p} ready={ready} queued={queued} />
+      {tg?.enabled && slotView && !slotView.addon && !slotView.auto ? <NoBotBanner m={m} ready={ready} queued={queued} act={act} /> : null}
       {loading ? <GroupSkeleton /> : null}
       {empty ? (
         <section className="card glass reveal">
@@ -101,6 +103,37 @@ export function InstalledTab({ market, pay, act }: { market: UseQueryResult<Mark
         <StorageRow />
       </Group>
     </>
+  );
+}
+
+/**
+ * The bot is on but the admin removed the addon that answered in it, so nobody does: the
+ * panel will not put the official one back by itself. The two ways out, side by side.
+ */
+function NoBotBanner({ m, ready, queued, act }: { m: Market | undefined; ready: boolean; queued: Set<string>; act: AddonActions }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const entry = m ? entryOf(OFFICIAL_BOT, m) : undefined;
+  const off = useMutation({
+    mutationFn: () => unwrap(api.PATCH("/api/v1/telegram", { body: { enabled: false } })),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.telegram, v);
+      toast.ok(t("addons.botTurnedOff"));
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  return (
+    <div className="banner warn flex-wrap" role="status">
+      <span className="min-w-[min(100%,240px)] flex-1">{t("addons.botOrphan")}</span>
+      {entry && !entry.installed ? (
+        <Button size="sm" variant="primary" disabled={!ready || queued.has(OFFICIAL_BOT)} onClick={() => act.approve(entry)}>
+          {t("addons.botOrphanInstall")}
+        </Button>
+      ) : null}
+      <Button size="sm" loading={off.isPending} onClick={() => off.mutate()}>
+        {t("addons.botTurnOff")}
+      </Button>
+    </div>
   );
 }
 
@@ -263,7 +296,7 @@ function BotRow({ a, m, tg, slot, ready, queued, act }: { a: MarketInstalled; m:
       }
       menu={
         <>
-          <MarketMenu a={a} name={name} entry={entry} ready={ready} queued={queued} act={act} removeNote={holds ? t("addons.removeBotText") : undefined}>
+          <MarketMenu a={a} name={name} entry={entry} ready={ready} queued={queued} act={act} removeNote={holds || !slot ? t("addons.removeBotText") : undefined}>
             {canHold ? (
               <Item icon={Send} onSelect={() => setGive(true)}>
                 {t("addons.giveBot")}

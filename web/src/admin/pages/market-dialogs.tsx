@@ -16,13 +16,17 @@ import { ADDON_ID_RE, PERMISSIONS, actsAsAdmin, installMarket, installPayment, s
 // the permissions the admin approved; an addon of the admin's own (an image by its digest, a
 // process on the server) is code mikan has not seen, and says so everywhere.
 
-/** The server's queue is one for both kinds of addons: a request of either shows in both. */
+/**
+ * The server's queue is one for both kinds of addons: a request of either shows in both. Who
+ * holds the bot may change with it (a bot removed or installed).
+ */
 export function useRequested() {
   const qc = useQueryClient();
   const toast = useToast();
   return () => {
     void qc.invalidateQueries({ queryKey: qk.addons });
     void qc.invalidateQueries({ queryKey: qk.marketplace });
+    void qc.invalidateQueries({ queryKey: qk.botSlot });
     toast.ok(t("addons.requested"));
   };
 }

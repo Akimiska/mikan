@@ -184,7 +184,7 @@ export function useAddons() {
   return useQuery({
     queryKey: qk.addons,
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/addons", { signal })),
-    refetchInterval: (q) => (q.state.data?.pending ? 3_000 : false),
+    refetchInterval: (q) => (q.state.data?.queue?.length ? 3_000 : false),
   });
 }
 
@@ -193,7 +193,7 @@ export function useMarketplace() {
   return useQuery({
     queryKey: qk.marketplace,
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/marketplace", { signal })),
-    refetchInterval: (q) => (q.state.data?.pending ? 3_000 : false),
+    refetchInterval: (q) => (q.state.data?.queue?.length ? 3_000 : false),
   });
 }
 

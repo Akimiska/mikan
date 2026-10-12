@@ -9,7 +9,7 @@ import { ADDON_TABS, type AddonsSearch } from "../search";
 import { CatalogTab } from "./addons-catalog";
 import { InstalledTab, type AddonActions } from "./addons-installed";
 import { ApproveDialog, MarketDetails, OwnDrawer } from "./market-dialogs";
-import { marketName, marketReady, queuedIds, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
+import { marketName, marketReady, serverQueue, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
 import { PaymentDrawer, addonName } from "./payment-addons";
 
 type Addons = ReturnType<typeof useAddons>["data"];
@@ -92,8 +92,9 @@ function anyName(id: string, m: Market | undefined, p: Addons): string {
  * Both lists read one queue of the server, so each request shows once.
  */
 function ServerBanners({ m, p }: { m: Market | undefined; p: Addons }) {
-  const pending = m?.pending ?? p?.pending;
-  const queued = Math.max(queuedIds(m, p).size - 1, 0);
+  const queue = serverQueue(m, p);
+  const pending = queue[0];
+  const queued = Math.max(queue.length - 1, 0);
   const lastOf = m?.last ?? p?.last;
   const last = lastOf && !pending && lastOf.state === "failed" ? lastOf : null;
   return (

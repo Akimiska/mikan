@@ -11,6 +11,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/addons/panelapi"
+	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/release"
 )
@@ -198,6 +200,13 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 	if err := h.ask(ctx, addons.Request{Action: "install", ID: e.ID}, map[string]any{"version": e.Version, "digest": e.Digest, "permissions": e.Permissions}); err != nil {
 		return nil, err
 	}
+	// A bot from the catalog is the admin asking for a bot again: the official one is handed
+	// the bot once it runs, as on a fresh panel.
+	if e.Kind == addons.KindBot {
+		if err := settings.Set(ctx, h.d.Settings, panelapi.AutoBotKey, true); err != nil {
+			return nil, err
+		}
+	}
 	return h.listMarketplace(ctx, nil)
 }
 
@@ -296,7 +305,8 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *AddonIDInput) (*ma
 	if err != nil {
 		return nil, err
 	}
-	if a, ok := st.Adapters[in.ID]; !ok || a.KindOf() == addons.KindPayment {
+	a, ok := st.Adapters[in.ID]
+	if !ok || a.KindOf() == addons.KindPayment {
 		return nil, huma.Error404NotFound("addon_not_installed")
 	}
 	if queued(h.d.Addons, in.ID) {
@@ -311,7 +321,23 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *AddonIDInput) (*ma
 		if err := q.DeleteAddonData(ctx, in.ID); err != nil {
 			return err
 		}
-		return q.DeleteAddonCursor(ctx, in.ID)
+		if err := q.DeleteAddonCursor(ctx, in.ID); err != nil {
+			return err
+		}
+		if a.KindOf() != addons.KindBot {
+			return nil
+		}
+		// The admin took a bot away: the slot is free, and the panel does not put the
+		// official bot back by itself (app/botaddon.go) until the admin asks for a bot again.
+		set := settings.New(q)
+		if slot, _, err := settings.Get[string](ctx, set, panelapi.SlotKey); err != nil {
+			return err
+		} else if slot == in.ID {
+			if err := settings.Set(ctx, set, panelapi.SlotKey, ""); err != nil {
+				return err
+			}
+		}
+		return settings.Set(ctx, set, panelapi.AutoBotKey, false)
 	}); err != nil {
 		return nil, err
 	}

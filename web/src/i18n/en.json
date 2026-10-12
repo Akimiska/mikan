@@ -2916,7 +2916,7 @@
     "botWaiting": "waits for the bot",
     "botDown": "not answering",
     "subsN": "{n, plural, one {# subscription} other {# subscriptions}}",
-    "removeBotText": "The bot stops answering subscribers until another addon holds it.",
+    "removeBotText": "The bot stops answering subscribers, and their messages wait in the panel for up to 24 hours. The panel will not put it back by itself: install it from the catalog, or turn the bot off and on again in the Telegram settings.",
     "payAccepts": "takes payments",
     "payNotSet": "not set up",
     "paySalesOff": "selling off",
@@ -2952,7 +2952,11 @@
     "partialPayments": "The payment methods of the catalog did not load.",
     "partialMarket": "The bots and pages of the catalog did not load.",
     "permsBadge": "{n, plural, =0 {no permissions} one {# permission} other {# permissions}}",
-    "ownUnavailable": "An addon of your own installs once mikan on the server supports such addons"
+    "ownUnavailable": "An addon of your own installs once mikan on the server supports such addons",
+    "botOrphan": "The bot is on, but no addon answers subscribers: their messages wait in the panel for up to 24 hours.",
+    "botOrphanInstall": "Install the official bot",
+    "botTurnOff": "Turn the bot off",
+    "botTurnedOff": "The bot is off"
   },
   "packages": {
     "title": "Traffic packages",

@@ -33,6 +33,11 @@ import (
 // updates wait in the buffer for one (app/botaddon.go installs the official bot).
 const SlotKey = "addons.bot"
 
+// AutoBotKey is false once the admin removed the addon that answered in the bot: the panel
+// stops installing the official one by itself until the admin turns the bot on again or
+// installs a bot from the catalog. Absent means true.
+const AutoBotKey = "addons.bot_auto"
+
 const (
 	maxBuffered = 2000           // updates kept for an addon that does not read them
 	keepUpdates = 24 * time.Hour // as long as Telegram keeps them itself

@@ -19,6 +19,7 @@ import (
 
 type BotSlotView struct {
 	Addon string `json:"addon" doc:"Аддон, который отвечает в боте; пусто — никто, обновления ждут в буфере панели"`
+	Auto  bool   `json:"auto" doc:"Панель сама ставит официального бота, пока бот включён и никто не отвечает; false — админ удалил бота"`
 }
 
 type botSlotOutput struct{ Body BotSlotView }
@@ -38,7 +39,11 @@ func (h *handlers) registerBotSlot() {
 }
 
 func (h *handlers) getBotSlot(ctx context.Context, _ *struct{}) (*botSlotOutput, error) {
-	return &botSlotOutput{Body: BotSlotView{Addon: panelapi.BotHolder(ctx, h.d.Settings)}}, nil
+	auto, set, err := settings.Get[bool](ctx, h.d.Settings, panelapi.AutoBotKey)
+	if err != nil {
+		return nil, err
+	}
+	return &botSlotOutput{Body: BotSlotView{Addon: panelapi.BotHolder(ctx, h.d.Settings), Auto: auto || !set}}, nil
 }
 
 func (h *handlers) setBotSlot(ctx context.Context, in *botSlotInput) (*botSlotOutput, error) {
@@ -67,5 +72,5 @@ func (h *handlers) setBotSlot(ctx context.Context, in *botSlotInput) (*botSlotOu
 	if h.d.Gateway != nil {
 		h.d.Gateway.Reload()
 	}
-	return &botSlotOutput{Body: BotSlotView{Addon: id}}, nil
+	return h.getBotSlot(ctx, nil)
 }

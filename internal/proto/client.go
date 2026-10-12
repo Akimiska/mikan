@@ -247,8 +247,12 @@ func (c *clientBuilder) security() error {
 		case "tuic":
 			c.q.Set("allow_insecure", "1") // the TUIC link scheme has no pin
 		default:
-			c.q.Set("allowInsecure", "1")
-			c.q.Set("insecure", "1")
+			// Xray-core ≥26.1 УДАЛИЛО allowInsecure и мигрировало на pcs
+			// (pinnedPeerCertSha256). Клиенты на свежем Xray (Happ и др.) теперь
+			// падают с «The feature "allowInsecure" has been removed and migrated
+			// to "pinnedPeerCertSha256"», причём один битый vless-аутбаунд рушит
+			// ВЕСЬ конфиг — поэтому ошибка вылезала и при выборе hysteria. Шлём
+			// ТОЛЬКО pcs: он и есть замена insecure для закреплённого серта.
 			c.q.Set("pcs", c.in.PinSHA256)
 		}
 	}

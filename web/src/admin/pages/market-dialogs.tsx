@@ -3,13 +3,13 @@ import { ShieldAlert } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 import { ApiError, api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
-import { localized } from "../../components/manifest-form";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { Field, Pill, Segmented } from "../../components/ui";
 import { t } from "../../i18n";
 import { fieldErrors } from "../../lib/fields";
-import { PERMISSIONS, actsAsAdmin, sortPermissions, type Kind, type MarketEntry, type MarketInstalled } from "./market-common";
+import { localized } from "../../lib/localized";
+import { ADDON_ID_RE, PERMISSIONS, actsAsAdmin, installMarket, installPayment, sortPermissions, type Kind, type MarketEntry, type MarketInstalled } from "./market-common";
 
 // The dialogs of the protocol 2 addons, shared by both tabs of the addons page: approving
 // what an addon may do, its details, and an addon of the admin's own. Each one gets exactly
@@ -37,7 +37,7 @@ export function permLabel(p: string): string {
 }
 
 /** The permissions an addon asks for, each with what it lets the addon do; new ones marked. */
-export function PermissionList({ perms, fresh = [] }: { perms: string[]; fresh?: string[] }) {
+function PermissionList({ perms, fresh = [] }: { perms: string[]; fresh?: string[] }) {
   if (!perms.length) return <p className="mt-4 text-[13px]">{t("market.approveNone")}</p>;
   return (
     <ul className="mt-4 flex flex-col gap-3">
@@ -72,24 +72,7 @@ function AdminWarning() {
  * list back; a catalog that changed in between is refused by the server and shown again.
  */
 export function ApproveDialog({ entry, granted, onClose }: { entry: MarketEntry | null; granted: string[]; onClose: () => void }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const requested = useRequested();
-  const install = useMutation({
-    mutationFn: (e: MarketEntry) => unwrap(api.POST("/api/v1/marketplace/{id}/install", { params: { path: { id: e.id } }, body: { permissions: e.permissions } })),
-    onSuccess: (v) => {
-      qc.setQueryData(qk.marketplace, v);
-      requested();
-      onClose();
-    },
-    onError: (e) => {
-      toast.error(errorText(e));
-      if (e instanceof ApiError && e.detail === "permissions_changed") {
-        void qc.invalidateQueries({ queryKey: qk.marketplace });
-        onClose();
-      }
-    },
-  });
+  const install = useInstallMarket({ onDone: onClose });
   const name = entry ? localized(entry.name, entry.id) : "";
   const fresh = entry?.installed ? entry.permissions.filter((p) => !granted.includes(p)) : [];
   return (
@@ -122,11 +105,6 @@ export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null;
             <div className="banner warn items-start" role="note">
               <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1">{t("market.unverifiedHint")}</span>
-            </div>
-          ) : null}
-          {a.status === "failed" ? (
-            <div className="banner err" role="alert">
-              <span className="min-w-0 flex-1 break-words">{a.error || t("market.failed")}</span>
             </div>
           ) : null}
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2">
@@ -174,7 +152,6 @@ type Own = {
   confirm: boolean;
 };
 
-const ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const DIGEST_RE = /^sha256:[a-f0-9]{64}$/;
 // The host's grammar is checked on the server; this catches what an admin types most often.
 const IMAGE_RE = /^[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$/;
@@ -183,7 +160,7 @@ const URL_RE = /^http:\/\/127\.0\.0\.1:([0-9]{4,5})\/?$/;
 /** What is wrong before asking the server, as the server would say it. */
 function check(o: Own): Record<string, string> {
   const out: Record<string, string> = {};
-  if (!ID_RE.test(o.id)) out.id = t("errors.api.addon_id_invalid");
+  if (!ADDON_ID_RE.test(o.id)) out.id = t("errors.api.addon_id_invalid");
   if (o.source === "custom") {
     const last = o.image.split("/").pop() ?? "";
     if (last.includes(":") || o.image.includes("@")) out.image = t("market.ownImageTagged");
@@ -268,7 +245,7 @@ export function OwnDrawer({ open, onOpenChange, update }: { open: boolean; onOpe
       meta={t("market.ownMeta")}
       footer={
         <DrawerFooter form="own-addon" onCancel={() => onOpenChange(false)} loading={install.isPending} disabled={!o.confirm}>
-          {update ? t("market.ownUpdate") : t("market.ownInstall")}
+          {update ? t("market.ownUpdate") : t("addons.install")}
         </DrawerFooter>
       }
     >
@@ -459,7 +436,7 @@ export function useInstallPayment() {
   const toast = useToast();
   const requested = useRequested();
   return useMutation({
-    mutationFn: (id: string) => unwrap(api.POST("/api/v1/addons/{id}/install", { params: { path: { id } } })),
+    mutationFn: installPayment,
     onSuccess: (v) => {
       qc.setQueryData(qk.addons, v);
       requested();
@@ -469,23 +446,26 @@ export function useInstallPayment() {
 }
 
 /**
- * A new build of an addon of the catalog that asks for nothing more than it was allowed: the
- * permissions it asks for are sent as approved. One that asks for more goes through
- * ApproveDialog instead, never here.
+ * Install a build of an addon of the catalog with the permissions its entry asks for, sent as
+ * approved: from ApproveDialog, or at once for a build that asks for nothing more than it was
+ * allowed (one that asks for more goes through ApproveDialog, never here). onDone runs when the
+ * request is settled for its caller: sent, or refused because the catalog changed in between.
  */
-export function useUpdateMarket() {
+export function useInstallMarket({ onDone }: { onDone?: () => void } = {}) {
   const qc = useQueryClient();
   const toast = useToast();
   const requested = useRequested();
   return useMutation({
-    mutationFn: (e: MarketEntry) => unwrap(api.POST("/api/v1/marketplace/{id}/install", { params: { path: { id: e.id } }, body: { permissions: e.permissions } })),
+    mutationFn: installMarket,
     onSuccess: (v) => {
       qc.setQueryData(qk.marketplace, v);
       requested();
+      onDone?.();
     },
     onError: (e) => {
       toast.error(errorText(e));
       void qc.invalidateQueries({ queryKey: qk.marketplace });
+      if (e instanceof ApiError && e.detail === "permissions_changed") onDone?.();
     },
   });
 }

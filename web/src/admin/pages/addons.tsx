@@ -1,6 +1,7 @@
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeft, LayoutGrid, PackagePlus, Puzzle } from "lucide-react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
+import { LayoutGrid, PackagePlus, Puzzle } from "lucide-react";
 import { useState } from "react";
+import { useAddons, useMarketplace } from "../../api/hooks";
 import { Tabs } from "../../components/tabs";
 import { Button, PageHeader, Spinner } from "../../components/ui";
 import { t } from "../../i18n";
@@ -8,9 +9,8 @@ import { ADDON_TABS, type AddonsSearch } from "../search";
 import { CatalogTab } from "./addons-catalog";
 import { InstalledTab, type AddonActions } from "./addons-installed";
 import { ApproveDialog, MarketDetails, OwnDrawer } from "./market-dialogs";
-import { marketName, useMarketplace, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
-import { PaymentDrawer, addonName, useAddons } from "./payment-addons";
-import { TorrentCard, TorrentHitsCard } from "./settings/torrent";
+import { marketName, marketReady, queuedIds, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
+import { PaymentDrawer, addonName } from "./payment-addons";
 
 type Addons = ReturnType<typeof useAddons>["data"];
 type Tab = (typeof ADDON_TABS)[number];
@@ -28,7 +28,7 @@ export function AddonsPage() {
   const pay = useAddons();
   const m = market.data;
   const p = pay.data;
-  const ready = !!m && m.supported && m.host_ready;
+  const ready = marketReady(m);
   const [approve, setApprove] = useState<MarketEntry | null>(null);
   const [details, setDetails] = useState<MarketInstalled | null>(null);
   const [payment, setPayment] = useState<string | null>(null);
@@ -93,7 +93,7 @@ function anyName(id: string, m: Market | undefined, p: Addons): string {
  */
 function ServerBanners({ m, p }: { m: Market | undefined; p: Addons }) {
   const pending = m?.pending ?? p?.pending;
-  const queued = Math.max((p?.queue?.length ?? 0) - 1, 0);
+  const queued = Math.max(queuedIds(m, p).size - 1, 0);
   const lastOf = m?.last ?? p?.last;
   const last = lastOf && !pending && lastOf.state === "failed" ? lastOf : null;
   return (
@@ -123,27 +123,5 @@ function ServerBanners({ m, p }: { m: Market | undefined; p: Addons }) {
         </div>
       ) : null}
     </>
-  );
-}
-
-/** The torrent blocker, an addon of its own: its switch and its catches. */
-export function TorrentPage() {
-  return (
-    <>
-      <PageHeader title={t("settings.torrent.title")} sub={t("addons.torrentSub")} actions={<BackToAddons />} />
-      <div className="flex max-w-4xl flex-col gap-4">
-        <TorrentCard />
-        <TorrentHitsCard />
-      </div>
-    </>
-  );
-}
-
-export function BackToAddons() {
-  return (
-    <Link to="/addons" className="btn btn-glass">
-      <ArrowLeft size={16} aria-hidden />
-      {t("addons.back")}
-    </Link>
   );
 }

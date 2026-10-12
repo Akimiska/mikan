@@ -8,14 +8,15 @@ import { useParams } from "@tanstack/react-router";
 import { Blocks, RefreshCw, ShieldOff, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
-import { localized } from "../../components/manifest-form";
+import { qk } from "../../api/hooks";
 import { Button, EmptyState, ErrorState, PageHeader, Skeleton } from "../../components/ui";
 import { getLocale, t } from "../../i18n";
-import { BackToAddons } from "./addons";
+import { localized } from "../../lib/localized";
+import { BackToAddons } from "./addon-row";
+import { ADDON_ID_RE } from "./market-common";
 
 type Page = Schemas["AddonPageView"];
 
-const ADDON_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
 /** A page that floods the panel with calls gets 429 for the extra ones. */
 const MAX_CALLS = 8;
@@ -24,9 +25,9 @@ const ADDRESS_TTL = 10 * 60_000;
 
 export function AddonAppPage() {
   const { id = "" } = useParams({ strict: false }) as { id?: string };
-  const valid = ADDON_ID.test(id);
+  const valid = ADDON_ID_RE.test(id);
   const q = useQuery({
-    queryKey: ["addon-page", id],
+    queryKey: qk.addonPage(id),
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/addons/{id}/ui", { params: { path: { id } }, signal })),
     enabled: valid,
     // Every visit asks for a fresh address; while the page is open it is not refetched on its

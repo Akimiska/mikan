@@ -3,19 +3,14 @@
 // gives each type the right control and puts a refusal under its field.
 import type { CSSProperties } from "react";
 import type { Schemas } from "../api/client";
-import { getLocale, t } from "../i18n";
+import { t } from "../i18n";
+import { localized } from "../lib/localized";
 import { Field } from "./ui";
 
-export type ManifestField = Schemas["AddonField"];
+type ManifestField = Schemas["AddonField"];
 
 /** What the form holds per setting key: a flag for bool, the typed text for the rest. */
 export type ManifestValues = Record<string, string | boolean>;
-
-/** A text the addon gives per language, in the panel's. */
-export function localized(m: Record<string, string> | undefined, fallback: string): string {
-  if (!m) return fallback;
-  return m[getLocale()] || m.en || Object.values(m)[0] || fallback;
-}
 
 /** The form as the saved settings fill it in. Secrets start empty: the API never sends them. */
 export function manifestInitial(fields: ManifestField[]): ManifestValues {

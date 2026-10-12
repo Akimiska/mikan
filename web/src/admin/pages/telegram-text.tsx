@@ -7,6 +7,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { api, errorText, unwrap } from "../../api/client";
 import { Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
+import { safeHref } from "../../lib/url";
 
 /** text after the admin stopped typing for a moment: the preview does not ask per key. */
 function useSettled<T>(value: T, ms = 300): T {
@@ -34,10 +35,6 @@ export function useTgPreview(text: string, vars?: Record<string, string>) {
 type Tag = "strong" | "em" | "u" | "s" | "code" | "pre" | "blockquote";
 const TAGS: Record<string, Tag | undefined> = { b: "strong", strong: "strong", i: "em", em: "em", u: "u", s: "s", code: "code", pre: "pre", blockquote: "blockquote" };
 
-function safeHref(href: string | null): string | undefined {
-  return href && /^(https?|tg):\/\//i.test(href) ? href : undefined;
-}
-
 function nodes(parent: Node): ReactNode[] {
   return Array.from(parent.childNodes).map((n, i) => {
     if (n.nodeType === Node.TEXT_NODE) return <Fragment key={i}>{n.textContent}</Fragment>;
@@ -45,7 +42,7 @@ function nodes(parent: Node): ReactNode[] {
     const tag = n.tagName.toLowerCase();
     const inner = nodes(n);
     if (tag === "a") {
-      const href = safeHref(n.getAttribute("href"));
+      const href = safeHref(n.getAttribute("href"), { tg: true });
       return href ? (
         <a key={i} href={href} target="_blank" rel="noreferrer noopener" className="text-[#2481cc] underline">
           {inner}

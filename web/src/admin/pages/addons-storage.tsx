@@ -2,23 +2,23 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Database } from "lucide-react";
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { api, errorText, unwrap } from "../../api/client";
+import { qk } from "../../api/hooks";
 import { Drawer, DrawerFooter } from "../../components/overlay";
 import { SwitchRow } from "../../components/switch";
 import { useToast } from "../../components/toast";
 import { Button, Field } from "../../components/ui";
 import { t } from "../../i18n";
-
-const storageKey = ["addon-storage"] as const;
+import { Row } from "./addon-row";
 
 function useAddonStorage() {
-  return useQuery({ queryKey: storageKey, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/addon-storage", { signal })) });
+  return useQuery({ queryKey: qk.addonStorage, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/addon-storage", { signal })) });
 }
 
 /**
  * How much each addon may keep in its own store: 256 MiB unless the admin sets another bound,
  * or none at all past a warning about the disk and the backups.
  */
-export function StorageRow({ Row }: { Row: (p: StorageRowProps) => React.ReactNode }) {
+export function StorageRow() {
   const q = useAddonStorage();
   const [open, setOpen] = useState(false);
   const v = q.data;
@@ -47,14 +47,6 @@ export function StorageRow({ Row }: { Row: (p: StorageRowProps) => React.ReactNo
   );
 }
 
-export type StorageRowProps = {
-  icon: typeof Database;
-  name: string;
-  sub: string;
-  state: { tone: "ok" | "warn" | "bad" | "off"; text: string } | undefined;
-  actions: React.ReactNode;
-};
-
 function StorageDrawer({ open, onOpenChange, unlimited, limit, fallback }: { open: boolean; onOpenChange: (v: boolean) => void; unlimited: boolean; limit: number; fallback: number }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -72,7 +64,7 @@ function StorageDrawer({ open, onOpenChange, unlimited, limit, fallback }: { ope
   const save = useMutation({
     mutationFn: () => unwrap(api.PUT("/api/v1/addon-storage", { body: free ? { unlimited: true } : { limit_mib: Number(mib) } })),
     onSuccess: (v) => {
-      qc.setQueryData(storageKey, v);
+      qc.setQueryData(qk.addonStorage, v);
       toast.ok(t("addons.storage.saved"));
       onOpenChange(false);
     },

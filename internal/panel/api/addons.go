@@ -53,8 +53,7 @@ type AddonField struct {
 type AddonView struct {
 	ID         string            `json:"id"`
 	Version    string            `json:"version"`
-	Status     string            `json:"status" enum:"running,failed"`
-	Error      string            `json:"error,omitempty" doc:"Почему контейнер не работает"`
+	Status     string            `json:"status" enum:"running"`
 	Name       map[string]string `json:"name"`
 	Help       map[string]string `json:"help"`
 	Enabled    bool              `json:"enabled"`
@@ -84,7 +83,6 @@ type AddonsView struct {
 	Catalog      []AddonCatalogEntry `json:"catalog"`
 	CatalogError string              `json:"catalog_error,omitempty" doc:"catalog_unavailable — каталог не загрузился"`
 	Installed    []AddonView         `json:"installed"`
-	Pending      *AddonRequest       `json:"pending,omitempty" doc:"Первая заявка в очереди: сервер ещё не взял её"`
 	Queue        []AddonRequest      `json:"queue,omitempty" doc:"Все заявки, которые сервер ещё не взял, по порядку"`
 	Last         *AddonResult        `json:"last,omitempty" doc:"Как сервер выполнил последнюю заявку"`
 	Supported    bool                `json:"supported" doc:"Панель видит каталог данных сервера; иначе ставить адаптеры нельзя"`
@@ -92,23 +90,29 @@ type AddonsView struct {
 
 type addonsOutput struct{ Body AddonsView }
 
-type addonIDInput struct {
+// AddonIDInput is exported so that the inputs embedding it keep a settable field.
+type AddonIDInput struct {
 	ID string `path:"id" pattern:"^[a-z0-9][a-z0-9-]{0,31}$"`
 }
 
 type patchAddonInput struct {
-	ID   string `path:"id" pattern:"^[a-z0-9][a-z0-9-]{0,31}$"`
+	AddonIDInput
 	Body struct {
 		Enabled  *bool          `json:"enabled,omitempty"`
 		Settings map[string]any `json:"settings,omitempty" doc:"Только то, что меняется; секрет пустой строкой — оставить прежний"`
 	}
 }
 
-func (h *handlers) registerAddons() {
-	tags := []string{"payments"}
-	op := func(id, method, path, summary string, status int) huma.Operation {
-		return huma.Operation{OperationID: id, Method: method, Path: path, Summary: summary, Tags: tags, DefaultStatus: status, Metadata: sessionOnly, Extensions: sessionOnlyExt}
+// sessionOps makes the operations of a tag that only a session may call: the API key
+// middleware refuses an API key by the mark, the reference shows it.
+func sessionOps(tag string) func(id, method, path, summary string, status int) huma.Operation {
+	return func(id, method, path, summary string, status int) huma.Operation {
+		return huma.Operation{OperationID: id, Method: method, Path: path, Summary: summary, Tags: []string{tag}, DefaultStatus: status, Metadata: sessionOnly, Extensions: sessionOnlyExt}
 	}
+}
+
+func (h *handlers) registerAddons() {
+	op := sessionOps("payments")
 	huma.Register(h.api, op("list-addons", http.MethodGet, "/api/v1/addons", "Маркетплейс способов оплаты", 0), h.listAddons)
 	huma.Register(h.api, op("install-addon", http.MethodPost, "/api/v1/addons/{id}/install", "Установить или обновить адаптер: заявка серверу", http.StatusAccepted), h.installAddon)
 	huma.Register(h.api, op("remove-addon", http.MethodPost, "/api/v1/addons/{id}/remove", "Удалить адаптер: заявка серверу", http.StatusAccepted), h.removeAddon)
@@ -125,6 +129,70 @@ func (h *handlers) catalog(ctx context.Context) (addons.Catalog, error) {
 	return c, err
 }
 
+// requestSummary is what the host has not taken yet, in order, and how it handled the last
+// request: both marketplaces show it.
+func requestSummary(m *addons.Manager, st addons.State) (queue []AddonRequest, last *AddonResult) {
+	for _, r := range m.Pending() {
+		queue = append(queue, AddonRequest{Action: r.Action, ID: r.ID, At: r.At})
+	}
+	if l := st.Request; l != nil {
+		last = &AddonResult{Action: l.Action, ID: l.ID, State: l.State, Error: l.Error, At: l.At}
+	}
+	return queue, last
+}
+
+// addonState is the host's state for a change of addons: addons_unavailable without a
+// manager.
+func (h *handlers) addonState() (addons.State, error) {
+	if h.d.Addons == nil {
+		return addons.State{}, huma.Error409Conflict("addons_unavailable")
+	}
+	return h.d.Addons.State()
+}
+
+// addonHost is addonState for what only protocol 2 does: host_outdated when the host
+// predates it.
+func (h *handlers) addonHost() (addons.State, error) {
+	st, err := h.addonState()
+	if err == nil && st.HostVersion == "" {
+		return st, huma.Error409Conflict("host_outdated")
+	}
+	return st, err
+}
+
+// installEntry is the signed catalog's entry for an install of id, a payment adapter or any
+// other kind, refused as the API has it: the catalog down, no such entry, an id the admin's
+// own addon holds, the very build already running.
+func (h *handlers) installEntry(ctx context.Context, st addons.State, id string, payment bool) (addons.Entry, error) {
+	c, err := h.catalog(ctx)
+	if err != nil {
+		return addons.Entry{}, huma.Error502BadGateway("catalog_unavailable")
+	}
+	i := slices.IndexFunc(c.Adapters, func(e addons.Entry) bool { return e.ID == id && (e.Kind == addons.KindPayment) == payment })
+	if i < 0 {
+		return addons.Entry{}, huma.Error404NotFound("addon_unknown")
+	}
+	e := c.Adapters[i]
+	a, ok := st.Adapters[id]
+	if ok && a.SourceOf() != addons.SourceOfficial {
+		// The admin's own addon holds the id: the catalog's would take over its tokens and grant.
+		return addons.Entry{}, huma.Error409Conflict("addon_id_taken")
+	}
+	if ok && a.Status == "running" && a.Digest == e.Digest {
+		return addons.Entry{}, huma.Error409Conflict("addon_current")
+	}
+	return e, nil
+}
+
+// ask queues r for the host and writes the audit entry of it.
+func (h *handlers) ask(ctx context.Context, r addons.Request, details map[string]any) error {
+	if err := h.d.Addons.Ask(r); err != nil {
+		return askErr(err)
+	}
+	h.audit(ctx, sessionOf(ctx).AdminID, "addon."+r.Action, "addon", r.ID, details)
+	return nil
+}
+
 func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	v := AddonsView{Catalog: []AddonCatalogEntry{}, Installed: []AddonView{}}
 	m := h.d.Addons
@@ -138,15 +206,7 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	// The marketplace of payment methods: the other kinds have their own section.
 	payments := st.Of(addons.KindPayment)
 	v.Supported = m.Supported()
-	if l := st.Request; l != nil {
-		v.Last = &AddonResult{Action: l.Action, ID: l.ID, State: l.State, Error: l.Error, At: l.At}
-	}
-	for _, r := range m.Pending() {
-		v.Queue = append(v.Queue, AddonRequest{Action: r.Action, ID: r.ID, At: r.At})
-	}
-	if len(v.Queue) > 0 {
-		v.Pending = &v.Queue[0]
-	}
+	v.Queue, v.Last = requestSummary(m, st)
 	if c, err := h.catalog(ctx); err != nil {
 		v.CatalogError = "catalog_unavailable"
 	} else {
@@ -163,7 +223,7 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 	}
 	for _, id := range slices.Sorted(maps.Keys(payments)) {
 		a := payments[id]
-		av := AddonView{ID: id, Version: a.Version, Status: a.Status, Error: a.Error, Name: map[string]string{}, Help: map[string]string{}, Settings: []AddonField{},
+		av := AddonView{ID: id, Version: a.Version, Status: a.Status, Name: map[string]string{}, Help: map[string]string{}, Settings: []AddonField{},
 			Available: slices.Contains(available, id), WebhookURL: h.d.Billing.AddonWebhookURL(ctx, id, sub)}
 		cfg, err := h.d.Billing.AddonConfig(ctx, id)
 		if err != nil {
@@ -213,50 +273,34 @@ func askErr(err error) error {
 	return err
 }
 
-func (h *handlers) installAddon(ctx context.Context, in *addonIDInput) (*addonsOutput, error) {
-	if h.d.Addons == nil {
-		return nil, huma.Error409Conflict("addons_unavailable")
-	}
-	c, err := h.catalog(ctx)
-	if err != nil {
-		return nil, huma.Error502BadGateway("catalog_unavailable")
-	}
-	pay := c.Of(addons.KindPayment)
-	i := slices.IndexFunc(pay, func(e addons.Entry) bool { return e.ID == in.ID })
-	if i < 0 {
-		return nil, huma.Error404NotFound("addon_unknown")
-	}
-	st, err := h.d.Addons.State()
+func (h *handlers) installAddon(ctx context.Context, in *AddonIDInput) (*addonsOutput, error) {
+	st, err := h.addonState()
 	if err != nil {
 		return nil, err
 	}
-	if a, ok := st.Adapters[in.ID]; ok && a.Status == "running" && a.Digest == pay[i].Digest {
-		return nil, huma.Error409Conflict("addon_current")
+	e, err := h.installEntry(ctx, st, in.ID, true)
+	if err != nil {
+		return nil, err
 	}
-	if err := h.d.Addons.Ask(addons.Request{Action: "install", ID: in.ID}); err != nil {
-		return nil, askErr(err)
+	if err := h.ask(ctx, addons.Request{Action: "install", ID: e.ID}, map[string]any{"version": e.Version, "digest": e.Digest}); err != nil {
+		return nil, err
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "addon.install", "addon", in.ID, map[string]any{"version": pay[i].Version, "digest": pay[i].Digest})
 	return h.listAddons(ctx, nil)
 }
 
 // removeAddon keeps the adapter's settings and its payments: installed again, it takes up
 // where it was.
-func (h *handlers) removeAddon(ctx context.Context, in *addonIDInput) (*addonsOutput, error) {
-	if h.d.Addons == nil {
-		return nil, huma.Error409Conflict("addons_unavailable")
-	}
-	st, err := h.d.Addons.State()
+func (h *handlers) removeAddon(ctx context.Context, in *AddonIDInput) (*addonsOutput, error) {
+	st, err := h.addonState()
 	if err != nil {
 		return nil, err
 	}
 	if _, ok := st.Of(addons.KindPayment)[in.ID]; !ok {
 		return nil, huma.Error404NotFound("addon_not_installed")
 	}
-	if err := h.d.Addons.Ask(addons.Request{Action: "remove", ID: in.ID}); err != nil {
-		return nil, askErr(err)
+	if err := h.ask(ctx, addons.Request{Action: "remove", ID: in.ID}, nil); err != nil {
+		return nil, err
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "addon.remove", "addon", in.ID, nil)
 	return h.listAddons(ctx, nil)
 }
 

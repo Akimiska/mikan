@@ -84,7 +84,6 @@ func proxyWorld(t *testing.T) (*Server, *fakeTelegram) {
 	t.Cleanup(cancel)
 	go out.Run(ctx)
 	s.d.Telegram = gateway{c, out}
-	s.d.Settings = settings.New(s.d.Store.Q)
 	s.d.SubBase = func(context.Context) string { return "https://panel.example:2096/s3cr" }
 	return s, tg
 }

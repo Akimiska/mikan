@@ -1052,8 +1052,7 @@ func (s *Service) StarsRefunded(ctx context.Context, tgID int64, chargeID string
 }
 
 // Run reconciles in the background: applies paid payments that failed to apply, asks the
-// adapters about open invoices (a webhook may never come), expires invoices nobody paid
-// and gets the host to install the adapters that took over the built-in providers.
+// adapters about open invoices (a webhook may never come) and expires invoices nobody paid.
 func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(reconcileEvery)
 	defer t.Stop()
@@ -1071,7 +1070,6 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) Reconcile(ctx context.Context) {
 	now := s.d.Now()
 	q := s.d.Store.Q
-	s.installMoved(ctx)
 	// Paid but not applied payments are tried for as long as they stay so: the buyer
 	// paid, and the admin sees why on the Payments page. Pending ones are asked about while
 	// they are open (pendingTTL).

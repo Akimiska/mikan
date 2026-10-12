@@ -14,13 +14,11 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,7 +46,7 @@ var (
 
 // Store is what the pages read: the approvals and the admin's sessions.
 type Store interface {
-	GetAddonGrant(ctx context.Context, addonID string) (db.AddonGrant, error)
+	addons.GrantReader
 	ListAdminSessions(ctx context.Context, adminID int64) ([]db.Session, error)
 }
 
@@ -75,43 +73,33 @@ func New(d Deps) *Pages {
 }
 
 // Allowed: the addon runs, serves HTTP, speaks protocol 2 and the admin approved its pages.
-// A payment adapter or a client of the panel is ErrNoPages.
-func (p *Pages) Allowed(ctx context.Context, id string) error {
+// A payment adapter or a client of the panel is ErrNoPages. It returns the addon as the
+// host runs it, for the calls that follow.
+func (p *Pages) Allowed(ctx context.Context, id string) (addons.Installed, error) {
 	if p == nil || p.d.Addons == nil {
-		return ErrNoPages
+		return addons.Installed{}, ErrNoPages
 	}
-	if _, err := p.d.Addons.Served(id); err != nil {
-		if errors.Is(err, addons.ErrNotInstalled) {
-			return ErrNoPages
-		}
-		return err
-	}
-	g, err := p.d.Store.GetAddonGrant(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrForbidden
+	a, err := p.d.Addons.Served(id)
+	if errors.Is(err, addons.ErrNotInstalled) {
+		return a, ErrNoPages
 	}
 	if err != nil {
-		return err
+		return a, err
 	}
-	perms, err := addons.DecodePermissions(g.Permissions)
-	if err != nil {
-		return err
+	perms, _, err := addons.LoadGrant(ctx, p.d.Store, id)
+	if errors.Is(err, addons.ErrNoGrant) || err == nil && !addons.HasPerm(perms, Permission) {
+		return a, ErrForbidden
 	}
-	if !slices.Contains(perms, Permission) {
-		return ErrForbidden
-	}
-	return nil
+	return a, err
 }
 
 // Open checks the addon as Allowed does and asks it where its pages start.
 func (p *Pages) Open(ctx context.Context, id string) (addons.UI, error) {
-	if err := p.Allowed(ctx, id); err != nil {
+	a, err := p.Allowed(ctx, id)
+	if err != nil {
 		return addons.UI{}, err
 	}
-	info, err := p.d.Addons.InfoV2(ctx, id)
-	if errors.Is(err, addons.ErrNotInstalled) {
-		return addons.UI{}, ErrNoPages
-	}
+	info, err := p.d.Addons.InfoV2(ctx, id, a)
 	if err != nil {
 		return addons.UI{}, err
 	}
@@ -195,13 +183,18 @@ func (p *Pages) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if !p.Verify(ctx, id, sig) || p.Allowed(ctx, id) != nil {
+	if !p.Verify(ctx, id, sig) {
+		server.NotFound(w)
+		return
+	}
+	a, err := p.Allowed(ctx, id)
+	if err != nil {
 		server.NotFound(w)
 		return
 	}
 	h := w.Header()
 	server.FrameHeaders(h)
-	f, err := p.d.Addons.Page(ctx, id, name, r.URL.RawQuery, r.Header)
+	f, err := p.d.Addons.Page(ctx, a, name, r.URL.RawQuery, r.Header)
 	if err != nil {
 		p.d.Log.Warn("addon pages: file", "addon", id, "err", err)
 		h.Set("Content-Type", "text/plain; charset=utf-8")

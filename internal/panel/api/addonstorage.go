@@ -32,26 +32,18 @@ type addonStorageInput struct {
 
 func (h *handlers) registerAddonStorage() {
 	op := func(id, method, summary string) huma.Operation {
-		return huma.Operation{OperationID: id, Method: method, Path: "/api/v1/addon-storage", Summary: summary, Tags: []string{"addons"},
-			Metadata: sessionOnly, Extensions: sessionOnlyExt}
+		return sessionOps("addons")(id, method, "/api/v1/addon-storage", summary, 0)
 	}
 	huma.Register(h.api, op("get-addon-storage", http.MethodGet, "Сколько аддон может хранить в своём хранилище"), h.getAddonStorage)
 	huma.Register(h.api, op("set-addon-storage", http.MethodPut, "Лимит хранилища аддона или без лимита"), h.setAddonStorage)
 }
 
 func (h *handlers) addonStorage(ctx context.Context) (AddonStorageView, error) {
-	v := AddonStorageView{LimitMiB: panelapi.DefaultKVMiB, DefaultMiB: panelapi.DefaultKVMiB}
-	mib, ok, err := settings.Get[int64](ctx, h.d.Settings, panelapi.KVLimitKey)
-	if err != nil {
-		return v, err
+	mib, unlimited, err := panelapi.KVLimitMiB(ctx, h.d.Settings)
+	if unlimited {
+		mib = panelapi.DefaultKVMiB // what the field offers when the bound is put back
 	}
-	switch {
-	case ok && mib == 0:
-		v.Unlimited = true
-	case ok && mib > 0:
-		v.LimitMiB = mib
-	}
-	return v, nil
+	return AddonStorageView{Unlimited: unlimited, LimitMiB: mib, DefaultMiB: panelapi.DefaultKVMiB}, err
 }
 
 func (h *handlers) getAddonStorage(ctx context.Context, _ *struct{}) (*addonStorageOutput, error) {

@@ -101,31 +101,54 @@ func NewClient(base, token string, hc *http.Client) *Client {
 	return &Client{base: strings.TrimRight(base, "/"), token: token, hc: hc}
 }
 
-func (c *Client) call(ctx context.Context, method, path string, in, out any) error {
+// maxAnswer is the longest answer the panel reads from an adapter.
+const maxAnswer = 1 << 20
+
+// doBearer sends one request to an addon with its token and reads the answer, up to limit
+// bytes: a longer one is ErrBadAnswer, a way that fails ErrUnreachable. in, when not nil,
+// goes as the JSON body; hdr is added to the request.
+func doBearer(ctx context.Context, hc *http.Client, token, method, url string, in []byte, hdr http.Header, limit int64) (*http.Response, []byte, error) {
 	var body io.Reader
 	if in != nil {
-		data, err := json.Marshal(in)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(data)
+		body = bytes.NewReader(in)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	for k, v := range hdr {
+		req.Header[k] = v
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := c.hc.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+	}
+	if int64(len(data)) > limit {
+		return nil, nil, ErrBadAnswer
+	}
+	return resp, data, nil
+}
+
+func (c *Client) call(ctx context.Context, method, path string, in, out any) error {
+	var payload []byte
+	if in != nil {
+		var err error
+		if payload, err = json.Marshal(in); err != nil {
+			return err
+		}
+	}
+	resp, data, err := doBearer(ctx, c.hc, c.token, method, c.base+path, payload, nil, maxAnswer)
+	if err != nil {
+		return err
 	}
 	if resp.StatusCode/100 != 2 {
 		e := &Error{Status: resp.StatusCode}

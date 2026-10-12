@@ -245,7 +245,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
 	// The panel's API for addons, with the Bot API proxy over the gateway for the addon that
 	// holds the bot.
-	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Grants: st.Q, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
+	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
 		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend, channelMember(backend, p.Gateway))})
 	// What the bot says comes from the bot addon (the official one is installed by itself,
 	// botaddon.go): the panel tells it through events, and keeps the broadcasts and the
@@ -493,10 +493,6 @@ func (p *Panel) Apply(ctx context.Context) (settings.Paths, error) {
 // edit them), drives the node syncer and cleans up expired state. It returns once ctx is
 // done and every one of its workers has stopped: the caller closes the database after it.
 func (p *Panel) Run(ctx context.Context) {
-	// Before the reconcile loop: payments of the built-in providers take their adapters' names.
-	if err := p.Billing.MoveBuiltin(ctx); err != nil {
-		p.log.Error("billing: move the built-in providers", "err", err)
-	}
 	// The host reads the switch and the channel from a file; the settings are what the
 	// admin chose. The channel is the panel's own check's too.
 	auto, err := p.Settings.On(ctx, settings.AutoUpdate)

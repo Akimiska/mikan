@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,31 +13,20 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/settings"
-	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/store/storetest"
 )
 
 // kvWorld is a server with a real database, two approved addons and a clock to move.
 func kvWorld(t *testing.T) (*Server, *time.Time) {
 	t.Helper()
-	ctx := context.Background()
-	st, err := storetest.Open(ctx, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	for id, perms := range map[string]string{"telegram": `["bot","kv"]`, "fresh": `["kv"]`, "nokv": `["bot"]`} {
-		if err := st.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: id, Version: "1.0.0", Permissions: perms, ApprovedAt: 1}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	dir := t.TempDir()
 	s := state()
 	s.Adapters["nokv"] = addons.Installed{Protocol: addons.Protocol2, Kind: addons.KindBot, PanelToken: strings.Repeat("k", 48), Status: "running"}
-	writeState(t, dir, s)
+	srv, _ := world(t, s, grants{
+		"telegram": {Version: "1.0.0", Permissions: `["bot","kv"]`},
+		"fresh":    {Version: "1.0.0", Permissions: `["kv"]`},
+		"nokv":     {Version: "1.0.0", Permissions: `["bot"]`},
+	})
 	now := time.Unix(1_800_000_000, 0)
-	srv := New(Deps{Addons: addons.New(dir, "", "dev", slog.New(slog.DiscardHandler), time.Now), Grants: st.Q, Store: st,
-		Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return now }})
+	srv.d.Now = func() time.Time { return now }
 	return srv, &now
 }
 
@@ -155,9 +143,19 @@ func TestKVLimits(t *testing.T) {
 	if r := kv(s, newToken, http.MethodPut, "/t?ttl=0", []byte("v"), nil); r.status != 400 {
 		t.Fatalf("ttl 0: %d", r.status)
 	}
-	// No bound by default; a quota set in Deps bounds an addon's store.
+	// 256 MiB when the admin set nothing; a limit of 1 MiB in the settings bounds an
+	// addon's store.
+	if mib, unlimited, err := KVLimitMiB(context.Background(), s.d.Settings); err != nil || unlimited || mib != DefaultKVMiB {
+		t.Fatalf("the default limit: %d %v %v", mib, unlimited, err)
+	}
 	const quota = 1 << 20
-	s.d.KVQuota = quota
+	setLimit := func(mib int64) {
+		t.Helper()
+		if err := settings.Set(context.Background(), s.d.Settings, KVLimitKey, mib); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setLimit(1)
 	value := bytes.Repeat([]byte("x"), MaxValue)
 	n := 0
 	for ; n < quota/MaxValue+2; n++ {
@@ -176,19 +174,15 @@ func TestKVLimits(t *testing.T) {
 	if r := kv(s, newToken, http.MethodPut, "/fill/000", value, nil); r.status != 200 {
 		t.Fatalf("a rewrite at the quota: %d %s", r.status, r.body)
 	}
-	// the admin's setting: 256 MiB when not set, none when set to 0
-	s.d.KVQuota = 0
-	s.d.Settings = settings.New(s.d.Store.Q)
-	if got := s.kvQuota(context.Background()); got != DefaultKVMiB<<20 {
-		t.Fatalf("the default quota: %d", got)
-	}
-	if err := settings.Set(context.Background(), s.d.Settings, KVLimitKey, int64(0)); err != nil {
-		t.Fatal(err)
+	// none when the admin sets 0
+	setLimit(0)
+	if mib, unlimited, err := KVLimitMiB(context.Background(), s.d.Settings); err != nil || !unlimited || mib != 0 {
+		t.Fatalf("no limit: %d %v %v", mib, unlimited, err)
 	}
 	if r := kv(s, newToken, http.MethodPut, "/more", value, nil); r.status != 200 {
 		t.Fatalf("a write with no quota: %d %s", r.status, r.body)
 	}
-	s.d.KVQuota = quota
+	setLimit(1)
 	// another addon has its own room
 	if r := kv(s, botToken, http.MethodPut, "/x", value, nil); r.status != 200 {
 		t.Fatalf("another addon: %d", r.status)

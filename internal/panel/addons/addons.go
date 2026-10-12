@@ -12,7 +12,6 @@
 //	                     "mem_mb"; seq is one past the highest queued, and the host takes them
 //	                     in that order. The panel then wakes the host with update/request
 //	                     {"do": "addons"}
-//	addons/request.json  the one request of a panel before the queue: the host still takes it
 //	addons/state.json    the host: what runs where, with the token, and how the last
 //	                     request went
 package addons
@@ -88,7 +87,8 @@ var (
 	ErrUnavailable  = errors.New("addons_unavailable") // no data directory (tests, the CLI)
 	ErrUnknown      = errors.New("addon_unknown")
 	ErrNotInstalled = errors.New("addon_not_installed")
-	ErrBusy         = errors.New("addon_busy") // a request for this addon is still with the host
+	ErrBusy         = errors.New("addon_busy")       // a request for this addon is still with the host
+	ErrBadAnswer    = errors.New("addon_bad_answer") // an addon's answer that is too large, not JSON, a redirect, or from another addon
 )
 
 // validID: adapter ids are path and provider-name safe.
@@ -250,15 +250,14 @@ type Installed struct {
 	Digest      string   `json:"digest"`
 	Listen      string   `json:"listen"`
 	Token       string   `json:"token"`
-	Protocol    int      `json:"protocol,omitempty"`    // 0 is 1: states written before protocol 2
+	Protocol    int      `json:"protocol,omitempty"`    // the host writes it for every addon; 0 is 1, as older states have it
 	Source      string   `json:"source,omitempty"`      // "" is official
-	Kind        string   `json:"kind,omitempty"`        // "" is payment
-	Mode        string   `json:"mode,omitempty"`        // "" is http
+	Kind        string   `json:"kind,omitempty"`        // payment for an adapter; "" is payment, as older states have it
+	Mode        string   `json:"mode,omitempty"`        // http for an adapter; "" is http, as older states have it
 	Permissions []string `json:"permissions,omitempty"` // approved for an addon of the admin's own
 	PanelToken  string   `json:"panel_token,omitempty"`
 	MemMB       int      `json:"mem_mb,omitempty"` // 0 is the host's default
-	Status      string   `json:"status"`           // running | failed
-	Error       string   `json:"error,omitempty"`
+	Status      string   `json:"status"`           // running
 	At          string   `json:"at"`
 }
 
@@ -268,6 +267,14 @@ func (a Installed) KindOf() string {
 		return KindPayment
 	}
 	return a.Kind
+}
+
+// ModeOf is how the addon talks to the panel; the host writes nothing for http.
+func (a Installed) ModeOf() string {
+	if a.Mode == "" {
+		return ModeHTTP
+	}
+	return a.Mode
 }
 
 // SourceOf is where the addon comes from; the host writes nothing for the catalog.
@@ -334,7 +341,7 @@ func (r Request) Valid() bool {
 	}
 	own := Entry{Protocol: Protocol2, Kind: r.Kind, Mode: r.Mode, Permissions: r.Permissions, Resources: Resources{MemMB: r.MemMB}}
 	switch {
-	case r.Source == "" || r.Source == SourceOfficial:
+	case r.Source == "":
 		return r.Image == "" && r.Digest == "" && r.URL == "" && r.Kind == "" && r.Mode == "" && len(r.Permissions) == 0 && r.MemMB == 0
 	case r.Action != "install":
 		return false
@@ -352,23 +359,17 @@ type Manager struct {
 	catalogURL     string
 	pub            ed25519.PublicKey
 	version        string
-	hc, adapters   *http.Client
-	pages          *http.Client // an addon's admin pages: no redirects followed
+	hc, peer       *http.Client // peer talks to the addons: no redirects followed
 	log            *slog.Logger
 	now            func() time.Time
 
 	mu      sync.Mutex
 	catalog *Catalog
 	fetched time.Time
-	infos   map[string]cachedInfo
-	infos2  map[string]cachedInfoV2
+	infos   map[string]described[Info]
+	infos2  map[string]described[InfoV2]
 
 	ask sync.Mutex // one request queued at a time: the number and the busy check
-}
-
-type cachedInfo struct {
-	digest string
-	info   Info
 }
 
 // New: dataDir is the panel's data directory ("" turns the host side off); catalogURL ""
@@ -379,9 +380,10 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 	}
 	pub, _ := release.Key(release.PublicKey)
 	m := &Manager{catalogURL: catalogURL, pub: pub, version: panelVersion, log: log, now: now,
-		hc: &http.Client{Timeout: 15 * time.Second}, adapters: &http.Client{Timeout: AdapterTimeout}, infos: map[string]cachedInfo{}, infos2: map[string]cachedInfoV2{},
+		hc:    &http.Client{Timeout: 15 * time.Second},
+		infos: map[string]described[Info]{}, infos2: map[string]described[InfoV2]{},
 		// The panel fetches what the addon names and nothing it points elsewhere to.
-		pages: &http.Client{Timeout: AdapterTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+		peer: &http.Client{Timeout: AdapterTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	if dataDir != "" {
 		m.dir, m.updateDir = filepath.Join(dataDir, "addons"), filepath.Join(dataDir, "update")
 	}
@@ -472,18 +474,10 @@ func requestName(name string) (seq uint64, id string, ok bool) {
 	return seq, id, err == nil
 }
 
-// queue reads what the host has not taken yet, oldest first: request.json of a panel before
-// the queue, then the queue by number; next is one past the highest number queued.
+// queue reads what the host has not taken yet, oldest first, by number; next is one past
+// the highest number queued.
 func (m *Manager) queue() (q []Request, next uint64) {
 	next = 1
-	read := func(path, id string) {
-		data, err := os.ReadFile(path)
-		var r Request
-		if err == nil && len(data) <= requestLimit && json.Unmarshal(data, &r) == nil && (id == "" || r.ID == id) {
-			q = append(q, r)
-		}
-	}
-	read(filepath.Join(m.dir, "request.json"), "")
 	entries, _ := os.ReadDir(filepath.Join(m.dir, "requests"))
 	type numbered struct {
 		seq      uint64
@@ -498,7 +492,11 @@ func (m *Manager) queue() (q []Request, next uint64) {
 	}
 	slices.SortFunc(queued, func(a, b numbered) int { return cmp.Or(cmp.Compare(a.seq, b.seq), cmp.Compare(a.name, b.name)) })
 	for _, n := range queued {
-		read(filepath.Join(m.dir, "requests", n.name), n.id)
+		data, err := os.ReadFile(filepath.Join(m.dir, "requests", n.name))
+		var r Request
+		if err == nil && len(data) <= requestLimit && json.Unmarshal(data, &r) == nil && r.ID == n.id {
+			q = append(q, r)
+		}
 	}
 	return q, next
 }
@@ -551,44 +549,66 @@ func writeFile(dir, name string, v any) error {
 	return fsutil.WriteFileAtomic(filepath.Join(dir, name), data, 0o644)
 }
 
+// running is the addon the host runs and listens for, when accept takes it: the one place
+// that tells a running addon from the rest of state.json.
+func (m *Manager) running(id string, accept func(Installed) bool) (Installed, error) {
+	s, err := m.State()
+	if err != nil {
+		return Installed{}, err
+	}
+	a, ok := s.Adapters[id]
+	if !ok || a.Status != "running" || a.Listen == "" || !accept(a) {
+		return Installed{}, ErrNotInstalled
+	}
+	return a, nil
+}
+
+func isPayment(a Installed) bool { return a.KindOf() == KindPayment }
+
 // Client talks to an installed, running adapter.
 func (m *Manager) Client(id string) (*Client, error) {
-	s, err := m.State()
+	a, err := m.running(id, isPayment)
 	if err != nil {
 		return nil, err
 	}
-	a, ok := s.Adapters[id]
-	if !ok || a.Status != "running" || a.Listen == "" || a.KindOf() != KindPayment {
-		return nil, ErrNotInstalled
-	}
-	return NewClient("http://"+a.Listen, a.Token, m.adapters), nil
+	return NewClient("http://"+a.Listen, a.Token, m.peer), nil
 }
 
-// Info is the payment adapter's own description, asked once per installed image.
+// Info is the payment adapter's own description, asked once per installed build.
 func (m *Manager) Info(ctx context.Context, id string) (Info, error) {
-	s, err := m.State()
+	a, err := m.running(id, isPayment)
 	if err != nil {
 		return Info{}, err
 	}
-	a, ok := s.Adapters[id]
-	if !ok || a.Status != "running" || a.KindOf() != KindPayment {
-		return Info{}, ErrNotInstalled
-	}
+	return describe(ctx, m, m.infos, id, a, "/v1/info", Protocol, func(i Info) (string, int) { return i.ID, i.Protocol })
+}
+
+// described is what an addon said of itself, with the build it said it for.
+type described[T any] struct {
+	build string
+	info  T
+}
+
+// describe asks a running addon for its description at path, once per installed build, and
+// takes it only from the addon it should be: who reads the id and the protocol out of it.
+func describe[T any](ctx context.Context, m *Manager, cache map[string]described[T], id string, a Installed, path string, protocol int, who func(T) (string, int)) (T, error) {
+	// An external addon has no digest: a new run of it is told by the host's time.
+	build := a.Digest + "\x00" + a.Version + "\x00" + a.At
 	m.mu.Lock()
-	if c, ok := m.infos[id]; ok && c.digest == a.Digest {
-		m.mu.Unlock()
+	c, ok := cache[id]
+	m.mu.Unlock()
+	if ok && c.build == build {
 		return c.info, nil
 	}
-	m.mu.Unlock()
-	info, err := NewClient("http://"+a.Listen, a.Token, m.adapters).Info(ctx)
-	if err != nil {
-		return Info{}, err
+	var zero, info T
+	if err := NewClient("http://"+a.Listen, a.Token, m.peer).call(ctx, http.MethodGet, path, nil, &info); err != nil {
+		return zero, err
 	}
-	if info.ID != id || info.Protocol != Protocol {
-		return Info{}, fmt.Errorf("addons: %s answers as %q, protocol %d", id, info.ID, info.Protocol)
+	if gotID, gotProtocol := who(info); gotID != id || gotProtocol != protocol {
+		return zero, fmt.Errorf("%w: %s answers as %q, protocol %d", ErrBadAnswer, id, gotID, gotProtocol)
 	}
 	m.mu.Lock()
-	m.infos[id] = cachedInfo{digest: a.Digest, info: info}
+	cache[id] = described[T]{build: build, info: info}
 	m.mu.Unlock()
 	return info, nil
 }

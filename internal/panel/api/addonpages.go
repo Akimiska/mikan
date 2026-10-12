@@ -26,7 +26,7 @@ type AddonPageView struct {
 type addonPageOutput struct{ Body AddonPageView }
 
 type addonRPCInput struct {
-	ID   string `path:"id" pattern:"^[a-z0-9][a-z0-9-]{0,31}$"`
+	AddonIDInput
 	Body struct {
 		Method string          `json:"method" enum:"GET,POST,PUT,DELETE" doc:"Метод для аддона; GET не пишется в журнал"`
 		Path   string          `json:"path" minLength:"1" maxLength:"1024" pattern:"^/[^\\x00-\\x1f\\x7f]*$" doc:"Путь для аддона, начинается с /"`
@@ -43,17 +43,15 @@ type AddonRPCResult struct {
 type addonRPCOutput struct{ Body AddonRPCResult }
 
 func (h *handlers) registerAddonPages() {
-	tags := []string{"addons"}
-	huma.Register(h.api, huma.Operation{OperationID: "get-addon-page", Method: http.MethodGet, Path: "/api/v1/addons/{id}/ui", Summary: "Подписанный адрес страницы аддона в админке",
-		Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.addonPage)
-	huma.Register(h.api, huma.Operation{OperationID: "call-addon-page", Method: http.MethodPost, Path: "/api/v1/addons/{id}/ui/rpc", Summary: "Вызов страницы аддона: панель передаёт его аддону",
-		Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.callAddonPage)
+	op := sessionOps("addons")
+	huma.Register(h.api, op("get-addon-page", http.MethodGet, "/api/v1/addons/{id}/ui", "Подписанный адрес страницы аддона в админке", 0), h.addonPage)
+	huma.Register(h.api, op("call-addon-page", http.MethodPost, "/api/v1/addons/{id}/ui/rpc", "Вызов страницы аддона: панель передаёт его аддону", 0), h.callAddonPage)
 }
 
 // pageErr turns what the pages refused into the API's codes.
 func pageErr(err error) error {
 	switch {
-	case errors.Is(err, pages.ErrNoPages), errors.Is(err, addons.ErrNotInstalled):
+	case errors.Is(err, pages.ErrNoPages):
 		return huma.Error404NotFound("addon_no_pages")
 	case errors.Is(err, pages.ErrForbidden):
 		return huma.Error403Forbidden("addon_ui_forbidden")
@@ -67,7 +65,7 @@ func pageErr(err error) error {
 	return err
 }
 
-func (h *handlers) addonPage(ctx context.Context, in *addonIDInput) (*addonPageOutput, error) {
+func (h *handlers) addonPage(ctx context.Context, in *AddonIDInput) (*addonPageOutput, error) {
 	ui, err := h.d.Pages.Open(ctx, in.ID)
 	if err != nil {
 		if !errors.Is(err, pages.ErrNoPages) && !errors.Is(err, pages.ErrForbidden) {
@@ -86,14 +84,15 @@ func (h *handlers) addonPage(ctx context.Context, in *addonIDInput) (*addonPageO
 // callAddonPage forwards a call of the page to the addon. What changes something is written
 // to the audit log by its method and path; bodies stay out of it.
 func (h *handlers) callAddonPage(ctx context.Context, in *addonRPCInput) (*addonRPCOutput, error) {
-	if err := h.d.Pages.Allowed(ctx, in.ID); err != nil {
+	a, err := h.d.Pages.Allowed(ctx, in.ID)
+	if err != nil {
 		return nil, pageErr(err)
 	}
 	lang := in.Body.Lang
 	if lang == "" {
 		lang, _ = h.d.Settings.Lang(ctx)
 	}
-	status, body, err := h.d.Addons.CallUI(ctx, in.ID, addons.RPC{Method: in.Body.Method, Path: in.Body.Path, Body: in.Body.Body, Admin: addons.RPCAdmin{Lang: lang}})
+	status, body, err := h.d.Addons.CallUI(ctx, a, addons.RPC{Method: in.Body.Method, Path: in.Body.Path, Body: in.Body.Body, Admin: addons.RPCAdmin{Lang: lang}})
 	if in.Body.Method != http.MethodGet {
 		details := map[string]any{"method": in.Body.Method, "path": in.Body.Path}
 		if err != nil {
@@ -104,9 +103,7 @@ func (h *handlers) callAddonPage(ctx context.Context, in *addonRPCInput) (*addon
 		h.audit(ctx, sessionOf(ctx).AdminID, "addon.ui_call", "addon", in.ID, details)
 	}
 	if err != nil {
-		if !errors.Is(err, addons.ErrNotInstalled) {
-			h.d.Log.Warn("addon pages: call", "addon", in.ID, "err", err)
-		}
+		h.d.Log.Warn("addon pages: call", "addon", in.ID, "err", err)
 		return nil, pageErr(err)
 	}
 	return &addonRPCOutput{Body: AddonRPCResult{Status: status, Body: body}}, nil

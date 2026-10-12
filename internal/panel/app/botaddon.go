@@ -52,7 +52,7 @@ func (b *botAddon) check(ctx context.Context) {
 	if err != nil || st.HostVersion == "" {
 		return // a host before protocol 2 runs no bot addon: `mikan update` first
 	}
-	if a, ok := st.Adapters[OfficialBot]; ok && a.Protocol == addons.Protocol2 {
+	if a, ok := st.Adapters[OfficialBot]; ok && a.KindOf() != addons.KindPayment {
 		if a.Status != "running" || !b.granted(ctx) {
 			return
 		}
@@ -76,7 +76,7 @@ func (b *botAddon) check(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	i := slices.IndexFunc(c.Adapters, func(e addons.Entry) bool { return e.ID == OfficialBot && e.Protocol == addons.Protocol2 })
+	i := slices.IndexFunc(c.Adapters, func(e addons.Entry) bool { return e.ID == OfficialBot && e.Kind != addons.KindPayment })
 	if i < 0 {
 		return // not in the catalog yet
 	}
@@ -102,12 +102,11 @@ func (b *botAddon) check(ctx context.Context) {
 
 // granted: the official addon may hold the bot.
 func (b *botAddon) granted(ctx context.Context) bool {
-	g, err := b.p.st.Q.GetAddonGrant(ctx, OfficialBot)
-	if err != nil {
-		return false
+	perms, _, err := addons.LoadGrant(ctx, b.p.st.Q, OfficialBot)
+	if err != nil && !errors.Is(err, addons.ErrNoGrant) {
+		b.p.log.Warn("bot addon: grant", "err", err)
 	}
-	perms, _ := addons.DecodePermissions(g.Permissions)
-	return slices.Contains(perms, "bot")
+	return err == nil && addons.HasPerm(perms, "bot")
 }
 
 // channelMember is the channel check the bot addon may ask: about the bot's own channel

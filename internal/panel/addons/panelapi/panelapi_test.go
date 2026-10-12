@@ -2,7 +2,6 @@ package panelapi
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,17 +16,13 @@ import (
 	"time"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
+// grants are the approvals a world starts with, by addon.
 type grants map[string]db.AddonGrant
-
-func (g grants) GetAddonGrant(_ context.Context, id string) (db.AddonGrant, error) {
-	if x, ok := g[id]; ok {
-		return x, nil
-	}
-	return db.AddonGrant{}, sql.ErrNoRows
-}
 
 var (
 	botToken = strings.Repeat("b", 48)
@@ -35,13 +30,25 @@ var (
 	newToken = strings.Repeat("n", 48)
 )
 
-// world is a data directory with the host's state and a server over it.
+// world is a data directory with the host's state and a server over it, with a real
+// database holding the approvals g.
 func world(t *testing.T, st addons.State, g grants) (*Server, string) {
 	t.Helper()
+	ctx := context.Background()
+	store, err := storetest.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	for id, x := range g {
+		if err := store.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: id, Version: x.Version, Permissions: x.Permissions, ApprovedAt: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	dir := t.TempDir()
 	writeState(t, dir, st)
 	m := addons.New(dir, "", "dev", slog.New(slog.DiscardHandler), time.Now)
-	return New(Deps{Addons: m, Grants: g, Log: slog.New(slog.DiscardHandler)}), dir
+	return New(Deps{Addons: m, Store: store, Settings: settings.New(store.Q), Log: slog.New(slog.DiscardHandler), Now: time.Now}), dir
 }
 
 func writeState(t *testing.T, dir string, st addons.State) {
@@ -59,7 +66,7 @@ func state() addons.State {
 	return addons.State{Adapters: map[string]addons.Installed{
 		"telegram": {Protocol: addons.Protocol2, Kind: addons.KindBot, PanelToken: botToken, Token: "t", Status: "running"},
 		"fresh":    {Protocol: addons.Protocol2, Kind: addons.KindBot, PanelToken: newToken, Token: "t", Status: "running"},
-		"broken":   {Protocol: addons.Protocol2, Kind: addons.KindBot, PanelToken: strings.Repeat("x", 48), Token: "t", Status: "failed"},
+		"broken":   {Protocol: addons.Protocol2, Kind: addons.KindBot, PanelToken: strings.Repeat("x", 48), Token: "t", Status: "stopped"},
 		// A payment adapter has no panel token; one planted in its entry opens nothing.
 		"yookassa": {PanelToken: payToken, Token: "t", Status: "running"},
 	}}

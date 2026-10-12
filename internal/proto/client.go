@@ -204,10 +204,19 @@ func (c *clientBuilder) security() error {
 		c.y["tls"] = true
 		c.y[c.sniKey()] = sni
 		c.y["client-fingerprint"] = c.fingerprint()
-		c.y["reality-opts"] = map[string]any{"public-key": pbk, "short-id": sid}
+		// support-x25519mlkem768: xray ≥26.9.8 требует post-quantum keyshare
+		// X25519MLKEM768 в reality-хендшейке. Без флага mihomo/AoiVPN НЕ коннектится
+		// к reality-инбаундам (особенно xhttp-reality), и один битый outbound рушит
+		// парс всего конфига. Легаси его ставит — выравниваем (см. xhttp-reality fix).
+		c.y["reality-opts"] = map[string]any{
+			"public-key":             pbk,
+			"short-id":               sid,
+			"support-x25519mlkem768": true,
+		}
 		for k, v := range map[string]string{"security": "reality", "sni": sni, "fp": c.fingerprint(), "pbk": pbk, "sid": sid} {
 			c.q.Set(k, v)
 		}
+		c.q.Set("pqv", "1") // X25519MLKEM768 keyshare в v2ray-ссылке (xray reads pqv)
 		return nil
 	}
 	if !rules[c.t.Type()].cert && c.ext.TLS != "node" {

@@ -193,6 +193,12 @@ func build(p Profile) ([]proxy, error) {
 				p.skip(in, err)
 				continue
 			}
+			// Shadowsocks снят с раздачи: протокол убран из клиента по решению
+			// владельца. Инбаунды могут ещё жить в панели — не рендерим их в
+			// подписку, не удаляя из БД (админ удалит пресет отдельно).
+			if pt, _ := t["type"].(string); pt == "shadowsocks" {
+				continue
+			}
 			base := domain.ProxyName(in)
 			// A name the admin typed is used as is; preset names get the node's flag.
 			if prefix := NodePrefix(n.Name); multi && in.DisplayName == "" && prefix != "" {
@@ -315,7 +321,16 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		},
 	}
 	// The panel and the nodes stay out of the tunnel whatever the admin's rules say.
-	rules := append(directRules(p.Direct), "GEOIP,LAN,DIRECT,no-resolve")
+	// Control-домены (sub/panel/vpn.aoimusic.ru) наоборот — ЧЕРЕЗ туннель, ДО всех
+	// GEOSITE/GEOIP-ru правил (иначе .ru→DIRECT тащит обновление подписки через
+	// RU-DNS/ТСПУ → "Failed host lookup: sub.aoimusic.ru" при импорте с вкл. VPN).
+	controlRules := []string{
+		"DOMAIN-SUFFIX,sub.aoimusic.ru," + g.Main,
+		"DOMAIN-SUFFIX,panel.aoimusic.ru," + g.Main,
+		"DOMAIN-SUFFIX,vpn.aoimusic.ru," + g.Main,
+	}
+	rules := append(controlRules, directRules(p.Direct)...)
+	rules = append(rules, "GEOIP,LAN,DIRECT,no-resolve")
 	rules = append(rules, p.Rules...)
 	cfg := map[string]any{
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning",
@@ -349,7 +364,13 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		}
 		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + dnsGroup, "https://8.8.8.8/dns-query#" + dnsGroup}
 		dns["proxy-server-nameserver"] = []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"}
-		dns["nameserver-policy"] = map[string]any{"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"}}
+		// Control-домены резолвим ЧЕРЕЗ туннель (не через RU-DNS), иначе
+		// обновление подписки/панель отваливаются под ТСПУ. Полиси выше
+		// category-ru (map неупорядочен, но +.aoimusic.ru точнее geosite).
+		dns["nameserver-policy"] = map[string]any{
+			"+.aoimusic.ru":       []string{"https://1.1.1.1/dns-query#" + dnsGroup},
+			"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"},
+		}
 	}
 	cfg["rules"] = append(rules, "MATCH,"+g.Main)
 	return json.MarshalIndent(cfg, "", "  ")

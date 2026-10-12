@@ -15,6 +15,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/panel/addons/panelapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/settings"
@@ -368,6 +369,15 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 			}
 		}
 		if b.Enabled != nil {
+			// Turning the bot on again brings the official bot addon back if none answers, also
+			// after the admin removed it.
+			if was, _, err := settings.Get[bool](ctx, set, tgate.KeyEnabled); err != nil {
+				return err
+			} else if *b.Enabled && !was {
+				if err := settings.Set(ctx, set, panelapi.AutoBotKey, true); err != nil {
+					return err
+				}
+			}
 			return settings.Set(ctx, set, tgate.KeyEnabled, *b.Enabled)
 		}
 		return nil

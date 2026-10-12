@@ -388,10 +388,6 @@
           "enabled": {
             "type": "boolean"
           },
-          "error": {
-            "description": "Почему контейнер не работает",
-            "type": "string"
-          },
           "help": {
             "additionalProperties": {
               "type": "string"
@@ -419,8 +415,7 @@
           },
           "status": {
             "enum": [
-              "running",
-              "failed"
+              "running"
             ],
             "type": "string"
           },
@@ -467,10 +462,6 @@
           "last": {
             "$ref": "#/components/schemas/AddonResult",
             "description": "Как сервер выполнил последнюю заявку"
-          },
-          "pending": {
-            "$ref": "#/components/schemas/AddonRequest",
-            "description": "Первая заявка в очереди: сервер ещё не взял её"
           },
           "queue": {
             "description": "Все заявки, которые сервер ещё не взял, по порядку",
@@ -848,12 +839,17 @@
         "additionalProperties": false,
         "properties": {
           "addon": {
-            "description": "Аддон, который отвечает в боте; пусто — собственные экраны панели",
+            "description": "Аддон, который отвечает в боте; пусто — никто, обновления ждут в буфере панели",
             "type": "string"
+          },
+          "auto": {
+            "description": "Панель сама ставит официального бота, пока бот включён и никто не отвечает; false — админ удалил бота",
+            "type": "boolean"
           }
         },
         "required": [
-          "addon"
+          "addon",
+          "auto"
         ],
         "type": "object"
       },
@@ -3139,10 +3135,6 @@
             "description": "Дайджест образа аддона админа (custom)",
             "type": "string"
           },
-          "error": {
-            "description": "Почему контейнер не работает",
-            "type": "string"
-          },
           "granted": {
             "description": "Одобренные права",
             "items": {
@@ -3188,8 +3180,7 @@
           },
           "status": {
             "enum": [
-              "running",
-              "failed"
+              "running"
             ],
             "type": "string"
           },
@@ -3240,9 +3231,12 @@
             "$ref": "#/components/schemas/AddonResult",
             "description": "Как сервер выполнил последнюю заявку"
           },
-          "pending": {
-            "$ref": "#/components/schemas/AddonRequest",
-            "description": "Заявка, которую сервер ещё не взял"
+          "queue": {
+            "description": "Все заявки, которые сервер ещё не взял, по порядку",
+            "items": {
+              "$ref": "#/components/schemas/AddonRequest"
+            },
+            "type": "array"
           },
           "supported": {
             "description": "Панель видит каталог данных сервера; иначе ставить аддоны нельзя",
@@ -5233,13 +5227,6 @@
               "null"
             ]
           },
-          "moving": {
-            "description": "Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
           "on_sale": {
             "description": "Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату",
             "format": "int64",
@@ -5290,8 +5277,7 @@
           "free_condition",
           "free_plans",
           "available",
-          "on_sale",
-          "moving"
+          "on_sale"
         ],
         "type": "object"
       },
@@ -13952,7 +13938,7 @@
             "description": "Error"
           }
         },
-        "summary": "Отдать бота аддону или вернуть экраны панели",
+        "summary": "Отдать бота аддону",
         "tags": [
           "addons"
         ],

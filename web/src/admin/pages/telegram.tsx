@@ -31,7 +31,11 @@ function usePatchTelegram() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Schemas["PatchTelegramInputBody"]) => unwrap(api.PATCH("/api/v1/telegram", { body })),
-    onSuccess: (v) => qc.setQueryData(qk.telegram, v),
+    onSuccess: (v) => {
+      qc.setQueryData(qk.telegram, v);
+      // Turning the bot on again brings the official bot addon back.
+      void qc.invalidateQueries({ queryKey: qk.botSlot });
+    },
   });
 }
 

@@ -1623,7 +1623,7 @@ export interface paths {
         };
         /** Кто отвечает в боте подписчиков */
         get: operations["get-bot-addon"];
-        /** Отдать бота аддону или вернуть экраны панели */
+        /** Отдать бота аддону */
         put: operations["set-bot-addon"];
         post?: never;
         delete?: never;
@@ -2247,8 +2247,6 @@ export interface components {
             /** @description Принимает оплату прямо сейчас: включён, настроен, работает */
             available: boolean;
             enabled: boolean;
-            /** @description Почему контейнер не работает */
-            error?: string;
             help: {
                 [key: string]: string;
             };
@@ -2260,7 +2258,7 @@ export interface components {
             };
             settings: components["schemas"]["AddonField"][];
             /** @enum {string} */
-            status: "running" | "failed";
+            status: "running";
             version: string;
             /** @description Адрес для уведомлений в кабинете провайдера */
             webhook_url: string;
@@ -2272,8 +2270,6 @@ export interface components {
             installed: components["schemas"]["AddonView"][];
             /** @description Как сервер выполнил последнюю заявку */
             last?: components["schemas"]["AddonResult"];
-            /** @description Первая заявка в очереди: сервер ещё не взял её */
-            pending?: components["schemas"]["AddonRequest"];
             /** @description Все заявки, которые сервер ещё не взял, по порядку */
             queue?: components["schemas"]["AddonRequest"][];
             /** @description Панель видит каталог данных сервера; иначе ставить адаптеры нельзя */
@@ -2418,8 +2414,10 @@ export interface components {
             addon: string;
         };
         BotSlotView: {
-            /** @description Аддон, который отвечает в боте; пусто — собственные экраны панели */
+            /** @description Аддон, который отвечает в боте; пусто — никто, обновления ждут в буфере панели */
             addon: string;
+            /** @description Панель сама ставит официального бота, пока бот включён и никто не отвечает; false — админ удалил бота */
+            auto: boolean;
         };
         BoundDeviceView: {
             app: string;
@@ -3216,8 +3214,6 @@ export interface components {
         MarketInstalled: {
             /** @description Дайджест образа аддона админа (custom) */
             digest?: string;
-            /** @description Почему контейнер не работает */
-            error?: string;
             /** @description Одобренные права */
             granted: string[];
             id: string;
@@ -3238,7 +3234,7 @@ export interface components {
              */
             source: "official" | "custom" | "external";
             /** @enum {string} */
-            status: "running" | "failed";
+            status: "running";
             /** @description Адрес внешнего аддона (external); пусто у клиента панели */
             url?: string;
             /** @description Пусто у аддона админа: версию знает только каталог */
@@ -3253,8 +3249,8 @@ export interface components {
             installed: components["schemas"]["MarketInstalled"][];
             /** @description Как сервер выполнил последнюю заявку */
             last?: components["schemas"]["AddonResult"];
-            /** @description Заявка, которую сервер ещё не взял */
-            pending?: components["schemas"]["AddonRequest"];
+            /** @description Все заявки, которые сервер ещё не взял, по порядку */
+            queue?: components["schemas"]["AddonRequest"][];
             /** @description Панель видит каталог данных сервера; иначе ставить аддоны нельзя */
             supported: boolean;
         };
@@ -4004,8 +4000,6 @@ export interface components {
              * @description Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже
              */
             free_tariff_id: number | null;
-            /** @description Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит */
-            moving: string[];
             /**
              * Format: int64
              * @description Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату

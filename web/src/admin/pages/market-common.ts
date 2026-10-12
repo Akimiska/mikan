@@ -24,11 +24,12 @@ export function marketReady(m: Market | undefined): boolean {
 
 /** Every addon the server has a request for: its actions wait until the server is done. */
 export function queuedIds(m: Market | undefined, p: Payments | undefined): Set<string> {
-  const ids = new Set<string>();
-  for (const r of p?.queue ?? []) ids.add(r.id);
-  if (p?.pending) ids.add(p.pending.id);
-  if (m?.pending) ids.add(m.pending.id);
-  return ids;
+  return new Set(serverQueue(m, p).map((r) => r.id));
+}
+
+/** The server's one queue of requests, oldest first: both lists carry it. */
+export function serverQueue(m: Market | undefined, p: Payments | undefined) {
+  return m?.queue ?? p?.queue ?? [];
 }
 
 /** Install (or update) an addon of the catalog with the permissions its entry asks for. */

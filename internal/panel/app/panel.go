@@ -58,9 +58,9 @@ type Panel struct {
 	// NodeUpdates updates the remote nodes to the panel's version; nil without nodes.
 	NodeUpdates *nodeupdate.Service
 	// Gateway is the panel's side of Telegram: the token, polling, Stars, the alerts' way
-	// out; Telegram is the bot's screens on top of it.
+	// out; Telegram is the admin's setup of the bot, its notices and broadcasts on top of it.
 	Gateway   *tgate.Gateway
-	Telegram  *tgbot.Bot
+	Telegram  *tgbot.Panel
 	Billing   *billing.Service
 	Updates   *updates.Checker
 	Alerts    *infraalerts.Monitor
@@ -246,7 +246,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	// The panel's API for addons, with the Bot API proxy over the gateway for the addon that
 	// holds the bot.
 	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
-		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend, channelMember(backend, p.Gateway))})
+		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend)})
 	// What the bot says comes from the bot addon (the official one is installed by itself,
 	// botaddon.go): the panel tells it through events, and keeps the broadcasts and the
 	// previews of the admin's texts.
@@ -257,10 +257,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		}
 		return err
 	}
-	p.Telegram = tgbot.New(tgbot.Deps{Backend: backend, Gateway: p.Gateway, Log: o.Log, Now: o.Now,
-		Off: func(context.Context) bool { return true }, Emit: emit})
+	p.Telegram = tgbot.NewPanel(tgbot.PanelDeps{Backend: backend, Outbox: p.Gateway.Outbox, Emit: emit, Log: o.Log, Now: o.Now})
 	// The updates wait in the buffer for the addon that holds the bot.
-	p.Gateway.SetHandler(p.AddonsAPI.BotSlot(nil))
+	p.Gateway.SetHandler(p.AddonsAPI.BotSlot())
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
 	p.Billing.SetTelegram(p.Gateway)
 	p.Billing.SetNotifier(tgbot.Notifications{Emit: emit, Log: o.Log})

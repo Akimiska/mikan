@@ -9,18 +9,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/tgate"
 )
 
 // The bot's screens as an addon see the panel over the Panel API: POST /panel/v2/bot/<method>
-// calls one method of Backend, Shop ("Shop.<method>") or Transport.Member ("Member") with
-// its arguments as a JSON array (the context left out) and answers its results the same
+// calls one method of Backend or Shop ("Shop.<method>") with its arguments as a JSON array
+// (the context left out) and answers its results the same
 // way, or an error by its code. RPCHandler is the panel's side, Remote the addon's: the
 // screens run unchanged on either (docs/pipeline/addons.md, section 13, PR 10).
 
@@ -33,7 +36,7 @@ var rpcErrors = map[string]error{
 	"no_rows":           sql.ErrNoRows,
 	"not_found":         domain.ErrNotFound,
 	"link_limit":        ErrLinkLimit,
-	"unavailable":       ErrUnavailable,
+	"not_channel":       ErrNotChannel,
 	"link_expired":      tgate.ErrLinkExpired,
 	"link_invalid":      tgate.ErrLinkInvalid,
 	"unbind_off":        domain.ErrUnbindOff,
@@ -76,9 +79,6 @@ func codeOf(err error) rpcError {
 	return rpcError{Code: "error", Message: err.Error()}
 }
 
-// Member is what the screens ask the gateway about the channel (Transport.Member).
-type Member func(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error)
-
 var (
 	backendType = reflect.TypeFor[Backend]()
 	shopType    = reflect.TypeFor[Shop]()
@@ -86,26 +86,23 @@ var (
 	contextType = reflect.TypeFor[context.Context]()
 )
 
-// RPCHandler serves the calls of Remote on b and member: only the methods of Backend, Shop
-// and Member are reachable, whatever else b has.
-func RPCHandler(b Backend, member Member) http.Handler {
+// RPCHandler serves the calls of Remote on b: only the methods of Backend and Shop are
+// reachable, whatever else b has (Local's notices and broadcast targets are the panel's).
+func RPCHandler(b Backend) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("method")
 		var fn reflect.Value
 		switch {
-		case name == "Member":
-			fn = reflect.ValueOf(member)
 		case strings.HasPrefix(name, "Shop."):
-			m, ok := shopType.MethodByName(strings.TrimPrefix(name, "Shop."))
-			if shop := b.Shop(); ok && shop != nil {
-				fn = reflect.ValueOf(shop).MethodByName(m.Name)
+			if m, ok := shopType.MethodByName(strings.TrimPrefix(name, "Shop.")); ok {
+				fn = reflect.ValueOf(b.Shop()).MethodByName(m.Name)
 			}
 		case name != "Shop":
 			if m, ok := backendType.MethodByName(name); ok {
 				fn = reflect.ValueOf(b).MethodByName(m.Name)
 			}
 		}
-		if !fn.IsValid() || fn.IsNil() && fn.Kind() == reflect.Func {
+		if !fn.IsValid() {
 			rpcWrite(w, http.StatusNotFound, map[string]any{"error": rpcError{Code: "no_method", Message: "no method " + name}})
 			return
 		}
@@ -216,12 +213,51 @@ func (r *Remote) call(ctx context.Context, method string, args []any, outs ...an
 	return nil
 }
 
-// Member is Transport.Member over the Panel API.
-func (r *Remote) Member(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error) {
-	var in bool
-	err := r.call(ctx, "Member", []any{chat, tgID, fresh}, &in)
-	return in, err
+// Events reads the panel's feed of the events of the given types, waiting up to wait for
+// one to come (GET /events).
+func (r *Remote) Events(ctx context.Context, wait time.Duration, types []string) ([]events.Event, error) {
+	q := url.Values{"wait": {strconv.Itoa(int(wait / time.Second))}, "types": {strings.Join(types, ",")}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.base+"/events?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	resp, err := r.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("events: HTTP %d", resp.StatusCode)
+	}
+	var feed struct {
+		Events []events.Event `json:"events"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, rpcMaxBody)).Decode(&feed); err != nil {
+		return nil, err
+	}
+	return feed.Events, nil
 }
 
-var _ Backend = (*Remote)(nil)
+// Ack tells the panel an event was handled, so that the feed does not hand it out again
+// (POST /events/ack).
+func (r *Remote) Ack(ctx context.Context, id int64) error {
+	body, _ := json.Marshal(map[string]int64{"id": id})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.base+"/events/ack", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := r.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return errors.New("ack: HTTP " + resp.Status)
+	}
+	return nil
+}
+
 var _ Shop = remoteShop{}

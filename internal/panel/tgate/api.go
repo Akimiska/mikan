@@ -2,9 +2,10 @@
 // money and access. It keeps the way to Telegram (route.go), the update loop with its
 // offset, the outbox with Telegram's limits, the flood guard, the accounts that wrote to
 // the bot, Telegram Stars, link codes and the Mini App's sign-in, the infrastructure
-// admin's chat and the bot's channel. The bot's screens (tgbot) get the updates the gateway
-// does not handle itself and send through its outbox; the bot addon does the same over the
-// Bot API proxy (addons/panelapi, docs/pipeline/addons.md).
+// admin's chat and the bot's channel. The bot's screens (tgbot) run in the bot addon: the
+// gateway buffers the updates it does not handle itself for the addon, and the addon sends
+// through the gateway's outbox over the Bot API proxy (addons/panelapi,
+// docs/pipeline/addons.md).
 package tgate
 
 import (

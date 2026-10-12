@@ -11,11 +11,11 @@ import (
 	"mikan/internal/panel/tgate"
 )
 
-// The bot's screens see the panel through two interfaces: Backend, the panel's data (who
-// an account is, its subscriptions, what it may buy), and Transport, the Telegram gateway
-// it sends through. Local and *tgate.Gateway are the in-process ones; the bot addon gets
-// the same over the Panel API and the Bot API proxy (docs/pipeline/addons.md, sections 6
-// and 7), so the methods follow those endpoints.
+// The bot's screens, which run as the bot addon, see the panel through Backend: its data
+// (who an account is, its subscriptions, what it may buy) and the channel check. Remote is
+// that over the Panel API (docs/pipeline/addons.md, section 13), Local the panel's side of
+// the same calls (RPCHandler), so the methods follow those endpoints. What the screens send
+// goes through the Bot API proxy.
 
 // Backend is the panel as the bot's screens use it.
 type Backend interface {
@@ -30,6 +30,9 @@ type Backend interface {
 	// MiniAppURL is where the Mini App opens; "" when Telegram could not load it (GET
 	// /tg/mini-app).
 	MiniAppURL(ctx context.Context) string
+	// Member says whether tgID is in the bot's channel chat (GET /tg/subscribed). The
+	// screens may ask about the bot's own channel only.
+	Member(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error)
 
 	// Context is a Telegram account: its chat and the subscriptions linked to it (GET
 	// /tg/context).
@@ -46,12 +49,13 @@ type Backend interface {
 	UserOfCode(ctx context.Context, code string) (int64, error)
 	UserOfAddress(ctx context.Context, urlPath string) (int64, bool)
 	// Link ties subscription userID to account tgID, unless another account it can ask
-	// owns it (LinkTaken) or tgID holds MaxLinks already.
+	// owns it (LinkTaken) or tgID holds tgate.MaxLinks already.
 	Link(ctx context.Context, tgID, userID int64) (Linked, error)
 	// Owner is the account a subscription is linked to.
 	Owner(ctx context.Context, userID int64) (int64, error)
 	// Transfer moves subscription userID to account to and shows it there, its owner having
-	// said yes: ErrLinkLimit when that account holds MaxLinks already (POST /tg/transfer).
+	// said yes: ErrLinkLimit when that account holds tgate.MaxLinks already (POST
+	// /tg/transfer).
 	Transfer(ctx context.Context, userID, to int64) error
 	// Unlink takes a subscription off its account; the subscription stays (POST /tg/unlink).
 	Unlink(ctx context.Context, userID int64) error
@@ -74,24 +78,29 @@ type Backend interface {
 	UnbindState(ctx context.Context, userID int64) (domain.UnbindState, error)
 	Unbind(ctx context.Context, userID, deviceID int64) error
 	// ReissueState and Reissue: the subscriber's own new link, under the panel's rules
-	// (POST /users/{id}/reissue); ErrUnavailable where the panel does not offer it.
+	// (POST /users/{id}/reissue).
 	ReissueState(ctx context.Context, userID int64) (domain.ReissueState, error)
 	Reissue(ctx context.Context, userID int64) error
 
-	// The notices about the term and the traffic: the subscriptions that may get one, and
-	// which were delivered (tg_notices). They move into the panel's events later.
+	// Shop is what the panel sells in the bot (GET /offers, POST /billing/*).
+	Shop() Shop
+	// Tariff is one tariff, for what a trial, a free plan or an invoice gives.
+	Tariff(ctx context.Context, id int64) (db.Tariff, error)
+}
+
+// PanelBackend is Backend and what only the panel's side of the bot reads: the notices
+// about the term and the traffic (which were told, tg_notices) and the broadcasts' targets.
+// The addon never asks for these, so Remote has none of them and the Panel API opens none:
+// a list of every subscriber's account is not the addon's to read.
+type PanelBackend interface {
+	Backend
+	// Notices are the subscriptions that may get a notice now.
 	Notices(ctx context.Context, now time.Time) ([]db.ListNoticeSubscriptionsRow, error)
 	NoticeSent(ctx context.Context, userID int64, kind string, period int64) (bool, error)
 	NoticeDelivered(ctx context.Context, userID int64, kind string, period int64, at time.Time) error
 	PruneNotices(ctx context.Context, before time.Time) error
 	// BroadcastTargets are the accounts a broadcast goes to.
 	BroadcastTargets(ctx context.Context) ([]int64, error)
-
-	// Shop is what the panel sells in the bot; nil while it sells nothing (GET /offers,
-	// POST /billing/*).
-	Shop() Shop
-	// Tariff is one tariff, for what a trial, a free plan or an invoice gives.
-	Tariff(ctx context.Context, id int64) (db.Tariff, error)
 }
 
 // Shop is the panel's billing as the bot's screens use it (*billing.Service).
@@ -112,17 +121,6 @@ type Shop interface {
 	FreePlan(ctx context.Context, tgID int64) (db.User, error)
 }
 
-// Transport is the Telegram gateway as the bot's screens use it (*tgate.Gateway); the
-// updates come the other way, through tgate.Handler.
-type Transport interface {
-	// Outbox is the running bot's outbox; nil while the bot is off.
-	Outbox() *tgate.Outbox
-	// Go runs f as work the gateway's Run waits for.
-	Go(f func())
-	// Member says whether tgID is in the channel chat (GET /tg/subscribed).
-	Member(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error)
-}
-
 // Account is a Telegram account as the bot sees it.
 type Account struct {
 	Chat    db.TgChat // its chat; HasChat false before it wrote to the bot
@@ -136,7 +134,7 @@ type LinkStatus int
 const (
 	LinkDone    LinkStatus = iota // linked to the account and shown there
 	LinkAlready                   // the account's already: shown there now
-	LinkLimit                     // the account holds MaxLinks already
+	LinkLimit                     // the account holds tgate.MaxLinks already
 	LinkTaken                     // another account owns it and can be asked: Linked.Owner
 )
 
@@ -157,18 +155,17 @@ type Pool struct {
 }
 
 var (
-	// ErrLinkLimit: the account holds MaxLinks subscriptions already.
+	// ErrLinkLimit: the account holds tgate.MaxLinks subscriptions already.
 	ErrLinkLimit = errors.New("max_links")
-	// ErrUnavailable: the panel does not offer this.
-	ErrUnavailable = errors.New("unavailable")
+	// ErrNotChannel: Backend.Member was asked about a chat that is not the bot's channel.
+	ErrNotChannel = errors.New("not_the_channel")
 )
 
-// The in-process pieces are what the panel wires together (app/panel.go).
+// The panel's pieces and the addon's are what they say they are.
 var (
-	_ Backend          = (*Local)(nil)
+	_ PanelBackend     = (*Local)(nil)
+	_ Backend          = (*Remote)(nil)
 	_ Shop             = (*billing.Service)(nil)
-	_ Transport        = (*tgate.Gateway)(nil)
-	_ tgate.Handler    = (*Bot)(nil)
-	_ billing.Notifier = (*Bot)(nil)
+	_ billing.Notifier = Notifications{}
 	_ billing.Telegram = (*tgate.Gateway)(nil)
 )

@@ -21,11 +21,11 @@ func TestBotTrial(t *testing.T) {
 	var svc *billing.Service
 	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: tgate.MaxLinks})
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.gate)
-	svc.SetNotifier(e.bot)
+	svc.SetNotifier(e.notifications())
 	const visitor = 779
 	welcome := func() call {
 		t.Helper()
@@ -92,7 +92,9 @@ func TestBotTrialNotGiven(t *testing.T) {
 	e.tg.mu.Lock()
 	from := len(e.tg.calls)
 	e.tg.mu.Unlock()
-	e.bot.TrialNotGiven(e.ctx, db.Payment{TgID: 4242, Amount: 100, Currency: "RUB"})
+	if err := e.bot.HandleEvent(e.ctx, event(t, EventTrialNotGiven, 0, 4242, PaymentMessage{Payment: db.Payment{TgID: 4242, Amount: 100, Currency: "RUB"}})); err != nil {
+		t.Fatal(err)
+	}
 	var sent map[string]any
 	for _, c := range e.tg.wait(t, from, "sendMessage") {
 		if c.method == "sendMessage" {
@@ -111,11 +113,11 @@ func TestBotTrialFailure(t *testing.T) {
 	var svc *billing.Service
 	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: tgate.MaxLinks})
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.gate)
-	svc.SetNotifier(e.bot)
+	svc.SetNotifier(e.notifications())
 	ts, _ := e.st.Q.ListTariffs(e.ctx)
 	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{TrialTariffID: ts[0].ID}); err != nil {
 		t.Fatal(err)
@@ -138,11 +140,11 @@ func TestBotPaidTrial(t *testing.T) {
 	var svc *billing.Service
 	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: tgate.MaxLinks})
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.gate)
-	svc.SetNotifier(e.bot)
+	svc.SetNotifier(e.notifications())
 	const visitor = 781
 	ts, _ := e.st.Q.ListTariffs(e.ctx)
 	// Selling is on for the trial alone: no tariff is on sale and new subscriptions are off.

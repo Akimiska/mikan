@@ -31,11 +31,11 @@ func TestShopStars(t *testing.T) {
 		}
 		pool := domain.NewPool(e.st, e.clock)
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, pool, noChanges{}, e.clock),
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: tgate.MaxLinks})
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.gate)
-	svc.SetNotifier(e.bot)
+	svc.SetNotifier(e.notifications())
 	const buyer = 777
 
 	// Selling is off on a panel that never turned it on: the welcome has no shop.

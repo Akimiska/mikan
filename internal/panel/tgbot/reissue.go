@@ -70,9 +70,6 @@ func (b *Bot) in(w *words, t time.Time) string {
 // cannot reissue at all.
 func (b *Bot) reissueState(ctx context.Context, u db.User) (domain.ReissueState, bool) {
 	st, err := b.d.Backend.ReissueState(ctx, u.ID)
-	if errors.Is(err, ErrUnavailable) {
-		return st, false
-	}
 	if err != nil {
 		b.d.Log.Warn("telegram: reissue rules", "err", err)
 		return st, false
@@ -115,7 +112,7 @@ func (b *Bot) reissueConfirm(ctx context.Context, w *words, u db.User) (string, 
 // reissueAct is the tap "rn:<user>": a new link for that subscription of the account, and
 // the connect screen with it. Only a subscription of the account is touched.
 func (b *Bot) reissueAct(ctx context.Context, chat, id int64) (screen, notice string) {
-	w := wordsFor(b.Config(ctx).Lang)
+	w := wordsFor(b.config(ctx).Lang)
 	lw := linkWordsFor(w)
 	list, _, _ := b.subs(ctx, chat)
 	for _, s := range list {
@@ -136,8 +133,6 @@ func (b *Bot) reissueAct(ctx context.Context, chat, id int64) (screen, notice st
 			return "s", lw.off
 		case errors.Is(err, domain.ErrNotFound):
 			return "m", ""
-		case errors.Is(err, ErrUnavailable):
-			return "s", ""
 		default:
 			b.d.Log.Warn("telegram: link not reissued", "user", id, "err", err)
 			return "s", lw.failed

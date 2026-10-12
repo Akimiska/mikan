@@ -17,17 +17,18 @@ import (
 )
 
 // Local is the Backend inside the panel's process: its store, settings, users, devices and
-// billing. It is the only part of the bot that touches them.
+// billing. It is the only part of the bot that touches them; the bot addon reaches it over
+// the Panel API (RPCHandler), and the panel's side of the bot (Panel) calls it directly.
 type Local struct {
 	Store    *store.Store
 	Settings *settings.Settings
 	// Binder unbinds devices at their subscriber's request.
 	Binder *domain.Devices
-	// Users reissues a subscription's link at its subscriber's request; nil: it cannot.
+	// Users reissues a subscription's link at its subscriber's request.
 	Users *domain.Users
-	// Billing sells tariffs in the menu; nil: no shop.
+	// Billing sells tariffs in the menu.
 	Billing *billing.Service
-	// Gateway reads the link codes it signed.
+	// Gateway reads the link codes it signed and asks who is in the channel.
 	Gateway *tgate.Gateway
 	// SubBase is https://host:port/<sub path>, "" while the panel has no public address.
 	SubBase func(ctx context.Context) string
@@ -37,17 +38,27 @@ type Local struct {
 }
 
 func (l *Local) Config(ctx context.Context) Config {
-	lang, _ := l.Settings.Lang(ctx)
 	// A setup saved before an option existed gets that option's default. A saved menu
 	// replaces the default one whole.
-	def := Default(lang)
-	def.Buttons = nil
-	cfg, ok, err := settings.GetOver(ctx, l.Settings, KeyConfig, def)
-	if err != nil || !ok {
+	cfg, lang, saved := tgate.ReadSetup(ctx, l.Settings, func(lang string) Config {
+		def := Default(lang)
+		def.Buttons = nil
+		return def
+	})
+	if !saved {
 		return Default(lang)
 	}
 	_ = cfg.Validate()
 	return cfg
+}
+
+// Member is the channel check, for the bot's own channel only: the screens cannot probe
+// other chats or reset what the gateway knows about members.
+func (l *Local) Member(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error) {
+	if ch := l.Gateway.ChannelConfig(ctx).Chat; ch == "" || chat != ch {
+		return false, ErrNotChannel
+	}
+	return l.Gateway.Member(ctx, chat, tgID, fresh)
 }
 
 func (l *Local) Brand(ctx context.Context) string {
@@ -116,9 +127,6 @@ func (l *Local) UserOfAddress(ctx context.Context, urlPath string) (int64, bool)
 			return u.ID, true
 		}
 	}
-	if l.Settings == nil {
-		return 0, false
-	}
 	legacyPath, verifier, err := panelimport.LoadLegacy(ctx, l.Settings)
 	if err != nil {
 		return 0, false
@@ -148,7 +156,7 @@ func (l *Local) Link(ctx context.Context, tgID, userID int64) (Linked, error) {
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return Linked{}, err
 	}
-	if n, err := l.Store.Q.CountTgLinksOf(ctx, tgID); err != nil || n >= MaxLinks {
+	if n, err := l.Store.Q.CountTgLinksOf(ctx, tgID); err != nil || n >= tgate.MaxLinks {
 		return Linked{Status: LinkLimit, User: u}, nil
 	}
 	if prev.TgID != 0 && l.reachable(ctx, prev.TgID) {
@@ -173,7 +181,7 @@ func (l *Local) Owner(ctx context.Context, userID int64) (int64, error) {
 }
 
 func (l *Local) Transfer(ctx context.Context, userID, to int64) error {
-	if n, err := l.Store.Q.CountTgLinksOf(ctx, to); err != nil || n >= MaxLinks {
+	if n, err := l.Store.Q.CountTgLinksOf(ctx, to); err != nil || n >= tgate.MaxLinks {
 		return ErrLinkLimit
 	}
 	if err := l.Store.Q.LinkTg(ctx, db.LinkTgParams{UserID: userID, TgID: to, CreatedAt: l.Now().Unix()}); err != nil {
@@ -258,16 +266,10 @@ func (l *Local) Unbind(ctx context.Context, userID, deviceID int64) error {
 }
 
 func (l *Local) ReissueState(ctx context.Context, userID int64) (domain.ReissueState, error) {
-	if l.Users == nil {
-		return domain.ReissueState{}, ErrUnavailable
-	}
 	return l.Users.ReissueState(ctx, userID)
 }
 
 func (l *Local) Reissue(ctx context.Context, userID int64) error {
-	if l.Users == nil {
-		return ErrUnavailable
-	}
 	_, err := l.Users.ReissueByOwner(ctx, userID, "bot")
 	return err
 }
@@ -293,12 +295,7 @@ func (l *Local) BroadcastTargets(ctx context.Context) ([]int64, error) {
 	return l.Store.Q.BroadcastTargets(ctx)
 }
 
-func (l *Local) Shop() Shop {
-	if l.Billing == nil {
-		return nil // not a nil *billing.Service in a non-nil interface
-	}
-	return l.Billing
-}
+func (l *Local) Shop() Shop { return l.Billing }
 
 func (l *Local) Tariff(ctx context.Context, id int64) (db.Tariff, error) {
 	return l.Store.Q.GetTariff(ctx, id)

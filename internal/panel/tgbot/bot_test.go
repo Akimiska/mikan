@@ -22,6 +22,7 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -256,7 +257,8 @@ type env struct {
 	set   *settings.Settings
 	tg    *fakeTelegram
 	gate  *tgate.Gateway
-	bot   *Bot
+	bot   *Bot   // the addon's side: the screens, on the updates and the events
+	panel *Panel // the panel's side: the notices and the broadcasts
 	now   time.Time
 	mu    sync.Mutex
 	user  db.User
@@ -333,23 +335,23 @@ func setup(t *testing.T, with ...func(e *env, d *wiring)) *env {
 	w := wiring{Store: e.st, Settings: e.set, Devices: e.devs, Users: e.users, Now: e.clock,
 		SubBase: func(context.Context) string { return "https://vpn.example.com:21355/sub" },
 		MiniApp: func() bool { return true }, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Limits: fast}
+	// Selling is off until a test turns it on, but the shop is always there.
+	w.Billing = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: e.users, Log: w.Log, Now: e.clock, MaxLinks: tgate.MaxLinks})
 	for _, f := range with {
 		f(e, &w)
 	}
 	e.gate = tgate.New(tgate.Deps{Store: w.Store, Settings: w.Settings, API: srv.URL, Log: w.Log, Now: w.Now, Limits: w.Limits, Billing: w.Billing})
-	var backend Backend = &Local{Store: w.Store, Settings: w.Settings, Binder: w.Devices, Users: w.Users, Billing: w.Billing, Gateway: e.gate,
+	local := &Local{Store: w.Store, Settings: w.Settings, Binder: w.Devices, Users: w.Users, Billing: w.Billing, Gateway: e.gate,
 		SubBase: w.SubBase, MiniApp: w.MiniApp, Now: w.Now}
+	var backend Backend = local
 	if w.RPC {
 		mux := http.NewServeMux()
-		mux.Handle("POST /bot/{method}", RPCHandler(backend, e.gate.Member))
+		mux.Handle("POST /bot/{method}", RPCHandler(local))
 		rpc := httptest.NewServer(mux)
 		t.Cleanup(rpc.Close)
 		backend = NewRemote(rpc.URL, "token", nil)
 	}
-	e.bot = New(Deps{Backend: backend, Gateway: e.gate, Log: w.Log, Now: w.Now})
-	e.gate.SetHandler(e.bot)
 	go e.gate.Run(ctx)
-	go e.bot.Run(ctx)
 	deadline := time.Now().Add(3 * time.Second)
 	for !e.gate.Status().Running {
 		if time.Now().After(deadline) {
@@ -357,7 +359,36 @@ func setup(t *testing.T, with ...func(e *env, d *wiring)) *env {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	// The addon's screens on the gateway's client and outbox; the panel tells them its
+	// events directly, and the updates come to them as the proxy hands them out.
+	e.bot = New(Deps{Backend: backend, Client: e.gate.Client(), Outbox: e.gate.Outbox(), Go: e.gate.Go, Log: w.Log, Now: w.Now})
+	e.panel = NewPanel(PanelDeps{Backend: local, Outbox: e.gate.Outbox, Emit: e.emit, Log: w.Log, Now: w.Now})
+	e.bot.Started(ctx)
+	e.gate.SetHandler(screens{e})
 	return e
+}
+
+// screens hands the gateway's updates to the addon's bot.
+type screens struct{ e *env }
+
+func (s screens) Update(ctx context.Context, up tgate.Update) error {
+	s.e.bot.Update(ctx, up)
+	return nil
+}
+
+// emit is the panel's feed of events as the addon reads it, without the table between:
+// the event is what the addon would pull, and its handling is the bot's.
+func (e *env) emit(ctx context.Context, typ string, userID, tgID int64, data any, _ string) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return e.bot.HandleEvent(ctx, events.Event{Type: typ, UserID: userID, TgID: tgID, Data: raw})
+}
+
+// notifications is what billing tells the buyers' messages through, as in the panel.
+func (e *env) notifications() Notifications {
+	return Notifications{Emit: e.emit, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
 // code is the /start code of the subscription page's link to the bot for user.
@@ -575,13 +606,13 @@ func testBot(t *testing.T, with ...func(*env, *wiring)) {
 		t.Fatal(err)
 	}
 	n = e.tg.count()
-	e.bot.Notify(e.ctx)
+	e.panel.Notify(e.ctx)
 	send, _ = find(e.tg.wait(t, n, "sendMessage"), "sendMessage")
 	if !strings.Contains(text(send), "заканчивается") || send.body["chat_id"] != float64(anna) {
 		t.Fatalf("expiring notice: %q", text(send))
 	}
 	n = e.tg.count()
-	e.bot.Notify(e.ctx)
+	e.panel.Notify(e.ctx)
 	time.Sleep(100 * time.Millisecond)
 	if e.tg.count() != n {
 		t.Fatal("the same notice twice")
@@ -596,14 +627,14 @@ func testBot(t *testing.T, with ...func(*env, *wiring)) {
 
 	// A broadcast reaches every account with a subscription.
 	n = e.tg.count()
-	if k, err := e.bot.Broadcast(e.ctx, "Плановые работы в {brand} ночью"); err != nil || k != 1 {
+	if k, err := e.panel.Broadcast(e.ctx, "Плановые работы в {brand} ночью"); err != nil || k != 1 {
 		t.Fatalf("broadcast: %d %v", k, err)
 	}
 	send, _ = find(e.tg.wait(t, n, "sendMessage"), "sendMessage")
 	if text(send) != "Плановые работы в Mikan VPN ночью" {
 		t.Fatalf("broadcast text: %q", text(send))
 	}
-	if p := e.bot.Progress(); p.Total != 1 || p.Sent != 1 || p.Active() {
+	if p := e.panel.Progress(); p.Total != 1 || p.Sent != 1 || p.Active() {
 		t.Fatalf("broadcast progress: %+v", p)
 	}
 
@@ -721,7 +752,7 @@ func TestConfigSavedBefore(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	b := New(Deps{Backend: &Local{Store: st, Settings: settings.New(st.Q)}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	b := &Local{Store: st, Settings: settings.New(st.Q)}
 	if c := b.Config(ctx); !c.QuietNight || len(c.Buttons) != 6 {
 		t.Fatalf("a fresh bot: %+v", c)
 	}
@@ -730,7 +761,7 @@ func TestConfigSavedBefore(t *testing.T) {
 		`{"id":"renew","action":"renew","label":"Продлить","on":true,"row":false}],` +
 		`"texts":{"welcome":"","main":"Привет","renew":"","expiring":"","expired":"","traffic_90":"","traffic_end":""},` +
 		`"notify":{"expire_3d":true,"expire_1d":false,"expired":true,"traffic_90":true,"traffic_100":true},"mini_app":true,"clean_chat":false}`
-	if err := st.Q.SetSetting(ctx, db.SetSettingParams{Key: KeyConfig, Value: old}); err != nil {
+	if err := st.Q.SetSetting(ctx, db.SetSettingParams{Key: tgate.KeyConfig, Value: old}); err != nil {
 		t.Fatal(err)
 	}
 	c := b.Config(ctx)

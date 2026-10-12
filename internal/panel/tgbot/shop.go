@@ -55,11 +55,7 @@ func (b *Bot) addonName(ctx context.Context) func(id string) string {
 
 // offers lists what the chat can buy; nil without payments.
 func (b *Bot) offers(ctx context.Context) ([]billing.Offer, billing.Available) {
-	shop := b.d.Backend.Shop()
-	if shop == nil {
-		return nil, billing.Available{}
-	}
-	o, av, err := shop.Offers(ctx)
+	o, av, err := b.d.Backend.Shop().Offers(ctx)
 	if err != nil {
 		b.d.Log.Warn("telegram: offers", "err", err)
 		return nil, av
@@ -69,7 +65,7 @@ func (b *Bot) offers(ctx context.Context) ([]billing.Offer, billing.Available) {
 
 // canBuyNew: people without a subscription may buy one here.
 func (b *Bot) canBuyNew(ctx context.Context) bool {
-	if shop := b.d.Backend.Shop(); shop == nil || !shop.Config(ctx).AllowNew {
+	if !b.d.Backend.Shop().Config(ctx).AllowNew {
 		return false
 	}
 	o, _ := b.offers(ctx)
@@ -217,7 +213,7 @@ func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg
 	id, days := tariffArg(ref)
 	provider, ok := providerOf(code)
 	shop := b.d.Backend.Shop()
-	if !ok || shop == nil {
+	if !ok {
 		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
 	p, err := shop.Invoice(ctx, billing.InvoiceRequest{TgID: chat, UserID: userID, TariffID: id, TermDays: days, Provider: provider})
@@ -246,25 +242,18 @@ func (w *words) payError(err error) string {
 	case errors.Is(err, billing.ErrTooMany):
 		return w.tooManyInvoices
 	case errors.Is(err, billing.ErrTooManySubs):
-		return fmt.Sprintf(w.linkLimit, MaxLinks)
+		return fmt.Sprintf(w.linkLimit, tgate.MaxLinks)
 	case errors.Is(err, billing.ErrNotYours):
 		return w.noSub
 	}
 	return w.payUnavailable
 }
 
-func (b *Bot) lang(ctx context.Context) string { return b.Config(ctx).Lang }
+func (b *Bot) lang(ctx context.Context) string { return b.config(ctx).Lang }
 
-// Paid implements billing.Notifier: the buyer learns the subscription is ready (with the
+// paid is the bot.paid event: the buyer learns the subscription is ready (with the
 // link for a new one) or the traffic package is added, and gets a fresh menu that shows it.
-func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
-	if b.off(ctx) {
-		return
-	}
-	out := b.d.Gateway.Outbox()
-	if out == nil {
-		return
-	}
+func (b *Bot) paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	w := wordsFor(b.lang(ctx))
 	var text string
 	switch {
@@ -281,23 +270,16 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 	}
 	chat := p.TgID
 	_ = b.d.Backend.SetCurrent(ctx, chat, u.ID)
-	out.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
+	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
 		_, err := c.Send(ctx, chat, text, nil, false)
 		return err
 	}, nil)
-	b.freshMenu(out, chat, "")
+	b.freshMenu(chat, "")
 }
 
-// Refunded implements billing.Notifier: the buyer learns the payment was refunded and what
+// refunded is the bot.refunded event: the buyer learns the payment was refunded and what
 // it gave is taken back.
-func (b *Bot) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool) {
-	if b.off(ctx) {
-		return
-	}
-	out := b.d.Gateway.Outbox()
-	if out == nil {
-		return
-	}
+func (b *Bot) refunded(ctx context.Context, p db.Payment, u db.User, disabled bool) {
 	w := wordsFor(b.lang(ctx))
 	var text string
 	switch {
@@ -315,11 +297,11 @@ func (b *Bot) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bo
 		text = fmt.Sprintf(w.refundedRenew, html.EscapeString(p.TariffName), html.EscapeString(u.Name), html.EscapeString(until))
 	}
 	chat := p.TgID
-	out.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
+	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
 		_, err := c.Send(ctx, chat, text, nil, false)
 		return err
 	}, nil)
-	b.freshMenu(out, chat, "")
+	b.freshMenu(chat, "")
 }
 
 // takeTrial gives the chat its free trial and says what it got, or shows the ways to pay
@@ -327,9 +309,6 @@ func (b *Bot) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bo
 func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *tgate.Keyboard) {
 	home := &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.back, CallbackData: "m"}}}}
 	shop := b.d.Backend.Shop()
-	if shop == nil {
-		return html.EscapeString(w.trialOff), home
-	}
 	if shop.Config(ctx).TrialPaid() {
 		return b.trialPay(ctx, w, chat)
 	}
@@ -376,7 +355,7 @@ func (b *Bot) trialInvoice(ctx context.Context, w *words, chat int64, code strin
 	back := []tgate.Button{{Text: w.back, CallbackData: "tr"}}
 	provider, ok := providerOf(code)
 	shop := b.d.Backend.Shop()
-	if !ok || shop == nil {
+	if !ok {
 		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
 	p, err := shop.TrialInvoice(ctx, chat, provider)
@@ -392,17 +371,10 @@ func (b *Bot) trialInvoice(ctx context.Context, w *words, chat int64, code strin
 	return text, &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
 }
 
-// TrialNotGiven implements billing.Notifier: it tells the buyer a paid trial was not given,
+// trialNotGiven is the bot.trial_not_given event: it tells the buyer a paid trial was not given,
 // as the account had its trial, and that its money comes back through support (the payment
 // method cannot refund it), with the support link when the panel has one.
-func (b *Bot) TrialNotGiven(ctx context.Context, p db.Payment) {
-	if b.off(ctx) {
-		return
-	}
-	out := b.d.Gateway.Outbox()
-	if out == nil {
-		return
-	}
+func (b *Bot) trialNotGiven(ctx context.Context, p db.Payment) {
 	w := wordsFor(b.lang(ctx))
 	text := fmt.Sprintf(w.trialNotGiven, html.EscapeString(w.price(p.Amount, p.Currency)))
 	var kb *tgate.Keyboard
@@ -410,7 +382,7 @@ func (b *Bot) TrialNotGiven(ctx context.Context, p db.Payment) {
 		kb = &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.support, URL: sup}}}}
 	}
 	chat := p.TgID
-	out.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
+	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgate.Client) error {
 		_, err := c.Send(ctx, chat, text, kb, false)
 		return err
 	}, nil)

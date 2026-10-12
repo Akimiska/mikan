@@ -23,11 +23,11 @@ func TestBuyTraffic(t *testing.T) {
 	e := setup(t, func(e *env, d *wiring) {
 		pool := domain.NewPool(e.st, e.clock)
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, pool, noChanges{}, e.clock),
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: tgate.MaxLinks})
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.gate)
-	svc.SetNotifier(e.bot)
+	svc.SetNotifier(e.notifications())
 	const owner = 555
 	q := e.st.Q
 	must := func(err error) {
@@ -117,7 +117,7 @@ func TestBuyTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	n = e.tg.count()
-	e.bot.Notify(e.ctx)
+	e.panel.Notify(e.ctx)
 	var notice call
 	e.tg.until(t, n, func(cs []call) bool {
 		for _, c := range cs {

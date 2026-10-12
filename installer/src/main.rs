@@ -262,9 +262,7 @@ pub fn out(l: &str) {
 }
 
 fn addon_cmd(c: AddonCmd) -> anyhow::Result<()> {
-    let install = ops::Install::load()?;
-    install.panel_only()?;
-    let panel = install.version();
+    let panel = addon::panel_version()?;
     let mut say = out;
     match c {
         AddonCmd::List => addon::list(&panel),

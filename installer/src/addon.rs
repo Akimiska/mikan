@@ -7,8 +7,7 @@
 //!   addons/requests/<seq>-<id>.json  the panel: {"action": "install" | "remove", "id", "at"},
 //!                        for an addon of the admin's own also "source" (custom | external)
 //!                        with "image" and "digest" or "url", "kind", "mode", "permissions",
-//!                        "mem_mb"; taken oldest first. A panel before the queue wrote one
-//!                        addons/request.json: it is still taken, first.
+//!                        "mem_mb"; taken oldest first
 //!   addons/state.json    this: what runs where, with its tokens, the addresses of the panel's
 //!                        API for addons, and how the last request went
 //!
@@ -23,7 +22,7 @@ use std::io::Read;
 use std::net::Ipv4Addr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -54,9 +53,8 @@ const EXTERNAL: &str = "external";
 /// /data/panel/addons. What lies there is the panel's to write: root reads only its
 /// requests from there, through panelfs, and keeps its own copy of the state.
 const PANEL_DIR: &str = "data/panel/addons";
-/// The queue below PANEL_DIR, and the one request a panel before the queue wrote.
+/// The queue below PANEL_DIR.
 const REQUESTS: &str = "requests";
-const LEGACY_REQUEST: &str = "request.json";
 /// The largest request: one with an image, a URL and every permission is a few hundred bytes.
 const REQUEST_LIMIT: u64 = 4096;
 /// Requests taken in one run; the rest wait for the panel's next wake-up.
@@ -164,17 +162,16 @@ pub struct Installed {
     pub digest: String,
     pub listen: String,
     pub token: String,
-    /// 0 is 1: states written before protocol 2.
-    #[serde(default, skip_serializing_if = "is_zero")]
+    /// States written before protocol 2 hold none of the three (protocol 0, no kind, no mode):
+    /// load_from reads them as a payment adapter.
+    #[serde(default)]
     pub protocol: u32,
     /// "" is the catalog; custom | external.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
-    /// "" is payment.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub kind: String,
-    /// "" is http.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub mode: String,
     /// What the admin approved for an addon of their own (the catalog holds the official ones').
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -183,13 +180,7 @@ pub struct Installed {
     pub panel_token: String,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub mem_mb: u32,
-    /// The ID a loaded image runs by where the engine keeps no digest for it (the classic
-    /// image store); empty runs image@digest.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub image_id: String,
     pub status: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub error: String,
     pub at: String,
 }
 
@@ -361,23 +352,15 @@ pub fn catalog(panel: &str) -> Result<Vec<Entry>> {
 /// The newest catalog this server has accepted ("updated" of the signed index).
 const CATALOG_SEEN: &str = "/opt/mikan/addons/catalog-updated";
 
-/// The adapters as root keeps them. 0.4.3 kept them only in the panel's directory: such a
-/// state is taken once, entry by entry, and only entries that pass sound() survive.
+/// The adapters as root keeps them: only entries that pass sound() survive.
 pub fn load_state() -> Result<State> {
-    let root_state = Path::new(ROOT_STATE);
-    // The panel's directory matters only for the one-time take-over of 0.4.3's state.
-    if root_state.exists() { load_from(root_state, None) } else { load_from(root_state, panel_dir(false)?.as_ref()) }
+    load_from(Path::new(ROOT_STATE))
 }
 
-/// The first read after 0.4.3 takes the panel's state and writes root's own copy at once,
-/// so the panel's file is never read again.
-fn load_from(root_state: &Path, panel: Option<&Dir>) -> Result<State> {
-    let (raw, migrated) = match fs::read(root_state) {
-        Ok(b) => (b, false),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match panel.map(|d| d.read("state.json", 64 << 10)).transpose()?.flatten() {
-            Some(b) => (b, true),
-            None => return Ok(State::default()),
-        },
+fn load_from(root_state: &Path) -> Result<State> {
+    let raw = match fs::read(root_state) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(State::default()),
         Err(e) => return Err(e.into()),
     };
     let mut s: State = serde_json::from_slice(&raw).context("the adapters' state is malformed")?;
@@ -389,6 +372,15 @@ fn load_from(root_state: &Path, panel: Option<&Dir>) -> Result<State> {
         eprintln!("mikan: the panel's API address on the bridge {:?} in the state is not sound: ignored", s.panel_api_bridge);
         s.panel_api_bridge.clear();
     }
+    for a in s.adapters.values_mut().filter(|a| a.protocol == 0) {
+        // Written before protocol 2: a payment adapter, with no kind and no mode.
+        a.protocol = PROTOCOL;
+        for (field, own) in [(&mut a.kind, "payment"), (&mut a.mode, "http")] {
+            if field.is_empty() {
+                *field = own.into();
+            }
+        }
+    }
     s.adapters.retain(|id, a| {
         let ok = sound(id, a);
         if !ok {
@@ -396,9 +388,6 @@ fn load_from(root_state: &Path, panel: Option<&Dir>) -> Result<State> {
         }
         ok
     });
-    if migrated {
-        panelfs::write_root(root_state, serde_json::to_string_pretty(&s)?.as_bytes())?;
-    }
     Ok(s)
 }
 
@@ -453,24 +442,17 @@ fn plain_token(t: &str) -> bool {
 fn sound(id: &str, a: &Installed) -> bool {
     let version_ok = a.version.len() <= 32 && a.version.bytes().all(|b| b.is_ascii_alphanumeric() || b".-+".contains(&b));
     let protocol_ok = match a.protocol {
-        0 | PROTOCOL => plain_payment(&a.kind, &a.mode, &a.permissions, a.mem_mb) && a.panel_token.is_empty() && a.source.is_empty(),
+        PROTOCOL => plain_payment(&a.kind, &a.mode, &a.permissions, a.mem_mb) && a.panel_token.is_empty() && a.source.is_empty(),
         PROTOCOL_2 => shape_2_ok(&a.kind, &a.mode, &a.permissions, a.mem_mb) && plain_token(&a.panel_token),
         _ => false,
     };
-    // Only the catalog's images are ever loaded from an archive and run by their ID.
     let source_ok = match a.source.as_str() {
-        "" => valid_image(&a.image) && valid_digest(&a.digest) && (a.image_id.is_empty() || valid_digest(&a.image_id)),
-        CUSTOM => valid_reference(&a.image) && valid_digest(&a.digest) && a.image_id.is_empty(),
-        EXTERNAL => a.image.is_empty() && a.digest.is_empty() && a.image_id.is_empty(),
+        "" => valid_image(&a.image) && valid_digest(&a.digest),
+        CUSTOM => valid_reference(&a.image) && valid_digest(&a.digest),
+        EXTERNAL => a.image.is_empty() && a.digest.is_empty(),
         _ => false,
     };
-    valid_id(id)
-        && source_ok
-        && loopback(&a.listen)
-        && plain_token(&a.token)
-        && version_ok
-        && protocol_ok
-        && (a.status == "running" || a.status == "failed")
+    valid_id(id) && source_ok && loopback(&a.listen) && plain_token(&a.token) && version_ok && protocol_ok && a.status == "running"
 }
 
 /// The compose project of the adapters, hardened like the panel and with even less: no
@@ -478,8 +460,14 @@ fn sound(id: &str, a: &Installed) -> bool {
 /// pulls: the images are here already (fetch), so a missing one never sends it to a registry.
 /// An addon of protocol 2 also gets the panel's API for addons; with no sound address for it
 /// it is left out. A custom addon runs on the bridge, listens on all of its own interfaces
-/// and is published on loopback only; an external one has no container.
-pub fn compose_yaml(adapters: &BTreeMap<String, Installed>, panel_api: &str, panel_api_bridge: &str) -> String {
+/// and is published on loopback only; an external one has no container. An addon runs by
+/// image@digest unless `by_id` holds the ID of its loaded image (by addon id).
+pub fn compose_yaml(
+    adapters: &BTreeMap<String, Installed>,
+    by_id: &BTreeMap<String, String>,
+    panel_api: &str,
+    panel_api_bridge: &str,
+) -> String {
     let mut y = String::from("# Written by `mikan addon`: changes here are lost.\nname: mikan-addons\n\nservices:\n");
     let mut bridged = false;
     for (id, a) in adapters {
@@ -487,7 +475,7 @@ pub fn compose_yaml(adapters: &BTreeMap<String, Installed>, panel_api: &str, pan
         if a.source == EXTERNAL || (a.v2() && !loopback(panel_api)) || (custom && !bridge_api(panel_api_bridge)) {
             continue;
         }
-        let image = if a.image_id.is_empty() { format!("{}@{}", a.image, a.digest) } else { a.image_id.clone() };
+        let image = by_id.get(id).cloned().unwrap_or_else(|| format!("{}@{}", a.image, a.digest));
         let mem = if a.mem_mb == 0 { DEFAULT_MEM_MB } else { a.mem_mb };
         let (network, listen, api) = if custom {
             bridged = true;
@@ -534,19 +522,21 @@ pub fn compose_yaml(adapters: &BTreeMap<String, Installed>, panel_api: &str, pan
     y
 }
 
+/// `docker`, whatever it answers.
+fn docker_output(args: &[&str]) -> Result<Output> {
+    Command::new("docker").args(args).stdin(Stdio::null()).output().with_context(|| format!("docker {}", args.join(" ")))
+}
+
+/// `docker`; fails naming the command and what it said on stderr.
+fn docker(args: &[&str]) -> Result<Output> {
+    docker::check(docker_output(args)?).with_context(|| format!("docker {}", args.join(" ")))
+}
+
 /// `docker compose` for the addons' project; what it wrote to stdout.
 fn compose(args: &[&str]) -> Result<String> {
     let file = format!("{COMPOSE_DIR}/compose.yml");
-    let out = Command::new("docker")
-        .args(["compose", "-p", PROJECT, "-f", &file])
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .context("docker compose")?;
-    if !out.status.success() {
-        bail!("docker compose {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    let all: Vec<&str> = ["compose", "-p", PROJECT, "-f", &file].into_iter().chain(args.iter().copied()).collect();
+    Ok(String::from_utf8_lossy(&docker(&all)?.stdout).into_owned())
 }
 
 /// Runs what the state lists, and nothing else. Every image is fetched first; an addon whose
@@ -558,11 +548,13 @@ fn up(state: &mut State, say: &mut dyn FnMut(&str)) -> Result<()> {
     fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
     let mut problems = Vec::new();
     let mut running = BTreeMap::new();
+    let mut by_id = BTreeMap::new();
     // An external addon has no container: nothing to fetch or run.
-    for (id, a) in state.adapters.iter_mut().filter(|(id, a)| a.status == "running" && a.source != EXTERNAL && sound(id, a)) {
+    for (id, a) in state.adapters.iter().filter(|(id, a)| a.source != EXTERNAL && sound(id, a)) {
         match fetch(a, say) {
-            Ok(()) => {
+            Ok(image_id) => {
                 running.insert(id.clone(), a.clone());
+                by_id.extend(image_id.map(|i| (id.clone(), i)));
             }
             Err(e) => problems.push(format!("{id}: {e:#}")),
         }
@@ -588,7 +580,7 @@ fn up(state: &mut State, say: &mut dyn FnMut(&str)) -> Result<()> {
     } else {
         crate::envfile::write_private(
             &dir.join("compose.yml"),
-            compose_yaml(&running, &state.panel_api, &state.panel_api_bridge).as_bytes(),
+            compose_yaml(&running, &by_id, &state.panel_api, &state.panel_api_bridge).as_bytes(),
         )?;
         compose(&["up", "-d", "--remove-orphans"])?;
     }
@@ -599,53 +591,40 @@ fn up(state: &mut State, say: &mut dyn FnMut(&str)) -> Result<()> {
 }
 
 /// Makes sure the engine has the addon's image, since compose never pulls: there already,
-/// loaded by `mikan addon load`, or pulled now.
-fn fetch(a: &mut Installed, say: &mut dyn FnMut(&str)) -> Result<()> {
-    if a.source == EXTERNAL || (!a.image_id.is_empty() && docker::image_present(&a.image_id)) {
-        return Ok(());
-    }
-    a.image_id.clear();
+/// loaded by `mikan addon load`, or pulled now. Gives the ID to run a loaded image by where
+/// the engine keeps no digest for it (the classic image store); None runs image@digest.
+fn fetch(a: &Installed, say: &mut dyn FnMut(&str)) -> Result<Option<String>> {
     let reference = format!("{}@{}", a.image, a.digest);
-    if docker::image_present(&reference) {
-        return Ok(());
+    if a.source == EXTERNAL || docker::image_present(&reference) {
+        return Ok(None);
     }
+    // Only the catalog's images are ever loaded from an archive and run by their ID.
     if a.source.is_empty()
         && let Some(id) = loaded(&a.digest)
         && docker::image_present(&id)
     {
-        a.image_id = id;
-        return Ok(());
+        return Ok(Some(id));
     }
     say(&format!("Pulling {reference}"));
-    docker::pull(&reference, |_| {})
+    docker::pull(&reference, |_| {}).map(|()| None)
 }
 
 /// The bridge of custom addons, made once: traffic between its containers is off, so one
 /// addon cannot call another's port. Its gateway is where the panel serves them its API.
 fn bridge() -> Result<Ipv4Addr> {
-    let inspect = || {
-        Command::new("docker")
-            .args([
-                "network",
-                "inspect",
-                "-f",
-                r#"{{.Driver}} {{index .Options "com.docker.network.bridge.enable_icc"}} {{range .IPAM.Config}}{{.Gateway}} {{end}}"#,
-                NETWORK,
-            ])
-            .stdin(Stdio::null())
-            .output()
-            .context("docker network inspect")
-    };
-    let mut out = inspect()?;
+    let inspect = [
+        "network",
+        "inspect",
+        "-f",
+        r#"{{.Driver}} {{index .Options "com.docker.network.bridge.enable_icc"}} {{range .IPAM.Config}}{{.Gateway}} {{end}}"#,
+        NETWORK,
+    ];
+    let mut out = docker_output(&inspect)?;
     if !out.status.success() {
         let name = format!("com.docker.network.bridge.name={NETWORK}");
-        let created = Command::new("docker")
-            .args(["network", "create", "--driver", "bridge", "-o", &name, "-o", "com.docker.network.bridge.enable_icc=false", NETWORK])
-            .stdin(Stdio::null())
-            .output()
-            .context("docker network create")?;
-        docker::check(created).with_context(|| format!("create the network {NETWORK}"))?;
-        out = docker::check(inspect()?)?;
+        docker(&["network", "create", "--driver", "bridge", "-o", &name, "-o", "com.docker.network.bridge.enable_icc=false", NETWORK])
+            .with_context(|| format!("create the network {NETWORK}"))?;
+        out = docker(&inspect)?;
     }
     parse_network(&String::from_utf8_lossy(&out.stdout))
 }
@@ -865,14 +844,13 @@ pub fn install(id: &str, panel: &str, say: &mut dyn FnMut(&str)) -> Result<()> {
     }
     let _lock = lock::acquire(Wait::Block, say)?;
     let entry = catalog(panel)?.into_iter().find(|e| e.id == id).with_context(|| format!("the marketplace has no adapter {id}"))?;
-    let v2 = entry.protocol == PROTOCOL_2;
     let next = Installed {
         version: entry.version,
         image: entry.image,
         digest: entry.digest,
-        protocol: if v2 { PROTOCOL_2 } else { 0 },
-        kind: if v2 { entry.kind } else { String::new() },
-        mode: if v2 { entry.mode } else { String::new() },
+        protocol: entry.protocol,
+        kind: entry.kind,
+        mode: entry.mode,
         mem_mb: entry.resources.mem_mb,
         ..Default::default()
     };
@@ -947,7 +925,7 @@ fn put(id: &str, mut next: Installed, say: &mut dyn FnMut(&str)) -> Result<()> {
     if !sound(id, &next) {
         bail!("the request for {id} is not sound");
     }
-    fetch(&mut next, say)?;
+    fetch(&next, say)?;
     state.adapters.insert(id.to_owned(), next.clone());
     let started = up(&mut state, say).and_then(|()| wait_started(id, &next, Duration::from_secs(30)));
     if let Err(e) = started {
@@ -988,10 +966,6 @@ pub fn remove(id: &str, say: &mut dyn FnMut(&str)) -> Result<()> {
 /// Whether the panel asked for something. A queue that cannot be opened counts: apply
 /// clears it.
 pub fn pending() -> bool {
-    let Ok(Some(dir)) = panel_dir(false) else { return false };
-    if dir.exists(LEGACY_REQUEST) {
-        return true;
-    }
     match queue_dir() {
         Ok(Some(q)) => q.names().is_ok_and(|n| n.iter().any(|n| !n.starts_with('.'))),
         Ok(None) => false,
@@ -1031,47 +1005,53 @@ fn request_name(name: &str) -> Option<(u64, &str)> {
 
 type Handler<'a> = &'a mut dyn FnMut(&Request, &mut dyn FnMut(&str)) -> Result<()>;
 
-/// Hands the panel's requests to handle, oldest first: request.json of a panel before the
-/// queue, then the queue, at most REQUESTS_PER_RUN. Each is removed before it is handled, so
-/// one that fails is not tried again and again. Fails with the first request that failed,
-/// after the rest were handled.
-fn drain(dir: &Dir, queue: Option<&Dir>, say: &mut dyn FnMut(&str), handle: Handler) -> Result<()> {
+/// Hands the queue's requests to handle, oldest first, at most REQUESTS_PER_RUN. Each is
+/// removed before it is handled, so one that fails is not tried again and again. Fails with
+/// the first request that failed, after the rest were handled.
+fn drain(queue: &Dir, say: &mut dyn FnMut(&str), handle: Handler) -> Result<()> {
     let mut results = Vec::new();
-    if dir.exists(LEGACY_REQUEST) {
-        results.push(take(dir, LEGACY_REQUEST, LEGACY_REQUEST, None, say, &mut *handle));
-    }
-    if let Some(q) = queue {
-        for _ in 0..REQUESTS_PER_RUN {
-            let (requests, junk) = sort_queue(q.names()?);
-            for name in junk {
-                say(&format!("addons/{REQUESTS}/{name} is not a request, removed"));
-                q.discard(&name)?;
-            }
-            let Some((name, id)) = requests.into_iter().next() else { break };
-            results.push(take(q, &name, &format!("{REQUESTS}/{name}"), Some(&id), say, &mut *handle));
+    for _ in 0..REQUESTS_PER_RUN {
+        let (requests, junk) = sort_queue(queue.names()?);
+        for name in junk {
+            say(&format!("addons/{REQUESTS}/{name} is not a request, removed"));
+            queue.discard(&name)?;
         }
+        let Some((name, id)) = requests.into_iter().next() else { break };
+        results.push(take(queue, &name, &id, say, &mut *handle));
     }
     results.into_iter().find(Result::is_err).unwrap_or(Ok(()))
 }
 
-/// Takes one request: removed first, whatever it is. A queued one must be for the addon its
-/// name says.
-fn take(dir: &Dir, name: &str, shown: &str, id: Option<&str>, say: &mut dyn FnMut(&str), handle: Handler) -> Result<()> {
-    let data = dir.read(name, REQUEST_LIMIT);
-    dir.discard(name)?;
+/// Takes one request: removed first, whatever it is. It must be for the addon its name says.
+fn take(queue: &Dir, name: &str, id: &str, say: &mut dyn FnMut(&str), handle: Handler) -> Result<()> {
+    let data = queue.read(name, REQUEST_LIMIT);
+    queue.discard(name)?;
     let data = match data {
         Ok(Some(d)) => d,
         Ok(None) => return Ok(()),
         Err(e) => {
-            say(&format!("addons/{shown} is not a request, removed: {e:#}"));
+            say(&format!("addons/{REQUESTS}/{name} is not a request, removed: {e:#}"));
             return Err(e);
         }
     };
-    let req: Request = serde_json::from_slice(&data).with_context(|| format!("addons/{shown} is malformed"))?;
-    if id.is_some_and(|id| id != req.id) {
-        bail!("addons/{shown} asks for {:?}", req.id);
+    let req: Request = serde_json::from_slice(&data).with_context(|| format!("addons/{REQUESTS}/{name} is malformed"))?;
+    if id != req.id {
+        bail!("addons/{REQUESTS}/{name} asks for {:?}", req.id);
     }
     handle(&req, say)
+}
+
+/// The version of the panel installed here, whose catalog the addons come from; a node has
+/// no addons.
+pub fn panel_version() -> Result<String> {
+    let install = crate::ops::Install::load()?;
+    install.panel_only()?;
+    Ok(install.version())
+}
+
+/// apply for the panel installed here.
+pub fn apply_here(say: &mut dyn FnMut(&str)) -> Result<()> {
+    apply(&panel_version()?, say)
 }
 
 /// Does what the panel asked for and tells it how each request went.
@@ -1086,11 +1066,13 @@ pub fn apply(panel: &str, say: &mut dyn FnMut(&str)) -> Result<()> {
             None
         }
     };
-    drain(&dir, queue.as_ref(), say, &mut |req: &Request, say: &mut dyn FnMut(&str)| -> Result<()> {
+    let Some(queue) = queue else { return Ok(()) };
+    // The id is the queued name's, which request_name checked.
+    drain(&queue, say, &mut |req: &Request, say: &mut dyn FnMut(&str)| -> Result<()> {
         let result = match (req.action.as_str(), req.source.as_str()) {
-            ("install", "" | "official") if valid_id(&req.id) => install(&req.id, panel, say),
-            ("install", _) if valid_id(&req.id) => install_own(req, say),
-            ("remove", _) if valid_id(&req.id) => remove(&req.id, say),
+            ("install", "") => install(&req.id, panel, say),
+            ("install", _) => install_own(req, say),
+            ("remove", _) => remove(&req.id, say),
             _ => Err(anyhow::anyhow!("unknown request {} {:?}", req.action, req.id)),
         };
         let mut state = load_state()?;
@@ -1252,8 +1234,7 @@ pub fn load(tar: &Path, id: Option<&str>, panel: &str, say: &mut dyn FnMut(&str)
     let image = archive_image(tar)?;
     let entry = pick(catalog(panel)?, &image.digest, id)?;
     say(&format!("Loading {} {}", entry.id, entry.version));
-    let out = Command::new("docker").arg("load").arg("-i").arg(tar).stdin(Stdio::null()).output().context("docker load")?;
-    docker::check(out).context("docker load")?;
+    docker(&["load", "-i", &tar.to_string_lossy()])?;
     // The containerd image store knows a loaded image by the digest the archive names, the
     // classic one by its config only, and keeps no digest for it.
     let local = [&image.digest, &image.config]
@@ -1263,8 +1244,7 @@ pub fn load(tar: &Path, id: Option<&str>, panel: &str, say: &mut dyn FnMut(&str)
         .context("docker load took the archive, but its image is not there under the digests the archive names")?;
     // A name keeps it from `docker image prune`; on the containerd store image@digest works then.
     let tag = format!("{}:loaded-{}", entry.image, &image.digest["sha256:".len()..][..12]);
-    let out = Command::new("docker").args(["tag", &local, &tag]).stdin(Stdio::null()).output().context("docker tag")?;
-    docker::check(out).context("docker tag")?;
+    docker(&["tag", &local, &tag])?;
     remember_loaded(&image.digest, &local)?;
     say(&format!("{} {} is loaded: installed now, it does not need the registry.", entry.id, entry.version));
     Ok(())
@@ -1277,9 +1257,8 @@ pub fn list(panel: &str) -> Result<()> {
         println!("No addons installed.");
     }
     for (id, a) in &state.adapters {
-        let err = if a.error.is_empty() { String::new() } else { format!(": {}", a.error) };
         let source = if a.source.is_empty() { "official" } else { &a.source };
-        println!("{id:<16} {:<10} {:<8} {source:<9} {}{err}", a.version, a.status, a.listen);
+        println!("{id:<16} {:<10} {:<8} {source:<9} {}", a.version, a.status, a.listen);
     }
     match catalog(panel) {
         Ok(entries) => {
@@ -1374,22 +1353,29 @@ mod tests {
         )
     }
 
+    /// A catalog of these entries and its signature.
+    fn signed(signer: &SigningKey, entries: &[String]) -> (Vec<u8>, String) {
+        let data = format!(r#"{{"version":1,"updated":"2026-10-11T00:00:00Z","adapters":[{}]}}"#, entries.join(",")).into_bytes();
+        let sig = STANDARD.encode(signer.sign(&data).to_bytes());
+        (data, sig)
+    }
+
     #[test]
     fn signed_catalog_only() {
         let signer = SigningKey::from_bytes(&[9; 32]);
         let key = signer.verifying_key();
         let d = format!("sha256:{}", "c".repeat(64));
-        let data = format!(
-            r#"{{"version":1,"updated":"2026-10-01T00:00:00Z","adapters":[{},{},{},{},{},{}]}}"#,
-            entry("yookassa", 1, "ghcr.io/getmikan/adapter-yookassa", &d, "0.4.3"),
-            entry("future", 2, "ghcr.io/getmikan/adapter-future", &d, ""),
-            entry("hub", 1, "docker.io/someone/adapter", &d, ""),
-            entry("tagged", 1, "ghcr.io/getmikan/adapter-x", "latest", ""),
-            entry("Bad", 1, "ghcr.io/getmikan/adapter-x", &d, ""),
-            entry("newer", 1, "ghcr.io/getmikan/adapter-x", &d, "9.0.0"),
-        )
-        .into_bytes();
-        let sig = STANDARD.encode(signer.sign(&data).to_bytes());
+        let (data, sig) = signed(
+            &signer,
+            &[
+                entry("yookassa", 1, "ghcr.io/getmikan/adapter-yookassa", &d, "0.4.3"),
+                entry("future", 2, "ghcr.io/getmikan/adapter-future", &d, ""),
+                entry("hub", 1, "docker.io/someone/adapter", &d, ""),
+                entry("tagged", 1, "ghcr.io/getmikan/adapter-x", "latest", ""),
+                entry("Bad", 1, "ghcr.io/getmikan/adapter-x", &d, ""),
+                entry("newer", 1, "ghcr.io/getmikan/adapter-x", &d, "9.0.0"),
+            ],
+        );
         let got = parse_catalog(&data, &format!("{sig}\n"), &key, "0.4.3").unwrap();
         assert_eq!(got.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["yookassa"]);
         assert!(parse_catalog(&data, &sig, &key, "0.4.2").unwrap().is_empty());
@@ -1515,8 +1501,10 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
                 digest: "sha256:1".into(),
                 listen: "127.0.0.1:41873".into(),
                 token: "t".into(),
+                protocol: PROTOCOL,
+                kind: "payment".into(),
+                mode: "http".into(),
                 status: "running".into(),
-                error: String::new(),
                 at: "2026-10-01T00:00:00Z".into(),
                 ..Default::default()
             },
@@ -1530,9 +1518,10 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         });
         let v: serde_json::Value = serde_json::to_value(&s).unwrap();
         let a = &v["adapters"]["yookassa"];
-        for k in ["version", "digest", "listen", "token", "status", "at"] {
+        for k in ["version", "digest", "listen", "token", "protocol", "kind", "mode", "status", "at"] {
             assert!(a.get(k).is_some(), "{k}");
         }
+        assert_eq!((a["protocol"].as_u64(), a["kind"].as_str(), a["mode"].as_str()), (Some(1), Some("payment"), Some("http")));
         assert_eq!(v["request"]["state"], "done");
         let go = fs::read_to_string("../internal/panel/addons/addons.go").unwrap();
         for tag in [
@@ -1567,6 +1556,9 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
             digest: format!("sha256:{}", "c".repeat(64)),
             listen: "127.0.0.1:45615".into(),
             token: "a".repeat(48),
+            protocol: PROTOCOL,
+            kind: "payment".into(),
+            mode: "http".into(),
             status: "running".into(),
             ..Default::default()
         };
@@ -1644,7 +1636,12 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         let mut s = State { adapters: m, ..Default::default() };
         s.adapters.retain(|id, a| sound(id, a));
         assert_eq!(s.adapters.keys().collect::<Vec<_>>(), ["yookassa"]);
-        assert!(!compose_yaml(&s.adapters, "", "").contains("privileged"));
+        assert!(!yaml(&s.adapters, "", "").contains("privileged"));
+    }
+
+    /// compose_yaml with every image run by image@digest.
+    fn yaml(adapters: &BTreeMap<String, Installed>, panel_api: &str, panel_api_bridge: &str) -> String {
+        compose_yaml(adapters, &BTreeMap::new(), panel_api, panel_api_bridge)
     }
 
     fn tmpdir(name: &str) -> std::path::PathBuf {
@@ -1654,38 +1651,36 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         d
     }
 
-    // 0.4.3 kept the state only where the panel can write it. The first read takes it entry
-    // by entry, keeps what is sound and writes root's own copy; after that the panel's file
-    // is never read again.
+    // A state written before protocol 2 has no protocol, kind or mode, and the fields since
+    // dropped (image_id, error) are ignored. It is read as it was meant and written the new way.
     #[test]
-    fn the_old_state_is_taken_once() {
-        let d = tmpdir("migrate");
-        fs::create_dir_all(d.join("panel")).unwrap();
+    fn an_old_state_is_read_as_a_payment_adapter() {
+        let d = tmpdir("old-state");
+        let root_state = d.join("state.json");
         let digest = format!("sha256:{}", "c".repeat(64));
-        let entry = |image: &str| {
+        let entry = |image: &str, status: &str, extra: &str| {
             format!(
-                r#"{{"version":"1.0.0","image":"{image}","digest":"{digest}","listen":"127.0.0.1:45615","token":"{}","status":"running","at":"x"}}"#,
+                r#"{{"version":"1.0.0","image":"{image}","digest":"{digest}","listen":"127.0.0.1:45615","token":"{}","status":"{status}","at":"x"{extra}}}"#,
                 "a".repeat(48)
             )
         };
         let state = format!(
-            r#"{{"adapters":{{"yookassa":{},"elsewhere":{},"other-org":{}}}}}"#,
-            entry("ghcr.io/getmikan/adapter-yookassa"),
-            entry("docker.io/library/alpine"),
-            entry("ghcr.io/someone/adapter")
+            r#"{{"adapters":{{"yookassa":{},"loaded":{},"elsewhere":{},"failed":{}}}}}"#,
+            entry("ghcr.io/getmikan/adapter-yookassa", "running", ""),
+            entry("ghcr.io/getmikan/adapter-cryptobot", "running", &format!(r#","image_id":"sha256:{}","error":"x""#, "e".repeat(64))),
+            entry("docker.io/library/alpine", "running", ""),
+            entry("ghcr.io/getmikan/adapter-stars", "failed", "")
         );
-        fs::write(d.join("panel/state.json"), &state).unwrap();
-        let panel = Dir::open(&d, "panel", false).unwrap().unwrap();
-        let root_state = d.join("root/state.json");
-        let s = load_from(&root_state, Some(&panel)).unwrap();
-        assert_eq!(s.adapters.keys().collect::<Vec<_>>(), ["yookassa"]);
-        assert!(root_state.exists(), "root's own copy is written at once");
-        // the panel now plants an entry: root no longer looks there
-        fs::write(d.join("panel/state.json"), state.replace("yookassa", "planted")).unwrap();
-        let again = load_from(&root_state, Some(&panel)).unwrap();
-        assert_eq!(again.adapters.keys().collect::<Vec<_>>(), ["yookassa"]);
-        // no state anywhere is no adapters
-        assert!(load_from(&d.join("none/state.json"), None).unwrap().adapters.is_empty());
+        fs::write(&root_state, state).unwrap();
+        let s = load_from(&root_state).unwrap();
+        assert_eq!(s.adapters.keys().collect::<Vec<_>>(), ["loaded", "yookassa"]);
+        for a in s.adapters.values() {
+            assert_eq!((a.protocol, a.kind.as_str(), a.mode.as_str()), (PROTOCOL, "payment", "http"));
+        }
+        assert!(load_from(&d.join("none.json")).unwrap().adapters.is_empty(), "no state is no adapters");
+        let written = serde_json::to_value(&s).unwrap();
+        assert_eq!(written["adapters"]["yookassa"]["protocol"], 1);
+        assert!(written["adapters"]["loaded"].get("image_id").is_none());
         fs::remove_dir_all(&d).unwrap();
     }
 
@@ -1703,7 +1698,7 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
                 ..Default::default()
             },
         );
-        let y = compose_yaml(&m, "", "");
+        let y = yaml(&m, "", "");
         for want in [
             "name: mikan-addons",
             "  yookassa:\n",
@@ -1748,8 +1743,7 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
             e("v1-perms", 1, r#","permissions":["kv"]"#),
             e("v3", 3, r#","kind":"bot""#),
         ];
-        let data = format!(r#"{{"version":1,"updated":"2026-10-11T00:00:00Z","adapters":[{}]}}"#, entries.join(",")).into_bytes();
-        let sig = STANDARD.encode(signer.sign(&data).to_bytes());
+        let (data, sig) = signed(&signer, &entries);
         let got = parse_catalog(&data, &sig, &signer.verifying_key(), "dev").unwrap();
         assert_eq!(got.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["telegram", "script", "page", "yookassa"]);
         assert_eq!(got[2].mode, "http", "a protocol 2 entry without a mode serves HTTP");
@@ -1773,43 +1767,26 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         }
     }
 
+    fn bot_v1() -> Installed {
+        Installed { protocol: PROTOCOL, kind: "payment".into(), mode: "http".into(), panel_token: String::new(), mem_mb: 0, ..bot() }
+    }
+
     // A state the panel could have touched cannot turn a payment adapter into something it
     // is not, nor smuggle YAML through the fields of protocol 2.
     #[test]
     fn protocol_2_soundness() {
         assert!(sound("telegram", &bot()));
-        let bad = |f: &dyn Fn(&mut Installed)| {
-            let mut a = bot();
-            f(&mut a);
-            a
-        };
+        assert!(sound("telegram", &bot_v1()));
         let cases = [
-            ("no panel token", bad(&|a| a.panel_token.clear())),
-            ("panel token with YAML", bad(&|a| a.panel_token = format!("{}\"\n    privileged: true", "b".repeat(40)))),
-            ("kind", bad(&|a| a.kind = "payment".into())),
-            ("unknown kind", bad(&|a| a.kind = "bot\n    privileged: true".into())),
-            ("mode", bad(&|a| a.mode = "socket".into())),
-            ("memory", bad(&|a| a.mem_mb = 100_000)),
-            ("protocol", bad(&|a| a.protocol = 3)),
-            (
-                "a payment adapter with a panel token",
-                bad(&|a| {
-                    a.protocol = 1;
-                    a.kind.clear();
-                    a.mode.clear();
-                    a.mem_mb = 0;
-                }),
-            ),
-            (
-                "a payment adapter with memory",
-                bad(&|a| {
-                    a.protocol = 0;
-                    a.kind.clear();
-                    a.mode.clear();
-                    a.panel_token.clear();
-                    a.mem_mb = 256;
-                }),
-            ),
+            ("no panel token", Installed { panel_token: String::new(), ..bot() }),
+            ("panel token with YAML", Installed { panel_token: format!("{}\"\n    privileged: true", "b".repeat(40)), ..bot() }),
+            ("kind", Installed { kind: "payment".into(), ..bot() }),
+            ("unknown kind", Installed { kind: "bot\n    privileged: true".into(), ..bot() }),
+            ("mode", Installed { mode: "socket".into(), ..bot() }),
+            ("memory", Installed { mem_mb: 100_000, ..bot() }),
+            ("protocol", Installed { protocol: 3, ..bot() }),
+            ("a payment adapter with a panel token", Installed { panel_token: "b".repeat(48), ..bot_v1() }),
+            ("a payment adapter with memory", Installed { mem_mb: 256, ..bot_v1() }),
         ];
         for (what, a) in cases {
             assert!(!sound("telegram", &a), "{what} passed");
@@ -1822,7 +1799,7 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
     fn compose_of_protocol_2() {
         let mut m = BTreeMap::new();
         m.insert("telegram".to_owned(), bot());
-        let y = compose_yaml(&m, "127.0.0.1:41990", "");
+        let y = yaml(&m, "127.0.0.1:41990", "");
         for want in [
             "  telegram:\n",
             "mem_limit: 192m",
@@ -1836,7 +1813,7 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
             assert!(y.contains(want), "no {want} in\n{y}");
         }
         for api in ["", "0.0.0.0:41990", "127.0.0.1:80", "127.0.0.1:1\"\n    privileged: true"] {
-            assert!(!compose_yaml(&m, api, "").contains("telegram"), "started with the panel's API at {api:?}");
+            assert!(!yaml(&m, api, "").contains("telegram"), "started with the panel's API at {api:?}");
         }
     }
 
@@ -1846,9 +1823,9 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         let d = tmpdir("panel-api");
         let root_state = d.join("state.json");
         fs::write(&root_state, r#"{"adapters":{},"panel_api":"0.0.0.0:41990"}"#).unwrap();
-        assert_eq!(load_from(&root_state, None).unwrap().panel_api, "");
+        assert_eq!(load_from(&root_state).unwrap().panel_api, "");
         fs::write(&root_state, r#"{"adapters":{},"panel_api":"127.0.0.1:41990"}"#).unwrap();
-        assert_eq!(load_from(&root_state, None).unwrap().panel_api, "127.0.0.1:41990");
+        assert_eq!(load_from(&root_state).unwrap().panel_api, "127.0.0.1:41990");
         fs::remove_dir_all(&d).unwrap();
     }
 
@@ -1921,21 +1898,17 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
     fn custom_and_external_soundness() {
         assert!(sound("my-bot", &custom()));
         assert!(sound("mine", &external()));
-        let official = Installed { image_id: format!("sha256:{}", "e".repeat(64)), ..bot() };
-        assert!(sound("telegram", &official), "a loaded image of the catalog runs by its ID");
         let cases = [
             ("a tag", Installed { image: "someone/bot:latest".into(), ..custom() }),
             ("YAML in the image", Installed { image: "x\"\n    privileged: true\n    y: \"".into(), ..custom() }),
             ("no digest", Installed { digest: String::new(), ..custom() }),
             ("a digest with YAML", Installed { digest: "sha256:abc\n    privileged: true".into(), ..custom() }),
-            ("a custom image by ID", Installed { image_id: format!("sha256:{}", "e".repeat(64)), ..custom() }),
-            ("an ID with YAML", Installed { image_id: "sha256:x\"\n    privileged: true".into(), ..bot() }),
             (
                 "a custom payment adapter",
                 Installed {
-                    protocol: 0,
-                    kind: String::new(),
-                    mode: String::new(),
+                    protocol: PROTOCOL,
+                    kind: "payment".into(),
+                    mode: "http".into(),
                     panel_token: String::new(),
                     mem_mb: 0,
                     permissions: vec![],
@@ -1952,10 +1925,6 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         for (what, a) in cases {
             assert!(!sound("my-bot", &a), "{what} passed");
         }
-    }
-
-    fn bot_v1() -> Installed {
-        Installed { protocol: 0, kind: String::new(), mode: String::new(), panel_token: String::new(), mem_mb: 0, ..bot() }
     }
 
     // The text of one service of a compose file: its line and the lines indented below it.
@@ -1975,7 +1944,7 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         m.insert("my-bot".to_owned(), custom());
         m.insert("my-client".to_owned(), Installed { mode: "client".into(), listen: "127.0.0.1:45619".into(), ..custom() });
         m.insert("mine".to_owned(), external());
-        let y = compose_yaml(&m, "127.0.0.1:41990", "172.18.0.1:41990");
+        let y = yaml(&m, "127.0.0.1:41990", "172.18.0.1:41990");
         let mine = service(&y, "my-bot");
         for want in [
             &format!("image: \"ghcr.io/someone/my-bot@sha256:{}\"", "d".repeat(64)),
@@ -1999,12 +1968,12 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         assert!(y.ends_with("\nnetworks:\n  mikan-addons:\n    external: true\n"), "{y}");
         // no sound address on the bridge: the custom ones wait, the rest runs
         for bridge in ["", "127.0.0.1:41990", "0.0.0.0:41990", "172.18.0.1:80", "172.18.0.1:41990\"\n    privileged: true"] {
-            let y = compose_yaml(&m, "127.0.0.1:41990", bridge);
+            let y = yaml(&m, "127.0.0.1:41990", bridge);
             assert!(!y.contains("my-bot") && !y.contains("networks:") && y.contains("  telegram:"), "{bridge:?}:\n{y}");
         }
         // a loaded image runs by its ID
-        m.insert("telegram".to_owned(), Installed { image_id: format!("sha256:{}", "e".repeat(64)), ..bot() });
-        let y = compose_yaml(&m, "127.0.0.1:41990", "");
+        let loaded = BTreeMap::from([("telegram".to_owned(), format!("sha256:{}", "e".repeat(64)))]);
+        let y = compose_yaml(&m, &loaded, "127.0.0.1:41990", "");
         assert!(service(&y, "telegram").contains(&format!("image: \"sha256:{}\"", "e".repeat(64))), "{y}");
     }
 
@@ -2052,9 +2021,9 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         let d = tmpdir("bridge-api");
         let root_state = d.join("state.json");
         fs::write(&root_state, r#"{"adapters":{},"panel_api":"127.0.0.1:41990","panel_api_bridge":"0.0.0.0:41990"}"#).unwrap();
-        assert_eq!(load_from(&root_state, None).unwrap().panel_api_bridge, "");
+        assert_eq!(load_from(&root_state).unwrap().panel_api_bridge, "");
         fs::write(&root_state, r#"{"adapters":{},"panel_api":"127.0.0.1:41990","panel_api_bridge":"172.18.0.1:41990"}"#).unwrap();
-        assert_eq!(load_from(&root_state, None).unwrap().panel_api_bridge, "172.18.0.1:41990");
+        assert_eq!(load_from(&root_state).unwrap().panel_api_bridge, "172.18.0.1:41990");
         fs::remove_dir_all(&d).unwrap();
     }
 
@@ -2076,15 +2045,14 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         assert_eq!(junk, ["junk", "x-y.json"], "the panel's file in the making is not junk");
     }
 
-    // The requests go oldest first, the one of a panel before the queue before them all; each
-    // is gone before it is handled, one that fails does not hold the others, a queued one must
-    // be for the addon its name says, and what is no request is removed.
+    // The requests go oldest first; each is gone before it is handled, one that fails does not
+    // hold the others, a request must be for the addon its name says, and what is no request
+    // is removed.
     #[test]
     fn the_queue_is_taken_in_order() {
         let d = tmpdir("queue");
         fs::create_dir_all(d.join("addons/requests")).unwrap();
         let req = |id: &str| format!(r#"{{"action":"install","id":"{id}","at":"2026-10-11T00:00:00Z"}}"#);
-        fs::write(d.join("addons/request.json"), req("legacy")).unwrap();
         fs::write(d.join("addons/requests/0000000002-b.json"), req("b")).unwrap();
         fs::write(d.join("addons/requests/0000000001-a.json"), req("a")).unwrap();
         fs::write(d.join("addons/requests/0000000003-c.json"), req("other")).unwrap();
@@ -2096,24 +2064,22 @@ fe80::1 21355/tcp on mikan-addons ALLOW       Anywhere (v6)
         fs::write(d.join("addons/requests/junk"), "x").unwrap();
         fs::create_dir(d.join("addons/requests/0000000005-dir.json")).unwrap();
         fs::write(d.join("addons/requests/.0000000006-e.json.1.tmp"), req("e")).unwrap();
-        let dir = Dir::open(&d, "addons", false).unwrap().unwrap();
         let queue = Dir::open(&d, "addons/requests", false).unwrap().unwrap();
         let mut seen = Vec::new();
         let mut said = Vec::new();
-        let r = drain(&dir, Some(&queue), &mut |l: &str| said.push(l.to_owned()), &mut |req: &Request, _: &mut dyn FnMut(&str)| {
+        let r = drain(&queue, &mut |l: &str| said.push(l.to_owned()), &mut |req: &Request, _: &mut dyn FnMut(&str)| {
             let queued = fs::read_dir(d.join("addons/requests"))
                 .unwrap()
                 .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(&format!("-{}.json", req.id)));
-            assert!(!queued && !d.join("addons/request.json").exists(), "{} is removed before it is handled", req.id);
+            assert!(!queued, "{} is removed before it is handled", req.id);
             seen.push(format!("{} {} {}", req.action, req.id, req.source));
             if req.id == "a" { Err(anyhow::anyhow!("a failed")) } else { Ok(()) }
         });
-        assert_eq!(seen, ["install legacy ", "install a ", "install b ", "install mine custom"]);
+        assert_eq!(seen, ["install a ", "install b ", "install mine custom"]);
         assert_eq!(format!("{:#}", r.unwrap_err()), "a failed", "the first failure, after the rest ran");
         let mut left = queue.names().unwrap();
         left.sort();
         assert_eq!(left, [".0000000006-e.json.1.tmp"], "everything else is taken or removed");
-        assert!(!dir.exists(LEGACY_REQUEST));
         assert!(said.iter().any(|l| l.contains("junk")), "{said:?}");
         fs::remove_dir_all(&d).unwrap();
     }

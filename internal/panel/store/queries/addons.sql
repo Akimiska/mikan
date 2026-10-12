@@ -1,9 +1,6 @@
 -- name: GetAddonGrant :one
 SELECT * FROM addon_grants WHERE addon_id = $1;
 
--- name: ListAddonGrants :many
-SELECT * FROM addon_grants ORDER BY addon_id;
-
 -- name: UpsertAddonGrant :exec
 INSERT INTO addon_grants (addon_id, version, permissions, approved_by, approved_at)
 VALUES ($1, $2, $3, $4, $5)

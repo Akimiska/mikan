@@ -122,7 +122,7 @@ func TestAddonEndToEnd(t *testing.T) {
 	subBase := func(context.Context) string { return "https://vpn.example.com:21355/sub" }
 	backend := &tgbot.Local{Store: st, Settings: set, Gateway: gate, SubBase: subBase, Now: now, MiniApp: func() bool { return false }}
 	hub := events.NewHub()
-	api := panelapi.New(panelapi.Deps{Addons: addons.New(dir, "", "dev", log, now), Grants: st.Q, Store: st, Hub: hub, Log: log, Now: now,
+	api := panelapi.New(panelapi.Deps{Addons: addons.New(dir, "", "dev", log, now), Store: st, Hub: hub, Log: log, Now: now,
 		Telegram: gate, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend, gate.Member)})
 	gate.SetHandler(api.BotSlot(nil))
 	go gate.Run(ctx)

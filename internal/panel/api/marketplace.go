@@ -44,8 +44,7 @@ type MarketInstalled struct {
 	Digest  string   `json:"digest,omitempty" doc:"Дайджест образа аддона админа (custom)"`
 	URL     string   `json:"url,omitempty" doc:"Адрес внешнего аддона (external); пусто у клиента панели"`
 	MemMB   int      `json:"mem_mb,omitempty" doc:"Память контейнера, МБ; 0 — по умолчанию 128"`
-	Status  string   `json:"status" enum:"running,failed"`
-	Error   string   `json:"error,omitempty" doc:"Почему контейнер не работает"`
+	Status  string   `json:"status" enum:"running"`
 	Granted []string `json:"granted" doc:"Одобренные права"`
 }
 
@@ -53,7 +52,7 @@ type MarketView struct {
 	Catalog      []MarketEntry     `json:"catalog"`
 	CatalogError string            `json:"catalog_error,omitempty" doc:"catalog_unavailable — каталог не загрузился"`
 	Installed    []MarketInstalled `json:"installed"`
-	Pending      *AddonRequest     `json:"pending,omitempty" doc:"Заявка, которую сервер ещё не взял"`
+	Queue        []AddonRequest    `json:"queue,omitempty" doc:"Все заявки, которые сервер ещё не взял, по порядку"`
 	Last         *AddonResult      `json:"last,omitempty" doc:"Как сервер выполнил последнюю заявку"`
 	Supported    bool              `json:"supported" doc:"Панель видит каталог данных сервера; иначе ставить аддоны нельзя"`
 	HostReady    bool              `json:"host_ready" doc:"mikan на сервере умеет аддоны протокола 2; иначе сначала обновить сервер"`
@@ -77,17 +76,14 @@ type marketCustomInput struct {
 }
 
 type marketInstallInput struct {
-	ID   string `path:"id" pattern:"^[a-z0-9][a-z0-9-]{0,31}$"`
+	AddonIDInput
 	Body struct {
 		Permissions []string `json:"permissions" doc:"Права, которые админ видел и одобрил: ровно те, что просит сборка каталога"`
 	}
 }
 
 func (h *handlers) registerMarketplace() {
-	tags := []string{"addons"}
-	op := func(id, method, path, summary string, status int) huma.Operation {
-		return huma.Operation{OperationID: id, Method: method, Path: path, Summary: summary, Tags: tags, DefaultStatus: status, Metadata: sessionOnly, Extensions: sessionOnlyExt}
-	}
+	op := sessionOps("addons")
 	huma.Register(h.api, op("list-marketplace", http.MethodGet, "/api/v1/marketplace", "Маркетплейс аддонов: боты, страницы и прочее", 0), h.listMarketplace)
 	huma.Register(h.api, op("install-marketplace", http.MethodPost, "/api/v1/marketplace/{id}/install", "Одобрить права и установить или обновить аддон: заявка серверу", http.StatusAccepted), h.installMarketplace)
 	huma.Register(h.api, op("install-custom-addon", http.MethodPost, "/api/v1/marketplace/custom", "Установить свой аддон: образ по дайджесту или процесс на 127.0.0.1, без проверки mikan", http.StatusAccepted), h.installCustom)
@@ -96,14 +92,11 @@ func (h *handlers) registerMarketplace() {
 
 // granted is the addon's approved permissions; nil when it has no grant.
 func (h *handlers) granted(ctx context.Context, id string) ([]string, error) {
-	g, err := h.d.Store.Q.GetAddonGrant(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	perms, _, err := addons.LoadGrant(ctx, h.d.Store.Q, id)
+	if errors.Is(err, addons.ErrNoGrant) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return addons.DecodePermissions(g.Permissions)
+	return perms, err
 }
 
 func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
@@ -117,15 +110,10 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 		return v, err
 	}
 	v.Supported, v.HostReady = m.Supported(), st.HostVersion != ""
-	if l := st.Request; l != nil {
-		v.Last = &AddonResult{Action: l.Action, ID: l.ID, State: l.State, Error: l.Error, At: l.At}
-	}
-	if q := m.Pending(); len(q) > 0 {
-		v.Pending = &AddonRequest{Action: q[0].Action, ID: q[0].ID, At: q[0].At}
-	}
+	v.Queue, v.Last = requestSummary(m, st)
 	installed := map[string]addons.Installed{}
 	for id, a := range st.Adapters {
-		if a.Protocol == addons.Protocol2 {
+		if a.KindOf() != addons.KindPayment {
 			installed[id] = a
 		}
 	}
@@ -137,10 +125,7 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 			return v, err
 		}
 		grants[id] = perms
-		mi := MarketInstalled{ID: id, Version: a.Version, Kind: a.KindOf(), Mode: a.Mode, Source: a.SourceOf(), MemMB: a.MemMB, Status: a.Status, Error: a.Error, Granted: listOrEmpty(perms)}
-		if mi.Mode == "" {
-			mi.Mode = addons.ModeHTTP
-		}
+		mi := MarketInstalled{ID: id, Version: a.Version, Kind: a.KindOf(), Mode: a.ModeOf(), Source: a.SourceOf(), MemMB: a.MemMB, Status: a.Status, Granted: listOrEmpty(perms)}
 		// Where an addon of the admin's own comes from is all there is to tell it by: nothing
 		// signed names it.
 		switch mi.Source {
@@ -157,7 +142,7 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 		v.CatalogError = "catalog_unavailable"
 	} else {
 		for _, e := range c.Adapters {
-			if e.Protocol != addons.Protocol2 {
+			if e.Kind == addons.KindPayment {
 				continue
 			}
 			a, ok := installed[e.ID]
@@ -189,32 +174,13 @@ func (h *handlers) listMarketplace(ctx context.Context, _ *struct{}) (*marketOut
 // installMarketplace records the approval first and then asks the host: an addon never runs
 // with permissions the admin has not seen.
 func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInput) (*marketOutput, error) {
-	if h.d.Addons == nil {
-		return nil, huma.Error409Conflict("addons_unavailable")
-	}
-	st, err := h.d.Addons.State()
+	st, err := h.addonHost()
 	if err != nil {
 		return nil, err
 	}
-	if st.HostVersion == "" {
-		return nil, huma.Error409Conflict("host_outdated")
-	}
-	c, err := h.catalog(ctx)
+	e, err := h.installEntry(ctx, st, in.ID, false)
 	if err != nil {
-		return nil, huma.Error502BadGateway("catalog_unavailable")
-	}
-	i := slices.IndexFunc(c.Adapters, func(e addons.Entry) bool { return e.ID == in.ID && e.Protocol == addons.Protocol2 })
-	if i < 0 {
-		return nil, huma.Error404NotFound("addon_unknown")
-	}
-	e := c.Adapters[i]
-	a, ok := st.Adapters[in.ID]
-	if ok && a.SourceOf() != addons.SourceOfficial {
-		// The admin's own addon holds the id: the catalog's would take over its tokens and grant.
-		return nil, huma.Error409Conflict("addon_id_taken")
-	}
-	if ok && a.Status == "running" && a.Digest == e.Digest {
-		return nil, huma.Error409Conflict("addon_current")
+		return nil, err
 	}
 	// The admin approves what they were shown; a catalog that changed in between is shown
 	// again rather than approved blindly.
@@ -229,10 +195,9 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 		Permissions: addons.EncodePermissions(e.Permissions), ApprovedBy: sql.NullInt64{Int64: admin, Valid: true}, ApprovedAt: h.d.Now().Unix()}); err != nil {
 		return nil, err
 	}
-	if err := h.d.Addons.Ask(addons.Request{Action: "install", ID: e.ID}); err != nil {
-		return nil, askErr(err)
+	if err := h.ask(ctx, addons.Request{Action: "install", ID: e.ID}, map[string]any{"version": e.Version, "digest": e.Digest, "permissions": e.Permissions}); err != nil {
+		return nil, err
 	}
-	h.audit(ctx, admin, "addon.install", "addon", e.ID, map[string]any{"version": e.Version, "digest": e.Digest, "permissions": e.Permissions})
 	return h.listMarketplace(ctx, nil)
 }
 
@@ -291,15 +256,9 @@ func (h *handlers) installCustom(ctx context.Context, in *marketCustomInput) (*m
 		// What the fields above let through and the host would still refuse.
 		return nil, huma.Error422UnprocessableEntity("addon_request_invalid")
 	}
-	if h.d.Addons == nil {
-		return nil, huma.Error409Conflict("addons_unavailable")
-	}
-	st, err := h.d.Addons.State()
+	st, err := h.addonHost()
 	if err != nil {
 		return nil, err
-	}
-	if st.HostVersion == "" {
-		return nil, huma.Error409Conflict("host_outdated")
 	}
 	// Without the catalog the id cannot be checked against it: refused rather than guessed.
 	c, err := h.catalog(ctx)
@@ -322,26 +281,22 @@ func (h *handlers) installCustom(ctx context.Context, in *marketCustomInput) (*m
 		Permissions: addons.EncodePermissions(b.Permissions), ApprovedBy: sql.NullInt64{Int64: admin, Valid: true}, ApprovedAt: h.d.Now().Unix()}); err != nil {
 		return nil, err
 	}
-	if err := h.d.Addons.Ask(r); err != nil {
-		return nil, askErr(err)
-	}
 	// Where the code comes from and what it may do; nothing here is a secret.
-	h.audit(ctx, admin, "addon.install", "addon", b.ID, map[string]any{"source": b.Source, "image": r.Image, "digest": r.Digest, "url": r.URL,
-		"kind": b.Kind, "mode": b.Mode, "permissions": listOrEmpty(b.Permissions), "mem_mb": b.MemMB})
+	if err := h.ask(ctx, r, map[string]any{"source": b.Source, "image": r.Image, "digest": r.Digest, "url": r.URL,
+		"kind": b.Kind, "mode": b.Mode, "permissions": listOrEmpty(b.Permissions), "mem_mb": b.MemMB}); err != nil {
+		return nil, err
+	}
 	return h.listMarketplace(ctx, nil)
 }
 
 // removeMarketplace takes the approval back at once: the addon loses the panel's API before
 // the host has even stopped it.
-func (h *handlers) removeMarketplace(ctx context.Context, in *addonIDInput) (*marketOutput, error) {
-	if h.d.Addons == nil {
-		return nil, huma.Error409Conflict("addons_unavailable")
-	}
-	st, err := h.d.Addons.State()
+func (h *handlers) removeMarketplace(ctx context.Context, in *AddonIDInput) (*marketOutput, error) {
+	st, err := h.addonState()
 	if err != nil {
 		return nil, err
 	}
-	if a, ok := st.Adapters[in.ID]; !ok || a.Protocol != addons.Protocol2 {
+	if a, ok := st.Adapters[in.ID]; !ok || a.KindOf() == addons.KindPayment {
 		return nil, huma.Error404NotFound("addon_not_installed")
 	}
 	if queued(h.d.Addons, in.ID) {
@@ -360,10 +315,9 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *addonIDInput) (*ma
 	}); err != nil {
 		return nil, err
 	}
-	if err := h.d.Addons.Ask(addons.Request{Action: "remove", ID: in.ID}); err != nil {
-		return nil, askErr(err)
+	if err := h.ask(ctx, addons.Request{Action: "remove", ID: in.ID}, nil); err != nil {
+		return nil, err
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "addon.remove", "addon", in.ID, nil)
 	return h.listMarketplace(ctx, nil)
 }
 

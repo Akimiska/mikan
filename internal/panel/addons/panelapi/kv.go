@@ -202,14 +202,10 @@ type kvKey struct {
 func (s *Server) kvList(w http.ResponseWriter, r *http.Request) {
 	c, _ := CallerOf(r.Context())
 	q := r.URL.Query()
-	limit := 100
-	if l := q.Get("limit"); l != "" {
-		n, err := strconv.Atoi(l)
-		if err != nil || n < 1 || n > maxList {
-			Fail(w, http.StatusBadRequest, "bad_request", "limit is 1 to 1000")
-			return
-		}
-		limit = n
+	limit, ok := intParam(q.Get("limit"), 100, 1, maxList)
+	if !ok {
+		Fail(w, http.StatusBadRequest, "bad_request", "limit is 1 to 1000")
+		return
 	}
 	rows, err := s.d.Store.Q.ListAddonKeys(r.Context(), db.ListAddonKeysParams{AddonID: c.ID, Prefix: q.Get("prefix"), After: q.Get("after"),
 		Now: s.d.Now().Unix(), Lim: int32(limit + 1)})
@@ -222,7 +218,7 @@ func (s *Server) kvList(w http.ResponseWriter, r *http.Request) {
 		Next string  `json:"next"`
 	}{Keys: []kvKey{}}
 	for i, row := range rows {
-		if i == limit {
+		if int64(i) == limit {
 			out.Next = out.Keys[limit-1].Key
 			break
 		}
@@ -255,16 +251,22 @@ const KVLimitKey = "addons.kv_limit_mib"
 // DefaultKVMiB is far more than a bot keeps, and small enough for the backups.
 const DefaultKVMiB = 256
 
+// KVLimitMiB is how many MiB one addon may keep in kv: the admin's setting, DefaultKVMiB
+// without one. unlimited is the setting at 0, and then mib is 0. On an error it answers the
+// default along with it.
+func KVLimitMiB(ctx context.Context, set *settings.Settings) (mib int64, unlimited bool, err error) {
+	v, ok, err := settings.Get[int64](ctx, set, KVLimitKey)
+	switch {
+	case err != nil || !ok || v < 0:
+		return DefaultKVMiB, false, err
+	case v == 0:
+		return 0, true, nil
+	}
+	return v, false, nil
+}
+
 // kvQuota is how many bytes one addon may keep; 0: no bound.
 func (s *Server) kvQuota(ctx context.Context) int64 {
-	if s.d.KVQuota > 0 {
-		return s.d.KVQuota
-	}
-	mib := int64(DefaultKVMiB)
-	if s.d.Settings != nil {
-		if v, ok, err := settings.Get[int64](ctx, s.d.Settings, KVLimitKey); err == nil && ok && v >= 0 {
-			mib = v
-		}
-	}
+	mib, _, _ := KVLimitMiB(ctx, s.d.Settings) // a failed read leaves the default bound
 	return mib << 20
 }

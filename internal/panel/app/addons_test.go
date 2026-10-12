@@ -86,9 +86,9 @@ func TestAddonsMarketplace(t *testing.T) {
 				Set   bool   `json:"set"`
 			} `json:"settings"`
 		} `json:"installed"`
-		Pending *struct {
+		Queue []struct {
 			ID string `json:"id"`
-		} `json:"pending"`
+		} `json:"queue"`
 		Supported bool `json:"supported"`
 	}
 	read := func(resp *http.Response, body []byte) view {
@@ -105,7 +105,7 @@ func TestAddonsMarketplace(t *testing.T) {
 	if resp, body := h.do(http.MethodPost, api+"/ghost/install", nil, csrf); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("not in the catalog: %d %s", resp.StatusCode, body)
 	}
-	if v := read(h.do(http.MethodPost, api+"/fake/install", nil, csrf)); v.Pending == nil || v.Pending.ID != "fake" {
+	if v := read(h.do(http.MethodPost, api+"/fake/install", nil, csrf)); len(v.Queue) != 1 || v.Queue[0].ID != "fake" {
 		t.Fatalf("install: %+v", v)
 	}
 	if wake, err := os.ReadFile(filepath.Join(dir, "update", "request")); err != nil || !strings.Contains(string(wake), `"do":"addons"`) {

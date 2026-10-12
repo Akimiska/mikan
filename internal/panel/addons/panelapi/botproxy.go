@@ -34,11 +34,10 @@ import (
 const SlotKey = "addons.bot"
 
 const (
-	maxBuffered   = 2000           // updates kept for an addon that does not read them
-	keepUpdates   = 24 * time.Hour // as long as Telegram keeps them itself
-	maxUpdateWait = 50             // seconds of a long poll
-	maxCall       = 1 << 20        // a call that carries no file
-	maxUpload     = tgate.MaxDocument + 1<<20
+	maxBuffered = 2000           // updates kept for an addon that does not read them
+	keepUpdates = 24 * time.Hour // as long as Telegram keeps them itself
+	maxCall     = 1 << 20        // a call that carries no file
+	maxUpload   = tgate.MaxDocument + 1<<20
 )
 
 // Telegram is the gateway as the proxy needs it.
@@ -70,27 +69,27 @@ func (s *Server) Slot(ctx context.Context) string {
 	if id == "" {
 		return ""
 	}
-	g, err := s.d.Grants.GetAddonGrant(ctx, id)
-	if err != nil {
-		return ""
+	perms, _, err := addons.LoadGrant(ctx, s.d.Store.Q, id)
+	if err != nil && !errors.Is(err, addons.ErrNoGrant) {
+		s.d.Log.Warn("addons api: grant", "addon", id, "err", err)
 	}
-	if perms, err := addons.DecodePermissions(g.Permissions); err != nil || !(Caller{Permissions: perms}).Can("bot") {
+	if err != nil || !addons.HasPerm(perms, "bot") {
 		return ""
 	}
 	return id
 }
 
-// slotSetting is the addon the admin chose, grant or not.
-func (s *Server) slotSetting(ctx context.Context) string {
-	if s.d.Settings == nil {
-		return ""
-	}
-	id, _, err := settings.Get[string](ctx, s.d.Settings, SlotKey)
+// BotHolder is the addon the admin chose to hold the bot, grant or not; "" when none or the
+// setting cannot be read.
+func BotHolder(ctx context.Context, set *settings.Settings) string {
+	id, _, err := settings.Get[string](ctx, set, SlotKey)
 	if err != nil {
 		return ""
 	}
 	return id
 }
+
+func (s *Server) slotSetting(ctx context.Context) string { return BotHolder(ctx, s.d.Settings) }
 
 // holds is Slot for a caller whose grant authenticate has just read: it needs the setting
 // alone, not the grant a second time.
@@ -278,16 +277,9 @@ func (s *Server) answer(w http.ResponseWriter, code int, answer []byte, err erro
 // getUpdates is Telegram's: what follows offset (acknowledging what is below it), up to
 // limit, waiting up to timeout seconds for something new.
 func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, p map[string]string) {
-	num := func(k string, def, lo, hi int64) int64 {
-		n, err := strconv.ParseInt(p[k], 10, 64)
-		if err != nil {
-			return def
-		}
-		return min(max(n, lo), hi)
-	}
-	offset := num("offset", 0, 0, math.MaxInt64)
-	limit := num("limit", 100, 1, 100)
-	timeout := num("timeout", 0, 0, maxUpdateWait)
+	offset := clampParam(p["offset"], 0, 0, math.MaxInt64)
+	limit := clampParam(p["limit"], 100, 1, 100)
+	timeout := clampParam(p["timeout"], 0, 0, maxPollWait)
 	if offset > 0 {
 		if err := s.d.Store.Q.AckAddonUpdates(r.Context(), offset); err != nil {
 			tgFail(w, http.StatusInternalServerError, "Internal Server Error")

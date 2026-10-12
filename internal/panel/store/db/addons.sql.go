@@ -257,39 +257,6 @@ func (q *Queries) ListAddonEvents(ctx context.Context, arg ListAddonEventsParams
 	return items, nil
 }
 
-const listAddonGrants = `-- name: ListAddonGrants :many
-SELECT addon_id, version, permissions, approved_by, approved_at FROM addon_grants ORDER BY addon_id
-`
-
-func (q *Queries) ListAddonGrants(ctx context.Context) ([]AddonGrant, error) {
-	rows, err := q.db.QueryContext(ctx, listAddonGrants)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AddonGrant{}
-	for rows.Next() {
-		var i AddonGrant
-		if err := rows.Scan(
-			&i.AddonID,
-			&i.Version,
-			&i.Permissions,
-			&i.ApprovedBy,
-			&i.ApprovedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAddonKeys = `-- name: ListAddonKeys :many
 SELECT key, version, expires_at FROM addon_kv
 WHERE addon_id = $1 AND starts_with(key, $2::TEXT) AND key > $3::TEXT

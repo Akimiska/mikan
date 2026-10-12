@@ -2,6 +2,7 @@ package panelapi
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,10 +17,7 @@ import (
 // follows the addon's cursor (or ?after=), waiting up to ?wait= seconds for something new;
 // POST /events/ack moves the cursor. Delivery is at least once: an addon dedupes by id.
 
-const (
-	maxWait   = 50
-	maxEvents = 500
-)
+const maxEvents = 500
 
 func (s *Server) handleEvents() {
 	s.Handle(http.MethodGet, "/events", "events", s.eventsList)
@@ -29,23 +27,18 @@ func (s *Server) handleEvents() {
 func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 	c, _ := CallerOf(r.Context())
 	q := r.URL.Query()
-	num := func(name string, def, lo, hi int) (int, bool) {
-		v := q.Get(name)
-		if v == "" {
-			return def, true
+	num := func(name string, def, lo, hi int64) (int64, bool) {
+		n, ok := intParam(q.Get(name), def, lo, hi)
+		if !ok {
+			Fail(w, http.StatusBadRequest, "bad_request", name+" is "+strconv.FormatInt(lo, 10)+" to "+strconv.FormatInt(hi, 10))
 		}
-		n, err := strconv.Atoi(v)
-		if err != nil || n < lo || n > hi {
-			Fail(w, http.StatusBadRequest, "bad_request", name+" is "+strconv.Itoa(lo)+" to "+strconv.Itoa(hi))
-			return 0, false
-		}
-		return n, true
+		return n, ok
 	}
 	limit, ok := num("limit", 100, 1, maxEvents)
 	if !ok {
 		return
 	}
-	wait, ok := num("wait", 0, 0, maxWait)
+	wait, ok := num("wait", 0, 0, maxPollWait)
 	if !ok {
 		return
 	}
@@ -55,12 +48,10 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 	}
 	var after int64
 	if a := q.Get("after"); a != "" {
-		n, err := strconv.ParseInt(a, 10, 64)
-		if err != nil || n < 0 {
+		if after, ok = intParam(a, 0, 0, math.MaxInt64); !ok {
 			Fail(w, http.StatusBadRequest, "bad_request", "after is an event id")
 			return
 		}
-		after = n
 	} else {
 		cur, err := s.d.Store.Q.GetAddonCursor(r.Context(), c.ID)
 		if err != nil {

@@ -108,9 +108,7 @@ type orderSubDocsInput struct {
 
 func (h *handlers) registerSubPage() {
 	tags := []string{"sub-page"}
-	op := func(id, method, path, summary string, status int) huma.Operation {
-		return huma.Operation{OperationID: id, Method: method, Path: path, Summary: summary, Tags: tags, DefaultStatus: status, Metadata: sessionOnly, Extensions: sessionOnlyExt}
-	}
+	op := sessionOps("sub-page")
 	huma.Register(h.api, huma.Operation{OperationID: "get-sub-page", Method: http.MethodGet, Path: "/api/v1/sub-page", Summary: "Страница подписки: вид, блоки, приложения", Tags: tags}, h.getSubPage)
 	huma.Register(h.api, op("update-sub-page", http.MethodPut, "/api/v1/sub-page", "Сохранить страницу подписки", 0), h.putSubPage)
 	huma.Register(h.api, huma.Operation{OperationID: "get-sub-page-image", Method: http.MethodGet, Path: "/api/v1/sub-page/images/{name}", Summary: "Загруженная картинка страницы подписки", Tags: tags,

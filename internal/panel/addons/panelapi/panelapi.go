@@ -8,7 +8,6 @@ package panelapi
 import (
 	"context"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -16,6 +15,7 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +24,6 @@ import (
 	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
-	"mikan/internal/panel/store/db"
 )
 
 // Prefix is where the API lives on its listener; the host hands it to addons as
@@ -34,23 +33,17 @@ const Prefix = "/panel/v2"
 // MaxBody bounds what an addon may send in one request.
 const MaxBody = 1 << 20
 
-// Grants is what the server reads the admin's approvals from.
-type Grants interface {
-	GetAddonGrant(ctx context.Context, addonID string) (db.AddonGrant, error)
-}
-
 type Deps struct {
-	Addons  *addons.Manager
-	Grants  Grants
-	Store   *store.Store // nil: no kv and no events (tests of access alone)
-	KVQuota int64        // bytes one addon may keep in kv, over the setting (tests); 0: the setting
-	Hub     *events.Hub
-	Log     *slog.Logger
-	Now     func() time.Time
-	// The Bot API proxy (botproxy.go): the gateway, the settings that name the addon holding
-	// the bot, and where the panel's own pages are (SubBase, for Mini App buttons).
-	Telegram Telegram
+	Addons *addons.Manager
+	Store  *store.Store // the admin's approvals, kv, events and the bot's buffer
+	Hub    *events.Hub
+	Log    *slog.Logger
+	Now    func() time.Time
+	// Settings hold the kv limit and the addon that holds the bot. The Bot API proxy
+	// (botproxy.go) also needs the gateway, and where the panel's own pages are (SubBase, for
+	// Mini App buttons).
 	Settings *settings.Settings
+	Telegram Telegram
 	SubBase  func(ctx context.Context) string
 	// Bot serves the bot's screens running as an addon (tgbot.RPCHandler): POST
 	// /panel/v2/bot/{method}, for the addon that holds the bot. nil: not served.
@@ -64,7 +57,7 @@ type Caller struct {
 	Permissions []string
 }
 
-func (c Caller) Can(perm string) bool { return slices.Contains(c.Permissions, perm) }
+func (c Caller) Can(perm string) bool { return addons.HasPerm(c.Permissions, perm) }
 
 type callerKey struct{}
 
@@ -111,10 +104,8 @@ func New(d Deps) *Server {
 		Fail(w, http.StatusNotFound, "not_found", "no such method")
 	})
 	s.Handle(http.MethodGet, "/self", "", s.self)
-	if d.Store != nil {
-		s.handleKV()
-		s.handleEvents()
-	}
+	s.handleKV()
+	s.handleEvents()
 	if d.Bot != nil {
 		s.Handle(http.MethodPost, "/bot/{method}", "bot", func(w http.ResponseWriter, r *http.Request) {
 			// The panel's data of the bot is the holder's alone, as its chats are.
@@ -162,7 +153,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Fail(w, http.StatusMisdirectedRequest, "bad_request", "unknown host")
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/bot") && s.d.Store != nil {
+	if strings.HasPrefix(r.URL.Path, "/bot") {
 		s.botAPI(w, r)
 		return
 	}
@@ -173,6 +164,29 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBody)
 	s.mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, c)))
+}
+
+// maxPollWait is the longest a long poll (events, getUpdates) waits, in seconds.
+const maxPollWait = 50
+
+// intParam reads an integer query value: def when it is empty; ok is false when it is no
+// integer within lo..hi.
+func intParam(raw string, def, lo, hi int64) (n int64, ok bool) {
+	if raw == "" {
+		return def, true
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	return n, err == nil && n >= lo && n <= hi
+}
+
+// clampParam reads a parameter as Telegram does: def when it is no integer, else the
+// nearest value within lo..hi.
+func clampParam(raw string, def, lo, hi int64) int64 {
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return def
+	}
+	return min(max(n, lo), hi)
 }
 
 // longPoll is what both feeds (events, getUpdates) wait with: read until it finds something
@@ -223,7 +237,7 @@ func (s *Server) authenticateToken(ctx context.Context, token string) (Caller, i
 	id := ""
 	// Every token is compared, so the time does not tell how far one matched.
 	for aid, a := range st.Adapters {
-		if a.Protocol == addons.Protocol2 && a.PanelToken != "" &&
+		if a.KindOf() != addons.KindPayment && a.PanelToken != "" &&
 			subtle.ConstantTimeCompare([]byte(a.PanelToken), []byte(token)) == 1 && a.Status == "running" {
 			id = aid
 		}
@@ -231,20 +245,15 @@ func (s *Server) authenticateToken(ctx context.Context, token string) (Caller, i
 	if id == "" {
 		return Caller{}, http.StatusUnauthorized, "unauthorized"
 	}
-	g, err := s.d.Grants.GetAddonGrant(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	perms, version, err := addons.LoadGrant(ctx, s.d.Store.Q, id)
+	if errors.Is(err, addons.ErrNoGrant) {
 		return Caller{}, http.StatusForbidden, "not_approved"
 	}
 	if err != nil {
 		s.d.Log.Warn("addons api: grant", "addon", id, "err", err)
 		return Caller{}, http.StatusServiceUnavailable, "unavailable"
 	}
-	perms, err := addons.DecodePermissions(g.Permissions)
-	if err != nil {
-		s.d.Log.Warn("addons api: grant", "addon", id, "err", err)
-		return Caller{}, http.StatusServiceUnavailable, "unavailable"
-	}
-	return Caller{ID: id, Version: g.Version, Permissions: perms}, 0, ""
+	return Caller{ID: id, Version: version, Permissions: perms}, 0, ""
 }
 
 // self tells an addon who the panel takes it for and what it may do.
@@ -357,12 +366,10 @@ func (s *Server) Run(ctx context.Context) {
 		case <-t.C:
 			check()
 		case <-prune.C:
-			if s.d.Store != nil {
-				s.pruneKV(ctx)
-				s.pruneUpdates(ctx)
-				if _, err := events.Prune(ctx, s.d.Store.Q, s.d.Now()); err != nil && ctx.Err() == nil {
-					s.d.Log.Warn("addons api: prune events", "err", err)
-				}
+			s.pruneKV(ctx)
+			s.pruneUpdates(ctx)
+			if _, err := events.Prune(ctx, s.d.Store.Q, s.d.Now()); err != nil && ctx.Err() == nil {
+				s.d.Log.Warn("addons api: prune events", "err", err)
 			}
 		}
 	}

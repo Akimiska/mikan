@@ -49,16 +49,16 @@ func New(d Deps) *Bot {
 func (b *Bot) config(ctx context.Context) Config { return b.d.Backend.Config(ctx) }
 
 // Started sets up what the chats show: the command menu and the Mini App's button beside
-// the input field, in the bot's language.
-func (b *Bot) Started(ctx context.Context) {
+// the input field, in the bot's language. An error means some of it is not set: the caller
+// tries again.
+func (b *Bot) Started(ctx context.Context) error {
 	cfg := b.config(ctx)
 	w := wordsFor(cfg.Lang)
-	_ = b.d.Client.SetCommands(ctx, w.commands)
-	if url := b.miniAppURL(ctx, cfg); url != "" {
-		_ = b.d.Client.SetMenuButton(ctx, w.menuApp, url)
-	} else {
-		_ = b.d.Client.SetMenuButton(ctx, "", "")
+	text, url := "", b.miniAppURL(ctx, cfg)
+	if url != "" {
+		text = w.menuApp
 	}
+	return errors.Join(b.d.Client.SetCommands(ctx, w.commands), b.d.Client.SetMenuButton(ctx, text, url))
 }
 
 // Update takes a message or a press in a private chat, the flood guard passed. It is

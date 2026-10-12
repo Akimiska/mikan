@@ -70,9 +70,24 @@ func newAddon(panelURL, panelToken, botURL, botToken string, log *slog.Logger) *
 func (a *addon) Run(ctx context.Context) {
 	defer a.running.Wait()
 	a.running.Go(func() { a.out.Run(ctx) })
-	a.bot.Started(ctx)
+	a.running.Go(func() { a.setUp(ctx) })
 	a.running.Go(func() { a.events(ctx) })
 	a.updates(ctx)
+}
+
+// setUp sets the chats' commands and menu button, again until it goes through: the panel's
+// gateway may not reach Telegram yet when the addon starts.
+func (a *addon) setUp(ctx context.Context) {
+	backoff := time.Second
+	for {
+		err := a.bot.Started(ctx)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		a.log.Warn("set up the chats", "err", err)
+		sleep(ctx, backoff)
+		backoff = min(2*backoff, time.Minute)
+	}
 }
 
 // updates reads the panel's buffer as Telegram's getUpdates: an update is acknowledged with

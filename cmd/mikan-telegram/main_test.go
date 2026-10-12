@@ -125,7 +125,6 @@ func TestAddonEndToEnd(t *testing.T) {
 	api := panelapi.New(panelapi.Deps{Addons: addons.New(dir, "", "dev", log, now), Store: st, Hub: hub, Log: log, Now: now,
 		Telegram: gate, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend)})
 	gate.SetHandler(api.BotSlot())
-	go gate.Run(ctx)
 	apiSrv := httptest.NewServer(api)
 	defer apiSrv.Close()
 
@@ -133,6 +132,10 @@ func TestAddonEndToEnd(t *testing.T) {
 	a.updatesWait = time.Second
 	done := make(chan struct{})
 	go func() { a.Run(ctx); close(done) }()
+	// The gateway comes up after the addon, as after a restart of the panel: the addon sets up
+	// the chats once the proxy reaches Telegram.
+	time.Sleep(300 * time.Millisecond)
+	go gate.Run(ctx)
 
 	until := func(what string, ok func([]string) bool) []string {
 		t.Helper()

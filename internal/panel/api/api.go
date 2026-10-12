@@ -89,8 +89,9 @@ type Deps struct {
 	Tuner interface {
 		Status(inboundID int64) (autotune.Status, bool)
 	}
-	// Telegram is the subscription owners' bot: its menu, texts and broadcasts.
-	Telegram *tgbot.Bot
+	// Telegram is the admin's setup of the subscription owners' bot: its menu, texts and
+	// broadcasts.
+	Telegram *tgbot.Panel
 	// Gateway is the panel's side of Telegram: the token, the route, the bot's status, the
 	// admin's chat and the channel.
 	Gateway *tgate.Gateway

@@ -18,10 +18,6 @@ import (
 func (g *Gateway) preCheckout(ctx context.Context, c *Client, q *PreCheckoutQuery) {
 	ctx, cancel := context.WithTimeout(ctx, preCheckoutDeadline)
 	defer cancel()
-	if g.d.Billing == nil {
-		_ = c.AnswerPreCheckout(ctx, q.ID, false, wordsFor(g.Lang(ctx)).payUnavailable)
-		return
-	}
 	err := g.d.Billing.PreCheckout(ctx, q.From.ID, q.InvoicePayload, q.Currency, q.TotalAmount)
 	reason := ""
 	if err != nil {
@@ -45,11 +41,8 @@ func (g *Gateway) starsPaid(ctx context.Context, m *Message) error {
 		return nil
 	}
 	pay := g.d.stars
-	if pay == nil && g.d.Billing != nil {
-		pay = g.d.Billing.StarsPaid
-	}
 	if pay == nil {
-		return nil
+		pay = g.d.Billing.StarsPaid
 	}
 	err := pay(ctx, m.From.ID, sp.InvoicePayload, sp.ChargeID, sp.Currency, sp.TotalAmount)
 	switch {
@@ -72,9 +65,6 @@ func (g *Gateway) starsPaid(ctx context.Context, m *Message) error {
 // that may go away is returned, as for starsPaid, so the update comes again.
 func (g *Gateway) starsRefunded(ctx context.Context, m *Message) error {
 	rp := m.RefundedPayment
-	if g.d.Billing == nil {
-		return nil
-	}
 	// The private chat is the buyer's: its id is their Telegram id.
 	if err := g.d.Billing.StarsRefunded(ctx, m.Chat.ID, rp.ChargeID); err != nil {
 		g.d.Log.Error("telegram: stars refund", "err", err, "charge", rp.ChargeID)

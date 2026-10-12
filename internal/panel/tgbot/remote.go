@@ -45,6 +45,12 @@ func (r *Remote) MiniAppURL(ctx context.Context) string {
 	return s
 }
 
+func (r *Remote) Member(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error) {
+	var in bool
+	err := r.call(ctx, "Member", []any{chat, tgID, fresh}, &in)
+	return in, err
+}
+
 func (r *Remote) Context(ctx context.Context, tgID int64) (Account, error) {
 	var a Account
 	err := r.call(ctx, "Context", []any{tgID}, &a)
@@ -162,32 +168,6 @@ func (r *Remote) ReissueState(ctx context.Context, userID int64) (domain.Reissue
 
 func (r *Remote) Reissue(ctx context.Context, userID int64) error {
 	return r.call(ctx, "Reissue", []any{userID})
-}
-
-func (r *Remote) Notices(ctx context.Context, now time.Time) ([]db.ListNoticeSubscriptionsRow, error) {
-	var n []db.ListNoticeSubscriptionsRow
-	err := r.call(ctx, "Notices", []any{now}, &n)
-	return n, err
-}
-
-func (r *Remote) NoticeSent(ctx context.Context, userID int64, kind string, period int64) (bool, error) {
-	var sent bool
-	err := r.call(ctx, "NoticeSent", []any{userID, kind, period}, &sent)
-	return sent, err
-}
-
-func (r *Remote) NoticeDelivered(ctx context.Context, userID int64, kind string, period int64, at time.Time) error {
-	return r.call(ctx, "NoticeDelivered", []any{userID, kind, period, at})
-}
-
-func (r *Remote) PruneNotices(ctx context.Context, before time.Time) error {
-	return r.call(ctx, "PruneNotices", []any{before})
-}
-
-func (r *Remote) BroadcastTargets(ctx context.Context) ([]int64, error) {
-	var t []int64
-	err := r.call(ctx, "BroadcastTargets", nil, &t)
-	return t, err
 }
 
 func (r *Remote) Shop() Shop { return r.shop }

@@ -123,8 +123,8 @@ func TestAddonEndToEnd(t *testing.T) {
 	backend := &tgbot.Local{Store: st, Settings: set, Gateway: gate, SubBase: subBase, Now: now, MiniApp: func() bool { return false }}
 	hub := events.NewHub()
 	api := panelapi.New(panelapi.Deps{Addons: addons.New(dir, "", "dev", log, now), Grants: st.Q, Store: st, Hub: hub, Log: log, Now: now,
-		Telegram: gate, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend, gate.Member)})
-	gate.SetHandler(api.BotSlot(nil))
+		Telegram: gate, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend)})
+	gate.SetHandler(api.BotSlot())
 	go gate.Run(ctx)
 	apiSrv := httptest.NewServer(api)
 	defer apiSrv.Close()
@@ -166,7 +166,7 @@ func TestAddonEndToEnd(t *testing.T) {
 		err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, now(), typ, userID, tgID, data, dedupe) })
 		hub.Kick()
 		return err
-	}}
+	}, Log: log}
 	before := len(tg.said())
 	n.Paid(ctx, db.Payment{ID: 1, TgID: 555, Kind: "new", Provider: "stars", Amount: 100, Currency: "XTR", Status: "applied"}, u, true)
 	until("the payment message", func(s []string) bool { return len(s) > before })

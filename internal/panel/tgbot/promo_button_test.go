@@ -117,17 +117,17 @@ func TestPromoButtonSaved(t *testing.T) {
 	e := setup(t)
 	cfg := Default("ru")
 	cfg.PromoButton = false
-	if err := settings.Set(e.ctx, e.set, KeyConfig, cfg); err != nil {
+	if err := settings.Set(e.ctx, e.set, tgate.KeyConfig, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if e.bot.Config(e.ctx).PromoButton {
+	if e.bot.config(e.ctx).PromoButton {
 		t.Fatal("a saved off stays off")
 	}
 	cfg.PromoButton = true
-	if err := settings.Set(e.ctx, e.set, KeyConfig, cfg); err != nil {
+	if err := settings.Set(e.ctx, e.set, tgate.KeyConfig, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !e.bot.Config(e.ctx).PromoButton {
+	if !e.bot.config(e.ctx).PromoButton {
 		t.Fatal("a saved on stays on")
 	}
 }

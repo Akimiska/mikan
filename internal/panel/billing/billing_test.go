@@ -135,7 +135,7 @@ func newEnv(t *testing.T) *env {
 	clock := func() time.Time { return e.now }
 	set := settings.New(e.st.Q)
 	e.s = New(Deps{Store: e.st, Settings: set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, clock), noChanges{}, clock),
-		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})), Now: clock})
+		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})), Now: clock, MaxLinks: 5})
 	e.s.SetTelegram(e.tg)
 	e.s.SetNotifier(e.tg)
 	must(t, settings.Set(ctx, set, KeyConfig, Config{Enabled: true, Stars: true, AllowNew: true, RenewResetsTraffic: true}))

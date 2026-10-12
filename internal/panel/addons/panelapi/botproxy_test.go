@@ -64,14 +64,6 @@ type gateway struct {
 func (g gateway) Client() *tgate.Client { return g.c }
 func (g gateway) Outbox() *tgate.Outbox { return g.out }
 
-type recorder struct{ ups []int64 }
-
-func (r *recorder) Started(context.Context, *tgate.Client) {}
-func (r *recorder) Update(_ context.Context, _ *tgate.Client, _ *tgate.Outbox, up tgate.Update) error {
-	r.ups = append(r.ups, up.UpdateID)
-	return nil
-}
-
 func proxyWorld(t *testing.T) (*Server, *fakeTelegram) {
 	t.Helper()
 	s, _ := kvWorld(t)
@@ -116,15 +108,15 @@ func update(id int64, text string) tgate.Update {
 }
 
 // The addon that holds the bot reads what Telegram sent, whole, and acknowledges it with its
-// offset; without a holder the panel's screens answer; nobody else gets in.
+// offset; with no holder the updates wait in the buffer; nobody else gets in.
 func TestBotSlotAndUpdates(t *testing.T) {
 	s, _ := proxyWorld(t)
 	ctx := context.Background()
-	screens := &recorder{}
-	slot := s.BotSlot(screens)
+	slot := s.BotSlot()
 
-	if err := slot.Update(ctx, nil, nil, update(1, "/start")); err != nil || len(screens.ups) != 1 {
-		t.Fatalf("no holder: the screens answer: %v %v", err, screens.ups)
+	// No holder: the update waits for the addon to come.
+	if err := slot.Update(ctx, update(1, "/start")); err != nil {
+		t.Fatal(err)
 	}
 	if code, _ := bot(s, botToken, "getUpdates", "", nil); code != http.StatusUnauthorized {
 		t.Fatalf("no holder: the addon is not let in: %d", code)
@@ -150,14 +142,11 @@ func TestBotSlotAndUpdates(t *testing.T) {
 		}
 	}
 
-	must(slot.Update(ctx, nil, nil, update(10, "hi")))
-	must(slot.Update(ctx, nil, nil, update(11, "there")))
-	if len(screens.ups) != 1 {
-		t.Fatal("the screens answered while an addon holds the bot")
-	}
+	must(slot.Update(ctx, update(10, "hi")))
+	must(slot.Update(ctx, update(11, "there")))
 	_, a := bot(s, botToken, "getUpdates", "application/json", []byte(`{"offset":0,"timeout":0}`))
 	var ups []map[string]any
-	if err := json.Unmarshal(a.Result, &ups); err != nil || len(ups) != 2 || ups[0]["message"].(map[string]any)["photo"] == nil {
+	if err := json.Unmarshal(a.Result, &ups); err != nil || len(ups) != 3 || ups[0]["message"].(map[string]any)["photo"] == nil {
 		t.Fatalf("updates, whole: %s", a.Result)
 	}
 	// form parameters, as python-telegram-bot sends them
@@ -174,7 +163,7 @@ func TestBotSlotAndUpdates(t *testing.T) {
 		done <- got
 	}()
 	time.Sleep(200 * time.Millisecond)
-	must(slot.Update(ctx, nil, nil, update(12, "new")))
+	must(slot.Update(ctx, update(12, "new")))
 	select {
 	case got := <-done:
 		if len(got) != 1 {

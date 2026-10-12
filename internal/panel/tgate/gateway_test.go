@@ -77,7 +77,7 @@ func TestBotTokenConflict(t *testing.T) {
 // moves past what nobody answers, and gives the alerts and the backups a client that sends.
 func TestGatewayWithoutScreens(t *testing.T) {
 	var paid atomic.Int32
-	e := start(t, nil, func(e *env, d *Deps) {
+	e := start(t, false, func(e *env, d *Deps) {
 		d.stars = func(context.Context, int64, string, string, string, int64) error {
 			paid.Add(1)
 			return nil

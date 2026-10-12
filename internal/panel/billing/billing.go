@@ -118,7 +118,7 @@ type Deps struct {
 	// TrustProxy reads the client's IP from X-Forwarded-For: adapters check where a
 	// webhook came from (YooKassa's addresses).
 	TrustProxy bool
-	MaxLinks   int64 // subscriptions one Telegram account may hold
+	MaxLinks   int64 // subscriptions one Telegram account may hold (tgate.MaxLinks)
 	// Addons are the marketplace's payment adapters; nil: none.
 	Addons *addons.Manager
 	// SubBase is https://host:port/<sub path>, where the webhooks are; "" without an address.
@@ -140,9 +140,6 @@ type Service struct {
 }
 
 func New(d Deps) *Service {
-	if d.MaxLinks == 0 {
-		d.MaxLinks = 5
-	}
 	return &Service{d: d}
 }
 

@@ -27,7 +27,7 @@ const (
 	KeyToken   = "tg_token" // never leaves the panel's API
 	KeyBot     = "tg_bot"   // the token's bot, from getMe
 	// KeyConfig is the bot's setup (tgbot.Config); the gateway reads its language and its
-	// channel from it.
+	// channel from it (ReadSetup).
 	KeyConfig         = "tg_config"
 	KeySecret         = "tg_secret" // signs the link codes
 	KeyOffset         = "tg_offset" // the last update taken, so a restart does not hand them out again
@@ -52,7 +52,7 @@ type Deps struct {
 	Log      *slog.Logger
 	Now      func() time.Time
 	Limits   Limits // zero: DefaultLimits
-	// Billing takes the Telegram Stars payments; nil: no payments.
+	// Billing takes the Telegram Stars payments.
 	Billing *billing.Service
 	// Tunnel reaches addr through node id, for RouteNode; nil: the panel has no nodes.
 	Tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)
@@ -61,17 +61,13 @@ type Deps struct {
 	stars func(ctx context.Context, tgID int64, payload, chargeID, currency string, amount int64) error
 }
 
-// Handler is the bot's side of the gateway: its screens (tgbot.Bot), or the buffer an addon
-// reads through the Bot API proxy (panelapi.BotSlot).
+// Handler is the bot's side of the gateway: the buffer the bot addon reads through the Bot
+// API proxy (panelapi.BotSlot).
 type Handler interface {
-	// Started: the gateway reached Telegram as the bot and is about to take updates; c sets
-	// up what the chats show (the commands, the menu button).
-	Started(ctx context.Context, c *Client)
 	// Update is a message or a button press in a private chat, past the flood guard, that
-	// the gateway does not handle itself. It is acknowledged to Telegram after the call:
-	// what it sends goes through out, and what must not hold up the loop goes through Go.
-	// An error offers the update again (a bot addon's buffer that could not take it).
-	Update(ctx context.Context, c *Client, out *Outbox, up Update) error
+	// the gateway does not handle itself. It is acknowledged to Telegram after the call; an
+	// error offers the update again (the buffer could not take it).
+	Update(ctx context.Context, up Update) error
 }
 
 // Status is what the admin panel shows.
@@ -128,7 +124,7 @@ func New(d Deps) *Gateway {
 	return &Gateway{d: d, polled: polled, reload: make(chan struct{}, 1), input: map[int64][]time.Time{}, members: map[int64]time.Time{}}
 }
 
-// SetHandler plugs in the bot's screens; without them the gateway still sends (alerts,
+// SetHandler plugs in what takes the bot's updates; without it the gateway still sends (alerts,
 // backups), takes payments and links the infrastructure admin's chat.
 func (g *Gateway) SetHandler(h Handler) { g.handler.Store(&handlerRef{h}) }
 
@@ -219,17 +215,24 @@ type view struct {
 	Channel Channel `json:"channel"`
 }
 
-// view reads the setup as tgbot.Config does: what was saved over the defaults, in the
-// panel's language when nothing was.
-func (g *Gateway) view(ctx context.Context, set *settings.Settings) view {
-	lang, _ := set.Lang(ctx)
+// ReadSetup reads the bot's setup into T: what was saved over fresh(lang), the defaults in
+// the panel's language ("ru" or "en"), which are what it gives when nothing was saved or
+// what was cannot be read. It also gives that language and whether a setup was saved. The
+// gateway's view and tgbot.Config both read the setup here.
+func ReadSetup[T any](ctx context.Context, set *settings.Settings, fresh func(lang string) T) (v T, lang string, saved bool) {
+	lang, _ = set.Lang(ctx)
 	if lang != "en" {
 		lang = "ru"
 	}
-	v, ok, err := settings.GetOver(ctx, set, KeyConfig, view{Lang: lang})
-	if err != nil || !ok {
-		return view{Lang: lang}
+	v, saved, err := settings.GetOver(ctx, set, KeyConfig, fresh(lang))
+	if err != nil || !saved {
+		return fresh(lang), lang, false
 	}
+	return v, lang, true
+}
+
+func (g *Gateway) view(ctx context.Context, set *settings.Settings) view {
+	v, _, _ := ReadSetup(ctx, set, func(lang string) view { return view{Lang: lang} })
 	if v.Lang != "en" {
 		v.Lang = "ru"
 	}
@@ -434,9 +437,6 @@ func (g *Gateway) poll(ctx context.Context, c *Client) {
 	}
 	_ = settings.Set(ctx, g.d.Settings, KeyBot, me)
 	_ = c.DropWebhook(ctx)
-	if h := g.handlerOf(); h != nil {
-		h.Started(ctx, c)
-	}
 	// Every message the bot sends goes through the outbox (see outbox.go).
 	out := NewOutbox(c, g.d.Limits, time.Now, func(chat int64) {
 		_ = g.d.Store.Q.SetTgBlocked(context.WithoutCancel(ctx), db.SetTgBlockedParams{Blocked: 1, TgID: chat})
@@ -642,7 +642,7 @@ func (g *Gateway) flooding(chat int64) bool {
 
 // handle takes one update. Only a payment can fail in a way that is worth offering the
 // update again for; the rest is answered, or dropped, as it comes. Messages and presses
-// in private chats go to the bot's screens, past the flood guard; a message first makes
+// in private chats go to the handler, past the flood guard; a message first makes
 // its account known (tg_chats).
 func (g *Gateway) handle(ctx context.Context, c *Client, up Update) error {
 	out := g.out.Load()
@@ -662,7 +662,7 @@ func (g *Gateway) handle(ctx context.Context, c *Client, up Update) error {
 			return nil
 		}
 		if h := g.handlerOf(); h != nil {
-			return h.Update(ctx, c, out, up)
+			return h.Update(ctx, up)
 		}
 	case up.Message != nil && up.Message.From != nil && up.Message.Chat.Type == "private":
 		m := up.Message
@@ -672,7 +672,7 @@ func (g *Gateway) handle(ctx context.Context, c *Client, up Update) error {
 		}
 		_ = g.d.Store.Q.UpsertTgChat(ctx, db.UpsertTgChatParams{TgID: chat, Username: m.From.Username, FirstName: m.From.FirstName, CreatedAt: now, UpdatedAt: now})
 		if h := g.handlerOf(); h != nil {
-			return h.Update(ctx, c, out, up)
+			return h.Update(ctx, up)
 		}
 	}
 	return nil

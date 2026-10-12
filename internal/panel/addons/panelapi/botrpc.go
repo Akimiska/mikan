@@ -56,12 +56,6 @@ var botRPC = map[string]rpcRule{
 	"Unlink":        rule("users:write", nil, []int{0}),
 	"Unbind":        rule("users:write", nil, []int{0}),
 	"Reissue":       rule("users:write", nil, []int{0}),
-	// The notices: the panel tells the bot addon through events; these read every account.
-	"Notices":          rule("users:read", nil, nil),
-	"NoticeSent":       rule("users:read", nil, nil),
-	"BroadcastTargets": rule("users:read", nil, nil),
-	"NoticeDelivered":  rule("users:write", nil, nil),
-	"PruneNotices":     rule("users:write", nil, nil),
 	// The shop: what is on offer, and what makes a payment or a subscription.
 	"Shop.Config": rule("", nil, nil), "Shop.Offers": rule("", nil, nil), "Shop.AddonName": rule("", nil, nil),
 	"Shop.TrialTariff":    rule("", nil, nil),

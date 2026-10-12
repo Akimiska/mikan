@@ -45,7 +45,7 @@ func TestRPCTypesCrossWhole(t *testing.T) {
 			t.Errorf("%s: %s cannot cross", path, tp)
 		}
 	}
-	for _, it := range []reflect.Type{backendType, shopType, reflect.TypeFor[Member]()} {
+	for _, it := range []reflect.Type{backendType, shopType} {
 		methods := []reflect.Type{it}
 		if it.Kind() == reflect.Interface {
 			methods = methods[:0]
@@ -75,15 +75,16 @@ type stubBackend struct {
 	err error
 }
 
-func (s stubBackend) Owner(_ context.Context, userID int64) (int64, error) { return userID * 10, s.err }
-func (s stubBackend) Shop() Shop                                           { return nil }
+func (s stubBackend) Owner(_ context.Context, userID int64) (int64, error)      { return userID * 10, s.err }
+func (s stubBackend) Shop() Shop                                                { return (*billing.Service)(nil) }
+func (s stubBackend) Member(context.Context, string, int64, bool) (bool, error) { return true, nil }
 
 // Errors the screens tell apart come back as themselves; only the interfaces' methods are
 // reachable; a panel that cannot be asked is an error, not a zero.
 func TestRPCErrorsAndMethods(t *testing.T) {
 	serve := func(b Backend) *Remote {
 		mux := http.NewServeMux()
-		mux.Handle("POST /bot/{method}", RPCHandler(b, func(context.Context, string, int64, bool) (bool, error) { return true, nil }))
+		mux.Handle("POST /bot/{method}", RPCHandler(b))
 		srv := httptest.NewServer(mux)
 		t.Cleanup(srv.Close)
 		return NewRemote(srv.URL, "t", nil)
@@ -107,7 +108,7 @@ func TestRPCErrorsAndMethods(t *testing.T) {
 		t.Fatalf("another error: %v", err)
 	}
 	// Not a method of the interfaces: refused, whatever the backend has.
-	for _, m := range []string{"Shop", "Shop.Offers", "store", "Owners", "String"} {
+	for _, m := range []string{"Shop", "Shop.Close", "store", "Owners", "String", "Notices", "NoticeSent", "NoticeDelivered", "PruneNotices", "BroadcastTargets"} {
 		if err := r.call(ctx, m, nil); err == nil || !strings.Contains(err.Error(), "no_method") && !strings.Contains(err.Error(), "no method") {
 			t.Fatalf("%s: %v", m, err)
 		}

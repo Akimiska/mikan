@@ -26,7 +26,7 @@ func (b *Bot) passes(ctx context.Context, cfg Config, chat int64, fresh bool) bo
 	if !cfg.Channel.Gate() {
 		return true
 	}
-	in, err := b.d.Gateway.Member(ctx, cfg.Channel.Chat, chat, fresh)
+	in, err := b.d.Backend.Member(ctx, cfg.Channel.Chat, chat, fresh)
 	return in || err != nil
 }
 
@@ -52,9 +52,6 @@ func channelButtons(cfg Config, w *words, data string) [][]tgate.Button {
 // freeButton is the free plan's button, while the account may take it.
 func (b *Bot) freeButton(ctx context.Context, cfg Config, w *words, chat int64) (tgate.Button, bool) {
 	shop := b.d.Backend.Shop()
-	if shop == nil {
-		return tgate.Button{}, false
-	}
 	if _, ok := shop.FreeOffer(ctx, chat); !ok {
 		return tgate.Button{}, false
 	}
@@ -66,9 +63,6 @@ func (b *Bot) freeButton(ctx context.Context, cfg Config, w *words, chat int64) 
 func (b *Bot) takeFree(ctx context.Context, cfg Config, w *words, chat int64) (string, *tgate.Keyboard) {
 	home := &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.back, CallbackData: "m"}}}}
 	shop := b.d.Backend.Shop()
-	if shop == nil {
-		return html.EscapeString(w.freeOff), home
-	}
 	u, err := shop.FreePlan(ctx, chat)
 	switch {
 	case errors.Is(err, billing.ErrFreeChannel):
@@ -78,7 +72,7 @@ func (b *Bot) takeFree(ctx context.Context, cfg Config, w *words, chat int64) (s
 	case errors.Is(err, billing.ErrFreeOff):
 		return html.EscapeString(w.freeOff), home
 	case errors.Is(err, billing.ErrTooManySubs):
-		return html.EscapeString(fmt.Sprintf(w.linkLimit, MaxLinks)), home
+		return html.EscapeString(fmt.Sprintf(w.linkLimit, tgate.MaxLinks)), home
 	case err != nil:
 		b.d.Log.Warn("telegram: free plan", "tg", chat, "err", err)
 		return html.EscapeString(w.freeFail), home

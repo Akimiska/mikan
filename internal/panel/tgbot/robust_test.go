@@ -2,8 +2,6 @@ package tgbot
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -66,91 +64,6 @@ func until(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-// A notice is recorded as sent only once it has been delivered. With Telegram out of reach
-// when the round runs, nothing is recorded and the notice comes at a later round, once.
-func TestNoticeIsNotLostWhenTelegramIsDown(t *testing.T) {
-	e := setup(t, func(e *env, d *wiring) { d.Limits.MaxTries = 1 })
-	const anna = 555
-	e.link(anna)
-	e.expireIn(2 * 24 * time.Hour)
-	e.tg.set("sendMessage", true)
-
-	n := e.tg.count()
-	e.bot.Notify(e.ctx)
-	until(t, "the send is tried", func() bool { return e.sendsTo(anna, n) == 1 })
-	time.Sleep(100 * time.Millisecond)
-	if e.noticeRows() != 0 {
-		t.Fatal("a notice that was not delivered was recorded as sent")
-	}
-
-	// The failure is waited out, not hammered at every round.
-	e.bot.Notify(e.ctx)
-	time.Sleep(100 * time.Millisecond)
-	if got := e.sendsTo(anna, n); got != 1 {
-		t.Fatalf("a failed notice is sent again at once: %d sends", got)
-	}
-
-	e.tg.set("sendMessage", false)
-	e.advance(noticeRetry + time.Minute)
-	e.bot.Notify(e.ctx)
-	until(t, "the notice is recorded", func() bool { return e.noticeRows() == 1 })
-	if got := e.sendsTo(anna, n); got != 2 {
-		t.Fatalf("delivered at the second round: %d sends", got)
-	}
-
-	// And it is done: no third send, now or after a restart.
-	e.bot.Notify(e.ctx)
-	e.advance(noticeRetry + time.Minute)
-	e.bot.Notify(e.ctx)
-	time.Sleep(150 * time.Millisecond)
-	if got := e.sendsTo(anna, n); got != 2 {
-		t.Fatalf("a delivered notice is sent again: %d sends", got)
-	}
-	restarted := New(e.bot.d) // on the same gateway, as a restarted panel's bot
-	restarted.Notify(e.ctx)
-	time.Sleep(150 * time.Millisecond)
-	if got := e.sendsTo(anna, n); got != 2 {
-		t.Fatalf("a restarted panel sends a delivered notice again: %d sends", got)
-	}
-}
-
-func TestNoticeBookkeeping(t *testing.T) {
-	e := setup(t)
-	e.link(555)
-	n := notice{kind: "expire_1d", period: 100}
-	claim := func() bool { _, ok := e.bot.claimNotice(e.ctx, e.user.ID, n, e.clock()); return ok }
-	done := func(err error) { e.bot.noticeDone(e.user.ID, n, noticeKey(e.user.ID, n), err) }
-	rows := func() int { return e.noticeRows() }
-
-	if !claim() || claim() {
-		t.Fatal("a notice on its way is not queued twice")
-	}
-	done(context.Canceled) // the bot was stopped with it in the queue
-	if rows() != 0 || !claim() {
-		t.Fatal("a notice dropped by a stop is due again")
-	}
-	done(tgate.ErrUnreachable)
-	if rows() != 0 || claim() {
-		t.Fatal("a failed notice waits")
-	}
-	e.advance(noticeRetry)
-	if !claim() {
-		t.Fatal("and is tried again after the wait")
-	}
-	done(&tgate.APIError{Code: 502, Description: "bad gateway"})
-	if rows() != 0 {
-		t.Fatal("a failure on Telegram's side is not a delivery")
-	}
-	e.advance(noticeRetry)
-	if !claim() {
-		t.Fatal("tried again")
-	}
-	done(&tgate.APIError{Code: 403, Description: "Forbidden: bot was blocked by the user"})
-	if rows() != 1 || claim() {
-		t.Fatal("a refusal for good is final: nothing to send again")
-	}
-}
-
 // The pre-checkout answer has Telegram's ten seconds. Whatever else is slow, it goes out
 // at once: the update loop does not wait for the other calls to Telegram.
 func TestPreCheckoutDoesNotWaitForOtherCalls(t *testing.T) {
@@ -188,7 +101,7 @@ func TestBroadcastIsFedInBatches(t *testing.T) {
 	s, c := newSink(t)
 	o := tgate.NewOutbox(c, fast, time.Now, nil, nil)
 	run(t, o)
-	b := New(Deps{})
+	b := NewPanel(PanelDeps{})
 	chats := make([]int64, 1700)
 	for i := range chats {
 		chats[i] = int64(1000 + i)
@@ -223,7 +136,7 @@ func TestBroadcastIsFedInBatches(t *testing.T) {
 func TestBroadcastFeedStopsWithTheOutbox(t *testing.T) {
 	_, c := newSink(t)
 	o := tgate.NewOutbox(c, fast, time.Now, nil, nil)
-	b := New(Deps{})
+	b := NewPanel(PanelDeps{})
 	b.bcast = BroadcastProgress{Total: 3}
 	ctx, cancel := context.WithCancel(context.Background())
 	go o.Run(ctx)
@@ -232,39 +145,5 @@ func TestBroadcastFeedStopsWithTheOutbox(t *testing.T) {
 	b.feed(o, []int64{1, 2, 3}, func(int64) {})
 	if p := b.Progress(); p.Failed != 3 || p.Active() {
 		t.Fatalf("what a stopped outbox did not send is failed, and the progress ends: %+v", p)
-	}
-}
-
-// While an addon holds the bot the panel sends no notice itself: each due notice becomes an
-// event for the addon, once, and is recorded as told.
-func TestNoticesBecomeEventsWhileAnAddonHoldsTheBot(t *testing.T) {
-	e := setup(t)
-	const anna = 555
-	e.link(anna)
-	e.expireIn(2 * 24 * time.Hour)
-	type emitted struct {
-		typ          string
-		user, tg     int64
-		data, dedupe string
-	}
-	var got []emitted
-	e.bot.d.Off = func(context.Context) bool { return true }
-	e.bot.d.Emit = func(_ context.Context, typ string, user, tg int64, data any, dedupe string) error {
-		raw, _ := json.Marshal(data)
-		got = append(got, emitted{typ, user, tg, string(raw), dedupe})
-		return nil
-	}
-	n := e.tg.count()
-	e.bot.Notify(e.ctx)
-	e.bot.Notify(e.ctx)
-	time.Sleep(100 * time.Millisecond)
-	if e.sendsTo(anna, n) != 0 {
-		t.Fatal("the panel sent a notice while an addon holds the bot")
-	}
-	if len(got) != 1 || got[0].typ != EventExpiring || got[0].user != e.user.ID || got[0].tg != anna || !strings.Contains(got[0].data, `"days":3`) {
-		t.Fatalf("events: %+v", got)
-	}
-	if e.noticeRows() != 1 {
-		t.Fatal("the notice told as an event is not recorded")
 	}
 }

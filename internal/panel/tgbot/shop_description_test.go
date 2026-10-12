@@ -12,6 +12,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/tgate"
 )
 
 // The admin's description of a plan follows the line built from its limits on every screen
@@ -34,11 +35,11 @@ func TestShopDescription(t *testing.T) {
 			t.Fatal(err)
 		}
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: tgate.MaxLinks})
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.gate)
-	svc.SetNotifier(e.bot)
+	svc.SetNotifier(e.notifications())
 	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{Enabled: true, Stars: true, AllowNew: true}); err != nil {
 		t.Fatal(err)
 	}

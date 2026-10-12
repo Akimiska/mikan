@@ -163,12 +163,11 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, not
 		text = html.EscapeString(notice) + "\n\n" + text
 	}
 	var rows [][]tgate.Button
-	if shop := b.d.Backend.Shop(); shop != nil {
-		if o, _, ok := shop.TrialOffer(ctx, chat); ok {
-			rows = append(rows, []tgate.Button{{Text: fmt.Sprintf(w.trialPaid, w.cheapest(billing.Offer{Stars: o.Stars, Rub: o.Rub})), CallbackData: "tr"}})
-		} else if shop.TrialOpen(ctx, chat) {
-			rows = append(rows, []tgate.Button{{Text: w.trial, CallbackData: "tr"}})
-		}
+	shop := b.d.Backend.Shop()
+	if o, _, ok := shop.TrialOffer(ctx, chat); ok {
+		rows = append(rows, []tgate.Button{{Text: fmt.Sprintf(w.trialPaid, w.cheapest(billing.Offer{Stars: o.Stars, Rub: o.Rub})), CallbackData: "tr"}})
+	} else if shop.TrialOpen(ctx, chat) {
+		rows = append(rows, []tgate.Button{{Text: w.trial, CallbackData: "tr"}})
 	}
 	if btn, ok := b.freeButton(ctx, cfg, w, chat); ok {
 		rows = append(rows, []tgate.Button{btn})
@@ -368,7 +367,7 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 	id, _ := strconv.ParseInt(arg, 10, 64)
 	switch cmd {
 	case "du":
-		w := wordsFor(b.Config(ctx).Lang)
+		w := wordsFor(b.config(ctx).Lang)
 		_, u, ok := b.subs(ctx, chat)
 		if !ok {
 			return "m", ""
@@ -414,7 +413,7 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 	case "rd":
 		// Only a subscription of this account, and only its link: the subscription itself
 		// stays as it is. The next one in the list is shown after it.
-		w := wordsFor(b.Config(ctx).Lang)
+		w := wordsFor(b.config(ctx).Lang)
 		list, _, _ := b.subs(ctx, chat)
 		for _, s := range list {
 			if s.ID != id {
@@ -496,8 +495,11 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 	return v
 }
 
-func (b *Bot) brand(ctx context.Context) string {
-	if s := b.d.Backend.Brand(ctx); s != "" {
+func (b *Bot) brand(ctx context.Context) string { return brandOf(ctx, b.d.Backend) }
+
+// brandOf is the panel's name for the service as the bot says it.
+func brandOf(ctx context.Context, be Backend) string {
+	if s := be.Brand(ctx); s != "" {
 		return s
 	}
 	return "VPN"

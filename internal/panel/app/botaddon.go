@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
-	"mikan/internal/panel/tgbot"
 )
 
 // The panel has no screens of its own in the subscribers' bot: they are the official bot
@@ -108,15 +106,4 @@ func (b *botAddon) granted(ctx context.Context) bool {
 	}
 	perms, _ := addons.DecodePermissions(g.Permissions)
 	return slices.Contains(perms, "bot")
-}
-
-// channelMember is the channel check the bot addon may ask: about the bot's own channel
-// only, so it cannot probe other chats or reset what the gateway knows about members.
-func channelMember(b *tgbot.Local, g *tgate.Gateway) tgbot.Member {
-	return func(ctx context.Context, chat string, tgID int64, fresh bool) (bool, error) {
-		if ch := b.Config(ctx).Channel.Chat; ch == "" || chat != ch {
-			return false, errors.New("not the bot's channel")
-		}
-		return g.Member(ctx, chat, tgID, fresh)
-	}
 }

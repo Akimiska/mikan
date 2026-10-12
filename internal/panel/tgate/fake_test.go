@@ -165,18 +165,16 @@ func find(calls []call, method string) (call, bool) {
 
 func text(c call) string { s, _ := c.body["text"].(string); return s }
 
-// screens stands in for the bot's screens (tgbot): every message gets a menu back, as it
-// does in the bot.
-type screens struct{}
+// screens stands in for the bot addon's screens (tgbot): every message gets a menu back, as
+// it does in the bot, sent through the gateway's outbox.
+type screens struct{ e *env }
 
-func (screens) Started(context.Context, *Client) {}
-
-func (screens) Update(_ context.Context, _ *Client, out *Outbox, up Update) error {
+func (s screens) Update(_ context.Context, up Update) error {
 	if up.Message == nil {
 		return nil
 	}
 	chat := up.Message.Chat.ID
-	out.Reply(chat, "", 1, func(ctx context.Context, c *Client) error {
+	s.e.gate.Outbox().Reply(chat, "", 1, func(ctx context.Context, c *Client) error {
 		_, err := c.Send(ctx, chat, "menu", nil, false)
 		return err
 	})
@@ -206,10 +204,10 @@ func (e *env) clock() time.Time {
 // before it starts.
 func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	t.Helper()
-	return start(t, screens{}, with...)
+	return start(t, true, with...)
 }
 
-func start(t *testing.T, h Handler, with ...func(e *env, d *Deps)) *env {
+func start(t *testing.T, withScreens bool, with ...func(e *env, d *Deps)) *env {
 	t.Helper()
 	e := &env{t: t, now: time.Unix(1_800_000_000, 0), tg: &fakeTelegram{blocked: map[int64]bool{}}}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -233,8 +231,8 @@ func start(t *testing.T, h Handler, with ...func(e *env, d *Deps)) *env {
 		f(e, &deps)
 	}
 	e.gate = New(deps)
-	if h != nil {
-		e.gate.SetHandler(h)
+	if withScreens {
+		e.gate.SetHandler(screens{e})
 	}
 	go e.gate.Run(ctx)
 	deadline := time.Now().Add(3 * time.Second)

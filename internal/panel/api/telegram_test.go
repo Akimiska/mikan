@@ -11,6 +11,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/store/storetest"
+	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbot"
 )
 
@@ -25,12 +26,12 @@ func TestReadKeyDoesNotGetTheSubPath(t *testing.T) {
 	}
 	t.Cleanup(func() { st.Close() })
 	set := settings.New(st.Q)
-	if err := settings.Set(ctx, set, tgbot.KeyConfig, tgbot.Default("en")); err != nil {
+	if err := settings.Set(ctx, set, tgate.KeyConfig, tgbot.Default("en")); err != nil {
 		t.Fatal(err)
 	}
 	const sub = "s3cr3t-sub-path"
 	now := func() time.Time { return time.Unix(1_800_000_000, 0) }
-	bot := tgbot.New(tgbot.Deps{
+	bot := tgbot.NewPanel(tgbot.PanelDeps{
 		Backend: &tgbot.Local{
 			Store:    st,
 			Settings: set,

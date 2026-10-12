@@ -25,7 +25,7 @@ func (e *env) withChannel(ch tgate.Channel, texts ...func(*Texts)) {
 	if err := cfg.Validate(); err != nil {
 		e.t.Fatal(err)
 	}
-	if err := settings.Set(e.ctx, e.set, KeyConfig, cfg); err != nil {
+	if err := settings.Set(e.ctx, e.set, tgate.KeyConfig, cfg); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -124,11 +124,11 @@ func TestBotFreePlan(t *testing.T) {
 	var svc *billing.Service
 	e := setup(t, func(e *env, d *wiring) {
 		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
-			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: MaxLinks})
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: tgate.MaxLinks})
 		d.Billing = svc
 	})
 	svc.SetTelegram(e.gate)
-	svc.SetNotifier(e.bot)
+	svc.SetNotifier(e.notifications())
 	const visitor = 795
 	if _, ok := buttons(e.start(visitor))["🎁 Бесплатный тариф"]; ok {
 		t.Fatal("a free plan nobody offers")
@@ -216,5 +216,37 @@ func TestChannelValidate(t *testing.T) {
 	cfg.Texts.FreeButton = strings.Repeat("я", 41)
 	if err := cfg.Validate(); !errors.Is(err, ErrButtonLabel) {
 		t.Fatalf("a long free plan button: %v", err)
+	}
+}
+
+// The bot addon may ask about the bot's own channel only: any other chat is refused before
+// Telegram is asked, over the Panel API as in process.
+func TestMemberIsAskedAboutTheBotsChannelOnly(t *testing.T) {
+	for name, with := range map[string]func(*env, *wiring){
+		"in process": func(*env, *wiring) {},
+		"over rpc":   func(_ *env, w *wiring) { w.RPC = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t, with)
+			e.withChannel(tgate.Channel{Required: true, Chat: "@mikan_news"})
+			e.tg.join(790, "member")
+			if in, err := e.bot.d.Backend.Member(e.ctx, "@mikan_news", 790, true); err != nil || !in {
+				t.Fatalf("the bot's own channel: %v %v", in, err)
+			}
+			n := e.tg.count()
+			for _, chat := range []string{"@somebody_elses", "-1001234567890", ""} {
+				if in, err := e.bot.d.Backend.Member(e.ctx, chat, 790, true); err == nil || in {
+					t.Fatalf("%q was asked about: %v %v", chat, in, err)
+				}
+			}
+			if e.tg.count() != n {
+				t.Fatal("Telegram was asked about a chat that is not the bot's channel")
+			}
+			// No channel set up: nothing may be asked.
+			e.withChannel(tgate.Channel{})
+			if _, err := e.bot.d.Backend.Member(e.ctx, "@mikan_news", 790, true); err == nil {
+				t.Fatal("asked about a channel the bot does not have")
+			}
+		})
 	}
 }

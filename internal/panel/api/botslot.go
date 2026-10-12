@@ -11,13 +11,14 @@ import (
 	"mikan/internal/panel/settings"
 )
 
-// Who answers in the subscribers' bot: the panel's own screens, or an addon holding the bot
-// (permission bot) through the Bot API proxy. The admin chooses; the panel keeps the token,
-// the payments and the alerts either way. Only a session may change it: the addon gets the
-// bot's chats.
+// Who answers in the subscribers' bot: an addon holding the bot (permission bot) through the
+// Bot API proxy. The admin chooses; while none holds it the updates wait in the panel's
+// buffer, and the official bot addon is installed by app/botaddon.go. The panel keeps the
+// token, the payments and the alerts either way. Only a session may change it: the addon
+// gets the bot's chats.
 
 type BotSlotView struct {
-	Addon string `json:"addon" doc:"Аддон, который отвечает в боте; пусто — собственные экраны панели"`
+	Addon string `json:"addon" doc:"Аддон, который отвечает в боте; пусто — никто, обновления ждут в буфере панели"`
 }
 
 type botSlotOutput struct{ Body BotSlotView }
@@ -34,7 +35,7 @@ func (h *handlers) registerBotSlot() {
 			Metadata: sessionOnly, Extensions: sessionOnlyExt}
 	}
 	huma.Register(h.api, op("get-bot-addon", http.MethodGet, "Кто отвечает в боте подписчиков"), h.getBotSlot)
-	huma.Register(h.api, op("set-bot-addon", http.MethodPut, "Отдать бота аддону или вернуть экраны панели"), h.setBotSlot)
+	huma.Register(h.api, op("set-bot-addon", http.MethodPut, "Отдать бота аддону"), h.setBotSlot)
 }
 
 func (h *handlers) getBotSlot(ctx context.Context, _ *struct{}) (*botSlotOutput, error) {

@@ -9,12 +9,12 @@ import { Field, Pill, Segmented } from "../../components/ui";
 import { t } from "../../i18n";
 import { fieldErrors } from "../../lib/fields";
 import { localized } from "../../lib/localized";
-import { ADDON_ID_RE, PERMISSIONS, actsAsAdmin, installMarket, installPayment, sortPermissions, type Kind, type MarketEntry, type MarketInstalled } from "./market-common";
+import { ADDON_ID_RE, PERMISSIONS, actsAsAdmin, installMarket, installPayment, sortPermissions, type Kind, type MarketEntry, type MarketInstalled, type MarketOrigin } from "./market-common";
 
 // The dialogs of the protocol 2 addons, shared by both tabs of the addons page: approving
 // what an addon may do, its details, and an addon of the admin's own. Each one gets exactly
-// the permissions the admin approved; an addon of the admin's own (an image by its digest, a
-// process on the server) is code mikan has not seen, and says so everywhere.
+// the permissions the admin approved; an addon of a source or of the admin's own (a process on
+// the server) is code mikan has not seen, and says so everywhere.
 
 /**
  * The server's queue is one for both kinds of addons: a request of either shows in both. Who
@@ -62,6 +62,16 @@ function PermissionList({ perms, fresh = [] }: { perms: string[]; fresh?: string
   );
 }
 
+/** Where an unofficial addon comes from, and what that does and does not vouch for. */
+function OriginWarning({ origin, flush }: { origin: MarketOrigin; flush?: boolean }) {
+  return (
+    <div className={flush ? "banner warn items-start" : "banner warn mt-4 items-start"} role="note">
+      <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1">{t(origin.signed ? "market.originSigned" : "market.originUnsigned", { title: origin.title })}</span>
+    </div>
+  );
+}
+
 function AdminWarning() {
   return (
     <div className="banner err mt-4 items-start" role="alert">
@@ -92,6 +102,7 @@ export function ApproveDialog({ entry, granted, onClose }: { entry: MarketEntry 
       {entry ? (
         <>
           <PermissionList perms={entry.permissions} fresh={fresh} />
+          {entry.origin ? <OriginWarning origin={entry.origin} /> : null}
           {actsAsAdmin(entry.permissions) ? <AdminWarning /> : null}
         </>
       ) : null}
@@ -105,7 +116,9 @@ export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null;
     <Drawer open={!!a} onOpenChange={(v) => !v && onClose()} title={name} meta={a ? `${t(`market.kind.${a.kind}`)} · ${t(`market.source.${a.source}`)}` : undefined}>
       {a ? (
         <div className="flex flex-col gap-4 pt-1 text-[13px]">
-          {a.source !== "official" ? (
+          {a.origin ? (
+            <OriginWarning origin={a.origin} flush />
+          ) : a.source !== "official" ? (
             <div className="banner warn items-start" role="note">
               <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1">{t("market.unverifiedHint")}</span>
@@ -120,6 +133,12 @@ export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null;
             ) : null}
             <dt className="text-[var(--ink-500)]">{t("market.ownMode")}</dt>
             <dd>{t(`market.mode.${a.mode}`)}</dd>
+            {a.origin ? (
+              <>
+                <dt className="text-[var(--ink-500)]">{t("market.sourceOf")}</dt>
+                <dd className="break-words">{a.origin.title}</dd>
+              </>
+            ) : null}
             {a.source === "custom" ? (
               <>
                 <dt className="text-[var(--ink-500)]">{t("market.image")}</dt>
@@ -144,68 +163,42 @@ export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null;
 }
 
 type Own = {
-  source: "custom" | "external";
   id: string;
-  image: string;
-  digest: string;
   url: string;
   kind: Kind;
   mode: "http" | "client";
   permissions: string[];
-  mem: string;
   confirm: boolean;
 };
 
-const DIGEST_RE = /^sha256:[a-f0-9]{64}$/;
-// The host's grammar is checked on the server; this catches what an admin types most often.
-const IMAGE_RE = /^[a-z0-9]+(?:[._-]+[a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$/;
 const URL_RE = /^http:\/\/127\.0\.0\.1:([0-9]{4,5})\/?$/;
 
 /** What is wrong before asking the server, as the server would say it. */
 function check(o: Own): Record<string, string> {
   const out: Record<string, string> = {};
   if (!ADDON_ID_RE.test(o.id)) out.id = t("errors.api.addon_id_invalid");
-  if (o.source === "custom") {
-    const last = o.image.split("/").pop() ?? "";
-    if (last.includes(":") || o.image.includes("@")) out.image = t("market.ownImageTagged");
-    else if (!IMAGE_RE.test(o.image) || o.image.length > 255) out.image = t("errors.api.addon_image_invalid");
-    if (!DIGEST_RE.test(o.digest)) out.digest = t("errors.api.addon_digest_invalid");
-  } else {
-    const m = URL_RE.exec(o.url);
-    const port = m ? Number(m[1]) : 0;
-    if (o.url ? !(port >= 1024 && port <= 65535 && String(port) === m?.[1]) : o.mode !== "client") out.url = t("errors.api.addon_url_invalid");
-  }
-  if (o.mem) {
-    const n = Number(o.mem);
-    if (!Number.isInteger(n) || n < 64 || n > 256) out.mem_mb = t("errors.api.addon_mem_invalid");
-  }
+  const m = URL_RE.exec(o.url);
+  const port = m ? Number(m[1]) : 0;
+  if (o.url ? !(port >= 1024 && port <= 65535 && String(port) === m?.[1]) : o.mode !== "client") out.url = t("errors.api.addon_url_invalid");
   return out;
 }
 
 function ownOf(a: MarketInstalled | null): Own {
-  if (!a) return { source: "custom", id: "", image: "", digest: "", url: "", kind: "bot", mode: "http", permissions: [], mem: "", confirm: false };
-  return {
-    source: a.source === "external" ? "external" : "custom",
-    id: a.id,
-    image: a.image ?? "",
-    digest: a.digest ?? "",
-    url: a.url ?? "",
-    kind: a.kind,
-    mode: a.mode,
-    permissions: a.granted,
-    mem: a.mem_mb ? String(a.mem_mb) : "",
-    confirm: false,
-  };
+  if (!a) return { id: "", url: "", kind: "bot", mode: "http", permissions: [], confirm: false };
+  return { id: a.id, url: a.url ?? "", kind: a.kind, mode: a.mode, permissions: a.granted, confirm: false };
 }
 
-/** An addon of the admin's own, new or a new build of one: nothing signed vouches for it. */
+/**
+ * The developer mode: a process of the admin's own on a loopback port, new or with other
+ * permissions. No container, nothing signed vouches for it; images come from sources.
+ */
 export function OwnDrawer({ open, onOpenChange, update }: { open: boolean; onOpenChange: (v: boolean) => void; update: MarketInstalled | null }) {
   const qc = useQueryClient();
   const requested = useRequested();
   const [o, setO] = useState<Own>(() => ownOf(update));
   const [tried, setTried] = useState(false);
   const install = useMutation({
-    mutationFn: (body: Schemas["MarketCustomInputBody"]) => unwrap(api.POST("/api/v1/marketplace/custom", { body })),
+    mutationFn: (body: Schemas["MarketExternalInputBody"]) => unwrap(api.POST("/api/v1/marketplace/external", { body })),
     onSuccess: (v) => {
       qc.setQueryData(qk.marketplace, v);
       requested();
@@ -230,14 +223,10 @@ export function OwnDrawer({ open, onOpenChange, update }: { open: boolean; onOpe
     if (Object.keys(local).length || !o.confirm || install.isPending) return;
     install.mutate({
       id: o.id,
-      source: o.source,
-      image: o.source === "custom" ? o.image : undefined,
-      digest: o.source === "custom" ? o.digest : undefined,
-      url: o.source === "external" && o.url ? o.url.replace(/\/$/, "") : undefined,
+      url: o.url ? o.url.replace(/\/$/, "") : undefined,
       kind: o.kind,
       mode: o.mode,
       permissions: o.permissions,
-      mem_mb: o.source === "custom" && o.mem ? Number(o.mem) : undefined,
       confirm: o.confirm,
     });
   };
@@ -294,19 +283,6 @@ function OwnForm({
           {general}
         </div>
       ) : null}
-      {update ? null : (
-        <Field label={t("market.ownSource")} hint={t("market.ownSourceHint")}>
-          <Segmented
-            label={t("market.ownSource")}
-            value={o.source}
-            onChange={(source) => set({ source })}
-            options={[
-              { value: "custom", label: t("market.ownSourceCustom") },
-              { value: "external", label: t("market.ownSourceExternal") },
-            ]}
-          />
-        </Field>
-      )}
       <Field label={t("market.ownId")} htmlFor={`${uid}-id`} hint={t("market.ownIdHint")} error={errors.id}>
         <input
           id={`${uid}-id`}
@@ -320,50 +296,19 @@ function OwnForm({
           onChange={(e) => set({ id: e.target.value.trim() })}
         />
       </Field>
-      {o.source === "custom" ? (
-        <>
-          <Field label={t("market.ownImage")} htmlFor={`${uid}-image`} hint={t("market.ownImageHint")} error={errors.image}>
-            <input
-              id={`${uid}-image`}
-              className="input mono"
-              value={o.image}
-              maxLength={255}
-              placeholder="ghcr.io/owner/name"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={!!errors.image}
-              onChange={(e) => set({ image: e.target.value.trim() })}
-            />
-          </Field>
-          <Field label={t("market.ownDigest")} htmlFor={`${uid}-digest`} hint={t("market.ownDigestHint")} error={errors.digest}>
-            <input
-              id={`${uid}-digest`}
-              className="input mono"
-              value={o.digest}
-              maxLength={71}
-              placeholder="sha256:…"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={!!errors.digest}
-              onChange={(e) => set({ digest: e.target.value.trim() })}
-            />
-          </Field>
-        </>
-      ) : (
-        <Field label={t("market.ownUrl")} htmlFor={`${uid}-url`} hint={t("market.ownUrlHint")} error={errors.url}>
-          <input
-            id={`${uid}-url`}
-            className="input mono"
-            value={o.url}
-            maxLength={64}
-            placeholder="http://127.0.0.1:8080"
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={!!errors.url}
-            onChange={(e) => set({ url: e.target.value.trim() })}
-          />
-        </Field>
-      )}
+      <Field label={t("market.ownUrl")} htmlFor={`${uid}-url`} hint={t("market.ownUrlHint")} error={errors.url}>
+        <input
+          id={`${uid}-url`}
+          className="input mono"
+          value={o.url}
+          maxLength={64}
+          placeholder="http://127.0.0.1:8080"
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={!!errors.url}
+          onChange={(e) => set({ url: e.target.value.trim() })}
+        />
+      </Field>
       <Field label={t("market.ownKind")}>
         <Segmented
           label={t("market.ownKind")}
@@ -394,20 +339,6 @@ function OwnForm({
         </div>
       </Field>
       {actsAsAdmin(o.permissions) ? <AdminWarning /> : null}
-      {o.source === "custom" ? (
-        <Field label={t("market.ownMem")} htmlFor={`${uid}-mem`} hint={t("market.ownMemHint")} error={errors.mem_mb}>
-          <input
-            id={`${uid}-mem`}
-            className="input num max-w-[160px]"
-            inputMode="numeric"
-            value={o.mem}
-            maxLength={3}
-            placeholder="128"
-            aria-invalid={!!errors.mem_mb}
-            onChange={(e) => set({ mem: e.target.value.replace(/\D/g, "") })}
-          />
-        </Field>
-      ) : null}
       <div className="field">
         <label className="flex items-start gap-2 text-[13px] font-semibold">
           <input

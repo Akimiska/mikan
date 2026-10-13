@@ -368,6 +368,8 @@ type Manager struct {
 	fetched time.Time
 	infos   map[string]described[Info]
 	infos2  map[string]described[InfoV2]
+	src     *sourceNet            // the way out to third-party sources (sources.go)
+	sources map[int64]SourceState // the last fetch of each source
 
 	ask sync.Mutex // one request queued at a time: the number and the busy check
 }
@@ -382,6 +384,7 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 	m := &Manager{catalogURL: catalogURL, pub: pub, version: panelVersion, log: log, now: now,
 		hc:    &http.Client{Timeout: 15 * time.Second},
 		infos: map[string]described[Info]{}, infos2: map[string]described[InfoV2]{},
+		src: newSourceNet(false), sources: map[int64]SourceState{},
 		// The panel fetches what the addon names and nothing it points elsewhere to.
 		peer: &http.Client{Timeout: AdapterTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	if dataDir != "" {

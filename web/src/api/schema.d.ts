@@ -4,6 +4,58 @@
  */
 
 export interface paths {
+    "/api/v1/addon-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Источники сторонних аддонов */
+        get: operations["list-addon-sources"];
+        put?: never;
+        /** Добавить источник: панель читает его, проверяет и закрепляет ключ подписи */
+        post: operations["add-addon-source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addon-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Убрать источник: пока из него стоит аддон, нельзя */
+        delete: operations["delete-addon-source"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addon-sources/{id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Прочитать источник заново */
+        post: operations["refresh-addon-source"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/addon-storage": {
         parameters: {
             query?: never;
@@ -586,7 +638,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/marketplace/custom": {
+    "/api/v1/marketplace/external": {
         parameters: {
             query?: never;
             header?: never;
@@ -595,8 +647,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Установить свой аддон: образ по дайджесту или процесс на 127.0.0.1, без проверки mikan */
-        post: operations["install-custom-addon"];
+        /** Режим разработчика: подключить свой процесс на 127.0.0.1, без проверки mikan */
+        post: operations["install-external-addon"];
         delete?: never;
         options?: never;
         head?: never;
@@ -612,7 +664,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Одобрить права и установить или обновить аддон: заявка серверу */
+        /** Одобрить права и установить или обновить аддон каталога или источника: заявка серверу */
         post: operations["install-marketplace"];
         delete?: never;
         options?: never;
@@ -2106,6 +2158,12 @@ export interface components {
             /** @enum {string} */
             scope: "read" | "full";
         };
+        AddSourceInputBody: {
+            /** @description Публичный ключ автора, ed25519 в base64, если админ знает его заранее: источник принимается, только если подписан им */
+            key?: string;
+            /** @description https://…/mikan-addon.json, https://…/index.json или github.com/<владелец>/<репозиторий> (последний релиз) */
+            url: string;
+        };
         AddonCatalogEntry: {
             description: {
                 [key: string]: string;
@@ -3153,37 +3211,6 @@ export interface components {
             totp?: string;
             username: string;
         };
-        MarketCustomInputBody: {
-            /** @description Админ подтвердил, что доверяет этому коду: mikan его не проверял */
-            confirm: boolean;
-            /** @description custom: sha256:<64 hex> */
-            digest?: string;
-            /** @description Имя аддона: a-z, 0-9 и дефис, не из каталога */
-            id: string;
-            /** @description custom: образ без тега, например ghcr.io/me/bot */
-            image?: string;
-            /** @enum {string} */
-            kind: "bot" | "ui" | "generic";
-            /**
-             * Format: int64
-             * @description Память контейнера, 64–256 МБ; 0 — по умолчанию 128
-             */
-            mem_mb?: number;
-            /**
-             * @description http — аддон отвечает панели на /v2/*; client — только сам ходит в панель
-             * @enum {string}
-             */
-            mode: "http" | "client";
-            /** @description Права, которые админ даёт аддону */
-            permissions: string[];
-            /**
-             * @description custom — свой образ по дайджесту; external — свой процесс на 127.0.0.1
-             * @enum {string}
-             */
-            source: "custom" | "external";
-            /** @description external: http://127.0.0.1:<порт>; клиенту панели (mode client) можно не указывать */
-            url?: string;
-        };
         MarketEntry: {
             description: {
                 [key: string]: string;
@@ -3199,25 +3226,44 @@ export interface components {
             name: {
                 [key: string]: string;
             };
+            /** @description Источник неофициального аддона; нет у аддона подписанного каталога */
+            origin?: components["schemas"]["MarketOrigin"];
             /** @description Что аддон просит: это и одобряет админ при установке */
             permissions: string[];
-            /** @description Установлен, а в каталоге другая сборка */
+            /** @description Установлен, а в каталоге или источнике другая сборка */
             update: boolean;
             version: string;
-            /** @description Сборка каталога просит больше прав, чем одобрено: обновление ждёт нового одобрения */
+            /** @description Сборка просит больше прав, чем одобрено: обновление ждёт нового одобрения */
             wider: boolean;
         };
+        MarketExternalInputBody: {
+            /** @description Админ подтвердил, что доверяет этому коду: mikan его не проверял */
+            confirm: boolean;
+            /** @description Имя аддона: a-z, 0-9 и дефис, не из каталога и не из источника */
+            id: string;
+            /** @enum {string} */
+            kind: "bot" | "ui" | "generic";
+            /**
+             * @description http — аддон отвечает панели на /v2/*; client — только сам ходит в панель
+             * @enum {string}
+             */
+            mode: "http" | "client";
+            /** @description Права, которые админ даёт аддону */
+            permissions: string[];
+            /** @description http://127.0.0.1:<порт>; клиенту панели (mode client) можно не указывать */
+            url?: string;
+        };
         MarketInstallInputBody: {
-            /** @description Права, которые админ видел и одобрил: ровно те, что просит сборка каталога */
+            /** @description Права, которые админ видел и одобрил: ровно те, что просит сборка */
             permissions: string[];
         };
         MarketInstalled: {
-            /** @description Дайджест образа аддона админа (custom) */
+            /** @description Дайджест образа неофициального аддона (custom) */
             digest?: string;
             /** @description Одобренные права */
             granted: string[];
             id: string;
-            /** @description Образ аддона админа (custom) */
+            /** @description Образ неофициального аддона (custom) */
             image?: string;
             /** @enum {string} */
             kind: "bot" | "ui" | "generic";
@@ -3228,8 +3274,10 @@ export interface components {
             mem_mb?: number;
             /** @enum {string} */
             mode: "http" | "client";
+            /** @description Источник, из которого поставлен аддон (custom) */
+            origin?: components["schemas"]["MarketOrigin"];
             /**
-             * @description official — из подписанного каталога; custom и external — аддон админа, mikan его не проверял
+             * @description official — из подписанного каталога; custom — образ из источника или, у старых установок, свой образ админа; external — свой процесс админа; mikan неофициальные не проверял
              * @enum {string}
              */
             source: "official" | "custom" | "external";
@@ -3237,10 +3285,18 @@ export interface components {
             status: "running";
             /** @description Адрес внешнего аддона (external); пусто у клиента панели */
             url?: string;
-            /** @description Пусто у аддона админа: версию знает только каталог */
+            /** @description Одобренная версия у аддона из источника; пусто у аддона админа без источника: версию знает только каталог */
             version: string;
         };
+        MarketOrigin: {
+            /** Format: int64 */
+            id: number;
+            /** @description Источник подписан закреплённым ключом; без подписи тот, кто управляет адресом, управляет и обновлениями */
+            signed: boolean;
+            title: string;
+        };
         MarketView: {
+            /** @description Подписанный каталог и записи источников, которые админ добавил */
             catalog: components["schemas"]["MarketEntry"][];
             /** @description catalog_unavailable — каталог не загрузился */
             catalog_error?: string;
@@ -4574,6 +4630,44 @@ export interface components {
             /** @description Искать сайты маскировки REALITY не только в /24 ноды, но и в соседних /24 её /16, до 20 найденных сайтов или 2 минут. Много подключений: хостер может принять это за сканирование сети */
             wide_sni_scan: boolean;
         };
+        SourceSkipView: {
+            /** @description Идентификатор записи, как его написал источник */
+            id: string;
+            /** @description id_taken — идентификатор из подписанного каталога или другого источника; payment — платёжный адаптер из источника не ставится; invalid, image_invalid, digest_invalid, version_invalid, id_invalid — запись не по правилам; min_panel — нужна более новая панель; duplicate, too_many */
+            reason: string;
+        };
+        SourceView: {
+            /** Format: date-time */
+            added_at: string;
+            entries: components["schemas"]["MarketEntry"][];
+            /** @description Код ошибки последнего чтения: source_unreachable, source_key_changed, source_signature_invalid… */
+            error?: string;
+            /** Format: date-time */
+            fetched_at?: string;
+            /** @description Отпечаток закреплённого ключа, для сверки с автором */
+            fingerprint?: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Аддоны, поставленные из этого источника: пока они есть, источник не удалить */
+            installed: string[];
+            /** @description Источник подписан уже другим ключом (error source_key_changed): отпечаток нового, который админ может принять */
+            new_fingerprint?: string;
+            /** @description Ключ источника закреплён: подпись с другим ключом или без подписи панель не принимает */
+            signed: boolean;
+            skipped: components["schemas"]["SourceSkipView"][];
+            title: string;
+            url: string;
+        };
+        SourcesView: {
+            /** @description catalog_unavailable — без подписанного каталога записи источников не сверить, их не показываем */
+            catalog_error?: string;
+            /**
+             * Format: int64
+             * @description Сколько источников можно добавить
+             */
+            limit: number;
+            sources: components["schemas"]["SourceView"][];
+        };
         SpeedTestView: {
             /** Format: date-time */
             at: string;
@@ -5378,6 +5472,133 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "list-addon-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "add-addon-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddSourceInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-addon-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "refresh-addon-source": {
+        parameters: {
+            query?: {
+                /** @description Отпечаток нового ключа, который админ сверил с автором (после source_key_changed) */
+                accept?: string;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-addon-storage": {
         parameters: {
             query?: never;
@@ -6689,7 +6910,7 @@ export interface operations {
             };
         };
     };
-    "install-custom-addon": {
+    "install-external-addon": {
         parameters: {
             query?: never;
             header?: never;
@@ -6698,7 +6919,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MarketCustomInputBody"];
+                "application/json": components["schemas"]["MarketExternalInputBody"];
             };
         };
         responses: {

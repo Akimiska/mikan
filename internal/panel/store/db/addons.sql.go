@@ -65,6 +65,44 @@ func (q *Queries) AddAddonEvent(ctx context.Context, arg AddAddonEventParams) er
 	return err
 }
 
+const addAddonSource = `-- name: AddAddonSource :one
+INSERT INTO addon_sources (url, key, title, added_by, added_at, fetched_at, error)
+VALUES ($1, $2, $3, $4, $5, $6, '')
+RETURNING id, url, key, title, added_by, added_at, fetched_at, error
+`
+
+type AddAddonSourceParams struct {
+	Url       string
+	Key       string
+	Title     string
+	AddedBy   sql.NullInt64
+	AddedAt   int64
+	FetchedAt int64
+}
+
+func (q *Queries) AddAddonSource(ctx context.Context, arg AddAddonSourceParams) (AddonSource, error) {
+	row := q.db.QueryRowContext(ctx, addAddonSource,
+		arg.Url,
+		arg.Key,
+		arg.Title,
+		arg.AddedBy,
+		arg.AddedAt,
+		arg.FetchedAt,
+	)
+	var i AddonSource
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Key,
+		&i.Title,
+		&i.AddedBy,
+		&i.AddedAt,
+		&i.FetchedAt,
+		&i.Error,
+	)
+	return i, err
+}
+
 const addAddonUpdate = `-- name: AddAddonUpdate :exec
 INSERT INTO addon_updates (update_id, body, created_at) VALUES ($1, $2, $3)
 ON CONFLICT (update_id) DO NOTHING
@@ -97,6 +135,17 @@ func (q *Queries) AddonKVSize(ctx context.Context, arg AddonKVSizeParams) (int64
 	var size int64
 	err := row.Scan(&size)
 	return size, err
+}
+
+const countAddonSources = `-- name: CountAddonSources :one
+SELECT count(*) FROM addon_sources
+`
+
+func (q *Queries) CountAddonSources(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAddonSources)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countAddonUpdates = `-- name: CountAddonUpdates :one
@@ -134,6 +183,33 @@ DELETE FROM addon_grants WHERE addon_id = $1
 
 func (q *Queries) DeleteAddonGrant(ctx context.Context, addonID string) error {
 	_, err := q.db.ExecContext(ctx, deleteAddonGrant, addonID)
+	return err
+}
+
+const deleteAddonOrigin = `-- name: DeleteAddonOrigin :exec
+DELETE FROM addon_origins WHERE addon_id = $1
+`
+
+func (q *Queries) DeleteAddonOrigin(ctx context.Context, addonID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonOrigin, addonID)
+	return err
+}
+
+const deleteAddonOriginsOf = `-- name: DeleteAddonOriginsOf :exec
+DELETE FROM addon_origins WHERE source_id = $1
+`
+
+func (q *Queries) DeleteAddonOriginsOf(ctx context.Context, sourceID int64) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonOriginsOf, sourceID)
+	return err
+}
+
+const deleteAddonSource = `-- name: DeleteAddonSource :exec
+DELETE FROM addon_sources WHERE id = $1
+`
+
+func (q *Queries) DeleteAddonSource(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonSource, id)
 	return err
 }
 
@@ -178,6 +254,37 @@ func (q *Queries) GetAddonGrant(ctx context.Context, addonID string) (AddonGrant
 		&i.Permissions,
 		&i.ApprovedBy,
 		&i.ApprovedAt,
+	)
+	return i, err
+}
+
+const getAddonOrigin = `-- name: GetAddonOrigin :one
+SELECT addon_id, source_id FROM addon_origins WHERE addon_id = $1
+`
+
+func (q *Queries) GetAddonOrigin(ctx context.Context, addonID string) (AddonOrigin, error) {
+	row := q.db.QueryRowContext(ctx, getAddonOrigin, addonID)
+	var i AddonOrigin
+	err := row.Scan(&i.AddonID, &i.SourceID)
+	return i, err
+}
+
+const getAddonSource = `-- name: GetAddonSource :one
+SELECT id, url, key, title, added_by, added_at, fetched_at, error FROM addon_sources WHERE id = $1
+`
+
+func (q *Queries) GetAddonSource(ctx context.Context, id int64) (AddonSource, error) {
+	row := q.db.QueryRowContext(ctx, getAddonSource, id)
+	var i AddonSource
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.Key,
+		&i.Title,
+		&i.AddedBy,
+		&i.AddedAt,
+		&i.FetchedAt,
+		&i.Error,
 	)
 	return i, err
 }
@@ -294,6 +401,69 @@ func (q *Queries) ListAddonKeys(ctx context.Context, arg ListAddonKeysParams) ([
 	for rows.Next() {
 		var i ListAddonKeysRow
 		if err := rows.Scan(&i.Key, &i.Version, &i.ExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAddonOrigins = `-- name: ListAddonOrigins :many
+SELECT addon_id, source_id FROM addon_origins ORDER BY addon_id
+`
+
+func (q *Queries) ListAddonOrigins(ctx context.Context) ([]AddonOrigin, error) {
+	rows, err := q.db.QueryContext(ctx, listAddonOrigins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AddonOrigin{}
+	for rows.Next() {
+		var i AddonOrigin
+		if err := rows.Scan(&i.AddonID, &i.SourceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAddonSources = `-- name: ListAddonSources :many
+SELECT id, url, key, title, added_by, added_at, fetched_at, error FROM addon_sources ORDER BY id
+`
+
+func (q *Queries) ListAddonSources(ctx context.Context) ([]AddonSource, error) {
+	rows, err := q.db.QueryContext(ctx, listAddonSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AddonSource{}
+	for rows.Next() {
+		var i AddonSource
+		if err := rows.Scan(
+			&i.ID,
+			&i.Url,
+			&i.Key,
+			&i.Title,
+			&i.AddedBy,
+			&i.AddedAt,
+			&i.FetchedAt,
+			&i.Error,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -441,6 +611,35 @@ func (q *Queries) PutAddonValue(ctx context.Context, arg PutAddonValueParams) er
 	return err
 }
 
+const setAddonSourceFetch = `-- name: SetAddonSourceFetch :exec
+UPDATE addon_sources SET fetched_at = $2, error = $3 WHERE id = $1
+`
+
+type SetAddonSourceFetchParams struct {
+	ID        int64
+	FetchedAt int64
+	Error     string
+}
+
+func (q *Queries) SetAddonSourceFetch(ctx context.Context, arg SetAddonSourceFetchParams) error {
+	_, err := q.db.ExecContext(ctx, setAddonSourceFetch, arg.ID, arg.FetchedAt, arg.Error)
+	return err
+}
+
+const setAddonSourceKey = `-- name: SetAddonSourceKey :exec
+UPDATE addon_sources SET key = $2 WHERE id = $1
+`
+
+type SetAddonSourceKeyParams struct {
+	ID  int64
+	Key string
+}
+
+func (q *Queries) SetAddonSourceKey(ctx context.Context, arg SetAddonSourceKeyParams) error {
+	_, err := q.db.ExecContext(ctx, setAddonSourceKey, arg.ID, arg.Key)
+	return err
+}
+
 const upsertAddonGrant = `-- name: UpsertAddonGrant :exec
 INSERT INTO addon_grants (addon_id, version, permissions, approved_by, approved_at)
 VALUES ($1, $2, $3, $4, $5)
@@ -464,5 +663,20 @@ func (q *Queries) UpsertAddonGrant(ctx context.Context, arg UpsertAddonGrantPara
 		arg.ApprovedBy,
 		arg.ApprovedAt,
 	)
+	return err
+}
+
+const upsertAddonOrigin = `-- name: UpsertAddonOrigin :exec
+INSERT INTO addon_origins (addon_id, source_id) VALUES ($1, $2)
+ON CONFLICT (addon_id) DO UPDATE SET source_id = EXCLUDED.source_id
+`
+
+type UpsertAddonOriginParams struct {
+	AddonID  string
+	SourceID int64
+}
+
+func (q *Queries) UpsertAddonOrigin(ctx context.Context, arg UpsertAddonOriginParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAddonOrigin, arg.AddonID, arg.SourceID)
 	return err
 }

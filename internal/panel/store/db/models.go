@@ -41,6 +41,22 @@ type AddonKv struct {
 	UpdatedAt int64
 }
 
+type AddonOrigin struct {
+	AddonID  string
+	SourceID int64
+}
+
+type AddonSource struct {
+	ID        int64
+	Url       string
+	Key       string
+	Title     string
+	AddedBy   sql.NullInt64
+	AddedAt   int64
+	FetchedAt int64
+	Error     string
+}
+
 type AddonUpdate struct {
 	UpdateID  int64
 	Body      string

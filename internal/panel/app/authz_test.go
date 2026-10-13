@@ -94,7 +94,12 @@ func TestFullKeyCannotTakeOverThePanel(t *testing.T) {
 		// A code field is a script an addon runs.
 		"update-addon": {http.MethodPatch, "/addons/telegram", map[string]any{"settings": map[string]any{"script": "print(1)"}}},
 		// Code nothing signed vouches for, run on the server.
-		"install-custom-addon": {http.MethodPost, "/marketplace/custom", map[string]any{"id": "x", "source": "external", "kind": "generic", "mode": "client", "permissions": []string{"users:write"}, "confirm": true}},
+		"install-external-addon": {http.MethodPost, "/marketplace/external", map[string]any{"id": "x", "kind": "generic", "mode": "client", "permissions": []string{"users:write"}, "confirm": true}},
+		// What a source may offer to run, and which sources are read.
+		"add-addon-source":     {http.MethodPost, "/addon-sources", map[string]any{"url": "github.com/attacker/addons"}},
+		"refresh-addon-source": {http.MethodPost, "/addon-sources/1/refresh", nil},
+		"delete-addon-source":  {http.MethodDelete, "/addon-sources/1", nil},
+		"install-marketplace":  {http.MethodPost, "/marketplace/x/install", map[string]any{"permissions": []string{}}},
 		// The subscription page every subscriber opens: its links, text, CSS and images.
 		"update-sub-page":       {http.MethodPut, "/sub-page", map[string]any{"config": map[string]any{}}},
 		"put-sub-page-image":    {http.MethodPut, "/sub-page/images/logo", map[string]any{"data": "iVBORw0KGgo="}},

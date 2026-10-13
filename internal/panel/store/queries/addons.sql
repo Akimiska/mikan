@@ -86,3 +86,42 @@ DELETE FROM addon_kv WHERE addon_id = $1;
 
 -- name: DeleteAddonCursor :exec
 DELETE FROM addon_cursors WHERE addon_id = $1;
+
+-- name: ListAddonSources :many
+SELECT * FROM addon_sources ORDER BY id;
+
+-- name: GetAddonSource :one
+SELECT * FROM addon_sources WHERE id = $1;
+
+-- name: AddAddonSource :one
+INSERT INTO addon_sources (url, key, title, added_by, added_at, fetched_at, error)
+VALUES ($1, $2, $3, $4, $5, $6, '')
+RETURNING *;
+
+-- name: SetAddonSourceFetch :exec
+UPDATE addon_sources SET fetched_at = $2, error = $3 WHERE id = $1;
+
+-- name: SetAddonSourceKey :exec
+UPDATE addon_sources SET key = $2 WHERE id = $1;
+
+-- name: DeleteAddonSource :exec
+DELETE FROM addon_sources WHERE id = $1;
+
+-- name: CountAddonSources :one
+SELECT count(*) FROM addon_sources;
+
+-- name: ListAddonOrigins :many
+SELECT * FROM addon_origins ORDER BY addon_id;
+
+-- name: GetAddonOrigin :one
+SELECT * FROM addon_origins WHERE addon_id = $1;
+
+-- name: UpsertAddonOrigin :exec
+INSERT INTO addon_origins (addon_id, source_id) VALUES ($1, $2)
+ON CONFLICT (addon_id) DO UPDATE SET source_id = EXCLUDED.source_id;
+
+-- name: DeleteAddonOrigin :exec
+DELETE FROM addon_origins WHERE addon_id = $1;
+
+-- name: DeleteAddonOriginsOf :exec
+DELETE FROM addon_origins WHERE source_id = $1;

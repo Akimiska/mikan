@@ -115,6 +115,9 @@ type Options struct {
 	WarpAPI string
 	// AddonsCatalog is the marketplace's signed catalog; "" is the real one.
 	AddonsCatalog string
+	// Dev is the panel running for development: addon sources may be read over plain http
+	// from 127.0.0.1.
+	Dev bool
 	// DNS checks new domains against public DNS; nil leaves them unchecked.
 	DNS *dnscheck.Checker
 	// HSTS says whether browsers are told to keep to HTTPS: for a panel that serves TLS
@@ -219,6 +222,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		return ep.URL() + "/" + paths.Sub
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
+	p.Addons.SetDev(o.Dev)
 	hub := events.NewHub()
 	deps.Addons = p.Addons
 	addonPages := addonpages.New(addonpages.Deps{Addons: p.Addons, Store: st.Q, Log: o.Log, Now: o.Now})

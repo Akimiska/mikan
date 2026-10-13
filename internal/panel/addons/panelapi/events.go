@@ -86,7 +86,7 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 	// The bot's messages (bot.*) carry whole subscriptions and payments: the holder's alone.
 	holder := s.holds(r.Context(), c)
 	rows, err := longPoll(r.Context(), s.d.Hub, time.Duration(wait)*time.Second, func() ([]db.AddonEvent, error) {
-		return s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, BotToo: holder, Lim: int32(limit)})
+		return s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, BotToo: holder, Lim: pageSize(limit, maxEvents)})
 	})
 	if r.Context().Err() != nil {
 		return

@@ -279,7 +279,7 @@ func (s *Server) getUpdates(w http.ResponseWriter, r *http.Request, p map[string
 		}
 	}
 	rows, err := longPoll(r.Context(), s.updates, time.Duration(timeout)*time.Second, func() ([]db.ListAddonUpdatesRow, error) {
-		return s.d.Store.Q.ListAddonUpdates(r.Context(), db.ListAddonUpdatesParams{FromID: offset, Lim: int32(limit)})
+		return s.d.Store.Q.ListAddonUpdates(r.Context(), db.ListAddonUpdatesParams{FromID: offset, Lim: pageSize(limit, 100)})
 	})
 	switch {
 	case r.Context().Err() != nil:

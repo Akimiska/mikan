@@ -173,7 +173,7 @@ func (s *Server) usersList(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		Users []userBrief `json:"users"`
 		Next  *int64      `json:"next"`
-	}{Users: make([]userBrief, 0, limit)}
+	}{Users: make([]userBrief, 0, pageSize(limit, maxUsersPage))}
 	switch {
 	case int64(len(found)) > limit:
 		found = found[:limit]

@@ -268,3 +268,14 @@ func TestBridge(t *testing.T) {
 		t.Fatalf("wanted: %v", got)
 	}
 }
+
+func TestPageSize(t *testing.T) {
+	for _, c := range []struct {
+		n, hi int64
+		want  int32
+	}{{0, 100, 1}, {-5, 100, 1}, {50, 100, 50}, {101, 100, 100}, {1 << 40, 500, 500}, {5000, 1 << 40, 1000}} {
+		if got := pageSize(c.n, c.hi); got != c.want {
+			t.Errorf("pageSize(%d, %d) = %d, want %d", c.n, c.hi, got, c.want)
+		}
+	}
+}

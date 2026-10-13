@@ -187,6 +187,21 @@ func intParam(raw string, def, lo, hi int64) (n int64, ok bool) {
 	return n, err == nil && n >= lo && n <= hi
 }
 
+// pageSize is a page limit as a query takes it: n within 1..hi, hi at most a page of 1000
+// rows. The bound is checked here, next to the conversion, whatever the caller checked.
+func pageSize(n, hi int64) int32 {
+	if hi > 1000 {
+		hi = 1000
+	}
+	if n < 1 {
+		return 1
+	}
+	if n > hi {
+		return int32(hi)
+	}
+	return int32(n)
+}
+
 // clampParam reads a parameter as Telegram does: def when it is no integer, else the
 // nearest value within lo..hi.
 func clampParam(raw string, def, lo, hi int64) int64 {

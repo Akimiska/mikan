@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { api, errorText, unwrap, type Schemas } from "../../../api/client";
+import { api, apiCodeText, errorText, unwrap, type Schemas } from "../../../api/client";
 import { useTariffs } from "../../../api/hooks";
 import { FormActions } from "../../../components/layout";
 import { useToast } from "../../../components/toast";
 import { Button, Field } from "../../../components/ui";
-import { t, tMaybe, type Key } from "../../../i18n";
+import { t, type Key } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { fieldErrors, onFormError } from "../../../lib/fields";
 
@@ -106,7 +106,7 @@ export function ImportCard() {
         ) : (
           <FormActions saving={check.isPending} disabled={!src.url.trim()} label={t("settings.import.check")} />
         )}
-        {st?.state === "failed" ? <div className="banner err mt-3">{t("settings.import.failed", { error: tMaybe(`errors.api.${st.error}`) ?? st.error ?? "" })}</div> : null}
+        {st?.state === "failed" ? <div className="banner err mt-3">{t("settings.import.failed", { error: apiCodeText(st.error ?? "") })}</div> : null}
         {preview ? (
           <div className="panel-soft mt-3 p-3 text-[13px]">
             <div className="font-medium">{t("settings.import.found", { total: preview.total, n: preview.new })}</div>

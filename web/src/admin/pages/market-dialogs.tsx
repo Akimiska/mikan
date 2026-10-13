@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ShieldAlert } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
 import { ApiError, api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
@@ -9,6 +8,7 @@ import { Field, Pill, Segmented } from "../../components/ui";
 import { t } from "../../i18n";
 import { fieldErrors } from "../../lib/fields";
 import { localized } from "../../lib/localized";
+import { ShieldBanner } from "./market-parts";
 import { ADDON_ID_RE, PERMISSIONS, actsAsAdmin, installMarket, installPayment, sortPermissions, type Kind, type MarketEntry, type MarketInstalled, type MarketOrigin } from "./market-common";
 
 // The dialogs of the protocol 2 addons, shared by both tabs of the addons page: approving
@@ -63,21 +63,15 @@ function PermissionList({ perms, fresh = [] }: { perms: string[]; fresh?: string
 }
 
 /** Where an unofficial addon comes from, and what that does and does not vouch for. */
-function OriginWarning({ origin, flush }: { origin: MarketOrigin; flush?: boolean }) {
-  return (
-    <div className={flush ? "banner warn items-start" : "banner warn mt-4 items-start"} role="note">
-      <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1">{t(origin.signed ? "market.originSigned" : "market.originUnsigned", { title: origin.title })}</span>
-    </div>
-  );
+function OriginWarning({ origin, className }: { origin: MarketOrigin; className?: string }) {
+  return <ShieldBanner className={className}>{t(origin.signed ? "market.originSigned" : "market.originUnsigned", { title: origin.title })}</ShieldBanner>;
 }
 
 function AdminWarning() {
   return (
-    <div className="banner err mt-4 items-start" role="alert">
-      <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1">{t("market.adminWarn")}</span>
-    </div>
+    <ShieldBanner tone="err" className="mt-4">
+      {t("market.adminWarn")}
+    </ShieldBanner>
   );
 }
 
@@ -102,7 +96,7 @@ export function ApproveDialog({ entry, granted, onClose }: { entry: MarketEntry 
       {entry ? (
         <>
           <PermissionList perms={entry.permissions} fresh={fresh} />
-          {entry.origin ? <OriginWarning origin={entry.origin} /> : null}
+          {entry.origin ? <OriginWarning origin={entry.origin} className="mt-4" /> : null}
           {entry.image ? (
             <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]">
               <dt className="text-[var(--ink-500)]">{t("market.image")}</dt>
@@ -123,12 +117,9 @@ export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null;
       {a ? (
         <div className="flex flex-col gap-4 pt-1 text-[13px]">
           {a.origin ? (
-            <OriginWarning origin={a.origin} flush />
+            <OriginWarning origin={a.origin} />
           ) : a.source !== "official" ? (
-            <div className="banner warn items-start" role="note">
-              <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
-              <span className="min-w-0 flex-1">{t("market.unverifiedHint")}</span>
-            </div>
+            <ShieldBanner>{t("market.unverifiedHint")}</ShieldBanner>
           ) : null}
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2">
             {a.version ? (
@@ -280,10 +271,7 @@ function OwnForm({
   const trustNote = `${uid}-trust-note`;
   return (
     <form id="own-addon" onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
-      <div className="banner warn items-start" role="note">
-        <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1">{t("market.ownWarn")}</span>
-      </div>
+      <ShieldBanner>{t("market.ownWarn")}</ShieldBanner>
       {general ? (
         <div className="banner err" role="alert">
           {general}

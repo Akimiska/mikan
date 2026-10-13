@@ -11,7 +11,8 @@ import { safeHref } from "../../lib/url";
 import { ADDON_KINDS, type AddonKind } from "../search";
 import type { AddonActions } from "./addons-installed";
 import { useInstallMarket, useInstallPayment, permLabel } from "./market-dialogs";
-import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, unofficialLabel, type Kind, type Market, type MarketEntry } from "./market-common";
+import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, type Kind, type Market, type MarketEntry } from "./market-common";
+import { OriginMark } from "./market-parts";
 
 type ItemKind = Kind | "payment";
 
@@ -208,9 +209,7 @@ function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index:
       {i.text ? <p className="addon-card-text">{i.text}</p> : null}
       <div className="flex flex-wrap items-center gap-1">
         {e?.origin ? (
-          <span title={t("market.unofficialHint", { title: e.origin.title })}>
-            <Pill tone="warn">{unofficialLabel(e.origin)}</Pill>
-          </span>
+          <OriginMark origin={e.origin} />
         ) : (
           <span className="tag">{t("addons.official")}</span>
         )}

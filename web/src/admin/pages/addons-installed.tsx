@@ -15,7 +15,8 @@ import type { AddonKind } from "../search";
 import { Group, Item, Row, RowMenu, type State } from "./addon-row";
 import { StorageRow } from "./addons-storage";
 import { useInstallMarket, useInstallPayment, useRemoveAddon, useRequested } from "./market-dialogs";
-import { KIND_ICONS, botStatus, entryOf, hasPages, installMarket, installPayment, marketName, marketReady, pagesPath, queuedIds, unofficialLabel, type BotPhase, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
+import { KIND_ICONS, botStatus, entryOf, hasPages, installMarket, installPayment, marketName, marketReady, pagesPath, queuedIds, type BotPhase, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
+import { OriginMark } from "./market-parts";
 
 type Payments = Schemas["AddonsView"];
 type Payment = Schemas["AddonView"];
@@ -180,13 +181,7 @@ function GroupSkeleton() {
 /** Where an addon of the marketplace comes from: checked by mikan, a source's, or the admin's own. */
 function SourceMark({ a }: { a: MarketInstalled }) {
   if (a.source === "official") return <span className="tag">{t("addons.official")}</span>;
-  if (a.origin) {
-    return (
-      <span title={t("market.unofficialHint", { title: a.origin.title })}>
-        <Pill tone="warn">{unofficialLabel(a.origin)}</Pill>
-      </span>
-    );
-  }
+  if (a.origin) return <OriginMark origin={a.origin} />;
   return (
     <span title={t("market.unverifiedHint")}>
       <Pill tone="warn">{t("market.unverified")}</Pill>

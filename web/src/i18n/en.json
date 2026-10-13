@@ -2877,8 +2877,8 @@
     "ownUpdate": "Update",
     "unofficial": "unofficial · {title}",
     "unofficialHint": "From the source \"{title}\", not the mikan catalog: nobody has reviewed this code",
-    "originSigned": "An addon from the source \"{title}\", not from the mikan catalog. The source's signature only says the file is from its author, not that the code is safe: mikan has not reviewed it. The image is pinned by its digest; a new build needs a new approval.",
-    "originUnsigned": "An addon from the source \"{title}\", which is not signed: whoever controls its address controls what is offered to you. mikan has not reviewed the code. The image is pinned by its digest; a new build needs a new approval.",
+    "originSigned": "An addon from the source \"{title}\", not from the mikan catalog. The source's signature only says the file is from its author, not that the code is safe: mikan has not reviewed it. The image is pinned by its digest. A new build with the same permissions is installed by the update button without a new approval; if it asks for more permissions, it has to be approved again.",
+    "originUnsigned": "An addon from the source \"{title}\", which is not signed: whoever controls its address controls what is offered to you. mikan has not reviewed the code. The image is pinned by its digest. A new build with the same permissions is installed by the update button without a new approval; if it asks for more permissions, it has to be approved again.",
     "sourceOf": "Source"
   },
   "addons": {
@@ -3516,7 +3516,7 @@
     "open": "Sources",
     "title": "Addon sources",
     "meta": "Third-party authors and catalogs",
-    "warn": "A source decides which code is offered to run on your server, and mikan does not review that code. Add only authors you trust. You still approve every install and every update yourself.",
+    "warn": "A source decides which code is offered to run on your server, and mikan does not review that code. Add only authors you trust. You approve an install yourself, and an update asks for a new approval only when the build needs more permissions.",
     "addTitle": "Add a source",
     "url": "Source address",
     "urlHint": "An https link to mikan-addon.json or index.json, or github.com/owner/repo (its latest release is read).",
@@ -3524,6 +3524,7 @@
     "key": "Author's key (optional)",
     "keyHint": "An ed25519 public key in base64, if the author gave it beforehand: the source is accepted only when signed with it. Without it the panel pins the key the source is signed with.",
     "add": "Add",
+    "full": "There can be at most {n} sources.",
     "reading": "The panel is reading the source, up to 10 seconds",
     "added": "Source added",
     "removed": "Source removed",

@@ -32,6 +32,11 @@ type AddonGrant struct {
 	ApprovedAt  int64
 }
 
+type AddonIDClaim struct {
+	AddonID  string
+	SourceID int64
+}
+
 type AddonKv struct {
 	AddonID   string
 	Key       string
@@ -39,6 +44,22 @@ type AddonKv struct {
 	Version   int64
 	ExpiresAt sql.NullInt64
 	UpdatedAt int64
+}
+
+type AddonOrigin struct {
+	AddonID  string
+	SourceID int64
+}
+
+type AddonSource struct {
+	ID        int64
+	Url       string
+	Key       string
+	Title     string
+	AddedBy   sql.NullInt64
+	AddedAt   int64
+	FetchedAt int64
+	Error     string
 }
 
 type AddonUpdate struct {

@@ -47,6 +47,26 @@
         ],
         "type": "object"
       },
+      "AddSourceInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "Публичный ключ автора, ed25519 в base64, если админ знает его заранее: источник принимается, только если подписан им",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "url": {
+            "description": "https://…/mikan-addon.json, https://…/index.json или github.com/\u003cвладелец\u003e/\u003cрепозиторий\u003e (последний релиз)",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
       "AddonCatalogEntry": {
         "additionalProperties": false,
         "properties": {
@@ -2963,81 +2983,6 @@
         ],
         "type": "object"
       },
-      "MarketCustomInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "confirm": {
-            "description": "Админ подтвердил, что доверяет этому коду: mikan его не проверял",
-            "type": "boolean"
-          },
-          "digest": {
-            "description": "custom: sha256:\u003c64 hex\u003e",
-            "maxLength": 71,
-            "type": "string"
-          },
-          "id": {
-            "description": "Имя аддона: a-z, 0-9 и дефис, не из каталога",
-            "maxLength": 32,
-            "type": "string"
-          },
-          "image": {
-            "description": "custom: образ без тега, например ghcr.io/me/bot",
-            "maxLength": 255,
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "bot",
-              "ui",
-              "generic"
-            ],
-            "type": "string"
-          },
-          "mem_mb": {
-            "description": "Память контейнера, 64–256 МБ; 0 — по умолчанию 128",
-            "format": "int64",
-            "type": "integer"
-          },
-          "mode": {
-            "description": "http — аддон отвечает панели на /v2/*; client — только сам ходит в панель",
-            "enum": [
-              "http",
-              "client"
-            ],
-            "type": "string"
-          },
-          "permissions": {
-            "description": "Права, которые админ даёт аддону",
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 16,
-            "type": "array"
-          },
-          "source": {
-            "description": "custom — свой образ по дайджесту; external — свой процесс на 127.0.0.1",
-            "enum": [
-              "custom",
-              "external"
-            ],
-            "type": "string"
-          },
-          "url": {
-            "description": "external: http://127.0.0.1:\u003cпорт\u003e; клиенту панели (mode client) можно не указывать",
-            "maxLength": 64,
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "source",
-          "kind",
-          "mode",
-          "permissions",
-          "confirm"
-        ],
-        "type": "object"
-      },
       "MarketEntry": {
         "additionalProperties": false,
         "properties": {
@@ -3047,10 +2992,18 @@
             },
             "type": "object"
           },
+          "digest": {
+            "description": "Дайджест образа записи источника",
+            "type": "string"
+          },
           "homepage": {
             "type": "string"
           },
           "id": {
+            "type": "string"
+          },
+          "image": {
+            "description": "Образ записи источника: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто",
             "type": "string"
           },
           "installed": {
@@ -3078,6 +3031,10 @@
             "description": "Название по языкам",
             "type": "object"
           },
+          "origin": {
+            "$ref": "#/components/schemas/MarketOrigin",
+            "description": "Источник неофициального аддона; нет у аддона подписанного каталога"
+          },
           "permissions": {
             "description": "Что аддон просит: это и одобряет админ при установке",
             "items": {
@@ -3086,14 +3043,14 @@
             "type": "array"
           },
           "update": {
-            "description": "Установлен, а в каталоге другая сборка",
+            "description": "Установлен, а в каталоге или источнике другая сборка",
             "type": "boolean"
           },
           "version": {
             "type": "string"
           },
           "wider": {
-            "description": "Сборка каталога просит больше прав, чем одобрено: обновление ждёт нового одобрения",
+            "description": "Сборка просит больше прав, чем одобрено: обновление ждёт нового одобрения",
             "type": "boolean"
           }
         },
@@ -3112,11 +3069,62 @@
         ],
         "type": "object"
       },
+      "MarketExternalInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "description": "Админ подтвердил, что доверяет этому коду: mikan его не проверял",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Имя аддона: a-z, 0-9 и дефис, не из каталога и не из источника",
+            "maxLength": 32,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "bot",
+              "ui",
+              "generic"
+            ],
+            "type": "string"
+          },
+          "mode": {
+            "description": "http — аддон отвечает панели на /v2/*; client — только сам ходит в панель",
+            "enum": [
+              "http",
+              "client"
+            ],
+            "type": "string"
+          },
+          "permissions": {
+            "description": "Права, которые админ даёт аддону",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "url": {
+            "description": "http://127.0.0.1:\u003cпорт\u003e; клиенту панели (mode client) можно не указывать",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "mode",
+          "permissions",
+          "confirm"
+        ],
+        "type": "object"
+      },
       "MarketInstallInputBody": {
         "additionalProperties": false,
         "properties": {
           "permissions": {
-            "description": "Права, которые админ видел и одобрил: ровно те, что просит сборка каталога",
+            "description": "Права, которые админ видел и одобрил: ровно те, что просит сборка",
             "items": {
               "type": "string"
             },
@@ -3132,7 +3140,7 @@
         "additionalProperties": false,
         "properties": {
           "digest": {
-            "description": "Дайджест образа аддона админа (custom)",
+            "description": "Дайджест образа неофициального аддона (custom)",
             "type": "string"
           },
           "granted": {
@@ -3146,7 +3154,7 @@
             "type": "string"
           },
           "image": {
-            "description": "Образ аддона админа (custom)",
+            "description": "Образ неофициального аддона (custom)",
             "type": "string"
           },
           "kind": {
@@ -3169,8 +3177,12 @@
             ],
             "type": "string"
           },
+          "origin": {
+            "$ref": "#/components/schemas/MarketOrigin",
+            "description": "Источник, из которого поставлен аддон (custom)"
+          },
           "source": {
-            "description": "official — из подписанного каталога; custom и external — аддон админа, mikan его не проверял",
+            "description": "official — из подписанного каталога; custom — образ из источника или, у старых установок, свой образ админа; external — свой процесс админа; mikan неофициальные не проверял",
             "enum": [
               "official",
               "custom",
@@ -3189,7 +3201,7 @@
             "type": "string"
           },
           "version": {
-            "description": "Пусто у аддона админа: версию знает только каталог",
+            "description": "Одобренная версия у аддона из источника; пусто у аддона админа без источника: версию знает только каталог",
             "type": "string"
           }
         },
@@ -3204,10 +3216,33 @@
         ],
         "type": "object"
       },
+      "MarketOrigin": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "signed": {
+            "description": "Источник подписан закреплённым ключом; без подписи тот, кто управляет адресом, управляет и обновлениями",
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "signed"
+        ],
+        "type": "object"
+      },
       "MarketView": {
         "additionalProperties": false,
         "properties": {
           "catalog": {
+            "description": "Подписанный каталог и записи источников, которые админ добавил",
             "items": {
               "$ref": "#/components/schemas/MarketEntry"
             },
@@ -6819,6 +6854,118 @@
         ],
         "type": "object"
       },
+      "SourceSkipView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Идентификатор записи, как его написал источник",
+            "type": "string"
+          },
+          "reason": {
+            "description": "id_taken — идентификатор из подписанного каталога или другого источника; payment — платёжный адаптер из источника не ставится; invalid, image_invalid, digest_invalid, version_invalid, id_invalid — запись не по правилам; min_panel — нужна более новая панель; duplicate, too_many",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "SourceView": {
+        "additionalProperties": false,
+        "properties": {
+          "added_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/MarketEntry"
+            },
+            "type": "array"
+          },
+          "error": {
+            "description": "Код ошибки последнего чтения: source_unreachable, source_key_changed, source_signature_invalid…",
+            "type": "string"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fingerprint": {
+            "description": "Отпечаток закреплённого ключа, для сверки с автором",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "installed": {
+            "description": "Аддоны, поставленные из этого источника: пока они есть, источник не удалить",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "new_fingerprint": {
+            "description": "Источник подписан уже другим ключом (error source_key_changed): отпечаток нового, который админ может принять",
+            "type": "string"
+          },
+          "signed": {
+            "description": "Ключ источника закреплён: подпись с другим ключом или без подписи панель не принимает",
+            "type": "boolean"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSkipView"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "title",
+          "signed",
+          "added_at",
+          "entries",
+          "skipped",
+          "installed"
+        ],
+        "type": "object"
+      },
+      "SourcesView": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_error": {
+            "description": "catalog_unavailable — без подписанного каталога записи источников не сверить, их не показываем",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Сколько источников можно добавить",
+            "format": "int64",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sources",
+          "limit"
+        ],
+        "type": "object"
+      },
       "SpeedTestView": {
         "additionalProperties": false,
         "properties": {
@@ -8857,6 +9004,178 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/addon-sources": {
+      "get": {
+        "operationId": "list-addon-sources",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Источники сторонних аддонов",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      },
+      "post": {
+        "operationId": "add-addon-source",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSourceInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Добавить источник: панель читает его, проверяет и закрепляет ключ подписи",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/addon-sources/{id}": {
+      "delete": {
+        "operationId": "delete-addon-source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Убрать источник: пока из него стоит аддон, нельзя",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/addon-sources/{id}/refresh": {
+      "post": {
+        "operationId": "refresh-addon-source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Отпечаток нового ключа, который админ сверил с автором (после source_key_changed)",
+            "explode": false,
+            "in": "query",
+            "name": "accept",
+            "schema": {
+              "description": "Отпечаток нового ключа, который админ сверил с автором (после source_key_changed)",
+              "maxLength": 64,
+              "pattern": "^[0-9a-f:]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcesView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Прочитать источник заново",
+        "tags": [
+          "addons"
+        ],
+        "x-session-only": true
+      }
+    },
     "/api/v1/addon-storage": {
       "get": {
         "operationId": "get-addon-storage",
@@ -10496,14 +10815,14 @@
         "x-session-only": true
       }
     },
-    "/api/v1/marketplace/custom": {
+    "/api/v1/marketplace/external": {
       "post": {
-        "operationId": "install-custom-addon",
+        "operationId": "install-external-addon",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MarketCustomInputBody"
+                "$ref": "#/components/schemas/MarketExternalInputBody"
               }
             }
           },
@@ -10531,7 +10850,7 @@
             "description": "Error"
           }
         },
-        "summary": "Установить свой аддон: образ по дайджесту или процесс на 127.0.0.1, без проверки mikan",
+        "summary": "Режим разработчика: подключить свой процесс на 127.0.0.1, без проверки mikan",
         "tags": [
           "addons"
         ],
@@ -10584,7 +10903,7 @@
             "description": "Error"
           }
         },
-        "summary": "Одобрить права и установить или обновить аддон: заявка серверу",
+        "summary": "Одобрить права и установить или обновить аддон каталога или источника: заявка серверу",
         "tags": [
           "addons"
         ],

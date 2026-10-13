@@ -11,7 +11,7 @@ import { safeHref } from "../../lib/url";
 import { ADDON_KINDS, type AddonKind } from "../search";
 import type { AddonActions } from "./addons-installed";
 import { useInstallMarket, useInstallPayment, permLabel } from "./market-dialogs";
-import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, type Kind, type Market, type MarketEntry } from "./market-common";
+import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, unofficialLabel, type Kind, type Market, type MarketEntry } from "./market-common";
 
 type ItemKind = Kind | "payment";
 
@@ -93,7 +93,7 @@ export function CatalogTab({
   const queued = queuedIds(m, p);
   const items: Item[] = [...(p?.catalog ?? []).map((e) => toItem(e, "payment")), ...(m?.catalog ?? []).map((e) => toItem(e, e.kind, e))].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name));
   const needle = q.trim().toLowerCase();
-  const found = needle ? items.filter((i) => [i.name, i.text, i.id, kindLabel(i.kind)].some((s) => s.toLowerCase().includes(needle))) : items;
+  const found = needle ? items.filter((i) => [i.name, i.text, i.id, kindLabel(i.kind), i.market?.origin?.title ?? ""].some((s) => s.toLowerCase().includes(needle))) : items;
   const shown = kind ? found.filter((i) => i.kind === kind) : found;
   const counts = (k?: AddonKind) => (k ? found.filter((i) => i.kind === k).length : found.length);
 
@@ -207,7 +207,13 @@ function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index:
       </div>
       {i.text ? <p className="addon-card-text">{i.text}</p> : null}
       <div className="flex flex-wrap items-center gap-1">
-        <span className="tag">{t("addons.official")}</span>
+        {e?.origin ? (
+          <span title={t("market.unofficialHint", { title: e.origin.title })}>
+            <Pill tone="warn">{unofficialLabel(e.origin)}</Pill>
+          </span>
+        ) : (
+          <span className="tag">{t("addons.official")}</span>
+        )}
         {e ? (
           <span title={e.permissions.length ? sortPermissions(e.permissions).map(permLabel).join(", ") : undefined}>
             <Pill tone={actsAsAdmin(e.permissions) ? "warn" : "off"}>{t("addons.permsBadge", { n: e.permissions.length })}</Pill>

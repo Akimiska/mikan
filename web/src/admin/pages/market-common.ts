@@ -10,6 +10,7 @@ import type { State } from "./addon-row";
 export type Market = Schemas["MarketView"];
 export type MarketEntry = Schemas["MarketEntry"];
 export type MarketInstalled = Schemas["MarketInstalled"];
+export type MarketOrigin = Schemas["MarketOrigin"];
 export type Kind = MarketInstalled["kind"];
 type Payments = Schemas["AddonsView"];
 type Telegram = Schemas["TelegramView"];
@@ -55,10 +56,21 @@ export function botStatus(tg: Telegram, words: Record<BotPhase, Key>): State {
   return at("bad", "down");
 }
 
-/** The catalog's entry of an installed addon; none for an addon of the admin's own. */
+/**
+ * The entry that offers an installed addon's updates: the signed catalog's for an official
+ * one, its own source's for one from a source. None for an addon of the admin's own (an image
+ * from before sources, a process of theirs): only they know its next build.
+ */
 export function entryOf(id: string, d: Market | undefined): MarketEntry | undefined {
-  const own = d?.installed.find((a) => a.id === id && a.source !== "official");
-  return own ? undefined : d?.catalog.find((e) => e.id === id);
+  const a = d?.installed.find((x) => x.id === id);
+  if (a && a.source !== "official" && !a.origin) return undefined;
+  return d?.catalog.find((e) => e.id === id && (e.origin?.id ?? 0) === (a?.origin?.id ?? 0));
+}
+
+/** The badge of an unofficial addon: whose it is, short enough for a phone. */
+export function unofficialLabel(o: MarketOrigin): string {
+  const title = o.title.length > 24 ? `${o.title.slice(0, 23)}…` : o.title;
+  return t("market.unofficial", { title });
 }
 
 /** The addon's name in the catalog; an addon of the admin's own is known by its id. */

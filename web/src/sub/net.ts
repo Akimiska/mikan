@@ -78,8 +78,13 @@ export function tgEvent(type: string, data: Record<string, unknown> | "" = "") {
 
 /** Opens a link outside the Mini App: Telegram links in Telegram, the rest in the browser. */
 export function openOutside(url: string) {
-  const tme = /^https:\/\/t\.me(\/.*)$/.exec(url);
-  if (tme) tgEvent("web_app_open_tg_link", { path_full: tme[1] });
+  // t.me/<name>?start=… with any path or query, over http too: Telegram opens it itself.
+  const tme = /^https?:\/\/(?:www\.)?(?:t|telegram)\.me(\/.*)$/i.exec(url);
+  if (!tgMode) {
+    // The same page in a browser has no bridge: a plain link in a new tab.
+    const href = safeHref(url);
+    if (href) window.open(href, "_blank", "noopener,noreferrer");
+  } else if (tme) tgEvent("web_app_open_tg_link", { path_full: tme[1] });
   else if (safeHref(url, { tg: true })) tgEvent("web_app_open_link", { url });
 }
 

@@ -15,7 +15,7 @@ import (
 const TitleMax = 200
 
 // AnnounceMax and AnnounceLines bound the announcement as the page and the Mini App show it,
-// with its line breaks; the apps get it as one line of TitleMax.
+// with its line breaks; the apps get at most TitleMax letters, one line but for INCY.
 const (
 	AnnounceMax   = 1000
 	AnnounceLines = 10
@@ -96,14 +96,32 @@ func fillTitle(s string, vars map[string]string) string {
 // title, its lines kept (at most AnnounceLines), blank lines between paragraphs and the
 // indent of a line too (a tab is four spaces), at most AnnounceMax letters.
 func fillAnnounce(s string, vars map[string]string) string {
+	return fillLines(s, vars, AnnounceLines, AnnounceMax)
+}
+
+// IncyAnnounceLines: INCY shows an announcement of up to five lines (docs.incy.cc,
+// Announce); it gets them, with their indents, within the TitleMax of an app's header.
+const IncyAnnounceLines = 5
+
+// fillAppAnnounce is the announcement for the app at hand: INCY's with its lines, any other
+// one line, as the apps that do not say they show more would run the lines together.
+func fillAppAnnounce(s string, vars map[string]string, ua string) string {
+	if IsINCY(ua) {
+		return fillLines(s, vars, IncyAnnounceLines, TitleMax)
+	}
+	return fillTitle(s, vars)
+}
+
+// fillLines fills s and keeps at most maxLines lines, with their indents, and maxRunes letters.
+func fillLines(s string, vars map[string]string, maxLines, maxRunes int) string {
 	lines := strings.Split(strings.ReplaceAll(fillVars(s, vars), "\r\n", "\n"), "\n")
-	if len(lines) > AnnounceLines {
-		lines = lines[:AnnounceLines]
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
 	}
 	for i, l := range lines {
-		lines[i] = indented(strings.ReplaceAll(l, "\t", "    "), AnnounceMax)
+		lines[i] = indented(strings.ReplaceAll(l, "\t", "    "), maxRunes)
 	}
-	return strings.TrimRight(strings.TrimLeft(cutText(strings.Join(lines, "\n"), AnnounceMax), "\n"), " \n")
+	return strings.TrimRight(strings.TrimLeft(cutText(strings.Join(lines, "\n"), maxRunes), "\n"), " \n")
 }
 
 // indented is cut that keeps the spaces a line starts with, up to indentMax.

@@ -267,7 +267,7 @@ func (h *Handler) serveProfile(w http.ResponseWriter, r *http.Request, u db.User
 	if cfg.Title != "" || cfg.Announce != "" {
 		vars = titleValues(u, grants.Main(u.ID), h.boundFor(r.Context(), u, cfg), cfg, h.now())
 		if cfg.Announce != "" {
-			cfg.Announce = fillTitle(cfg.Announce, vars)
+			cfg.Announce = fillAppAnnounce(cfg.Announce, vars, r.UserAgent())
 		}
 	}
 	h.userInfoHeaders(w, u, grants.Main(u.ID), cfg, vars)

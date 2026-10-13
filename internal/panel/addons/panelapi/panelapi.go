@@ -190,14 +190,10 @@ func intParam(raw string, def, lo, hi int64) (n int64, ok bool) {
 // pageSize is a page limit as a query takes it: n within 1..hi, hi at most a page of 1000
 // rows. The bound is checked here, next to the conversion, whatever the caller checked.
 func pageSize(n, hi int64) int32 {
-	if hi > 1000 {
-		hi = 1000
-	}
-	if n < 1 {
+	n = min(n, hi, 1000)
+	// n is at most 1000 already; the constant bound sits by the conversion for the analysers.
+	if n < 1 || n > 1000 {
 		return 1
-	}
-	if n > hi {
-		return int32(hi)
 	}
 	return int32(n)
 }

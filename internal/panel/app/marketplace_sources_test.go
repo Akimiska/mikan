@@ -33,6 +33,7 @@ type srcLab struct {
 	src      *httptest.Server
 	mu       sync.Mutex
 	files    map[string][]byte
+	failing  map[string]bool // paths that answer 503
 	hits     map[string]int
 	official ed25519.PublicKey
 }
@@ -66,7 +67,7 @@ func newSrcLab(t *testing.T) *srcLab {
 		}
 	}))
 	t.Cleanup(catalog.Close)
-	l := &srcLab{t: t, dir: t.TempDir(), files: map[string][]byte{}, hits: map[string]int{}, official: pub}
+	l := &srcLab{t: t, dir: t.TempDir(), files: map[string][]byte{}, failing: map[string]bool{}, hits: map[string]int{}, official: pub}
 	l.src = httptest.NewServer(http.HandlerFunc(l.serve))
 	t.Cleanup(l.src.Close)
 	l.h = newHarness(t, func(o *Options) { o.DataDir, o.AddonsCatalog, o.Dev = l.dir, catalog.URL+"/index.json", true })
@@ -84,8 +85,11 @@ func (l *srcLab) serve(w http.ResponseWriter, r *http.Request) {
 	l.mu.Lock()
 	l.hits[r.URL.Path]++
 	data, ok := l.files[r.URL.Path]
+	down := l.failing[r.URL.Path]
 	l.mu.Unlock()
 	switch {
+	case down:
+		http.Error(w, "down", http.StatusServiceUnavailable)
 	case r.URL.Path == "/redirect-other":
 		// Another name for the same machine: another host as far as redirects go.
 		http.Redirect(w, r, "http://localhost:"+strings.Split(l.src.URL, ":")[2]+"/mikan-addon.json", http.StatusFound)
@@ -304,6 +308,7 @@ func TestAddonSourcesRefusals(t *testing.T) {
 	tagged["image"] = "registry.example.com/me/tagged:latest"
 	l.publish("/tagged.json", l.catalogDoc(tagged), nil)
 	l.publish("/official.json", l.catalogDoc(srcEntry("telegram", "9.9.9", "b", "bot", "bot")), nil)
+	l.publish("/payid.json", l.catalogDoc(srcEntry("yookassa", "9.9.9", "b", "generic")), nil)
 	l.publish("/badsig.json", l.catalogDoc(srcEntry("hello", "1.0.0", "b", "generic")), author)
 	l.mu.Lock()
 	l.files["/badsig.json.sig"] = []byte(base64.StdEncoding.EncodeToString(make([]byte, 64)))
@@ -333,7 +338,8 @@ func TestAddonSourcesRefusals(t *testing.T) {
 		"redirect elsewhere":  {url(l.url("/redirect-other")), "source_redirect_refused", "body.url"},
 		"payment adapter":     {url(l.url("/payment.json")), "source_empty", "payment"},
 		"image with a tag":    {url(l.url("/tagged.json")), "source_empty", "image_invalid"},
-		"official id":         {url(l.url("/official.json")), "addon_id_taken", "telegram"},
+		"official bot slot":   {url(l.url("/official.json")), "source_empty", "id_taken"},
+		"official id":         {url(l.url("/payid.json")), "addon_id_taken", "yookassa"},
 		"bad signature":       {url(l.url("/badsig.json")), "source_signature_invalid", "body.url"},
 		"bad key":             {map[string]any{"url": l.url("/ok.json"), "key": "not a key"}, "source_key_invalid", "body.key"},
 		"other key":           {map[string]any{"url": l.url("/ok.json"), "key": base64.StdEncoding.EncodeToString(newKey(t).Public().(ed25519.PublicKey))}, "source_key_changed", "body.key"},
@@ -578,8 +584,22 @@ func TestAddonSourceUnsigned(t *testing.T) {
 	author := newKey(t)
 	l.publish("/mikan-addon.json", srcEntry("solo", "1.0.1", "b", "ui", "ui"), author)
 	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh", nil, http.StatusOK)
-	if s = l.sources().Sources[0]; !s.Signed || s.Error != "" {
+	// The key is not pinned behind the admin's back: it waits for the fingerprint, the source
+	// stays unsigned (the stronger warning stays) and offers nothing meanwhile.
+	s = l.sources().Sources[0]
+	if s.Signed || s.Error != "source_key_changed" || s.NewFingerprint == "" || len(s.Entries) != 0 {
 		t.Fatalf("a source that began to sign: %+v", s)
+	}
+	if row, err := l.h.st.Q.GetAddonSource(context.Background(), s.ID); err != nil || row.Key != "" {
+		t.Fatalf("the key was pinned unasked: %+v %v", row, err)
+	}
+	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh?accept=0000:0000", nil, http.StatusOK)
+	if s = l.sources().Sources[0]; s.Signed || s.Error != "source_key_changed" {
+		t.Fatalf("a made-up fingerprint took the key: %+v", s)
+	}
+	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh?accept="+s.NewFingerprint, nil, http.StatusOK)
+	if s = l.sources().Sources[0]; !s.Signed || s.Error != "" || len(s.Entries) != 1 {
+		t.Fatalf("an accepted key: %+v", s)
 	}
 	// From now on it is held to the key.
 	l.publish("/mikan-addon.json", srcEntry("solo", "1.0.2", "b", "ui", "ui"), nil)
@@ -688,6 +708,124 @@ func TestMarketplaceExternalAddons(t *testing.T) {
 	}
 	if q := l.h.p.Addons.Pending(); len(q) != 1 || q[0].Action != "remove" || q[0].ID != "oldcustom" {
 		t.Fatalf("remove request: %+v", q)
+	}
+}
+
+// The first source to list an id keeps it, however the sources are numbered and whatever the
+// panel has in memory; the claim is let go when its source stops listing the id.
+func TestAddonSourceIDsAreClaimedByTheFirst(t *testing.T) {
+	l := newSrcLab(t)
+	l.publish("/a.json", l.catalogDoc(srcEntry("alpha", "1.0.0", "b", "generic")), nil)
+	l.publish("/b.json", l.catalogDoc(srcEntry("beta", "1.0.0", "b", "generic")), nil)
+	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/a.json")}, http.StatusCreated)
+	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/b.json")}, http.StatusCreated)
+	// The older source begins to list what the newer one holds: it does not take it over.
+	l.publish("/a.json", l.catalogDoc(srcEntry("alpha", "1.0.0", "b", "generic"), srcEntry("beta", "9.0.0", "e", "generic")), nil)
+	l.call(http.MethodPost, "/addon-sources/1/refresh", nil, http.StatusOK)
+	owners := map[string]string{}
+	for _, e := range l.market().Catalog {
+		if e.Origin != nil {
+			owners[e.ID] = e.Origin.Title
+			if e.ID == "beta" && e.Version != "1.0.0" {
+				t.Fatalf("beta offered with the older source's build: %s", e.Version)
+			}
+		}
+	}
+	if len(owners) != 2 {
+		t.Fatalf("catalog: %v", owners)
+	}
+	a := l.sources().Sources[0]
+	if len(a.Entries) != 1 || a.Entries[0].ID != "alpha" || len(a.Skipped) != 1 || a.Skipped[0].ID != "beta" || a.Skipped[0].Reason != "id_taken" {
+		t.Fatalf("the older source: %+v", a)
+	}
+
+	// The panel restarted and the source cannot be read: its claim stands.
+	l.h.p.Addons.ForgetSource(1)
+	l.mu.Lock()
+	delete(l.files, "/a.json")
+	l.mu.Unlock()
+	l.publish("/c.json", l.catalogDoc(srcEntry("alpha", "2.0.0", "c", "generic")), nil)
+	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/c.json")}, http.StatusUnprocessableEntity, "addon_id_taken", "alpha")
+	if n := len(l.sources().Sources); n != 2 {
+		t.Fatalf("a refused source was kept: %d", n)
+	}
+
+	// Read in full without the id, its source lets it go.
+	l.publish("/a.json", l.catalogDoc(srcEntry("other", "1.0.0", "b", "generic")), nil)
+	l.call(http.MethodPost, "/addon-sources/1/refresh", nil, http.StatusOK)
+	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/c.json")}, http.StatusCreated)
+}
+
+// Two adds of the same address at once keep one of them; the other is told it is there.
+func TestAddonSourceAddedTwiceAtOnce(t *testing.T) {
+	l := newSrcLab(t)
+	l.publish("/a.json", l.catalogDoc(srcEntry("alpha", "1.0.0", "b", "generic")), nil)
+	var wg sync.WaitGroup
+	codes := make([]int, 4)
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, _ := l.h.do(http.MethodPost, l.api+"/addon-sources", map[string]any{"url": l.url("/a.json")}, l.csrf)
+			codes[i] = resp.StatusCode
+		}()
+	}
+	wg.Wait()
+	created := 0
+	for _, c := range codes {
+		switch c {
+		case http.StatusCreated:
+			created++
+		case http.StatusUnprocessableEntity:
+		default:
+			t.Fatalf("answers: %v", codes)
+		}
+	}
+	if created != 1 || len(l.sources().Sources) != 1 {
+		t.Fatalf("answers: %v", codes)
+	}
+}
+
+// A source that cannot be reached for a while keeps offering what it last offered, so the
+// catalog does not flap with the network; an install reads it again and needs it to answer.
+func TestAddonSourceUnreachableKeepsItsEntries(t *testing.T) {
+	l := newSrcLab(t)
+	l.publish("/a.json", l.catalogDoc(srcEntry("alpha", "1.0.0", "b", "generic"), srcEntry("gamma", "1.0.0", "b", "generic")), nil)
+	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/a.json")}, http.StatusCreated)
+	l.mu.Lock()
+	l.failing["/a.json"] = true
+	l.mu.Unlock()
+	l.call(http.MethodPost, "/addon-sources/1/refresh", nil, http.StatusOK)
+	s := l.sources().Sources[0]
+	if s.Error != "source_unreachable" || len(s.Entries) != 2 {
+		t.Fatalf("while down: %+v", s)
+	}
+	if n := len(l.market().Catalog); n != 3 {
+		t.Fatalf("the catalog while the source is down: %d", n)
+	}
+	l.call(http.MethodPost, "/marketplace/alpha/install", approve(), http.StatusBadGateway, "source_unreachable")
+	if _, ok := l.grant("alpha"); ok {
+		t.Fatal("a grant for an install the source could not confirm")
+	}
+}
+
+// A row left by an install from a source that never happened does not make an addon the admin
+// installs another way, later, that source's.
+func TestAddonOriginRowDoesNotOutliveAFailedInstall(t *testing.T) {
+	l := newSrcLab(t)
+	l.publish("/a.json", l.catalogDoc(srcEntry("alpha", "1.0.0", "b", "generic")), nil)
+	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/a.json")}, http.StatusCreated)
+	l.call(http.MethodPost, "/marketplace/alpha/install", approve(), http.StatusAccepted)
+	if _, ok := l.origin("alpha"); !ok {
+		t.Fatal("no origin for a queued install")
+	}
+	// The host could not pull the image: nothing is installed. The source drops the addon.
+	l.hostRan(map[string]addons.Installed{})
+	l.publish("/a.json", l.catalogDoc(srcEntry("beta", "1.0.0", "b", "generic")), nil)
+	l.call(http.MethodPost, "/addon-sources/1/refresh", nil, http.StatusOK)
+	l.call(http.MethodPost, "/marketplace/external", map[string]any{"id": "alpha", "kind": "generic", "mode": "client", "permissions": []string{}, "confirm": true}, http.StatusAccepted)
+	if id, ok := l.origin("alpha"); ok {
+		t.Fatalf("the developer's own addon is marked as source %d's", id)
 	}
 }
 

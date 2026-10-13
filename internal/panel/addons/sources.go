@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/netip"
@@ -40,7 +41,16 @@ const (
 	MaxSources       = 16
 	MaxSourceEntries = 64
 	sourceFresh      = 10 * time.Minute
-	sourceFailedFor  = time.Minute
+	sourceFailedFor  = time.Minute // after a failed fetch; doubled on each one in a row, up to the fresh time
+	// A GitHub shorthand costs a request of the unauthenticated API (60 an hour from one
+	// address) each time: sixteen of them stay under it only if they are read rarely.
+	githubFresh = 30 * time.Minute
+	// A page asking for a source never waits longer than this for a fetch it did not ask to be
+	// redone: the fetch goes on, and the next ask finds it.
+	sourceWait = 3 * time.Second
+	// OfficialBotID is the id the panel hands the bot slot to by itself (app/botaddon.go): no
+	// source can offer an addon under it.
+	OfficialBotID = "telegram"
 )
 
 // Codes of what a source did wrong; the API and the stored error column carry them as they
@@ -108,9 +118,13 @@ func ParseSourceKey(key string) (ed25519.PublicKey, bool) {
 
 // SourcePin says which key a fetch must find. Key is the pinned one ("" for a source that
 // was not signed); Accept is the fingerprint the admin looked at and takes as the new key.
+// Unsigned is a source the admin already holds without a key: a signature that shows up on it
+// is a new key like any other, taken only with Accept (a source being added has no such pin,
+// and pins what it is signed with).
 type SourcePin struct {
-	Key    string
-	Accept string
+	Key      string
+	Accept   string
+	Unsigned bool
 }
 
 // SourceSkip is an entry of a source the panel left out, and why.
@@ -325,7 +339,8 @@ func (n *sourceNet) githubFiles(ctx context.Context, r ghRepo) (file, sig string
 	prefix := fmt.Sprintf("%s/%s/%s/releases/download/", n.ghWeb, r.owner, r.repo)
 	find := func(name string) string {
 		for _, a := range rel.Assets {
-			if a.Name == name && strings.HasPrefix(a.URL, prefix) && !strings.ContainsAny(a.URL, "?#") {
+			// GitHub spells the owner and the repository as they were created, whatever the admin typed.
+			if a.Name == name && len(a.URL) > len(prefix) && strings.EqualFold(a.URL[:len(prefix)], prefix) && !strings.ContainsAny(a.URL, "?#") {
 				return a.URL
 			}
 		}
@@ -354,19 +369,22 @@ var validVersion = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$`)
 // the page is never handed more than it can show.
 func cleanText(t Text, maxRunes int) Text {
 	out := Text{}
-	for lang, s := range t {
+	// The same languages survive every time: the ones the page shows first, then by name.
+	langs := slices.Sorted(maps.Keys(t))
+	slices.SortStableFunc(langs, func(a, b string) int { return langRank(a) - langRank(b) })
+	for _, lang := range langs {
 		if len(out) >= 8 {
 			break
 		}
 		if len(lang) == 0 || len(lang) > 8 {
 			continue
 		}
-		s = strings.Map(func(r rune) rune {
+		s := strings.Map(func(r rune) rune {
 			if r == '\n' || r == '\t' || !unicode.IsControl(r) && r != utf8.RuneError {
 				return r
 			}
 			return -1
-		}, s)
+		}, t[lang])
 		if r := []rune(s); len(r) > maxRunes {
 			s = string(r[:maxRunes])
 		}
@@ -377,6 +395,31 @@ func cleanText(t Text, maxRunes int) Text {
 	return out
 }
 
+func langRank(l string) int {
+	switch l {
+	case "en":
+		return 0
+	case "ru":
+		return 1
+	}
+	return 2
+}
+
+// publicRegistry: the registry an image names (Docker Hub when it names none) is a public
+// host. An unofficial addon's image is pulled by the root host on the source's word, and that
+// must not reach a loopback or a LAN endpoint.
+func publicRegistry(image string) bool {
+	parts := strings.Split(image, "/")
+	if len(parts) < 2 || !(strings.ContainsAny(parts[0], ".:") || parts[0] == "localhost") {
+		return true
+	}
+	host := parts[0]
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return proto.PublicHost(host)
+}
+
 // checkSourceEntry says why a source's entry cannot be installed, "" when it can; on success
 // it leaves the entry clean. A source offers protocol 2 addons only (no payment adapter: it
 // would decide where money goes), pinned by digest: no tag a source could move.
@@ -384,11 +427,13 @@ func checkSourceEntry(e *Entry, panelVersion string) string {
 	switch {
 	case !ValidID(e.ID):
 		return "id_invalid"
+	case e.ID == OfficialBotID:
+		return "id_taken"
 	case e.Kind == KindPayment || e.Protocol == Protocol:
 		return "payment"
 	case e.Protocol != Protocol2 || !e.normalize():
 		return "invalid"
-	case !ValidImage(e.Image):
+	case !ValidImage(e.Image) || !publicRegistry(e.Image):
 		return "image_invalid"
 	case !release.ValidDigest(e.Digest):
 		return "digest_invalid"
@@ -479,7 +524,7 @@ func (m *Manager) FetchSource(ctx context.Context, rawURL string, pin SourcePin)
 	defer cancel()
 	var doc SourceDoc
 	for attempt := 0; attempt < 2; attempt++ {
-		doc, err = m.fetchSourceOnce(ctx, n, canonical, gh)
+		doc, err = m.fetchSourceOnce(ctx, n, canonical, gh, pin)
 		if !errors.Is(err, ErrSourceSignature) {
 			break
 		}
@@ -487,9 +532,11 @@ func (m *Manager) FetchSource(ctx context.Context, rawURL string, pin SourcePin)
 	if err != nil {
 		return SourceDoc{}, err
 	}
-	// The pinned key is the trust anchor. A source that was unsigned has none to hold, and a
-	// signature that appears later only adds one (no weaker than the unsigned file was).
-	if pin.Key != "" && doc.Key != pin.Key && !(doc.Key != "" && pin.Accept != "" && pin.Accept == Fingerprint(doc.Key)) {
+	// The pinned key is the trust anchor. A source held without one that begins to sign is
+	// not pinned behind the admin's back either: nobody compared that key with the author, and
+	// the warning of an unsigned source would be gone for it.
+	accepted := doc.Key != "" && pin.Accept != "" && pin.Accept == Fingerprint(doc.Key)
+	if (pin.Key != "" || pin.Unsigned) && doc.Key != pin.Key && !accepted {
 		return SourceDoc{}, &KeyChangedError{Key: doc.Key}
 	}
 	if len(doc.Entries) == 0 {
@@ -499,7 +546,7 @@ func (m *Manager) FetchSource(ctx context.Context, rawURL string, pin SourcePin)
 	return doc, nil
 }
 
-func (m *Manager) fetchSourceOnce(ctx context.Context, n *sourceNet, canonical string, gh *ghRepo) (SourceDoc, error) {
+func (m *Manager) fetchSourceOnce(ctx context.Context, n *sourceNet, canonical string, gh *ghRepo, pin SourcePin) (SourceDoc, error) {
 	file, sigURL, title := canonical, canonical+".sig", hostTitle(canonical)
 	if gh != nil {
 		var err error
@@ -517,16 +564,27 @@ func (m *Manager) fetchSourceOnce(ctx context.Context, n *sourceNet, canonical s
 	}
 	var sig []byte
 	if sigURL != "" {
-		if sig, status, err = n.get(ctx, sigURL, 4096, ""); err != nil {
-			return SourceDoc{}, err
-		}
-		if status == http.StatusNotFound {
+		sig, status, err = n.get(ctx, sigURL, 4096, "")
+		switch {
+		// Object stores answer 403 for a key that is not there. For a pinned source no
+		// signature is source_key_changed all the same.
+		case err != nil && (status == http.StatusForbidden || status == http.StatusGone), err == nil && status == http.StatusNotFound:
 			sig = nil
-		} else if sig == nil {
+		case err != nil:
+			return SourceDoc{}, err
+		case sig == nil:
 			sig = []byte{}
+		case pin.Key == "" && looksLikePage(sig):
+			// A static host's fallback page, taken for the signature of a file that has none.
+			sig = nil
 		}
 	}
 	return m.parseSourceDoc(data, sig, title)
+}
+
+// looksLikePage: what came for a signature is a web page (HTML), not a signature.
+func looksLikePage(b []byte) bool {
+	return strings.HasPrefix(strings.TrimSpace(string(b)), "<")
 }
 
 // hostTitle is the name of a source that gave none: its host.
@@ -558,11 +616,19 @@ func (m *Manager) SetDev(dev bool) {
 	m.mu.Unlock()
 }
 
-// SourceState is the last fetch of a source: what it gave, or why it did not.
+// SourceState is the last fetch of a source: what it gave, or why it did not. After a failure
+// that says nothing about the source itself (the network, a 5xx, a rate limit) Doc is what the
+// last good fetch gave, still offered; after any other it is empty.
 type SourceState struct {
-	Doc SourceDoc
-	Err error
-	At  time.Time
+	Doc   SourceDoc
+	Err   error
+	At    time.Time
+	Fails int // fetches in a row that failed: the retry waits longer each time
+}
+
+// Offered: the entries of Doc may be offered and installed from.
+func (s SourceState) Offered() bool {
+	return s.Err == nil || errors.Is(s.Err, ErrSourceUnreachable) && len(s.Doc.Entries) > 0
 }
 
 // SourceStore is what recording a fetch needs; *db.Queries has it.
@@ -593,27 +659,99 @@ func (m *Manager) ForgetSource(id int64) {
 	m.mu.Unlock()
 }
 
-// RefreshSource fetches the source unless the last fetch is fresh (force: always), and
-// records how it went: the time and the code of the error in the table, the key when a
-// signature newly pins one. A failed source gives no entries, whatever it gave before: a key
-// that changed must not leave its old entries to install.
-func (m *Manager) RefreshSource(ctx context.Context, q SourceStore, s db.AddonSource, force bool, accept string) SourceState {
-	if cached, ok := m.Source(s.ID); ok && !force {
-		fresh := sourceFresh
-		if cached.Err != nil {
-			fresh = sourceFailedFor
-		}
-		if m.now().Sub(cached.At) < fresh {
-			return cached
-		}
+// sourceTTL is how long the last fetch of a source holds: a good one for the fresh time, a
+// failed one for a minute and twice as long after each failure in a row.
+func sourceTTL(rawURL string, st SourceState) time.Duration {
+	fresh := sourceFresh
+	if strings.HasPrefix(rawURL, "github.com/") {
+		fresh = githubFresh
 	}
-	doc, err := m.FetchSource(ctx, s.Url, SourcePin{Key: s.Key, Accept: accept})
+	if st.Err == nil {
+		return fresh
+	}
+	return min(sourceFailedFor<<min(max(st.Fails-1, 0), 8), fresh)
+}
+
+// sourceFlight is a fetch of one source under way: whoever asks for the source meanwhile joins
+// it instead of starting another.
+type sourceFlight struct {
+	done chan struct{}
+	st   SourceState
+}
+
+// RefreshSource gives the state of the source, fetching it when the last fetch is not fresh
+// (force: always) and recording how it went: the time and the code of the error in the table,
+// the key when a signature newly pins one.
+//
+// A fetch is one per source at a time and does not belong to the request that started it: a
+// request that is cancelled leaves it running, and it never records the cancellation as the
+// source's fault. A page (not force) is not made to wait for a source it already knows: it
+// gets the old state at once, and the fetch brings the new one for the next ask; for a source
+// it does not know yet it waits a few seconds at most. An install or a refresh (force) waits
+// for the answer.
+func (m *Manager) RefreshSource(ctx context.Context, q SourceStore, s db.AddonSource, force bool, accept string) SourceState {
+	cached, have := m.Source(s.ID)
+	if have && !force && m.now().Sub(cached.At) < sourceTTL(s.Url, cached) {
+		return cached
+	}
+	f := m.fetchFlight(ctx, q, s, accept)
+	if have && !force {
+		return cached
+	}
+	var late <-chan time.Time
+	if !force {
+		t := time.NewTimer(sourceWait)
+		defer t.Stop()
+		late = t.C
+	}
+	select {
+	case <-f.done:
+		return f.st
+	case <-ctx.Done():
+	case <-late:
+	}
+	// Nothing is known yet: no entries, and no fault of the source to show.
+	return cached
+}
+
+func (m *Manager) fetchFlight(ctx context.Context, q SourceStore, s db.AddonSource, accept string) *sourceFlight {
+	m.mu.Lock()
+	// An accept is the admin's own ask and is not folded into a fetch that does not carry it.
+	if f, ok := m.flights[s.ID]; ok && accept == "" {
+		m.mu.Unlock()
+		return f
+	}
+	f := &sourceFlight{done: make(chan struct{})}
+	m.flights[s.ID] = f
+	m.mu.Unlock()
+	ctx = context.WithoutCancel(ctx)
+	go func() {
+		f.st = m.fetchAndRecord(ctx, q, s, accept)
+		m.mu.Lock()
+		if m.flights[s.ID] == f {
+			delete(m.flights, s.ID)
+		}
+		m.mu.Unlock()
+		close(f.done)
+	}()
+	return f
+}
+
+// fetchAndRecord fetches the source and keeps the outcome. A key that changed leaves no entries
+// to install; a failure of the network keeps the last good ones.
+func (m *Manager) fetchAndRecord(ctx context.Context, q SourceStore, s db.AddonSource, accept string) SourceState {
+	prev, _ := m.Source(s.ID)
+	doc, err := m.FetchSource(ctx, s.Url, SourcePin{Key: s.Key, Accept: accept, Unsigned: s.Key == ""})
 	st := SourceState{Doc: doc, Err: err, At: m.now()}
 	if err != nil {
+		st.Fails = prev.Fails + 1
 		st.Doc = SourceDoc{Skipped: doc.Skipped}
 		var kc *KeyChangedError
-		if errors.As(err, &kc) {
+		switch {
+		case errors.As(err, &kc):
 			st.Doc.Key = kc.Key // for the fingerprint the admin may accept
+		case errors.Is(err, ErrSourceUnreachable) && prev.Offered():
+			st.Doc = prev.Doc
 		}
 		m.log.Warn("addons: source", "id", s.ID, "url", s.Url, "err", SourceCode(err))
 	}
@@ -643,16 +781,19 @@ type SourceEntries struct {
 
 // Owners says who holds each addon id: 0 is the panel's own (the official catalog, and what
 // is installed with no source), a number is a source. An id an installed addon came from is
-// that source's; every other id goes to the lowest source number, the one added first. An
-// entry of a source is offered only under an id its source holds.
-func Owners(taken map[string]bool, origins map[string]int64, srcs []SourceEntries) map[string]int64 {
+// that source's, then an id a source claimed (the first to list it keeps it; the claims are
+// stored); an id nobody claimed yet goes to the lowest source number. An entry of a source is
+// offered only under an id its source holds.
+func Owners(taken map[string]bool, origins, claims map[string]int64, srcs []SourceEntries) map[string]int64 {
 	owner := map[string]int64{}
 	for id := range taken {
 		owner[id] = 0
 	}
-	for id, src := range origins {
-		if _, ok := owner[id]; !ok {
-			owner[id] = src
+	for _, held := range []map[string]int64{origins, claims} {
+		for id, src := range held {
+			if _, ok := owner[id]; !ok {
+				owner[id] = src
+			}
 		}
 	}
 	srcs = slices.Clone(srcs)

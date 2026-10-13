@@ -125,3 +125,16 @@ DELETE FROM addon_origins WHERE addon_id = $1;
 
 -- name: DeleteAddonOriginsOf :exec
 DELETE FROM addon_origins WHERE source_id = $1;
+
+-- name: ListAddonClaims :many
+SELECT * FROM addon_id_claims ORDER BY addon_id;
+
+-- name: ClaimAddonID :exec
+INSERT INTO addon_id_claims (addon_id, source_id) VALUES ($1, $2)
+ON CONFLICT (addon_id) DO NOTHING;
+
+-- name: ReleaseAddonClaim :exec
+DELETE FROM addon_id_claims WHERE addon_id = $1 AND source_id = $2;
+
+-- name: LockAddonSources :exec
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-addon-sources', 0));

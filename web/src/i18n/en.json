@@ -494,7 +494,7 @@
       "source_not_found": "There is no mikan-addon.json or index.json at this address (for a repository: in its latest release).",
       "source_bad_answer": "The source file cannot be read: it is neither mikan-addon.json nor index.json.",
       "source_signature_invalid": "The source signature does not match its key.",
-      "source_key_changed": "The source is signed with another key or no longer signed. Check the key with the author.",
+      "source_key_changed": "The source is signed with another key, began to be signed, or is no longer signed. Check the key with the author.",
       "source_empty": "The source has no entries that can be installed.",
       "source_key_invalid": "The key cannot be read: it must be an ed25519 public key in base64.",
       "source_exists": "This source is already added.",

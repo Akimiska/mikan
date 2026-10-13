@@ -3215,8 +3215,12 @@ export interface components {
             description: {
                 [key: string]: string;
             };
+            /** @description Дайджест образа записи источника */
+            digest?: string;
             homepage: string;
             id: string;
+            /** @description Образ записи источника: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто */
+            image?: string;
             installed: boolean;
             /** @enum {string} */
             kind: "bot" | "ui" | "generic";

@@ -103,6 +103,12 @@ export function ApproveDialog({ entry, granted, onClose }: { entry: MarketEntry 
         <>
           <PermissionList perms={entry.permissions} fresh={fresh} />
           {entry.origin ? <OriginWarning origin={entry.origin} /> : null}
+          {entry.image ? (
+            <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]">
+              <dt className="text-[var(--ink-500)]">{t("market.image")}</dt>
+              <dd className="mono break-all">{`${entry.image}@${entry.digest}`}</dd>
+            </dl>
+          ) : null}
           {actsAsAdmin(entry.permissions) ? <AdminWarning /> : null}
         </>
       ) : null}

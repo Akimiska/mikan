@@ -13,6 +13,7 @@ import (
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/addons/panelapi"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -43,6 +44,8 @@ type MarketEntry struct {
 	Update      bool              `json:"update" doc:"Установлен, а в каталоге или источнике другая сборка"`
 	Wider       bool              `json:"wider" doc:"Сборка просит больше прав, чем одобрено: обновление ждёт нового одобрения"`
 	Origin      *MarketOrigin     `json:"origin,omitempty" doc:"Источник неофициального аддона; нет у аддона подписанного каталога"`
+	Image       string            `json:"image,omitempty" doc:"Образ записи источника: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто"`
+	Digest      string            `json:"digest,omitempty" doc:"Дайджест образа записи источника"`
 }
 
 type MarketInstalled struct {
@@ -118,9 +121,13 @@ func (h *handlers) grant(ctx context.Context, id string) (perms []string, versio
 // marketEntry is an entry as the marketplace lists it: a running addon of this very source
 // (nil for the official catalog) is installed, and one with another build is an update.
 func marketEntry(e addons.Entry, origin *MarketOrigin, a addons.Installed, here bool, granted []string) MarketEntry {
-	return MarketEntry{ID: e.ID, Name: e.Name, Description: e.Description, Version: e.Version, Kind: e.Kind, Mode: e.Mode,
+	me := MarketEntry{ID: e.ID, Name: e.Name, Description: e.Description, Version: e.Version, Kind: e.Kind, Mode: e.Mode,
 		Permissions: listOrEmpty(e.Permissions), Homepage: e.Homepage, Installed: here, Update: here && a.Digest != e.Digest,
 		Wider: here && !addons.Covers(granted, e.Permissions), Origin: origin}
+	if origin != nil {
+		me.Image, me.Digest = e.Image, e.Digest
+	}
+	return me
 }
 
 func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
@@ -262,8 +269,14 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 		if src != nil {
 			return q.UpsertAddonOrigin(ctx, db.UpsertAddonOriginParams{AddonID: e.ID, SourceID: src.ID})
 		}
-		return nil
+		// An addon of the catalog has no source: a row left by an install that never
+		// happened must not make this one a source's.
+		return q.DeleteAddonOrigin(ctx, e.ID)
 	}); err != nil {
+		// The source was removed while the install was on its way.
+		if store.IsForeignKey(err) {
+			return nil, huma.Error404NotFound("source_unknown")
+		}
 		return nil, err
 	}
 	if err := h.ask(ctx, req, details); err != nil {
@@ -347,8 +360,14 @@ func (h *handlers) installExternal(ctx context.Context, in *marketExternalInput)
 		return nil, huma.Error409Conflict("addon_busy")
 	}
 	admin := sessionOf(ctx).AdminID
-	if err := h.d.Store.Q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: b.ID, Version: externalGrantVersion,
-		Permissions: addons.EncodePermissions(b.Permissions), ApprovedBy: sql.NullInt64{Int64: admin, Valid: true}, ApprovedAt: h.d.Now().Unix()}); err != nil {
+	if err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if err := q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: b.ID, Version: externalGrantVersion,
+			Permissions: addons.EncodePermissions(b.Permissions), ApprovedBy: sql.NullInt64{Int64: admin, Valid: true}, ApprovedAt: h.d.Now().Unix()}); err != nil {
+			return err
+		}
+		// A row of an install from a source that never happened must not claim this one.
+		return q.DeleteAddonOrigin(ctx, b.ID)
+	}); err != nil {
 		return nil, err
 	}
 	// Where the code comes from and what it may do; nothing here is a secret.

@@ -374,11 +374,29 @@ func TestSourceKeyPinning(t *testing.T) {
 			t.Fatalf("unsigned after signed (accept %q): %v", accept, err)
 		}
 	}
-	// An unsigned source that starts to sign only gains a key.
+	// A source being added with no key pins the one it is signed with.
 	publish(author, "e")
 	if doc, err := m.FetchSource(ctx, url, SourcePin{}); err != nil || doc.Key != authorKey {
-		t.Fatalf("unsigned then signed: %+v %v", doc, err)
+		t.Fatalf("first fetch of a signed source: %+v %v", doc, err)
 	}
+	// A source held without a key that begins to sign is not pinned unasked: the new key waits
+	// for the admin's fingerprint like any other.
+	unsigned := SourcePin{Unsigned: true}
+	if _, err := m.FetchSource(ctx, url, unsigned); !errors.As(err, &kc) || kc.Key != authorKey {
+		t.Fatalf("unsigned then signed: %v", err)
+	}
+	if _, err := m.FetchSource(ctx, url, SourcePin{Unsigned: true, Accept: Fingerprint(thiefKey)}); !errors.Is(err, ErrSourceKeyChanged) {
+		t.Fatalf("another key's fingerprint: %v", err)
+	}
+	if doc, err := m.FetchSource(ctx, url, SourcePin{Unsigned: true, Accept: Fingerprint(authorKey)}); err != nil || doc.Key != authorKey {
+		t.Fatalf("accepted: %+v %v", doc, err)
+	}
+	// Still unsigned is no change.
+	f.del("/mikan-addon.json.sig")
+	if doc, err := m.FetchSource(ctx, url, unsigned); err != nil || doc.Key != "" {
+		t.Fatalf("still unsigned: %+v %v", doc, err)
+	}
+	publish(author, "e")
 
 	// A signature that does not verify, or a file naming a key it was not signed with.
 	f.put("/mikan-addon.json.sig", []byte(base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))))
@@ -446,6 +464,15 @@ func TestSourceEntriesAreChecked(t *testing.T) {
 			e["homepage"] = "javascript:alert(1)"
 		}),
 		mod("homepage", func(e map[string]any) { e["homepage"] = "https://example.com/ok" }),
+		mod("hubimg", func(e map[string]any) { e["image"] = "me/hub" }),
+		mod("portimg", func(e map[string]any) { e["image"] = "registry.example.com:5000/me/x" }),
+		// The official bot's slot is not for a source's addon; nor is a registry on this machine
+		// or its network.
+		mod("telegram", func(e map[string]any) {}),
+		mod("loopimg", func(e map[string]any) { e["image"] = "127.0.0.1:2375/x" }),
+		mod("localimg", func(e map[string]any) { e["image"] = "localhost/x" }),
+		mod("lanimg", func(e map[string]any) { e["image"] = "10.0.0.5:5000/x" }),
+		mod("bareimg", func(e map[string]any) { e["image"] = "registry:5000/x" }),
 	}
 	f.put("/index.json", mustJSON(t, map[string]any{"adapters": entries}))
 	doc, err := m.FetchSource(t.Context(), f.srv.URL+"/index.json", SourcePin{})
@@ -456,7 +483,7 @@ func TestSourceEntriesAreChecked(t *testing.T) {
 	for _, e := range doc.Entries {
 		kept = append(kept, e.ID)
 	}
-	if got := strings.Join(kept, ","); got != "good,goodtwice,texts,homepage" {
+	if got := strings.Join(kept, ","); got != "good,goodtwice,texts,homepage,hubimg,portimg" {
 		t.Fatalf("kept: %s", got)
 	}
 	reasons := map[string]string{}
@@ -465,7 +492,8 @@ func TestSourceEntriesAreChecked(t *testing.T) {
 	}
 	for id, want := range map[string]string{"tagged": "image_invalid", "digestinimage": "image_invalid", "digestless": "digest_invalid", "shortdigest": "digest_invalid", "pay": "payment", "pay1": "payment",
 		"proto3": "invalid", "badperm": "invalid", "dupperm": "invalid", "badkind": "invalid", "bigmem": "invalid", "Bad_ID": "id_invalid", "future": "min_panel",
-		"badversion": "version_invalid", "goodtwice": "duplicate", "badimage": "image_invalid"} {
+		"badversion": "version_invalid", "goodtwice": "duplicate", "badimage": "image_invalid",
+		"telegram": "id_taken", "loopimg": "image_invalid", "localimg": "image_invalid", "lanimg": "image_invalid", "bareimg": "image_invalid"} {
 		if reasons[id] != want {
 			t.Errorf("%s: %q, want %q (all: %v)", id, reasons[id], want, reasons)
 		}
@@ -517,7 +545,7 @@ func newGHFake(t *testing.T) *ghFake {
 	}))
 	g.api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/repos/owner/repo/releases/latest":
+		case strings.EqualFold(r.URL.Path, "/repos/owner/repo/releases/latest"):
 			g.mu.Lock()
 			rel := g.release
 			g.mu.Unlock()
@@ -617,6 +645,11 @@ func TestSourceGitHubShorthand(t *testing.T) {
 	if _, err := m.FetchSource(ctx, src, SourcePin{}); !errors.Is(err, ErrSourceBadAnswer) {
 		t.Fatalf("broken release: %v", err)
 	}
+	// GitHub names the repository as it was created; the admin may have typed it otherwise.
+	g.publish("mikan-addon.json")
+	if doc, err := m.FetchSource(ctx, "github.com/Owner/REPO", SourcePin{}); err != nil || len(doc.Entries) != 1 {
+		t.Fatalf("another spelling of the repository: %+v %v", doc, err)
+	}
 	// The same shorthand written as a URL is the same source.
 	if c, err := m.CanonicalSourceURL("https://github.com/owner/repo"); err != nil || c != src {
 		t.Fatalf("canonical: %q %v", c, err)
@@ -651,8 +684,11 @@ func TestOwners(t *testing.T) {
 	}
 	got := Owners(map[string]bool{"telegram": true, "yookassa": true},
 		map[string]int64{"installed": 7, "telegram": 9},
+		// A claim outlives the lower number of a source that lists the id later; the panel's own
+		// and an installed addon's ids stay what they are.
+		map[string]int64{"shared": 3, "claimed": 7, "yookassa": 4, "installed": 2},
 		[]SourceEntries{{ID: 3, Entries: e("shared", "telegram", "three", "installed")}, {ID: 2, Entries: e("shared", "two")}, {ID: 7, Entries: e("seven", "installed")}})
-	want := map[string]int64{"telegram": 0, "yookassa": 0, "installed": 7, "shared": 2, "two": 2, "three": 3, "seven": 7}
+	want := map[string]int64{"telegram": 0, "yookassa": 0, "installed": 7, "shared": 3, "claimed": 7, "two": 2, "three": 3, "seven": 7}
 	if len(got) != len(want) {
 		t.Fatalf("owners: %v", got)
 	}

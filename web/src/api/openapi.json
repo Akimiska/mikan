@@ -2992,10 +2992,18 @@
             },
             "type": "object"
           },
+          "digest": {
+            "description": "Дайджест образа записи источника",
+            "type": "string"
+          },
           "homepage": {
             "type": "string"
           },
           "id": {
+            "type": "string"
+          },
+          "image": {
+            "description": "Образ записи источника: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто",
             "type": "string"
           },
           "installed": {

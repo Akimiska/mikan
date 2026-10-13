@@ -137,6 +137,21 @@ func (q *Queries) AddonKVSize(ctx context.Context, arg AddonKVSizeParams) (int64
 	return size, err
 }
 
+const claimAddonID = `-- name: ClaimAddonID :exec
+INSERT INTO addon_id_claims (addon_id, source_id) VALUES ($1, $2)
+ON CONFLICT (addon_id) DO NOTHING
+`
+
+type ClaimAddonIDParams struct {
+	AddonID  string
+	SourceID int64
+}
+
+func (q *Queries) ClaimAddonID(ctx context.Context, arg ClaimAddonIDParams) error {
+	_, err := q.db.ExecContext(ctx, claimAddonID, arg.AddonID, arg.SourceID)
+	return err
+}
+
 const countAddonSources = `-- name: CountAddonSources :one
 SELECT count(*) FROM addon_sources
 `
@@ -311,6 +326,33 @@ func (q *Queries) GetAddonValue(ctx context.Context, arg GetAddonValueParams) (A
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listAddonClaims = `-- name: ListAddonClaims :many
+SELECT addon_id, source_id FROM addon_id_claims ORDER BY addon_id
+`
+
+func (q *Queries) ListAddonClaims(ctx context.Context) ([]AddonIDClaim, error) {
+	rows, err := q.db.QueryContext(ctx, listAddonClaims)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AddonIDClaim{}
+	for rows.Next() {
+		var i AddonIDClaim
+		if err := rows.Scan(&i.AddonID, &i.SourceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAddonEvents = `-- name: ListAddonEvents :many
@@ -524,6 +566,15 @@ func (q *Queries) LockAddonEvents(ctx context.Context, key int64) error {
 	return err
 }
 
+const lockAddonSources = `-- name: LockAddonSources :exec
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-addon-sources', 0))
+`
+
+func (q *Queries) LockAddonSources(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, lockAddonSources)
+	return err
+}
+
 const lockAddonValue = `-- name: LockAddonValue :one
 SELECT addon_id, key, value, version, expires_at, updated_at FROM addon_kv WHERE addon_id = $1 AND key = $2 FOR UPDATE
 `
@@ -608,6 +659,20 @@ func (q *Queries) PutAddonValue(ctx context.Context, arg PutAddonValueParams) er
 		arg.ExpiresAt,
 		arg.UpdatedAt,
 	)
+	return err
+}
+
+const releaseAddonClaim = `-- name: ReleaseAddonClaim :exec
+DELETE FROM addon_id_claims WHERE addon_id = $1 AND source_id = $2
+`
+
+type ReleaseAddonClaimParams struct {
+	AddonID  string
+	SourceID int64
+}
+
+func (q *Queries) ReleaseAddonClaim(ctx context.Context, arg ReleaseAddonClaimParams) error {
+	_, err := q.db.ExecContext(ctx, releaseAddonClaim, arg.AddonID, arg.SourceID)
 	return err
 }
 

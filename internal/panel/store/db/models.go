@@ -32,6 +32,11 @@ type AddonGrant struct {
 	ApprovedAt  int64
 }
 
+type AddonIDClaim struct {
+	AddonID  string
+	SourceID int64
+}
+
 type AddonKv struct {
 	AddonID   string
 	Key       string

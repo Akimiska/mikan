@@ -15,6 +15,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -85,8 +86,15 @@ type sourceBoard struct {
 	owners  map[string]int64 // addon id → source (0: the panel's own); nil without the catalog
 }
 
+// offered is the source's entries when it may offer them (see SourceState.Offered).
+func (b sourceBoard) offered(id int64) (addons.SourceDoc, bool) {
+	state, ok := b.states[id]
+	return state.Doc, ok && state.Offered()
+}
+
 // sourceBoard reads the sources, refreshes the stale ones (refresh) in parallel, and works out
-// who owns which id. Without the signed catalog (nil) no id can be judged: no entry is offered.
+// who owns which id: an id goes to the first source to list it, and that claim is stored. Without
+// the signed catalog (nil) no id can be judged: no entry is offered.
 func (h *handlers) sourceBoard(ctx context.Context, st addons.State, official *addons.Catalog, refresh bool) (sourceBoard, error) {
 	q := h.d.Store.Q
 	b := sourceBoard{states: map[int64]addons.SourceState{}, origins: map[string]int64{}}
@@ -120,7 +128,10 @@ func (h *handlers) sourceBoard(ctx context.Context, st addons.State, official *a
 		}
 		wg.Wait()
 		for i, s := range b.list {
-			b.states[s.ID] = states[i]
+			// A source not read yet (its fetch is still under way) has no state to judge by.
+			if !states[i].At.IsZero() {
+				b.states[s.ID] = states[i]
+			}
 		}
 	} else {
 		for _, s := range b.list {
@@ -143,12 +154,76 @@ func (h *handlers) sourceBoard(ctx context.Context, st addons.State, official *a
 	}
 	var srcs []addons.SourceEntries
 	for _, s := range b.list {
-		if state, ok := b.states[s.ID]; ok && state.Err == nil {
-			srcs = append(srcs, addons.SourceEntries{ID: s.ID, Entries: state.Doc.Entries})
+		if doc, ok := b.offered(s.ID); ok {
+			srcs = append(srcs, addons.SourceEntries{ID: s.ID, Entries: doc.Entries})
 		}
 	}
-	b.owners = addons.Owners(taken, b.origins, srcs)
+	claims, err := h.claimIDs(ctx, b, taken, srcs)
+	if err != nil {
+		return b, err
+	}
+	b.owners = addons.Owners(taken, b.origins, claims, srcs)
 	return b, nil
+}
+
+// claimIDs keeps the claims on ids: a source that lists an id nobody holds takes it, and keeps
+// it while it lists it (a source that cannot be read for now keeps what it had). The claims are
+// stored, so neither a restart nor a source added later changes who holds an id.
+func (h *handlers) claimIDs(ctx context.Context, b sourceBoard, taken map[string]bool, srcs []addons.SourceEntries) (map[string]int64, error) {
+	q := h.d.Store.Q
+	rows, err := q.ListAddonClaims(ctx)
+	if err != nil {
+		return nil, err
+	}
+	claims := map[string]int64{}
+	changed := false
+	for _, r := range rows {
+		claims[r.AddonID] = r.SourceID
+	}
+	listed := map[int64]map[string]bool{}
+	for _, s := range srcs {
+		listed[s.ID] = map[string]bool{}
+		for _, e := range s.Entries {
+			listed[s.ID][e.ID] = true
+		}
+	}
+	// A source read in full that no longer lists the id lets it go.
+	for id, src := range claims {
+		if state, ok := b.states[src]; ok && state.Err == nil && !listed[src][id] {
+			if err := q.ReleaseAddonClaim(ctx, db.ReleaseAddonClaimParams{AddonID: id, SourceID: src}); err != nil {
+				return nil, err
+			}
+			delete(claims, id)
+			changed = true
+		}
+	}
+	for _, s := range slices.SortedFunc(slices.Values(srcs), func(a, b addons.SourceEntries) int { return int(a.ID - b.ID) }) {
+		for _, e := range s.Entries {
+			if _, held := claims[e.ID]; held || taken[e.ID] {
+				continue
+			}
+			if _, installed := b.origins[e.ID]; installed {
+				continue
+			}
+			if err := q.ClaimAddonID(ctx, db.ClaimAddonIDParams{AddonID: e.ID, SourceID: s.ID}); err != nil {
+				return nil, err
+			}
+			claims[e.ID] = s.ID
+			changed = true
+		}
+	}
+	if !changed {
+		return claims, nil
+	}
+	// Another request may have claimed an id in between: what is stored decides.
+	if rows, err = q.ListAddonClaims(ctx); err != nil {
+		return nil, err
+	}
+	claims = map[string]int64{}
+	for _, r := range rows {
+		claims[r.AddonID] = r.SourceID
+	}
+	return claims, nil
 }
 
 func (b sourceBoard) source(id int64) (db.AddonSource, bool) {
@@ -174,12 +249,12 @@ func (b sourceBoard) mark(s db.AddonSource) *MarketOrigin {
 
 // entriesOf is what the source offers: its entries under ids it holds.
 func (b sourceBoard) entriesOf(s db.AddonSource) []addons.Entry {
-	state, ok := b.states[s.ID]
-	if !ok || state.Err != nil || b.owners == nil {
+	doc, ok := b.offered(s.ID)
+	if !ok || b.owners == nil {
 		return nil
 	}
 	var out []addons.Entry
-	for _, e := range state.Doc.Entries {
+	for _, e := range doc.Entries {
 		if b.owners[e.ID] == s.ID {
 			out = append(out, e)
 		}
@@ -277,17 +352,21 @@ func (h *handlers) sourceView(ctx context.Context, st addons.State, b sourceBoar
 	slices.Sort(sv.Installed)
 	listed := map[string]bool{}
 	for _, e := range b.entriesOf(s) {
-		granted, err := h.granted(ctx, e.ID)
-		if err != nil {
-			return sv, err
-		}
 		a, ok := st.Adapters[e.ID]
 		here := ok && a.SourceOf() == addons.SourceCustom && b.origins[e.ID] == s.ID
+		// What was approved matters only for an addon of this source that is there.
+		var granted []string
+		if here {
+			var err error
+			if granted, err = h.granted(ctx, e.ID); err != nil {
+				return sv, err
+			}
+		}
 		sv.Entries = append(sv.Entries, marketEntry(e, b.mark(s), a, here, granted))
 		listed[e.ID] = true
 	}
 	// What the source lists under an id another holds is not offered, and says so.
-	if fetched && state.Err == nil && b.owners != nil {
+	if fetched && state.Offered() && b.owners != nil {
 		for _, e := range state.Doc.Entries {
 			if !listed[e.ID] {
 				sv.Skipped = append(sv.Skipped, SourceSkipView{ID: e.ID, Reason: "id_taken"})
@@ -349,7 +428,9 @@ func (h *handlers) addSource(ctx context.Context, in *addSourceInput) (*sourcesO
 	if err != nil {
 		return nil, huma.Error502BadGateway("catalog_unavailable")
 	}
-	board, err := h.sourceBoard(ctx, st, &c, false)
+	// The sources held already are read first (a panel just started knows none of them): an id
+	// one of them holds is not for the new one.
+	board, err := h.sourceBoard(ctx, st, &c, true)
 	if err != nil {
 		return nil, err
 	}
@@ -377,16 +458,58 @@ func (h *handlers) addSource(ctx context.Context, in *addSourceInput) (*sourcesO
 		return nil, fieldErrValue("body.url", "addon_id_taken", taken)
 	}
 	now := h.d.Now().Unix()
-	row, err := q.AddAddonSource(ctx, db.AddAddonSourceParams{Url: canonical, Key: doc.Key, Title: doc.Title,
-		AddedBy: sql.NullInt64{Int64: sessionOf(ctx).AdminID, Valid: true}, AddedAt: now, FetchedAt: now})
-	if err != nil {
-		return nil, err
-	}
-	m.SetSource(row.ID, doc)
 	ids := make([]string, 0, len(doc.Entries))
 	for _, e := range doc.Entries {
 		ids = append(ids, e.ID)
 	}
+	var row db.AddonSource
+	// One add at a time: the limit and the claims on ids are judged on what the other adds left.
+	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if err := q.LockAddonSources(ctx); err != nil {
+			return err
+		}
+		if n, err := q.CountAddonSources(ctx); err != nil {
+			return err
+		} else if n >= addons.MaxSources {
+			return huma.Error409Conflict("source_limit")
+		}
+		// The same address added at the same moment: the one that got here first stays.
+		if rows, err := q.ListAddonSources(ctx); err != nil {
+			return err
+		} else if slices.ContainsFunc(rows, func(s db.AddonSource) bool { return s.Url == canonical }) {
+			return fieldErr("body.url", "source_exists")
+		}
+		claims, err := q.ListAddonClaims(ctx)
+		if err != nil {
+			return err
+		}
+		var held []string
+		for _, c := range claims {
+			if slices.Contains(ids, c.AddonID) {
+				held = append(held, c.AddonID)
+			}
+		}
+		if len(held) > 0 {
+			return fieldErrValue("body.url", "addon_id_taken", held)
+		}
+		if row, err = q.AddAddonSource(ctx, db.AddAddonSourceParams{Url: canonical, Key: doc.Key, Title: doc.Title,
+			AddedBy: sql.NullInt64{Int64: sessionOf(ctx).AdminID, Valid: true}, AddedAt: now, FetchedAt: now}); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := q.ClaimAddonID(ctx, db.ClaimAddonIDParams{AddonID: id, SourceID: row.ID}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if store.IsUnique(err) {
+		return nil, fieldErr("body.url", "source_exists")
+	}
+	if err != nil {
+		return nil, err
+	}
+	m.SetSource(row.ID, doc)
 	h.audit(ctx, sessionOf(ctx).AdminID, "addon.source.add", "addon_source", strconv.FormatInt(row.ID, 10),
 		map[string]any{"url": canonical, "title": doc.Title, "signed": doc.Key != "", "fingerprint": addons.Fingerprint(doc.Key), "entries": ids})
 	v, err := h.sourcesView(ctx, st, &c, false)

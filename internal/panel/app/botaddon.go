@@ -22,7 +22,7 @@ import (
 // a bot from the catalog.
 
 // OfficialBot is the id of the official bot addon in the catalog.
-const OfficialBot = "telegram"
+const OfficialBot = addons.OfficialBotID
 
 // officialBotPermissions bound what the official bot is granted when it installs itself.
 var officialBotPermissions = []string{"bot", "users:read", "users:write", "billing:invoice", "events", "kv"}

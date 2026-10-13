@@ -357,3 +357,9 @@ func IsUnique(err error) bool {
 	var pe *pgconn.PgError
 	return errors.As(err, &pe) && pe.Code == "23505"
 }
+
+// IsForeignKey: the row points at one that is not there (any more).
+func IsForeignKey(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.Code == "23503"
+}

@@ -2844,7 +2844,7 @@
       "invoice": "Invoices",
       "invoiceText": "creates invoices, gives trials and free plans through the panel's payment methods",
       "events": "Events",
-      "eventsText": "learns about payments, refunds and subscriptions or traffic running out",
+      "eventsText": "learns about payments, refunds, new clients and trials (with their Telegram ids), devices bound and unbound (names and models), servers going down and coming back, and subscriptions or traffic running out",
       "kv": "Storage",
       "kvText": "keeps its own data in the panel (256 MB by default)",
       "ui": "Pages",

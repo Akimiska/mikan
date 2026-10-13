@@ -17,6 +17,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -55,6 +56,7 @@ type Manager struct {
 	now     func() time.Time
 
 	nodesDirty chan struct{}
+	hub        *events.Hub // woken after a node was told down or up (liveness.go); nil: no one waits
 
 	mu        sync.Mutex
 	running   map[int64]*running
@@ -102,6 +104,9 @@ func NewManager(st *store.Store, set *settings.Settings, pool *domain.Pool, conn
 	return &Manager{st: st, set: set, pool: pool, connect: connect, log: log, now: now,
 		nodesDirty: make(chan struct{}, 1), running: map[int64]*running{}, batches: map[int64]uint64{}, storeInterval: storeEvery}
 }
+
+// SetEvents connects the hub that wakes the addons reading the feed; call it before Run.
+func (m *Manager) SetEvents(h *events.Hub) { m.hub = h }
 
 func (m *Manager) Run(ctx context.Context) {
 	m.reconcile(ctx)

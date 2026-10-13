@@ -250,6 +250,10 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 	if !addons.SamePermissions(in.Body.Permissions, e.Permissions) {
 		return nil, huma.Error409Conflict("permissions_changed")
 	}
+	// A permission the host does not know yet would make it drop the addon: mikan update first.
+	if !addons.HostTakes(st.HostVersion, e.Permissions) {
+		return nil, huma.Error409Conflict("host_outdated")
+	}
 	if queued(h.d.Addons, e.ID) {
 		return nil, huma.Error409Conflict("addon_busy")
 	}
@@ -335,6 +339,9 @@ func (h *handlers) installExternal(ctx context.Context, in *marketExternalInput)
 	st, err := h.addonHost()
 	if err != nil {
 		return nil, err
+	}
+	if !addons.HostTakes(st.HostVersion, b.Permissions) {
+		return nil, huma.Error409Conflict("host_outdated")
 	}
 	// Without the catalog the id cannot be checked against it: refused rather than guessed.
 	c, err := h.catalog(ctx)

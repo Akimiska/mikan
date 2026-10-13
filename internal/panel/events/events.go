@@ -1,6 +1,7 @@
 // Package events is the panel's feed of events for addons of protocol 2 (permission events):
-// what happened to payments and subscribers, written in the same transaction as the change
-// itself, so an event is never lost and never told about a change that rolled back.
+// what happened to payments, subscribers, devices and nodes (types.go lists them all), written
+// in the same transaction as the change itself, so an event is never lost and never told about
+// a change that rolled back.
 package events
 
 import (
@@ -11,15 +12,6 @@ import (
 	"time"
 
 	"mikan/internal/panel/store/db"
-)
-
-// Types of events in the first version of protocol 2.
-const (
-	PaymentPaid     = "payment.paid"
-	PaymentRefunded = "payment.refunded"
-	// UserGranted: an addon with users:grant gave a user days or traffic. data: user_id,
-	// days, bytes, pool_id, reason, addon.
-	UserGranted = "user.granted"
 )
 
 // Retention: an event older than this is gone, read or not.

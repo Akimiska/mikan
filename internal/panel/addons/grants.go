@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"mikan/internal/panel/store/db"
+	"mikan/internal/release"
 )
 
 // The admin approves the permissions of an addon of protocol 2 as a set: the table
@@ -69,4 +70,19 @@ func Covers(approved, asked []string) bool {
 // SamePermissions: the two hold the same set.
 func SamePermissions(a, b []string) bool {
 	return Covers(a, b) && Covers(b, a)
+}
+
+// permsSince is the host version that first knows a permission added after protocol 2 shipped:
+// an older host drops an entry that asks for one as unsound, so its addon would not run.
+var permsSince = map[string]string{"users:all": "0.5.1.0-rc.11", "users:grant": "0.5.1.0-rc.11"}
+
+// HostTakes says whether a host of this version runs an addon with these permissions. A host
+// that reports no release version (a development build) is taken to know them all.
+func HostTakes(host string, perms []string) bool {
+	for _, p := range perms {
+		if since, ok := permsSince[p]; ok && release.Valid(host) && !release.AtLeast(host, since) {
+			return false
+		}
+	}
+	return true
 }

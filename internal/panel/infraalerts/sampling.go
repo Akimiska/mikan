@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/panel/hysteresis"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -22,9 +23,9 @@ import (
 // nodeFailAfter failed samples; a probe of WARP or an exit makes it degraded after
 // probeFailAfter; every kind needs recoverAfter good samples in a row to be called recovered.
 const (
-	nodeFailAfter  = 3
+	nodeFailAfter  = hysteresis.NodeFailAfter
 	probeFailAfter = 2
-	recoverAfter   = 2
+	recoverAfter   = hysteresis.RecoverAfter
 )
 
 // An inbound or the cascade relay is unavailable after inboundFailSamples failed samples. A port

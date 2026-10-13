@@ -141,6 +141,7 @@ func (s *Users) ReissueByOwner(ctx context.Context, id int64, via string) (db.Us
 	if err != nil {
 		return db.User{}, err
 	}
+	s.hub.Kick() // the devices it unbound
 	s.changes.PoliciesChanged()
 	return s.Get(ctx, id)
 }

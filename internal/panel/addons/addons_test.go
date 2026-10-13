@@ -340,3 +340,23 @@ func TestRequestValid(t *testing.T) {
 		}
 	}
 }
+
+// A host before the open permissions would drop an addon that asks for them.
+func TestHostTakes(t *testing.T) {
+	for _, c := range []struct {
+		host  string
+		perms []string
+		want  bool
+	}{
+		{"0.5.1.0-rc.10", []string{"bot", "kv"}, true},
+		{"0.5.1.0-rc.10", []string{"users:all"}, false},
+		{"0.5.1.0-rc.10", []string{"events", "users:grant"}, false},
+		{"0.5.1.0-rc.11", []string{"users:all", "users:grant"}, true},
+		{"0.5.1.0", []string{"users:grant"}, true},
+		{"dev", []string{"users:grant"}, true},
+	} {
+		if got := HostTakes(c.host, c.perms); got != c.want {
+			t.Errorf("HostTakes(%q, %v) = %v, want %v", c.host, c.perms, got, c.want)
+		}
+	}
+}

@@ -6,6 +6,8 @@ package infraalerts
 import (
 	"errors"
 	"strings"
+
+	"mikan/internal/panel/hysteresis"
 )
 
 const KeyConfig = "infrastructure_alerts"
@@ -142,62 +144,18 @@ func (c *AlertsConfig) Validate() error {
 	return nil
 }
 
-type Level uint8
+// The levels and the hysteresis live in hysteresis, shared with the addons' node events; the
+// names stay here because the persisted samples and everything below speak them.
+type Level = hysteresis.Level
 
 const (
-	Unknown Level = iota
-	Healthy
-	Degraded
-	Unavailable
+	Unknown     = hysteresis.Unknown
+	Healthy     = hysteresis.Healthy
+	Degraded    = hysteresis.Degraded
+	Unavailable = hysteresis.Unavailable
 )
 
-// Tracker applies failure and recovery hysteresis. A bad sample must persist for the
-// configured number of rounds; a good sample must persist too before recovery is emitted.
-type Tracker struct {
-	Level      Level
-	BadRounds  int
-	GoodRounds int
-}
-
-type Transition struct {
-	From Level
-	To   Level
-}
-
-func (t *Tracker) Observe(sample Level, failAfter, recoverAfter int) *Transition {
-	if sample == Unknown {
-		return nil
-	}
-	if failAfter < 1 {
-		failAfter = 1
-	}
-	if recoverAfter < 1 {
-		recoverAfter = 1
-	}
-	if sample == Healthy {
-		t.BadRounds = 0
-		if t.Level == Unknown || t.Level == Healthy {
-			t.Level, t.GoodRounds = Healthy, 0
-			return nil
-		}
-		t.GoodRounds++
-		if t.GoodRounds >= recoverAfter {
-			from := t.Level
-			t.Level, t.GoodRounds = Healthy, 0
-			return &Transition{From: from, To: Healthy}
-		}
-		return nil
-	}
-	t.GoodRounds = 0
-	if t.Level == sample {
-		t.BadRounds = 0
-		return nil
-	}
-	t.BadRounds++
-	if t.BadRounds >= failAfter {
-		from := t.Level
-		t.Level, t.BadRounds = sample, 0
-		return &Transition{From: from, To: sample}
-	}
-	return nil
-}
+type (
+	Tracker    = hysteresis.Tracker
+	Transition = hysteresis.Transition
+)

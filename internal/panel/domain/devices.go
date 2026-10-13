@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -25,7 +27,12 @@ type Devices struct {
 	pool    *Pool
 	changes Changes
 	now     func() time.Time
+	hub     *events.Hub // woken after a device is bound or unbound; nil: no one waits
 }
+
+// SetEvents connects the hub that wakes the addons reading the feed (events.DeviceBound and
+// events.DeviceUnbound are written in the transaction of the change).
+func (d *Devices) SetEvents(h *events.Hub) { d.hub = h }
 
 // DeviceInfo is what a client tells about itself when it fetches the subscription.
 type DeviceInfo struct {
@@ -125,6 +132,9 @@ func (d *Devices) Bind(ctx context.Context, u db.User, in DeviceInfo, requireHWI
 	if err != nil {
 		return db.Slot{}, err
 	}
+	if created {
+		d.hub.Kick()
+	}
 	if created && hwid != "" {
 		d.changes.PoliciesChanged() // the new slot is allowed from now on
 	}
@@ -220,14 +230,28 @@ func (d *Devices) bind(ctx context.Context, u db.User, hwid string, in DeviceInf
 		if err != nil {
 			return err
 		}
-		if _, err := q.CreateBoundDevice(ctx, db.CreateBoundDeviceParams{UserID: u.ID, Hwid: hwid, SlotID: slot.ID, Os: os, OsVersion: osv, Model: model,
-			App: app, LastIp: ip, CreatedAt: now, LastSeen: now}); err != nil {
+		nd, err := q.CreateBoundDevice(ctx, db.CreateBoundDeviceParams{UserID: u.ID, Hwid: hwid, SlotID: slot.ID, Os: os, OsVersion: osv, Model: model,
+			App: app, LastIp: ip, CreatedAt: now, LastSeen: now})
+		if err != nil {
 			return err
 		}
 		created = true
-		return nil
+		return emitDevice(ctx, q, time.Unix(now, 0), events.DeviceBound, u.ID, nd, "")
 	})
 	return slot, created, err
+}
+
+// emitDevice tells the addons a device of userID took or lost its place, in the caller's
+// transaction; once per device and type (a device's id is never given again). The device's own
+// id (the HWID) stays out of it. by is how it was unbound (events.UnboundBy*).
+func emitDevice(ctx context.Context, q *db.Queries, now time.Time, typ string, userID int64, dev db.BoundDevice, by string) error {
+	return events.Emit(ctx, q, now, typ, userID, 0, events.Device{DeviceID: dev.ID, Label: DeviceLabel(dev), Shared: dev.Hwid == "", By: by},
+		typ+":"+strconv.FormatInt(dev.ID, 10))
+}
+
+// unbound tells of a device that lost its place, by the way the caller names.
+func unbound(ctx context.Context, q *db.Queries, now time.Time, userID int64, dev db.BoundDevice, by string) error {
+	return emitDevice(ctx, q, now, events.DeviceUnbound, userID, dev, by)
 }
 
 // Unbind frees a device's place and cuts it off: its own slot burns (the node drops it
@@ -249,6 +273,7 @@ func (d *Devices) Unbind(ctx context.Context, userID, deviceID int64, bySubscrib
 		err = d.unbind(ctx, rules, userID, deviceID, bySubscriber)
 	}
 	if err == nil {
+		d.hub.Kick()
 		d.changes.PoliciesChanged()
 	}
 	return err
@@ -299,6 +324,13 @@ func (d *Devices) unbind(ctx context.Context, rules UnbindRules, userID, deviceI
 			return err
 		}
 		if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
+			return err
+		}
+		by := events.UnboundByAdmin
+		if bySubscriber {
+			by = events.UnboundBySubscriber
+		}
+		if err := unbound(ctx, q, now, userID, dev, by); err != nil {
 			return err
 		}
 		if !bySubscriber {
@@ -375,9 +407,13 @@ func (d *Devices) Ban(ctx context.Context, userID, deviceID, adminID int64) (db.
 		if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: dev.SlotID}); err != nil {
 			return err
 		}
-		return q.DeleteBoundDevice(ctx, dev.ID)
+		if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
+			return err
+		}
+		return unbound(ctx, q, time.Unix(now, 0), userID, dev, events.UnboundByBan)
 	})
 	if err == nil {
+		d.hub.Kick()
 		d.changes.PoliciesChanged() // the burnt slot leaves the nodes
 	}
 	return ban, err
@@ -429,29 +465,35 @@ func (d *Devices) ForgetIdle(ctx context.Context) (int, error) {
 			if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
 				return err
 			}
+			if err := unbound(ctx, q, now, dev.UserID, dev, events.UnboundIdle); err != nil {
+				return err
+			}
 			n++
 		}
 		return nil
 	})
 	if err == nil && n > 0 {
+		d.hub.Kick()
 		d.changes.PoliciesChanged()
 	}
 	return n, err
 }
 
-// burnDevices burns the slots of a user's devices with ids and forgets all devices:
-// the user is reissued or deleted. The shared place uses the user's own slot, which the
-// caller handles.
+// burnDevices burns the slots of a user's devices with ids and forgets all devices, telling
+// the addons each was unbound: the user is reissued. The shared place uses the user's own
+// slot, which the caller handles.
 func burnDevices(ctx context.Context, q *db.Queries, userID, now int64) error {
 	devs, err := q.ListBoundDevices(ctx, userID)
 	if err != nil {
 		return err
 	}
 	for _, dev := range devs {
-		if dev.Hwid == "" {
-			continue
+		if dev.Hwid != "" {
+			if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: dev.SlotID}); err != nil {
+				return err
+			}
 		}
-		if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now, Valid: true}, ID: dev.SlotID}); err != nil {
+		if err := unbound(ctx, q, time.Unix(now, 0), userID, dev, events.UnboundReissue); err != nil {
 			return err
 		}
 	}

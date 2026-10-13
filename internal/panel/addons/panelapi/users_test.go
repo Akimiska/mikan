@@ -14,6 +14,7 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/store/db"
 )
 
@@ -121,13 +122,20 @@ func (e *usersEnv) audit() []db.AuditLog {
 	return rows
 }
 
+// feed is the grants told to addons; the users the tests make are told too (user.created).
 func (e *usersEnv) feed() []db.AddonEvent {
 	e.t.Helper()
 	rows, err := e.s.d.Store.Q.ListAddonEvents(context.Background(), db.ListAddonEventsParams{BotToo: true, Lim: 100})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	return rows
+	var granted []db.AddonEvent
+	for _, r := range rows {
+		if r.Type == events.UserGranted {
+			granted = append(granted, r)
+		}
+	}
+	return granted
 }
 
 // Each route needs its own permission; the bot's users:read and users:write, and the
@@ -521,7 +529,7 @@ func TestGrantDaysAndTraffic(t *testing.T) {
 	}
 	var data map[string]any
 	_ = json.Unmarshal([]byte(evs[2].Data), &data)
-	if evs[2].Type != "user.granted" || evs[2].UserID.Int64 != u.ID || data["user_id"] != float64(u.ID) || data["days"] != float64(30) ||
+	if evs[2].Type != "user.granted" || evs[2].UserID.Int64 != u.ID || data["days"] != float64(30) ||
 		data["bytes"] != float64(domain.GiB) || data["addon"] != "granter" {
 		t.Fatalf("event: %+v %v", evs[2], data)
 	}
@@ -750,7 +758,7 @@ func TestGrantEventCarriesTheOwner(t *testing.T) {
 	}
 	var data map[string]any
 	_ = json.Unmarshal([]byte(evs[0].Data), &data)
-	if data["pool_id"] != nil || data["bytes"] != float64(0) || data["days"] != float64(2) {
+	if data["pool_id"] != nil || data["bytes"] != nil || data["days"] != float64(2) || data["addon"] != "granter" {
 		t.Fatalf("data: %v", data)
 	}
 }

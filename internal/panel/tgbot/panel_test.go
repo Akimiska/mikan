@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
@@ -43,7 +44,7 @@ func TestNoticesBecomeEventsOnce(t *testing.T) {
 	if e.sendsTo(anna, n) != 0 {
 		t.Fatal("the panel sent a notice itself")
 	}
-	if len(got) != 1 || got[0].typ != EventExpiring || got[0].user != e.user.ID || got[0].tg != anna || !strings.Contains(got[0].data, `"days":3`) {
+	if len(got) != 1 || got[0].typ != events.UserExpiring || got[0].user != e.user.ID || got[0].tg != anna || !strings.Contains(got[0].data, `"days":3`) {
 		t.Fatalf("events: %+v", got)
 	}
 	if e.noticeRows() != 1 {

@@ -154,19 +154,22 @@ func (t Text) In(lang string) string {
 // Entry is one addon of the catalog. Kind, Mode, Permissions and Resources are protocol 2;
 // a protocol 1 entry is a payment adapter serving HTTP.
 type Entry struct {
-	ID          string    `json:"id"`
-	Name        Text      `json:"name"`
-	Description Text      `json:"description"`
-	Version     string    `json:"version"`
-	Protocol    int       `json:"protocol"`
-	Kind        string    `json:"kind,omitempty"`
-	Mode        string    `json:"mode,omitempty"`
-	Permissions []string  `json:"permissions,omitempty"`
-	Resources   Resources `json:"resources,omitzero"`
-	Image       string    `json:"image"`
-	Digest      string    `json:"digest"`
-	MinPanel    string    `json:"min_panel"`
-	Homepage    string    `json:"homepage"`
+	ID          string   `json:"id"`
+	Name        Text     `json:"name"`
+	Description Text     `json:"description"`
+	Version     string   `json:"version"`
+	Protocol    int      `json:"protocol"`
+	Kind        string   `json:"kind,omitempty"`
+	Mode        string   `json:"mode,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+	// How its events reach it (push, and the types it wants) is not here: an addon of the
+	// admin's own has no entry, so the panel reads it from the addon's /v2/info (InfoV2). That
+	// is a choice of delivery only; what an addon may receive is the events permission.
+	Resources Resources `json:"resources,omitzero"`
+	Image     string    `json:"image"`
+	Digest    string    `json:"digest"`
+	MinPanel  string    `json:"min_panel"`
+	Homepage  string    `json:"homepage"`
 }
 
 // Resources an addon asks the host for.
@@ -374,6 +377,7 @@ type Manager struct {
 	src     *sourceNet              // the way out to third-party sources (sources.go)
 	sources map[int64]SourceState   // the last fetch of each source
 	flights map[int64]*sourceFlight // fetches under way
+	noInfo  map[string]noInfo       // a /v2/info that failed, by addon
 
 	ask sync.Mutex // one request queued at a time: the number and the busy check
 }
@@ -387,7 +391,7 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 	pub, _ := release.Key(release.PublicKey)
 	m := &Manager{catalogURL: catalogURL, pub: pub, version: panelVersion, log: log, now: now,
 		hc:    &http.Client{Timeout: 15 * time.Second},
-		infos: map[string]described[Info]{}, infos2: map[string]described[InfoV2]{},
+		infos: map[string]described[Info]{}, infos2: map[string]described[InfoV2]{}, noInfo: map[string]noInfo{},
 		src: newSourceNet(false), sources: map[int64]SourceState{}, flights: map[int64]*sourceFlight{},
 		// The panel fetches what the addon names and nothing it points elsewhere to.
 		peer: &http.Client{Timeout: AdapterTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
@@ -596,11 +600,14 @@ type described[T any] struct {
 	info  T
 }
 
+// build tells one run of an installed build from another: an external addon has no digest,
+// so a new run of it is told by the host's time.
+func (a Installed) build() string { return a.Digest + "\x00" + a.Version + "\x00" + a.At }
+
 // describe asks a running addon for its description at path, once per installed build, and
 // takes it only from the addon it should be: who reads the id and the protocol out of it.
 func describe[T any](ctx context.Context, m *Manager, cache map[string]described[T], id string, a Installed, path string, protocol int, who func(T) (string, int)) (T, error) {
-	// An external addon has no digest: a new run of it is told by the host's time.
-	build := a.Digest + "\x00" + a.Version + "\x00" + a.At
+	build := a.build()
 	m.mu.Lock()
 	c, ok := cache[id]
 	m.mu.Unlock()

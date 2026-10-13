@@ -160,19 +160,38 @@ func TestAddonEndToEnd(t *testing.T) {
 	})
 	_ = said
 
-	// A payment message comes as an event; the bot tells the buyer.
+	// A payment message comes as an event; the bot tells the buyer, once: the deprecated bot.*
+	// twin of the same payment, which the panel still writes, is not read.
 	u, err := domain.NewUsers(st, domain.NewPool(st, now), noChanges{}, now).Create(ctx, domain.CreateInput{Name: "Anna", TariffID: firstTariff(t, st.Q)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := tgbot.Notifications{Emit: func(ctx context.Context, typ string, userID, tgID int64, data any, dedupe string) error {
-		err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, now(), typ, userID, tgID, data, dedupe) })
+	if err := st.Q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: 555, CreatedAt: now().Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	emit := func(typ string, data any) {
+		t.Helper()
+		if err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, now(), typ, u.ID, 555, data, typ+":1") }); err != nil {
+			t.Fatal(err)
+		}
 		hub.Kick()
-		return err
-	}, Log: log}
-	before := len(tg.said())
-	n.Paid(ctx, db.Payment{ID: 1, TgID: 555, Kind: "new", Provider: "stars", Amount: 100, Currency: "XTR", Status: "applied"}, u, true)
-	until("the payment message", func(s []string) bool { return len(s) > before })
+	}
+	pay := db.Payment{ID: 1, TgID: 555, Kind: "new", Provider: "stars", Amount: 100, Currency: "XTR", TariffName: "Month", Status: "applied"}
+	told := func(s []string) (n int) {
+		for _, m := range s {
+			if strings.HasPrefix(m, "sendMessage: ") && strings.Contains(m, "готова") {
+				n++
+			}
+		}
+		return n
+	}
+	emit(events.BotPaid, tgbot.PaymentMessage{Payment: pay, User: u, Created: true})
+	emit(events.PaymentPaid, events.Payment{PaymentID: 1, Kind: "new", Provider: "stars", Amount: 100, Currency: "XTR", TariffName: "Month", Created: true})
+	until("the payment message", func(s []string) bool { return told(s) > 0 })
+	time.Sleep(500 * time.Millisecond)
+	if n := told(tg.said()); n != 1 {
+		t.Fatalf("the payment was told %d times: %q", n, tg.said())
+	}
 
 	cancel()
 	select {

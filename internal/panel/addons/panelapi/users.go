@@ -483,9 +483,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 		}
 		// The reason is the admin's: the feed is read by every addon that holds events, so it carries
 		// what was given and to whom (as payments do), not why.
-		return events.Emit(ctx, q, now, events.UserGranted, id, tg, map[string]any{
-			"user_id": id, "days": days, "bytes": bytes, "pool_id": in.PoolID, "addon": c.ID,
-		}, "user.granted:"+c.ID+":"+in.Key)
+		return events.Emit(ctx, q, now, events.UserGranted, id, tg, events.Granted{Days: days, Bytes: bytes, PoolID: pool, Addon: c.ID}, "user.granted:"+c.ID+":"+in.Key)
 	})
 	var fe *domain.FieldError
 	switch {

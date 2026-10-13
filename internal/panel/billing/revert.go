@@ -287,17 +287,24 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 			if rv, u, err = s.takeBack(ctx, q, p); err != nil {
 				return err
 			}
-			return emitPayment(ctx, q, s.d.Now(), events.PaymentRefunded, p, u.ID, false)
+			return emitPayment(ctx, q, s.d.Now(), events.PaymentRefunded, p, u.ID, false, rv.Action == "disabled")
 		case PaymentPending, PaymentExpired, PaymentPaid, PaymentFailed:
 			// Refunded before it was applied: it never will be.
 			n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: at, ID: id})
 			open = n == 1
-			return err
+			if err != nil || !open {
+				return err
+			}
+			// Still a refund the addons count: told once, in the transaction of the change.
+			return emitPayment(ctx, q, s.d.Now(), events.PaymentRefunded, p, 0, false, false)
 		}
 		return nil
 	})
 	if err != nil {
 		return Reverted{}, err
+	}
+	if open {
+		s.d.Events.Kick()
 	}
 	if open && s.d.Promo != nil {
 		if err := s.d.Promo.ReleasePayment(ctx, id); err != nil {

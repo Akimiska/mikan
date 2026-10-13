@@ -96,8 +96,10 @@ type Telegram interface {
 	Subscribed(ctx context.Context, tgID int64) (bool, error)
 }
 
-// Notifier tells buyers what came of their payments: the panel writes them as events
-// (tgbot.Notifications) and the bot addon, which holds the bot's screens, words and sends them.
+// Notifier tells buyers what came of their payments. The panel writes the deprecated bot.*
+// events through it (tgbot.Notifications), for the bot builds released before the payment
+// events; the payment.* and trial.not_given events the bot addon reads are written by billing
+// itself, in the transaction of the change.
 type Notifier interface {
 	// Paid tells the buyer the subscription is ready.
 	Paid(ctx context.Context, p db.Payment, u db.User, created bool)
@@ -124,7 +126,7 @@ type Deps struct {
 	// SubBase is https://host:port/<sub path>, where the webhooks are; "" without an address.
 	SubBase func(ctx context.Context) string
 	Promo   *promo.Service
-	// Events wakes the addons reading the feed after a payment is applied or refunded; nil: no
+	// Events wakes the addons reading the feed after a payment, a trial or a refund; nil: no
 	// one waits (the events are written all the same).
 	Events *events.Hub
 }

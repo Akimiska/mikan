@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/acme"
+	"mikan/internal/panel/hysteresis"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -106,7 +107,7 @@ func TestObserveDeduplicatesSampleAfterStateRoundTrip(t *testing.T) {
 	clock := now
 	m := New(st, settings.New(st.Q), nil, nil, nil, nil, nil, slog.Default(), func() time.Time { return clock })
 	state := persistentState{Samples: map[string]sampleState{"warp/1": {
-		Tracker: Tracker{Level: Healthy, BadRounds: 1}, Checked: now,
+		Tracker: hysteresis.Tracker{Level: hysteresis.Healthy, BadRounds: 1}, Checked: now,
 	}}}
 	if err := m.save(ctx, state); err != nil {
 		t.Fatal(err)
@@ -135,7 +136,7 @@ func TestObserveDeduplicatesSampleAfterStateRoundTrip(t *testing.T) {
 		t.Fatalf("persisted CheckedAt = %v", got)
 	}
 	before := loaded.Samples["warp/1"].BadRounds
-	if m.observe(&loaded, "warp/1", Degraded, now, 2, 2, "") {
+	if m.observe(&loaded, "warp/1", hysteresis.Degraded, now, 2, 2, "") {
 		t.Fatal("same probe emitted a new transition")
 	}
 	if got := loaded.Samples["warp/1"].BadRounds; got != before {
@@ -148,7 +149,7 @@ func TestFailedPublicPinDoesNotRequeueUnchangedSummary(t *testing.T) {
 	m := New(st, settings.New(st.Q), nil, nil, nil, nil, nil, slog.Default(), time.Now)
 	const channel = "@mikan_status"
 	text := strings.Join([]string{"🌐 <b>Состояние серверов</b>", "Публичные серверы пока не настроены."}, "\n")
-	state := persistentState{PublicTarget: channel, PublicMessage: 42, PublicText: text, PublicPinAttempted: true, PublicLevels: map[int64]Level{}}
+	state := persistentState{PublicTarget: channel, PublicMessage: 42, PublicText: text, PublicPinAttempted: true, PublicLevels: map[int64]hysteresis.Level{}}
 	cfg := Default()
 	cfg.PublicEnabled, cfg.PublicChannel = true, channel
 	m.publicStatus(ctx, &state, cfg, nil, map[int64][]db.Inbound{}, "ru")
@@ -174,7 +175,7 @@ func TestPublicPinFailureIsRecordedAndLoggedOnce(t *testing.T) {
 
 func TestCheckedSampleIsPersistedInStateJSON(t *testing.T) {
 	checked := time.Unix(1_800_000_000, 0).UTC()
-	raw, err := json.Marshal(sampleState{Tracker: Tracker{Level: Degraded}, Checked: checked})
+	raw, err := json.Marshal(sampleState{Tracker: hysteresis.Tracker{Level: hysteresis.Degraded}, Checked: checked})
 	if err != nil {
 		t.Fatal(err)
 	}

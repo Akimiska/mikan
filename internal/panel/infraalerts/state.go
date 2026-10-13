@@ -7,13 +7,14 @@ import (
 	"errors"
 	"time"
 
+	"mikan/internal/panel/hysteresis"
 	"mikan/internal/panel/store/db"
 )
 
 const stateKey = "monitor"
 
 type sampleState struct {
-	Tracker
+	hysteresis.Tracker
 	Checked time.Time `json:"checked,omitempty"`
 }
 
@@ -21,20 +22,20 @@ type sampleState struct {
 // stateKey. Its shape is the on-disk format: a field is renamed or retyped only together with
 // a migration of what is already saved.
 type persistentState struct {
-	Samples            map[string]sampleState `json:"samples"`
-	Stuck              map[string]string      `json:"stuck"`
-	AutoCursor         int64                  `json:"auto_cursor"`
-	TorrentCursor      int64                  `json:"torrent_cursor,omitempty"`
-	TLSBad             bool                   `json:"tls_bad"`
-	UpdateAt           string                 `json:"update_at"`
-	NodeUpdateAt       map[string]int64       `json:"node_update_at,omitempty"`
-	PublicTarget       string                 `json:"public_target"`
-	PublicMessage      int64                  `json:"public_message"`
-	PublicText         string                 `json:"public_text"`
-	PublicLevels       map[int64]Level        `json:"public_levels"`
-	PublicPinned       bool                   `json:"public_pinned"`
-	PublicPinAttempted bool                   `json:"public_pin_attempted"`
-	Pending            []delivery             `json:"pending"`
+	Samples            map[string]sampleState     `json:"samples"`
+	Stuck              map[string]string          `json:"stuck"`
+	AutoCursor         int64                      `json:"auto_cursor"`
+	TorrentCursor      int64                      `json:"torrent_cursor,omitempty"`
+	TLSBad             bool                       `json:"tls_bad"`
+	UpdateAt           string                     `json:"update_at"`
+	NodeUpdateAt       map[string]int64           `json:"node_update_at,omitempty"`
+	PublicTarget       string                     `json:"public_target"`
+	PublicMessage      int64                      `json:"public_message"`
+	PublicText         string                     `json:"public_text"`
+	PublicLevels       map[int64]hysteresis.Level `json:"public_levels"`
+	PublicPinned       bool                       `json:"public_pinned"`
+	PublicPinAttempted bool                       `json:"public_pin_attempted"`
+	Pending            []delivery                 `json:"pending"`
 }
 
 // storedState is the state's text as last read or written, kept in memory so a round does not

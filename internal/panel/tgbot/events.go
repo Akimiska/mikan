@@ -81,8 +81,6 @@ func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
 		if err := json.Unmarshal(e.Data, &p); err != nil || e.TgID == 0 {
 			return nil // nothing to say from it, now or later
 		}
-		pay := db.Payment{ID: p.PaymentID, TgID: e.TgID, Kind: p.Kind, Provider: p.Provider, TariffName: p.TariffName,
-			Amount: p.Amount, Currency: p.Currency}
 		var u db.User
 		if e.UserID != 0 {
 			var err error
@@ -97,9 +95,9 @@ func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
 			if u.ID == 0 {
 				return nil // a subscription that is gone has nothing to be thanked for
 			}
-			b.paid(ctx, pay, u, p.Created)
+			b.paid(ctx, e.TgID, p, u)
 		} else {
-			b.refunded(ctx, pay, u, p.Disabled)
+			b.refunded(ctx, e.TgID, p, u)
 		}
 	case events.TrialNotGiven:
 		var n events.NotGiven
@@ -109,7 +107,7 @@ func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
 		// A trial that went back by itself is told by its PaymentRefunded; only the one the
 		// admin must return by hand has no other word.
 		if n.Refund == events.RefundedManually {
-			b.trialNotGiven(ctx, db.Payment{ID: n.PaymentID, TgID: e.TgID, Amount: n.Amount, Currency: n.Currency})
+			b.trialNotGiven(ctx, e.TgID, n)
 		}
 	case events.UserExpiring, events.UserExpired, events.Traffic90, events.Traffic100:
 		if e.TgID == 0 {

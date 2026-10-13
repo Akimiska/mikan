@@ -568,6 +568,18 @@ func (s *Users) Extend(ctx context.Context, id int64, days int64) (db.User, erro
 	return s.Update(ctx, id, Patch{Extend: &Extension{Days: days}})
 }
 
+// MaxExtendDays bounds one extension by days: ten years, as the admin's API does.
+const MaxExtendDays = 3650
+
+// ExtendOn is Extend on q's transaction, for a caller that writes more in it (an addon's
+// grant with its key, its audit line and its event); the caller tells the nodes (Changed).
+func (s *Users) ExtendOn(ctx context.Context, q *db.Queries, id, days int64) (db.User, error) {
+	if days < 1 || days > MaxExtendDays {
+		return db.User{}, fieldErr("days", "bad_days")
+	}
+	return s.updateOn(ctx, q, id, Patch{Extend: &Extension{Days: days}})
+}
+
 // ExtendMonths adds n months: to the n-th billing day, or without one to the same day of
 // the month (see AddMonths). A term that already ended restarts from now.
 func (s *Users) ExtendMonths(ctx context.Context, id int64, n int) (db.User, error) {

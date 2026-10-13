@@ -8,6 +8,8 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	"github.com/lib/pq"
 )
 
 const archiveTrafficPackage = `-- name: ArchiveTrafficPackage :execrows
@@ -548,6 +550,48 @@ func (q *Queries) SumUserGrantsLeft(ctx context.Context, arg SumUserGrantsLeftPa
 	items := []SumUserGrantsLeftRow{}
 	for rows.Next() {
 		var i SumUserGrantsLeftRow
+		if err := rows.Scan(&i.UserID, &i.PoolID, &i.LeftBytes); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumUsersGrantsLeft = `-- name: SumUsersGrantsLeft :many
+SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remaining) AS BIGINT) AS left_bytes
+FROM traffic_grants
+WHERE user_id = ANY($1::bigint[]) AND remaining > 0 AND (expires_at IS NULL OR expires_at > CAST($2 AS BIGINT))
+GROUP BY user_id, COALESCE(pool_id, 0)
+`
+
+type SumUsersGrantsLeftParams struct {
+	Ids []int64
+	Now int64
+}
+
+type SumUsersGrantsLeftRow struct {
+	UserID    int64
+	PoolID    int64
+	LeftBytes int64
+}
+
+// SumUserGrantsLeft for a page of users.
+func (q *Queries) SumUsersGrantsLeft(ctx context.Context, arg SumUsersGrantsLeftParams) ([]SumUsersGrantsLeftRow, error) {
+	rows, err := q.db.QueryContext(ctx, sumUsersGrantsLeft, pq.Array(arg.Ids), arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SumUsersGrantsLeftRow{}
+	for rows.Next() {
+		var i SumUsersGrantsLeftRow
 		if err := rows.Scan(&i.UserID, &i.PoolID, &i.LeftBytes); err != nil {
 			return nil, err
 		}

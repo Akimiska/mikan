@@ -99,6 +99,33 @@ func (q *Queries) AddonKVSize(ctx context.Context, arg AddonKVSizeParams) (int64
 	return size, err
 }
 
+const claimAddonGrantKey = `-- name: ClaimAddonGrantKey :execrows
+INSERT INTO addon_grant_keys (addon_id, key, user_id, result, created_at) VALUES ($1, $2, $3, '', $4)
+ON CONFLICT (addon_id, key) DO NOTHING
+`
+
+type ClaimAddonGrantKeyParams struct {
+	AddonID   string
+	Key       string
+	UserID    int64
+	CreatedAt int64
+}
+
+// The key of a grant, taken before the grant: 0 rows is a key already used (a repeat). A
+// concurrent claim of the same key waits for the first one's commit.
+func (q *Queries) ClaimAddonGrantKey(ctx context.Context, arg ClaimAddonGrantKeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimAddonGrantKey,
+		arg.AddonID,
+		arg.Key,
+		arg.UserID,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countAddonUpdates = `-- name: CountAddonUpdates :one
 SELECT count(*) FROM addon_updates
 `
@@ -178,6 +205,28 @@ func (q *Queries) GetAddonGrant(ctx context.Context, addonID string) (AddonGrant
 		&i.Permissions,
 		&i.ApprovedBy,
 		&i.ApprovedAt,
+	)
+	return i, err
+}
+
+const getAddonGrantKey = `-- name: GetAddonGrantKey :one
+SELECT addon_id, key, user_id, result, created_at FROM addon_grant_keys WHERE addon_id = $1 AND key = $2
+`
+
+type GetAddonGrantKeyParams struct {
+	AddonID string
+	Key     string
+}
+
+func (q *Queries) GetAddonGrantKey(ctx context.Context, arg GetAddonGrantKeyParams) (AddonGrantKey, error) {
+	row := q.db.QueryRowContext(ctx, getAddonGrantKey, arg.AddonID, arg.Key)
+	var i AddonGrantKey
+	err := row.Scan(
+		&i.AddonID,
+		&i.Key,
+		&i.UserID,
+		&i.Result,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -345,6 +394,109 @@ func (q *Queries) ListAddonUpdates(ctx context.Context, arg ListAddonUpdatesPara
 	return items, nil
 }
 
+const listTgLinksOfUsers = `-- name: ListTgLinksOfUsers :many
+SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
+FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = ANY($1::bigint[])
+`
+
+type ListTgLinksOfUsersRow struct {
+	UserID    int64
+	TgID      int64
+	Username  string
+	FirstName string
+}
+
+func (q *Queries) ListTgLinksOfUsers(ctx context.Context, ids []int64) ([]ListTgLinksOfUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTgLinksOfUsers, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTgLinksOfUsersRow{}
+	for rows.Next() {
+		var i ListTgLinksOfUsersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.TgID,
+			&i.Username,
+			&i.FirstName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersAfter = `-- name: ListUsersAfter :many
+SELECT id, name, contact, note, tags, status, tariff_id, traffic_limit, device_limit, reset_strategy, period_days, period_start, used_up, used_down, total_up, total_down, expires_at, inbounds, sub_token, slot_id, online_at, created_at, updated_at, billing_day, source, hidden, folder_id, speed_limit, device_mode FROM users WHERE id > $1::BIGINT ORDER BY id LIMIT $2::INT
+`
+
+type ListUsersAfterParams struct {
+	After int64
+	Lim   int32
+}
+
+// A page of users by id, for the Panel API's cursor: stable while users come and go.
+func (q *Queries) ListUsersAfter(ctx context.Context, arg ListUsersAfterParams) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, listUsersAfter, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Contact,
+			&i.Note,
+			&i.Tags,
+			&i.Status,
+			&i.TariffID,
+			&i.TrafficLimit,
+			&i.DeviceLimit,
+			&i.ResetStrategy,
+			&i.PeriodDays,
+			&i.PeriodStart,
+			&i.UsedUp,
+			&i.UsedDown,
+			&i.TotalUp,
+			&i.TotalDown,
+			&i.ExpiresAt,
+			&i.Inbounds,
+			&i.SubToken,
+			&i.SlotID,
+			&i.OnlineAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BillingDay,
+			&i.Source,
+			&i.Hidden,
+			&i.FolderID,
+			&i.SpeedLimit,
+			&i.DeviceMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAddonEvents = `-- name: LockAddonEvents :exec
 SELECT pg_advisory_xact_lock($1::BIGINT)
 `
@@ -438,6 +590,21 @@ func (q *Queries) PutAddonValue(ctx context.Context, arg PutAddonValueParams) er
 		arg.ExpiresAt,
 		arg.UpdatedAt,
 	)
+	return err
+}
+
+const setAddonGrantResult = `-- name: SetAddonGrantResult :exec
+UPDATE addon_grant_keys SET result = $3 WHERE addon_id = $1 AND key = $2
+`
+
+type SetAddonGrantResultParams struct {
+	AddonID string
+	Key     string
+	Result  string
+}
+
+func (q *Queries) SetAddonGrantResult(ctx context.Context, arg SetAddonGrantResultParams) error {
+	_, err := q.db.ExecContext(ctx, setAddonGrantResult, arg.AddonID, arg.Key, arg.Result)
 	return err
 }
 

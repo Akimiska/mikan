@@ -68,3 +68,10 @@ ORDER BY id DESC;
 
 -- name: DeleteGrantByPayment :execrows
 DELETE FROM traffic_grants WHERE payment_id = $1;
+
+-- name: SumUsersGrantsLeft :many
+-- SumUserGrantsLeft for a page of users.
+SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remaining) AS BIGINT) AS left_bytes
+FROM traffic_grants
+WHERE user_id = ANY(sqlc.arg(ids)::bigint[]) AND remaining > 0 AND (expires_at IS NULL OR expires_at > CAST(sqlc.arg(now) AS BIGINT))
+GROUP BY user_id, COALESCE(pool_id, 0);

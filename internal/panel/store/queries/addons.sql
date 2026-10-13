@@ -86,3 +86,23 @@ DELETE FROM addon_kv WHERE addon_id = $1;
 
 -- name: DeleteAddonCursor :exec
 DELETE FROM addon_cursors WHERE addon_id = $1;
+
+-- name: ClaimAddonGrantKey :execrows
+-- The key of a grant, taken before the grant: 0 rows is a key already used (a repeat). A
+-- concurrent claim of the same key waits for the first one's commit.
+INSERT INTO addon_grant_keys (addon_id, key, user_id, result, created_at) VALUES ($1, $2, $3, '', $4)
+ON CONFLICT (addon_id, key) DO NOTHING;
+
+-- name: SetAddonGrantResult :exec
+UPDATE addon_grant_keys SET result = $3 WHERE addon_id = $1 AND key = $2;
+
+-- name: GetAddonGrantKey :one
+SELECT * FROM addon_grant_keys WHERE addon_id = $1 AND key = $2;
+
+-- name: ListUsersAfter :many
+-- A page of users by id, for the Panel API's cursor: stable while users come and go.
+SELECT * FROM users WHERE id > sqlc.arg(after)::BIGINT ORDER BY id LIMIT sqlc.arg(lim)::INT;
+
+-- name: ListTgLinksOfUsers :many
+SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
+FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = ANY(sqlc.arg(ids)::bigint[]);

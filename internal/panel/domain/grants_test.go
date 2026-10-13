@@ -366,3 +366,48 @@ func TestAdminGrant(t *testing.T) {
 		t.Fatalf("unknown user: %v", err)
 	}
 }
+
+// The On variants work on the caller's transaction: what the caller rolls back is gone, and
+// the nodes are the caller's to tell.
+func TestExtendOnAndGrantOn(t *testing.T) {
+	e := newGrantsEnv(t, 100)
+	errBack := errors.New("roll back")
+	before := e.ch.policies
+	err := e.st.Tx(e.ctx, func(q *db.Queries) error {
+		u, err := e.users.ExtendOn(e.ctx, q, e.u.ID, 5)
+		if err != nil || u.ExpiresAt.Int64 != e.u.ExpiresAt.Int64+5*86400 {
+			t.Fatalf("extension: %+v %v", u.ExpiresAt, err)
+		}
+		if _, err := e.users.GrantOn(e.ctx, q, e.u.ID, GrantInput{Bytes: GiB, Lifetime: LifetimeUsed, Note: "x"}); err != nil {
+			t.Fatal(err)
+		}
+		return errBack
+	})
+	if !errors.Is(err, errBack) {
+		t.Fatalf("tx: %v", err)
+	}
+	if u, _ := e.st.Q.GetUser(e.ctx, e.u.ID); u.ExpiresAt != e.u.ExpiresAt {
+		t.Fatalf("a rolled back extension stayed: %v", u.ExpiresAt)
+	}
+	if gs, _ := e.st.Q.ListUserGrants(e.ctx, e.u.ID); len(gs) != 0 {
+		t.Fatalf("a rolled back grant stayed: %+v", gs)
+	}
+	if e.ch.policies != before {
+		t.Fatal("the On variants must leave telling the nodes to the caller")
+	}
+	_ = e.st.Tx(e.ctx, func(q *db.Queries) error {
+		for _, days := range []int64{0, -1, MaxExtendDays + 1} {
+			var fe *FieldError
+			if _, err := e.users.ExtendOn(e.ctx, q, e.u.ID, days); !errors.As(err, &fe) || fe.Field != "days" {
+				t.Errorf("%d days: %v", days, err)
+			}
+		}
+		if _, err := e.users.ExtendOn(e.ctx, q, e.u.ID+999, 1); !errors.Is(err, ErrNotFound) {
+			t.Errorf("unknown user: %v", err)
+		}
+		if _, err := e.users.GrantOn(e.ctx, q, e.u.ID+999, GrantInput{Bytes: GiB, Lifetime: LifetimeUsed}); !errors.Is(err, ErrNotFound) {
+			t.Errorf("unknown user: %v", err)
+		}
+		return nil
+	})
+}

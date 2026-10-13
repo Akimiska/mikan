@@ -42,9 +42,11 @@ func TestBotReissuesTheLink(t *testing.T) {
 	}
 
 	// Someone else's tap with the same data changes nothing.
+	// Its answer is awaited, so that the next tap does not take it for its own.
 	e.later()
+	n = e.tg.count()
 	e.press(other, menu, "rn:"+uid)
-	time.Sleep(100 * time.Millisecond)
+	e.tg.wait(t, n, "answerCallbackQuery")
 	if u, _ := e.st.Q.GetUser(e.ctx, e.user.ID); u.SubToken != e.user.SubToken {
 		t.Fatal("another account reissued the link")
 	}

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Link2, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
+import { KeyRound, Link2, RefreshCw, Trash2 } from "lucide-react";
 import { useId, useState, type FormEvent } from "react";
-import { ApiError, api, errorText, unwrap, type Schemas } from "../../api/client";
+import { ApiError, api, apiCodeText, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useAddonSources } from "../../api/hooks";
 import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
@@ -9,6 +9,7 @@ import { Button, EmptyState, ErrorState, Field, Pill, Skeleton } from "../../com
 import { t, tMaybe } from "../../i18n";
 import { fieldErrors } from "../../lib/fields";
 import { ago } from "../../lib/format";
+import { ShieldBanner } from "./market-parts";
 
 type Sources = Schemas["SourcesView"];
 type Source = Schemas["SourceView"];
@@ -17,13 +18,8 @@ type Source = Schemas["SourceView"];
 // decides which code is offered to run on the server, so the drawer keeps in front of the
 // admin whose key vouches for it (or that nothing does) and how the last read went.
 
-/** What the server's code of a failed read says, in words. */
-function codeText(code: string): string {
-  return tMaybe(`errors.api.${code}`) ?? code;
-}
-
 /** Everything the panel needs from the admin to take a source: its address, and the author's key if they know it. */
-function AddForm({ full, onAdded }: { full: boolean; onAdded: (v: Sources) => void }) {
+function AddForm({ full, limit, onAdded }: { full: boolean; limit: number | undefined; onAdded: (v: Sources) => void }) {
   const uid = useId();
   const toast = useToast();
   const [url, setUrl] = useState("");
@@ -90,7 +86,7 @@ function AddForm({ full, onAdded }: { full: boolean; onAdded: (v: Sources) => vo
         <Button variant="primary" type="submit" loading={add.isPending} disabled={full}>
           <Link2 size={16} aria-hidden /> {t("sources.add")}
         </Button>
-        {full ? <span className="text-xs text-[var(--ink-500)]">{t("errors.api.source_limit")}</span> : null}
+        {full ? <span className="text-xs text-[var(--ink-500)]">{t("sources.full", { n: limit ?? "" })}</span> : null}
         {add.isPending ? <span className="text-xs text-[var(--ink-500)]">{t("sources.reading")}</span> : null}
       </div>
     </form>
@@ -158,15 +154,12 @@ function SourceCard({ s, index, onChanged }: { s: Source; index: number; onChang
           <span className="mono break-all">{s.fingerprint}</span>
         </div>
       ) : (
-        <div className="banner warn items-start" role="note">
-          <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
-          <span className="min-w-0 flex-1">{t("sources.unsignedWarn")}</span>
-        </div>
+        <ShieldBanner>{t("sources.unsignedWarn")}</ShieldBanner>
       )}
       {s.error ? (
         <div className="banner err flex-wrap items-start" role="alert">
           <span className="min-w-[min(100%,240px)] flex-1 break-words">
-            {t("sources.lastError")}: {codeText(s.error)}
+            {t("sources.lastError")}: {apiCodeText(s.error)}
             {keyChanged && s.new_fingerprint ? (
               <>
                 {" "}
@@ -256,15 +249,12 @@ export function SourcesDrawer({ open, onOpenChange }: { open: boolean; onOpenCha
   return (
     <Drawer open={open} onOpenChange={onOpenChange} wide title={t("sources.title")} meta={t("sources.meta")}>
       <div className="flex flex-col gap-4 pt-1 text-[13px]">
-        <div className="banner warn items-start" role="note">
-          <ShieldAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
-          <span className="min-w-0 flex-1">{t("sources.warn")}</span>
-        </div>
-        <AddForm full={!!d && d.sources.length >= d.limit} onAdded={changed} />
+        <ShieldBanner>{t("sources.warn")}</ShieldBanner>
+        <AddForm full={!!d && d.sources.length >= d.limit} limit={d?.limit} onAdded={changed} />
         <h3 className="font-semibold">{t("sources.listTitle")}</h3>
         {d?.catalog_error ? (
           <div className="banner warn" role="status">
-            {codeText(d.catalog_error)}
+            {apiCodeText(d.catalog_error)}
           </div>
         ) : null}
         {q.isError && !d ? (

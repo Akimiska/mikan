@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Link, useBlocker, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowDown, ArrowUp, Bell, Bot, Globe, LayoutList, Link2, Megaphone, Network, Plus, PlugZap, Send, Shield, Trash2, TriangleAlert } from "lucide-react";
 import { useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
+import { api, ApiError, apiCodeText, errorText, unwrap, type Schemas } from "../../api/client";
 import { onFormError } from "../../lib/fields";
 import { qk, useNodes, useSettings, useTelegram } from "../../api/hooks";
 import { useDraft } from "../../lib/draft";
@@ -438,7 +438,7 @@ function BackupCard() {
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-[var(--ink-500)]">
           {b.last_ok ? t("telegram.infra.backupLast", { when: ago(b.last_ok), size }) : t("telegram.infra.backupNever")}
-          {b.last_error ? <div className="text-[var(--berry-600)]">{t("telegram.infra.backupFailed", { error: tMaybe(`errors.api.${b.last_error}`) ?? b.last_error })}</div> : null}
+          {b.last_error ? <div className="text-[var(--berry-600)]">{t("telegram.infra.backupFailed", { error: apiCodeText(b.last_error) })}</div> : null}
         </div>
         <Button size="sm" loading={send.isPending || b.sending} disabled={!b.admin_chat_set || !b.password_set || b.sending} onClick={() => send.mutate()}>
           {b.sending ? t("telegram.infra.backupSending") : t("telegram.infra.backupSendNow")}

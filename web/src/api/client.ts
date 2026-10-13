@@ -51,6 +51,11 @@ export class ApiError extends Error {
   }
 }
 
+/** What a code the server sends (a failed payment, import, backup or source read) says, in words; a code with no text as is. */
+export function apiCodeText(code: string): string {
+  return tMaybe(`errors.api.${code}`) ?? code;
+}
+
 function apiMessage(code: string, value: unknown): string {
   return tMaybe(`errors.api.${code}`, { value: typeof value === "string" || typeof value === "number" ? value : "" }) ?? code;
 }

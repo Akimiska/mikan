@@ -4643,7 +4643,11 @@ export interface components {
         SourceView: {
             /** Format: date-time */
             added_at: string;
-            entries: components["schemas"]["MarketEntry"][];
+            /**
+             * Format: int64
+             * @description Сколько записей источник предлагает: сами записи в /marketplace
+             */
+            entries: number;
             /** @description Код ошибки последнего чтения: source_unreachable, source_key_changed, source_signature_invalid… */
             error?: string;
             /** Format: date-time */

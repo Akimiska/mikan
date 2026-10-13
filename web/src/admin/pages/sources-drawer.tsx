@@ -137,7 +137,7 @@ function SourceCard({ s, index, onChanged }: { s: Source; index: number; onChang
   });
   const inUse = s.installed.length > 0;
   const keyChanged = s.error === "source_key_changed";
-  const entries = s.entries.length;
+  const entries = s.entries;
   return (
     <li className="reveal flex min-w-0 flex-col gap-3 rounded-[12px] border border-[var(--hairline)] bg-[var(--surface-soft)] p-4" style={{ "--i": Math.min(index, 8) } as React.CSSProperties}>
       <div className="flex flex-wrap items-start gap-2">

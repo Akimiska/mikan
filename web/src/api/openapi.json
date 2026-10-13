@@ -6880,10 +6880,9 @@
             "type": "string"
           },
           "entries": {
-            "items": {
-              "$ref": "#/components/schemas/MarketEntry"
-            },
-            "type": "array"
+            "description": "Сколько записей источник предлагает: сами записи в /marketplace",
+            "format": "int64",
+            "type": "integer"
           },
           "error": {
             "description": "Код ошибки последнего чтения: source_unreachable, source_key_changed, source_signature_invalid…",

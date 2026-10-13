@@ -83,7 +83,10 @@ export function Shop({
   const [error, setError] = useState("");
   const [promoPreview, setPromoPreview] = useState<{ discount: number; final_amount: number; currency: string } | null>(null);
   const [opened, setOpened] = useState(false);
-  useEffect(() => { setError(""); setPromoPreview(null); }, [picked, termDays, promoCode]);
+  // The payment page of a ruble provider, ready to open. Telegram opens a link only for a tap
+  // it sees, and the requests that made this link took that tap, so the buyer taps again.
+  const [ready, setReady] = useState<{ url: string; provider: Provider } | null>(null);
+  useEffect(() => { setError(""); setPromoPreview(null); setReady(null); }, [picked, termDays, promoCode]);
   useEffect(() => setTermDays(null), [picked]);
   const offer = offers.find((o) => o.id === picked);
   const terms = offer?.terms && offer.terms.length > 1 ? offer.terms : null;
@@ -100,6 +103,7 @@ export function Shop({
     if (!offer) return;
     setBusy(provider);
     setError("");
+    setReady(null);
     try {
       if (promoCode) {
         const preview = await postJSON<{ code: string; discount: number; final_amount: number; currency: string }>(subRoot + "/tg/promo", {
@@ -127,9 +131,10 @@ export function Shop({
       }
       // A Stars link is https://t.me/$<slug>: Telegram opens its payment sheet for it.
       const slug = /^https:\/\/t\.me\/\$(.+)$/.exec(body.url)?.[1];
-      if (provider === "stars" && slug) openInvoice(slug);
-      else openLink(body.url);
-      setOpened(true);
+      if (provider === "stars" && slug) {
+        openInvoice(slug);
+        setOpened(true);
+      } else setReady({ url: body.url, provider });
     } catch {
       setError(t("sub.shopFail"));
     } finally {
@@ -143,6 +148,8 @@ export function Shop({
     const adapters = [...(data.addons ?? [])].sort((a, b) => rank(a.provider) - rank(b.provider) || a.provider.localeCompare(b.provider));
     for (const a of adapters) methods.push({ id: a.provider, label: KNOWN[a.provider] ? t(KNOWN[a.provider]!) : a.name, price: rubles(price.rub) });
   }
+
+  const goName = ready ? data.addons?.find((a) => a.provider === ready.provider)?.name : undefined;
 
   return (
     <section className="glass sub-card p-4" aria-label={title}>
@@ -179,6 +186,22 @@ export function Shop({
               <span className="text-[11px] opacity-80">{m.label}</span>
             </Button>
           ))}
+        </div>
+      ) : null}
+      {ready && !busy && !error ? (
+        <div className="mt-3 flex flex-col gap-2">
+          <Button
+            variant="primary"
+            block
+            onClick={() => {
+              // Straight from the tap: no await between it and the bridge call.
+              openLink(ready.url);
+              setOpened(true);
+            }}
+          >
+            {goName ? t("sub.shopGoVia", { name: goName }) : t("sub.shopGo")}
+          </Button>
+          {opened ? null : <p className="text-xs text-[var(--ink-500)]">{t("sub.shopGoHint")}</p>}
         </div>
       ) : null}
       {error ? (

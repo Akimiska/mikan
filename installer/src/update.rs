@@ -359,8 +359,10 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
     {
         say(&format!("Addons: {e:#}"));
     }
-    // The command that runs now says which addons it can run, whatever was asked of it.
-    if !install.node {
+    // The command that runs now says which addons it can run, whatever was asked of it. One
+    // that handed the update to the upgraded command leaves that to it: written after it, the
+    // older version would take back what the newer one said.
+    if !install.node && !at.handed_off {
         addon::touch(say);
     }
     // The admin pressed Update and waits for an answer, and an update that began must end

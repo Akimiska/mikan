@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"mikan/internal/panel/store/db"
 )
@@ -136,5 +137,21 @@ func TestDevicesText(t *testing.T) {
 	}
 	if !wantsDevices("a", "x {devices}") || wantsDevices("{days}", "") {
 		t.Error("wantsDevices does not tell {devices}")
+	}
+}
+
+// INCY shows up to five lines of an announcement, so it gets them with their indents; the
+// other apps still get one line.
+func TestFillAppAnnounce(t *testing.T) {
+	text := "Работы ночью\n  с 2 до 4\nстрока 3\nстрока 4\nстрока 5\nстрока 6"
+	if got, want := fillAppAnnounce(text, nil, "INCY/2.0.8/iOS"), "Работы ночью\n  с 2 до 4\nстрока 3\nстрока 4\nстрока 5"; got != want {
+		t.Errorf("INCY: %q, want %q", got, want)
+	}
+	if got := fillAppAnnounce(text, nil, "Happ/3.2.1"); strings.Contains(got, "\n") {
+		t.Errorf("Happ got lines: %q", got)
+	}
+	long := strings.Repeat("а", TitleMax+50)
+	if got := fillAppAnnounce(long, nil, "INCY/2.0.8"); utf8.RuneCountInString(got) > TitleMax {
+		t.Errorf("INCY over TitleMax: %d", utf8.RuneCountInString(got))
 	}
 }

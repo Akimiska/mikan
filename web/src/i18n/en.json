@@ -1457,7 +1457,7 @@
     "apps": "In the apps",
     "appsSub": "What subscribers see in their VPN apps besides the servers",
     "announce": "Announcement",
-    "announceHint": "Lines for the subscription page and the Mini App: news, maintenance, the term and the traffic left through the variables below. Line breaks, blank lines and indents stay, up to 10 lines. Happ and v2RayTun do not show line breaks: they get everything as one line of up to 200 characters. Empty: nothing is shown.",
+    "announceHint": "Lines for the subscription page and the Mini App: news, maintenance, the term and the traffic left through the variables below. Line breaks, blank lines and indents stay, up to 10 lines. INCY shows up to 5 lines with their indents; Happ and v2RayTun show no line breaks and get it as one line; apps get up to 200 characters. Empty: nothing is shown.",
     "announceUrl": "Announcement link",
     "announceUrlHint": "Where a tap on the announcement leads: https:// or tg://",
     "appBranding": "Your brand in the apps",

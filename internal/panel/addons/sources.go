@@ -64,12 +64,13 @@ var (
 	ErrSourceNotFound    = errors.New("source_not_found")
 	ErrSourceBadAnswer   = errors.New("source_bad_answer")
 	ErrSourceSignature   = errors.New("source_signature_invalid")
+	ErrSourceKeyNeeded   = errors.New("source_key_needed")  // signed, but neither the admin nor the file names the key
 	ErrSourceKeyChanged  = errors.New("source_key_changed") // another key than the pinned one, or none
 	ErrSourceEmpty       = errors.New("source_empty")       // nothing in it this panel can install
 )
 
 var sourceErrors = []error{ErrSourceURL, ErrSourceAddress, ErrSourceRedirect, ErrSourceTooLarge, ErrSourceUnreachable, ErrSourceNotFound,
-	ErrSourceBadAnswer, ErrSourceSignature, ErrSourceKeyChanged, ErrSourceEmpty}
+	ErrSourceBadAnswer, ErrSourceSignature, ErrSourceKeyNeeded, ErrSourceKeyChanged, ErrSourceEmpty}
 
 // SourceCode is the code of a failed fetch: one of the errors above, source_unreachable for
 // anything else (the network, a timeout).
@@ -452,7 +453,7 @@ func checkSourceEntry(e *Entry, panelVersion string) string {
 
 // parseSourceDoc reads a source file and checks the signature, when there is one, against
 // the key the file names. It returns the key the file is signed with ("" unsigned).
-func (m *Manager) parseSourceDoc(data []byte, sig []byte, fallbackTitle string) (SourceDoc, error) {
+func (m *Manager) parseSourceDoc(data []byte, sig []byte, fallbackTitle, pinKey string) (SourceDoc, error) {
 	var f sourceFile
 	if err := json.Unmarshal(data, &f); err != nil {
 		return SourceDoc{}, fmt.Errorf("%w: %v", ErrSourceBadAnswer, err)
@@ -462,8 +463,20 @@ func (m *Manager) parseSourceDoc(data []byte, sig []byte, fallbackTitle string) 
 		doc.Title = fallbackTitle
 	}
 	if sig != nil {
-		pub, ok := ParseSourceKey(f.Key)
-		if !ok || release.Verify(data, string(sig), pub) != nil {
+		// A signature names no key: it is checked against the one the admin holds (given on
+		// add, or pinned), else the one the file declares. A file signed by another key than
+		// the pinned one comes out with that key, for FetchSource to call it a change.
+		var pub ed25519.PublicKey
+		for _, k := range []string{pinKey, f.Key} {
+			if p, ok := ParseSourceKey(k); ok && release.Verify(data, string(sig), p) == nil {
+				pub = p
+				break
+			}
+		}
+		switch {
+		case pub == nil && pinKey == "" && f.Key == "":
+			return SourceDoc{}, ErrSourceKeyNeeded
+		case pub == nil:
 			return SourceDoc{}, ErrSourceSignature
 		}
 		doc.Key = base64.StdEncoding.EncodeToString(pub)
@@ -579,7 +592,7 @@ func (m *Manager) fetchSourceOnce(ctx context.Context, n *sourceNet, canonical s
 			sig = nil
 		}
 	}
-	return m.parseSourceDoc(data, sig, title)
+	return m.parseSourceDoc(data, sig, title, pin.Key)
 }
 
 // looksLikePage: what came for a signature is a web page (HTML), not a signature.

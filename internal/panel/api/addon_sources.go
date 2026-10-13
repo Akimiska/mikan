@@ -265,7 +265,7 @@ func (b sourceBoard) entriesOf(s db.AddonSource) []addons.Entry {
 // sourceErr is how a failed read of a source answers an install.
 func sourceErr(err error) error {
 	code := addons.SourceCode(err)
-	if errors.Is(err, addons.ErrSourceKeyChanged) || errors.Is(err, addons.ErrSourceSignature) {
+	if errors.Is(err, addons.ErrSourceKeyChanged) || errors.Is(err, addons.ErrSourceSignature) || errors.Is(err, addons.ErrSourceKeyNeeded) {
 		return huma.Error409Conflict(code)
 	}
 	return huma.Error502BadGateway(code)

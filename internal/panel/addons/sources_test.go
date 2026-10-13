@@ -698,3 +698,31 @@ func TestOwners(t *testing.T) {
 		}
 	}
 }
+
+// A file signed as the official catalog is (no key inside it) is read with the key the admin
+// gives; with none, the panel asks for it rather than calling the signature wrong.
+func TestSourceSignedWithoutAKeyInside(t *testing.T) {
+	f := newFileServer(t)
+	m := srcManager(t, devNet())
+	ctx := t.Context()
+	author := newPriv(t)
+	authorKey := base64.StdEncoding.EncodeToString(author.Public().(ed25519.PublicKey))
+	data, err := json.Marshal(map[string]any{"version": 1, "adapters": []any{entryDoc("hello", "b")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.put("/index.json", data)
+	f.put("/index.json.sig", []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(author, data))))
+	url := f.srv.URL + "/index.json"
+
+	if _, err := m.FetchSource(ctx, url, SourcePin{}); !errors.Is(err, ErrSourceKeyNeeded) || SourceCode(err) != "source_key_needed" {
+		t.Fatalf("no key anywhere: %v", err)
+	}
+	if doc, err := m.FetchSource(ctx, url, SourcePin{Key: authorKey}); err != nil || doc.Key != authorKey || len(doc.Entries) != 1 {
+		t.Fatalf("the admin's key: %+v %v", doc, err)
+	}
+	other := base64.StdEncoding.EncodeToString(newPriv(t).Public().(ed25519.PublicKey))
+	if _, err := m.FetchSource(ctx, url, SourcePin{Key: other}); !errors.Is(err, ErrSourceSignature) {
+		t.Fatalf("a key that did not sign it: %v", err)
+	}
+}

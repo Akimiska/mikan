@@ -8693,6 +8693,14 @@
             ],
             "type": "string"
           },
+          "no_sse_header": {
+            "description": "Не слать Content-Type: text/event-stream в ответах",
+            "type": "boolean"
+          },
+          "sc_max_buffered_posts": {
+            "description": "Сколько запросов отправки сервер держит в очереди (packet-up): число от 1",
+            "type": "string"
+          },
           "sc_max_each_post_bytes": {
             "description": "Наибольший запрос отправки (packet-up), байт: число или диапазон",
             "type": "string"
@@ -8701,8 +8709,65 @@
             "description": "Пауза между запросами отправки (packet-up), мс",
             "type": "string"
           },
+          "sc_stream_up_server_secs": {
+            "description": "Как часто сервер шлёт паддинг в stream-up, секунд: число или диапазон; 0 — не слать",
+            "type": "string"
+          },
+          "seq_key": {
+            "description": "Имя параметра номера запроса (не для path)",
+            "type": "string"
+          },
+          "seq_placement": {
+            "description": "Где едет номер запроса (packet-up); пусто — path",
+            "enum": [
+              "",
+              "path",
+              "query",
+              "header",
+              "cookie"
+            ],
+            "type": "string"
+          },
+          "session_key": {
+            "description": "Имя параметра сессии (не для path)",
+            "type": "string"
+          },
+          "session_length": {
+            "description": "Длина номера сессии: число или диапазон; с набором по умолчанию 16-32",
+            "type": "string"
+          },
+          "session_placement": {
+            "description": "Где едет номер сессии; пусто — path",
+            "enum": [
+              "",
+              "path",
+              "query",
+              "header",
+              "cookie"
+            ],
+            "type": "string"
+          },
+          "session_table": {
+            "description": "Из каких ASCII-символов приложение составляет номер сессии: свой набор или имя hex, base36, Base62, number, alphabet, Alphabet",
+            "type": "string"
+          },
           "uplink_chunk_size": {
             "description": "Размер куска отправки, байт: число или диапазон",
+            "type": "string"
+          },
+          "uplink_data_key": {
+            "description": "Имя заголовка или cookie с данными: нужно для header и cookie",
+            "type": "string"
+          },
+          "uplink_data_placement": {
+            "description": "Где едут данные отправки (packet-up); header и cookie только в режиме packet-up",
+            "enum": [
+              "",
+              "body",
+              "header",
+              "cookie",
+              "auto"
+            ],
             "type": "string"
           },
           "uplink_http_method": {

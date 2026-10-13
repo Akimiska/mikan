@@ -62,7 +62,7 @@
         "ru": "Отдельный домен или поддомен для ссылок подписки, отдельно от панели и серверов. Ссылки не меняются при переезде панели.",
         "en": "A separate domain or subdomain for subscription links, apart from the panel and the servers. Links stay the same when the panel moves."
       },
-      "target": 50, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qY"
+      "target": 50, "raised": 10, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qY"
     },
     {
       "id": "node-clients",

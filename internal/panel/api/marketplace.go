@@ -391,8 +391,9 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *AddonIDInput) (*ma
 	if queued(h.d.Addons, in.ID) {
 		return nil, huma.Error409Conflict("addon_busy")
 	}
-	// The grant goes first, and the addon's store and its place in the feed with it: another
-	// addon installed later under the same id starts with nothing of this one's.
+	// The grant goes first, and the addon's store, its place in the feed and its grant keys
+	// with it: another addon installed later under the same id starts with nothing of this
+	// one's (a grant key of the old one would answer the new one with the old result).
 	if err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
 		if err := q.DeleteAddonGrant(ctx, in.ID); err != nil {
 			return err
@@ -404,6 +405,9 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *AddonIDInput) (*ma
 			return err
 		}
 		if err := q.DeleteAddonCursor(ctx, in.ID); err != nil {
+			return err
+		}
+		if err := q.DeleteAddonGrantKeys(ctx, in.ID); err != nil {
 			return err
 		}
 		if a.KindOf() != addons.KindBot {

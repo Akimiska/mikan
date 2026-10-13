@@ -8,6 +8,8 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	"github.com/lib/pq"
 )
 
 const addTariffTerm = `-- name: AddTariffTerm :exec
@@ -894,6 +896,46 @@ func (q *Queries) ListTariffs(ctx context.Context) ([]Tariff, error) {
 	return items, nil
 }
 
+const listTgLinksOfUsers = `-- name: ListTgLinksOfUsers :many
+SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
+FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = ANY($1::bigint[])
+`
+
+type ListTgLinksOfUsersRow struct {
+	UserID    int64
+	TgID      int64
+	Username  string
+	FirstName string
+}
+
+func (q *Queries) ListTgLinksOfUsers(ctx context.Context, ids []int64) ([]ListTgLinksOfUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTgLinksOfUsers, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTgLinksOfUsersRow{}
+	for rows.Next() {
+		var i ListTgLinksOfUsersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.TgID,
+			&i.Username,
+			&i.FirstName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserDevices = `-- name: ListUserDevices :many
 SELECT user_id, ip, first_seen, last_seen FROM devices WHERE user_id = $1 ORDER BY last_seen DESC
 `
@@ -913,6 +955,45 @@ func (q *Queries) ListUserDevices(ctx context.Context, userID int64) ([]Device, 
 			&i.FirstSeen,
 			&i.LastSeen,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserNamesAfter = `-- name: ListUserNamesAfter :many
+SELECT id, name FROM users WHERE id > $1::BIGINT ORDER BY id LIMIT $2::INT
+`
+
+type ListUserNamesAfterParams struct {
+	After int64
+	Lim   int32
+}
+
+type ListUserNamesAfterRow struct {
+	ID   int64
+	Name string
+}
+
+// A page of users by id with just what a search reads, for the Panel API's cursor: stable
+// while users come and go. The rows of the page itself come from ListUsersByIDs.
+func (q *Queries) ListUserNamesAfter(ctx context.Context, arg ListUserNamesAfterParams) ([]ListUserNamesAfterRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUserNamesAfter, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserNamesAfterRow{}
+	for rows.Next() {
+		var i ListUserNamesAfterRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -962,6 +1043,63 @@ SELECT id, name, contact, note, tags, status, tariff_id, traffic_limit, device_l
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := q.db.QueryContext(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Contact,
+			&i.Note,
+			&i.Tags,
+			&i.Status,
+			&i.TariffID,
+			&i.TrafficLimit,
+			&i.DeviceLimit,
+			&i.ResetStrategy,
+			&i.PeriodDays,
+			&i.PeriodStart,
+			&i.UsedUp,
+			&i.UsedDown,
+			&i.TotalUp,
+			&i.TotalDown,
+			&i.ExpiresAt,
+			&i.Inbounds,
+			&i.SubToken,
+			&i.SlotID,
+			&i.OnlineAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BillingDay,
+			&i.Source,
+			&i.Hidden,
+			&i.FolderID,
+			&i.SpeedLimit,
+			&i.DeviceMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersByIDs = `-- name: ListUsersByIDs :many
+SELECT id, name, contact, note, tags, status, tariff_id, traffic_limit, device_limit, reset_strategy, period_days, period_start, used_up, used_down, total_up, total_down, expires_at, inbounds, sub_token, slot_id, online_at, created_at, updated_at, billing_day, source, hidden, folder_id, speed_limit, device_mode FROM users WHERE id = ANY($1::bigint[]) ORDER BY id
+`
+
+func (q *Queries) ListUsersByIDs(ctx context.Context, ids []int64) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, listUsersByIDs, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}

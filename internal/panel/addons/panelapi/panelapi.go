@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -48,6 +49,9 @@ type Deps struct {
 	// Bot serves the bot's screens running as an addon (tgbot.RPCHandler): POST
 	// /panel/v2/bot/{method}, for the addon that holds the bot. nil: not served.
 	Bot http.Handler
+	// Users are the rules the grants of users:grant go through (days, traffic: the admin's
+	// own paths). nil: the routes of users:all and users:grant are not served.
+	Users *domain.Users
 }
 
 // Caller is the addon a request came from and what it may do.
@@ -106,6 +110,9 @@ func New(d Deps) *Server {
 	s.Handle(http.MethodGet, "/self", "", s.self)
 	s.handleKV()
 	s.handleEvents()
+	if d.Users != nil {
+		s.handleUsers()
+	}
 	if d.Bot != nil {
 		s.Handle(http.MethodPost, "/bot/{method}", "bot", func(w http.ResponseWriter, r *http.Request) {
 			// The panel's data of the bot is the holder's alone, as its chats are.

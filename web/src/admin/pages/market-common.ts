@@ -85,6 +85,8 @@ export const PERMISSIONS: { id: string; label: Key; text: Key }[] = [
   { id: "bot", label: "market.perm.bot", text: "market.perm.botText" },
   { id: "users:read", label: "market.perm.usersRead", text: "market.perm.usersReadText" },
   { id: "users:write", label: "market.perm.usersWrite", text: "market.perm.usersWriteText" },
+  { id: "users:all", label: "market.perm.usersAll", text: "market.perm.usersAllText" },
+  { id: "users:grant", label: "market.perm.usersGrant", text: "market.perm.usersGrantText" },
   { id: "billing:invoice", label: "market.perm.invoice", text: "market.perm.invoiceText" },
   { id: "events", label: "market.perm.events", text: "market.perm.eventsText" },
   { id: "kv", label: "market.perm.kv", text: "market.perm.kvText" },
@@ -100,9 +102,14 @@ export function sortPermissions(perms: string[]): string[] {
   return [...perms].sort((a, b) => at(a) - at(b) || a.localeCompare(b));
 }
 
-/** Talking to the clients for the panel or giving them days: the addon is as good as an admin. */
+/**
+ * Talking to the clients for the panel, giving them days (any of them, for users:grant) or
+ * reading all of them (users:all): the addon is as good as an admin.
+ */
+export const DANGEROUS_PERMISSIONS = ["bot", "users:write", "users:all", "users:grant"];
+
 export function actsAsAdmin(perms: string[]): boolean {
-  return perms.includes("bot") || perms.includes("users:write");
+  return perms.some((p) => DANGEROUS_PERMISSIONS.includes(p));
 }
 
 /** Its pages in the admin panel: granted and running. */

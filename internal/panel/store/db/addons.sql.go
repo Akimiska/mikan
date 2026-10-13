@@ -137,6 +137,33 @@ func (q *Queries) AddonKVSize(ctx context.Context, arg AddonKVSizeParams) (int64
 	return size, err
 }
 
+const claimAddonGrantKey = `-- name: ClaimAddonGrantKey :execrows
+INSERT INTO addon_grant_keys (addon_id, key, user_id, result, created_at) VALUES ($1, $2, $3, '', $4)
+ON CONFLICT (addon_id, key) DO NOTHING
+`
+
+type ClaimAddonGrantKeyParams struct {
+	AddonID   string
+	Key       string
+	UserID    int64
+	CreatedAt int64
+}
+
+// The key of a grant, taken before the grant: 0 rows is a key already used (a repeat). A
+// concurrent claim of the same key waits for the first one's commit.
+func (q *Queries) ClaimAddonGrantKey(ctx context.Context, arg ClaimAddonGrantKeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimAddonGrantKey,
+		arg.AddonID,
+		arg.Key,
+		arg.UserID,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const claimAddonID = `-- name: ClaimAddonID :exec
 INSERT INTO addon_id_claims (addon_id, source_id) VALUES ($1, $2)
 ON CONFLICT (addon_id) DO NOTHING
@@ -198,6 +225,15 @@ DELETE FROM addon_grants WHERE addon_id = $1
 
 func (q *Queries) DeleteAddonGrant(ctx context.Context, addonID string) error {
 	_, err := q.db.ExecContext(ctx, deleteAddonGrant, addonID)
+	return err
+}
+
+const deleteAddonGrantKeys = `-- name: DeleteAddonGrantKeys :exec
+DELETE FROM addon_grant_keys WHERE addon_id = $1
+`
+
+func (q *Queries) DeleteAddonGrantKeys(ctx context.Context, addonID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonGrantKeys, addonID)
 	return err
 }
 
@@ -269,6 +305,28 @@ func (q *Queries) GetAddonGrant(ctx context.Context, addonID string) (AddonGrant
 		&i.Permissions,
 		&i.ApprovedBy,
 		&i.ApprovedAt,
+	)
+	return i, err
+}
+
+const getAddonGrantKey = `-- name: GetAddonGrantKey :one
+SELECT addon_id, key, user_id, result, created_at FROM addon_grant_keys WHERE addon_id = $1 AND key = $2
+`
+
+type GetAddonGrantKeyParams struct {
+	AddonID string
+	Key     string
+}
+
+func (q *Queries) GetAddonGrantKey(ctx context.Context, arg GetAddonGrantKeyParams) (AddonGrantKey, error) {
+	row := q.db.QueryRowContext(ctx, getAddonGrantKey, arg.AddonID, arg.Key)
+	var i AddonGrantKey
+	err := row.Scan(
+		&i.AddonID,
+		&i.Key,
+		&i.UserID,
+		&i.Result,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -673,6 +731,21 @@ type ReleaseAddonClaimParams struct {
 
 func (q *Queries) ReleaseAddonClaim(ctx context.Context, arg ReleaseAddonClaimParams) error {
 	_, err := q.db.ExecContext(ctx, releaseAddonClaim, arg.AddonID, arg.SourceID)
+	return err
+}
+
+const setAddonGrantResult = `-- name: SetAddonGrantResult :exec
+UPDATE addon_grant_keys SET result = $3 WHERE addon_id = $1 AND key = $2
+`
+
+type SetAddonGrantResultParams struct {
+	AddonID string
+	Key     string
+	Result  string
+}
+
+func (q *Queries) SetAddonGrantResult(ctx context.Context, arg SetAddonGrantResultParams) error {
+	_, err := q.db.ExecContext(ctx, setAddonGrantResult, arg.AddonID, arg.Key, arg.Result)
 	return err
 }
 

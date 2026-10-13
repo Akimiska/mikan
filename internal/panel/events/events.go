@@ -17,6 +17,9 @@ import (
 const (
 	PaymentPaid     = "payment.paid"
 	PaymentRefunded = "payment.refunded"
+	// UserGranted: an addon with users:grant gave a user days or traffic. data: user_id,
+	// days, bytes, pool_id, reason, addon.
+	UserGranted = "user.granted"
 )
 
 // Retention: an event older than this is gone, read or not.

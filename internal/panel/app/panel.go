@@ -250,7 +250,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	// The panel's API for addons, with the Bot API proxy over the gateway for the addon that
 	// holds the bot.
 	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
-		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend)})
+		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend), Users: deps.Users})
 	// What the bot says comes from the bot addon (the official one is installed by itself,
 	// botaddon.go): the panel tells it through events, and keeps the broadcasts and the
 	// previews of the admin's texts.

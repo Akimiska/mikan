@@ -71,6 +71,8 @@ func TestParseCatalogProtocol2(t *testing.T) {
 		{ID: "script", Protocol: 2, Kind: KindBot, Mode: ModeClient, Image: img, Digest: digest},
 		{ID: "page", Protocol: 2, Kind: KindUI, Image: img, Digest: digest},
 		{ID: "yookassa", Protocol: 1, Image: img, Digest: digest},
+		// The permissions that reach every subscriber are ones an entry may ask for.
+		{ID: "reach", Protocol: 2, Kind: KindUI, Permissions: []string{"users:all", "users:grant"}, Image: img, Digest: digest},
 		{ID: "no-kind", Protocol: 2, Image: img, Digest: digest},
 		{ID: "pay-v2", Protocol: 2, Kind: KindPayment, Image: img, Digest: digest},
 		{ID: "odd-mode", Protocol: 2, Kind: KindBot, Mode: "socket", Image: img, Digest: digest},
@@ -91,7 +93,7 @@ func TestParseCatalogProtocol2(t *testing.T) {
 	for _, e := range got.Adapters {
 		ids = append(ids, e.ID)
 	}
-	if strings.Join(ids, ",") != "telegram,script,page,yookassa" {
+	if strings.Join(ids, ",") != "telegram,script,page,yookassa,reach" {
 		t.Fatalf("kept %v", ids)
 	}
 	if e := got.Adapters[2]; e.Mode != ModeHTTP {

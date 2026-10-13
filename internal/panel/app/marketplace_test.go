@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store/db"
 )
 
 // The marketplace of protocol 2: the admin approves exactly the permissions shown, the grant
@@ -147,10 +149,33 @@ func TestMarketplaceGrants(t *testing.T) {
 		t.Fatalf("an update asking for more is not marked: %+v", v.Catalog)
 	}
 
+	// A grant key of the addon is its own: removing the addon takes it too, so one installed
+	// later under the id does not get the old one's results.
+	ctx := context.Background()
+	if err := domain.Seed(ctx, h.st, h.now); err != nil {
+		t.Fatal(err)
+	}
+	tariffs, _ := h.st.Q.ListTariffs(ctx)
+	clock := func() time.Time { return h.now }
+	u, err := domain.NewUsers(h.st, domain.NewPool(h.st, clock), noChanges{}, clock).Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"telegram", "neighbour"} {
+		if n, err := h.st.Q.ClaimAddonGrantKey(ctx, db.ClaimAddonGrantKeyParams{AddonID: id, Key: "k", UserID: u.ID, CreatedAt: 1}); err != nil || n != 1 {
+			t.Fatalf("claim: %d %v", n, err)
+		}
+	}
 	if resp, body := h.do(http.MethodPost, api+"/telegram/remove", nil, csrf); resp.StatusCode/100 != 2 {
 		t.Fatalf("remove: %d %s", resp.StatusCode, body)
 	}
 	if _, ok := grant(); ok {
 		t.Fatal("the grant outlived the removal")
+	}
+	if _, err := h.st.Q.GetAddonGrantKey(ctx, db.GetAddonGrantKeyParams{AddonID: "telegram", Key: "k"}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("the grant key outlived the removal: %v", err)
+	}
+	if _, err := h.st.Q.GetAddonGrantKey(ctx, db.GetAddonGrantKeyParams{AddonID: "neighbour", Key: "k"}); err != nil {
+		t.Fatalf("another addon's key went with it: %v", err)
 	}
 }

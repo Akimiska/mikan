@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/torrent"
 )
@@ -170,10 +171,10 @@ func (h *handlers) listTorrentHits(ctx context.Context, in *torrentHitsInput) (*
 	out := &torrentHitsOutput{Body: make([]TorrentHitView, 0, len(rows))}
 	for _, r := range rows {
 		out.Body = append(out.Body, TorrentHitView{
-			ID: r.ID, UserID: r.UserID, UserName: r.UserName, NodeID: ptrInt(r.NodeID.Int64, r.NodeID.Valid), NodeName: r.NodeName,
+			ID: r.ID, UserID: r.UserID, UserName: r.UserName, NodeID: store.Int64Ptr(r.NodeID), NodeName: r.NodeName,
 			IP: r.Ip, Inbound: r.Inbound, Network: r.Network, Kind: r.Kind, Dest: r.Dest, Hits: r.Hits,
-			At: time.Unix(r.At, 0).UTC(), BannedUntil: ptrTime(r.BannedUntil, r.BannedUntil > 0),
-			LiftedAt: ptrTime(r.LiftedAt.Int64, r.LiftedAt.Valid),
+			At: time.Unix(r.At, 0).UTC(), BannedUntil: store.TimePtr(sql.NullInt64{Int64: r.BannedUntil, Valid: r.BannedUntil > 0}),
+			LiftedAt: store.TimePtr(r.LiftedAt),
 		})
 	}
 	return out, nil

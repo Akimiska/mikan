@@ -14,6 +14,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/torrent"
 )
@@ -61,21 +62,6 @@ type UserView struct {
 	CreatedAt     time.Time     `json:"created_at"`
 }
 
-func ptrInt(v int64, ok bool) *int64 {
-	if !ok {
-		return nil
-	}
-	return &v
-}
-
-func ptrTime(v int64, ok bool) *time.Time {
-	if !ok {
-		return nil
-	}
-	t := time.Unix(v, 0).UTC()
-	return &t
-}
-
 // userEnv is what every user of one response shares, read once for the whole response: a
 // list of 500 users asked for the subscription address (six settings) and the online map
 // (every slot of every node) 500 times each.
@@ -119,14 +105,14 @@ func (h *handlers) viewUser(u db.User, slots []string, bound int64, grants domai
 	now := h.d.Now()
 	v := UserView{
 		ID: u.ID, Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: domain.DecodeTags(u.Tags),
-		State: domain.State(u, grants.Main(u.ID), now), TariffID: ptrInt(u.TariffID.Int64, u.TariffID.Valid),
-		TrafficLimit: ptrInt(u.TrafficLimit.Int64, u.TrafficLimit.Valid), TrafficExtra: grants.Main(u.ID), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
-		TotalUp: u.TotalUp, TotalDown: u.TotalDown, DeviceLimit: ptrInt(u.DeviceLimit.Int64, u.DeviceLimit.Valid), DeviceMode: u.DeviceMode,
-		SpeedLimit: ptrInt(u.SpeedLimit.Int64, u.SpeedLimit.Valid), ResetStrategy: u.ResetStrategy, ExpiresAt: ptrTime(u.ExpiresAt.Int64, u.ExpiresAt.Valid),
-		BillingDay: ptrInt(u.BillingDay.Int64, u.BillingDay.Valid),
-		Inbounds:   domain.DecodeInbounds(u.Inbounds), OnlineAt: ptrTime(u.OnlineAt.Int64, u.OnlineAt.Valid),
+		State: domain.State(u, grants.Main(u.ID), now), TariffID: store.Int64Ptr(u.TariffID),
+		TrafficLimit: store.Int64Ptr(u.TrafficLimit), TrafficExtra: grants.Main(u.ID), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
+		TotalUp: u.TotalUp, TotalDown: u.TotalDown, DeviceLimit: store.Int64Ptr(u.DeviceLimit), DeviceMode: u.DeviceMode,
+		SpeedLimit: store.Int64Ptr(u.SpeedLimit), ResetStrategy: u.ResetStrategy, ExpiresAt: store.TimePtr(u.ExpiresAt),
+		BillingDay: store.Int64Ptr(u.BillingDay),
+		Inbounds:   domain.DecodeInbounds(u.Inbounds), OnlineAt: store.TimePtr(u.OnlineAt),
 		CreatedAt: time.Unix(u.CreatedAt, 0).UTC(), OnlineIPs: []string{}, BoundDevices: bound,
-		Source: u.Source, FolderID: ptrInt(u.FolderID.Int64, u.FolderID.Valid), Hidden: u.Hidden != 0,
+		Source: u.Source, FolderID: store.Int64Ptr(u.FolderID), Hidden: u.Hidden != 0,
 	}
 	if v.Inbounds == nil {
 		v.Inbounds = []int64{}
@@ -138,7 +124,7 @@ func (h *handlers) viewUser(u db.User, slots []string, bound int64, grants domai
 		v.SubURL = env.subBase + "/" + u.SubToken
 	}
 	if until, ok := env.bans[u.ID]; ok {
-		v.TorrentBan = ptrTime(until, true)
+		v.TorrentBan = store.TimePtr(sql.NullInt64{Int64: until, Valid: true})
 	}
 	v.OnlineIPs = env.liveIPs(slots)
 	v.Online = len(v.OnlineIPs) > 0

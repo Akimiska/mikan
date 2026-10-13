@@ -396,14 +396,14 @@ func TestUserCard(t *testing.T) {
 		t.Fatalf("card: %d %v", status, m)
 	}
 	tr, _ := m["traffic"].(map[string]any)
-	links, _ := m["tg_links"].([]any)
+	tg, _ := m["telegram"].(map[string]any)
 	if m["id"] != float64(u.ID) || m["name"] != "Dina" || m["state"] != "active" || m["tariff_name"] != e.tariffs[1].Name || m["tariff_id"] != float64(e.tariffs[1].ID) ||
 		tr["used"] != float64(4*gib) || tr["limit"] != float64(10*gib) || tr["left"] != float64(8*gib) ||
-		m["packages_left"] != float64(2*gib) || m["devices"] != float64(1) || m["tg_id"] != float64(4242) || len(links) != 1 {
+		m["packages_left"] != float64(2*gib) || m["devices"] != float64(1) || m["tg_id"] != float64(4242) {
 		t.Fatalf("card: %v", m)
 	}
-	if l, _ := links[0].(map[string]any); l["id"] != float64(4242) || l["username"] != "dina" || l["name"] != "Dina" {
-		t.Fatalf("link: %v", links)
+	if tg["username"] != "dina" || tg["name"] != "Dina" {
+		t.Fatalf("telegram: %v", m["telegram"])
 	}
 	if exp, _ := m["expires_at"].(string); exp == "" {
 		t.Fatalf("a tariff with a term has an expiry: %v", m)
@@ -421,9 +421,9 @@ func TestUserCard(t *testing.T) {
 	if _, m = e.do(readerToken, "GET", fmt.Sprintf("/users/%d", u.ID), ""); m["traffic"].(map[string]any)["limit"] != nil || m["traffic"].(map[string]any)["left"] != nil {
 		t.Fatalf("unlimited: %v", m)
 	}
-	// A subscription with no owner has no link, as an empty list and not null.
+	// A subscription with no owner has no link.
 	bare := e.user("bare")
-	if _, m = e.do(readerToken, "GET", fmt.Sprintf("/users/%d", bare.ID), ""); m["tg_id"] != nil || fmt.Sprint(m["tg_links"]) != "[]" {
+	if _, m = e.do(readerToken, "GET", fmt.Sprintf("/users/%d", bare.ID), ""); m["tg_id"] != nil || m["telegram"] != nil {
 		t.Fatalf("unlinked: %v", m)
 	}
 

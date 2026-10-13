@@ -391,11 +391,12 @@ func TestPushFiltersLikePull(t *testing.T) {
 	}
 }
 
-// A name in the addon's list that is not an event type drops that name, not the list: the
-// addon is never sent more than it named.
+// A name in the addon's list that is not an event type matches no event: the addon is never
+// sent more than it named, and one that named nothing real is sent nothing, not everything.
 func TestPushSlipInTypesDoesNotWidenTheFeed(t *testing.T) {
 	h := newHook(t, "slip", true, events.PaymentRefunded, "Bad Type")
-	p := pushWorld(t, map[string]string{"slip": `["events"]`}, h)
+	none := newHook(t, "none", true, "Bad Type")
+	p := pushWorld(t, map[string]string{"slip": `["events"]`, "none": `["events"]`}, h, none)
 	p.emit(t, events.PaymentPaid, 1)
 	p.emit(t, events.PaymentRefunded, 1)
 	p.run(t)
@@ -405,6 +406,9 @@ func TestPushSlipInTypesDoesNotWidenTheFeed(t *testing.T) {
 		if !slices.Equal(b.types, []string{events.PaymentRefunded}) {
 			t.Fatalf("an addon that named one valid type was sent %v", b.types)
 		}
+	}
+	if got := none.delivered(); len(got) != 0 {
+		t.Fatalf("an addon that named no event type was sent %v", got)
 	}
 }
 

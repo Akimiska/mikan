@@ -178,13 +178,8 @@ type srcView struct {
 		Error          string `json:"error"`
 		FetchedAt      string `json:"fetched_at"`
 		Installed      []string
-		Entries        []struct {
-			ID        string `json:"id"`
-			Installed bool   `json:"installed"`
-			Update    bool   `json:"update"`
-			Wider     bool   `json:"wider"`
-		} `json:"entries"`
-		Skipped []struct {
+		Entries        int `json:"entries"`
+		Skipped        []struct {
 			ID     string `json:"id"`
 			Reason string `json:"reason"`
 		} `json:"skipped"`
@@ -249,14 +244,16 @@ func (l *srcLab) grant(id string) (db.AddonGrant, bool) {
 
 func (l *srcLab) origin(id string) (int64, bool) {
 	l.t.Helper()
-	o, err := l.h.st.Q.GetAddonOrigin(context.Background(), id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false
-	}
+	rows, err := l.h.st.Q.ListAddonOrigins(context.Background())
 	if err != nil {
 		l.t.Fatal(err)
 	}
-	return o.SourceID, true
+	for _, o := range rows {
+		if o.AddonID == id {
+			return o.SourceID, true
+		}
+	}
+	return 0, false
 }
 
 // A full API key, for the refusals.
@@ -412,7 +409,7 @@ func TestAddonSourcesInstall(t *testing.T) {
 		t.Fatalf("sources: %s", out)
 	}
 	s := v.Sources[0]
-	if !s.Signed || s.Fingerprint == "" || s.Title != "Test author" || s.Error != "" || s.FetchedAt == "" || len(s.Entries) != 2 ||
+	if !s.Signed || s.Fingerprint == "" || s.Title != "Test author" || s.Error != "" || s.FetchedAt == "" || s.Entries != 2 ||
 		len(s.Skipped) != 1 || s.Skipped[0].ID != "yoo" || s.Skipped[0].Reason != "payment" {
 		t.Fatalf("source: %+v", s)
 	}
@@ -513,7 +510,7 @@ func TestAddonSourcesInstall(t *testing.T) {
 	l.publish("/index.json", l.catalogDoc(srcEntry("hello", "1.2.0", "f", "generic", "kv")), other)
 	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh", nil, http.StatusOK)
 	v = l.sources()
-	if e := v.Sources[0]; e.Error != "source_key_changed" || e.NewFingerprint == "" || e.NewFingerprint == e.Fingerprint || len(e.Entries) != 0 || !e.Signed {
+	if e := v.Sources[0]; e.Error != "source_key_changed" || e.NewFingerprint == "" || e.NewFingerprint == e.Fingerprint || e.Entries != 0 || !e.Signed {
 		t.Fatalf("after a key change: %+v", e)
 	}
 	l.call(http.MethodPost, "/marketplace/hello/install", approve("kv"), http.StatusConflict, "source_key_changed")
@@ -535,7 +532,7 @@ func TestAddonSourcesInstall(t *testing.T) {
 	}
 	fp := l.sources().Sources[0].NewFingerprint
 	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh?accept="+fp, nil, http.StatusOK)
-	if e := l.sources().Sources[0]; e.Error != "" || e.Fingerprint != fp || len(e.Entries) != 1 {
+	if e := l.sources().Sources[0]; e.Error != "" || e.Fingerprint != fp || e.Entries != 1 {
 		t.Fatalf("after accepting the key: %+v", e)
 	}
 	var audited int
@@ -578,7 +575,7 @@ func TestAddonSourceUnsigned(t *testing.T) {
 	}
 	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/mikan-addon.json")}, http.StatusCreated)
 	s := l.sources().Sources[0]
-	if s.Signed || s.Fingerprint != "" || len(s.Entries) != 1 || s.Title != "127.0.0.1" {
+	if s.Signed || s.Fingerprint != "" || s.Entries != 1 || s.Title != "127.0.0.1" {
 		t.Fatalf("unsigned source: %+v", s)
 	}
 	author := newKey(t)
@@ -587,7 +584,7 @@ func TestAddonSourceUnsigned(t *testing.T) {
 	// The key is not pinned behind the admin's back: it waits for the fingerprint, the source
 	// stays unsigned (the stronger warning stays) and offers nothing meanwhile.
 	s = l.sources().Sources[0]
-	if s.Signed || s.Error != "source_key_changed" || s.NewFingerprint == "" || len(s.Entries) != 0 {
+	if s.Signed || s.Error != "source_key_changed" || s.NewFingerprint == "" || s.Entries != 0 {
 		t.Fatalf("a source that began to sign: %+v", s)
 	}
 	if row, err := l.h.st.Q.GetAddonSource(context.Background(), s.ID); err != nil || row.Key != "" {
@@ -598,7 +595,7 @@ func TestAddonSourceUnsigned(t *testing.T) {
 		t.Fatalf("a made-up fingerprint took the key: %+v", s)
 	}
 	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh?accept="+s.NewFingerprint, nil, http.StatusOK)
-	if s = l.sources().Sources[0]; !s.Signed || s.Error != "" || len(s.Entries) != 1 {
+	if s = l.sources().Sources[0]; !s.Signed || s.Error != "" || s.Entries != 1 {
 		t.Fatalf("an accepted key: %+v", s)
 	}
 	// From now on it is held to the key.
@@ -726,6 +723,9 @@ func TestAddonSourceIDsAreClaimedByTheFirst(t *testing.T) {
 	for _, e := range l.market().Catalog {
 		if e.Origin != nil {
 			owners[e.ID] = e.Origin.Title
+			if e.ID == "alpha" && e.Origin.ID != 1 {
+				t.Fatalf("alpha is not the older source's: %+v", e.Origin)
+			}
 			if e.ID == "beta" && e.Version != "1.0.0" {
 				t.Fatalf("beta offered with the older source's build: %s", e.Version)
 			}
@@ -735,7 +735,7 @@ func TestAddonSourceIDsAreClaimedByTheFirst(t *testing.T) {
 		t.Fatalf("catalog: %v", owners)
 	}
 	a := l.sources().Sources[0]
-	if len(a.Entries) != 1 || a.Entries[0].ID != "alpha" || len(a.Skipped) != 1 || a.Skipped[0].ID != "beta" || a.Skipped[0].Reason != "id_taken" {
+	if a.Entries != 1 || len(a.Skipped) != 1 || a.Skipped[0].ID != "beta" || a.Skipped[0].Reason != "id_taken" {
 		t.Fatalf("the older source: %+v", a)
 	}
 
@@ -797,7 +797,7 @@ func TestAddonSourceUnreachableKeepsItsEntries(t *testing.T) {
 	l.mu.Unlock()
 	l.call(http.MethodPost, "/addon-sources/1/refresh", nil, http.StatusOK)
 	s := l.sources().Sources[0]
-	if s.Error != "source_unreachable" || len(s.Entries) != 2 {
+	if s.Error != "source_unreachable" || s.Entries != 2 {
 		t.Fatalf("while down: %+v", s)
 	}
 	if n := len(l.market().Catalog); n != 3 {

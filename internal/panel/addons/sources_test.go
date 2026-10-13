@@ -675,20 +675,12 @@ func TestSourceGitHubHandOverIsLimitedToItsAssetHosts(t *testing.T) {
 }
 
 func TestOwners(t *testing.T) {
-	e := func(ids ...string) []Entry {
-		var out []Entry
-		for _, id := range ids {
-			out = append(out, Entry{ID: id})
-		}
-		return out
-	}
 	got := Owners(map[string]bool{"telegram": true, "yookassa": true},
 		map[string]int64{"installed": 7, "telegram": 9},
 		// A claim outlives the lower number of a source that lists the id later; the panel's own
 		// and an installed addon's ids stay what they are.
-		map[string]int64{"shared": 3, "claimed": 7, "yookassa": 4, "installed": 2},
-		[]SourceEntries{{ID: 3, Entries: e("shared", "telegram", "three", "installed")}, {ID: 2, Entries: e("shared", "two")}, {ID: 7, Entries: e("seven", "installed")}})
-	want := map[string]int64{"telegram": 0, "yookassa": 0, "installed": 7, "shared": 3, "claimed": 7, "two": 2, "three": 3, "seven": 7}
+		map[string]int64{"shared": 3, "claimed": 7, "yookassa": 4, "installed": 2})
+	want := map[string]int64{"telegram": 0, "yookassa": 0, "installed": 7, "shared": 3, "claimed": 7}
 	if len(got) != len(want) {
 		t.Fatalf("owners: %v", got)
 	}

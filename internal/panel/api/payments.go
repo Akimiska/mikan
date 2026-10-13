@@ -12,6 +12,7 @@ import (
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -276,19 +277,11 @@ func freeConditionView(c string) string {
 	return "none"
 }
 
-func unixPtr(n sql.NullInt64) *time.Time {
-	if !n.Valid {
-		return nil
-	}
-	t := time.Unix(n.Int64, 0).UTC()
-	return &t
-}
-
 // paymentView is a payment without the names; the list's query brings those along.
 func paymentView(p db.Payment) PaymentView {
-	v := PaymentView{ID: p.ID, Provider: p.Provider, Kind: p.Kind, Status: p.Status, TgID: p.TgID, TariffName: p.TariffName, TermDays: ptrInt(p.TermDays.Int64, p.TermDays.Valid), Amount: p.Amount,
+	v := PaymentView{ID: p.ID, Provider: p.Provider, Kind: p.Kind, Status: p.Status, TgID: p.TgID, TariffName: p.TariffName, TermDays: store.Int64Ptr(p.TermDays), Amount: p.Amount,
 		Currency: p.Currency, ExternalID: p.ExternalID.String, Error: p.Error, CreatedAt: time.Unix(p.CreatedAt, 0).UTC(),
-		PaidAt: unixPtr(p.PaidAt), AppliedAt: unixPtr(p.AppliedAt), RefundedAt: unixPtr(p.RefundedAt)}
+		PaidAt: store.TimePtr(p.PaidAt), AppliedAt: store.TimePtr(p.AppliedAt), RefundedAt: store.TimePtr(p.RefundedAt)}
 	if p.UserID.Valid {
 		id := p.UserID.Int64
 		v.UserID = &id

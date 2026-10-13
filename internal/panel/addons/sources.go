@@ -110,11 +110,8 @@ func Fingerprint(key string) string {
 
 // ParseSourceKey reads a base64 ed25519 public key.
 func ParseSourceKey(key string) (ed25519.PublicKey, bool) {
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(key))
-	if err != nil || len(raw) != ed25519.PublicKeySize {
-		return nil, false
-	}
-	return raw, true
+	pub, err := release.Key(strings.TrimSpace(key))
+	return pub, err == nil
 }
 
 // SourcePin says which key a fetch must find. Key is the pinned one ("" for a source that
@@ -174,17 +171,10 @@ func newSourceNet(dev bool) *sourceNet {
 	return n
 }
 
-// nat64 is the well-known NAT64 prefix: an IPv4 address inside it is judged as itself.
-var nat64 = netip.MustParsePrefix("64:ff9b::/96")
-
 // allowed says whether the panel may connect to a: public addresses only, and in development
 // 127.0.0.1 too.
 func (n *sourceNet) allowed(a netip.Addr) bool {
-	a = a.Unmap()
-	if nat64.Contains(a) {
-		b := a.As16()
-		a = netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})
-	}
+	a = proto.Unwrap4(a)
 	if n.dev && a == netip.MustParseAddr("127.0.0.1") {
 		return true
 	}
@@ -795,9 +785,8 @@ type SourceEntries struct {
 // Owners says who holds each addon id: 0 is the panel's own (the official catalog, and what
 // is installed with no source), a number is a source. An id an installed addon came from is
 // that source's, then an id a source claimed (the first to list it keeps it; the claims are
-// stored); an id nobody claimed yet goes to the lowest source number. An entry of a source is
-// offered only under an id its source holds.
-func Owners(taken map[string]bool, origins, claims map[string]int64, srcs []SourceEntries) map[string]int64 {
+// stored). An entry of a source is offered only under an id its source holds.
+func Owners(taken map[string]bool, origins, claims map[string]int64) map[string]int64 {
 	owner := map[string]int64{}
 	for id := range taken {
 		owner[id] = 0
@@ -806,15 +795,6 @@ func Owners(taken map[string]bool, origins, claims map[string]int64, srcs []Sour
 		for id, src := range held {
 			if _, ok := owner[id]; !ok {
 				owner[id] = src
-			}
-		}
-	}
-	srcs = slices.Clone(srcs)
-	slices.SortFunc(srcs, func(a, b SourceEntries) int { return int(a.ID - b.ID) })
-	for _, s := range srcs {
-		for _, e := range s.Entries {
-			if _, ok := owner[e.ID]; !ok {
-				owner[e.ID] = s.ID
 			}
 		}
 	}

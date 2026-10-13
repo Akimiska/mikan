@@ -216,7 +216,12 @@ func (c *clientBuilder) security() error {
 		for k, v := range map[string]string{"security": "reality", "sni": sni, "fp": c.fingerprint(), "pbk": pbk, "sid": sid} {
 			c.q.Set(k, v)
 		}
-		c.q.Set("pqv", "1") // X25519MLKEM768 keyshare в v2ray-ссылке (xray reads pqv)
+		// pqv в ссылке НЕ ставим. По спеке Xray pqv = mldsa65Verify — base64-ключ
+		// ML-DSA-65, который существует только при mldsa65Seed на сервере. Голый
+		// "pqv=1" Xray-клиенты парсят как mldsa65Verify:"1" → «Failed to build
+		// REALITY config: invalid "mldsa65Verify": 1» и весь конфиг не запускается.
+		// Keyshare MLKEM768 это поле не включает: xray-клиенты шлют его сами,
+		// mihomo берёт из YAML support-x25519mlkem768 выше.
 		return nil
 	}
 	if !rules[c.t.Type()].cert && c.ext.TLS != "node" {

@@ -32,7 +32,8 @@ const (
 	pushBatch = 100
 	pushFirst = time.Second
 	pushMax   = 5 * time.Minute
-	// pushScan is how often the supervisor looks for addons that came up.
+	// pushScan is how often the supervisor looks for addons that came up. A worker of an addon
+	// that is not pushed to ends at once, and is started again by the next scan.
 	pushScan = 5 * time.Second
 )
 
@@ -99,15 +100,14 @@ func (s *Server) RunPush(ctx context.Context) {
 			if busy {
 				continue
 			}
-			if _, ok := s.pushTarget(ctx, id); !ok {
-				continue
-			}
 			mu.Lock()
 			workers[id] = true
 			mu.Unlock()
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				// Asked here, not in the scan: an addon whose /v2/info hangs holds only its own
+				// slot, and the scan goes on to the others. pushTo asks the same first.
 				s.pushTo(ctx, id, tune)
 				mu.Lock()
 				delete(workers, id)

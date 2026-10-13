@@ -32,7 +32,7 @@ func eventTypes(evs []db.AddonEvent) []string {
 }
 
 // A node is told down once, after three failed checks in a row, however long it stays down,
-// and up once at the first check that passes; the checks go on every five seconds.
+// and up once after two checks that pass; the checks go on every five seconds.
 func TestNodeDownAndUpAreToldOnce(t *testing.T) {
 	s, fake, st, _, now := setup(t)
 	hub := events.NewHub()

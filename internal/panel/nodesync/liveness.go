@@ -10,24 +10,24 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/hysteresis"
 	"mikan/internal/panel/store/db"
 )
 
-// downAfter: failed health checks in a row (five seconds apart) before a node is told to the
-// addons as down; one lost packet is not an outage. It is told up at the first check that passes.
-const downAfter = 3
-
 // liveness turns the node's health checks into the two events of its life, events.NodeDown
-// and events.NodeUp, once per change however long the checks go on. What was told is kept in
-// node_state (key "health/<node>": "up", or "down:<unix seconds the failures began>"), so a
-// restart of the panel neither tells a node that is still down again nor loses that it came
-// back. A node never told down needs no word when it answers: nothing was said to take back.
+// and events.NodeUp, once per change however long the checks go on. The hysteresis is the
+// admin's alerts' (hysteresis.Tracker: three failed checks to go down, two good ones to come
+// back, five seconds apart), so the addons and the admin's chat hear of an outage at the same
+// moment. What was told is kept in node_state (key "health/<node>": "up", or "down:<unix
+// seconds the failures began>"), so a restart of the panel neither tells a node that is still
+// down again nor loses that it came back. A node never told down needs no word when it
+// answers: nothing was said to take back.
 type liveness struct {
 	mu    sync.Mutex
-	read  bool      // told is what node_state holds
-	told  string    // "", "up" or "down:<since>"
-	fails int       // failed checks in a row
-	since time.Time // when the run of failures began
+	read  bool               // told is what node_state holds
+	told  string             // "", "up" or "down:<since>"
+	track hysteresis.Tracker // seeded from told
+	since time.Time          // when the run of failures began
 }
 
 func (l *liveness) down() (since int64, ok bool) {
@@ -49,17 +49,6 @@ func (s *Syncer) observe(ctx context.Context, view *HealthView) {
 	l := &s.alive
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if view.OK {
-		l.fails = 0
-	} else {
-		if l.fails == 0 {
-			l.since = view.CheckedAt
-		}
-		l.fails++
-	}
-	if !view.OK && l.fails < downAfter {
-		return
-	}
 	key := stateKeyOf("health", s.id)
 	if !l.read {
 		v, err := s.m.st.Q.GetNodeState(ctx, key)
@@ -68,22 +57,53 @@ func (s *Syncer) observe(ctx context.Context, view *HealthView) {
 			return
 		}
 		l.told, l.read = v, true
+		// A node told down is still down for the tracker: it comes back after the good checks.
+		if since, down := l.down(); down {
+			l.track.Level, l.since = hysteresis.Unavailable, time.Unix(since, 0)
+		}
 	}
-	_, wasDown := l.down()
-	switch {
-	case !view.OK && !wasDown:
-		l.tell(ctx, s, key, events.NodeDown, "down:"+strconv.FormatInt(l.since.Unix(), 10),
+	level := hysteresis.Healthy
+	if !view.OK {
+		level = hysteresis.Unavailable
+		if l.since.IsZero() {
+			l.since = view.CheckedAt
+		}
+	} else if l.track.Level != hysteresis.Unavailable {
+		l.since = time.Time{} // a lost packet is over: the next run of failures starts anew
+	}
+	tr := l.track.Observe(level, hysteresis.NodeFailAfter, hysteresis.RecoverAfter)
+	if tr == nil {
+		return
+	}
+	var ok bool
+	switch tr.To {
+	case hysteresis.Unavailable:
+		ok = l.tell(ctx, s, key, events.NodeDown, "down:"+strconv.FormatInt(l.since.Unix(), 10),
 			events.Node{NodeID: s.id, Code: view.Code, Since: l.since.Unix()}, "node.down:"+strconv.FormatInt(s.id, 10)+":"+strconv.FormatInt(l.since.Unix(), 10))
-	case view.OK && wasDown:
-		since, _ := l.down()
-		l.tell(ctx, s, key, events.NodeUp, "up",
+	case hysteresis.Healthy:
+		since, wasDown := l.down()
+		if !wasDown {
+			return // never told down: nothing to take back
+		}
+		ok = l.tell(ctx, s, key, events.NodeUp, "up",
 			events.Node{NodeID: s.id, DownAt: since}, "node.up:"+strconv.FormatInt(s.id, 10)+":"+strconv.FormatInt(since, 10))
+		if ok {
+			l.since = time.Time{}
+		}
+	}
+	if !ok {
+		// Not told: the tracker steps back to just before the change, so the next check tells it.
+		if tr.To == hysteresis.Unavailable {
+			l.track = hysteresis.Tracker{Level: tr.From, BadRounds: hysteresis.NodeFailAfter - 1}
+		} else {
+			l.track = hysteresis.Tracker{Level: tr.From, GoodRounds: hysteresis.RecoverAfter - 1}
+		}
 	}
 }
 
 // tell writes the change and its event on one transaction, so what is told and what is kept
 // agree; the node's name is read there too. A node removed meanwhile is told of to no one.
-func (l *liveness) tell(ctx context.Context, s *Syncer, key, typ, next string, data events.Node, dedupe string) {
+func (l *liveness) tell(ctx context.Context, s *Syncer, key, typ, next string, data events.Node, dedupe string) bool {
 	err := s.m.st.Tx(ctx, func(q *db.Queries) error {
 		n, err := q.GetNode(ctx, s.id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -100,8 +120,9 @@ func (l *liveness) tell(ctx context.Context, s *Syncer, key, typ, next string, d
 	})
 	if err != nil {
 		s.log.Warn("node health: the change is not told", "event", typ, "err", err)
-		return
+		return false
 	}
 	l.told = next
 	s.m.hub.Kick()
+	return true
 }

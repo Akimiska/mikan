@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"time"
 	"unicode/utf8"
 )
 
@@ -40,17 +41,17 @@ type InfoV2 struct {
 	Push     bool     `json:"push,omitempty"`   // it serves POST /v2/events and is sent them
 }
 
-// validEventTypes: names of event types as the panel writes them, and not too many.
-func validEventTypes(types []string) bool {
-	if len(types) > 64 {
-		return false
-	}
+// validEventTypes keeps the names of event types as the panel writes them, and not too many.
+// A name that is not one is dropped, not the list: a slip in one name must not widen what the
+// addon is sent to all of it.
+func validEventTypes(types []string) []string {
+	out := make([]string, 0, min(len(types), 64))
 	for _, t := range types {
-		if !validEventType.MatchString(t) {
-			return false
+		if len(out) < 64 && validEventType.MatchString(t) {
+			out = append(out, t)
 		}
 	}
-	return true
+	return out
 }
 
 var validEventType = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)
@@ -77,11 +78,20 @@ func (m *Manager) InfoV2(ctx context.Context, id string, a Installed) (InfoV2, e
 	if !info.UI.valid() {
 		info.UI = nil
 	}
-	// A list the panel cannot use is as if the addon named none of them: it gets them all.
-	if !validEventTypes(info.Events) {
-		info.Events = nil
-	}
+	// Only the names that are not types are dropped; an addon none of whose names is one is
+	// as if it named none, and gets all of what its permission allows.
+	info.Events = validEventTypes(info.Events)
 	return info, nil
+}
+
+// noInfoFor is how long a /v2/info that failed is not asked again: the addon is pulled from
+// meanwhile, and a hung one costs the panel one wait per this, not one per pull.
+const noInfoFor = 30 * time.Second
+
+// noInfo is a failed /v2/info of one build of an addon.
+type noInfo struct {
+	build string
+	until time.Time
 }
 
 // Pushes is the served addon id, with its description, when it asks for its events to be
@@ -92,8 +102,21 @@ func (m *Manager) Pushes(ctx context.Context, id string) (a Installed, info Info
 	if err != nil {
 		return Installed{}, InfoV2{}, false
 	}
+	build := a.build()
+	m.mu.Lock()
+	f, failed := m.noInfo[id]
+	m.mu.Unlock()
+	if failed && f.build == build && m.now().Before(f.until) {
+		return Installed{}, InfoV2{}, false
+	}
 	info, err = m.InfoV2(ctx, id, a)
-	return a, info, err == nil && info.Push
+	if err != nil {
+		m.mu.Lock()
+		m.noInfo[id] = noInfo{build: build, until: m.now().Add(noInfoFor)}
+		m.mu.Unlock()
+		return Installed{}, InfoV2{}, false
+	}
+	return a, info, info.Push
 }
 
 // PushEvents sends one batch (body is {"events": [...]}) to the served addon a: POST

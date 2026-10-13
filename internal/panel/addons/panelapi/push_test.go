@@ -28,6 +28,8 @@ type hook struct {
 	types   []string
 	answers []int // statuses of the next posts; then 204
 	posts   []post
+	hang    bool // /v2/info never answers
+	infos   int  // how many times it was asked
 }
 
 type post struct {
@@ -44,7 +46,16 @@ func newHook(t *testing.T, id string, push bool, types ...string) *hook {
 		case "GET /v2/info":
 			h.mu.Lock()
 			info := addons.InfoV2{ID: id, Protocol: addons.Protocol2, Push: h.push, Events: h.types}
+			h.infos++
+			hang := h.hang
 			h.mu.Unlock()
+			if hang {
+				select {
+				case <-r.Context().Done():
+				case <-time.After(15 * time.Second):
+				}
+				return
+			}
 			_ = json.NewEncoder(w).Encode(info)
 		case "POST /v2/events":
 			var in struct {
@@ -378,4 +389,48 @@ func TestPushFiltersLikePull(t *testing.T) {
 	if c := p.cursor(t, "holder"); c != last {
 		t.Fatalf("the holder's cursor %d, want %d", c, last)
 	}
+}
+
+// A name in the addon's list that is not an event type drops that name, not the list: the
+// addon is never sent more than it named.
+func TestPushSlipInTypesDoesNotWidenTheFeed(t *testing.T) {
+	h := newHook(t, "slip", true, events.PaymentRefunded, "Bad Type")
+	p := pushWorld(t, map[string]string{"slip": `["events"]`}, h)
+	p.emit(t, events.PaymentPaid, 1)
+	p.emit(t, events.PaymentRefunded, 1)
+	p.run(t)
+	eventually(t, "the refund is sent", func() bool { return len(h.delivered()) >= 1 })
+	time.Sleep(500 * time.Millisecond)
+	for _, b := range h.got() {
+		if !slices.Equal(b.types, []string{events.PaymentRefunded}) {
+			t.Fatalf("an addon that named one valid type was sent %v", b.types)
+		}
+	}
+}
+
+// An addon whose /v2/info does not answer is asked once, then left alone for a while: its pulls
+// are not each held for the wait, and the others are sent theirs meanwhile.
+func TestPushHungInfoIsNotAskedAgainAtOnce(t *testing.T) {
+	hung := newHook(t, "hung", true)
+	hung.hang = true
+	good := newHook(t, "good", true)
+	p := pushWorld(t, map[string]string{"hung": `["events"]`, "good": `["events"]`}, hung, good)
+	p.emit(t, events.PaymentPaid, 1)
+
+	if code, _, _ := p.pull(t, hung, ""); code != http.StatusOK {
+		t.Fatalf("pull of an addon whose info hangs: %d", code)
+	}
+	begin := time.Now()
+	if code, _, _ := p.pull(t, hung, ""); code != http.StatusOK || time.Since(begin) > time.Second {
+		t.Fatalf("second pull took %v (%d): it asked the hung addon again", time.Since(begin), code)
+	}
+	hung.mu.Lock()
+	asked := hung.infos
+	hung.mu.Unlock()
+	if asked != 1 {
+		t.Fatalf("/v2/info of the hung addon was asked %d times", asked)
+	}
+
+	p.run(t)
+	eventually(t, "the other addon is sent its event", func() bool { return len(good.delivered()) == 1 })
 }

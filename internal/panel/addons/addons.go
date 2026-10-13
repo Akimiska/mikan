@@ -159,11 +159,9 @@ type Entry struct {
 	Kind        string   `json:"kind,omitempty"`
 	Mode        string   `json:"mode,omitempty"`
 	Permissions []string `json:"permissions,omitempty"`
-	// Events are the types of events the addon wants (empty: all), Push that it takes them as
-	// POST /v2/events instead of pulling them: mode http only (docs/pipeline/addons.md, 15.3).
-	// The panel reads both from the addon's own /v2/info (InfoV2), which is what it serves.
-	Events    []string  `json:"events,omitempty"`
-	Push      bool      `json:"push,omitempty"`
+	// How its events reach it (push, and the types it wants) is not here: an addon of the
+	// admin's own has no entry, so the panel reads it from the addon's /v2/info (InfoV2). That
+	// is a choice of delivery only; what an addon may receive is the events permission.
 	Resources Resources `json:"resources,omitzero"`
 	Image     string    `json:"image"`
 	Digest    string    `json:"digest"`
@@ -217,9 +215,6 @@ func (e *Entry) normalize() bool {
 				return false
 			}
 			seen[p] = true
-		}
-		if e.Push && e.Mode != ModeHTTP || !validEventTypes(e.Events) {
-			return false
 		}
 		return e.Resources.MemMB == 0 || e.Resources.MemMB >= MinMemMB && e.Resources.MemMB <= MaxMemMB
 	}
@@ -376,6 +371,7 @@ type Manager struct {
 	fetched time.Time
 	infos   map[string]described[Info]
 	infos2  map[string]described[InfoV2]
+	noInfo  map[string]noInfo // a /v2/info that failed, by addon
 
 	ask sync.Mutex // one request queued at a time: the number and the busy check
 }
@@ -389,7 +385,7 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 	pub, _ := release.Key(release.PublicKey)
 	m := &Manager{catalogURL: catalogURL, pub: pub, version: panelVersion, log: log, now: now,
 		hc:    &http.Client{Timeout: 15 * time.Second},
-		infos: map[string]described[Info]{}, infos2: map[string]described[InfoV2]{},
+		infos: map[string]described[Info]{}, infos2: map[string]described[InfoV2]{}, noInfo: map[string]noInfo{},
 		// The panel fetches what the addon names and nothing it points elsewhere to.
 		peer: &http.Client{Timeout: AdapterTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	if dataDir != "" {
@@ -597,11 +593,14 @@ type described[T any] struct {
 	info  T
 }
 
+// build tells one run of an installed build from another: an external addon has no digest,
+// so a new run of it is told by the host's time.
+func (a Installed) build() string { return a.Digest + "\x00" + a.Version + "\x00" + a.At }
+
 // describe asks a running addon for its description at path, once per installed build, and
 // takes it only from the addon it should be: who reads the id and the protocol out of it.
 func describe[T any](ctx context.Context, m *Manager, cache map[string]described[T], id string, a Installed, path string, protocol int, who func(T) (string, int)) (T, error) {
-	// An external addon has no digest: a new run of it is told by the host's time.
-	build := a.Digest + "\x00" + a.Version + "\x00" + a.At
+	build := a.build()
 	m.mu.Lock()
 	c, ok := cache[id]
 	m.mu.Unlock()

@@ -71,6 +71,7 @@ func (s *Syncer) observe(ctx context.Context, view *HealthView) {
 	} else if l.track.Level != hysteresis.Unavailable {
 		l.since = time.Time{} // a lost packet is over: the next run of failures starts anew
 	}
+	before := l.track
 	tr := l.track.Observe(level, hysteresis.NodeFailAfter, hysteresis.RecoverAfter)
 	if tr == nil {
 		return
@@ -78,14 +79,14 @@ func (s *Syncer) observe(ctx context.Context, view *HealthView) {
 	var ok bool
 	switch tr.To {
 	case hysteresis.Unavailable:
-		ok = l.tell(ctx, s, key, events.NodeDown, "down:"+strconv.FormatInt(l.since.Unix(), 10),
+		ok = s.tell(ctx, key, events.NodeDown, "down:"+strconv.FormatInt(l.since.Unix(), 10),
 			events.Node{NodeID: s.id, Code: view.Code, Since: l.since.Unix()}, "node.down:"+strconv.FormatInt(s.id, 10)+":"+strconv.FormatInt(l.since.Unix(), 10))
 	case hysteresis.Healthy:
 		since, wasDown := l.down()
 		if !wasDown {
 			return // never told down: nothing to take back
 		}
-		ok = l.tell(ctx, s, key, events.NodeUp, "up",
+		ok = s.tell(ctx, key, events.NodeUp, "up",
 			events.Node{NodeID: s.id, DownAt: since}, "node.up:"+strconv.FormatInt(s.id, 10)+":"+strconv.FormatInt(since, 10))
 		if ok {
 			l.since = time.Time{}
@@ -93,17 +94,13 @@ func (s *Syncer) observe(ctx context.Context, view *HealthView) {
 	}
 	if !ok {
 		// Not told: the tracker steps back to just before the change, so the next check tells it.
-		if tr.To == hysteresis.Unavailable {
-			l.track = hysteresis.Tracker{Level: tr.From, BadRounds: hysteresis.NodeFailAfter - 1}
-		} else {
-			l.track = hysteresis.Tracker{Level: tr.From, GoodRounds: hysteresis.RecoverAfter - 1}
-		}
+		l.track = before
 	}
 }
 
 // tell writes the change and its event on one transaction, so what is told and what is kept
 // agree; the node's name is read there too. A node removed meanwhile is told of to no one.
-func (l *liveness) tell(ctx context.Context, s *Syncer, key, typ, next string, data events.Node, dedupe string) bool {
+func (s *Syncer) tell(ctx context.Context, key, typ, next string, data events.Node, dedupe string) bool {
 	err := s.m.st.Tx(ctx, func(q *db.Queries) error {
 		n, err := q.GetNode(ctx, s.id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -122,7 +119,7 @@ func (l *liveness) tell(ctx context.Context, s *Syncer, key, typ, next string, d
 		s.log.Warn("node health: the change is not told", "event", typ, "err", err)
 		return false
 	}
-	l.told = next
+	s.alive.told = next
 	s.m.hub.Kick()
 	return true
 }

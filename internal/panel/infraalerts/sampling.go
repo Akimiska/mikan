@@ -19,14 +19,11 @@ import (
 	"mikan/internal/panel/store/db"
 )
 
-// The hysteresis of the samples, in rounds (see Tracker). A node is unavailable after
-// nodeFailAfter failed samples; a probe of WARP or an exit makes it degraded after
-// probeFailAfter; every kind needs recoverAfter good samples in a row to be called recovered.
-const (
-	nodeFailAfter  = hysteresis.NodeFailAfter
-	probeFailAfter = 2
-	recoverAfter   = hysteresis.RecoverAfter
-)
+// The hysteresis of the samples, in rounds (see hysteresis.Tracker). A node is unavailable after
+// hysteresis.NodeFailAfter failed samples; a probe of WARP or an exit makes it degraded after
+// probeFailAfter; every kind needs hysteresis.RecoverAfter good samples in a row to be called
+// recovered.
+const probeFailAfter = 2
 
 // An inbound or the cascade relay is unavailable after inboundFailSamples failed samples. A port
 // held by another program is moved by the tuner within seconds: such a listener is reported
@@ -138,7 +135,7 @@ func (m *Monitor) round(ctx context.Context) {
 	for _, in := range inbounds {
 		byNode[in.NodeID] = append(byNode[in.NodeID], in)
 	}
-	levels := make(map[int64]Level, len(nodes))
+	levels := make(map[int64]hysteresis.Level, len(nodes))
 	listenerHealth := make(map[int64]map[string]bool, len(nodes))
 	// Whether the tuner moves a busy relay by itself: there is no switch for one relay.
 	relayMoves := false
@@ -160,13 +157,13 @@ func (m *Monitor) round(ctx context.Context) {
 		if !ok || hv.CheckedAt.IsZero() {
 			continue
 		}
-		nodeLevel := Healthy
+		nodeLevel := hysteresis.Healthy
 		if !hv.OK {
-			nodeLevel = Unavailable
+			nodeLevel = hysteresis.Unavailable
 		}
-		m.observe(&st, "node/"+strconv.FormatInt(n.ID, 10), nodeLevel, hv.CheckedAt, nodeFailAfter, recoverAfter, eventFor(cfg, eventNode, n.Name, nodeLevel, t))
-		if nodeLevel == Unavailable {
-			levels[n.ID] = Unavailable
+		m.observe(&st, "node/"+strconv.FormatInt(n.ID, 10), nodeLevel, hv.CheckedAt, hysteresis.NodeFailAfter, hysteresis.RecoverAfter, eventFor(cfg, eventNode, n.Name, nodeLevel, t))
+		if nodeLevel == hysteresis.Unavailable {
+			levels[n.ID] = hysteresis.Unavailable
 			continue
 		}
 		listenerHealth[n.ID] = make(map[string]bool, len(hv.Listeners))
@@ -180,18 +177,18 @@ func (m *Monitor) round(ctx context.Context) {
 				continue
 			}
 			ok := listenerHealth[n.ID][in.Name]
-			level := Healthy
+			level := hysteresis.Healthy
 			if !ok {
-				level = Unavailable
+				level = hysteresis.Unavailable
 			}
 			key := "inbound/" + strconv.FormatInt(in.ID, 10)
-			m.observe(&st, key, level, hv.CheckedAt, inboundFailAfter(busy[in.Name], in.AutoPort != 0), recoverAfter, eventFor(cfg, eventInbound, n.Name+" / "+in.Name, level, t))
-			if level != Healthy {
-				nodeLevel = Degraded
+			m.observe(&st, key, level, hv.CheckedAt, inboundFailAfter(busy[in.Name], in.AutoPort != 0), hysteresis.RecoverAfter, eventFor(cfg, eventInbound, n.Name+" / "+in.Name, level, t))
+			if level != hysteresis.Healthy {
+				nodeLevel = hysteresis.Degraded
 			}
 		}
-		if m.checkRelay(&st, cfg, n, hv, relayMoves, lang) != Healthy {
-			nodeLevel = Degraded
+		if m.checkRelay(&st, cfg, n, hv, relayMoves, lang) != hysteresis.Healthy {
+			nodeLevel = hysteresis.Degraded
 		}
 		levels[n.ID] = nodeLevel
 	}
@@ -274,7 +271,7 @@ func forgetRemoved(st *persistentState, nodes []db.Node, byNode map[int64][]db.I
 
 // observe records a new sample, with a stable failure threshold and two-sample recovery.
 // A false return means no stable transition was emitted.
-func (m *Monitor) observe(st *persistentState, key string, level Level, checked time.Time, failAfter, recoverSamples int, text string) bool {
+func (m *Monitor) observe(st *persistentState, key string, level hysteresis.Level, checked time.Time, failAfter, recoverSamples int, text string) bool {
 	s := st.Samples[key]
 	if !s.Checked.IsZero() && !checked.After(s.Checked) {
 		return false
@@ -299,7 +296,7 @@ const (
 	eventInbound eventKind = "inbound"
 )
 
-func eventFor(c AlertsConfig, event eventKind, name string, level Level, t *texts) string {
+func eventFor(c AlertsConfig, event eventKind, name string, level hysteresis.Level, t *texts) string {
 	var enabled bool
 	switch event {
 	case eventNode:
@@ -315,10 +312,10 @@ func eventFor(c AlertsConfig, event eventKind, name string, level Level, t *text
 		return ""
 	}
 	icon, state := "🔴", t.stateUnavailable
-	if level == Healthy {
+	if level == hysteresis.Healthy {
 		icon, state = "🟢", t.stateRecovered
 	}
-	if level == Degraded {
+	if level == hysteresis.Degraded {
 		icon, state = "🟡", t.stateDegraded
 	}
 	return icon + " <b>" + html.EscapeString(name) + "</b> — " + state
@@ -328,18 +325,18 @@ func eventFor(c AlertsConfig, event eventKind, name string, level Level, t *text
 // another program holds keeps it down without a word. A node without a relay has no such
 // listener and is Healthy here. moves says whether the tuner moves a busy relay by itself,
 // which is given time to, as an inbound's move is.
-func (m *Monitor) checkRelay(st *persistentState, cfg AlertsConfig, n db.Node, hv nodesync.HealthView, moves bool, lang string) Level {
+func (m *Monitor) checkRelay(st *persistentState, cfg AlertsConfig, n db.Node, hv nodesync.HealthView, moves bool, lang string) hysteresis.Level {
 	i := slices.IndexFunc(hv.Listeners, func(l nodeapi.ListenerStatus) bool { return l.Name == nodeapi.RelayListener })
 	if i < 0 {
-		return Healthy
+		return hysteresis.Healthy
 	}
-	l, level := hv.Listeners[i], Healthy
+	l, level := hv.Listeners[i], hysteresis.Healthy
 	if !l.OK {
-		level = Unavailable
+		level = hysteresis.Unavailable
 	}
 	t := textsFor(lang)
 	label := n.Name + " / " + t.relayLabel
-	m.observe(st, "relay/"+strconv.FormatInt(n.ID, 10), level, hv.CheckedAt, inboundFailAfter(l.Busy(), moves), recoverAfter, eventFor(cfg, eventExit, label, level, t))
+	m.observe(st, "relay/"+strconv.FormatInt(n.ID, 10), level, hv.CheckedAt, inboundFailAfter(l.Busy(), moves), hysteresis.RecoverAfter, eventFor(cfg, eventExit, label, level, t))
 	return level
 }
 
@@ -376,14 +373,14 @@ func warpReason(s nodeapi.WarpStatus, endpoint, lang string) string {
 	return t.warpReason + text
 }
 
-func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
+func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]hysteresis.Level, lang string) {
 	type ask struct {
 		n db.Node
 		w db.NodeWarp
 	}
 	var asks []ask
 	for _, n := range nodes {
-		if n.Enabled == 0 || levels[n.ID] == Unavailable {
+		if n.Enabled == 0 || levels[n.ID] == hysteresis.Unavailable {
 			continue
 		}
 		w, err := m.nodeWarp(ctx, n.ID)
@@ -406,22 +403,22 @@ func (m *Monitor) probeWarp(ctx context.Context, st *persistentState, cfg Alerts
 		if err != nil || s.CheckedAt.IsZero() {
 			continue
 		}
-		level := Healthy
+		level := hysteresis.Healthy
 		if !s.OK {
-			level = Degraded
+			level = hysteresis.Degraded
 		}
 		text := eventFor(cfg, eventWarp, a.n.Name+" / WARP", level, t)
-		if text != "" && level == Degraded {
+		if text != "" && level == hysteresis.Degraded {
 			text += "\n" + html.EscapeString(warpReason(s, a.w.Endpoint, lang))
 		}
-		m.observe(st, "warp/"+strconv.FormatInt(a.n.ID, 10), level, s.CheckedAt, probeFailAfter, recoverAfter, text)
-		if level != Healthy {
-			levels[a.n.ID] = Degraded
+		m.observe(st, "warp/"+strconv.FormatInt(a.n.ID, 10), level, s.CheckedAt, probeFailAfter, hysteresis.RecoverAfter, text)
+		if level != hysteresis.Healthy {
+			levels[a.n.ID] = hysteresis.Degraded
 		}
 	}
 }
 
-func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]Level, lang string) {
+func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg AlertsConfig, nodes []db.Node, inbounds map[int64][]db.Inbound, levels map[int64]hysteresis.Level, lang string) {
 	name := map[int64]string{}
 	for _, n := range nodes {
 		name[n.ID] = n.Name
@@ -433,7 +430,7 @@ func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg Alert
 	var asks []ask
 	seen := map[string]bool{}
 	for _, n := range nodes {
-		if n.Enabled == 0 || levels[n.ID] == Unavailable {
+		if n.Enabled == 0 || levels[n.ID] == hysteresis.Unavailable {
 			continue
 		}
 		exits := map[int64]bool{}
@@ -469,14 +466,14 @@ func (m *Monitor) probeExits(ctx context.Context, st *persistentState, cfg Alert
 		if err != nil || p.CheckedAt.IsZero() {
 			continue
 		}
-		level := Healthy
+		level := hysteresis.Healthy
 		if !p.OK {
-			level = Degraded
+			level = hysteresis.Degraded
 		}
 		label := name[a.node] + " → " + name[a.exit]
-		m.observe(st, a.key, level, p.CheckedAt, probeFailAfter, recoverAfter, eventFor(cfg, eventExit, label, level, t))
-		if level != Healthy {
-			levels[a.node] = Degraded
+		m.observe(st, a.key, level, p.CheckedAt, probeFailAfter, hysteresis.RecoverAfter, eventFor(cfg, eventExit, label, level, t))
+		if level != hysteresis.Healthy {
+			levels[a.node] = hysteresis.Degraded
 		}
 	}
 }

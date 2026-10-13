@@ -249,11 +249,6 @@ func emitDevice(ctx context.Context, q *db.Queries, now time.Time, typ string, u
 		typ+":"+strconv.FormatInt(dev.ID, 10))
 }
 
-// unbound tells of a device that lost its place, by the way the caller names.
-func unbound(ctx context.Context, q *db.Queries, now time.Time, userID int64, dev db.BoundDevice, by string) error {
-	return emitDevice(ctx, q, now, events.DeviceUnbound, userID, dev, by)
-}
-
 // Unbind frees a device's place and cuts it off: its own slot burns (the node drops it
 // at once). The shared place of apps without an id is the user's own slot: it is replaced
 // with a fresh one, the subscription link stays. The subscriber does it within the admin's
@@ -330,7 +325,7 @@ func (d *Devices) unbind(ctx context.Context, rules UnbindRules, userID, deviceI
 		if bySubscriber {
 			by = events.UnboundBySubscriber
 		}
-		if err := unbound(ctx, q, now, userID, dev, by); err != nil {
+		if err := emitDevice(ctx, q, now, events.DeviceUnbound, userID, dev, by); err != nil {
 			return err
 		}
 		if !bySubscriber {
@@ -410,7 +405,7 @@ func (d *Devices) Ban(ctx context.Context, userID, deviceID, adminID int64) (db.
 		if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
 			return err
 		}
-		return unbound(ctx, q, time.Unix(now, 0), userID, dev, events.UnboundByBan)
+		return emitDevice(ctx, q, time.Unix(now, 0), events.DeviceUnbound, userID, dev, events.UnboundByBan)
 	})
 	if err == nil {
 		d.hub.Kick()
@@ -465,7 +460,7 @@ func (d *Devices) ForgetIdle(ctx context.Context) (int, error) {
 			if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
 				return err
 			}
-			if err := unbound(ctx, q, now, dev.UserID, dev, events.UnboundIdle); err != nil {
+			if err := emitDevice(ctx, q, now, events.DeviceUnbound, dev.UserID, dev, events.UnboundIdle); err != nil {
 				return err
 			}
 			n++
@@ -493,7 +488,7 @@ func burnDevices(ctx context.Context, q *db.Queries, userID, now int64) error {
 				return err
 			}
 		}
-		if err := unbound(ctx, q, time.Unix(now, 0), userID, dev, events.UnboundReissue); err != nil {
+		if err := emitDevice(ctx, q, time.Unix(now, 0), events.DeviceUnbound, userID, dev, events.UnboundReissue); err != nil {
 			return err
 		}
 	}

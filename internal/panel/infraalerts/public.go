@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"mikan/internal/panel/hysteresis"
 	"mikan/internal/panel/store/db"
 )
 
@@ -19,18 +20,18 @@ func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg Ale
 	inbounds map[int64][]db.Inbound, lang string) {
 	if !cfg.PublicEnabled {
 		st.PublicText = ""
-		st.PublicLevels = map[int64]Level{}
+		st.PublicLevels = map[int64]hysteresis.Level{}
 		dropPending(st, targetSummary, targetPublicChange)
 		return
 	}
 	if st.PublicLevels == nil {
-		st.PublicLevels = map[int64]Level{}
+		st.PublicLevels = map[int64]hysteresis.Level{}
 	}
 	t := textsFor(lang)
 	type row struct {
 		id    int64
 		name  string
-		level Level
+		level hysteresis.Level
 	}
 	var rows []row
 	for _, n := range nodes {
@@ -51,7 +52,7 @@ func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg Ale
 	text := strings.Join(lines, "\n")
 	for _, r := range rows {
 		previous, seen := st.PublicLevels[r.id]
-		if seen && previous != r.level && previous != Unknown && r.level != Unknown && cfg.PublicChanges {
+		if seen && previous != r.level && previous != hysteresis.Unknown && r.level != hysteresis.Unknown && cfg.PublicChanges {
 			change := publicLine(t, html.EscapeString(r.name), r.level)
 			st.Pending = appendPending(st.Pending, delivery{Key: fmt.Sprintf("public/%d/%d/%d", r.id, previous, r.level), Target: targetPublicChange, Text: change})
 		}
@@ -87,13 +88,13 @@ func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg Ale
 
 // warp is the node's WARP row: the round's own cache (Monitor.nodeWarp), read once a
 // round, not once per inbound.
-func publicNodeLevel(ctx context.Context, st *persistentState, warp func(context.Context, int64) (db.NodeWarp, error), nodeID int64, inbounds []db.Inbound) Level {
+func publicNodeLevel(ctx context.Context, st *persistentState, warp func(context.Context, int64) (db.NodeWarp, error), nodeID int64, inbounds []db.Inbound) hysteresis.Level {
 	node := stateLevel(st, "node/"+strconv.FormatInt(nodeID, 10))
-	if node == Unknown {
-		return Unknown
+	if node == hysteresis.Unknown {
+		return hysteresis.Unknown
 	}
-	if node == Unavailable {
-		return Unavailable
+	if node == hysteresis.Unavailable {
+		return hysteresis.Unavailable
 	}
 	total, working, unknown := 0, 0, false
 	for _, in := range inbounds {
@@ -102,11 +103,11 @@ func publicNodeLevel(ctx context.Context, st *persistentState, warp func(context
 		}
 		total++
 		level := stateLevel(st, "inbound/"+strconv.FormatInt(in.ID, 10))
-		if level == Unknown {
+		if level == hysteresis.Unknown {
 			unknown = true
 			continue
 		}
-		if level != Healthy {
+		if level != hysteresis.Healthy {
 			continue
 		}
 		switch in.Outbound {
@@ -114,22 +115,22 @@ func publicNodeLevel(ctx context.Context, st *persistentState, warp func(context
 			w, err := warp(ctx, nodeID)
 			if err == nil && w.Enabled != 0 {
 				out := stateLevel(st, "warp/"+strconv.FormatInt(nodeID, 10))
-				if out == Unknown {
+				if out == hysteresis.Unknown {
 					unknown = true
 					continue
 				}
-				if out != Healthy {
+				if out != hysteresis.Healthy {
 					continue
 				}
 			}
 		case "node":
 			if in.ExitNodeID.Valid {
 				out := stateLevel(st, fmt.Sprintf("exit/%d/%d", nodeID, in.ExitNodeID.Int64))
-				if out == Unknown {
+				if out == hysteresis.Unknown {
 					unknown = true
 					continue
 				}
-				if out != Healthy {
+				if out != hysteresis.Healthy {
 					continue
 				}
 			}
@@ -137,42 +138,44 @@ func publicNodeLevel(ctx context.Context, st *persistentState, warp func(context
 		working++
 	}
 	if total == 0 {
-		return Unavailable
+		return hysteresis.Unavailable
 	}
 	if working == total {
-		return Healthy
+		return hysteresis.Healthy
 	}
 	if working > 0 {
-		return Degraded
+		return hysteresis.Degraded
 	}
 	if unknown {
-		return Unknown
+		return hysteresis.Unknown
 	}
-	return Unavailable
+	return hysteresis.Unavailable
 }
 
-func stateLevel(st *persistentState, key string) Level {
+func stateLevel(st *persistentState, key string) hysteresis.Level {
 	if s, ok := st.Samples[key]; ok {
 		return s.Level
 	}
-	return Unknown
+	return hysteresis.Unknown
 }
 
 // PublicText is a server's line in the public status, in Russian.
-func PublicText(name string, level Level) string { return publicLine(&ruTexts, name, level) }
+func PublicText(name string, level hysteresis.Level) string { return publicLine(&ruTexts, name, level) }
 
 // PublicTextEN is a server's line in the public status, in English.
-func PublicTextEN(name string, level Level) string { return publicLine(&enTexts, name, level) }
+func PublicTextEN(name string, level hysteresis.Level) string {
+	return publicLine(&enTexts, name, level)
+}
 
 // publicLine is the icon, the server's name (already escaped) and the word for its level.
-func publicLine(t *texts, name string, level Level) string {
+func publicLine(t *texts, name string, level hysteresis.Level) string {
 	icon, label := "⚪", t.levelChecking
 	switch level {
-	case Healthy:
+	case hysteresis.Healthy:
 		icon, label = "🟢", t.levelWorking
-	case Degraded:
+	case hysteresis.Degraded:
 		icon, label = "🟡", t.levelIssues
-	case Unavailable:
+	case hysteresis.Unavailable:
 		icon, label = "🔴", t.levelUnavailable
 	}
 	return icon + " " + name + " — " + label

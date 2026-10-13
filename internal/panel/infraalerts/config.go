@@ -6,8 +6,6 @@ package infraalerts
 import (
 	"errors"
 	"strings"
-
-	"mikan/internal/panel/hysteresis"
 )
 
 const KeyConfig = "infrastructure_alerts"
@@ -143,19 +141,3 @@ func (c *AlertsConfig) Validate() error {
 	}
 	return nil
 }
-
-// The levels and the hysteresis live in hysteresis, shared with the addons' node events; the
-// names stay here because the persisted samples and everything below speak them.
-type Level = hysteresis.Level
-
-const (
-	Unknown     = hysteresis.Unknown
-	Healthy     = hysteresis.Healthy
-	Degraded    = hysteresis.Degraded
-	Unavailable = hysteresis.Unavailable
-)
-
-type (
-	Tracker    = hysteresis.Tracker
-	Transition = hysteresis.Transition
-)

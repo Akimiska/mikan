@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/panel/hysteresis"
 	"mikan/internal/panel/tgate"
 )
 
@@ -145,13 +146,13 @@ func TestDropPendingKeepsTheOthersInOrder(t *testing.T) {
 func TestTextsBothLanguages(t *testing.T) {
 	cfg := Default()
 	cases := []struct{ got, want string }{
-		{PublicText("a", Healthy), "🟢 a — Работает"},
-		{PublicText("a", Unknown), "⚪ a — Проверяем"},
-		{PublicTextEN("a", Degraded), "🟡 a — Issues"},
-		{PublicTextEN("a", Unavailable), "🔴 a — Unavailable"},
-		{eventFor(cfg, eventNode, "n<", Healthy, &ruTexts), "🟢 <b>n&lt;</b> — Восстановлен"},
-		{eventFor(cfg, eventNode, "n", Degraded, &enTexts), "🟡 <b>n</b> — Degraded"},
-		{eventFor(cfg, eventInbound, "n", Unavailable, &enTexts), "🔴 <b>n</b> — Unavailable"},
+		{PublicText("a", hysteresis.Healthy), "🟢 a — Работает"},
+		{PublicText("a", hysteresis.Unknown), "⚪ a — Проверяем"},
+		{PublicTextEN("a", hysteresis.Degraded), "🟡 a — Issues"},
+		{PublicTextEN("a", hysteresis.Unavailable), "🔴 a — Unavailable"},
+		{eventFor(cfg, eventNode, "n<", hysteresis.Healthy, &ruTexts), "🟢 <b>n&lt;</b> — Восстановлен"},
+		{eventFor(cfg, eventNode, "n", hysteresis.Degraded, &enTexts), "🟡 <b>n</b> — Degraded"},
+		{eventFor(cfg, eventInbound, "n", hysteresis.Unavailable, &enTexts), "🔴 <b>n</b> — Unavailable"},
 		{warpReason(nodeapi.WarpStatus{Error: "timeout"}, "1.2.3.4:2408", "ru"), "Причина: нет ответа от endpoint 1.2.3.4:2408 по UDP: возможно, хостер блокирует UDP, попробуйте другой endpoint"},
 		{warpReason(nodeapi.WarpStatus{Error: "timeout"}, "1.2.3.4:2408", "en"), "Reason: no answer from the WARP endpoint 1.2.3.4:2408 over UDP: the host may block UDP, try another endpoint"},
 		{warpReason(nodeapi.WarpStatus{}, "", "en"), "Reason: check failed"},

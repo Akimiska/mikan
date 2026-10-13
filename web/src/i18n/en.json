@@ -499,7 +499,7 @@
       "source_empty": "The source has no entries that can be installed.",
       "source_key_invalid": "The key cannot be read: it must be an ed25519 public key in base64.",
       "source_exists": "This source is already added.",
-      "source_limit": "There can be at most 16 sources.",
+      "source_limit": "The sources are at their limit: remove one to add another.",
       "source_in_use": "An addon from this source is installed. Remove it first.",
       "source_unknown": "No such source."
     },

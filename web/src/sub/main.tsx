@@ -1,4 +1,5 @@
 import "../styles/app.css";
+import "../styles/fonts-mono.css";
 import "./look.css";
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";

@@ -59,7 +59,7 @@ type PageBrand struct {
 // their type; the admin's own (text, links) have ids of their own: text-<x>, links-<x>.
 type PageBlock struct {
 	ID    string     `json:"id" maxLength:"24"`
-	Type  string     `json:"type" enum:"announce,status,promo,shop,traffic,devices,apps,guide,instructions,link,locations,telegram,support,text,links"`
+	Type  string     `json:"type" enum:"announce,status,promo,shop,traffic,devices,apps,guide,instructions,link,reissue,locations,telegram,support,text,links"`
 	On    bool       `json:"on"`
 	Title string     `json:"title" maxLength:"60" doc:"Свой заголовок (у кнопок — текст кнопки); пусто — обычный"`
 	Text  string     `json:"text,omitempty" maxLength:"8000" doc:"Блок text: Markdown"`
@@ -100,15 +100,21 @@ type PageOG struct {
 	Image       bool   `json:"image" doc:"Логотип картинкой превью"`
 }
 
+// builtinBlock is a block of the page that is there once, its id its type. after names the block
+// it stands behind when a saved page lacks it (a block a newer version brings shows up next to
+// what it belongs to); without one it goes to the end.
+type builtinBlock struct {
+	typ   string
+	on    bool
+	after string
+}
+
 // PageBlock types. The built-in ones in the order the page always had, with whether they
 // show: the announcement and the server list are new and start hidden.
-var builtins = []struct {
-	typ string
-	on  bool
-}{
-	{"announce", false}, {"status", true}, {"promo", true}, {"shop", true}, {"traffic", true},
-	{"devices", true}, {"apps", true}, {"guide", true}, {"instructions", true}, {"link", true},
-	{"locations", false}, {"telegram", true}, {"support", true},
+var builtins = []builtinBlock{
+	{"announce", false, ""}, {"status", true, ""}, {"promo", true, ""}, {"shop", true, ""}, {"traffic", true, ""},
+	{"devices", true, ""}, {"apps", true, ""}, {"guide", true, ""}, {"instructions", true, ""}, {"link", true, ""},
+	{"reissue", true, "link"}, {"locations", false, ""}, {"telegram", true, ""}, {"support", true, ""},
 }
 
 // Custom block types: the admin's own, any number up to MaxCustom.
@@ -164,8 +170,8 @@ func ValidColor(s string) bool { return colorRe.MatchString(s) }
 func oneOf(v string, set ...string) bool { return slices.Contains(set, v) }
 
 // Normalize makes c a document the page can show: unset values take their defaults, text is
-// trimmed, built-in blocks missing from the list are added at its end (a block a newer
-// version brings shows up where nothing was decided about it), what cannot be shown is
+// trimmed, built-in blocks missing from the list are added at its end, or behind the block they belong
+// to (a block a newer version brings shows up where nothing was decided about it), what cannot be shown is
 // dropped. What it had to drop or could not take is returned: the API refuses the save
 // then; a stored document is shown as cleaned.
 func Normalize(c *Page) []Problem {
@@ -301,12 +307,7 @@ func normalizeBlocks(c *Page) []Problem {
 	blocks := make([]PageBlock, 0, len(c.Blocks)+len(builtins))
 	for i, b := range c.Blocks {
 		b.ID, b.Type = strings.TrimSpace(b.ID), strings.TrimSpace(b.Type)
-		builtin := slices.ContainsFunc(builtins, func(x struct {
-			typ string
-			on  bool
-		}) bool {
-			return x.typ == b.Type
-		})
+		builtin := slices.ContainsFunc(builtins, func(x builtinBlock) bool { return x.typ == b.Type })
 		switch {
 		case builtin:
 			if b.ID != b.Type {
@@ -387,8 +388,14 @@ func normalizeBlocks(c *Page) []Problem {
 		blocks = append(blocks, b)
 	}
 	for _, x := range builtins {
-		if !seen[x.typ] {
-			blocks = append(blocks, PageBlock{ID: x.typ, Type: x.typ, On: x.on})
+		if seen[x.typ] {
+			continue
+		}
+		missing := PageBlock{ID: x.typ, Type: x.typ, On: x.on}
+		if at := slices.IndexFunc(blocks, func(b PageBlock) bool { return x.after != "" && b.ID == x.after }); at >= 0 {
+			blocks = slices.Insert(blocks, at+1, missing)
+		} else {
+			blocks = append(blocks, missing)
 		}
 	}
 	c.Blocks = blocks

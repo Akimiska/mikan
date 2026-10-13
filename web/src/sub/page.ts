@@ -26,7 +26,7 @@ type PagePublic = {
 };
 
 /** Blocks shown only in the Telegram Mini App: buying needs Telegram's sign-in. */
-export const MINI_APP_ONLY: readonly BlockType[] = ["promo", "shop"];
+export const MINI_APP_ONLY: readonly BlockType[] = ["promo", "shop", "reissue"];
 export const CUSTOM_TYPES: readonly BlockType[] = ["text", "links"];
 export const PLATFORMS: readonly Platform[] = ["ios", "android", "windows", "macos", "linux"];
 
@@ -51,6 +51,7 @@ const DEFAULT_PAGE: PageConfig = {
       ["guide", true],
       ["instructions", true],
       ["link", true],
+      ["reissue", true],
       ["locations", false],
       ["telegram", true],
       ["support", true],

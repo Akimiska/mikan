@@ -265,7 +265,7 @@ func (h *Handler) serveProfile(w http.ResponseWriter, r *http.Request, u db.User
 	// The values are worked out only when a title or an announcement can use them.
 	var vars map[string]string
 	if cfg.Title != "" || cfg.Announce != "" {
-		vars = titleValues(u, grants.Main(u.ID), cfg, h.now())
+		vars = titleValues(u, grants.Main(u.ID), h.boundFor(r.Context(), u, cfg), cfg, h.now())
 		if cfg.Announce != "" {
 			cfg.Announce = fillTitle(cfg.Announce, vars)
 		}
@@ -469,6 +469,19 @@ func (h *Handler) userInfoHeaders(w http.ResponseWriter, u db.User, grants int64
 	}
 }
 
+// boundFor counts the devices bound to u for {devices}: -1 when the title and the
+// announcement do not use it or binding is off.
+func (h *Handler) boundFor(ctx context.Context, u db.User, cfg Config) int64 {
+	if !cfg.Binding || !wantsDevices(cfg.Title, cfg.Announce) {
+		return -1
+	}
+	n, err := h.st.Q.CountBoundDevices(ctx, u.ID)
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
 // operatorHeaders: the subscription page, the announcement and the app branding
 // (OperatorHeaders). Devices are counted only for branding, which shows them.
 func (h *Handler) operatorHeaders(w http.ResponseWriter, r *http.Request, u db.User, cfg Config) {
@@ -571,7 +584,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 		out.Telegram = h.tg.LinkURL(ctx, u.ID)
 	}
 	if cfg.Announce != "" {
-		out.Announce, out.AnnounceURL = fillAnnounce(cfg.Announce, titleValues(u, grants.Main(u.ID), cfg, now)), cfg.AnnounceURL
+		out.Announce, out.AnnounceURL = fillAnnounce(cfg.Announce, titleValues(u, grants.Main(u.ID), h.boundFor(ctx, u, cfg), cfg, now)), cfg.AnnounceURL
 	}
 	if cfg.Happ.Crypt != "" && cfg.SubBase != "" {
 		if link, err := h.happ.Link(ctx, cfg.Happ.Crypt, cfg.SubBase+"/"+u.SubToken); err == nil {

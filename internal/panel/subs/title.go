@@ -19,16 +19,18 @@ const TitleMax = 200
 const (
 	AnnounceMax   = 1000
 	AnnounceLines = 10
+	indentMax     = 40 // spaces a line of the announcement may start with
 )
 
 // msk is the zone dates are written in, as the bot writes them: most users live there.
 var msk = time.FixedZone("MSK", 3*60*60)
 
 // titleValues are the variables for one user. A term or limit that is not set reads "∞".
-func titleValues(u db.User, grants int64, cfg Config, now time.Time) map[string]string {
+// bound is the devices bound to the user, -1 when they were not counted (see wantsDevices).
+func titleValues(u db.User, grants int64, bound int64, cfg Config, now time.Time) map[string]string {
 	en := cfg.Lang == "en"
 	v := map[string]string{"brand": cfg.Brand, "name": u.Name, "date": "∞", "days": "∞",
-		"used": sizeText(u.UsedUp+u.UsedDown, en), "left": "∞", "total": "∞"}
+		"used": sizeText(u.UsedUp+u.UsedDown, en), "left": "∞", "total": "∞", "devices": devicesText(u, bound, en)}
 	if u.ExpiresAt.Valid {
 		exp := time.Unix(u.ExpiresAt.Int64, 0)
 		v["date"] = exp.In(msk).Format("02.01.2006")
@@ -49,6 +51,34 @@ func titleValues(u db.User, grants int64, cfg Config, now time.Time) map[string]
 	return v
 }
 
+// wantsDevices says whether a text holds {devices}, the one variable that costs a query.
+func wantsDevices(texts ...string) bool {
+	for _, s := range texts {
+		if strings.Contains(s, "{devices}") {
+			return true
+		}
+	}
+	return false
+}
+
+// devicesText is {devices}: "2/3" bound devices of the limit, "2" without a limit. A limit
+// that is not about places (the online mode, or no binding to count them) reads as the bot
+// writes it, "up to 3 at once", and no limit at all "∞".
+func devicesText(u db.User, bound int64, en bool) string {
+	switch {
+	case u.DeviceLimit.Valid && (bound < 0 || !domain.BindsDevices(u.DeviceMode)):
+		if en {
+			return "up to " + strconv.FormatInt(u.DeviceLimit.Int64, 10) + " at once"
+		}
+		return "до " + strconv.FormatInt(u.DeviceLimit.Int64, 10) + " одновременно"
+	case bound < 0:
+		return "∞"
+	case u.DeviceLimit.Valid:
+		return strconv.FormatInt(bound, 10) + "/" + strconv.FormatInt(u.DeviceLimit.Int64, 10)
+	}
+	return strconv.FormatInt(bound, 10)
+}
+
 // fillTitle puts the user's values in place of the variables, in one pass: a value that
 // holds {something} itself is not filled again. The result is one line of at most
 // TitleMax letters.
@@ -63,17 +93,26 @@ func fillTitle(s string, vars map[string]string) string {
 }
 
 // fillAnnounce is the announcement as the page and the Mini App show it: filled like a
-// title, its lines kept (at most AnnounceLines, each cleaned as a title is), blank lines
-// between paragraphs too, at most AnnounceMax letters.
+// title, its lines kept (at most AnnounceLines), blank lines between paragraphs and the
+// indent of a line too (a tab is four spaces), at most AnnounceMax letters.
 func fillAnnounce(s string, vars map[string]string) string {
 	lines := strings.Split(strings.ReplaceAll(fillVars(s, vars), "\r\n", "\n"), "\n")
 	if len(lines) > AnnounceLines {
 		lines = lines[:AnnounceLines]
 	}
 	for i, l := range lines {
-		lines[i] = cut(strings.ReplaceAll(l, "\t", " "), AnnounceMax)
+		lines[i] = indented(strings.ReplaceAll(l, "\t", "    "), AnnounceMax)
 	}
-	return strings.TrimSpace(cutText(strings.Join(lines, "\n"), AnnounceMax))
+	return strings.TrimRight(strings.TrimLeft(cutText(strings.Join(lines, "\n"), AnnounceMax), "\n"), " \n")
+}
+
+// indented is cut that keeps the spaces a line starts with, up to indentMax.
+func indented(s string, n int) string {
+	body := cut(s, n)
+	if body == "" {
+		return ""
+	}
+	return strings.Repeat(" ", min(len(s)-len(strings.TrimLeft(s, " ")), indentMax)) + body
 }
 
 // cutText keeps at most n letters of s, line breaks included.

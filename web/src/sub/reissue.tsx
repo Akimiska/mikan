@@ -19,7 +19,7 @@ function period(days: number): string {
  * the apps need the new one, so a tap asks first. Telegram's launch data proves who asks;
  * on success the page opens the subscription at its new address.
  */
-export function ReissueSection({ info, subURL, onDone }: { info: Info; subURL: string; onDone: (token: string) => void }) {
+export function ReissueSection({ info, subURL, title, onDone }: { info: Info; subURL: string; title?: string; onDone: (token: string) => void }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -59,7 +59,7 @@ export function ReissueSection({ info, subURL, onDone }: { info: Info; subURL: s
       <div className="mb-2 flex items-center gap-2">
         <RefreshCw size={16} className="text-[var(--ink-600)]" aria-hidden />
         <h2 id="reissue-title" className="text-[15px] font-semibold">
-          {t("sub.reissueTitle")}
+          {title || t("sub.reissueTitle")}
         </h2>
       </div>
       <p className="text-[13px] text-[var(--ink-600)]">{off ? t("sub.reissueOff") : t("sub.reissueText")}</p>
@@ -70,7 +70,7 @@ export function ReissueSection({ info, subURL, onDone }: { info: Info; subURL: s
         </div>
       ) : null}
       {off || waiting ? null : confirm ? (
-        <div className="mt-3 rounded-2xl bg-[var(--hover)] p-3" role="group" aria-label={t("sub.reissueTitle")}>
+        <div className="mt-3 rounded-2xl bg-[var(--hover)] p-3" role="group" aria-label={title || t("sub.reissueTitle")}>
           <p className="text-[13px] text-[var(--ink-700)]">{t("sub.reissueWarn")}</p>
           <div className="mt-2 flex justify-end gap-2">
             <Button

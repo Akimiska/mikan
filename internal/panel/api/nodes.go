@@ -16,6 +16,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/panel/tgate"
@@ -165,7 +166,7 @@ func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct
 func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {
 	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
 		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown",
-		FairShare: n.FairShare != 0, ChannelMbps: ptrInt(n.ChannelMbps.Int64, n.ChannelMbps.Valid)}
+		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps)}
 	if v.Local {
 		// The panel's own node is reached at the panel's address.
 		ep, _ := h.d.Settings.Endpoint(ctx)

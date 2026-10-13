@@ -331,17 +331,6 @@ func (q *Queries) GetAddonGrantKey(ctx context.Context, arg GetAddonGrantKeyPara
 	return i, err
 }
 
-const getAddonOrigin = `-- name: GetAddonOrigin :one
-SELECT addon_id, source_id FROM addon_origins WHERE addon_id = $1
-`
-
-func (q *Queries) GetAddonOrigin(ctx context.Context, addonID string) (AddonOrigin, error) {
-	row := q.db.QueryRowContext(ctx, getAddonOrigin, addonID)
-	var i AddonOrigin
-	err := row.Scan(&i.AddonID, &i.SourceID)
-	return i, err
-}
-
 const getAddonSource = `-- name: GetAddonSource :one
 SELECT id, url, key, title, added_by, added_at, fetched_at, error FROM addon_sources WHERE id = $1
 `

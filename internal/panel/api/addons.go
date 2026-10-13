@@ -129,6 +129,16 @@ func (h *handlers) catalog(ctx context.Context) (addons.Catalog, error) {
 	return c, err
 }
 
+// officialCatalog is the signed catalog, or nil when it cannot be read: the views then show
+// what they can without it.
+func (h *handlers) officialCatalog(ctx context.Context) *addons.Catalog {
+	c, err := h.catalog(ctx)
+	if err != nil {
+		return nil
+	}
+	return &c
+}
+
 // requestSummary is what the host has not taken yet, in order, and how it handled the last
 // request: both marketplaces show it.
 func requestSummary(m *addons.Manager, st addons.State) (queue []AddonRequest, last *AddonResult) {

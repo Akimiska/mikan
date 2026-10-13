@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -41,20 +40,8 @@ type InfoV2 struct {
 	Push     bool     `json:"push,omitempty"`   // it serves POST /v2/events and is sent them
 }
 
-// validEventTypes keeps the names of event types as the panel writes them, and not too many.
-// A name that is not one is dropped, not the list: a slip in one name must not widen what the
-// addon is sent to all of it.
-func validEventTypes(types []string) []string {
-	out := make([]string, 0, min(len(types), 64))
-	for _, t := range types {
-		if len(out) < 64 && validEventType.MatchString(t) {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-var validEventType = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)
+// maxInfoEvents is how many event types of an addon's /v2/info the panel reads.
+const maxInfoEvents = 64
 
 // validEntry: a plain file path under /ui/, nothing to escape or to climb out with.
 var validEntry = regexp.MustCompile(`^/ui/[A-Za-z0-9._~/-]{0,200}$`)
@@ -78,9 +65,8 @@ func (m *Manager) InfoV2(ctx context.Context, id string, a Installed) (InfoV2, e
 	if !info.UI.valid() {
 		info.UI = nil
 	}
-	// Only the names that are not types are dropped; an addon none of whose names is one is
-	// as if it named none, and gets all of what its permission allows.
-	info.Events = validEventTypes(info.Events)
+	// A name that is not an event type matches no event: it narrows the feed like any other.
+	info.Events = info.Events[:min(len(info.Events), maxInfoEvents)]
 	return info, nil
 }
 
@@ -123,14 +109,7 @@ func (m *Manager) Pushes(ctx context.Context, id string) (a Installed, info Info
 // /v2/events. Only a 2xx takes it; anything else, a refusal, a redirect or an addon that does
 // not answer, is an error and the caller sends the batch again.
 func (m *Manager) PushEvents(ctx context.Context, a Installed, body []byte) error {
-	resp, _, err := doBearer(ctx, m.peer, a.Token, http.MethodPost, "http://"+a.Listen+"/v2/events", body, nil, MaxRPCAnswer)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("the addon answered %s", resp.Status)
-	}
-	return nil
+	return NewClient("http://"+a.Listen, a.Token, m.peer).call(ctx, http.MethodPost, "/v2/events", json.RawMessage(body), nil)
 }
 
 // PageFile is one file of an addon's pages as the panel passes it on.

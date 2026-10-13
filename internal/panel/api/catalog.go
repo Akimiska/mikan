@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -43,12 +44,12 @@ type TermView struct {
 }
 
 func viewTariff(t db.Tariff, terms []db.TariffTerm) TariffView {
-	v := TariffView{ID: t.ID, Name: t.Name, TrafficLimit: ptrInt(t.TrafficLimit.Int64, t.TrafficLimit.Valid),
-		DurationDays: t.DurationDays, DeviceLimit: ptrInt(t.DeviceLimit.Int64, t.DeviceLimit.Valid), DeviceMode: t.DeviceMode,
-		SpeedLimit: ptrInt(t.SpeedLimit.Int64, t.SpeedLimit.Valid), ResetStrategy: t.ResetStrategy, BillingDay: ptrInt(t.BillingDay.Int64, t.BillingDay.Valid), PriceLabel: t.PriceLabel, Description: t.Description, Sort: t.Sort,
-		PriceStars: ptrInt(t.PriceStars.Int64, t.PriceStars.Valid), PriceRub: ptrInt(t.PriceRub.Int64, t.PriceRub.Valid), OnSale: t.OnSale != 0}
+	v := TariffView{ID: t.ID, Name: t.Name, TrafficLimit: store.Int64Ptr(t.TrafficLimit),
+		DurationDays: t.DurationDays, DeviceLimit: store.Int64Ptr(t.DeviceLimit), DeviceMode: t.DeviceMode,
+		SpeedLimit: store.Int64Ptr(t.SpeedLimit), ResetStrategy: t.ResetStrategy, BillingDay: store.Int64Ptr(t.BillingDay), PriceLabel: t.PriceLabel, Description: t.Description, Sort: t.Sort,
+		PriceStars: store.Int64Ptr(t.PriceStars), PriceRub: store.Int64Ptr(t.PriceRub), OnSale: t.OnSale != 0}
 	for _, term := range domain.TariffTerms(t, terms) {
-		v.Terms = append(v.Terms, TermView{Days: term.Days, PriceStars: ptrInt(term.PriceStars.Int64, term.PriceStars.Valid), PriceRub: ptrInt(term.PriceRub.Int64, term.PriceRub.Valid)})
+		v.Terms = append(v.Terms, TermView{Days: term.Days, PriceStars: store.Int64Ptr(term.PriceStars), PriceRub: store.Int64Ptr(term.PriceRub)})
 	}
 	return v
 }

@@ -16,6 +16,7 @@ import (
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -67,8 +68,8 @@ type trafficView struct {
 	Left  *int64 `json:"left"`  // what is left of the limit and the packages; null: unlimited
 }
 
-type tgLinkView struct {
-	ID       int64  `json:"id"`
+// tgProfileView is the Telegram account a subscription is linked to; its id is the card's tg_id.
+type tgProfileView struct {
 	Username string `json:"username"`
 	Name     string `json:"name"`
 }
@@ -76,25 +77,10 @@ type tgLinkView struct {
 // userCard is one subscriber in full.
 type userCard struct {
 	userBrief
-	Traffic      trafficView  `json:"traffic"`
-	PackagesLeft int64        `json:"packages_left"` // bytes left of the traffic packages of the main limit
-	Devices      int64        `json:"devices"`       // devices bound to the subscription
-	TgLinks      []tgLinkView `json:"tg_links"`
-}
-
-func unixPtr(v sql.NullInt64) *time.Time {
-	if !v.Valid {
-		return nil
-	}
-	t := time.Unix(v.Int64, 0).UTC()
-	return &t
-}
-
-func idPtr(v sql.NullInt64) *int64 {
-	if !v.Valid {
-		return nil
-	}
-	return &v.Int64
+	Traffic      trafficView    `json:"traffic"`
+	PackagesLeft int64          `json:"packages_left"` // bytes left of the traffic packages of the main limit
+	Devices      int64          `json:"devices"`       // devices bound to the subscription
+	Telegram     *tgProfileView `json:"telegram"`      // null: not linked
 }
 
 // tariffNames reads each tariff's name once per response; an archived or deleted one is "".
@@ -126,8 +112,8 @@ func (s *Server) brief(ctx context.Context, u db.User, grants domain.GrantsLeft,
 	if err != nil {
 		return userBrief{}, err
 	}
-	return userBrief{ID: u.ID, Name: u.Name, State: domain.State(u, grants.Main(u.ID), s.d.Now()), TariffID: idPtr(u.TariffID),
-		TariffName: name, ExpiresAt: unixPtr(u.ExpiresAt)}, nil
+	return userBrief{ID: u.ID, Name: u.Name, State: domain.State(u, grants.Main(u.ID), s.d.Now()), TariffID: store.Int64Ptr(u.TariffID),
+		TariffName: name, ExpiresAt: store.TimePtr(u.ExpiresAt)}, nil
 }
 
 // usersList pages by id, oldest first, from ?after= (exclusive), so a page never moves
@@ -299,15 +285,15 @@ func (s *Server) userGet(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "user tariff", err)
 		return
 	}
-	card := userCard{userBrief: b, PackagesLeft: grants.Main(id), Devices: bound, TgLinks: []tgLinkView{}}
-	card.Traffic = trafficView{Used: u.UsedUp + u.UsedDown, Limit: idPtr(u.TrafficLimit)}
+	card := userCard{userBrief: b, PackagesLeft: grants.Main(id), Devices: bound}
+	card.Traffic = trafficView{Used: u.UsedUp + u.UsedDown, Limit: store.Int64Ptr(u.TrafficLimit)}
 	if left := domain.TrafficLeft(u.TrafficLimit, card.Traffic.Used, grants.Main(id)); left >= 0 {
 		card.Traffic.Left = &left
 	}
 	switch l, err := q.TgLinkOfUser(ctx, id); {
 	case err == nil:
 		card.TgID = &l.TgID
-		card.TgLinks = append(card.TgLinks, tgLinkView{ID: l.TgID, Username: l.Username, Name: l.FirstName})
+		card.Telegram = &tgProfileView{Username: l.Username, Name: l.FirstName}
 	case !errors.Is(err, sql.ErrNoRows):
 		s.internal(w, "user link", err)
 		return
@@ -344,7 +330,6 @@ type grantResult struct {
 
 // Why a grant stopped inside its transaction, told apart from a failure of the database.
 var (
-	errNoUser       = errors.New("no such user")
 	errKeyOtherUser = errors.New("the key was used for another user")
 	errUserDisabled = errors.New("the user is disabled")
 )
@@ -417,7 +402,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 		res, repeat = grantResult{UserID: id}, false
 		u, err := q.GetUser(ctx, id)
 		if errors.Is(err, sql.ErrNoRows) {
-			return errNoUser
+			return domain.ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -448,7 +433,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			res.Days, res.ExpiresAt = days, unixPtr(ext.ExpiresAt)
+			res.Days, res.ExpiresAt = days, store.TimePtr(ext.ExpiresAt)
 			err = audit.Write(ctx, q, now, audit.Entry{Action: "user.extend", TargetType: "user", TargetID: strconv.FormatInt(id, 10),
 				Details: map[string]any{"actor": actor, "days": days, "reason": in.Reason, "key": in.Key}})
 			if err != nil {
@@ -460,7 +445,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			res.Bytes, res.PoolID, res.Lifetime, res.GrantID, res.TrafficExpires = g.Bytes, in.PoolID, g.Lifetime, g.ID, unixPtr(g.ExpiresAt)
+			res.Bytes, res.PoolID, res.Lifetime, res.GrantID, res.TrafficExpires = g.Bytes, in.PoolID, g.Lifetime, g.ID, store.TimePtr(g.ExpiresAt)
 			err = audit.Write(ctx, q, now, audit.Entry{Action: "user.grant", TargetType: "user", TargetID: strconv.FormatInt(id, 10),
 				Details: map[string]any{"actor": actor, "bytes": g.Bytes, "pool_id": in.PoolID, "lifetime": g.Lifetime, "traffic_days": trafficDays, "reason": in.Reason, "key": in.Key}})
 			if err != nil {
@@ -487,7 +472,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 	})
 	var fe *domain.FieldError
 	switch {
-	case errors.Is(err, errNoUser), errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, domain.ErrNotFound):
 		Fail(w, http.StatusNotFound, "not_found", "no such user")
 		return
 	case errors.Is(err, errKeyOtherUser):

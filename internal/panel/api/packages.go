@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -30,8 +31,8 @@ type PackageView struct {
 }
 
 func viewPackage(p db.TrafficPackage) PackageView {
-	return PackageView{ID: p.ID, Name: p.Name, Bytes: p.Bytes, PoolID: ptrInt(p.PoolID.Int64, p.PoolID.Valid), Lifetime: p.Lifetime, Days: p.Days,
-		PriceStars: ptrInt(p.PriceStars.Int64, p.PriceStars.Valid), PriceRub: ptrInt(p.PriceRub.Int64, p.PriceRub.Valid), OnSale: p.OnSale != 0, Sort: p.Sort}
+	return PackageView{ID: p.ID, Name: p.Name, Bytes: p.Bytes, PoolID: store.Int64Ptr(p.PoolID), Lifetime: p.Lifetime, Days: p.Days,
+		PriceStars: store.Int64Ptr(p.PriceStars), PriceRub: store.Int64Ptr(p.PriceRub), OnSale: p.OnSale != 0, Sort: p.Sort}
 }
 
 type PackageBody struct {
@@ -189,8 +190,8 @@ func (h *handlers) packageNames(ctx context.Context) (map[int64]string, error) {
 }
 
 func (h *handlers) viewGrant(g db.TrafficGrant, packages map[int64]string) GrantView {
-	return GrantView{ID: g.ID, PoolID: ptrInt(g.PoolID.Int64, g.PoolID.Valid), Bytes: g.Bytes, Remaining: g.Remaining, Lifetime: g.Lifetime,
-		ExpiresAt: ptrTime(g.ExpiresAt.Int64, g.ExpiresAt.Valid), Active: domain.GrantActive(g, h.d.Now()), Source: g.Source,
-		PaymentID: ptrInt(g.PaymentID.Int64, g.PaymentID.Valid), PackageName: packages[g.PackageID.Int64], Note: g.Note,
+	return GrantView{ID: g.ID, PoolID: store.Int64Ptr(g.PoolID), Bytes: g.Bytes, Remaining: g.Remaining, Lifetime: g.Lifetime,
+		ExpiresAt: store.TimePtr(g.ExpiresAt), Active: domain.GrantActive(g, h.d.Now()), Source: g.Source,
+		PaymentID: store.Int64Ptr(g.PaymentID), PackageName: packages[g.PackageID.Int64], Note: g.Note,
 		CreatedAt: time.Unix(g.CreatedAt, 0).UTC()}
 }

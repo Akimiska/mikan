@@ -225,7 +225,7 @@ func (h *handlers) userPools(ctx context.Context, in *userIDInput) (*userPoolsOu
 	out := &userPoolsOutput{Body: make([]UserPoolView, 0, len(ps))}
 	for _, p := range ps {
 		r := mine[p.ID]
-		v := UserPoolView{PoolID: p.ID, Name: p.Name, TrafficLimit: ptrInt(r.TrafficLimit.Int64, r.TrafficLimit.Valid), UsedUp: r.UsedUp, UsedDown: r.UsedDown,
+		v := UserPoolView{PoolID: p.ID, Name: p.Name, TrafficLimit: store.Int64Ptr(r.TrafficLimit), UsedUp: r.UsedUp, UsedDown: r.UsedDown,
 			Extra: grants.Pool(in.ID, p.ID), Excluded: r.Excluded}
 		v.Exhausted = domain.PoolExhausted(r, v.Extra)
 		out.Body = append(out.Body, v)

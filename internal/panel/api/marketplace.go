@@ -148,12 +148,9 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 			installed[id] = a
 		}
 	}
-	var official *addons.Catalog
-	c, cerr := h.catalog(ctx)
-	if cerr != nil {
+	official := h.officialCatalog(ctx)
+	if official == nil {
 		v.CatalogError = "catalog_unavailable"
-	} else {
-		official = &c
 	}
 	board, err := h.sourceBoard(ctx, st, official, true)
 	if err != nil {

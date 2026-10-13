@@ -9,6 +9,7 @@ import (
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -40,16 +41,9 @@ type revertInfo struct {
 	Set     *userState `json:"set,omitempty"`
 }
 
-func nullPtr(n sql.NullInt64) *int64 {
-	if !n.Valid {
-		return nil
-	}
-	return &n.Int64
-}
-
 func stateOf(u db.User) *userState {
-	return &userState{Status: u.Status, TariffID: nullPtr(u.TariffID), TrafficLimit: nullPtr(u.TrafficLimit), DeviceLimit: nullPtr(u.DeviceLimit),
-		SpeedLimit: nullPtr(u.SpeedLimit), DeviceMode: u.DeviceMode, ResetStrategy: u.ResetStrategy, BillingDay: nullPtr(u.BillingDay), ExpiresAt: nullPtr(u.ExpiresAt)}
+	return &userState{Status: u.Status, TariffID: store.Int64Ptr(u.TariffID), TrafficLimit: store.Int64Ptr(u.TrafficLimit), DeviceLimit: store.Int64Ptr(u.DeviceLimit),
+		SpeedLimit: store.Int64Ptr(u.SpeedLimit), DeviceMode: u.DeviceMode, ResetStrategy: u.ResetStrategy, BillingDay: store.Int64Ptr(u.BillingDay), ExpiresAt: store.Int64Ptr(u.ExpiresAt)}
 }
 
 // sameOffer: the user still has the tariff and limits the payment set. The term and the

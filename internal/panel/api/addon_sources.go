@@ -40,7 +40,7 @@ type SourceView struct {
 	AddedAt        time.Time        `json:"added_at"`
 	FetchedAt      *time.Time       `json:"fetched_at,omitempty"`
 	Error          string           `json:"error,omitempty" doc:"Код ошибки последнего чтения: source_unreachable, source_key_changed, source_signature_invalid…"`
-	Entries        []MarketEntry    `json:"entries"`
+	Entries        int              `json:"entries" doc:"Сколько записей источник предлагает: сами записи в /marketplace"`
 	Skipped        []SourceSkipView `json:"skipped"`
 	Installed      []string         `json:"installed" doc:"Аддоны, поставленные из этого источника: пока они есть, источник не удалить"`
 }
@@ -162,7 +162,7 @@ func (h *handlers) sourceBoard(ctx context.Context, st addons.State, official *a
 	if err != nil {
 		return b, err
 	}
-	b.owners = addons.Owners(taken, b.origins, claims, srcs)
+	b.owners = addons.Owners(taken, b.origins, claims)
 	return b, nil
 }
 
@@ -314,18 +314,14 @@ func (h *handlers) sourcesView(ctx context.Context, st addons.State, c *addons.C
 		return v, err
 	}
 	for _, s := range board.list {
-		sv, err := h.sourceView(ctx, st, board, s)
-		if err != nil {
-			return v, err
-		}
-		v.Sources = append(v.Sources, sv)
+		v.Sources = append(v.Sources, sourceView(board, s))
 	}
 	return v, nil
 }
 
-func (h *handlers) sourceView(ctx context.Context, st addons.State, b sourceBoard, s db.AddonSource) (SourceView, error) {
+func sourceView(b sourceBoard, s db.AddonSource) SourceView {
 	sv := SourceView{ID: s.ID, URL: s.Url, Title: s.Title, Signed: s.Key != "", Fingerprint: addons.Fingerprint(s.Key), AddedAt: time.Unix(s.AddedAt, 0).UTC(),
-		Error: s.Error, Entries: []MarketEntry{}, Skipped: []SourceSkipView{}, Installed: []string{}}
+		Error: s.Error, Skipped: []SourceSkipView{}, Installed: []string{}}
 	if s.FetchedAt > 0 {
 		t := time.Unix(s.FetchedAt, 0).UTC()
 		sv.FetchedAt = &t
@@ -350,19 +346,10 @@ func (h *handlers) sourceView(ctx context.Context, st addons.State, b sourceBoar
 		}
 	}
 	slices.Sort(sv.Installed)
+	entries := b.entriesOf(s)
+	sv.Entries = len(entries)
 	listed := map[string]bool{}
-	for _, e := range b.entriesOf(s) {
-		a, ok := st.Adapters[e.ID]
-		here := ok && a.SourceOf() == addons.SourceCustom && b.origins[e.ID] == s.ID
-		// What was approved matters only for an addon of this source that is there.
-		var granted []string
-		if here {
-			var err error
-			if granted, err = h.granted(ctx, e.ID); err != nil {
-				return sv, err
-			}
-		}
-		sv.Entries = append(sv.Entries, marketEntry(e, b.mark(s), a, here, granted))
+	for _, e := range entries {
 		listed[e.ID] = true
 	}
 	// What the source lists under an id another holds is not offered, and says so.
@@ -373,7 +360,7 @@ func (h *handlers) sourceView(ctx context.Context, st addons.State, b sourceBoar
 			}
 		}
 	}
-	return sv, nil
+	return sv
 }
 
 func (h *handlers) listSources(ctx context.Context, _ *struct{}) (*sourcesOutput, error) {
@@ -381,12 +368,7 @@ func (h *handlers) listSources(ctx context.Context, _ *struct{}) (*sourcesOutput
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.catalog(ctx)
-	var official *addons.Catalog
-	if err == nil {
-		official = &c
-	}
-	v, err := h.sourcesView(ctx, st, official, true)
+	v, err := h.sourcesView(ctx, st, h.officialCatalog(ctx), true)
 	if err != nil {
 		return nil, err
 	}
@@ -543,11 +525,7 @@ func (h *handlers) refreshSource(ctx context.Context, in *refreshSourceInput) (*
 		h.audit(ctx, sessionOf(ctx).AdminID, "addon.source.key", "addon_source", strconv.FormatInt(src.ID, 10),
 			map[string]any{"url": src.Url, "from": addons.Fingerprint(src.Key), "to": addons.Fingerprint(state.Doc.Key)})
 	}
-	var official *addons.Catalog
-	if c, err := h.catalog(ctx); err == nil {
-		official = &c
-	}
-	v, err := h.sourcesView(ctx, st, official, false)
+	v, err := h.sourcesView(ctx, st, h.officialCatalog(ctx), false)
 	if err != nil {
 		return nil, err
 	}
@@ -592,11 +570,7 @@ func (h *handlers) removeSource(ctx context.Context, in *sourceIDInput) (*source
 	}
 	h.d.Addons.ForgetSource(src.ID)
 	h.audit(ctx, sessionOf(ctx).AdminID, "addon.source.remove", "addon_source", strconv.FormatInt(src.ID, 10), map[string]any{"url": src.Url, "title": src.Title})
-	var official *addons.Catalog
-	if c, err := h.catalog(ctx); err == nil {
-		official = &c
-	}
-	v, err := h.sourcesView(ctx, st, official, false)
+	v, err := h.sourcesView(ctx, st, h.officialCatalog(ctx), false)
 	if err != nil {
 		return nil, err
 	}

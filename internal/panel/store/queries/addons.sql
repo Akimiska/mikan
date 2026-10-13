@@ -113,9 +113,6 @@ SELECT count(*) FROM addon_sources;
 -- name: ListAddonOrigins :many
 SELECT * FROM addon_origins ORDER BY addon_id;
 
--- name: GetAddonOrigin :one
-SELECT * FROM addon_origins WHERE addon_id = $1;
-
 -- name: UpsertAddonOrigin :exec
 INSERT INTO addon_origins (addon_id, source_id) VALUES ($1, $2)
 ON CONFLICT (addon_id) DO UPDATE SET source_id = EXCLUDED.source_id;

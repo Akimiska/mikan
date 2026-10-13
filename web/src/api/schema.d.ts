@@ -5309,12 +5309,43 @@ export interface components {
              * @enum {string}
              */
             mode?: "" | "stream-one" | "stream-up" | "packet-up";
+            /** @description Не слать Content-Type: text/event-stream в ответах */
+            no_sse_header?: boolean;
+            /** @description Сколько запросов отправки сервер держит в очереди (packet-up): число от 1 */
+            sc_max_buffered_posts?: string;
             /** @description Наибольший запрос отправки (packet-up), байт: число или диапазон */
             sc_max_each_post_bytes?: string;
             /** @description Пауза между запросами отправки (packet-up), мс */
             sc_min_posts_interval_ms?: string;
+            /** @description Как часто сервер шлёт паддинг в stream-up, секунд: число или диапазон; 0 — не слать */
+            sc_stream_up_server_secs?: string;
+            /** @description Имя параметра номера запроса (не для path) */
+            seq_key?: string;
+            /**
+             * @description Где едет номер запроса (packet-up); пусто — path
+             * @enum {string}
+             */
+            seq_placement?: "" | "path" | "query" | "header" | "cookie";
+            /** @description Имя параметра сессии (не для path) */
+            session_key?: string;
+            /** @description Длина номера сессии: число или диапазон; с набором по умолчанию 16-32 */
+            session_length?: string;
+            /**
+             * @description Где едет номер сессии; пусто — path
+             * @enum {string}
+             */
+            session_placement?: "" | "path" | "query" | "header" | "cookie";
+            /** @description Из каких ASCII-символов приложение составляет номер сессии: свой набор или имя hex, base36, Base62, number, alphabet, Alphabet */
+            session_table?: string;
             /** @description Размер куска отправки, байт: число или диапазон */
             uplink_chunk_size?: string;
+            /** @description Имя заголовка или cookie с данными: нужно для header и cookie */
+            uplink_data_key?: string;
+            /**
+             * @description Где едут данные отправки (packet-up); header и cookie только в режиме packet-up
+             * @enum {string}
+             */
+            uplink_data_placement?: "" | "body" | "header" | "cookie" | "auto";
             /** @enum {string} */
             uplink_http_method?: "" | "POST" | "PUT" | "PATCH";
             /** @description Размер паддинга, байт: число или диапазон «100-1000» */

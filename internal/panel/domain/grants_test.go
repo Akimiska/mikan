@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -410,4 +411,52 @@ func TestExtendOnAndGrantOn(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// A grant by an addon is the admin's grant with the giver named in the note, which the grants
+// list shows; the note's own limit is the reason's, not the prefix's.
+func TestGrantOnNamesTheGiver(t *testing.T) {
+	e := newGrantsEnv(t, 100)
+	reason := strings.Repeat("я", maxGrantNoteLn)
+	var g db.TrafficGrant
+	err := e.st.Tx(e.ctx, func(q *db.Queries) (err error) {
+		g, err = e.users.GrantOn(e.ctx, q, e.u.ID, GrantInput{Bytes: GiB, Lifetime: LifetimeUsed, Note: reason, By: "addon:x"})
+		return err
+	})
+	if err != nil || g.Note != "addon:x: "+reason || g.Source != SourceAdmin {
+		t.Fatalf("%q %q %v", g.Note, g.Source, err)
+	}
+	if g, err = e.users.Grant(e.ctx, e.u.ID, GrantInput{Bytes: GiB, Lifetime: LifetimeUsed, Note: " thanks "}); err != nil || g.Note != "thanks" {
+		t.Fatalf("the admin's: %q %v", g.Note, err)
+	}
+	err = e.st.Tx(e.ctx, func(q *db.Queries) error {
+		_, err := e.users.GrantOn(e.ctx, q, e.u.ID, GrantInput{Bytes: GiB, Lifetime: LifetimeUsed, Note: reason + "я", By: "addon:x"})
+		return err
+	})
+	var fe *FieldError
+	if !errors.As(err, &fe) || fe.Field != "note" {
+		t.Fatalf("a note too long: %v", err)
+	}
+}
+
+// The ten years of an extension are held by the domain, whoever extends.
+func TestExtendIsBoundedHere(t *testing.T) {
+	e := newGrantsEnv(t, 100)
+	var fe *FieldError
+	if _, err := e.users.Extend(e.ctx, e.u.ID, MaxExtendDays+1); !errors.As(err, &fe) || fe.Field != "days" {
+		t.Fatalf("extend: %v", err)
+	}
+	if _, err := e.users.Update(e.ctx, e.u.ID, Patch{Extend: &Extension{Days: -1}}); !errors.As(err, &fe) {
+		t.Fatalf("a negative extension: %v", err)
+	}
+	if _, err := e.users.Bulk(e.ctx, []int64{e.u.ID}, BulkExtend, BulkOpt{Days: MaxExtendDays + 1}); !errors.As(err, &fe) || fe.Field != "days" {
+		t.Fatalf("bulk: %v", err)
+	}
+	before, _ := e.st.Q.GetUser(e.ctx, e.u.ID)
+	if after, err := e.users.Extend(e.ctx, e.u.ID, MaxExtendDays); err != nil || after.ExpiresAt.Int64 <= before.ExpiresAt.Int64 {
+		t.Fatalf("the most: %v %v", after.ExpiresAt, err)
+	}
+	if n, err := e.users.Bulk(e.ctx, []int64{e.u.ID}, BulkExtend, BulkOpt{Days: MaxExtendDays}); err != nil || n != 1 {
+		t.Fatalf("bulk the most: %d %v", n, err)
+	}
 }

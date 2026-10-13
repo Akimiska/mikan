@@ -99,10 +99,5 @@ UPDATE addon_grant_keys SET result = $3 WHERE addon_id = $1 AND key = $2;
 -- name: GetAddonGrantKey :one
 SELECT * FROM addon_grant_keys WHERE addon_id = $1 AND key = $2;
 
--- name: ListUsersAfter :many
--- A page of users by id, for the Panel API's cursor: stable while users come and go.
-SELECT * FROM users WHERE id > sqlc.arg(after)::BIGINT ORDER BY id LIMIT sqlc.arg(lim)::INT;
-
--- name: ListTgLinksOfUsers :many
-SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
-FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = ANY(sqlc.arg(ids)::bigint[]);
+-- name: DeleteAddonGrantKeys :exec
+DELETE FROM addon_grant_keys WHERE addon_id = $1;

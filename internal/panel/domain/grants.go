@@ -86,15 +86,7 @@ func LoadGrantsLeft(ctx context.Context, q *db.Queries, now time.Time) (GrantsLe
 
 // UserGrantsLeft reads what is left of one user's active grants.
 func UserGrantsLeft(ctx context.Context, q *db.Queries, userID int64, now time.Time) (GrantsLeft, error) {
-	rows, err := q.SumUserGrantsLeft(ctx, db.SumUserGrantsLeftParams{UserID: userID, Now: now.Unix()})
-	if err != nil {
-		return nil, err
-	}
-	out := GrantsLeft{}
-	for _, r := range rows {
-		out[[2]int64{r.UserID, r.PoolID}] = r.LeftBytes
-	}
-	return out, nil
+	return GrantsLeftOf(ctx, q, []int64{userID}, now)
 }
 
 // GrantsLeftOf reads what is left of the active grants of the users in ids: a page's worth
@@ -389,6 +381,9 @@ type GrantInput struct {
 	Lifetime string
 	Days     int64
 	Note     string
+	// By says who gives, when it is not the admin (an addon: "addon:<id>"): the grants list
+	// shows only the note, so the note starts with it, outside the note's own length limit.
+	By string
 }
 
 // Grant gives the user traffic from the admin. A user (or a pool) that ran out gets back
@@ -443,7 +438,11 @@ func (s *Users) grantOn(ctx context.Context, q *db.Queries, userID int64, in Gra
 	if err := PoolExists(ctx, q, in.PoolID); err != nil {
 		return db.TrafficGrant{}, err
 	}
-	return GrantTx(ctx, q, u, GrantSpec{PoolID: in.PoolID, Bytes: in.Bytes, Lifetime: in.Lifetime, Days: in.Days, Source: SourceAdmin, Note: in.Note}, s.now())
+	note := in.Note
+	if in.By != "" {
+		note = in.By + ": " + note
+	}
+	return GrantTx(ctx, q, u, GrantSpec{PoolID: in.PoolID, Bytes: in.Bytes, Lifetime: in.Lifetime, Days: in.Days, Source: SourceAdmin, Note: note}, s.now())
 }
 
 // PoolExists: id 0 (the main traffic) or a pool that exists.

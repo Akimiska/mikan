@@ -164,6 +164,15 @@ func (q *Queries) DeleteAddonGrant(ctx context.Context, addonID string) error {
 	return err
 }
 
+const deleteAddonGrantKeys = `-- name: DeleteAddonGrantKeys :exec
+DELETE FROM addon_grant_keys WHERE addon_id = $1
+`
+
+func (q *Queries) DeleteAddonGrantKeys(ctx context.Context, addonID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonGrantKeys, addonID)
+	return err
+}
+
 const deleteAddonValue = `-- name: DeleteAddonValue :execrows
 DELETE FROM addon_kv WHERE addon_id = $1 AND key = $2
 `
@@ -381,109 +390,6 @@ func (q *Queries) ListAddonUpdates(ctx context.Context, arg ListAddonUpdatesPara
 	for rows.Next() {
 		var i ListAddonUpdatesRow
 		if err := rows.Scan(&i.UpdateID, &i.Body); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTgLinksOfUsers = `-- name: ListTgLinksOfUsers :many
-SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
-FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = ANY($1::bigint[])
-`
-
-type ListTgLinksOfUsersRow struct {
-	UserID    int64
-	TgID      int64
-	Username  string
-	FirstName string
-}
-
-func (q *Queries) ListTgLinksOfUsers(ctx context.Context, ids []int64) ([]ListTgLinksOfUsersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listTgLinksOfUsers, pq.Array(ids))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListTgLinksOfUsersRow{}
-	for rows.Next() {
-		var i ListTgLinksOfUsersRow
-		if err := rows.Scan(
-			&i.UserID,
-			&i.TgID,
-			&i.Username,
-			&i.FirstName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUsersAfter = `-- name: ListUsersAfter :many
-SELECT id, name, contact, note, tags, status, tariff_id, traffic_limit, device_limit, reset_strategy, period_days, period_start, used_up, used_down, total_up, total_down, expires_at, inbounds, sub_token, slot_id, online_at, created_at, updated_at, billing_day, source, hidden, folder_id, speed_limit, device_mode FROM users WHERE id > $1::BIGINT ORDER BY id LIMIT $2::INT
-`
-
-type ListUsersAfterParams struct {
-	After int64
-	Lim   int32
-}
-
-// A page of users by id, for the Panel API's cursor: stable while users come and go.
-func (q *Queries) ListUsersAfter(ctx context.Context, arg ListUsersAfterParams) ([]User, error) {
-	rows, err := q.db.QueryContext(ctx, listUsersAfter, arg.After, arg.Lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []User{}
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Contact,
-			&i.Note,
-			&i.Tags,
-			&i.Status,
-			&i.TariffID,
-			&i.TrafficLimit,
-			&i.DeviceLimit,
-			&i.ResetStrategy,
-			&i.PeriodDays,
-			&i.PeriodStart,
-			&i.UsedUp,
-			&i.UsedDown,
-			&i.TotalUp,
-			&i.TotalDown,
-			&i.ExpiresAt,
-			&i.Inbounds,
-			&i.SubToken,
-			&i.SlotID,
-			&i.OnlineAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.BillingDay,
-			&i.Source,
-			&i.Hidden,
-			&i.FolderID,
-			&i.SpeedLimit,
-			&i.DeviceMode,
-		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

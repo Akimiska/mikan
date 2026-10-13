@@ -203,3 +203,15 @@ UPDATE tariffs SET device_mode = $1 WHERE id = $2;
 
 -- name: SetUserDeviceMode :exec
 UPDATE users SET device_mode = $1, updated_at = $2 WHERE id = $3;
+
+-- name: ListUserNamesAfter :many
+-- A page of users by id with just what a search reads, for the Panel API's cursor: stable
+-- while users come and go. The rows of the page itself come from ListUsersByIDs.
+SELECT id, name FROM users WHERE id > sqlc.arg(after)::BIGINT ORDER BY id LIMIT sqlc.arg(lim)::INT;
+
+-- name: ListUsersByIDs :many
+SELECT * FROM users WHERE id = ANY(sqlc.arg(ids)::bigint[]) ORDER BY id;
+
+-- name: ListTgLinksOfUsers :many
+SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
+FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = ANY(sqlc.arg(ids)::bigint[]);

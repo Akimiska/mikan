@@ -30,7 +30,14 @@ const (
 	defUsersPage = 50
 	maxSearch    = 100
 	maxReason    = 200 // runes: the grant note's bound
-	scanBatch    = 500 // users read at a time while a search looks for a page's worth
+)
+
+// A search reads names in batches until it has a page's worth, but never more than scanCap
+// per request: past that it answers what it found with a cursor to go on from, so one
+// request's work is bounded however little matches. Variables so a test can make them small.
+var (
+	scanBatch int32 = 500
+	scanCap         = 20000
 )
 
 // validGrantKey: what an addon names a grant by, so keys stay short and plain.
@@ -150,40 +157,51 @@ func (s *Server) usersList(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "users search", err)
 		return
 	}
-	// A search reads in big batches and filters here (the search lowercases as Go does, which
-	// PostgreSQL's lower() does not for every locale); without one a page is one read.
+	// Names are read, not rows, and filtered here (the search lowercases as Go does, which
+	// PostgreSQL's lower() does not for every locale); only the page's own rows are read in
+	// full. Without a search a page is one small read.
 	batch := int32(limit + 1)
 	if needle != "" {
 		batch = scanBatch
 	}
-	var page []db.User
-	cursor := after
-	for int64(len(page)) <= limit {
-		rows, err := s.d.Store.Q.ListUsersAfter(ctx, db.ListUsersAfterParams{After: cursor, Lim: batch})
+	var found []int64
+	cursor, scanned, end := after, 0, false
+	for int64(len(found)) <= limit && scanned < scanCap && !end {
+		rows, err := s.d.Store.Q.ListUserNamesAfter(ctx, db.ListUserNamesAfterParams{After: cursor, Lim: batch})
 		if err != nil {
 			s.internal(w, "users list", err)
 			return
 		}
 		for _, u := range rows {
 			cursor = u.ID
-			if match(u) {
-				page = append(page, u)
-				if int64(len(page)) > limit {
+			scanned++
+			if match(u.ID, u.Name) {
+				found = append(found, u.ID)
+				if int64(len(found)) > limit {
 					break
 				}
 			}
 		}
-		if len(rows) < int(batch) {
-			break
-		}
+		end = len(rows) < int(batch)
 	}
 	out := struct {
 		Users []userBrief `json:"users"`
 		Next  *int64      `json:"next"`
-	}{Users: make([]userBrief, 0, len(page))}
-	if int64(len(page)) > limit {
-		page = page[:limit]
-		out.Next = &page[len(page)-1].ID
+	}{Users: make([]userBrief, 0, limit)}
+	switch {
+	case int64(len(found)) > limit:
+		found = found[:limit]
+		out.Next = &found[len(found)-1]
+	case !end:
+		// The scan was cut short: what matched is here, and the cursor goes on from where it stopped.
+		out.Next = &cursor
+	}
+	var page []db.User
+	if len(found) > 0 {
+		if page, err = s.d.Store.Q.ListUsersByIDs(ctx, found); err != nil {
+			s.internal(w, "users list", err)
+			return
+		}
 	}
 	ids := make([]int64, len(page))
 	for i, u := range page {
@@ -219,9 +237,9 @@ func (s *Server) usersList(w http.ResponseWriter, r *http.Request) {
 }
 
 // userMatcher is the filter of a search: everything for an empty one.
-func (s *Server) userMatcher(ctx context.Context, needle string) (func(db.User) bool, error) {
+func (s *Server) userMatcher(ctx context.Context, needle string) (func(id int64, name string) bool, error) {
 	if needle == "" {
-		return func(db.User) bool { return true }, nil
+		return func(int64, string) bool { return true }, nil
 	}
 	lower := strings.ToLower(needle)
 	n, numeric := int64(0), false
@@ -236,8 +254,8 @@ func (s *Server) userMatcher(ctx context.Context, needle string) (func(db.User) 
 			linked[u.ID] = true
 		}
 	}
-	return func(u db.User) bool {
-		return strings.Contains(strings.ToLower(u.Name), lower) || numeric && (u.ID == n || linked[u.ID])
+	return func(id int64, name string) bool {
+		return strings.Contains(strings.ToLower(name), lower) || numeric && (id == n || linked[id])
 	}, nil
 }
 
@@ -298,14 +316,16 @@ func (s *Server) userGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // grantRequest is the body of a grant. Days and bytes are pointers: an explicit 0 is a
-// mistake, not "none".
+// mistake, not "none". Days is only the extension of the term; how long traffic lasts is
+// TrafficDays, and only for lifetime "days", so each can be said on its own.
 type grantRequest struct {
-	Days     *int64 `json:"days"`
-	Bytes    *int64 `json:"bytes"`
-	PoolID   *int64 `json:"pool_id"`
-	Lifetime string `json:"lifetime"`
-	Reason   string `json:"reason"`
-	Key      string `json:"key"`
+	Days        *int64 `json:"days"`
+	Bytes       *int64 `json:"bytes"`
+	PoolID      *int64 `json:"pool_id"`
+	Lifetime    string `json:"lifetime"`
+	TrafficDays *int64 `json:"traffic_days"`
+	Reason      string `json:"reason"`
+	Key         string `json:"key"`
 }
 
 // grantResult is what a grant answers, kept under its key: a repeat answers the same,
@@ -344,7 +364,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
-		Fail(w, http.StatusBadRequest, "bad_request", "the body is JSON: days, bytes, pool_id, lifetime, reason, key")
+		Fail(w, http.StatusBadRequest, "bad_request", "the body is JSON: days, bytes, pool_id, lifetime, traffic_days, reason, key")
 		return
 	}
 	in.Reason = strings.TrimSpace(in.Reason)
@@ -358,20 +378,29 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 	case in.Days == nil && in.Bytes == nil:
 		Fail(w, http.StatusBadRequest, "bad_request", "days or bytes is needed")
 		return
-	case in.Bytes == nil && (in.PoolID != nil || in.Lifetime != ""):
-		Fail(w, http.StatusBadRequest, "bad_request", "pool_id and lifetime go with bytes")
+	case in.Bytes == nil && (in.PoolID != nil || in.Lifetime != "" || in.TrafficDays != nil):
+		Fail(w, http.StatusBadRequest, "bad_request", "pool_id, lifetime and traffic_days go with bytes")
 		return
 	case in.PoolID != nil && *in.PoolID < 1:
 		Fail(w, http.StatusBadRequest, "bad_request", "pool_id is a pool id")
+		return
+	case (in.Lifetime == domain.LifetimeDays) != (in.TrafficDays != nil):
+		Fail(w, http.StatusBadRequest, "bad_request", "traffic_days goes with lifetime days, and lifetime days needs it; days is only the extension of the term")
+		return
+	case in.TrafficDays != nil && (*in.TrafficDays < 1 || *in.TrafficDays > domain.MaxGrantDays):
+		Fail(w, http.StatusBadRequest, "bad_request", "traffic_days is 1 to 3650")
 		return
 	}
 	// Traffic that does not say how long it lasts lasts until it is used up.
 	if in.Bytes != nil && in.Lifetime == "" {
 		in.Lifetime = domain.LifetimeUsed
 	}
-	var days, bytes, pool int64
+	var days, trafficDays, bytes, pool int64
 	if in.Days != nil {
 		days = *in.Days
+	}
+	if in.TrafficDays != nil {
+		trafficDays = *in.TrafficDays
 	}
 	if in.Bytes != nil {
 		bytes = *in.Bytes
@@ -380,6 +409,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 		pool = *in.PoolID
 	}
 
+	actor := audit.AddonActor(c.ID)
 	var res grantResult
 	var repeat bool
 	err := s.d.Store.Tx(ctx, func(q *db.Queries) error {
@@ -410,7 +440,6 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 			repeat = true
 			return json.Unmarshal([]byte(first.Result), &res)
 		}
-		actor := audit.AddonActor(c.ID)
 		if in.Days != nil {
 			if u.Status == "disabled" {
 				return errUserDisabled
@@ -427,13 +456,13 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if in.Bytes != nil {
-			g, err := s.d.Users.GrantOn(ctx, q, id, domain.GrantInput{PoolID: pool, Bytes: bytes, Lifetime: in.Lifetime, Days: days, Note: in.Reason})
+			g, err := s.d.Users.GrantOn(ctx, q, id, domain.GrantInput{PoolID: pool, Bytes: bytes, Lifetime: in.Lifetime, Days: trafficDays, Note: in.Reason, By: actor})
 			if err != nil {
 				return err
 			}
 			res.Bytes, res.PoolID, res.Lifetime, res.GrantID, res.TrafficExpires = g.Bytes, in.PoolID, g.Lifetime, g.ID, unixPtr(g.ExpiresAt)
 			err = audit.Write(ctx, q, now, audit.Entry{Action: "user.grant", TargetType: "user", TargetID: strconv.FormatInt(id, 10),
-				Details: map[string]any{"actor": actor, "bytes": g.Bytes, "pool_id": in.PoolID, "lifetime": g.Lifetime, "reason": in.Reason, "key": in.Key}})
+				Details: map[string]any{"actor": actor, "bytes": g.Bytes, "pool_id": in.PoolID, "lifetime": g.Lifetime, "traffic_days": trafficDays, "reason": in.Reason, "key": in.Key}})
 			if err != nil {
 				return err
 			}
@@ -452,8 +481,10 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
+		// The reason is the admin's: the feed is read by every addon that holds events, so it carries
+		// what was given and to whom (as payments do), not why.
 		return events.Emit(ctx, q, now, events.UserGranted, id, tg, map[string]any{
-			"user_id": id, "days": days, "bytes": bytes, "pool_id": in.PoolID, "reason": in.Reason, "addon": c.ID,
+			"user_id": id, "days": days, "bytes": bytes, "pool_id": in.PoolID, "addon": c.ID,
 		}, "user.granted:"+c.ID+":"+in.Key)
 	})
 	var fe *domain.FieldError

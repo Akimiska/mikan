@@ -459,18 +459,21 @@ func TestGrantDaysAndTraffic(t *testing.T) {
 		t.Fatalf("traffic: %d %v", status, m)
 	}
 	gs := e.trafficGrants(u.ID)
-	if len(gs) != 1 || gs[0].Bytes != 5*domain.GiB || gs[0].Remaining != 5*domain.GiB || gs[0].Note != "apology for the outage" ||
+	if len(gs) != 1 || gs[0].Bytes != 5*domain.GiB || gs[0].Remaining != 5*domain.GiB || gs[0].Note != "addon:granter: apology for the outage" ||
 		gs[0].Lifetime != domain.LifetimeUsed || gs[0].PoolID.Valid || gs[0].ExpiresAt.Valid {
 		t.Fatalf("grants: %+v", gs)
 	}
 
-	// Days and traffic in one call, the traffic lasting as long as the days.
-	status, m = e.grant(granterToken, u.ID, `{"days":7,"bytes":1073741824,"lifetime":"days","reason":"week pass","key":"week-1"}`)
-	if status != 200 || m["days"] != float64(7) || m["bytes"] != float64(domain.GiB) || m["traffic_expires_at"] == nil {
+	// Days and traffic in one call: the term is extended by days, the traffic lasts traffic_days.
+	status, m = e.grant(granterToken, u.ID, `{"days":30,"bytes":1073741824,"lifetime":"days","traffic_days":7,"reason":"week pass","key":"week-1"}`)
+	if status != 200 || m["days"] != float64(30) || m["bytes"] != float64(domain.GiB) || m["traffic_expires_at"] == nil {
 		t.Fatalf("both: %d %v", status, m)
 	}
 	if gs = e.trafficGrants(u.ID); len(gs) != 2 {
 		t.Fatalf("grants: %+v", gs)
+	}
+	if got := e.reload(u.ID).ExpiresAt.Int64; got != before.ExpiresAt.Int64+60*86400 {
+		t.Fatalf("the term is 30 days (bonus) and 30 days (week pass) longer: %d -> %d", before.ExpiresAt.Int64, got)
 	}
 	var week db.TrafficGrant
 	for _, g := range gs {
@@ -518,9 +521,13 @@ func TestGrantDaysAndTraffic(t *testing.T) {
 	}
 	var data map[string]any
 	_ = json.Unmarshal([]byte(evs[2].Data), &data)
-	if evs[2].Type != "user.granted" || evs[2].UserID.Int64 != u.ID || data["user_id"] != float64(u.ID) || data["days"] != float64(7) ||
-		data["bytes"] != float64(domain.GiB) || data["reason"] != "week pass" || data["addon"] != "granter" {
+	if evs[2].Type != "user.granted" || evs[2].UserID.Int64 != u.ID || data["user_id"] != float64(u.ID) || data["days"] != float64(30) ||
+		data["bytes"] != float64(domain.GiB) || data["addon"] != "granter" {
 		t.Fatalf("event: %+v %v", evs[2], data)
+	}
+	// The reason is the admin's: every addon with events reads the feed.
+	if _, ok := data["reason"]; ok || strings.Contains(evs[2].Data, "week pass") {
+		t.Fatalf("the event tells the reason: %s", evs[2].Data)
 	}
 	if got := e.changes.n.Load(); got < 4 {
 		t.Fatalf("the nodes were told %d times", got)
@@ -558,7 +565,13 @@ func TestGrantRefusals(t *testing.T) {
 		{"zero bytes", `{"bytes":0,"reason":"x","key":"k"}`, 400, "bad_request"},
 		{"too many bytes", `{"bytes":109951162777601,"reason":"x","key":"k"}`, 400, "bad_request"},
 		{"an unknown lifetime", `{"bytes":1073741824,"lifetime":"forever","reason":"x","key":"k"}`, 400, "bad_request"},
-		{"days lifetime without days", `{"bytes":1073741824,"lifetime":"days","reason":"x","key":"k"}`, 400, "bad_request"},
+		{"days lifetime without traffic_days", `{"bytes":1073741824,"lifetime":"days","reason":"x","key":"k"}`, 400, "bad_request"},
+		{"days lifetime with days only", `{"days":7,"bytes":1073741824,"lifetime":"days","reason":"x","key":"k"}`, 400, "bad_request"},
+		{"traffic_days without lifetime days", `{"bytes":1073741824,"traffic_days":7,"reason":"x","key":"k"}`, 400, "bad_request"},
+		{"traffic_days with another lifetime", `{"bytes":1073741824,"lifetime":"period","traffic_days":7,"reason":"x","key":"k"}`, 400, "bad_request"},
+		{"traffic_days without traffic", `{"days":1,"traffic_days":7,"reason":"x","key":"k"}`, 400, "bad_request"},
+		{"zero traffic_days", `{"bytes":1073741824,"lifetime":"days","traffic_days":0,"reason":"x","key":"k"}`, 400, "bad_request"},
+		{"too many traffic_days", `{"bytes":1073741824,"lifetime":"days","traffic_days":3651,"reason":"x","key":"k"}`, 400, "bad_request"},
 		{"a lifetime without traffic", `{"days":1,"lifetime":"used","reason":"x","key":"k"}`, 400, "bad_request"},
 		{"a pool without traffic", `{"days":1,"pool_id":1,"reason":"x","key":"k"}`, 400, "bad_request"},
 		{"pool zero", `{"bytes":1073741824,"pool_id":0,"reason":"x","key":"k"}`, 400, "bad_request"},
@@ -642,7 +655,7 @@ func TestGrantIsOneTransaction(t *testing.T) {
 func TestGrantKeys(t *testing.T) {
 	e := newUsersEnv(t)
 	u, v := e.user("Ivy"), e.user("Jon")
-	body := `{"days":14,"bytes":3221225472,"lifetime":"days","reason":"referral","key":"ref:123"}`
+	body := `{"days":14,"bytes":3221225472,"lifetime":"days","traffic_days":14,"reason":"referral","key":"ref:123"}`
 
 	status, first := e.grant(granterToken, u.ID, body)
 	if status != 200 || first["repeat"] != false {
@@ -739,5 +752,31 @@ func TestGrantEventCarriesTheOwner(t *testing.T) {
 	_ = json.Unmarshal([]byte(evs[0].Data), &data)
 	if data["pool_id"] != nil || data["bytes"] != float64(0) || data["days"] != float64(2) {
 		t.Fatalf("data: %v", data)
+	}
+}
+
+// A search that matches little is cut short, not run to the end of the table: the answer has
+// what matched so far and a cursor to go on from, and following the cursors finds everything.
+func TestUsersSearchIsBounded(t *testing.T) {
+	e := newUsersEnv(t)
+	oldBatch, oldCap := scanBatch, scanCap
+	scanBatch, scanCap = 2, 4
+	t.Cleanup(func() { scanBatch, scanCap = oldBatch, oldCap })
+	var ids []int64
+	for _, n := range []string{"u1", "u2", "u3", "u4", "u5", "needle", "u7"} {
+		ids = append(ids, e.user(n).ID)
+	}
+	// Four users are read, none is "needle": an empty page, and the cursor at the fourth.
+	status, b, raw := e.list("?q=needle")
+	if status != 200 || len(b.Users) != 0 || b.Next == nil || *b.Next != ids[3] {
+		t.Fatalf("the first chunk: %d %s", status, raw)
+	}
+	status, b, raw = e.list(fmt.Sprintf("?q=needle&after=%d", *b.Next))
+	if status != 200 || fmt.Sprint(b.ids()) != fmt.Sprint(ids[5:6]) || b.Next != nil {
+		t.Fatalf("the second chunk reaches the end: %d %s", status, raw)
+	}
+	// No search: pages as ever, whatever the scan's size.
+	if status, b, raw = e.list("?limit=5"); status != 200 || len(b.Users) != 5 || b.Next == nil || *b.Next != ids[4] {
+		t.Fatalf("a plain page: %d %s", status, raw)
 	}
 }

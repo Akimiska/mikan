@@ -513,6 +513,9 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 		par.ExpiresAt = sql.NullInt64{Int64: p.ExpiresAt.Unix(), Valid: true}
 	}
 	if p.Extend != nil {
+		if p.Extend.Days < 0 || p.Extend.Days > MaxExtendDays {
+			return db.User{}, fieldErr("days", "bad_days")
+		}
 		par.ExpiresAt = sql.NullInt64{Int64: p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay).Unix(), Valid: true}
 		par.Status = "active"
 	}
@@ -568,13 +571,14 @@ func (s *Users) Extend(ctx context.Context, id int64, days int64) (db.User, erro
 	return s.Update(ctx, id, Patch{Extend: &Extension{Days: days}})
 }
 
-// MaxExtendDays bounds one extension by days: ten years, as the admin's API does.
+// MaxExtendDays bounds one extension by days: ten years. Every way to extend (Update's
+// Patch, the bulk action, an addon's grant) is held to it here, not by its caller.
 const MaxExtendDays = 3650
 
 // ExtendOn is Extend on q's transaction, for a caller that writes more in it (an addon's
 // grant with its key, its audit line and its event); the caller tells the nodes (Changed).
 func (s *Users) ExtendOn(ctx context.Context, q *db.Queries, id, days int64) (db.User, error) {
-	if days < 1 || days > MaxExtendDays {
+	if days < 1 {
 		return db.User{}, fieldErr("days", "bad_days")
 	}
 	return s.updateOn(ctx, q, id, Patch{Extend: &Extension{Days: days}})
@@ -729,6 +733,9 @@ func (s *Users) Bulk(ctx context.Context, ids []int64, action string, opt BulkOp
 		return 0, fmt.Errorf("bulk action %q", action)
 	}
 	days := opt.Days
+	if action == BulkExtend && days > MaxExtendDays {
+		return 0, fieldErr("days", "bad_days")
+	}
 	want := slices.Clone(ids)
 	slices.Sort(want)
 	want = slices.Compact(want)

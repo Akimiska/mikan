@@ -40,12 +40,6 @@ FROM traffic_grants
 WHERE remaining > 0 AND (expires_at IS NULL OR expires_at > CAST(sqlc.arg(now) AS BIGINT))
 GROUP BY user_id, COALESCE(pool_id, 0);
 
--- name: SumUserGrantsLeft :many
-SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remaining) AS BIGINT) AS left_bytes
-FROM traffic_grants
-WHERE user_id = sqlc.arg(user_id) AND remaining > 0 AND (expires_at IS NULL OR expires_at > CAST(sqlc.arg(now) AS BIGINT))
-GROUP BY user_id, COALESCE(pool_id, 0);
-
 -- name: EndPeriodGrants :exec
 -- A new traffic period ends the grants that last one period.
 UPDATE traffic_grants SET expires_at = CAST(sqlc.arg(now) AS BIGINT)
@@ -70,7 +64,7 @@ ORDER BY id DESC;
 DELETE FROM traffic_grants WHERE payment_id = $1;
 
 -- name: SumUsersGrantsLeft :many
--- SumUserGrantsLeft for a page of users.
+-- What is left of the active grants of the users in ids, per user and target.
 SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remaining) AS BIGINT) AS left_bytes
 FROM traffic_grants
 WHERE user_id = ANY(sqlc.arg(ids)::bigint[]) AND remaining > 0 AND (expires_at IS NULL OR expires_at > CAST(sqlc.arg(now) AS BIGINT))

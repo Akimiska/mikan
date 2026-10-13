@@ -8,6 +8,7 @@ import { Button } from "../../../components/ui";
 import { getLocale, t, useLocale } from "../../../i18n";
 import type { Platform } from "../../../sub/apps";
 import { cleanCSS, paintLook, titleOf, type DocItem, type DocView, type PageConfig } from "../../../sub/page";
+import { ReissueSection } from "../../../sub/reissue";
 import { Shop, type ShopData } from "../../../sub/shop";
 import type { Info } from "../../../sub/types";
 import { DocScreen, PageBackdrop, PageBlocks, PageShell } from "../../../sub/view";
@@ -186,6 +187,11 @@ function PreviewPage(p: PreviewProps) {
             openLink={() => undefined}
             onRefresh={() => undefined}
           />
+        </div>
+      }
+      reissue={
+        <div inert>
+          <ReissueSection info={{ ...p.info, reissue: true }} subURL="" title={titleOf(p.config, "reissue")} onDone={() => undefined} />
         </div>
       }
       reload={() => Promise.resolve()}

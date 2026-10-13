@@ -73,6 +73,8 @@ type BlocksProps = {
   /** The Mini App's own sections, built by the page: promo codes, the shop and the packages. */
   promo?: ReactNode;
   shop?: ReactNode;
+  /** The Mini App's "new link" section: it needs the Telegram sign-in, so the page builds it. */
+  reissue?: ReactNode;
   /** The shop sells here: "renew" goes to it instead of support. */
   selling?: boolean;
   reload: () => Promise<void>;
@@ -113,6 +115,8 @@ function block(b: PageBlock, p: BlocksProps): ReactNode {
       return p.docs.length ? <Instructions block={b} docs={p.docs} onOpen={p.onOpenDoc} /> : null;
     case "link":
       return <SubLink block={b} subURL={p.subURL} qr={p.config.apps.qr} />;
+    case "reissue":
+      return p.reissue ?? null;
     case "locations":
       return info.locations?.length ? <Locations block={b} names={info.locations} /> : null;
     case "telegram": {
@@ -387,7 +391,7 @@ function Announce({ block: b, text, url }: { block: PageBlock; text: string; url
   return (
     <section className="glass sub-card p-4" role="note">
       {b.title ? <Heading className="mb-1">{b.title}</Heading> : null}
-      <p className="whitespace-pre-line text-[13px] leading-5 text-[var(--ink-700)]">{text}</p>
+      <p className="break-words whitespace-pre-wrap text-[13px] leading-5 text-[var(--ink-700)]">{text}</p>
       {href ? (
         <a className="btn btn-glass btn-sm mt-3" href={href} target="_blank" rel="noreferrer noopener" {...outside(href)}>
           {t("sub.announceMore")}

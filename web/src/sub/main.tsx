@@ -410,22 +410,25 @@ function SubPage() {
             </>
           ) : null
         }
+        reissue={
+          tgMode ? (
+            <ReissueSection
+              key={token}
+              info={current}
+              subURL={subURL}
+              title={titleOf(config, "reissue")}
+              onDone={(newToken) => {
+                // The page opens at the new address; the sign-in's list is told afterwards, so that
+                // it finds the new link among the account's and keeps it on screen.
+                setSubURL(subRoot + "/" + newToken);
+                void session();
+              }}
+            />
+          ) : null
+        }
         reload={() => loadInfo(subURL).catch(() => undefined)}
         onOpenDoc={openDoc}
       />
-      {tgMode ? (
-        <ReissueSection
-          key={token}
-          info={current}
-          subURL={subURL}
-          onDone={(newToken) => {
-            // The page opens at the new address; the sign-in's list is told afterwards, so that
-            // it finds the new link among the account's and keeps it on screen.
-            setSubURL(subRoot + "/" + newToken);
-            void session();
-          }}
-        />
-      ) : null}
     </Shell>
   );
 }

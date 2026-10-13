@@ -1421,7 +1421,7 @@
     "apps": "In the apps",
     "appsSub": "What subscribers see in their VPN apps besides the servers",
     "announce": "Announcement",
-    "announceHint": "Lines for the subscription page and the Mini App: news, maintenance, the term and the traffic left through the variables below. Line breaks and blank lines stay, up to 10 lines. Happ and v2RayTun show it as one line of up to 200 characters. Empty: nothing is shown.",
+    "announceHint": "Lines for the subscription page and the Mini App: news, maintenance, the term and the traffic left through the variables below. Line breaks, blank lines and indents stay, up to 10 lines. Happ and v2RayTun do not show line breaks: they get everything as one line of up to 200 characters. Empty: nothing is shown.",
     "announceUrl": "Announcement link",
     "announceUrlHint": "Where a tap on the announcement leads: https:// or tg://",
     "appBranding": "Your brand in the apps",
@@ -1638,7 +1638,8 @@
       "days": "Days left; ∞ without a term",
       "used": "Traffic used",
       "left": "Traffic left; ∞ without a limit",
-      "total": "The traffic limit with packages; ∞ without one"
+      "total": "The traffic limit with packages; ∞ without one",
+      "devices": "Bound devices: 2/3; 2 without a limit; up to 3 at once for a limit counted online; ∞ when binding is off"
     },
     "page": {
       "tab": {
@@ -1766,6 +1767,7 @@
         "guide": "How to connect",
         "instructions": "Guides",
         "link": "Subscription link",
+        "reissue": "New link",
         "locations": "Servers",
         "telegram": "Telegram button",
         "support": "Support button",
@@ -1783,6 +1785,7 @@
         "guide": "Three steps to connect",
         "instructions": "The published guides",
         "link": "The subscription address and a QR code",
+        "reissue": "The \"New link\" button: the subscriber reissues the link themselves",
         "locations": "Nodes the subscriber has access to",
         "telegram": "Linking to the bot, when the bot is set up",
         "support": "The support link from the Subscription section",

@@ -200,6 +200,8 @@ func (r *Remote) call(ctx context.Context, method string, args []any, outs ...an
 	switch {
 	case ans.Error != nil:
 		return ans.Error
+	case ans.Code == "not_talking":
+		return fmt.Errorf("panel: %s: %w", method, ErrNotTalking)
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("panel: %s: %s (%s)", method, ans.Code, ans.Message)
 	case len(ans.Results) != len(outs):

@@ -2,36 +2,29 @@ package tgbot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strconv"
 
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
 
 // The screens run as the bot addon and the panel tells them what the buyer and the
-// subscriber must hear through its feed of events: the payment messages (Notifications on
-// the panel's side, as billing's Notifier) and the term and traffic notices (Panel.Notify).
-// HandleEvent is the addon's side.
+// subscriber must hear through its feed of events: the payment messages (events.PaymentPaid,
+// PaymentRefunded and TrialNotGiven, written by billing in the transaction of the change) and
+// the term and traffic notices (Panel.Notify). HandleEvent is the addon's side: it takes the
+// subscription over the Panel API, as any addon would.
 
-// Events of the payment messages.
-const (
-	EventPaid          = "bot.paid"
-	EventRefunded      = "bot.refunded"
-	EventTrialNotGiven = "bot.trial_not_given"
-)
-
-// Events of the notices.
-const (
-	EventExpiring   = "user.expiring"
-	EventExpired    = "user.expired"
-	EventTraffic90  = "traffic.90"
-	EventTraffic100 = "traffic.100"
-)
-
-// PaymentMessage is what a payment message is about.
+// PaymentMessage is what the bot.* events carry: the whole payment and subscription.
+//
+// The bot.* events are deprecated: Notifications keeps writing them for one release so the
+// bot builds released before the payment events carried what the bot needs keep working. This
+// build does not read them (EventTypes), so no message comes twice.
 type PaymentMessage struct {
 	Payment  db.Payment `json:"payment"`
 	User     db.User    `json:"user"`
@@ -39,17 +32,12 @@ type PaymentMessage struct {
 	Disabled bool       `json:"disabled,omitempty"` // bot.refunded: the subscription was turned off
 }
 
-// NoticeEvent is what the addon is told of a notice: which subscription, and what is due.
-type NoticeEvent struct {
-	Days       int   `json:"days,omitempty"`        // user.expiring: 3 or 1
-	ExpiresAt  int64 `json:"expires_at,omitempty"`  // unix seconds
-	PeriodFrom int64 `json:"period_from,omitempty"` // traffic: the period it is about
-}
-
 // Emit writes an event of the panel's feed; dedupe makes a second emit of it a no-op.
 type Emit func(ctx context.Context, typ string, userID, tgID int64, data any, dedupe string) error
 
-// Notifications is billing's Notifier as events for the bot addon.
+// Notifications is billing's Notifier as the deprecated bot.* events (see PaymentMessage).
+// They are written after the commit and can be lost on a crash; events.PaymentPaid and its
+// kin are not.
 type Notifications struct {
 	Emit Emit
 	Log  *slog.Logger
@@ -63,42 +51,71 @@ func (n Notifications) emit(ctx context.Context, typ string, m PaymentMessage) {
 }
 
 func (n Notifications) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
-	n.emit(ctx, EventPaid, PaymentMessage{Payment: p, User: u, Created: created})
+	n.emit(ctx, events.BotPaid, PaymentMessage{Payment: p, User: u, Created: created})
 }
 
 func (n Notifications) Refunded(ctx context.Context, p db.Payment, u db.User, disabled bool) {
-	n.emit(ctx, EventRefunded, PaymentMessage{Payment: p, User: u, Disabled: disabled})
+	n.emit(ctx, events.BotRefunded, PaymentMessage{Payment: p, User: u, Disabled: disabled})
 }
 
 func (n Notifications) TrialNotGiven(ctx context.Context, p db.Payment) {
-	n.emit(ctx, EventTrialNotGiven, PaymentMessage{Payment: p})
+	n.emit(ctx, events.BotTrialNotGiven, PaymentMessage{Payment: p})
 }
 
 // EventTypes are the events HandleEvent acts on.
-var EventTypes = []string{EventPaid, EventRefunded, EventTrialNotGiven, EventExpiring, EventExpired, EventTraffic90, EventTraffic100}
+var EventTypes = []string{events.PaymentPaid, events.PaymentRefunded, events.TrialNotGiven,
+	events.UserExpiring, events.UserExpired, events.Traffic90, events.Traffic100}
+
+// gone: the subscription of a payment is not there for the bot any more: deleted, or moved to
+// an account that is not talking to it. Retrying would not change that.
+func gone(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, domain.ErrNotFound) || errors.Is(err, ErrNotTalking)
+}
 
 // HandleEvent sends what an event of the panel asks the bot to say. An error leaves the
 // event unacknowledged, to come again.
 func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
 	switch e.Type {
-	case EventPaid, EventRefunded, EventTrialNotGiven:
-		var m PaymentMessage
-		if err := json.Unmarshal(e.Data, &m); err != nil {
+	case events.PaymentPaid, events.PaymentRefunded:
+		var p events.Payment
+		if err := json.Unmarshal(e.Data, &p); err != nil || e.TgID == 0 {
 			return nil // nothing to say from it, now or later
 		}
-		switch e.Type {
-		case EventPaid:
-			b.paid(ctx, m.Payment, m.User, m.Created)
-		case EventRefunded:
-			b.refunded(ctx, m.Payment, m.User, m.Disabled)
-		default:
-			b.trialNotGiven(ctx, m.Payment)
+		pay := db.Payment{ID: p.PaymentID, TgID: e.TgID, Kind: p.Kind, Provider: p.Provider, TariffName: p.TariffName,
+			Amount: p.Amount, Currency: p.Currency}
+		var u db.User
+		if e.UserID != 0 {
+			var err error
+			if u, err = b.d.Backend.User(ctx, e.UserID); err != nil {
+				if !gone(err) {
+					return err
+				}
+				u = db.User{} // deleted since: a refund still says the money is back
+			}
 		}
-	case EventExpiring, EventExpired, EventTraffic90, EventTraffic100:
+		if e.Type == events.PaymentPaid {
+			if u.ID == 0 {
+				return nil // a subscription that is gone has nothing to be thanked for
+			}
+			b.paid(ctx, pay, u, p.Created)
+		} else {
+			b.refunded(ctx, pay, u, p.Disabled)
+		}
+	case events.TrialNotGiven:
+		var n events.NotGiven
+		if err := json.Unmarshal(e.Data, &n); err != nil || e.TgID == 0 {
+			return nil
+		}
+		// A trial that went back by itself is told by its PaymentRefunded; only the one the
+		// admin must return by hand has no other word.
+		if n.Refund == events.RefundedManually {
+			b.trialNotGiven(ctx, db.Payment{ID: n.PaymentID, TgID: e.TgID, Amount: n.Amount, Currency: n.Currency})
+		}
+	case events.UserExpiring, events.UserExpired, events.Traffic90, events.Traffic100:
 		if e.TgID == 0 {
 			return nil
 		}
-		var n NoticeEvent
+		var n events.Notice
 		_ = json.Unmarshal(e.Data, &n)
 		kind := noticeKind(e.Type, n.Days)
 		u, err := b.d.Backend.User(ctx, e.UserID)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -27,14 +28,32 @@ type UI struct {
 	Title Text   `json:"title"`
 }
 
-// InfoV2 is the part of an addon's /v2/info the panel reads: who answers, and where its
-// pages start. The permissions come from the signed catalog entry and the grant, never
-// from the addon.
+// InfoV2 is the part of an addon's /v2/info the panel reads: who answers, where its pages
+// start and how it wants its events. The permissions come from the signed catalog entry and
+// the grant, never from the addon: Push only picks the way events reach an addon that was
+// granted them, and Events narrows what it is sent.
 type InfoV2 struct {
-	ID       string `json:"id"`
-	Protocol int    `json:"protocol"`
-	UI       *UI    `json:"ui,omitempty"`
+	ID       string   `json:"id"`
+	Protocol int      `json:"protocol"`
+	UI       *UI      `json:"ui,omitempty"`
+	Events   []string `json:"events,omitempty"` // the types it wants; empty: all
+	Push     bool     `json:"push,omitempty"`   // it serves POST /v2/events and is sent them
 }
+
+// validEventTypes: names of event types as the panel writes them, and not too many.
+func validEventTypes(types []string) bool {
+	if len(types) > 64 {
+		return false
+	}
+	for _, t := range types {
+		if !validEventType.MatchString(t) {
+			return false
+		}
+	}
+	return true
+}
+
+var validEventType = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)
 
 // validEntry: a plain file path under /ui/, nothing to escape or to climb out with.
 var validEntry = regexp.MustCompile(`^/ui/[A-Za-z0-9._~/-]{0,200}$`)
@@ -58,7 +77,37 @@ func (m *Manager) InfoV2(ctx context.Context, id string, a Installed) (InfoV2, e
 	if !info.UI.valid() {
 		info.UI = nil
 	}
+	// A list the panel cannot use is as if the addon named none of them: it gets them all.
+	if !validEventTypes(info.Events) {
+		info.Events = nil
+	}
 	return info, nil
+}
+
+// Pushes is the served addon id, with its description, when it asks for its events to be
+// pushed to it (push in its /v2/info); ok is false for one that is not running, does not
+// serve HTTP, does not ask, or does not answer now. It pulls then.
+func (m *Manager) Pushes(ctx context.Context, id string) (a Installed, info InfoV2, ok bool) {
+	a, err := m.Served(id)
+	if err != nil {
+		return Installed{}, InfoV2{}, false
+	}
+	info, err = m.InfoV2(ctx, id, a)
+	return a, info, err == nil && info.Push
+}
+
+// PushEvents sends one batch (body is {"events": [...]}) to the served addon a: POST
+// /v2/events. Only a 2xx takes it; anything else, a refusal, a redirect or an addon that does
+// not answer, is an error and the caller sends the batch again.
+func (m *Manager) PushEvents(ctx context.Context, a Installed, body []byte) error {
+	resp, _, err := doBearer(ctx, m.peer, a.Token, http.MethodPost, "http://"+a.Listen+"/v2/events", body, nil, MaxRPCAnswer)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("the addon answered %s", resp.Status)
+	}
+	return nil
 }
 
 // PageFile is one file of an addon's pages as the panel passes it on.

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store/db"
@@ -29,6 +30,9 @@ var (
 	// ErrTrialPaid: the trial has a price; it is bought with TrialInvoice.
 	ErrTrialPaid = errors.New("trial_paid")
 )
+
+// errTrialChanged: a trial payment that was to be refunded is in a state nobody expected.
+var errTrialChanged = errors.New("the trial payment changed while its money was going back")
 
 // TrialTariff is the tariff a trial gives, when the admin offers one.
 func (s *Service) TrialTariff(ctx context.Context) (db.Tariff, bool) {
@@ -116,7 +120,7 @@ func (s *Service) Trial(ctx context.Context, tgID int64) (db.User, error) {
 		} else if n == 0 {
 			return ErrTrialUsed
 		}
-		if u, err = s.d.Users.CreateOn(ctx, q, domain.CreateInput{Name: buyerName(ctx, q, tgID), Note: "Telegram · trial", TariffID: t.ID, Source: domain.UserFromTrial}, domain.Patch{}); err != nil {
+		if u, err = s.d.Users.CreateOn(ctx, q, domain.CreateInput{Name: buyerName(ctx, q, tgID), Note: "Telegram · trial", TariffID: t.ID, Source: domain.UserFromTrial, TgID: tgID}, domain.Patch{}); err != nil {
 			return err
 		}
 		if err := q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: tgID, CreatedAt: now.Unix()}); err != nil {
@@ -125,7 +129,11 @@ func (s *Service) Trial(ctx context.Context, tgID int64) (db.User, error) {
 		if err := q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: u.ID, TgID: tgID}); err != nil {
 			return err
 		}
-		return q.SetTrialUser(ctx, db.SetTrialUserParams{UserID: sql.NullInt64{Int64: u.ID, Valid: true}, TgID: tgID})
+		if err := q.SetTrialUser(ctx, db.SetTrialUserParams{UserID: sql.NullInt64{Int64: u.ID, Valid: true}, TgID: tgID}); err != nil {
+			return err
+		}
+		// Told in the same transaction: never of a trial that rolled back.
+		return emitTrialStarted(ctx, q, now, u.ID, tgID, t.ID, 0)
 	}
 	err := s.d.Store.Tx(ctx, run)
 	if errors.Is(err, domain.ErrNoSlots) {
@@ -136,6 +144,7 @@ func (s *Service) Trial(ctx context.Context, tgID int64) (db.User, error) {
 	if err != nil {
 		return db.User{}, err
 	}
+	s.d.Events.Kick()
 	s.d.Users.Changed()
 	s.d.Log.Info("billing: trial", "tg", tgID, "user", u.ID, "tariff", t.ID)
 	return u, nil
@@ -254,7 +263,7 @@ func (s *Service) applyTrial(ctx context.Context, q *db.Queries, pay db.Payment)
 	// Bought like every other payment, with the trial's own source and note: a tariff
 	// archived since the invoice still gives what was paid for.
 	u, _, err := s.d.Users.Purchase(ctx, q, domain.PurchaseInput{TariffID: pay.TariffID.Int64, Term: pay.TermDays,
-		Name: buyerName(ctx, q, pay.TgID), Note: "Telegram · trial", Source: domain.UserFromTrial})
+		Name: buyerName(ctx, q, pay.TgID), TgID: pay.TgID, Note: "Telegram · trial", Source: domain.UserFromTrial})
 	if err != nil {
 		return db.User{}, err
 	}
@@ -303,27 +312,39 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 		s.d.Log.Error("billing: refund of a trial that cannot be given", "payment", cur.ID, "provider", cur.Provider, "err", refundErr)
 		return errors.Join(refundErr, s.d.Store.Q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: "trial_refund_failed", ID: cur.ID}))
 	}
-	// Refunded before it was applied, as a late promo payment is: it never will be.
-	refundedAt := sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}
-	n, err := s.d.Store.Q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: refundedAt, ID: cur.ID})
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		// Marked refunded meanwhile by another way (Telegram's refunded_payment for the
-		// Stars just returned, the admin's refund): the money is back all the same, and
-		// none of those tells the buyer about a payment that gave nothing. Anything else
-		// (another pass applied it) is the admin's to settle, said loudly.
-		latest, err := s.d.Store.Q.GetPayment(ctx, cur.ID)
+	// Refunded before it was applied, as a late promo payment is: it never will be. The
+	// addons hear of it in the same transaction, once (the dedupe key): when another way marked
+	// it refunded meanwhile (Telegram's refunded_payment for the Stars just returned, the
+	// admin's refund) the money is back all the same and none of those tells of a payment that
+	// gave nothing. Anything else (another pass applied it) is the admin's to settle, said loudly.
+	var refundedAt sql.NullInt64
+	err = s.d.Store.Tx(ctx, func(q *db.Queries) error {
+		now := s.d.Now()
+		refundedAt = sql.NullInt64{Int64: now.Unix(), Valid: true}
+		n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: refundedAt, ID: cur.ID})
 		if err != nil {
 			return err
 		}
-		if latest.Status != PaymentRefunded {
-			s.d.Log.Error("billing: the trial payment changed while its money was going back", "payment", cur.ID, "status", latest.Status)
-			return errors.New("the trial payment changed while its money was going back")
+		if n != 1 {
+			latest, err := q.GetPayment(ctx, cur.ID)
+			if err != nil {
+				return err
+			}
+			if latest.Status != PaymentRefunded {
+				s.d.Log.Error("billing: the trial payment changed while its money was going back", "payment", cur.ID, "status", latest.Status)
+				return errTrialChanged
+			}
+			refundedAt = latest.RefundedAt
 		}
-		refundedAt = latest.RefundedAt
+		if err := emitPayment(ctx, q, now, events.PaymentRefunded, cur, 0, false, false); err != nil {
+			return err
+		}
+		return emitTrialNotGiven(ctx, q, now, cur, events.RefundedAuto)
+	})
+	if err != nil {
+		return err
 	}
+	s.d.Events.Kick()
 	s.d.Log.Warn("billing: a paid trial the account may not take was refunded", "payment", cur.ID, "provider", cur.Provider, "tg", cur.TgID)
 	if n := s.notifier(); n != nil {
 		// Nothing was made for the payment, so the buyer hears only that it came back.
@@ -341,9 +362,17 @@ func (s *Service) trialByHand(ctx context.Context, p db.Payment) error {
 	if p.Error == TrialRefundByHand {
 		return nil
 	}
-	if err := s.d.Store.Q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: TrialRefundByHand, ID: p.ID}); err != nil {
+	// The addons are told in the same transaction as the error is set, which says it was.
+	err := s.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if err := q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: TrialRefundByHand, ID: p.ID}); err != nil {
+			return err
+		}
+		return emitTrialNotGiven(ctx, q, s.d.Now(), p, events.RefundedManually)
+	})
+	if err != nil {
 		return err
 	}
+	s.d.Events.Kick()
 	s.d.Log.Warn("billing: a paid trial the account may not take waits for a refund by hand", "payment", p.ID, "provider", p.Provider, "tg", p.TgID)
 	if n := s.notifier(); n != nil {
 		n.TrialNotGiven(ctx, p)
@@ -368,13 +397,20 @@ func (s *Service) RefundedByHand(ctx context.Context, id int64) error {
 	unlock, _ := s.trialRefunds.lock(context.Background(), id)
 	defer unlock()
 	refundedAt := sql.NullInt64{Int64: s.d.Now().Unix(), Valid: true}
-	n, err := s.d.Store.Q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: refundedAt, ID: id})
+	err = s.d.Store.Tx(ctx, func(q *db.Queries) error {
+		n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: refundedAt, ID: id})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrNotRefunable // applied or refunded meanwhile
+		}
+		return emitPayment(ctx, q, s.d.Now(), events.PaymentRefunded, p, 0, false, false)
+	})
 	if err != nil {
 		return err
 	}
-	if n != 1 {
-		return ErrNotRefunable // applied or refunded meanwhile
-	}
+	s.d.Events.Kick()
 	if s.d.Promo != nil {
 		if err := s.d.Promo.ReleasePayment(ctx, id); err != nil {
 			s.d.Log.Warn("billing: release promo of a payment refunded by hand", "payment", id, "err", err)

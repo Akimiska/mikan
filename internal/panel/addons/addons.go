@@ -151,19 +151,24 @@ func (t Text) In(lang string) string {
 // Entry is one addon of the catalog. Kind, Mode, Permissions and Resources are protocol 2;
 // a protocol 1 entry is a payment adapter serving HTTP.
 type Entry struct {
-	ID          string    `json:"id"`
-	Name        Text      `json:"name"`
-	Description Text      `json:"description"`
-	Version     string    `json:"version"`
-	Protocol    int       `json:"protocol"`
-	Kind        string    `json:"kind,omitempty"`
-	Mode        string    `json:"mode,omitempty"`
-	Permissions []string  `json:"permissions,omitempty"`
-	Resources   Resources `json:"resources,omitzero"`
-	Image       string    `json:"image"`
-	Digest      string    `json:"digest"`
-	MinPanel    string    `json:"min_panel"`
-	Homepage    string    `json:"homepage"`
+	ID          string   `json:"id"`
+	Name        Text     `json:"name"`
+	Description Text     `json:"description"`
+	Version     string   `json:"version"`
+	Protocol    int      `json:"protocol"`
+	Kind        string   `json:"kind,omitempty"`
+	Mode        string   `json:"mode,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+	// Events are the types of events the addon wants (empty: all), Push that it takes them as
+	// POST /v2/events instead of pulling them: mode http only (docs/pipeline/addons.md, 15.3).
+	// The panel reads both from the addon's own /v2/info (InfoV2), which is what it serves.
+	Events    []string  `json:"events,omitempty"`
+	Push      bool      `json:"push,omitempty"`
+	Resources Resources `json:"resources,omitzero"`
+	Image     string    `json:"image"`
+	Digest    string    `json:"digest"`
+	MinPanel  string    `json:"min_panel"`
+	Homepage  string    `json:"homepage"`
 }
 
 // Resources an addon asks the host for.
@@ -212,6 +217,9 @@ func (e *Entry) normalize() bool {
 				return false
 			}
 			seen[p] = true
+		}
+		if e.Push && e.Mode != ModeHTTP || !validEventTypes(e.Events) {
+			return false
 		}
 		return e.Resources.MemMB == 0 || e.Resources.MemMB >= MinMemMB && e.Resources.MemMB <= MaxMemMB
 	}

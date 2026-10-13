@@ -287,7 +287,7 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 			if rv, u, err = s.takeBack(ctx, q, p); err != nil {
 				return err
 			}
-			return emitPayment(ctx, q, s.d.Now(), events.PaymentRefunded, p, u.ID, false)
+			return emitPayment(ctx, q, s.d.Now(), events.PaymentRefunded, p, u.ID, false, rv.Action == "disabled")
 		case PaymentPending, PaymentExpired, PaymentPaid, PaymentFailed:
 			// Refunded before it was applied: it never will be.
 			n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: at, ID: id})

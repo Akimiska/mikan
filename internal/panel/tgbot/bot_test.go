@@ -265,6 +265,8 @@ type env struct {
 	devs  *domain.Devices
 	users *domain.Users
 	msgID int64
+	// seen is the last event of the panel's feed the addon has been handed.
+	seen int64
 }
 
 func (e *env) clock() time.Time {
@@ -386,10 +388,39 @@ func (e *env) emit(ctx context.Context, typ string, userID, tgID int64, data any
 	return e.bot.HandleEvent(ctx, events.Event{Type: typ, UserID: userID, TgID: tgID, Data: raw})
 }
 
-// notifications is what billing tells the buyers' messages through, as in the panel.
-func (e *env) notifications() Notifications {
-	return Notifications{Emit: e.emit, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+// feed is what billing tells the buyers' messages through, as in the panel: billing writes
+// its events in the transaction of the change, and the addon, which reads the feed, says what
+// is new in it once the call returns. Only the types the addon asks for are handed on.
+type feed struct{ e *env }
+
+func (f feed) Paid(context.Context, db.Payment, db.User, bool)     { f.drain() }
+func (f feed) Refunded(context.Context, db.Payment, db.User, bool) { f.drain() }
+func (f feed) TrialNotGiven(context.Context, db.Payment)           { f.drain() }
+
+func (f feed) drain() {
+	e := f.e
+	e.t.Helper()
+	for {
+		rows, err := e.st.Q.ListAddonEvents(e.ctx, db.ListAddonEventsParams{After: e.seen, Types: EventTypes, Lim: 100})
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		if len(rows) == 0 {
+			return
+		}
+		for _, r := range rows {
+			e.seen = r.ID
+			ev := events.Event{ID: r.ID, Type: r.Type, UserID: r.UserID.Int64, TgID: r.TgID.Int64, Data: json.RawMessage(r.Data)}
+			if err := e.bot.HandleEvent(e.ctx, ev); err != nil {
+				e.t.Fatalf("event %s: %v", r.Type, err)
+			}
+		}
+	}
 }
+
+// notifications is the notifier billing is given in these tests: the panel's own feed, read
+// as the bot addon does.
+func (e *env) notifications() billing.Notifier { return feed{e} }
 
 // code is the /start code of the subscription page's link to the bot for user.
 func (e *env) code(user int64) string {

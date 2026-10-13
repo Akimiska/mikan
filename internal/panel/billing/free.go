@@ -133,7 +133,7 @@ func (s *Service) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 		} else if n >= s.d.MaxLinks {
 			return ErrTooManySubs
 		}
-		if u, err = s.d.Users.CreateOn(ctx, q, domain.CreateInput{Name: buyerName(ctx, q, tgID), Note: "Telegram · free plan", TariffID: t.ID, Source: domain.UserFromFree}, domain.Patch{}); err != nil {
+		if u, err = s.d.Users.CreateOn(ctx, q, domain.CreateInput{Name: buyerName(ctx, q, tgID), Note: "Telegram · free plan", TariffID: t.ID, Source: domain.UserFromFree, TgID: tgID}, domain.Patch{}); err != nil {
 			return err
 		}
 		if err := q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: tgID, CreatedAt: now.Unix()}); err != nil {
@@ -154,6 +154,7 @@ func (s *Service) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 	if err != nil {
 		return db.User{}, err
 	}
+	s.d.Events.Kick()
 	s.d.Users.Changed()
 	s.d.Log.Info("billing: free plan", "tg", tgID, "user", u.ID, "tariff", t.ID)
 	return u, nil

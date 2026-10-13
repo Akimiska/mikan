@@ -910,7 +910,7 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			}
 		}
 		if u, created, err = s.d.Users.Purchase(ctx, q, domain.PurchaseInput{UserID: userID, TariffID: pay.TariffID.Int64,
-			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), ResetTraffic: reset}); err != nil {
+			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), TgID: pay.TgID, ResetTraffic: reset}); err != nil {
 			return err
 		}
 		if created {
@@ -937,7 +937,13 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		if err := run(q); err != nil || done {
 			return err
 		}
-		return emitPayment(ctx, q, s.d.Now(), events.PaymentPaid, pay, u.ID, created)
+		if err := emitPayment(ctx, q, s.d.Now(), events.PaymentPaid, pay, u.ID, created, false); err != nil {
+			return err
+		}
+		if pay.Kind == KindTrial {
+			return emitTrialStarted(ctx, q, s.d.Now(), u.ID, pay.TgID, pay.TariffID.Int64, pay.ID)
+		}
+		return nil
 	}
 	err = s.d.Store.Tx(ctx, told)
 	if errors.Is(err, domain.ErrNoSlots) {

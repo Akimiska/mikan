@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
@@ -126,18 +127,18 @@ func (p *Panel) Notify(ctx context.Context) {
 			if err != nil || sent {
 				continue
 			}
-			typ, data := EventExpiring, NoticeEvent{ExpiresAt: u.ExpiresAt.Int64}
+			typ, data := events.UserExpiring, events.Notice{ExpiresAt: u.ExpiresAt.Int64}
 			switch n.kind {
 			case "expire_3d":
 				data.Days = 3
 			case "expire_1d":
 				data.Days = 1
 			case "expired":
-				typ = EventExpired
+				typ = events.UserExpired
 			case "traffic_90":
-				typ, data = EventTraffic90, NoticeEvent{PeriodFrom: n.period}
+				typ, data = events.Traffic90, events.Notice{PeriodFrom: n.period}
 			case "traffic_100":
-				typ, data = EventTraffic100, NoticeEvent{PeriodFrom: n.period}
+				typ, data = events.Traffic100, events.Notice{PeriodFrom: n.period}
 			}
 			dedupe := "notice:" + n.kind + ":" + strconv.FormatInt(u.ID, 10) + ":" + strconv.FormatInt(n.period, 10)
 			if err := p.d.Emit(ctx, typ, u.ID, l.TgID, data, dedupe); err != nil {

@@ -144,6 +144,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		log:       o.Log,
 	}
 	pool := domain.NewPool(st, o.Now)
+	// The feed of events for addons: what changes users, devices, nodes and payments is
+	// written in its own transaction, and the hub wakes the addons reading it.
+	hub := events.NewHub()
 	var changes domain.Changes = noChanges{}
 	deps := api.Deps{
 		Version: o.Version, Store: st, Settings: set, Sessions: p.sessions,
@@ -152,6 +155,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	if o.Connect != nil {
 		p.Nodes = nodesync.NewManager(st, set, pool, o.Connect, o.Log, o.Now)
+		p.Nodes.SetEvents(hub)
 		changes = p.Nodes
 		deps.Online = p.Nodes.Online
 		deps.Nodes = p.Nodes
@@ -168,6 +172,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.SubPort, deps.SubPortError = o.SubPort, o.SubPortError
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
+	deps.Users.SetEvents(hub)
 	// The nodes try a new listener before it is saved, when the panel runs them.
 	var dryRun domain.DryRun
 	if p.Nodes != nil {
@@ -186,6 +191,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	deps.Inbounds.SetResolver(deps.Resolve)
 	deps.Devices = domain.NewDevices(st, pool, changes, o.Now)
+	deps.Devices.SetEvents(hub)
 	p.st, p.devices = st, deps.Devices
 	deps.Packages = domain.NewPackages(st, o.Now)
 	if o.Certs != nil {
@@ -219,7 +225,6 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		return ep.URL() + "/" + paths.Sub
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
-	hub := events.NewHub()
 	deps.Addons = p.Addons
 	addonPages := addonpages.New(addonpages.Deps{Addons: p.Addons, Store: st.Q, Log: o.Log, Now: o.Now})
 	deps.Pages = addonPages
@@ -513,7 +518,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.NodeUpdates != nil {
 		workers = append(workers, p.NodeUpdates.Run)
 	}
-	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
+	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

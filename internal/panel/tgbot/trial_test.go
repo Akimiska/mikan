@@ -9,8 +9,8 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
-	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
 
@@ -92,7 +92,7 @@ func TestBotTrialNotGiven(t *testing.T) {
 	e.tg.mu.Lock()
 	from := len(e.tg.calls)
 	e.tg.mu.Unlock()
-	if err := e.bot.HandleEvent(e.ctx, event(t, EventTrialNotGiven, 0, 4242, PaymentMessage{Payment: db.Payment{TgID: 4242, Amount: 100, Currency: "RUB"}})); err != nil {
+	if err := e.bot.HandleEvent(e.ctx, event(t, events.TrialNotGiven, 0, 4242, events.NotGiven{PaymentID: 8, Amount: 100, Currency: "RUB", Reason: events.TrialUsed, Refund: events.RefundedManually})); err != nil {
 		t.Fatal(err)
 	}
 	var sent map[string]any

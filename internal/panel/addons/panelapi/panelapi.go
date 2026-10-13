@@ -93,6 +93,7 @@ type Server struct {
 	updates *events.Hub    // wakes getUpdates of the bot addon
 	talk    talking        // the accounts the bot addon is talking to (botrpc.go)
 	uploads chan struct{}  // files on their way through the Bot API proxy
+	push    pushTune       // the pauses of the push delivery (push.go); zero: the real ones
 
 	mu    sync.Mutex
 	addrs map[string]bool // what it listens on: the Host a request must name

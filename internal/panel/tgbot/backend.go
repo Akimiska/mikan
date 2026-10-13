@@ -159,6 +159,9 @@ var (
 	ErrLinkLimit = errors.New("max_links")
 	// ErrNotChannel: Backend.Member was asked about a chat that is not the bot's channel.
 	ErrNotChannel = errors.New("not_the_channel")
+	// ErrNotTalking: the Panel API refused a call about an account that is not talking to the
+	// bot now (the addon reaches only those; Remote only).
+	ErrNotTalking = errors.New("not_talking")
 )
 
 // The panel's pieces and the addon's are what they say they are.

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
@@ -19,11 +20,11 @@ func night(t time.Time) bool {
 // noticeKind is the kind of notice an event names; days is the user.expiring event's.
 func noticeKind(typ string, days int) string {
 	switch typ {
-	case EventExpired:
+	case events.UserExpired:
 		return "expired"
-	case EventTraffic90:
+	case events.Traffic90:
 		return "traffic_90"
-	case EventTraffic100:
+	case events.Traffic100:
 		return "traffic_100"
 	}
 	if days == 1 {

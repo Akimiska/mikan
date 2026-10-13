@@ -85,6 +85,7 @@ type Syncer struct {
 	torrentKnown bool
 
 	health atomic.Pointer[HealthView]
+	alive  liveness // what the addons were told of the node's health (liveness.go)
 	online atomic.Pointer[map[string]nodeapi.Online]
 	// served is the pin of the certificate in the state the node last took ("" for a public
 	// one); nil until it took one from this panel process. Links follow it, not the
@@ -771,6 +772,7 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 			view.Since = prev.Since
 		}
 		s.health.Store(view)
+		s.observe(ctx, view)
 		return
 	}
 	view.OK, view.Health, view.Listeners, view.LastOK = true, h, h.Listeners, view.CheckedAt
@@ -791,6 +793,7 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 		s.retry.ok()
 	}
 	s.mu.Unlock()
+	s.observe(ctx, view)
 	if back {
 		signal(s.stateDirty)
 		signal(s.policiesDirty)

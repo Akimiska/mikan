@@ -3664,7 +3664,7 @@
       "can4": "At the Terminal level: work in a shell on the servers you pick, everything is recorded",
       "cannotTitle": "The operator cannot",
       "cannot1": "See or change your password, two-factor protection and API keys",
-      "cannot2": "Learn the admin sign-in address or give access to anyone else",
+      "cannot2": "Give access to anyone else or revoke yours",
       "cannot3": "Read the whole action journal or send mailings to clients",
       "cannot4": "See clients' names, Telegram and subscription links unless you allow it"
     },
@@ -3677,7 +3677,8 @@
       "how": "Send the link to the support bot or to whoever is helping you. It opens once and in one browser only.",
       "toBot": "Copy and open the bot",
       "done": "Done",
-      "lost": "Lost the link? Revoke the access and open a new one."
+      "lost": "Lost the link? Revoke the access and open a new one.",
+      "path": "The link contains the secret address of your admin: everyone it reaches learns it, and it stays known after the access ends. When support is over, press \"Issue a new link\" in the \"Panel link\" card."
     },
     "journal": {
       "title": "Access journal ({n})",
@@ -3710,7 +3711,7 @@
       "note": "A note for yourself",
       "noteHint": "For example a ticket number. It stays in your journal.",
       "termTitle": "Terminal",
-      "termWarn": "This is full access to the server: the operator can do everything root can. Every session is recorded, and you will see the recording. Open the terminal only to someone you trust, and only for the time of the request.",
+      "termWarn": "This is full access to the server: the operator can do everything root can. Every session is recorded and you can watch the recording, but with root rights the operator can change the server (add a key, a cron job, a user) and the recording itself, so check it after the session. Open the terminal only to someone you trust, and only for the time of the request.",
       "targets": "Servers",
       "targetsHint": "Where the terminal is allowed. Pick at least one.",
       "passwordHint": "The password confirms that it is you.",

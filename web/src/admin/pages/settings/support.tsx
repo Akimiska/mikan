@@ -242,6 +242,7 @@ function MadeLink({ link, onDone }: { link: string; onDone: () => void }) {
             </Button>
           </div>
           <p className="text-xs text-[var(--ink-500)]">{t("support.link.lost")}</p>
+          <p className="text-xs text-[var(--ink-500)]">{t("support.link.path")}</p>
         </div>
       </div>
     </div>

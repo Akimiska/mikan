@@ -10655,6 +10655,7 @@ export interface operations {
             query?: {
                 /** @description attention — исчерпан лимит, истекают и истекли, в этом порядке: одним запросом для обзора */
                 state?: "all" | "active" | "expiring" | "limited" | "expired" | "disabled" | "attention";
+                /** @description Поиск по имени, контакту, заметке и меткам. Оператору поддержки без показа подписчиков закрыт: 403 support_denied */
                 q?: string;
                 /** @description all — любая; none — вне папок; число — id папки */
                 folder?: string;

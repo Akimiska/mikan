@@ -215,7 +215,7 @@ Development happens on the `dev` branch; pull requests into `main` are built and
 ## ⛔ Forks and third-party builds
 
 > [!CAUTION]
-> **The official mikan lives only here:** the repository `Miroshka000/mikan`, the image `ghcr.io/miroshka000/mikan` and releases signed with the mikan key. Addons come only from the `getmikan/marketplace` catalog. Anything else is not mikan, whatever it calls itself.
+> **The official mikan lives only here:** the repository `Miroshka000/mikan`, the image `ghcr.io/miroshka000/mikan` and releases signed with the mikan key. Official addons come only from the `getmikan/marketplace` catalog; the community registry `getmikan/marketplace-community` lists third-party addons that mikan does not review and is not responsible for. Anything else is not mikan, whatever it calls itself.
 >
 > **The mikan project considers every fork and every build from other sources potentially unsafe.**
 >

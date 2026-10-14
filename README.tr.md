@@ -214,7 +214,7 @@ Geliştirme `dev` dalında yapılır. `main` dalına açılan çekme istekleri d
 ## ⛔ Fork'lar ve üçüncü taraf derlemeler
 
 > [!CAUTION]
-> **Resmî mikan yalnızca burada:** `Miroshka000/mikan` deposu, `ghcr.io/miroshka000/mikan` imajı ve mikan anahtarıyla imzalanmış sürümler. Eklentiler yalnızca `getmikan/marketplace` kataloğundan gelir. Geri kalan her şey, adı ne olursa olsun, mikan değildir.
+> **Resmî mikan yalnızca burada:** `Miroshka000/mikan` deposu, `ghcr.io/miroshka000/mikan` imajı ve mikan anahtarıyla imzalanmış sürümler. Resmî eklentiler yalnızca `getmikan/marketplace` kataloğundan gelir; topluluk kaydı `getmikan/marketplace-community`, mikan'ın incelemediği ve sorumluluğunu almadığı üçüncü taraf eklentileri listeler. Geri kalan her şey, adı ne olursa olsun, mikan değildir.
 >
 > **mikan projesi, her fork'u ve başka kaynaklardan gelen her derlemeyi potansiyel olarak güvensiz kabul eder.**
 >

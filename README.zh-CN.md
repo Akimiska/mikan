@@ -212,7 +212,7 @@ cd installer && cargo test                    # the installer (Rust)
 ## ⛔ 分叉与第三方构建
 
 > [!CAUTION]
-> **官方 mikan 只在这里**：仓库 `Miroshka000/mikan`、镜像 `ghcr.io/miroshka000/mikan`，以及用 mikan 密钥签名的发布版本。插件只来自 `getmikan/marketplace` 目录。其他一切，无论叫什么名字，都不是 mikan。
+> **官方 mikan 只在这里**：仓库 `Miroshka000/mikan`、镜像 `ghcr.io/miroshka000/mikan`，以及用 mikan 密钥签名的发布版本。官方插件只来自 `getmikan/marketplace` 目录；社区注册表 `getmikan/marketplace-community` 收录的是第三方插件，mikan 不审查也不为其负责。其他一切，无论叫什么名字，都不是 mikan。
 >
 > **mikan 项目认为，所有分叉以及所有来自其他来源的构建都存在潜在的安全风险。**
 >

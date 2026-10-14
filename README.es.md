@@ -215,7 +215,7 @@ El desarrollo se hace en la rama `dev`; los pull requests hacia `main` se compil
 ## ⛔ Forks y compilaciones de terceros
 
 > [!CAUTION]
-> **El mikan oficial está solo aquí:** el repositorio `Miroshka000/mikan`, la imagen `ghcr.io/miroshka000/mikan` y las versiones firmadas con la clave de mikan. Los complementos solo vienen del catálogo `getmikan/marketplace`. Todo lo demás no es mikan, se llame como se llame.
+> **El mikan oficial está solo aquí:** el repositorio `Miroshka000/mikan`, la imagen `ghcr.io/miroshka000/mikan` y las versiones firmadas con la clave de mikan. Los complementos oficiales solo vienen del catálogo `getmikan/marketplace`; el registro comunitario `getmikan/marketplace-community` lista complementos de terceros que mikan no revisa ni respalda. Todo lo demás no es mikan, se llame como se llame.
 >
 > **El proyecto mikan considera potencialmente inseguro todo fork y toda compilación de otras fuentes.**
 >

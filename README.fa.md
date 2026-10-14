@@ -243,7 +243,7 @@ cd installer && cargo test                    # the installer (Rust)
 ## ⛔ فورک‌ها و بیلدهای شخص ثالث
 
 > [!CAUTION]
-> **mikan رسمی فقط اینجاست:** مخزن `Miroshka000/mikan`، ایمیج `ghcr.io/miroshka000/mikan` و نسخه‌هایی که با کلید mikan امضا شده‌اند. افزونه‌ها فقط از کاتالوگ `getmikan/marketplace` می‌آیند. هر چیز دیگری، با هر نامی، mikan نیست.
+> **mikan رسمی فقط اینجاست:** مخزن `Miroshka000/mikan`، ایمیج `ghcr.io/miroshka000/mikan` و نسخه‌هایی که با کلید mikan امضا شده‌اند. افزونه‌های رسمی فقط از کاتالوگ `getmikan/marketplace` می‌آیند؛ مخزن جامعه `getmikan/marketplace-community` افزونه‌های شخص ثالث را فهرست می‌کند که mikan آن‌ها را بررسی نمی‌کند و مسئولیتی در قبالشان ندارد. هر چیز دیگری، با هر نامی، mikan نیست.
 >
 > **پروژه mikan هر فورک و هر بیلدی از منابع دیگر را بالقوه ناامن می‌داند.**
 >

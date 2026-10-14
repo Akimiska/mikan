@@ -5158,6 +5158,8 @@ export interface components {
             level: "view" | "change" | "terminal";
             nodes: components["schemas"]["SupportNode"][];
             panel_version: string;
+            /** @description Отпечаток ключа подписи релизов, которому верит эта сборка: у официального mikan он один, у форка свой */
+            release_key: string;
             show_people: boolean;
             terminal_targets: string[];
         };

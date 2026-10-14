@@ -24,6 +24,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
+	"mikan/internal/release"
 )
 
 // supportHarness is a logged-in admin with a read key and a full key, plus the means to be
@@ -170,12 +171,13 @@ func TestSupportAccessLifecycle(t *testing.T) {
 		ExpiresAt    string `json:"expires_at"`
 		ShowPeople   bool   `json:"show_people"`
 		PanelVersion string `json:"panel_version"`
+		ReleaseKey   string `json:"release_key"`
 		Nodes        []struct {
 			ID   int64  `json:"id"`
 			Name string `json:"name"`
 		} `json:"nodes"`
 	}
-	if err := json.Unmarshal(body, &w); err != nil || w.Level != "view" || !w.ShowPeople || w.PanelVersion != "test" || w.ExpiresAt == "" {
+	if err := json.Unmarshal(body, &w); err != nil || w.Level != "view" || !w.ShowPeople || w.PanelVersion != "test" || w.ExpiresAt == "" || w.ReleaseKey != release.KeyFingerprint() {
 		t.Fatalf("enter body: %v %s", err, body)
 	}
 	// The one entry of the link is spent, in this browser and in any other.

@@ -7684,6 +7684,10 @@
           "panel_version": {
             "type": "string"
           },
+          "release_key": {
+            "description": "Отпечаток ключа подписи релизов, которому верит эта сборка: у официального mikan он один, у форка свой",
+            "type": "string"
+          },
           "show_people": {
             "type": "boolean"
           },
@@ -7699,6 +7703,7 @@
           "expires_at",
           "show_people",
           "panel_version",
+          "release_key",
           "nodes",
           "terminal_targets"
         ],

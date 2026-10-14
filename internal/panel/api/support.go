@@ -18,6 +18,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/support"
+	"mikan/internal/release"
 )
 
 // Support access (internal/panel/support keeps the grants). Whoever the admin lets in works
@@ -334,6 +335,7 @@ type SupportWhoami struct {
 	ExpiresAt       time.Time     `json:"expires_at"`
 	ShowPeople      bool          `json:"show_people"`
 	PanelVersion    string        `json:"panel_version"`
+	ReleaseKey      string        `json:"release_key" doc:"Отпечаток ключа подписи релизов, которому верит эта сборка: у официального mikan он один, у форка свой"`
 	Nodes           []SupportNode `json:"nodes"`
 	TerminalTargets []string      `json:"terminal_targets"`
 	CSRFToken       string        `json:"csrf_token,omitempty" doc:"Для изменяющих запросов сессии оператора; у ключа ms_… нет"`
@@ -500,7 +502,7 @@ func (h *handlers) supportWhoamiBody(ctx context.Context, g db.SupportGrant, csr
 	if targets == nil {
 		targets = []string{}
 	}
-	w := SupportWhoami{Level: g.Level, ExpiresAt: support.Expires(g), ShowPeople: g.ShowPeople, PanelVersion: h.d.Version,
+	w := SupportWhoami{Level: g.Level, ExpiresAt: support.Expires(g), ShowPeople: g.ShowPeople, PanelVersion: h.d.Version, ReleaseKey: release.KeyFingerprint(),
 		Nodes: make([]SupportNode, 0, len(nodes)), TerminalTargets: targets, CSRFToken: csrf}
 	for _, n := range nodes {
 		w.Nodes = append(w.Nodes, SupportNode{ID: n.ID, Name: n.Name})

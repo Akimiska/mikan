@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"sync"
@@ -175,6 +176,13 @@ type NodeRuntime interface {
 	HostDoctor(ctx context.Context, id int64) (nodeapi.HostReport, error)
 	// HostRestart has a node's server restart its containers.
 	HostRestart(ctx context.Context, id int64) (nodeapi.RestartAccepted, error)
+	// Terminal opens a support terminal session on a node's server: the stream of frames
+	// (hostchan.ReadFrame); closing it ends the session.
+	Terminal(ctx context.Context, id int64, o nodeapi.TerminalOpen) (net.Conn, error)
+	// Recordings lists the terminal recordings on a node's server.
+	Recordings(ctx context.Context, id int64) (nodeapi.RecordingList, error)
+	// Recording returns one of them.
+	Recording(ctx context.Context, id int64, name string) ([]byte, error)
 }
 
 type ctxKey int
@@ -200,6 +208,9 @@ type handlers struct {
 
 	// speedCooldown spaces the speed tests of a node.
 	speedCooldown speedCooldown
+
+	// terms are the open support terminal sessions (terminal.go).
+	terms terminalHub
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.
@@ -305,6 +316,10 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerAudit()
 	h.registerSupport()
 	h.registerHostOps()
+	h.registerTerminal(mux)
+	if d.Support != nil {
+		d.Support.SetEndedHook(h.grantEnded)
+	}
 	return noStore(maskResponses(mux)), api, nil
 }
 

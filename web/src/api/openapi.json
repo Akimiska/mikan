@@ -6296,6 +6296,57 @@
         ],
         "type": "object"
       },
+      "RecordingInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "Когда сессия началась",
+            "format": "date-time",
+            "type": "string"
+          },
+          "grant_id": {
+            "description": "Доступ, под которым шла сессия",
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "description": "\u003cдоступ\u003e-\u003cвремя\u003e.cast",
+            "type": "string"
+          },
+          "size": {
+            "description": "Байт",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "grant_id",
+          "at",
+          "size"
+        ],
+        "type": "object"
+      },
+      "RecordingsView": {
+        "additionalProperties": false,
+        "properties": {
+          "recordings": {
+            "description": "От новых к старым",
+            "items": {
+              "$ref": "#/components/schemas/RecordingInfo"
+            },
+            "type": "array"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "recordings"
+        ],
+        "type": "object"
+      },
       "RecoveryOutputBody": {
         "additionalProperties": false,
         "properties": {
@@ -14556,6 +14607,120 @@
           }
         },
         "summary": "Отозвать доступ для поддержки",
+        "tags": [
+          "support"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/support/recordings": {
+      "get": {
+        "description": "Каждый сеанс терминала записывается на сервере целиком (ввод и вывод, формат asciicast v2) и хранится 30 дней. source=panel или node:\u003cid\u003e. Только админ из сессии: оператору поддержки и ключам закрыто.",
+        "operationId": "list-support-recordings",
+        "parameters": [
+          {
+            "description": "Чьи записи: panel или node:\u003cid\u003e ноды",
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "default": "panel",
+              "description": "Чьи записи: panel или node:\u003cid\u003e ноды",
+              "maxLength": 24,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Записи сеансов терминала поддержки",
+        "tags": [
+          "support"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/support/recordings/{name}": {
+      "get": {
+        "description": "Файл asciicast v2 (application/x-asciicast), до 8 МиБ. source=panel или node:\u003cid\u003e. Только админ из сессии.",
+        "operationId": "get-support-recording",
+        "parameters": [
+          {
+            "description": "Имя записи из списка",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "Имя записи из списка",
+              "maxLength": 64,
+              "pattern": "^[0-9]{1,18}-[0-9]{1,12}\\.cast$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Чья запись: panel или node:\u003cid\u003e ноды",
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "default": "panel",
+              "description": "Чья запись: panel или node:\u003cid\u003e ноды",
+              "maxLength": 24,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "contentEncoding": "base64",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Запись сеанса терминала",
         "tags": [
           "support"
         ],

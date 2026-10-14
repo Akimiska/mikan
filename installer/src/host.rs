@@ -166,7 +166,7 @@ fn version_of(path: &Path) -> Result<String> {
     Err(last.map_or_else(|| anyhow::anyhow!("the downloaded command does not run"), Into::into))
 }
 
-const UNIT_NAMES: [&str; 8] = [
+const UNIT_NAMES: [&str; 10] = [
     "mikan-update.service",
     "mikan-update.timer",
     "mikan-update-request.service",
@@ -175,10 +175,18 @@ const UNIT_NAMES: [&str; 8] = [
     "mikan-doctor-request.path",
     "mikan-restart-request.service",
     "mikan-restart-request.path",
+    "mikan-terminal-request.service",
+    "mikan-terminal-request.path",
 ];
 
 /// The path units, which are enabled and started; the timer too.
-const WATCHES: [&str; 4] = ["mikan-update.timer", "mikan-update-request.path", "mikan-doctor-request.path", "mikan-restart-request.path"];
+const WATCHES: [&str; 5] = [
+    "mikan-update.timer",
+    "mikan-update-request.path",
+    "mikan-doctor-request.path",
+    "mikan-restart-request.path",
+    "mikan-terminal-request.path",
+];
 
 /// The unit files of a panel or of a node: the same, except that each path unit watches
 /// the request of the one the server runs (the panel's Update button, or the panel asking
@@ -300,6 +308,41 @@ Description=mikan: wait for a restart request from {from}
 [Path]
 PathExists=/opt/mikan/data/{dir}/restart/request
 Unit=mikan-restart-request.service
+
+[Install]
+WantedBy=paths.target
+"
+            ),
+        ),
+        (
+            UNIT_NAMES[8],
+            "[Unit]
+Description=mikan: one support terminal session, opened by the panel for a live grant
+
+[Service]
+Type=simple
+# The agent ends the session by itself (the grant's end, the panel letting go, 15 minutes
+# of silence). This is the backstop for one that is stuck: no grant lasts longer than 24
+# hours. systemd kills the whole cgroup when the agent ends, so a process the shell left
+# behind does not outlive the session.
+RuntimeMaxSec=25h
+TimeoutStartSec=1min
+KillMode=control-group
+SendSIGKILL=yes
+TimeoutStopSec=10s
+ExecStart=/usr/local/bin/mikan terminal-agent
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[9],
+            format!(
+                "[Unit]
+Description=mikan: wait for a support terminal request from {from}
+
+[Path]
+PathExists=/opt/mikan/data/{dir}/support/terminal/request
+Unit=mikan-terminal-request.service
 
 [Install]
 WantedBy=paths.target
@@ -487,6 +530,27 @@ mod tests {
         assert!(WATCHES.iter().all(|w| UNIT_NAMES.contains(w)));
     }
 
+    // The terminal's request lies deeper (support/terminal/), the agent is the one fixed
+    // command, it runs apart from the others and is enabled like them.
+    #[test]
+    fn the_terminal_unit_watches_its_own_request_and_runs_the_agent() {
+        let (panel, node) = (units(true), units(false));
+        let unit = |all: &[(&str, String)], name: &str| all.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        let (p, n) = (unit(&panel, "mikan-terminal-request.path"), unit(&node, "mikan-terminal-request.path"));
+        assert!(p.contains("\nPathExists=/opt/mikan/data/panel/support/terminal/request\n") && !p.contains("data/node"));
+        assert!(n.contains("\nPathExists=/opt/mikan/data/node/support/terminal/request\n") && !n.contains("data/panel"));
+        assert!(p.contains("Unit=mikan-terminal-request.service"));
+        let service = unit(&panel, "mikan-terminal-request.service");
+        assert_eq!(service, unit(&node, "mikan-terminal-request.service"));
+        assert!(service.contains("\nExecStart=/usr/local/bin/mikan terminal-agent\n"));
+        // A session is a long-running process whose whole cgroup goes with it, and that is
+        // stopped at 25 hours whatever happens (a grant lasts 24 at most).
+        for want in ["Type=simple", "KillMode=control-group", "SendSIGKILL=yes", "RuntimeMaxSec=25h"] {
+            assert!(service.contains(want), "{want}");
+        }
+        assert!(WATCHES.contains(&"mikan-terminal-request.path"));
+    }
+
     // Run again, the install leaves the files alone: a server that is up to date is not
     // rewritten, one with an older unit set (no doctor or restart unit, a changed text) gets
     // what is missing and nothing else.
@@ -511,7 +575,7 @@ mod tests {
         assert!(units_current_in(&d, true));
         // The same directory for a node: its own watches, the files that are the same stay.
         let before = fs::read_to_string(d.join("mikan-update.timer")).unwrap();
-        assert_eq!(write_units(&d, false).unwrap(), 3, "only the three path units differ");
+        assert_eq!(write_units(&d, false).unwrap(), 4, "only the four path units differ");
         assert_eq!(fs::read_to_string(d.join("mikan-update.timer")).unwrap(), before);
         assert!(fs::read_to_string(d.join("mikan-restart-request.path")).unwrap().contains("data/node/restart/request"));
         fs::remove_dir_all(&d).unwrap();
@@ -522,7 +586,10 @@ mod tests {
     fn the_new_units_run_a_fixed_command() {
         for panel in [true, false] {
             for (name, text) in units(panel) {
-                if name.starts_with("mikan-doctor-request") || name.starts_with("mikan-restart-request") {
+                if name.starts_with("mikan-doctor-request")
+                    || name.starts_with("mikan-restart-request")
+                    || name.starts_with("mikan-terminal-request")
+                {
                     assert!(!text.contains("$") && !text.contains("%"), "{name}: nothing is expanded from outside");
                 }
             }

@@ -66,8 +66,14 @@ func (e *FieldError) Error() string { return e.Field + ": " + e.Code }
 type Notice struct {
 	Leave bool // false: the operator entered
 	Grant db.SupportGrant
-	// Reason of a leave: "revoked", "replaced" or "expired".
+	// Reason of a leave: "revoked", "replaced" or "expired"; of a terminal session's end, what
+	// the host's agent says (closed, idle, expired, revoked, exit, recording, error).
 	Reason string
+	// Terminal is the server ("panel", "node:<id>") when the notice is about a terminal
+	// session that began (Leave false) or ended (Leave true) and not about the access;
+	// Seconds is how long the ended session lasted.
+	Terminal string
+	Seconds  int64
 }
 
 type Service struct {
@@ -91,6 +97,15 @@ func (s *Service) SetNotifier(fn func(ctx context.Context, n Notice)) { s.notify
 // id: whatever holds something open for the grant (a terminal) lets it go. Call it before
 // the service is used.
 func (s *Service) SetEndedHook(fn func(grantID int64)) { s.ended = fn }
+
+// NotifyTerminal tells the admin a terminal session of the grant began (leave false) or ended
+// (leave true; reason, how it ended, and its length in seconds). Nobody is told when no
+// notifier is set.
+func (s *Service) NotifyTerminal(ctx context.Context, g db.SupportGrant, target string, leave bool, reason string, seconds int64) {
+	if s.notify != nil {
+		s.notify(ctx, Notice{Leave: leave, Grant: g, Reason: reason, Terminal: target, Seconds: seconds})
+	}
+}
 
 // NewToken makes a token.
 func NewToken() string { return TokenPrefix + secure.Token(TokenLen) }

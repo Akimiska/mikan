@@ -23,6 +23,7 @@ mod signals;
 mod sites;
 mod support;
 mod system;
+mod terminal;
 mod tui;
 mod update;
 
@@ -149,6 +150,10 @@ enum Cmd {
         #[arg(long, hide = true)]
         requested: bool,
     },
+    /// One support terminal session the panel opened for a live grant of the terminal level
+    /// (a systemd path unit runs this; it listens on no port and ends with the grant)
+    #[command(hide = true)]
+    TerminalAgent,
     /// Stop mikan and remove the command; the data stays in /opt/mikan
     Uninstall {
         /// Do not ask
@@ -256,6 +261,7 @@ fn main() -> ExitCode {
         Some(Cmd::PostUpdate) => update::converge(&mut out),
         Some(Cmd::Restart { requested: true }) => ops::restart_requested(),
         Some(Cmd::Restart { requested: false }) => ops::restart(),
+        Some(Cmd::TerminalAgent) => terminal::agent(),
         Some(Cmd::Uninstall { yes }) => {
             if yes || ops::confirm("Stop mikan and remove the mikan command? The data stays in /opt/mikan.") {
                 ops::uninstall().map(|panel| {

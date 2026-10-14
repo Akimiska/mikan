@@ -2,6 +2,10 @@ package nodeapi
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -143,3 +147,102 @@ const (
 	// CodeHostUnavailable: the node has no directory the host watches (tests, development).
 	CodeHostUnavailable = "host_unavailable"
 )
+
+// The support terminal on a node: the panel opens a stream to the shell of the node's host
+// through the node's API (the panel-only TLS channel), and reads the recordings the host's
+// agent made. The stream is the agent's own frames (internal/hostchan), which the node only
+// passes on.
+
+// TerminalProtocol is the Upgrade of POST /v1/terminal: after the 101 answer the connection
+// is the frame stream, until either side closes it.
+const TerminalProtocol = "mikan-terminal"
+
+// TerminalOpen is what the panel asks a node for: the grant the session belongs to, the
+// target (node:<id>) and when the grant ends, in unix seconds; the host's agent ends the
+// session then.
+type TerminalOpen struct {
+	GrantID   int64
+	Target    string
+	ExpiresAt int64
+}
+
+// RecordingInfo is one recording of a terminal session on a server.
+type RecordingInfo struct {
+	Name    string    `json:"name" doc:"<доступ>-<время>.cast"`
+	GrantID int64     `json:"grant_id" doc:"Доступ, под которым шла сессия"`
+	At      time.Time `json:"at" doc:"Когда сессия началась"`
+	Size    int64     `json:"size" doc:"Байт"`
+}
+
+// RecordingList answers GET /v1/recordings, the newest first.
+type RecordingList struct {
+	Recordings []RecordingInfo `json:"recordings"`
+}
+
+// The codes of the terminal of a node.
+const (
+	// CodeTerminalBusy: a session is open on this node's server.
+	CodeTerminalBusy = "terminal_busy"
+	// CodeTerminalTimeout: the host's agent did not come up: its unit is missing (an older
+	// installer: mikan update brings it).
+	CodeTerminalTimeout = "terminal_timeout"
+	// CodeNoRecording: there is no such recording.
+	CodeNoRecording = "no_recording"
+)
+
+// Terminal opens a terminal session on the node's host and returns its stream (frames, see
+// hostchan.ReadFrame); closing it ends the session. Nodes that predate it answer 404 (a
+// *StatusError); a node whose host has a session open *Error{Code: CodeTerminalBusy}, one
+// whose host has no agent CodeTerminalTimeout or CodeHostUnavailable.
+func (c *Client) Terminal(ctx context.Context, o TerminalOpen) (net.Conn, error) {
+	q := url.Values{
+		"grant":   {strconv.FormatInt(o.GrantID, 10)},
+		"target":  {o.Target},
+		"expires": {strconv.FormatInt(o.ExpiresAt, 10)},
+	}
+	req := &http.Request{
+		Method: http.MethodPost, URL: &url.URL{Path: "/v1/terminal", RawQuery: q.Encode()}, Host: "node",
+		Header: http.Header{"Connection": {"Upgrade"}, "Upgrade": {TerminalProtocol}},
+	}
+	// The node waits for its host's agent for about ten seconds before it answers.
+	return c.upgrade(ctx, req, http.StatusSwitchingProtocols, 20*time.Second)
+}
+
+// Recordings lists the recordings on the node's host.
+func (c *Client) Recordings(ctx context.Context) (RecordingList, error) {
+	var r RecordingList
+	err := c.do(ctx, http.MethodGet, "/v1/recordings", nil, &r, 10*time.Second)
+	return r, err
+}
+
+// Recording returns one recording (an asciicast v2 file), at most MaxResponse bytes; a
+// *Error{Code: CodeNoRecording} when the node has none of that name.
+func (c *Client) Recording(ctx context.Context, name string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	path := "/v1/recordings/" + url.PathEscape(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		var e Error
+		if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&e) == nil && e.Code != "" {
+			return nil, &e
+		}
+		return nil, &StatusError{Method: http.MethodGet, Path: path, Status: resp.StatusCode}
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponse+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > MaxResponse {
+		return nil, ErrTooLarge
+	}
+	return raw, nil
+}

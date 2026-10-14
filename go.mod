@@ -3,6 +3,7 @@ module mikan
 go 1.27
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/danielgtaylor/huma/v2 v2.39.1
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/jackc/pgx/v5 v5.11.0
@@ -27,7 +28,6 @@ require (
 	github.com/bodgit/windows v1.0.1 // indirect
 	github.com/boombuler/barcode v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/coreos/go-iptables v0.8.0 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/dunglas/httpsfv v1.0.2 // indirect

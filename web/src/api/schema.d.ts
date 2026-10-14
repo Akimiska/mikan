@@ -1661,6 +1661,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Записи сеансов терминала поддержки
+         * @description Каждый сеанс терминала записывается на сервере целиком (ввод и вывод, формат asciicast v2) и хранится 30 дней. source=panel или node:<id>. Только админ из сессии: оператору поддержки и ключам закрыто.
+         */
+        get: operations["list-support-recordings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/recordings/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Запись сеанса терминала
+         * @description Файл asciicast v2 (application/x-asciicast), до 8 МиБ. source=panel или node:<id>. Только админ из сессии.
+         */
+        get: operations["get-support-recording"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/support/whoami": {
         parameters: {
             query?: never;
@@ -4614,6 +4654,30 @@ export interface components {
             /** @description #RRGGBB или пусто */
             brand_accent?: string;
             config: components["schemas"]["Page"];
+        };
+        RecordingInfo: {
+            /**
+             * Format: date-time
+             * @description Когда сессия началась
+             */
+            at: string;
+            /**
+             * Format: int64
+             * @description Доступ, под которым шла сессия
+             */
+            grant_id: number;
+            /** @description <доступ>-<время>.cast */
+            name: string;
+            /**
+             * Format: int64
+             * @description Байт
+             */
+            size: number;
+        };
+        RecordingsView: {
+            /** @description От новых к старым */
+            recordings: components["schemas"]["RecordingInfo"][];
+            source: string;
         };
         RecoveryOutputBody: {
             /** @description Показываются один раз */
@@ -9679,6 +9743,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-support-recordings": {
+        parameters: {
+            query?: {
+                /** @description Чьи записи: panel или node:<id> ноды */
+                source?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-support-recording": {
+        parameters: {
+            query?: {
+                /** @description Чья запись: panel или node:<id> ноды */
+                source?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Имя записи из списка */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
             };
             /** @description Error */
             default: {

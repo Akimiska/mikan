@@ -64,6 +64,9 @@ type hostFixture struct {
 	nodes *hostNodes
 	logs  *logbuf.Buffer
 	log   *slog.Logger
+	// handler is the API itself (to serve for a WebSocket), deps what it was made of.
+	handler http.Handler
+	deps    Deps
 	// do sends a request as the admin's session; as "none" with no credentials, or with the
 	// given Authorization header.
 	do func(method, path, as string) (int, string)
@@ -118,6 +121,7 @@ func newHostFixture(t *testing.T, withHost bool, tweak ...func(*Deps)) *hostFixt
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.handler, f.deps = handler, deps
 	keys := map[string]string{}
 	for scope, key := range map[string]string{"full": "mk_FullKeyFullKeyFullKeyFullKey0123456789", "read": "mk_ReadKeyReadKeyReadKeyReadKey0123456789"} {
 		keys[scope] = key

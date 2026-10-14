@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mikan/internal/fsutil"
@@ -66,6 +67,11 @@ type Channel struct {
 	now  func() time.Time
 	poll time.Duration
 	busy sync.Mutex
+
+	// The support terminal (terminal.go): a session is open, and the writers of the
+	// revocation marker.
+	session  atomic.Bool
+	revokeMu sync.Mutex
 }
 
 // New makes a channel over a data directory; "" makes one that is always unavailable.

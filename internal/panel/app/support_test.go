@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/support"
 	"mikan/internal/panel/tgate"
 	"mikan/internal/release"
 )
@@ -31,6 +33,46 @@ import (
 // a support operator in a browser of its own.
 type supportHarness struct {
 	*keyHarness
+	bot *fakeSupportBot
+}
+
+// fakeSupportBot is the support bot: any well-formed code is of ticket 17 unless told
+// otherwise, and the link the panel hands over is kept.
+type fakeSupportBot struct {
+	mu        sync.Mutex
+	claimErr  error
+	attachErr error
+	claims    []string
+	links     []string
+}
+
+func (b *fakeSupportBot) Claim(_ context.Context, code string) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.claims = append(b.claims, code)
+	if b.claimErr != nil {
+		return 0, b.claimErr
+	}
+	return 17, nil
+}
+
+func (b *fakeSupportBot) Attach(_ context.Context, code, link string) (int64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.attachErr != nil {
+		return 0, b.attachErr
+	}
+	b.links = append(b.links, link)
+	return 17, nil
+}
+
+func (b *fakeSupportBot) lastLink() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.links) == 0 {
+		return ""
+	}
+	return b.links[len(b.links)-1]
 }
 
 type grantReply struct {
@@ -41,23 +83,35 @@ type grantReply struct {
 		TerminalTargets []string `json:"terminal_targets"`
 		Status          string   `json:"status"`
 	} `json:"grant"`
-	Token string `json:"token"`
-	Link  string `json:"link"`
+	Ticket int64 `json:"ticket"`
+	// What the bot got: the link and its token. The admin is never shown them.
+	Token string `json:"-"`
+	Link  string `json:"-"`
 }
 
 func newSupportHarness(t *testing.T, with ...func(*Options)) *supportHarness {
 	t.Helper()
-	return &supportHarness{newKeyHarness(t, with...)}
+	bot := &fakeSupportBot{}
+	with = append([]func(*Options){func(o *Options) { o.SupportBot = bot }}, with...)
+	return &supportHarness{newKeyHarness(t, with...), bot}
 }
 
-// grant opens an access the way the admin does: from the session.
+// grant opens an access the way the admin does: from the session, with a code from the bot
+// (a good one unless the body has its own). The link the bot got is in the reply.
 func (s *supportHarness) grant(body map[string]any) (grantReply, int, []byte) {
 	s.t.Helper()
+	if _, ok := body["code"]; !ok {
+		body["code"] = "ABCD2345"
+	}
 	resp, out := s.do(http.MethodPost, s.api+"/support/grants", body, s.csrf)
 	var g grantReply
 	if resp.StatusCode == http.StatusCreated {
 		if err := json.Unmarshal(out, &g); err != nil {
 			s.t.Fatalf("grant reply: %v %s", err, out)
+		}
+		g.Link = s.bot.lastLink()
+		if i := strings.LastIndex(g.Link, "#"); i >= 0 {
+			g.Token = g.Link[i+1:]
 		}
 	}
 	return g, resp.StatusCode, out
@@ -146,6 +200,10 @@ func TestSupportAccessLifecycle(t *testing.T) {
 	}
 	if want := "https://203.0.113.10:21355/" + adminPath + "/support#" + g.Token; g.Link != want {
 		t.Fatalf("link %q, want %q", g.Link, want)
+	}
+	// The admin gets the ticket, never the link.
+	if g.Ticket != 17 || strings.Contains(string(out), g.Token) || strings.Contains(string(out), "/support#") {
+		t.Fatalf("reply: %s", out)
 	}
 	// Only the hash is stored.
 	var stored string
@@ -655,7 +713,8 @@ func TestSupportAdminNotices(t *testing.T) {
 	}))
 	t.Cleanup(tg.Close)
 
-	h := newHarness(t, func(o *Options) { o.TelegramAPI = tg.URL })
+	bot := &fakeSupportBot{}
+	h := newHarness(t, func(o *Options) { o.TelegramAPI = tg.URL; o.SupportBot = bot })
 	ctx := context.Background()
 	set := settings.New(h.st.Q)
 	for k, v := range map[string]any{tgate.KeyToken: "123:abc", tgate.KeyEnabled: true, tgate.KeyInfraAdminChat: int64(777), settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355} {
@@ -667,7 +726,7 @@ func TestSupportAdminNotices(t *testing.T) {
 		t.Fatal("login")
 	}
 	k := &keyHarness{harness: h, api: "/" + adminPath + "/api/v1", csrf: map[string]string{"X-CSRF-Token": h.csrf}}
-	s := &supportHarness{k}
+	s := &supportHarness{k, bot}
 	texts := func() []string {
 		deadline := time.Now().Add(3 * time.Second)
 		for {
@@ -933,5 +992,87 @@ func TestSupportOperatorLeaves(t *testing.T) {
 	}
 	if resp, _ := op.do(http.MethodGet, "/support/whoami", nil, bearerOf(g2.Token)); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("token 2 after leaving: %d", resp.StatusCode)
+	}
+}
+
+// Access opens only for a code the support bot says yes to, and its link goes to the bot
+// alone: a refused code opens nothing, a link the bot did not take is withdrawn.
+func TestSupportAccessNeedsTheBotsCode(t *testing.T) {
+	s := newSupportHarness(t)
+	count := func() int {
+		var n int
+		if err := s.st.DB.QueryRow("SELECT COUNT(*) FROM support_grants").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for name, c := range map[string]struct {
+		code string
+		want int
+		msg  string
+	}{
+		"no code":    {"", http.StatusUnprocessableEntity, ""},
+		"short":      {"ABC", http.StatusUnprocessableEntity, ""},
+		"not a code": {"ABCD 23!5", http.StatusUnprocessableEntity, "support_code"},
+		"cyrillic":   {"АБВГ2345", http.StatusUnprocessableEntity, ""},
+		"bad by bot": {"ZZZZ9999", http.StatusUnprocessableEntity, "support_code_invalid"},
+	} {
+		if name == "bad by bot" {
+			s.bot.claimErr = support.ErrCode
+		}
+		_, code, out := s.grant(map[string]any{"hours": 2, "level": "view", "code": c.code})
+		if code != c.want || !strings.Contains(string(out), c.msg) {
+			t.Errorf("%s: %d %s", name, code, out)
+		}
+		s.bot.claimErr = nil
+	}
+	if n := count(); n != 0 {
+		t.Fatalf("%d grants opened without a good code", n)
+	}
+
+	// The bot is down: nothing opens.
+	s.bot.claimErr = fmt.Errorf("%w: dial", support.ErrBotDown)
+	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "view"}); code != http.StatusBadGateway || !strings.Contains(string(out), "support_bot_down") {
+		t.Errorf("bot down: %d %s", code, out)
+	}
+	s.bot.claimErr = nil
+	if n := count(); n != 0 {
+		t.Fatalf("%d grants opened with the bot down", n)
+	}
+
+	// A dashed, lower-case code is the same code.
+	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "view", "code": "abcd-2345"}); code != http.StatusCreated {
+		t.Fatalf("dashed code: %d %s", code, out)
+	}
+	if last := s.bot.claims[len(s.bot.claims)-1]; last != "ABCD2345" {
+		t.Errorf("the bot got %q", last)
+	}
+
+	// The bot refuses the link: the grant is withdrawn at once and its token opens nothing.
+	s.bot.attachErr = &support.LinkError{Reason: "panel is not an official build"}
+	before := len(s.bot.links)
+	_, code, out := s.grant(map[string]any{"hours": 2, "level": "change"})
+	if code != http.StatusUnprocessableEntity || !strings.Contains(string(out), "support_link_refused") || !strings.Contains(string(out), "official build") {
+		t.Fatalf("refused link: %d %s", code, out)
+	}
+	s.bot.attachErr = nil
+	if len(s.bot.links) != before {
+		t.Fatal("a refused link was kept")
+	}
+	var live int
+	if err := s.st.DB.QueryRow("SELECT COUNT(*) FROM support_grants WHERE revoked_at IS NULL").Scan(&live); err != nil || live != 0 {
+		t.Fatalf("live grants after a refused link: %d %v", live, err)
+	}
+	_, body := s.do(http.MethodGet, s.api+"/support/grants", nil, nil)
+	if !strings.Contains(string(body), "undelivered") {
+		t.Errorf("the journal does not say why: %s", body)
+	}
+}
+
+// Without a support bot no access can be opened.
+func TestSupportAccessWithoutABot(t *testing.T) {
+	s := newSupportHarness(t, func(o *Options) { o.SupportBot = nil })
+	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "view"}); code != http.StatusServiceUnavailable || !strings.Contains(string(out), "support_bot_down") {
+		t.Errorf("no bot: %d %s", code, out)
 	}
 }

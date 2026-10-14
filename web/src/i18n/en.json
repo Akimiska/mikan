@@ -262,6 +262,10 @@
       "support_only": "For a support operator only",
       "support_link_used": "This link was used already. Ask for a new one",
       "invalid_support_token": "The access link is not valid or has expired",
+      "support_code": "An 8-character code of letters and digits, the support bot gives it in your ticket",
+      "support_code_invalid": "The code does not fit: it is wrong, used or expired. Get a new one in the support bot",
+      "support_link_refused": "The support bot did not take the access: it could not open the panel at its address, or the build is not official",
+      "support_bot_down": "The support bot is not answering, try again in a minute",
       "support_hours": "Choose a duration: 2, 6 or 24 hours",
       "support_level": "Choose an access level",
       "terminal_targets_required": "Choose at least one server for the terminal",
@@ -3638,7 +3642,7 @@
     },
     "card": {
       "title": "Support access",
-      "sub": "A temporary way into the panel for someone who helps you set it up. No password and no SSH.",
+      "sub": "A temporary way into the panel for the official mikan support, by a code from a paid ticket. No password and no SSH.",
       "open": "Open",
       "closed": "Closed",
       "last": "Last access ({level}): {how} {ago}",
@@ -3670,18 +3674,6 @@
       "cannot3": "Read the whole action journal or send mailings to clients",
       "cannot4": "See clients' names, Telegram and subscription links unless you allow it"
     },
-    "link": {
-      "title": "Access link",
-      "once": "The link is shown once: the panel keeps only its fingerprint. Copy it now.",
-      "copy": "Copy the access link",
-      "copied": "Access link copied",
-      "qr": "QR code of the access link",
-      "how": "Send the link to the support bot or to whoever is helping you. It opens once and in one browser only.",
-      "toBot": "Copy and open the bot",
-      "done": "Done",
-      "lost": "Lost the link? Revoke the access and open a new one.",
-      "path": "The link contains the secret address of your admin: everyone it reaches learns it, and it stays known after the access ends. When support is over, press \"Issue a new link\" in the \"Panel link\" card."
-    },
     "journal": {
       "title": "Access journal ({n})",
       "lead": "What the operator did and what happened to the access, newest first.",
@@ -3693,7 +3685,8 @@
       "replaced": "Access replaced by a new one",
       "expire": "The access ran out",
       "termStart": "Terminal opened: {server}",
-      "termEnd": "Terminal closed: {server}, {sec} s"
+      "termEnd": "Terminal closed: {server}, {sec} s",
+      "undelivered": "The support bot did not take the access, it was closed at once"
     },
     "form": {
       "title": "Open access",
@@ -3717,7 +3710,10 @@
       "targets": "Servers",
       "targetsHint": "Where the terminal is allowed. Pick at least one.",
       "passwordHint": "The password confirms that it is you.",
-      "understood": "I understand that I am giving full access to the selected servers"
+      "understood": "I understand that I am giving full access to the selected servers",
+      "code": "Code from the support bot",
+      "codeHint": "In your ticket in @MikanSup_bot press \"🔑 Support access\". The code works once and for an hour.",
+      "codeGet": "Open the support bot"
     },
     "rec": {
       "open": "Terminal recordings",
@@ -3758,6 +3754,12 @@
       "title": "Finish the work?",
       "text": "The access ends at once: you leave the panel, open terminals close, the link and the key stop working. To come back you need a new link from the admin.",
       "confirm": "Finish and leave"
+    },
+    "made": {
+      "title": "Access handed to support",
+      "text": "Ticket #{ticket}. The operator comes in on their own: nothing to copy, the panel handed the link to the bot directly.",
+      "path": "The support bot knows the secret address of your admin. When support is over, you can issue a new one in the \"Panel link\" card.",
+      "done": "Got it"
     }
   },
   "diag": {

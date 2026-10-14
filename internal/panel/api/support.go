@@ -285,6 +285,7 @@ func (h *handlers) viewSupportGrant(g db.SupportGrant) SupportGrantView {
 
 type createSupportGrantInput struct {
 	Body struct {
+		Code            string   `json:"code" minLength:"8" maxLength:"16" doc:"Одноразовый код из обращения в боте поддержки: без него доступ не открывается"`
 		Hours           int      `json:"hours" enum:"2,6,24" doc:"Срок доступа в часах"`
 		Level           string   `json:"level" enum:"view,change,terminal"`
 		ShowPeople      bool     `json:"show_people,omitempty" doc:"Показывать оператору имена, Telegram и ссылки подписчиков"`
@@ -297,9 +298,8 @@ type createSupportGrantInput struct {
 
 type createSupportGrantOutput struct {
 	Body struct {
-		Grant SupportGrantView `json:"grant"`
-		Token string           `json:"token" doc:"Токен ms_…: показывается один раз"`
-		Link  string           `json:"link" doc:"Ссылка доступа для оператора, токен в части после #: показывается один раз"`
+		Grant  SupportGrantView `json:"grant"`
+		Ticket int64            `json:"ticket" doc:"Обращение в боте поддержки, которому передан доступ"`
 	}
 }
 
@@ -347,8 +347,9 @@ type supportWhoamiOutput struct{ Body SupportWhoami }
 func (h *handlers) registerSupport() {
 	admin := []string{supportAdminTag}
 	huma.Register(h.api, huma.Operation{OperationID: "create-support-grant", Method: http.MethodPost, Path: "/api/v1/support/grants", Summary: "Открыть доступ для поддержки",
-		Description: "Одновременно активен один доступ: новый отзывает прежний. Ссылка и токен показываются один раз. Уровень terminal требует пароль и код 2FA.",
-		Tags:        admin, Metadata: sessionOnly, Extensions: sessionOnlyExt, DefaultStatus: http.StatusCreated}, h.createSupportGrant)
+		Description: "Только для официальной поддержки: панель проверяет код из обращения у бота поддержки, открывает доступ и сама передаёт ссылку боту, админу она не показывается. " +
+			"Одновременно активен один доступ: новый отзывает прежний. Уровень terminal требует пароль и код 2FA.",
+		Tags: admin, Metadata: sessionOnly, Extensions: sessionOnlyExt, DefaultStatus: http.StatusCreated}, h.createSupportGrant)
 	huma.Register(h.api, huma.Operation{OperationID: "list-support-grants", Method: http.MethodGet, Path: "/api/v1/support/grants", Summary: "Доступ для поддержки и действия оператора",
 		Tags: admin, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.listSupportGrants)
 	huma.Register(h.api, huma.Operation{OperationID: "revoke-support-grant", Method: http.MethodDelete, Path: "/api/v1/support/grants/{id}", Summary: "Отозвать доступ для поддержки",
@@ -408,8 +409,31 @@ func (h *handlers) createSupportGrant(ctx context.Context, in *createSupportGran
 			return nil, err
 		}
 	}
+	if off, err := h.d.Support.Off(ctx); err != nil {
+		return nil, err
+	} else if off != "" {
+		return nil, huma.Error403Forbidden("support_disabled")
+	}
+	code, ok := support.NormCode(b.Code)
+	if !ok {
+		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.code", Message: "support_code"})
+	}
+	bot := h.d.Support.Bot()
+	if bot == nil {
+		return nil, huma.Error503ServiceUnavailable("support_bot_down")
+	}
+	// The bot says yes before anything is opened: access goes to a paid ticket only.
+	ticket, err := bot.Claim(ctx, code)
+	if err != nil {
+		return nil, supportBotError(err)
+	}
+	note := b.Note
+	if strings.TrimSpace(note) == "" {
+		note = "#" + strconv.FormatInt(ticket, 10)
+	}
+	ip := clientOf(ctx).IP
 	created, err := h.d.Support.Create(ctx, support.CreateInput{AdminID: admin.ID, Hours: b.Hours, Level: b.Level, ShowPeople: b.ShowPeople,
-		Targets: b.TerminalTargets, Note: b.Note, IP: clientOf(ctx).IP})
+		Targets: b.TerminalTargets, Note: note, IP: ip})
 	if errors.Is(err, support.ErrDisabled) {
 		return nil, huma.Error403Forbidden("support_disabled")
 	}
@@ -421,12 +445,33 @@ func (h *handlers) createSupportGrant(ctx context.Context, in *createSupportGran
 		return nil, err
 	}
 	link, err := h.supportLink(ctx, created.Token)
+	if err == nil {
+		ticket, err = bot.Attach(ctx, code, link)
+	}
 	if err != nil {
-		return nil, err
+		// The link did not reach the bot: nobody holds it, the grant goes.
+		if werr := h.d.Support.Withdraw(context.WithoutCancel(ctx), created.Grant.ID, admin.ID, ip); werr != nil {
+			h.d.Log.Error("support: withdraw an undelivered grant", "grant", created.Grant.ID, "err", werr)
+		}
+		return nil, supportBotError(err)
 	}
 	out := &createSupportGrantOutput{}
-	out.Body.Grant, out.Body.Token, out.Body.Link = h.viewSupportGrant(created.Grant), created.Token, link
+	out.Body.Grant, out.Body.Ticket = h.viewSupportGrant(created.Grant), ticket
 	return out, nil
+}
+
+// supportBotError is what the admin is told when the support bot said no or did not answer.
+func supportBotError(err error) error {
+	var le *support.LinkError
+	switch {
+	case errors.Is(err, support.ErrCode):
+		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.code", Message: "support_code_invalid"})
+	case errors.As(err, &le):
+		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.code", Message: "support_link_refused", Value: le.Reason})
+	case errors.Is(err, support.ErrBotDown):
+		return huma.Error502BadGateway("support_bot_down")
+	}
+	return err
 }
 
 func (h *handlers) listSupportGrants(ctx context.Context, _ *struct{}) (*supportGrantsOutput, error) {

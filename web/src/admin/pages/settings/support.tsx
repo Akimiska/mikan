@@ -1,9 +1,10 @@
 // "Support access" in Settings → Security: the admin lets a person into the panel for a few
 // hours without giving them a password or a shell. The card says what the person can and
-// cannot do, opens the access (a link shown once), shows who came in and what they did, ends
-// it at once, and keeps the recordings of terminal sessions.
+// cannot do, opens the access for the official support (by a code from a paid ticket in the
+// support bot; the panel hands the link to the bot itself and never shows it), shows who came
+// in and what they did, ends it at once, and keeps the recordings of terminal sessions.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, ClipboardCopy, Copy, ExternalLink, FileVideo, LifeBuoy, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { CircleCheck, ChevronRight, ClipboardCopy, ExternalLink, FileVideo, LifeBuoy, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../../api/client";
 import { meQuery, useNodes } from "../../../api/hooks";
@@ -13,7 +14,7 @@ import { Confirm, Drawer, DrawerFooter } from "../../../components/overlay";
 import { QueryBoundary } from "../../../components/query";
 import { SwitchRow } from "../../../components/switch";
 import { useToast } from "../../../components/toast";
-import { Button, EmptyState, Field, Pill, QR, Segmented, Skeleton } from "../../../components/ui";
+import { Button, EmptyState, Field, Pill, Segmented, Skeleton } from "../../../components/ui";
 import { getLocale, t } from "../../../i18n";
 import { useCopy } from "../../../lib/copy";
 import { fieldErrors } from "../../../lib/fields";
@@ -22,7 +23,7 @@ import { nodeLabel, serverName } from "../../../lib/node-label";
 import { useNow } from "../../../lib/now";
 import { useSaveSettings } from "./shared";
 
-/** The support desk's bot: the link goes there. */
+/** The support desk's bot: it gives the code, and the panel hands it the link. */
 const SUPPORT_BOT = "https://t.me/MikanSup_bot";
 
 type Level = SupportGrant["level"];
@@ -33,8 +34,8 @@ const HOURS: Hours[] = [2, 6, 24];
 export function SupportCard() {
   const grants = useSupportGrants();
   const [form, setForm] = useState(false);
-  // The link of the access just opened. The panel keeps only its hash: it is shown here, once.
-  const [made, setMade] = useState<string | null>(null);
+  // The ticket the access just opened was handed to.
+  const [made, setMade] = useState<number | null>(null);
   const [rec, setRec] = useState<{ source: string; name?: string } | null>(null);
   const g = grants.data?.grant ?? null;
   const live = isLive(g);
@@ -57,7 +58,7 @@ export function SupportCard() {
       <QueryBoundary query={grants} pending={<Skeleton style={{ height: 112, borderRadius: 16 }} />} wrap={(state) => <div>{state}</div>}>
         {() => (
           <>
-            {made && !off ? <MadeLink link={made} onDone={() => setMade(null)} /> : null}
+            {made && !off ? <Handed ticket={made} onDone={() => setMade(null)} /> : null}
             {off ? null : isLive(g) ? <ActiveGrant g={g} onReplace={() => setForm(true)} onRevoked={() => setMade(null)} /> : <Idle g={g} onOpen={() => setForm(true)} />}
             {hadTerminal ? (
               <div className="mt-4">
@@ -74,9 +75,9 @@ export function SupportCard() {
         open={form}
         replacing={live}
         onClose={() => setForm(false)}
-        onMade={(link) => {
+        onMade={(ticket) => {
           setForm(false);
-          setMade(link);
+          setMade(ticket);
         }}
       />
       <RecordingsDrawer state={rec} onChange={setRec} />
@@ -249,47 +250,18 @@ function ActiveGrant({ g, onReplace, onRevoked }: { g: SupportGrant; onReplace: 
   );
 }
 
-/** The access link, shown once: copied, as a QR, or sent on to the support bot. */
-function MadeLink({ link, onDone }: { link: string; onDone: () => void }) {
-  const copyText = useCopy();
-  const copy = () => copyText(link, t("support.link.copied"));
+/** The access went to the support bot: the ticket it serves, and what the bot now knows. */
+function Handed({ ticket, onDone }: { ticket: number; onDone: () => void }) {
   return (
-    <div className="panel-soft mb-4 p-4" role="region" aria-label={t("support.link.title")}>
-      <div className="banner warn mb-3">
-        <ShieldAlert size={18} className="shrink-0" aria-hidden />
-        <span>{t("support.link.once")}</span>
+    <div className="panel-soft mb-4 p-4" role="status">
+      <div className="mb-2 flex items-center gap-2 text-[14px] font-semibold text-[var(--ink-900)]">
+        <CircleCheck size={18} className="shrink-0 text-[var(--leaf-700)]" aria-hidden /> {t("support.made.title")}
       </div>
-      <div className="link-field">
-        <span className="mono" title={link}>
-          {link}
-        </span>
-        <button type="button" className="icon-btn" onClick={() => void copy()} aria-label={t("support.link.copy")}>
-          <Copy size={18} aria-hidden />
-        </button>
-      </div>
-      <div className="mt-3 grid gap-4 sm:grid-cols-[136px_minmax(0,1fr)]">
-        <QR value={link} size={136} label={t("support.link.qr")} />
-        <div className="flex flex-col gap-3">
-          <p className="text-[13px] text-[var(--ink-600)]">{t("support.link.how")}</p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              onClick={() =>
-                void copy().then((ok) => {
-                  if (ok) window.open(SUPPORT_BOT, "_blank", "noopener,noreferrer");
-                })
-              }
-            >
-              <ExternalLink size={16} aria-hidden /> {t("support.link.toBot")}
-            </Button>
-            <Button variant="ghost" onClick={onDone}>
-              {t("support.link.done")}
-            </Button>
-          </div>
-          <p className="text-xs text-[var(--ink-500)]">{t("support.link.lost")}</p>
-          <p className="text-xs text-[var(--ink-500)]">{t("support.link.path")}</p>
-        </div>
-      </div>
+      <p className="mb-2 text-[13px] text-[var(--ink-600)]">{t("support.made.text", { ticket })}</p>
+      <p className="mb-3 text-xs text-[var(--ink-500)]">{t("support.made.path")}</p>
+      <Button size="sm" variant="ghost" onClick={onDone}>
+        {t("support.made.done")}
+      </Button>
     </div>
   );
 }
@@ -310,7 +282,7 @@ function actionText(a: SupportAction, names: { id: number; name: string }[]): st
     case "support.enter":
       return t("support.journal.enter", { via: str(d.via) === "api" ? t("support.journal.viaApi") : t("support.journal.viaBrowser") });
     case "support.revoke":
-      return str(d.reason) === "replaced" ? t("support.journal.replaced") : t("support.journal.revoke");
+      return str(d.reason) === "replaced" ? t("support.journal.replaced") : str(d.reason) === "undelivered" ? t("support.journal.undelivered") : t("support.journal.revoke");
     case "support.expire":
       return t("support.journal.expire");
     case "support.terminal.start":
@@ -374,7 +346,11 @@ function Journal({ actions, onRecording }: { actions: SupportAction[]; onRecordi
 
 /* ----------------------------------------------------------------- the form */
 
-function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; replacing: boolean; onClose: () => void; onMade: (link: string) => void }) {
+/** A code as the support bot gives it: eight letters and digits, typed with or without dashes. */
+const normCode = (v: string) => v.replace(/[\s-]/g, "").toUpperCase();
+const codeOK = (v: string) => /^[A-Z0-9]{8}$/.test(normCode(v));
+
+function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; replacing: boolean; onClose: () => void; onMade: (ticket: number) => void }) {
   const qc = useQueryClient();
   const nodes = useNodes();
   const me = useQuery(meQuery);
@@ -386,6 +362,7 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
   const [targets, setTargets] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [ticketCode, setTicketCode] = useState("");
   const [understood, setUnderstood] = useState(false);
   const terminal = level === "terminal";
   const servers = [{ id: "panel", label: t("diag.serverPanel") }, ...(nodes.data ?? []).filter((n) => !n.local).map((n) => ({ id: `node:${n.id}`, label: nodeLabel(n) }))];
@@ -393,14 +370,20 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
     mutationFn: () =>
       unwrap(
         api.POST("/api/v1/support/grants", {
-          body: { hours, level, show_people: people, note: note.trim() || undefined, ...(terminal ? { terminal_targets: targets, password, totp: code || undefined } : {}) },
+          body: {
+            code: normCode(ticketCode),
+            hours,
+            level,
+            show_people: people,
+            note: note.trim() || undefined,
+            ...(terminal ? { terminal_targets: targets, password, totp: code || undefined } : {}),
+          },
         }),
       ),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: supportKey.grants });
       reset();
-      // A link that starts with "/" has no public address behind it: the page's own is used.
-      onMade(new URL(r.link, window.location.origin).href);
+      onMade(r.ticket);
     },
   });
   const reset = () => {
@@ -411,11 +394,12 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
     setTargets([]);
     setPassword("");
     setCode("");
+    setTicketCode("");
     setUnderstood(false);
     create.reset();
   };
   const errors = fieldErrors(create.error);
-  const ready = !terminal || (targets.length > 0 && !!password && (!totp || code.length === 6) && understood);
+  const ready = codeOK(ticketCode) && (!terminal || (targets.length > 0 && !!password && (!totp || code.length === 6) && understood));
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (ready && !create.isPending) create.mutate();
@@ -444,6 +428,32 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
           </div>
         ) : null}
         {create.error && !Object.keys(errors).length ? <div className="banner err mb-4" role="alert">{errorText(create.error)}</div> : null}
+        <Field
+          label={t("support.form.code")}
+          htmlFor="support-code"
+          hint={
+            <>
+              {t("support.form.codeHint")}{" "}
+              <a className="link-btn inline-flex items-center gap-1" href={SUPPORT_BOT} target="_blank" rel="noopener noreferrer">
+                {t("support.form.codeGet")} <ExternalLink size={12} aria-hidden />
+              </a>
+            </>
+          }
+          error={errors.code}
+        >
+          <input
+            id="support-code"
+            className="input mono max-w-[200px] uppercase tracking-[0.2em]"
+            value={ticketCode}
+            maxLength={11}
+            onChange={(e) => setTicketCode(e.target.value)}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            aria-invalid={!!errors.code}
+            required
+          />
+        </Field>
         <Field label={t("support.form.hours")}>
           <Segmented<`${Hours}`> label={t("support.form.hours")} value={`${hours}`} onChange={(v) => setHours(Number(v) as Hours)} options={HOURS.map((h) => ({ value: `${h}` as const, label: t("support.form.hoursN", { n: h }) }))} />
         </Field>

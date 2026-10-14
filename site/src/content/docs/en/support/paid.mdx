@@ -17,11 +17,11 @@ This page is the full set of rules. Before you pay, the bot asks you to press "A
 
 2. The answer did not help: press "Need an operator", describe the problem in one message and, if you can, send the output of `mikan doctor` or the "Check node" report.
 
-3. Read the rules, press "Accept the rules" and choose a plan. The bot sends a payment button: a card, SBP or Wallet, the payment goes through Tribute.
+3. Read the rules, press "Accept the rules" and choose a plan. The bot sends a payment button: a card, SBP or Wallet through Tribute, or crypto through @CryptoBot.
 
 4. The bot learns about the payment by itself and opens the ticket. The operator sees it in their queue.
 
-5. Open access in the panel and send the link to the bot. The operator checks what is visible and gets to work.
+5. In the ticket press "🔑 Support access", open access in the panel and type the code from the bot. The panel hands the access to the ticket itself, the operator checks what is visible and gets to work.
 
 6. When it is solved, the ticket is closed and the access link is erased.
 
@@ -81,13 +81,13 @@ The operator needs access to the panel, and you open and close it yourself: **Se
 - Choose the duration: 2, 6 or 24 hours. You can revoke access earlier with one button.
 - Choose the level. **View** is read-only: the operator sees nodes, logs and diagnostics but changes nothing. **Change** also lets them edit nodes, certificates and addons, start updates and restarts. If the fix needs no changes, leave it on view.
 - The **Show client data** checkbox is off by default. Then the names and Telegram of subscribers are hidden, and subscription links and keys are masked. Turn it on only if the problem cannot be solved without it.
-- The panel shows the link once. Send it to the bot: it checks the link and attaches it to your ticket. Do not post the link in the forum chat.
-- The link holds the secret address of your admin panel, and whoever has it still knows that address after the access ends. When the support is over, press "Issue a new link" on the "Panel link" card.
+- The access opens by a one-time code from the ticket: the panel checks the code with the bot and hands the access to it itself. The link is never shown to you, there is nothing to forward, and nobody else can be let in this way.
+- The support bot learns the secret address of your admin panel. When the support is over, you can press "Issue a new link" on the "Panel link" card.
 - Only one access is active at a time. A new one cancels the previous one.
 
 Access covers all nodes of your panel, so there is no need to set up each one separately.
 
-Nobody gets into the panel without your button: the project has no standing access to your servers, and the panel connects nowhere by itself. If you do not need the feature at all, turn off the "Allow support access" switch on the same card or run `mikan support-access off` on the server: then no access can be opened even from the panel, and no support terminal is installed on the server.
+Nobody gets into the panel without your button: the project has no standing access to your servers, and the panel reaches the support bot only when you open the access. If you do not need the feature at all, turn off the "Allow support access" switch on the same card or run `mikan support-access off` on the server: then no access can be opened even from the panel, and no support terminal is installed on the server.
 
 ### What the operator can never do
 
@@ -151,7 +151,7 @@ You can ask to delete the text of a ticket earlier in the ticket itself. Payment
 
 - Write without insults.
 - One ticket, one problem.
-- Do not send passwords, server keys, 2FA codes or tokens in the chat. The bot asks for the access link itself, and for nothing else.
+- Do not send passwords, server keys, 2FA codes or tokens in the chat. Access to the panel opens by a code, no link needs to be sent to the chat.
 - The operator acts only with your consent. If you ask them to stop, they stop.
 - A ticket in which the operator is insulted may be closed without a refund.
 

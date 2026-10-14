@@ -1,26 +1,29 @@
 ---
 title: Support access
-description: How to let a helper into the panel for a few hours without a password or SSH, what they can and cannot do, and how to close the access.
+description: How to let the official mikan support into the panel for a few hours by a code from the bot, without a password or SSH, what it can and cannot do, and how to close the access.
 ---
 
-When you need help with the setup, you can let a person into your panel for a while: they need neither your password nor SSH. The access lives for 2, 6 or 24 hours and closes with one button. Without your button nobody, mikan's developers included, gets into the panel: the project has no standing access to your servers, and the panel connects nowhere by itself.
+When you need help with the setup, you can let the [paid mikan support](/mikan/en/support/paid/) into your panel for a while: it needs neither your password nor SSH. The access lives for 2, 6 or 24 hours and closes with one button. Without your button nobody, mikan's developers included, gets into the panel: the project has no standing access to your servers.
+
+The access opens for the official support only, and only by a code from a paid ticket in [@MikanSup_bot](https://t.me/MikanSup_bot). The panel checks the code with the bot and hands the access to it itself: the link is never shown to you, there is nothing to copy or forward. Nobody else can be let in this way. The panel reaches the support bot only at that moment.
 
 Section: **Settings → Support**.
 
 ## Opening it
 
-1. Press "Open access".
-2. Choose the duration: 2, 6 or 24 hours.
-3. Choose the level:
+1. In your ticket in the bot, press "🔑 Support access": the bot shows a code. It works once and for an hour, a new one cancels the previous.
+2. In the panel, press "Open access" and type the code.
+3. Choose the duration: 2, 6 or 24 hours.
+4. Choose the level:
    - **View**: read everything diagnosis needs (nodes, protocols, logs, server checks), change nothing;
    - **Change**: also edit nodes, protocols, certificates and addons, start updates and restarts;
    - **Terminal**: all of that plus a shell on chosen servers, see [below](#terminal).
-4. The **Show client data** checkbox is off by default: names, Telegram, subscription links, device addresses and the client search are hidden. Turn it on only if the problem cannot be solved without it.
-5. Press "Open access". The panel shows the link **once**: copy it, show the QR or press "Copy and open the bot".
+5. The **Show client data** checkbox is off by default: names, Telegram, subscription links, device addresses and the client search are hidden. Turn it on only if the problem cannot be solved without it.
+6. Press "Open access". The panel asks the bot whether the code fits, opens the access and hands it to the ticket. The bot checks that the panel answers at its address and is an official mikan build, and tells you "Access received".
 
-The link is one-time: it lets one browser in. Lost the link? Revoke the access and open a new one. One access is active at a time, a new one cancels the previous. The access covers every node of the panel at once.
+If the code does not fit, or the bot does not answer or refuses the access, nothing opens: an access that did not reach the bot is closed by the panel at once. One access is active at a time, a new one cancels the previous. The access covers every node of the panel at once.
 
-The link contains your admin panel's secret address. After the support, issue a new panel link: **Settings → Security → Panel link → Issue a new link**.
+The support bot learns your admin panel's secret address. After the support you can issue a new panel link: **Settings → Security → Panel link → Issue a new link**.
 
 ## Always closed
 
@@ -58,6 +61,6 @@ The **Terminal** level gives a root shell on the panel's server and on chosen no
 
 ## When the panel does not open
 
-Then the link cannot be used. Run `mikan support <code>` on the server with the code from your ticket: it gathers the server check, the status and the last log lines without secrets and sends them to the ticket. More in [The mikan command](/mikan/en/operations/cli/).
+Then no access can be opened. Run `mikan support <code>` on the server with the code from your ticket: it gathers the server check, the status and the last log lines without secrets and sends them to the ticket. More in [The mikan command](/mikan/en/operations/cli/).
 
 mikan's paid support works through this access, its rules: [Paid support](/mikan/en/support/paid/).

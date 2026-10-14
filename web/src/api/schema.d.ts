@@ -1632,7 +1632,7 @@ export interface paths {
         put?: never;
         /**
          * Открыть доступ для поддержки
-         * @description Одновременно активен один доступ: новый отзывает прежний. Ссылка и токен показываются один раз. Уровень terminal требует пароль и код 2FA.
+         * @description Только для официальной поддержки: панель проверяет код из обращения у бота поддержки, открывает доступ и сама передаёт ссылку боту, админу она не показывается. Одновременно активен один доступ: новый отзывает прежний. Уровень terminal требует пароль и код 2FA.
          */
         post: operations["create-support-grant"];
         delete?: never;
@@ -3009,6 +3009,8 @@ export interface components {
             name: string;
         };
         CreateSupportGrantInputBody: {
+            /** @description Одноразовый код из обращения в боте поддержки: без него доступ не открывается */
+            code: string;
             /**
              * Format: int64
              * @description Срок доступа в часах
@@ -3030,10 +3032,11 @@ export interface components {
         };
         CreateSupportGrantOutputBody: {
             grant: components["schemas"]["SupportGrantView"];
-            /** @description Ссылка доступа для оператора, токен в части после #: показывается один раз */
-            link: string;
-            /** @description Токен ms_…: показывается один раз */
-            token: string;
+            /**
+             * Format: int64
+             * @description Обращение в боте поддержки, которому передан доступ
+             */
+            ticket: number;
         };
         CreateUserInputBody: {
             contact?: string;

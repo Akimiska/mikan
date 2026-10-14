@@ -33,6 +33,9 @@ type Config struct {
 	// SupportOff: MIKAN_SUPPORT_ACCESS=off turns support access off for good on this server,
 	// whatever the panel's setting says.
 	SupportOff bool
+	// SupportBotURL is the support bot (MIKAN_SUPPORT_BOT_URL, for tests and development);
+	// "" is the official one.
+	SupportBotURL string
 }
 
 func FromEnv() (Config, error) {
@@ -55,6 +58,7 @@ func FromEnv() (Config, error) {
 		return c, fmt.Errorf("MIKAN_PANEL_LISTEN: %w", err)
 	}
 	c.TelegramAPI = os.Getenv("MIKAN_TG_API")
+	c.SupportBotURL = os.Getenv("MIKAN_SUPPORT_BOT_URL")
 	switch v := os.Getenv("MIKAN_SUPPORT_ACCESS"); v {
 	case "", "on":
 	case "off":

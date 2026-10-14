@@ -32,6 +32,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/support"
 	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
 	"mikan/internal/release"
@@ -85,6 +86,15 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, SupportOff: cfg.SupportOff, Log: logger, Now: time.Now,
 		Autotune: autotune.DefaultOptions().Scaled(cfg.AutotuneScale), TelegramAPI: cfg.TelegramAPI,
 		DataDir: cfg.DataDir, Dev: cfg.Dev, Releases: updates.Fetch(release.IndexURL, release.LatestURL), DNS: dnscheck.New(), CheckHost: checkhost.New("", nil, time.Now), Logs: logs}
+	botURL := cfg.SupportBotURL
+	if botURL == "" {
+		botURL = support.DefaultBotURL
+	}
+	bot, err := support.NewHTTPBot(botURL)
+	if err != nil {
+		return fmt.Errorf("MIKAN_SUPPORT_BOT_URL: %w", err)
+	}
+	opts.SupportBot = bot
 	nodesDir := filepath.Join(tlsDir, "nodes")
 	nodeCerts := tlscert.NewNodeStore(filepath.Join(tlsDir, "custom-nodes"), time.Now)
 	opts.NodeCerts = nodeCerts

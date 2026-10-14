@@ -93,6 +93,7 @@ type Service struct {
 	notify func(ctx context.Context, n Notice)
 	ended  func(grantID int64)
 	off    func(ctx context.Context) (string, error)
+	bot    Bot
 }
 
 func New(st *store.Store, now func() time.Time, log *slog.Logger) *Service {
@@ -107,6 +108,13 @@ func (s *Service) SetNotifier(fn func(ctx context.Context, n Notice)) { s.notify
 // id: whatever holds something open for the grant (a terminal) lets it go. Call it before
 // the service is used.
 func (s *Service) SetEndedHook(fn func(grantID int64)) { s.ended = fn }
+
+// SetBot sets the support bot a grant is opened for; nil: no grant can be opened.
+// Call it before the service is used.
+func (s *Service) SetBot(b Bot) { s.bot = b }
+
+// Bot is the support bot; nil when none is set.
+func (s *Service) Bot() Bot { return s.bot }
 
 // SetSwitch sets what tells whether support access is turned off and why (Off); nil: it is
 // always on. Call it before the service is used.
@@ -348,6 +356,15 @@ func (s *Service) announce(ctx context.Context, gone []goneGrant) {
 // Revoke ends the grant now. ErrNotLive: it had ended already.
 func (s *Service) Revoke(ctx context.Context, id, adminID int64, ip string) (db.SupportGrant, error) {
 	return s.end(ctx, id, adminID, ip, "revoked")
+}
+
+// Withdraw ends a grant whose link never reached the support bot: nobody could have used it.
+func (s *Service) Withdraw(ctx context.Context, id, adminID int64, ip string) error {
+	_, err := s.end(ctx, id, adminID, ip, "undelivered")
+	if errors.Is(err, ErrNotLive) {
+		return nil
+	}
+	return err
 }
 
 // Leave is the operator ending their own access when the work is done: the same as a

@@ -108,6 +108,16 @@ The node's server goes out to the internet from a different address than the one
 
 The WARP window states the reason. Most often it is "no answer over UDP": the hosting provider blocks UDP to Cloudflare's endpoint. Connect your own WireGuard config with a different endpoint. All reasons are listed in the [WARP](/mikan/en/nodes/warp/#check) section.
 
+## Addons
+
+### An addon from Community asks me to confirm every update
+
+That is by design. Community addons are written by third-party authors, mikan does not review their code and is not responsible for them, so every install and every update of an unofficial addon waits for the "I take the risk" box, and "Update all" leaves them out. If the window says the release is signed with another key, compare the fingerprint with the author before accepting it. More: [Community addons](/mikan/en/operations/community-addons/).
+
+### An addon is marked "revoked"
+
+mikan took it out of the registry (for example, its code turned out to be stolen or malicious): the reason is in its row and its details. It can no longer be installed or updated; remove it in the menu of its row.
+
 ## Updates
 
 ### The panel is stopped after an update

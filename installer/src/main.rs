@@ -11,14 +11,17 @@ mod doctor;
 mod envfile;
 mod hello;
 mod host;
+mod hostreq;
 mod lock;
 mod net;
 mod ops;
 mod panelfs;
+mod redact;
 mod release;
 mod setup;
 mod signals;
 mod sites;
+mod support;
 mod system;
 mod tui;
 mod update;
@@ -57,7 +60,24 @@ enum Cmd {
     /// Containers, version, health and whether an update is out
     Status,
     /// Check this server: Docker, containers, ports, firewall, clock, DNS, access to GitHub and GHCR, disk and memory
-    Doctor,
+    Doctor {
+        /// Print the report as JSON (secrets cut out) instead of text
+        #[arg(long)]
+        json: bool,
+        /// The panel, or a node's panel, asked for it (a systemd path unit runs this)
+        #[arg(long, hide = true, conflicts_with = "json")]
+        requested: bool,
+    },
+    /// Send support what this server says (the check, the status, the last log lines, secrets
+    /// cut out) with the code from your ticket: for a panel that is down or a node the panel
+    /// cannot reach
+    Support {
+        /// The code from the ticket
+        code: String,
+        /// Print what would be sent and send nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Follow the logs (Ctrl+C stops)
     Logs {
         #[arg(value_parser = ["panel", "node"])]
@@ -124,7 +144,11 @@ enum Cmd {
     #[command(hide = true)]
     PostUpdate,
     /// Restart the containers
-    Restart,
+    Restart {
+        /// The panel asked for it (a systemd path unit runs this)
+        #[arg(long, hide = true)]
+        requested: bool,
+    },
     /// Stop mikan and remove the command; the data stays in /opt/mikan
     Uninstall {
         /// Do not ask
@@ -195,7 +219,10 @@ fn main() -> ExitCode {
         None => tui::start(),
         Some(Cmd::Install(o)) => setup::install(o),
         Some(Cmd::Status) => ops::status(),
-        Some(Cmd::Doctor) => doctor::run(),
+        Some(Cmd::Doctor { json: true, .. }) => doctor::json(),
+        Some(Cmd::Doctor { requested: true, .. }) => doctor::requested(),
+        Some(Cmd::Doctor { .. }) => doctor::run(),
+        Some(Cmd::Support { code, dry_run }) => support::run(&code, dry_run),
         Some(Cmd::Logs { service }) => ops::logs(service.as_deref()),
         Some(Cmd::Url) => ops::admin(&["url"]),
         Some(Cmd::ResetPassword) => ops::admin(&["reset-password"]),
@@ -227,7 +254,8 @@ fn main() -> ExitCode {
         Some(Cmd::Addon(c)) => addon_cmd(c),
         Some(Cmd::Join { key, panel_ip }) => ops::join_key(key).and_then(|k| ops::join(&k, panel_ip)),
         Some(Cmd::PostUpdate) => update::converge(&mut out),
-        Some(Cmd::Restart) => ops::restart(),
+        Some(Cmd::Restart { requested: true }) => ops::restart_requested(),
+        Some(Cmd::Restart { requested: false }) => ops::restart(),
         Some(Cmd::Uninstall { yes }) => {
             if yes || ops::confirm("Stop mikan and remove the mikan command? The data stays in /opt/mikan.") {
                 ops::uninstall().map(|panel| {

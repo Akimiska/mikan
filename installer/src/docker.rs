@@ -204,6 +204,14 @@ fn ask(mut cmd: Command, limit: Duration) -> Option<Output> {
     wait_within(child, limit).ok().flatten()
 }
 
+/// The last lines the containers wrote, as compose prints them (each line starts with its
+/// service); None when Docker does not answer in time. Not cleaned of anything: whoever
+/// sends it on does that.
+pub fn recent_logs(tail: usize) -> Option<String> {
+    let out = ask(compose(&["logs", "--no-color", "--tail", &tail.to_string()]), Duration::from_secs(30))?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 /// The Docker engine's version, None without Docker.
 pub fn version() -> Option<String> {
     let mut cmd = Command::new("docker");

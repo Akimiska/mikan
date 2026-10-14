@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"sync"
@@ -12,6 +13,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"mikan/internal/hostchan"
+	"mikan/internal/logbuf"
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
@@ -34,6 +37,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/support"
 	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
@@ -134,6 +138,14 @@ type Deps struct {
 	CheckHost *checkhost.Client
 	// DataDir is the panel's data directory, whose disk "Check server" looks at; "": none.
 	DataDir string
+	// Support keeps the support grants (internal/panel/support); nil in tests that do not
+	// need it: no grant then opens anything.
+	Support *support.Service
+	// Logs holds the last lines of the panel's log for the Diagnostics page; nil: none.
+	Logs *logbuf.Buffer
+	// Host asks the panel's own server for `mikan doctor` and a restart of the containers
+	// (the files its units watch); nil: not offered.
+	Host *hostchan.Channel
 }
 
 // NodeRuntime is what the API needs from the running nodes.
@@ -158,6 +170,19 @@ type NodeRuntime interface {
 	Hello(id int64) (nodesync.HelloView, bool)
 	// Diagnose asks a node how its server is: DNS, the internet, GitHub, disk, memory.
 	Diagnose(ctx context.Context, id int64) (nodeapi.Diagnosis, error)
+	// Logs is a node's own log, the last tail lines, secrets cut out.
+	Logs(ctx context.Context, id int64, tail int) (nodeapi.Logs, error)
+	// HostDoctor has a node's server run `mikan doctor` and returns its report.
+	HostDoctor(ctx context.Context, id int64) (nodeapi.HostReport, error)
+	// HostRestart has a node's server restart its containers.
+	HostRestart(ctx context.Context, id int64) (nodeapi.RestartAccepted, error)
+	// Terminal opens a support terminal session on a node's server: the stream of frames
+	// (hostchan.ReadFrame); closing it ends the session.
+	Terminal(ctx context.Context, id int64, o nodeapi.TerminalOpen) (net.Conn, error)
+	// Recordings lists the terminal recordings on a node's server.
+	Recordings(ctx context.Context, id int64) (nodeapi.RecordingList, error)
+	// Recording returns one of them.
+	Recording(ctx context.Context, id int64, name string) ([]byte, error)
 }
 
 type ctxKey int
@@ -183,6 +208,9 @@ type handlers struct {
 
 	// speedCooldown spaces the speed tests of a node.
 	speedCooldown speedCooldown
+
+	// terms are the open support terminal sessions (terminal.go).
+	terms terminalHub
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.
@@ -200,6 +228,8 @@ func Config(version string) huma.Config {
 		"Скрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. " +
 		"Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\n" +
 		"Админка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n" +
+		"«Доступ для поддержки» (Настройки → Безопасность) даёт оператору временный токен `ms_…`: `Authorization: Bearer ms_…` или вход по ссылке в браузере (`POST /support/enter`). " +
+		"Уровень `view` только читает, `change` ещё и меняет; вход, ключи, сессии, журнал, секретные адреса и сам доступ закрыты всегда (403 `support_denied`). Без галочки «показывать подписчиков» имена, Telegram и ссылки скрыты. Кто он и до какого времени: `GET /support/whoami`.\n\n" +
 		"Ошибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n" +
 		"## Подписка в приложениях\n\n" +
 		"Ссылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: " +
@@ -209,10 +239,11 @@ func Config(version string) huma.Config {
 		"`{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, " +
 		"`{total}` — лимит с пакетами, `{devices}` — привязанные устройства (`2/3`; без лимита `2`; `∞`, когда привязки нет и лимита тоже). Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
-		"apiKey":  {Type: "http", Scheme: "bearer", Description: "Ключ API: Authorization: Bearer mk_…"},
-		"session": {Type: "apiKey", In: "cookie", Name: auth.CookieName, Description: "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах"},
+		"apiKey":     {Type: "http", Scheme: "bearer", Description: "Ключ API: Authorization: Bearer mk_…"},
+		"session":    {Type: "apiKey", In: "cookie", Name: auth.CookieName, Description: "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах"},
+		"supportKey": {Type: "http", Scheme: "bearer", Description: "Токен доступа для поддержки: Authorization: Bearer ms_…"},
 	}
-	cfg.Security = []map[string][]string{{"apiKey": {}}, {"session": {}}}
+	cfg.Security = []map[string][]string{{"apiKey": {}}, {"session": {}}, {"supportKey": {}}}
 	return cfg
 }
 
@@ -283,7 +314,13 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerPools()
 	h.registerPackages()
 	h.registerAudit()
-	return noStore(mux), api, nil
+	h.registerSupport()
+	h.registerHostOps()
+	h.registerTerminal(mux)
+	if d.Support != nil {
+		d.Support.SetEndedHook(h.grantEnded)
+	}
+	return noStore(maskResponses(mux)), api, nil
 }
 
 func noStore(next http.Handler) http.Handler {
@@ -328,6 +365,12 @@ func (h *handlers) middleware(ctx huma.Context, next func(huma.Context)) {
 		_ = huma.WriteErr(h.api, ctx, http.StatusForbidden, "csrf")
 		return
 	}
+	// A support operator's session is the grant's: it lives as long as the grant and goes
+	// only where support access lets it (support.go).
+	if sess.SupportGrantID.Valid {
+		h.supportSession(ctx, next, mutating, sess)
+		return
+	}
 	next(huma.WithValue(ctx, keySession, sess))
 }
 
@@ -350,14 +393,25 @@ func sessionOf(ctx context.Context) db.Session {
 
 func (h *handlers) audit(ctx context.Context, adminID int64, action, targetType, targetID string, details any) {
 	// What an API key did says which key: the admin may hand keys to several scripts.
+	// What a support operator did is not the admin's: no admin id, the actor is the grant.
+	var who map[string]any
 	if k, ok := apiKeyOf(ctx); ok {
-		m := map[string]any{"api_key": k.Prefix}
+		who = map[string]any{"api_key": k.Prefix}
+	} else if actor, ok := supportActor(ctx); ok {
+		adminID, who = 0, map[string]any{"actor": actor}
+	}
+	if who != nil {
+		m := map[string]any{}
 		if d, isMap := details.(map[string]any); isMap {
 			for key, v := range d {
 				m[key] = v
 			}
 		} else if details != nil {
 			m["details"] = details
+		}
+		// The line says who acted whatever the details hold.
+		for key, v := range who {
+			m[key] = v
 		}
 		details = m
 	}

@@ -15,6 +15,11 @@ export type UserState = User["state"];
 const base = new URL("./", document.baseURI);
 export const basePath = base.pathname.replace(/\/$/, "");
 
+/** A WebSocket address of an API path (the terminal): the page's own origin and secret path. */
+export function wsUrl(path: string): string {
+  return base.origin.replace(/^http/, "ws") + basePath + path;
+}
+
 let csrfToken = "";
 export function setCsrf(token: string) {
   csrfToken = token;
@@ -99,7 +104,8 @@ export function errorText(e: unknown): string {
   if (e.status === 0) return t("errors.network");
   if (e.status === 503 && e.detail === "no_free_slots") return t("errors.noSlots");
   if (e.status === 503) return t("errors.nodeDown");
-  if (e.status === 403) return t("errors.forbidden");
+  // A support operator is refused with a code that says why (read-only access, a closed part).
+  if (e.status === 403) return (e.detail ? tMaybe(`errors.api.${e.detail}`) : undefined) ?? t("errors.forbidden");
   if (e.status === 404) return t("errors.notFound");
   if (e.status === 400 || e.status === 409 || e.status === 422) return Object.values(e.fields)[0] || tMaybe(`errors.api.${e.detail}`) || t("errors.checkInput");
   if (e.status === 429) return t("errors.tooMany", { s: e.retryAfter || 60 });

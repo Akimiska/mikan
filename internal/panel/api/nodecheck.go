@@ -71,9 +71,12 @@ type russiaOutput struct{ Body RussiaView }
 
 func (h *handlers) registerNodeChecks() {
 	tags := []string{"node"}
-	huma.Register(h.api, huma.Operation{OperationID: "check-node", Method: http.MethodPost, Path: "/api/v1/nodes/{id}/check", Summary: "Проверить ноду: связь, версия, часы, протоколы, порты, интернет, каскад", Tags: tags}, h.checkNode)
-	huma.Register(h.api, huma.Operation{OperationID: "check-node-russia", Method: http.MethodPost, Path: "/api/v1/nodes/{id}/check-russia", Summary: "Проверить порты ноды из России через check-host.net", Tags: tags}, h.checkNodeRussia)
-	huma.Register(h.api, huma.Operation{OperationID: "check-server", Method: http.MethodPost, Path: "/api/v1/system/check", Summary: "Проверить сервер панели", Tags: []string{"settings"}}, h.checkServer)
+	// The checks change nothing on a server, so an operator at the view level may run them
+	// (supportDiagnostic); check-node-russia asks check-host.net for the node's ports, which
+	// carries no data of subscribers.
+	huma.Register(h.api, huma.Operation{OperationID: "check-node", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/check", Summary: "Проверить ноду: связь, версия, часы, протоколы, порты, интернет, каскад", Tags: tags}, h.checkNode)
+	huma.Register(h.api, huma.Operation{OperationID: "check-node-russia", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/check-russia", Summary: "Проверить порты ноды из России через check-host.net", Tags: tags}, h.checkNodeRussia)
+	huma.Register(h.api, huma.Operation{OperationID: "check-server", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/system/check", Summary: "Проверить сервер панели", Tags: []string{"settings"}}, h.checkServer)
 }
 
 // linkFix is what fixes a link failure.

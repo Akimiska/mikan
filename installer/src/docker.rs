@@ -81,6 +81,7 @@ services:
       MIKAN_NODE_SOCKET: /run/mikan/node.sock
       MIKAN_PANEL_LISTEN: 0.0.0.0:${PANEL_PORT}
       MIKAN_ACME_LISTEN: "${MIKAN_ACME_LISTEN:-:80}"
+      MIKAN_SUPPORT_ACCESS: "${MIKAN_SUPPORT_ACCESS:-on}"
       MIKAN_DATABASE_URL: ${MIKAN_DATABASE_URL}
     volumes: ["./data/panel:/data/panel", "run:/run/mikan", "pg-run:/run/postgresql:ro"]
     mem_limit: 1g
@@ -202,6 +203,14 @@ const ASK_LIMIT: Duration = Duration::from_secs(20);
 fn ask(mut cmd: Command, limit: Duration) -> Option<Output> {
     let child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
     wait_within(child, limit).ok().flatten()
+}
+
+/// The last lines the containers wrote, as compose prints them (each line starts with its
+/// service); None when Docker does not answer in time. Not cleaned of anything: whoever
+/// sends it on does that.
+pub fn recent_logs(tail: usize) -> Option<String> {
+    let out = ask(compose(&["logs", "--no-color", "--tail", &tail.to_string()]), Duration::from_secs(30))?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// The Docker engine's version, None without Docker.

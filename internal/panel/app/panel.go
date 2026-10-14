@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/hostchan"
+	"mikan/internal/logbuf"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
@@ -39,6 +41,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subpage"
 	"mikan/internal/panel/subs"
+	"mikan/internal/panel/support"
 	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
@@ -59,13 +62,15 @@ type Panel struct {
 	NodeUpdates *nodeupdate.Service
 	// Gateway is the panel's side of Telegram: the token, polling, Stars, the alerts' way
 	// out; Telegram is the admin's setup of the bot, its notices and broadcasts on top of it.
-	Gateway   *tgate.Gateway
-	Telegram  *tgbot.Panel
-	Billing   *billing.Service
-	Updates   *updates.Checker
-	Alerts    *infraalerts.Monitor
-	Backups   *tgbackup.Service
-	Importer  *panelimport.Importer
+	Gateway  *tgate.Gateway
+	Telegram *tgbot.Panel
+	Billing  *billing.Service
+	Updates  *updates.Checker
+	Alerts   *infraalerts.Monitor
+	Backups  *tgbackup.Service
+	Importer *panelimport.Importer
+	// Support keeps the support access grants; the operator's terminal hooks into it.
+	Support   *support.Service
 	Addons    *addons.Manager
 	AddonsAPI *panelapi.Server
 	server    *server.Server
@@ -84,6 +89,8 @@ type Options struct {
 	Version    string
 	Web        fs.FS
 	TrustProxy bool
+	// SupportOff turns support access off whatever the setting says (MIKAN_SUPPORT_ACCESS=off).
+	SupportOff bool
 	Log        *slog.Logger
 	Now        func() time.Time
 	// Connect reaches a node; nil when the panel runs without nodes (tests, UI development).
@@ -128,6 +135,8 @@ type Options struct {
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// CheckHost checks nodes' ports from Russia; nil: the check is not offered (tests).
 	CheckHost *checkhost.Client
+	// Logs holds the last lines of the panel's log for the Diagnostics page; nil: none.
+	Logs *logbuf.Buffer
 }
 
 type noChanges struct{}
@@ -156,6 +165,18 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		IPLimit: p.ipLimit, UserLimit: p.userLimit, TOTP: auth.NewTOTPGuard(),
 		TrustProxy: o.TrustProxy, Log: o.Log, Now: o.Now, Pool: pool,
 	}
+	p.Support = support.New(st, o.Now, o.Log)
+	p.Support.SetSwitch(func(ctx context.Context) (string, error) {
+		if o.SupportOff {
+			return support.OffEnv, nil
+		}
+		on, err := set.On(ctx, settings.SupportAccess)
+		if err != nil || on {
+			return "", err
+		}
+		return support.OffSetting, nil
+	})
+	deps.Support = p.Support
 	if o.Connect != nil {
 		p.Nodes = nodesync.NewManager(st, set, pool, o.Connect, o.Log, o.Now)
 		p.Nodes.SetEvents(hub)
@@ -235,6 +256,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.DNS = o.DNS
 	deps.CheckHost = o.CheckHost
 	deps.DataDir = o.DataDir
+	deps.Logs, deps.Host = o.Logs, hostchan.New(o.DataDir)
 	promos := promo.New(st, o.Now)
 	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
@@ -270,6 +292,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	// The updates wait in the buffer for the addon that holds the bot.
 	p.Gateway.SetHandler(p.AddonsAPI.BotSlot())
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
+	p.Support.SetNotifier(p.tellAdminOfSupport)
 	p.Billing.SetTelegram(p.Gateway)
 	p.Billing.SetNotifier(tgbot.Notifications{Emit: emit, Log: o.Log})
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
@@ -527,6 +550,15 @@ func (p *Panel) Run(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {
 					p.log.Error("reload settings", "err", err)
+				}
+			})
+		},
+		// A support grant whose time ran out is written to the journal and the admin is told
+		// within the half minute, not when the next request meets it.
+		func(ctx context.Context) {
+			every(ctx, 30*time.Second, func() {
+				if err := p.Support.Sweep(ctx); err != nil {
+					p.log.Error("support sweep", "err", err)
 				}
 			})
 		},

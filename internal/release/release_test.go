@@ -219,3 +219,11 @@ func TestNotesFor(t *testing.T) {
 		t.Fatalf("a stable release without a section: %q", n)
 	}
 }
+
+// The support desk knows the official build by this fingerprint (mikan-bot keeps a copy):
+// a changed release key changes it, and the desk must be told.
+func TestKeyFingerprint(t *testing.T) {
+	if got := KeyFingerprint(); got != "f278e3dde3431658" {
+		t.Fatalf("KeyFingerprint() = %s", got)
+	}
+}

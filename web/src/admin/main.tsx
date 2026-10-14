@@ -6,6 +6,7 @@ import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ApiError } from "../api/client";
+import { whoamiQuery } from "../api/support";
 import { Atmosphere } from "../components/atmosphere";
 import { getTheme, setTheme } from "../components/theme";
 import { ErrorBoundary } from "../components/error-boundary";
@@ -30,8 +31,14 @@ const router = createAppRouter(queryClient);
 setTheme(getTheme(), { keep: false });
 
 window.addEventListener("mikan:unauthorized", () => {
-  if (router.state.location.pathname === "/login") return;
+  if (router.state.location.pathname === "/login" || router.state.location.pathname === "/support") return;
+  // A support operator whose access ended (revoked, or by its time) is told so, not sent to a login that is not theirs.
+  const operator = !!queryClient.getQueryData(whoamiQuery.queryKey);
   queryClient.clear();
+  if (operator) {
+    void router.navigate({ to: "/support", search: { ended: true } });
+    return;
+  }
   void router.navigate({ to: "/login", search: { next: router.state.location.href } });
 });
 

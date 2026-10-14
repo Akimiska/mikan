@@ -50,6 +50,9 @@ const (
 	// KeyWideScan lets the search for REALITY sites go past the node's /24 to the rest of
 	// its /16 (scan.Options.Wide): more candidates, and many more connections.
 	KeyWideScan = "wide_sni_scan"
+	// KeySupportAccess lets the admin open support access (internal/panel/support); off, no
+	// grant can be made and the live one ends.
+	KeySupportAccess = "support_access"
 	// Devices (domain.Devices): bind subscriptions to devices, on unless switched off;
 	// refuse apps that send no device id instead of seating them together, off by default.
 	KeyDeviceBinding = "device_binding"
@@ -132,6 +135,7 @@ var (
 	ShowGoals     = Switch{KeyShowGoals, true}
 	AppBranding   = Switch{KeyAppBranding, false}
 	HappHide      = Switch{KeyHappHide, false}
+	SupportAccess = Switch{KeySupportAccess, true}
 )
 
 // ValidLang says whether s is a language of the panel.

@@ -111,6 +111,10 @@ admiten reembolsos: Telegram Stars y los adaptadores que declaran soporte de ree
 Así, Mikan puede devolver un pago si la reserva del código vence antes de que el proveedor
 lo confirme.
 
+## Acceso de soporte
+
+Si necesitas ayuda, tú mismo abres un acceso temporal: Ajustes → Seguridad → Acceso de soporte, por 2, 6 o 24 horas, con el nivel «ver», «cambiar» o «terminal». Sin ese botón nadie, ni siquiera los desarrolladores de mikan, entra en el panel: el proyecto no tiene acceso permanente a tus servidores y el panel no se conecta a ningún sitio por sí mismo. Cada acción del operador queda en el registro, el acceso se revoca con un botón y la terminal exige tu contraseña y 2FA y se graba. Para desactivar la función por completo, usa el interruptor de la misma tarjeta o ejecuta `mikan support-access off` en el servidor. Reglas del soporte de pago: [en el sitio](https://miroshka000.github.io/mikan/support/paid/).
+
 ## Capturas de pantalla
 
 <table>
@@ -186,6 +190,9 @@ Ejecuta `mikan` para abrir el menú, o usa los comandos directamente:
 | `mikan targets scan` · `apply` | sitios de camuflaje REALITY cerca del servidor |
 | `mikan join KEY` | en un nodo: tomar una clave nueva del panel |
 | `mikan restart` | reiniciar los contenedores |
+| `mikan doctor` | revisar el servidor: Docker, puertos, firewall, reloj, DNS, disco |
+| `mikan support CÓDIGO` | enviar el diagnóstico a un ticket de soporte cuando el panel no responde |
+| `mikan support-access on\|off` | permitir o prohibir el acceso de soporte en este servidor |
 | `mikan uninstall` | detener y quitar el comando, conservando los datos |
 
 ## Actualizaciones

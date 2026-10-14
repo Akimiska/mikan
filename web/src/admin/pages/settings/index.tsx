@@ -1,18 +1,21 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowDownToLine, Cpu, Globe, LayoutTemplate, Link2, Route, ShieldCheck } from "lucide-react";
 import { useSettings } from "../../../api/hooks";
+import { useSupportMode } from "../../../api/support";
 import { SectionNav } from "../../../components/layout";
 import { QueryBoundary } from "../../../components/query";
 import { ThemeCard } from "../../../components/theme";
 import { PageHeader, Skeleton } from "../../../components/ui";
 import { t, type Key } from "../../../i18n";
 import { SETTINGS_PARTS, SETTINGS_TABS, type SettingsSearch } from "../../search";
+import { ClosedForSupport } from "../../support-closed";
 import { AutoCard, LanguageCard, ServiceCard, UpdatesCard } from "./general";
 import { ServerCheckCard } from "../node-check";
 import { GoalsCard } from "./goals";
 import { ImportCard, LegacyLinksCard } from "./import";
 import { RoutingSection } from "./routing";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
+import { SupportCard } from "./support";
 import { AppsCard, DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
 import { HappCard } from "./happ";
 import { SubPageSettings, type SubPagePart } from "./sub-page";
@@ -38,6 +41,8 @@ const PART_LABELS: Record<string, Key> = {
  */
 export function SettingsPage() {
   const settings = useSettings();
+  // A support operator has no account of their own here: the credentials, the sessions and the keys are closed to them.
+  const operator = !!useSupportMode();
   const { tab, part } = useSearch({ from: "/_app/settings" });
   const navigate = useNavigate({ from: "/settings" });
   const go = (next: Tab, nextPart?: string) => void navigate({ search: { tab: next, part: nextPart }, replace: true });
@@ -85,14 +90,22 @@ export function SettingsPage() {
               ) : tab === "routing" ? (
                 <RoutingSection s={s} view={routingPart} onView={(v) => go("routing", v)} />
               ) : tab === "security" ? (
-                <>
-                  <PasswordCard />
-                  <TwoFactorCard />
-                  <SessionsCard />
-                  <AccessCard s={s} />
-                  <CertificateCard s={s} />
-                  <ApiCard />
-                </>
+                operator ? (
+                  <>
+                    <ClosedForSupport />
+                    <CertificateCard s={s} />
+                  </>
+                ) : (
+                  <>
+                    <PasswordCard />
+                    <TwoFactorCard />
+                    <SessionsCard />
+                    <AccessCard s={s} />
+                    <CertificateCard s={s} />
+                    <ApiCard />
+                    <SupportCard />
+                  </>
+                )
               ) : tab === "system" ? (
                 <>
                   <UpdatesCard />

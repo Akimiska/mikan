@@ -108,6 +108,10 @@ Go 和 PostgreSQL，三个小容器。在带客户端的实际运行服务器上
 只能通过支持退款的支付方式支付：Telegram Stars，以及声明支持退款的适配器。这样，如果优惠码的预留
 在支付服务商确认之前过期，mikan 就能把款项退回。
 
+## 支持访问
+
+需要帮助时，由你自己开启临时访问：设置 → 安全 → 支持访问，时长 2、6 或 24 小时，级别为「查看」「修改」或「终端」。没有这个按钮，任何人（包括 mikan 的开发者）都进不了面板：项目对你的服务器没有常驻访问，面板也不会自行连接任何地方。操作员的每个操作都写入审计日志，一键即可撤销访问，终端需要你的密码和 2FA 才能开启，并且全程录制。要彻底关闭此功能，可使用同一卡片上的开关，或在服务器上运行 `mikan support-access off`。付费支持规则：[见网站](https://miroshka000.github.io/mikan/support/paid/)。
+
 ## 截图
 
 <table>
@@ -183,6 +187,9 @@ flowchart LR
 | `mikan targets scan` · `apply` | 服务器附近的 REALITY 伪装站点 |
 | `mikan join KEY` | 在节点上执行：从面板获取新密钥 |
 | `mikan restart` | 重启容器 |
+| `mikan doctor` | 检查服务器：Docker、端口、防火墙、时钟、DNS、磁盘 |
+| `mikan support 代码` | 面板无法访问时，把诊断发送到支持工单 |
+| `mikan support-access on\|off` | 允许或禁止本服务器的支持访问 |
 | `mikan uninstall` | 停止并删除该命令，保留数据 |
 
 ## 更新

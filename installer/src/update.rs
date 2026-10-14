@@ -38,7 +38,7 @@ use crate::lock::{self, Wait};
 use crate::ops::Install;
 use crate::panelfs::{self, Dir};
 use crate::release::Channel;
-use crate::{DIR, addon, backup, clock, docker, host, net, release, setup, signals};
+use crate::{DIR, addon, backup, clock, docker, host, net, release, setup, signals, terminal};
 
 /// What `mikan update` was asked for.
 #[derive(clap::Args, Clone, Debug, Default)]
@@ -320,6 +320,11 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
         }
     };
     let install = Install::load()?;
+    // The daily run sweeps the support recordings that are past their 30 days, so that they
+    // go even when no terminal session comes after them.
+    if !a.check {
+        terminal::sweep(Path::new(DIR));
+    }
     let mut at = Attempt { upto: upto_from_env(), ..Attempt::default() };
     if a.requested {
         let dir = match update_dir(install.node, false) {

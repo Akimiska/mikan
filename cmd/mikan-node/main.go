@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"mikan/internal/acmechallenge"
+	"mikan/internal/logbuf"
 	"mikan/internal/node"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/config"
@@ -48,7 +49,9 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// The last lines of the log, secrets cut out, for the panel's Diagnostics page.
+	logs := logbuf.New(logbuf.DefaultLines)
+	log := slog.New(logs.Handler(slog.NewTextHandler(os.Stderr, nil)))
 	dataDir := envOr("MIKAN_DATA_DIR", config.DefaultDataDir)
 	sock := envOr("MIKAN_NODE_SOCKET", config.DefaultNodeSocket)
 
@@ -66,7 +69,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("MIKAN_ACME_LISTEN: %w", err)
 	}
-	eng, err := node.Start(node.Options{DataDir: dataDir, Version: version, Log: log, DeviceRelease: release, AllowPrivate: allowPrivate, ACMEListen: acmeListen})
+	eng, err := node.Start(node.Options{DataDir: dataDir, Version: version, Log: log, DeviceRelease: release, AllowPrivate: allowPrivate, ACMEListen: acmeListen, Logs: logs})
 	if err != nil {
 		return err
 	}

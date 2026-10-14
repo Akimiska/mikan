@@ -371,14 +371,15 @@ type RelayUser struct {
 }
 
 type Session struct {
-	IDHash     string
-	AdminID    int64
-	CsrfToken  string
-	CreatedAt  int64
-	LastSeenAt int64
-	ExpiresAt  int64
-	Ip         string
-	UserAgent  string
+	IDHash         string
+	AdminID        int64
+	CsrfToken      string
+	CreatedAt      int64
+	LastSeenAt     int64
+	ExpiresAt      int64
+	Ip             string
+	UserAgent      string
+	SupportGrantID sql.NullInt64
 }
 
 type Setting struct {
@@ -431,6 +432,24 @@ type SubFetch struct {
 	UserID    int64
 	Ip        string
 	FetchedAt int64
+}
+
+type SupportGrant struct {
+	ID              int64
+	TokenHash       string
+	AdminID         int64
+	Level           string
+	ShowPeople      bool
+	TerminalTargets []string
+	Note            string
+	CreatedAt       int64
+	ExpiresAt       int64
+	EnteredAt       sql.NullInt64
+	OperatorSeenAt  sql.NullInt64
+	LastUsedAt      sql.NullInt64
+	LastIp          string
+	RevokedAt       sql.NullInt64
+	EndedNotedAt    sql.NullInt64
 }
 
 type Tariff struct {

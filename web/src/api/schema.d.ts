@@ -621,6 +621,26 @@ export interface paths {
         patch: operations["update-inbound"];
         trace?: never;
     };
+    "/api/v1/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Последние строки лога панели или ноды
+         * @description source=panel или node:<id>; до 2000 строк, самые новые последними. Токены, ключи, пароли, ссылки подписок и секретные пути вырезаны.
+         */
+        get: operations["get-logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/marketplace": {
         parameters: {
             query?: never;
@@ -883,6 +903,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * mikan doctor на сервере ноды
+         * @description То же для сервера удалённой ноды; для своей ноды панели это сервер панели. Оператору поддержки с доступом «просмотр» разрешён.
+         */
+        post: operations["doctor-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/key": {
         parameters: {
             query?: never;
@@ -894,6 +934,26 @@ export interface paths {
         put?: never;
         /** Выпустить новый ключ ноды (старый перестаёт работать) */
         post: operations["rekey-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перезапустить контейнеры сервера ноды
+         * @description Для своей ноды панели используйте /system/restart: она живёт в одних контейнерах с панелью.
+         */
+        post: operations["restart-node"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1540,6 +1600,127 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/enter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Вход оператора по ссылке доступа
+         * @description Одна ссылка пускает в браузер один раз; повторный вход требует новой ссылки. Ключ ms_… в заголовке Authorization работает, пока доступ жив.
+         */
+        post: operations["support-enter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Доступ для поддержки и действия оператора */
+        get: operations["list-support-grants"];
+        put?: never;
+        /**
+         * Открыть доступ для поддержки
+         * @description Одновременно активен один доступ: новый отзывает прежний. Ссылка и токен показываются один раз. Уровень terminal требует пароль и код 2FA.
+         */
+        post: operations["create-support-grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/grants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отозвать доступ для поддержки
+         * @description Оператор теряет доступ сразу: его сессии удаляются, ключ ms_… перестаёт работать.
+         */
+        delete: operations["revoke-support-grant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Записи сеансов терминала поддержки
+         * @description Каждый сеанс терминала записывается на сервере целиком (ввод и вывод, формат asciicast v2) и хранится 30 дней. source=panel или node:<id>. Только админ из сессии: оператору поддержки и ключам закрыто.
+         */
+        get: operations["list-support-recordings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/recordings/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Запись сеанса терминала
+         * @description Файл asciicast v2 (application/x-asciicast), до 8 МиБ. source=panel или node:<id>. Только админ из сессии.
+         */
+        get: operations["get-support-recording"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Чей доступ и до какого времени
+         * @description Для оператора: сессия или ключ ms_…. Другим отвечает 403 support_only.
+         */
+        get: operations["support-whoami"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/check": {
         parameters: {
             query?: never;
@@ -1551,6 +1732,46 @@ export interface paths {
         put?: never;
         /** Проверить сервер панели */
         post: operations["check-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * mikan doctor на сервере панели
+         * @description Хост запускает mikan doctor и отдаёт отчёт (Docker, контейнеры, порты, файрвол, часы, DNS, GitHub, диск, память); ждём до минуты. Нужна команда mikan 0.5.1.1 или новее на сервере: mikan update. Оператору поддержки с доступом «просмотр» разрешён: отчёт ничего не меняет.
+         */
+        post: operations["doctor-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перезапустить контейнеры сервера панели
+         * @description Хост перезапускает контейнеры через секунду-две: панель на это время недоступна.
+         */
+        post: operations["restart-server"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2767,6 +2988,33 @@ export interface components {
             host: string;
             name: string;
         };
+        CreateSupportGrantInputBody: {
+            /**
+             * Format: int64
+             * @description Срок доступа в часах
+             * @enum {integer}
+             */
+            hours: 2 | 6 | 24;
+            /** @enum {string} */
+            level: "view" | "change" | "terminal";
+            /** @description Пометка для себя, например номер обращения */
+            note?: string;
+            /** @description Пароль админа: нужен для уровня terminal */
+            password?: string;
+            /** @description Показывать оператору имена, Telegram и ссылки подписчиков */
+            show_people?: boolean;
+            /** @description Уровень terminal: где разрешён терминал, panel и/или node:<id>. Полный доступ к этим серверам */
+            terminal_targets?: string[];
+            /** @description Код из приложения, если включена 2FA: нужен для уровня terminal */
+            totp?: string;
+        };
+        CreateSupportGrantOutputBody: {
+            grant: components["schemas"]["SupportGrantView"];
+            /** @description Ссылка доступа для оператора, токен в части после #: показывается один раз */
+            link: string;
+            /** @description Токен ms_…: показывается один раз */
+            token: string;
+        };
         CreateUserInputBody: {
             contact?: string;
             name: string;
@@ -2985,6 +3233,28 @@ export interface components {
         HappLinkOutputBody: {
             /** @description happ://crypt5/…: Happ открывает подписку, не показывая её адрес; пусто — шифрованная ссылка выключена */
             link: string;
+        };
+        HostItem: {
+            detail: string;
+            /** @description Что сделать; пусто, если всё хорошо */
+            fix?: string;
+            label: string;
+            /** @enum {string} */
+            level: "ok" | "warn" | "error";
+        };
+        HostReport: {
+            /** @description RFC 3339 */
+            at: string;
+            /** Format: int64 */
+            errors: number;
+            /** @description Заявка, на которую это ответ */
+            id: string;
+            items: components["schemas"]["HostItem"][];
+            /** @enum {string} */
+            kind: "panel" | "node";
+            version: string;
+            /** Format: int64 */
+            warnings: number;
         };
         HostStatus: {
             /** @description RFC 3339 */
@@ -3205,11 +3475,23 @@ export interface components {
             name: string;
             ok: boolean;
         };
+        LogLine: {
+            /** Format: date-time */
+            at: string;
+            /** @description DEBUG, INFO, WARN или ERROR */
+            level: string;
+            /** @description Строка целиком, как её пишет slog, без секретов */
+            text: string;
+        };
         LoginInputBody: {
             password: string;
             /** @description Код из приложения или резервный код */
             totp?: string;
             username: string;
+        };
+        LogsView: {
+            lines: components["schemas"]["LogLine"][];
+            source: string;
         };
         MarketEntry: {
             description: {
@@ -3965,6 +4247,7 @@ export interface components {
             sub_template?: string;
             /** @description Переменные — см. SettingsView.sub_title */
             sub_title?: string;
+            support_access?: boolean;
             /** @description https://… или tg://… */
             support_url?: string;
             wide_sni_scan?: boolean;
@@ -4373,6 +4656,30 @@ export interface components {
             brand_accent?: string;
             config: components["schemas"]["Page"];
         };
+        RecordingInfo: {
+            /**
+             * Format: date-time
+             * @description Когда сессия началась
+             */
+            at: string;
+            /**
+             * Format: int64
+             * @description Доступ, под которым шла сессия
+             */
+            grant_id: number;
+            /** @description <доступ>-<время>.cast */
+            name: string;
+            /**
+             * Format: int64
+             * @description Байт
+             */
+            size: number;
+        };
+        RecordingsView: {
+            /** @description От новых к старым */
+            recordings: components["schemas"]["RecordingInfo"][];
+            source: string;
+        };
         RecoveryOutputBody: {
             /** @description Показываются один раз */
             recovery_codes: string[];
@@ -4416,6 +4723,9 @@ export interface components {
         };
         ResetPathOutputBody: {
             admin_url: string;
+        };
+        RestartAccepted: {
+            id: string;
         };
         Result: {
             cert_valid: boolean;
@@ -4630,6 +4940,8 @@ export interface components {
             sub_template: string;
             /** @description Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего, {devices} — привязанные устройства (2/3); без срока или лимита — ∞ */
             sub_title: string;
+            /** @description Разрешить доступ для поддержки (Настройки → Безопасность). Выключено: новый доступ не выдать, действующий закрывается. MIKAN_SUPPORT_ACCESS=off в .env сервера выключает его независимо от этой настройки */
+            support_access: boolean;
             support_url: string;
             /** @description Искать сайты маскировки REALITY не только в /24 ноды, но и в соседних /24 её /16, до 20 найденных сайтов или 2 минут. Много подключений: хостер может принять это за сканирование сети */
             wide_sni_scan: boolean;
@@ -4782,6 +5094,74 @@ export interface components {
             /** @description Страница по умолчанию — к ней ведёт «Сбросить» */
             defaults: components["schemas"]["Page"];
             logo?: components["schemas"]["PageAsset"];
+        };
+        SupportEnterInputBody: {
+            /** @description Токен из ссылки доступа (после #) */
+            token: string;
+        };
+        SupportGrantView: {
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Когда оператор вошёл по ссылке в браузере; null: ещё нет
+             */
+            entered_at: string | null;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Адрес, с которого оператор был в последний раз */
+            last_ip: string;
+            /**
+             * Format: date-time
+             * @description Последнее обращение оператора (браузер или ключ); null: ещё не было
+             */
+            last_used_at: string | null;
+            /**
+             * @description view: только чтение; change: ещё и изменения; terminal: ещё и терминал на серверах из terminal_targets
+             * @enum {string}
+             */
+            level: "view" | "change" | "terminal";
+            note: string;
+            /** Format: date-time */
+            revoked_at: string | null;
+            /** @description Оператор видит имена, Telegram и ссылки подписок; иначе они скрыты */
+            show_people: boolean;
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+            /** @description Где разрешён терминал: panel или node:<id>; пусто вне уровня terminal */
+            terminal_targets: string[];
+        };
+        SupportGrantsOutputBody: {
+            /** @description Что делал оператор и что было с доступом, от новых к старым */
+            actions: components["schemas"]["AuditEntry"][];
+            /** @description Последний выданный доступ, активный или нет; null: ещё не выдавался */
+            grant: components["schemas"]["SupportGrantView"];
+            /**
+             * @description Выключен ли доступ для поддержки: пусто — включён, env — MIKAN_SUPPORT_ACCESS=off в .env сервера, setting — настройкой support_access
+             * @enum {string}
+             */
+            off: "" | "env" | "setting";
+        };
+        SupportNode: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        SupportWhoami: {
+            /** @description Для изменяющих запросов сессии оператора; у ключа ms_… нет */
+            csrf_token?: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @enum {string} */
+            level: "view" | "change" | "terminal";
+            nodes: components["schemas"]["SupportNode"][];
+            panel_version: string;
+            /** @description Отпечаток ключа подписи релизов, которому верит эта сборка: у официального mikan он один, у форка свой */
+            release_key: string;
+            show_people: boolean;
+            terminal_targets: string[];
         };
         System: {
             /** Format: double */
@@ -6889,6 +7269,40 @@ export interface operations {
             };
         };
     };
+    "get-logs": {
+        parameters: {
+            query?: {
+                /** @description Чей лог: panel или node:<id> ноды */
+                source?: string;
+                /** @description Сколько последних строк */
+                tail?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-marketplace": {
         parameters: {
             query?: never;
@@ -7488,6 +7902,37 @@ export interface operations {
             };
         };
     };
+    "doctor-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostReport"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "rekey-node": {
         parameters: {
             query?: never;
@@ -7506,6 +7951,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "restart-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestartAccepted"];
                 };
             };
             /** @description Error */
@@ -9164,6 +9640,228 @@ export interface operations {
             };
         };
     };
+    "support-enter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportEnterInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportWhoami"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-support-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportGrantsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-support-grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSupportGrantInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateSupportGrantOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "revoke-support-grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-support-recordings": {
+        parameters: {
+            query?: {
+                /** @description Чьи записи: panel или node:<id> ноды */
+                source?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-support-recording": {
+        parameters: {
+            query?: {
+                /** @description Чья запись: panel или node:<id> ноды */
+                source?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Имя записи из списка */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "support-whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportWhoami"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "check-server": {
         parameters: {
             query?: never;
@@ -9180,6 +9878,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "doctor-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostReport"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "restart-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestartAccepted"];
                 };
             };
             /** @description Error */
@@ -9909,6 +10665,7 @@ export interface operations {
             query?: {
                 /** @description attention — исчерпан лимит, истекают и истекли, в этом порядке: одним запросом для обзора */
                 state?: "all" | "active" | "expiring" | "limited" | "expired" | "disabled" | "attention";
+                /** @description Поиск по имени, контакту, заметке и меткам. Оператору поддержки без показа подписчиков закрыт: 403 support_denied */
                 q?: string;
                 /** @description all — любая; none — вне папок; число — id папки */
                 folder?: string;

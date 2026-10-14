@@ -31,6 +31,8 @@ import (
 
 	"mikan/internal/acmechallenge"
 	"mikan/internal/fsutil"
+	"mikan/internal/hostchan"
+	"mikan/internal/logbuf"
 	"mikan/internal/nodeapi"
 	"mikan/internal/proto"
 	"mikan/internal/scan"
@@ -52,6 +54,8 @@ type Options struct {
 	// ACMEListen is where the panel's HTTP-01 challenges for this node are answered
 	// (acmechallenge.ParseListen); "" is port 80.
 	ACMEListen string
+	// Logs holds the last lines of the node's log for GET /v1/logs; nil: none to show.
+	Logs *logbuf.Buffer
 }
 
 type Engine struct {
@@ -61,6 +65,11 @@ type Engine struct {
 	version      string
 	started      time.Time
 	allowPrivate bool
+	logs         *logbuf.Buffer
+
+	// hostCh is the channel to the units on the node's server (see hostChan).
+	hostOnce sync.Once
+	hostCh   *hostchan.Channel
 
 	Reg *Registry
 	tun *Tunnel
@@ -189,7 +198,7 @@ func Start(o Options) (*Engine, error) {
 	C.SetHomeDir(home)
 
 	e := &Engine{
-		dataDir: dataDir, home: home, log: log, version: version, started: time.Now(), allowPrivate: o.AllowPrivate,
+		dataDir: dataDir, home: home, log: log, version: version, started: time.Now(), allowPrivate: o.AllowPrivate, logs: o.Logs,
 		listeners: map[string]nodeapi.ListenerStatus{},
 		errs:      map[string]string{}, marker: make(chan string, 8), sys: newSysSampler(),
 		Challenge: acmechallenge.New(cmp.Or(o.ACMEListen, acmechallenge.DefaultListen)),

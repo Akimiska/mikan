@@ -6,7 +6,9 @@ package release
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,14 @@ import (
 // private half lives only in the RELEASE_SIGNING_KEY secret of the release workflow and
 // with the maintainer.
 const PublicKey = "Z3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8="
+
+// KeyFingerprint names the release key a build trusts: the first 16 hex digits of the
+// SHA-256 of PublicKey. The support desk compares it with the official one; a build that
+// trusts another key is not mikan's own.
+func KeyFingerprint() string {
+	sum := sha256.Sum256([]byte(PublicKey))
+	return hex.EncodeToString(sum[:8])
+}
 
 // Repo is where releases are published.
 const Repo = "Miroshka000/mikan"

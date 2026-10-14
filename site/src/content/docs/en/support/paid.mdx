@@ -17,7 +17,7 @@ This page is the full set of rules. Before you pay, the bot asks you to press "A
 
 2. The answer did not help: press "Need an operator", describe the problem in one message and, if you can, send the output of `mikan doctor` or the "Check node" report.
 
-3. Read the rules, press "Accept the rules" and choose a plan. Pay in Tribute from the same Telegram account you write to the bot with.
+3. Read the rules, press "Accept the rules" and choose a plan. The bot sends a payment button: a card, SBP or Wallet, the payment goes through Tribute.
 
 4. The bot learns about the payment by itself and opens the ticket. The operator sees it in their queue.
 
@@ -62,7 +62,7 @@ Details:
 
 - A ticket over the limit costs the same as a one-off, $4.99.
 - Unused tickets do not carry over to the next month.
-- You can cancel the subscription at any time, it stays active until the end of the paid period.
+- The subscription renews every month. You can cancel it at any time with the "Cancel the subscription" button in the bot, and it stays active until the end of the paid period.
 - One ticket, one problem. A new problem is a new ticket.
 - We aim for a first reply within 24 hours. This is a target, not a guarantee, but subscribers are first in the queue.
 
@@ -141,7 +141,7 @@ It collects the output of `mikan doctor`, `mikan status` and the tail of the log
 - **The ticket**: subject, description, diagnostics and the talk with the operator. The texts of a closed ticket are erased 30 days after it is closed. Unpaid ticket drafts are deleted after 30 days.
 - **The access link** is stored encrypted and erased when the ticket is closed or the access ends. It never gets into logs.
 - **Terminal recordings**, if you turned it on: 30 days, and in the panel only you can see them. They are kept on your server, so during a terminal session the operator has root access to them too.
-- **Payments**: the purchase id, amount, plan and dates. They are needed to match a payment to a ticket and to count the subscription limit. We have no access to your card details: Tribute handles the payment.
+- **Payments**: the order number, amount, plan and dates. They are needed to match a payment to a ticket and to count the subscription limit. We have no access to your card details: Tribute handles the payment.
 - **Your subscribers**: the operator sees their names, Telegram and links only if you ticked "Show subscribers' data".
 
 You can ask to delete the text of a ticket earlier in the ticket itself. Payment records stay: they are needed for bookkeeping.

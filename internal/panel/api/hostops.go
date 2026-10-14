@@ -70,10 +70,16 @@ func (h *handlers) secretWords(ctx context.Context) []string {
 func (h *handlers) getLogs(ctx context.Context, in *logsInput) (*logsOutput, error) {
 	out := &logsOutput{Body: LogsView{Source: in.Source, Lines: []nodeapi.LogLine{}}}
 	words := h.secretWords(ctx)
+	// A reader who may not see the subscribers gets no Telegram ids and no client addresses
+	// either: the lines of a log say them ("tg=123 user=5", "ip=1.2.3.4").
+	people := hidesLinks(ctx)
 	clean := func(l nodeapi.LogLine) nodeapi.LogLine {
 		// A node's lines are cut where they are written; the panel does it once more, since
 		// a node is a server somebody else may run.
 		l.Text = logbuf.RedactWords(logbuf.Redact(l.Text), words)
+		if people {
+			l.Text = logbuf.RedactPeople(l.Text)
+		}
 		return l
 	}
 	if in.Source == "panel" {

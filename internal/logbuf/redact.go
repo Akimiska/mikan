@@ -111,3 +111,47 @@ func RedactWords(s string, words []string) string {
 	}
 	return s
 }
+
+// PeopleMark is what takes the place of a person's address or account in RedactPeople.
+const PeopleMark = "[hidden]"
+
+// peopleName is a name, split at _ . -, one part of which says a person or the place they
+// came from: a Telegram account, a chat, a device id, an address, a name or a contact.
+const peopleName = `(?:[a-z0-9]+[_.-])*(?:tg|telegram|chat|hwid|device|ips?|addr|address|remote|username|contact|nick|phone|email)(?:[_.-][a-z0-9]+)*`
+
+var peopleRules = []struct {
+	re   *regexp.Regexp
+	repl string
+	// keep, when set, decides per match whether it names a person (true: replace).
+	keep func(match string) bool
+}{
+	// tg=123, tg_id=123, client_ip=1.2.3.4, hwid="abc" of a line of text.
+	{re: regexp.MustCompile(`(?i)(\b` + peopleName + `)(\s*[=:]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;&}"']+)`), repl: "${1}${2}" + PeopleMark},
+	// "tg_id": 123 of JSON, also inside a quoted slog value.
+	{re: regexp.MustCompile(`(?i)(\\?"` + peopleName + `\\?"\s*:\s*)(\\?"(?:[^"\\]|\\.)*?\\?"|[^\s,}\]]+)`), repl: "${1}\"" + PeopleMark + "\""},
+	// An IPv4 address on its own. A version (0.5.1.1) starts with 0: no client does.
+	{re: regexp.MustCompile(`\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b`), repl: PeopleMark,
+		keep: func(m string) bool { return !strings.HasPrefix(m, "0.") }},
+	// An IPv6 address; a time (12:30:45) has neither "::" nor a letter of hex.
+	{re: regexp.MustCompile(`(?i)\b[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}\b|::[0-9a-f:]*[0-9a-f]`), repl: PeopleMark,
+		keep: func(m string) bool { return strings.Contains(m, "::") || strings.ContainsAny(m, "abcdefABCDEF") }},
+}
+
+// RedactPeople cuts out what names a person in a line of a log, beyond what Redact cuts: a
+// Telegram id or account, a device id, a client's address. For a reader the admin did not
+// let see the subscribers. It errs toward cutting too much and leaves a version number.
+func RedactPeople(s string) string {
+	for _, r := range peopleRules {
+		if r.keep == nil {
+			s = r.re.ReplaceAllString(s, r.repl)
+			continue
+		}
+		s = r.re.ReplaceAllStringFunc(s, func(m string) string {
+			if r.keep(m) {
+				return r.repl
+			}
+			return m
+		})
+	}
+	return s
+}

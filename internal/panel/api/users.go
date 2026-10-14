@@ -161,7 +161,7 @@ func (h *handlers) userSlots(ctx context.Context, ids []int64) (map[int64][]stri
 
 type listUsersInput struct {
 	State  string `query:"state" enum:"all,active,expiring,limited,expired,disabled,attention" default:"all" doc:"attention — исчерпан лимит, истекают и истекли, в этом порядке: одним запросом для обзора"`
-	Query  string `query:"q" maxLength:"100"`
+	Query  string `query:"q" maxLength:"100" doc:"Поиск по имени, контакту, заметке и меткам. Оператору поддержки без показа подписчиков закрыт: 403 support_denied"`
 	Folder string `query:"folder" maxLength:"20" default:"all" doc:"all — любая; none — вне папок; число — id папки"`
 	Source string `query:"source" enum:"all,admin,bot,trial,free,import" default:"all" doc:"Откуда пользователь, см. source у пользователя"`
 	Hidden string `query:"hidden" enum:"hide,show,only" default:"show" doc:"show — вместе со скрытыми (по умолчанию: скрытие касается только списка в панели); hide — без скрытых; only — только скрытые"`
@@ -384,6 +384,13 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 	// The filters stay in Go: the search lowercases as Go does (PostgreSQL's lower() follows
 	// the database's locale, and a C locale leaves Cyrillic as it is), and the states are
 	// domain.State. Only the page's users get their slots read.
+	//
+	// A search by name, contact, note or tag tells with its total and the ids it finds whether
+	// the text is in a subscriber, however the answer is masked: an operator who may not see
+	// the subscribers does not search them.
+	if strings.TrimSpace(in.Query) != "" && hidesPeople(ctx) {
+		return nil, huma.Error403Forbidden("support_denied")
+	}
 	users, err := h.d.Store.Q.ListUsers(ctx)
 	if err != nil {
 		return nil, err

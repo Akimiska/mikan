@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/support"
@@ -20,16 +21,18 @@ func TestMaskPeople(t *testing.T) {
 		`"payment":{"user_id":7,"user_name":"Ivan Petrov","tg_id":99,"tg_username":"ivan_tg","tariff_name":"Month <b>"},` +
 		`"hit":{"user_id":7,"ip":"5.6.7.8","user_name":"Ivan Petrov","node_name":"DE-1"},` +
 		`"device":{"id":1,"name":"Ivan's iPhone","hwid":"abc","last_ip":"9.9.9.9","platform":"ios"},` +
-		`"node":{"id":1,"name":"DE-1","ip":"203.0.113.9","note":"fine"},"tariff":{"id":2,"name":"Month"}}`
+		`"node":{"id":1,"name":"DE-1","host":"h","ip":"203.0.113.9","note":"fine"},"tariff":{"id":2,"name":"Month"},` +
+		// The addresses a subscriber came from: a device list names no user beside them.
+		`"devices":[{"ip":"7.7.7.7","first_seen":"a","last_seen":"b","online":true}],"probe":{"ok":true,"ip":"198.51.100.7","checked_at":"c"}}`
 	out := string(maskPeople([]byte(in)))
-	for _, leak := range []string{"Ivan", "@ivan", "owes", "tok", "1.2.3.4", "99", "ivan_tg", "old", "Anna", "5.6.7.8", "abc", "9.9.9.9"} {
+	for _, leak := range []string{"Ivan", "@ivan", "owes", "tok", "1.2.3.4", "99", "ivan_tg", "old", "Anna", "5.6.7.8", "abc", "9.9.9.9", "7.7.7.7"} {
 		// 99 also stands in "tg_id":99 only; used_up has no 99 run.
 		if strings.Contains(out, leak) {
 			t.Errorf("%q survives: %s", leak, out)
 		}
 	}
 	for _, keep := range []string{`"name":"#7"`, `"name":"#3"`, `"user_name":"#7"`, `"tg_id":0`, `"used_up":123456789012345678`, `"tags":["vip"]`, `"online_ips":[]`,
-		`"tariff_name":"Month <b>"`, `"node_name":"DE-1"`, `"ip":"203.0.113.9"`, `"name":"DE-1"`, `"name":"Month"`, `"platform":"ios"`, `"bytes":5`} {
+		`"tariff_name":"Month <b>"`, `"node_name":"DE-1"`, `"ip":"203.0.113.9"`, `"ip":"198.51.100.7"`, `"online":true`, `"name":"DE-1"`, `"name":"Month"`, `"platform":"ios"`, `"bytes":5`} {
 		if !strings.Contains(out, keep) {
 			t.Errorf("%s is lost: %s", keep, out)
 		}
@@ -105,6 +108,44 @@ func TestSupportGate(t *testing.T) {
 	} {
 		if status, code := supportGate(c.op, c.mutating, c.g); status != c.status || code != c.code {
 			t.Errorf("%s mutating=%v level=%s: %d %s, want %d %s", c.op.OperationID, c.mutating, c.g.Level, status, code, c.status, c.code)
+		}
+	}
+}
+
+// The operations registered for real: the diagnostics a view operator is promised (the
+// UI, the docs and the MCP wrappers lean on it) pass the gate at the view level, the
+// restarts do not, and the bot's settings are closed at every level.
+func TestSupportGateOfTheRegisteredOperations(t *testing.T) {
+	api := humago.New(http.NewServeMux(), huma.DefaultConfig("test", "1"))
+	h := &handlers{api: api}
+	h.registerNodeChecks()
+	h.registerHostOps()
+	h.registerTelegram()
+	ops := map[string]*huma.Operation{}
+	for _, item := range api.OpenAPI().Paths {
+		for _, op := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
+			if op != nil {
+				ops[op.OperationID] = op
+			}
+		}
+	}
+	view, change := db.SupportGrant{Level: support.LevelView}, db.SupportGrant{Level: support.LevelChange}
+	for id, want := range map[string]int{"check-node": 0, "check-node-russia": 0, "check-server": 0, "doctor-server": 0, "doctor-node": 0,
+		"restart-server": http.StatusForbidden, "restart-node": http.StatusForbidden,
+		"update-telegram": http.StatusForbidden, "telegram-infrastructure-connect": http.StatusForbidden, "telegram-infrastructure-disconnect": http.StatusForbidden} {
+		op := ops[id]
+		if op == nil {
+			t.Errorf("%s is not registered", id)
+			continue
+		}
+		mutating := op.Method != http.MethodGet
+		if status, _ := supportGate(op, mutating, view); status != want {
+			t.Errorf("%s at view: %d, want %d", id, status, want)
+		}
+		if strings.HasPrefix(id, "update-telegram") || strings.HasPrefix(id, "telegram-") {
+			if status, code := supportGate(op, mutating, change); status != http.StatusForbidden || code != "support_denied" {
+				t.Errorf("%s at change: %d %s, want 403 support_denied", id, status, code)
+			}
 		}
 	}
 }

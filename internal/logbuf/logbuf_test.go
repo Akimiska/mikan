@@ -62,6 +62,41 @@ func TestRedactLeavesOrdinaryLines(t *testing.T) {
 	}
 }
 
+// What names a subscriber goes for a reader who may not see the subscribers; the rest of the
+// line, versions and times stay.
+func TestRedactPeople(t *testing.T) {
+	cases := []struct{ name, in, secret, keep string }{
+		{"tg id", "billing: free plan tg=123456789 user=5", "123456789", "user=5"},
+		{"tg id field", "bot: linked tg_id=987654321 ok", "987654321", "ok"},
+		{"ip field", "billing: adapter refused a webhook ip=1.2.3.4", "1.2.3.4", "refused a webhook"},
+		{"client ip", `msg="denied" client_ip="203.0.113.77" code=403`, "203.0.113.77", "code=403"},
+		{"bare ipv4", "dial from 198.51.100.7:5555 failed", "198.51.100.7", "failed"},
+		{"ipv6", "accepted 2001:db8::1 now", "2001:db8::1", "accepted"},
+		{"loopback v6", "from ::1 ok", "::1", "ok"},
+		{"hwid", "device hwid=abcdef0123 bound", "abcdef0123", "bound"},
+		{"json", `body="{\"tg_id\":4242424,\"plan\":\"m\"}"`, "4242424", `plan`},
+		{"username", "telegram username=ivan_tg wrote", "ivan_tg", "wrote"},
+	}
+	for _, c := range cases {
+		got := RedactPeople(c.in)
+		if strings.Contains(got, c.secret) {
+			t.Errorf("%s: the person is still there: %q", c.name, got)
+		}
+		if !strings.Contains(got, c.keep) {
+			t.Errorf("%s: too much is gone, %q is missing: %q", c.name, c.keep, got)
+		}
+	}
+	for _, line := range []string{
+		`time=2026-10-14T10:00:00.123Z level=INFO msg="panel started" listen=0.0.0.0:21355 version=0.5.1.1`,
+		"msg=update unit=mikan-update-request.service path=/opt/mikan/data/panel/update/request",
+		"node 4 health ok users=120 inbounds=3 description=fine",
+	} {
+		if got := RedactPeople(line); got != line {
+			t.Errorf("changed an ordinary line:\n%s\n%s", line, got)
+		}
+	}
+}
+
 func TestRedactWords(t *testing.T) {
 	got := RedactWords("GET /secretpath123/api/v1/x /ab/y", []string{"secretpath123", "", "ab"})
 	if strings.Contains(got, "secretpath123") || !strings.Contains(got, "/ab/y") {

@@ -38,10 +38,14 @@ const (
 // supportDeniedTags and supportDeniedOps are what a support operator never reaches, at any
 // level: logins and the admin's own credentials (auth, api-keys, support: the grants
 // themselves), the way into the admin (the secret path), the journal and the database in
-// Telegram, and a broadcast to every subscriber.
+// Telegram, a broadcast to every subscriber, and the bot itself: its token, its route and the
+// admin's chat for notices. The admin learns of an operator's entry and of a terminal only
+// through that chat, and the bot token carries the subscribers' conversations and the Stars,
+// so an operator who could mute, redirect or swap them would work unseen.
 var (
 	supportDeniedTags = []string{"auth", "api-keys", supportAdminTag}
-	supportDeniedOps  = []string{"list-audit", "reset-admin-path", "get-telegram-backup", "update-telegram-backup", "send-telegram-backup", "telegram-broadcast"}
+	supportDeniedOps  = []string{"list-audit", "reset-admin-path", "get-telegram-backup", "update-telegram-backup", "send-telegram-backup", "telegram-broadcast",
+		"update-telegram", "telegram-infrastructure-connect", "telegram-infrastructure-disconnect"}
 )
 
 type supportCtx struct {
@@ -99,6 +103,13 @@ func hidesLinks(ctx context.Context) bool {
 	if k, ok := apiKeyOf(ctx); ok && k.Scope != "full" {
 		return true
 	}
+	g, ok := supportGrantOf(ctx)
+	return ok && !g.ShowPeople
+}
+
+// hidesPeople: a support operator the admin did not let see the subscribers. What would
+// answer a question about a person by its count or its order (a search) is closed to it.
+func hidesPeople(ctx context.Context) bool {
 	g, ok := supportGrantOf(ctx)
 	return ok && !g.ShowPeople
 }

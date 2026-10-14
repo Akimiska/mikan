@@ -316,6 +316,9 @@ func TestSupportOperatorBoundaries(t *testing.T) {
 		{http.MethodPost, "/settings/reset-admin-path"},
 		{http.MethodGet, "/telegram/backup"}, {http.MethodPatch, "/telegram/backup"}, {http.MethodPost, "/telegram/backup/send"},
 		{http.MethodGet, "/audit"}, {http.MethodPost, "/telegram/broadcast"},
+		// The bot, its route and the admin's chat for notices: an operator who could mute or
+		// swap them would enter and open a terminal unseen.
+		{http.MethodPatch, "/telegram"}, {http.MethodPost, "/telegram/infrastructure/connect"}, {http.MethodDelete, "/telegram/infrastructure/connect"},
 	}
 	for _, level := range []string{"view", "change"} {
 		g, code, out := s.grant(map[string]any{"hours": 6, "level": level})
@@ -546,8 +549,12 @@ func TestSupportOperatorSeesNoSecretsAndMaybeNoPeople(t *testing.T) {
 	if _, err := s.st.DB.Exec("INSERT INTO tg_links(user_id, tg_id, created_at) VALUES ($1, 4242424, 1)", u.ID); err != nil {
 		t.Fatal(err)
 	}
-	people := []string{"Ivan Petrov", "ivan_contact", "owes a month", u.SubToken, "ivan_tg", "4242424"}
-	paths := []string{"/users", "/users/" + idOf(u.ID), "/settings"}
+	// An address the subscriber came from: the list of devices is a bare array of them.
+	if _, err := s.st.DB.Exec("INSERT INTO devices(user_id, ip, first_seen, last_seen) VALUES ($1, '198.18.0.77', 1, 2)", u.ID); err != nil {
+		t.Fatal(err)
+	}
+	people := []string{"Ivan Petrov", "ivan_contact", "owes a month", u.SubToken, "ivan_tg", "4242424", "198.18.0.77"}
+	paths := []string{"/users", "/users/" + idOf(u.ID), "/users/" + idOf(u.ID) + "/devices", "/settings"}
 
 	hidden, code, out := s.grant(map[string]any{"hours": 2, "level": "change"})
 	if code != http.StatusCreated {
@@ -575,6 +582,16 @@ func TestSupportOperatorSeesNoSecretsAndMaybeNoPeople(t *testing.T) {
 			t.Errorf("a masked user keeps no number: %s", body)
 		}
 	}
+	// A search is an oracle on the people behind the mask (the total and the ids it finds say
+	// what a name, a contact, a note or a tag holds): closed to this operator, whatever the
+	// text, in a browser and with a token alike. An empty or blank one is no search.
+	for _, q := range []string{"@ivan_contact", "a", "ivan", "owes", "%20"} {
+		resp, body := s.newOperator().do(http.MethodGet, "/users?q="+q, nil, bearerOf(hidden.Token))
+		blank := strings.TrimSpace(strings.ReplaceAll(q, "%20", " ")) == ""
+		if blank && resp.StatusCode != http.StatusOK || !blank && (resp.StatusCode != http.StatusForbidden || detail(body) != "support_denied") {
+			t.Errorf("a masked operator searches %q: %d %s", q, resp.StatusCode, body)
+		}
+	}
 	// A writing answer is masked too: the card the operator gets back after an edit.
 	resp, body := s.newOperator().do(http.MethodPatch, "/users/"+idOf(u.ID), map[string]any{"note": "from support"}, bearerOf(hidden.Token))
 	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "from support") || strings.Contains(string(body), "Ivan") {
@@ -595,6 +612,13 @@ func TestSupportOperatorSeesNoSecretsAndMaybeNoPeople(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("a shown operator misses %q: %s", want, body)
 		}
+	}
+	// ... and may search them, and sees the addresses.
+	if resp, body := s.newOperator().do(http.MethodGet, "/users?q=ivan_contact", nil, bearerOf(shown.Token)); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Ivan Petrov") {
+		t.Errorf("a shown operator's search: %d %s", resp.StatusCode, body)
+	}
+	if _, body := s.newOperator().do(http.MethodGet, "/users/"+idOf(u.ID)+"/devices", nil, bearerOf(shown.Token)); !strings.Contains(string(body), "198.18.0.77") {
+		t.Errorf("a shown operator misses the addresses: %s", body)
 	}
 	_, body = s.newOperator().do(http.MethodGet, "/settings", nil, bearerOf(shown.Token))
 	if strings.Contains(string(body), adminPath) || strings.Contains(string(body), subPath) {
@@ -727,6 +751,11 @@ func TestSupportOperatorHostOperations(t *testing.T) {
 		o.Log = slog.New(logs.Handler(o.Log.Handler()))
 	})
 	restartRequest := filepath.Join(dir, "restart", "request")
+	// Lines that name a subscriber: the operator is not to read the Telegram id or the address
+	// (people hidden is the default of a grant), the admin is.
+	wlog := slog.New(logs.Handler(nil))
+	wlog.Info("billing: free plan", "tg", 123456789, "user", 5)
+	wlog.Warn("billing: adapter refused a webhook", "ip", "1.2.3.4")
 	// The host's unit: answers every doctor request until the test ends.
 	stop := make(chan struct{})
 	t.Cleanup(func() { close(stop) })
@@ -764,8 +793,12 @@ func TestSupportOperatorHostOperations(t *testing.T) {
 				return s.newOperator().do(m, p, b, bearerOf(g.Token))
 			},
 		} {
-			if resp, body := call(http.MethodGet, "/logs", nil); resp.StatusCode != http.StatusOK {
+			resp, body := call(http.MethodGet, "/logs", nil)
+			if resp.StatusCode != http.StatusOK {
 				t.Errorf("%s %s logs: %d %s", level, how, resp.StatusCode, body)
+			}
+			if !strings.Contains(string(body), "free plan") || strings.Contains(string(body), "123456789") || strings.Contains(string(body), "1.2.3.4") {
+				t.Errorf("%s %s logs: the lines must come without the subscriber's Telegram id and address: %s", level, how, body)
 			}
 			// A diagnostic is allowed at every level.
 			for _, path := range []string{"/system/doctor", "/nodes/1/doctor"} {
@@ -790,5 +823,9 @@ func TestSupportOperatorHostOperations(t *testing.T) {
 				t.Fatalf("view %s left a restart request for the host", how)
 			}
 		}
+	}
+	// The admin's own answer keeps them.
+	if _, body := s.do(http.MethodGet, s.api+"/logs", nil, nil); !strings.Contains(string(body), "123456789") || !strings.Contains(string(body), "1.2.3.4") {
+		t.Errorf("the admin's logs lost the lines: %s", body)
 	}
 }

@@ -146,6 +146,14 @@ func maskObject(m map[string]any, parent string) map[string]any {
 	// A user (the list, the card, the dashboard's top), a device and a payment name a person
 	// with the plain "name" or "user_name"; a number stands in for the name.
 	person := hasHWID || hasSubURL || hasContact || parent == "top_month"
+	// An address is a person's by default (a device list names no user next to it, a hit
+	// does); it stays only in what describes a server: a node (address, host), a probe
+	// through a cascade or WARP (ok, checked_at: the exit address) and a neighbor scan.
+	_, hasAddress := m["address"]
+	_, hasHost := m["host"]
+	_, hasChecked := m["checked_at"]
+	_, hasScanned := m["scanned"]
+	infrastructure := (hasAddress || hasHost || hasChecked || hasScanned) && !hasUserID && !person
 	id := ""
 	if n, ok := m["user_id"].(json.Number); ok {
 		id = "#" + n.String()
@@ -166,7 +174,7 @@ func maskObject(m map[string]any, parent string) map[string]any {
 			if _, isString := val.(string); isString {
 				m[k] = id
 			}
-		case k == "last_ip" && hasHWID, k == "ip" && hasUserID:
+		case (k == "ip" || k == "last_ip") && !infrastructure:
 			m[k] = ""
 		case k == "telegram", k == "legacy":
 			// The linked Telegram account and the old links of an imported panel: gone.

@@ -14636,6 +14636,31 @@
         "x-session-only": true
       }
     },
+    "/api/v1/support/leave": {
+      "post": {
+        "description": "Оператор сам закрывает свой доступ: как отзыв админом, сессии и терминалы закрываются, ключ ms_… перестаёт работать. На любом уровне. Другим отвечает 403 support_only.",
+        "operationId": "support-leave",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Закончить работу и выйти",
+        "tags": [
+          "support-operator"
+        ]
+      }
+    },
     "/api/v1/support/recordings": {
       "get": {
         "description": "Каждый сеанс терминала записывается на сервере целиком (ввод и вывод, формат asciicast v2) и хранится 30 дней. source=panel или node:\u003cid\u003e. Только админ из сессии: оператору поддержки и ключам закрыто.",

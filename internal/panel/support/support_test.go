@@ -278,3 +278,31 @@ func TestSweepEndsTheLiveGrantWhenOff(t *testing.T) {
 		t.Fatalf("off = %q", off)
 	}
 }
+
+func TestLeaveEndsTheGrantAsTheOperators(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	c, err := e.create(LevelView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Enter(ctx, c.Grant, "203.0.113.2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Leave(ctx, c.Grant.ID, "203.0.113.2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Authenticate(ctx, c.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("token after leave: %v", err)
+	}
+	e.mu.Lock()
+	last := e.notices[len(e.notices)-1]
+	ended := e.ended
+	e.mu.Unlock()
+	if !last.Leave || last.Reason != "left" || len(ended) != 1 {
+		t.Fatalf("notice %+v, ended %v", last, ended)
+	}
+	if err := e.svc.Leave(ctx, c.Grant.ID, ""); !errors.Is(err, ErrNotLive) {
+		t.Fatalf("second leave: %v", err)
+	}
+}

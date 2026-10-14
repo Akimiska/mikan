@@ -75,8 +75,9 @@ func supportTerminalAllowed(ctx context.Context, target string) bool {
 var supportDiagnostic = map[string]any{"supportDiagnostic": true}
 
 func supportReadOnlyPost(op *huma.Operation) bool {
-	ok, _ := op.Metadata["supportDiagnostic"].(bool)
-	return ok
+	diag, _ := op.Metadata["supportDiagnostic"].(bool)
+	leave, _ := op.Metadata["supportLeave"].(bool)
+	return diag || leave
 }
 
 // supportGate is the decision for an operation a support operator called: 0 lets it
@@ -356,9 +357,24 @@ func (h *handlers) registerSupport() {
 	huma.Register(h.api, huma.Operation{OperationID: "support-enter", Method: http.MethodPost, Path: "/api/v1/support/enter", Summary: "Вход оператора по ссылке доступа",
 		Description: "Одна ссылка пускает в браузер один раз; повторный вход требует новой ссылки. Ключ ms_… в заголовке Authorization работает, пока доступ жив.",
 		Tags:        []string{supportOperatorTag}, Metadata: map[string]any{"public": true}, Security: []map[string][]string{{}}}, h.supportEnter)
+	huma.Register(h.api, huma.Operation{OperationID: "support-leave", Method: http.MethodPost, Path: "/api/v1/support/leave", Summary: "Закончить работу и выйти",
+		Description: "Оператор сам закрывает свой доступ: как отзыв админом, сессии и терминалы закрываются, ключ ms_… перестаёт работать. На любом уровне. Другим отвечает 403 support_only.",
+		Tags:        []string{supportOperatorTag}, Metadata: map[string]any{"supportLeave": true}, DefaultStatus: http.StatusNoContent}, h.supportLeave)
 	huma.Register(h.api, huma.Operation{OperationID: "support-whoami", Method: http.MethodGet, Path: "/api/v1/support/whoami", Summary: "Чей доступ и до какого времени",
 		Description: "Для оператора: сессия или ключ ms_…. Другим отвечает 403 support_only.",
 		Tags:        []string{supportOperatorTag}}, h.supportWhoami)
+}
+
+func (h *handlers) supportLeave(ctx context.Context, _ *struct{}) (*struct{}, error) {
+	g, ok := supportGrantOf(ctx)
+	if !ok {
+		return nil, huma.Error403Forbidden("support_only")
+	}
+	err := h.d.Support.Leave(ctx, g.ID, clientOf(ctx).IP)
+	if err != nil && !errors.Is(err, support.ErrNotLive) {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // supportLink is the address the admin gives the operator: the panel's own, the secret path

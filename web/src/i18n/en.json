@@ -3751,6 +3751,12 @@
       "confirmTitle": "Turn support access off?",
       "confirmText": "The current access ends at once: the operator leaves the panel and open terminals close.",
       "confirm": "Turn off"
+    },
+    "leave": {
+      "button": "Finish and leave",
+      "title": "Finish the work?",
+      "text": "The access ends at once: you leave the panel, open terminals close, the link and the key stop working. To come back you need a new link from the admin.",
+      "confirm": "Finish and leave"
     }
   },
   "diag": {

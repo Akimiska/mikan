@@ -886,3 +886,52 @@ func TestSupportAccessSwitch(t *testing.T) {
 		t.Fatalf("list with the env switch: %s", body)
 	}
 }
+
+// The operator ends their own access when the work is done, at any level, in the browser or
+// by token; the admin has nothing to leave.
+func TestSupportOperatorLeaves(t *testing.T) {
+	s := newSupportHarness(t)
+	if resp, body := s.do(http.MethodPost, s.api+"/support/leave", nil, s.csrf); resp.StatusCode != http.StatusForbidden || detail(body) != "support_only" {
+		t.Fatalf("admin leaves: %d %s", resp.StatusCode, body)
+	}
+	g, code, out := s.grant(map[string]any{"hours": 2, "level": "view"})
+	if code != http.StatusCreated {
+		t.Fatalf("grant: %d %s", code, out)
+	}
+	op := s.newOperator()
+	if resp, body := op.enter(g.Token); resp.StatusCode != http.StatusOK {
+		t.Fatalf("enter: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := op.do(http.MethodPost, "/support/leave", nil, nil); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("leave without CSRF: %d", resp.StatusCode)
+	}
+	if resp, body := op.write(http.MethodPost, "/support/leave", nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("leave at view: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := op.do(http.MethodGet, "/support/whoami", nil, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("still in after leaving: %d", resp.StatusCode)
+	}
+	if resp, _ := op.do(http.MethodGet, "/support/whoami", nil, bearerOf(g.Token)); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("token after leaving: %d", resp.StatusCode)
+	}
+	_, body := s.do(http.MethodGet, s.api+"/support/grants", nil, nil)
+	var list struct {
+		Grant struct {
+			Status string `json:"status"`
+		} `json:"grant"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil || list.Grant.Status != "revoked" {
+		t.Fatalf("grant after leaving: %s", body)
+	}
+	// By token: a second access, left over the API.
+	g2, code, out := s.grant(map[string]any{"hours": 2, "level": "change"})
+	if code != http.StatusCreated {
+		t.Fatalf("grant 2: %d %s", code, out)
+	}
+	if resp, body := op.do(http.MethodPost, "/support/leave", nil, bearerOf(g2.Token)); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("leave by token: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := op.do(http.MethodGet, "/support/whoami", nil, bearerOf(g2.Token)); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("token 2 after leaving: %d", resp.StatusCode)
+	}
+}

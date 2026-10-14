@@ -2,11 +2,12 @@
 // someone can work in the panel until a time (with the way to end it); for the operator,
 // the mode they are in. One strip, two readings, so neither side can forget the access is live.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { EyeOff, Headset, LifeBuoy, Pencil, TerminalSquare } from "lucide-react";
-import { useEffect } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { EyeOff, Headset, LifeBuoy, LogOut, Pencil, TerminalSquare } from "lucide-react";
+import { useEffect, useState } from "react";
 import { api, errorText, unwrap } from "../api/client";
 import { isLive, supportKey, useSupportGrants, useSupportMode, type SupportGrant } from "../api/support";
+import { Confirm } from "../components/overlay";
 import { useToast } from "../components/toast";
 import { Button } from "../components/ui";
 import { getLocale, t, useLocale } from "../i18n";
@@ -72,10 +73,26 @@ function LiveGrant({ g }: { g: SupportGrant }) {
   );
 }
 
-/** The operator's side: what they may do here, and until when. */
+/** The operator's side: what they may do here, until when, and the way out when the work is done. */
 function OperatorBar({ level, until, showPeople }: { level: "view" | "change" | "terminal"; until: string; showPeople: boolean }) {
   useBarHeight();
   const now = useNow(15_000);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [confirm, setConfirm] = useState(false);
+  const leave = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/support/leave")),
+    onSuccess: () => {
+      setConfirm(false);
+      qc.clear();
+      void navigate({ to: "/support", search: { ended: true } });
+    },
+    onError: (e) => {
+      setConfirm(false);
+      toast.error(errorText(e));
+    },
+  });
   const Icon = LEVEL_ICON[level];
   return (
     <div className="support-bar info" role="region" aria-label={t("support.modeLabel")}>
@@ -94,6 +111,19 @@ function OperatorBar({ level, until, showPeople }: { level: "view" | "change" | 
           <EyeOff size={14} aria-hidden /> {t("support.peopleHidden")}
         </span>
       ) : null}
+      <Button size="sm" variant="danger-solid" onClick={() => setConfirm(true)}>
+        <LogOut size={16} aria-hidden /> {t("support.leave.button")}
+      </Button>
+      <Confirm
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={t("support.leave.title")}
+        text={t("support.leave.text")}
+        confirm={t("support.leave.confirm")}
+        danger
+        loading={leave.isPending}
+        onConfirm={() => leave.mutate()}
+      />
     </div>
   );
 }

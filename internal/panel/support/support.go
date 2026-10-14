@@ -347,6 +347,17 @@ func (s *Service) announce(ctx context.Context, gone []goneGrant) {
 
 // Revoke ends the grant now. ErrNotLive: it had ended already.
 func (s *Service) Revoke(ctx context.Context, id, adminID int64, ip string) (db.SupportGrant, error) {
+	return s.end(ctx, id, adminID, ip, "revoked")
+}
+
+// Leave is the operator ending their own access when the work is done: the same as a
+// revoke, noted as theirs.
+func (s *Service) Leave(ctx context.Context, id int64, ip string) error {
+	_, err := s.end(ctx, id, 0, ip, "left")
+	return err
+}
+
+func (s *Service) end(ctx context.Context, id, adminID int64, ip, reason string) (db.SupportGrant, error) {
 	var gone []goneGrant
 	var out db.SupportGrant
 	err := s.st.Tx(ctx, func(q *db.Queries) error {
@@ -371,10 +382,10 @@ func (s *Service) Revoke(ctx context.Context, id, adminID int64, ip string) (db.
 			return err
 		}
 		out = g
-		if err := s.writeEnd(ctx, q, now, adminID, ip, "support.revoke", g, "revoked"); err != nil {
+		if err := s.writeEnd(ctx, q, now, adminID, ip, "support.revoke", g, reason); err != nil {
 			return err
 		}
-		gone = append(gone, goneGrant{g, "revoked"})
+		gone = append(gone, goneGrant{g, reason})
 		return nil
 	})
 	if errors.Is(err, ErrNotLive) {

@@ -82,7 +82,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	holder := &tlscert.Holder{}
 	holder.Set(self)
 
-	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, Log: logger, Now: time.Now,
+	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, SupportOff: cfg.SupportOff, Log: logger, Now: time.Now,
 		Autotune: autotune.DefaultOptions().Scaled(cfg.AutotuneScale), TelegramAPI: cfg.TelegramAPI,
 		DataDir: cfg.DataDir, Dev: cfg.Dev, Releases: updates.Fetch(release.IndexURL, release.LatestURL), DNS: dnscheck.New(), CheckHost: checkhost.New("", nil, time.Now), Logs: logs}
 	nodesDir := filepath.Join(tlsDir, "nodes")

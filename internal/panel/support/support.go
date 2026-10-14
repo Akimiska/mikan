@@ -55,6 +55,15 @@ var (
 	ErrUsed = errors.New("support link already used")
 	// ErrNotLive: nothing to revoke, the grant had ended already.
 	ErrNotLive = errors.New("support grant not live")
+	// ErrDisabled: support access is turned off (Settings or MIKAN_SUPPORT_ACCESS=off).
+	ErrDisabled = errors.New("support access disabled")
+)
+
+// Off says why support access is turned off: "" it is on, OffEnv by the server's .env,
+// OffSetting by the panel's setting.
+const (
+	OffEnv     = "env"
+	OffSetting = "setting"
 )
 
 // FieldError names the field of a request that is wrong and the code the web shows.
@@ -83,6 +92,7 @@ type Service struct {
 
 	notify func(ctx context.Context, n Notice)
 	ended  func(grantID int64)
+	off    func(ctx context.Context) (string, error)
 }
 
 func New(st *store.Store, now func() time.Time, log *slog.Logger) *Service {
@@ -97,6 +107,18 @@ func (s *Service) SetNotifier(fn func(ctx context.Context, n Notice)) { s.notify
 // id: whatever holds something open for the grant (a terminal) lets it go. Call it before
 // the service is used.
 func (s *Service) SetEndedHook(fn func(grantID int64)) { s.ended = fn }
+
+// SetSwitch sets what tells whether support access is turned off and why (Off); nil: it is
+// always on. Call it before the service is used.
+func (s *Service) SetSwitch(fn func(ctx context.Context) (string, error)) { s.off = fn }
+
+// Off tells whether support access is turned off and why ("" it is on).
+func (s *Service) Off(ctx context.Context) (string, error) {
+	if s.off == nil {
+		return "", nil
+	}
+	return s.off(ctx)
+}
 
 // NotifyTerminal tells the admin a terminal session of the grant began (leave false) or ended
 // (leave true; reason, how it ended, and its length in seconds). Nobody is told when no
@@ -169,6 +191,11 @@ type Created struct {
 // targets are checked here; the caller has already asked for the password and the code the
 // terminal level needs.
 func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
+	if off, err := s.Off(ctx); err != nil {
+		return Created{}, err
+	} else if off != "" {
+		return Created{}, ErrDisabled
+	}
 	if !slices.Contains(Hours, in.Hours) {
 		return Created{}, &FieldError{"hours", "support_hours"}
 	}
@@ -362,13 +389,24 @@ func (s *Service) Revoke(ctx context.Context, id, adminID int64, ip string) (db.
 }
 
 // Sweep notes the grants whose time ran out (the journal line, the notice, the sessions),
-// and forgets the ones that ended long ago. It runs on a timer and when a request meets an
+// ends the live one when support access is turned off, and forgets the ones that ended long
+// ago. It runs on a timer and when a request meets an
 // expired grant.
 func (s *Service) Sweep(ctx context.Context) error {
+	off, err := s.Off(ctx)
+	if err != nil {
+		return err
+	}
 	var gone []goneGrant
-	err := s.st.Tx(ctx, func(q *db.Queries) error {
+	err = s.st.Tx(ctx, func(q *db.Queries) error {
 		gone = nil
 		now := s.now()
+		if off != "" {
+			// Turned off: what is live ends now, as when the admin revokes it.
+			ended, err := s.endAll(ctx, q, now, 0, "", "disabled")
+			gone = ended
+			return err
+		}
 		expired, err := q.ExpireSupportGrants(ctx, sql.NullInt64{Int64: now.Unix(), Valid: true})
 		if err != nil {
 			return err
@@ -418,6 +456,19 @@ func (s *Service) Get(ctx context.Context, id int64) (db.SupportGrant, error) {
 }
 
 func (s *Service) liveOrNote(ctx context.Context, g db.SupportGrant) (db.SupportGrant, error) {
+	off, err := s.Off(ctx)
+	if err != nil {
+		return db.SupportGrant{}, err
+	}
+	if off != "" {
+		// Turned off: no grant opens anything, and the live one is ended at once.
+		if Live(g, s.now()) {
+			if err := s.Sweep(ctx); err != nil && s.log != nil {
+				s.log.Warn("support sweep", "err", err)
+			}
+		}
+		return db.SupportGrant{}, ErrInvalid
+	}
 	if Live(g, s.now()) {
 		return g, nil
 	}

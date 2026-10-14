@@ -307,6 +307,7 @@ type supportGrantIDInput struct {
 
 type supportGrantsOutput struct {
 	Body struct {
+		Off     string            `json:"off" enum:",env,setting" doc:"Выключен ли доступ для поддержки: пусто — включён, env — MIKAN_SUPPORT_ACCESS=off в .env сервера, setting — настройкой support_access"`
 		Grant   *SupportGrantView `json:"grant" doc:"Последний выданный доступ, активный или нет; null: ещё не выдавался"`
 		Actions []AuditEntry      `json:"actions" doc:"Что делал оператор и что было с доступом, от новых к старым"`
 	}
@@ -391,6 +392,9 @@ func (h *handlers) createSupportGrant(ctx context.Context, in *createSupportGran
 	}
 	created, err := h.d.Support.Create(ctx, support.CreateInput{AdminID: admin.ID, Hours: b.Hours, Level: b.Level, ShowPeople: b.ShowPeople,
 		Targets: b.TerminalTargets, Note: b.Note, IP: clientOf(ctx).IP})
+	if errors.Is(err, support.ErrDisabled) {
+		return nil, huma.Error403Forbidden("support_disabled")
+	}
 	var fe *support.FieldError
 	if errors.As(err, &fe) {
 		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body." + fe.Field, Message: fe.Code})
@@ -414,6 +418,11 @@ func (h *handlers) listSupportGrants(ctx context.Context, _ *struct{}) (*support
 	}
 	out := &supportGrantsOutput{}
 	out.Body.Actions = []AuditEntry{}
+	off, err := h.d.Support.Off(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out.Body.Off = off
 	g, err := h.d.Store.Q.LatestSupportGrant(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil

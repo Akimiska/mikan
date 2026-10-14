@@ -210,3 +210,71 @@ func TestTargetsAreChecked(t *testing.T) {
 		t.Fatalf("ok: %v %+v", err, c.Grant)
 	}
 }
+
+// Turned off, support access gives nothing: no new grant, the live one ends at its next use
+// (told to the admin and to what it held open) and its token opens nothing.
+func TestSwitchedOffAccessGivesNothing(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	c, err := e.create(LevelChange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Enter(ctx, c.Grant, "203.0.113.2"); err != nil {
+		t.Fatal(err)
+	}
+	off := OffSetting
+	e.svc.SetSwitch(func(context.Context) (string, error) { return off, nil })
+	if _, err := e.create(LevelView); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("create while off: %v", err)
+	}
+	if _, err := e.svc.Authenticate(ctx, c.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("token while off: %v", err)
+	}
+	g, err := e.st.Q.GetSupportGrant(ctx, c.Grant.ID)
+	if err != nil || !g.RevokedAt.Valid {
+		t.Fatalf("the live grant is not ended: %+v %v", g, err)
+	}
+	e.mu.Lock()
+	ended, notices := e.ended, e.notices
+	e.mu.Unlock()
+	if len(ended) != 1 || ended[0] != c.Grant.ID {
+		t.Fatalf("ended hook: %v", ended)
+	}
+	last := notices[len(notices)-1]
+	if !last.Leave || last.Reason != "disabled" {
+		t.Fatalf("notice: %+v", last)
+	}
+	// Turned on again, the old token stays dead and a new grant can be made.
+	off = ""
+	if _, err := e.svc.Authenticate(ctx, c.Token); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("old token after turning on: %v", err)
+	}
+	if _, err := e.create(LevelView); err != nil {
+		t.Fatalf("create after turning on: %v", err)
+	}
+	if got, _ := e.svc.Off(ctx); got != "" {
+		t.Fatalf("off = %q", got)
+	}
+}
+
+// The env switch wins over everything and Sweep ends a live grant on its own.
+func TestSweepEndsTheLiveGrantWhenOff(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	c, err := e.create(LevelView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.svc.SetSwitch(func(context.Context) (string, error) { return OffEnv, nil })
+	if err := e.svc.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	g, err := e.st.Q.GetSupportGrant(ctx, c.Grant.ID)
+	if err != nil || !g.RevokedAt.Valid {
+		t.Fatalf("not ended by the sweep: %+v %v", g, err)
+	}
+	if off, _ := e.svc.Off(ctx); off != OffEnv {
+		t.Fatalf("off = %q", off)
+	}
+}

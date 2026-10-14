@@ -91,8 +91,8 @@ func supportNoticeText(lang string, n support.Notice) string {
 		return fmt.Sprintf("🔧 <b>Support entered the panel</b>\nLevel: %s, access until %s%s\nRevoke it: Settings, Security, Support access.", level, until, note)
 	}
 	reason := map[bool]map[string]string{
-		true:  {"revoked": "отозван", "replaced": "заменён новым", "expired": "срок истёк"},
-		false: {"revoked": "revoked", "replaced": "replaced by a new one", "expired": "time ran out"},
+		true:  {"revoked": "отозван", "replaced": "заменён новым", "expired": "срок истёк", "disabled": "доступ поддержки выключен"},
+		false: {"revoked": "revoked", "replaced": "replaced by a new one", "expired": "time ran out", "disabled": "support access was turned off"},
 	}[ru][n.Reason]
 	if ru {
 		return fmt.Sprintf("🔧 <b>Доступ для поддержки закрыт</b>\nПричина: %s%s", reason, note)

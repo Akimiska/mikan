@@ -81,6 +81,7 @@ services:
       MIKAN_NODE_SOCKET: /run/mikan/node.sock
       MIKAN_PANEL_LISTEN: 0.0.0.0:${PANEL_PORT}
       MIKAN_ACME_LISTEN: "${MIKAN_ACME_LISTEN:-:80}"
+      MIKAN_SUPPORT_ACCESS: "${MIKAN_SUPPORT_ACCESS:-on}"
       MIKAN_DATABASE_URL: ${MIKAN_DATABASE_URL}
     volumes: ["./data/panel:/data/panel", "run:/run/mikan", "pg-run:/run/postgresql:ro"]
     mem_limit: 1g

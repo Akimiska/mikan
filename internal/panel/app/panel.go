@@ -89,6 +89,8 @@ type Options struct {
 	Version    string
 	Web        fs.FS
 	TrustProxy bool
+	// SupportOff turns support access off whatever the setting says (MIKAN_SUPPORT_ACCESS=off).
+	SupportOff bool
 	Log        *slog.Logger
 	Now        func() time.Time
 	// Connect reaches a node; nil when the panel runs without nodes (tests, UI development).
@@ -164,6 +166,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		TrustProxy: o.TrustProxy, Log: o.Log, Now: o.Now, Pool: pool,
 	}
 	p.Support = support.New(st, o.Now, o.Log)
+	p.Support.SetSwitch(func(ctx context.Context) (string, error) {
+		if o.SupportOff {
+			return support.OffEnv, nil
+		}
+		on, err := set.On(ctx, settings.SupportAccess)
+		if err != nil || on {
+			return "", err
+		}
+		return support.OffSetting, nil
+	})
 	deps.Support = p.Support
 	if o.Connect != nil {
 		p.Nodes = nodesync.NewManager(st, set, pool, o.Connect, o.Log, o.Now)

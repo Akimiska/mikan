@@ -301,6 +301,33 @@ pub fn restart() -> Result<()> {
     Ok(())
 }
 
+/// `mikan support-access on|off`: MIKAN_SUPPORT_ACCESS in .env, the support terminal's units
+/// (host.rs keeps them away while it is off) and, on a panel, its container, which reads the
+/// variable when it is created.
+pub fn support_access(on: bool) -> Result<()> {
+    let mut install = Install::load()?;
+    let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
+    if on {
+        install.env.remove("MIKAN_SUPPORT_ACCESS");
+    } else {
+        install.env.set("MIKAN_SUPPORT_ACCESS", "off")?;
+    }
+    install.env.save()?;
+    if Path::new("/run/systemd/system").exists() {
+        host::install_units(!install.node)?;
+    }
+    if !install.node {
+        docker::compose_run(&["up", "-d"])?;
+        setup::wait_ready(None, Duration::from_secs(90))?;
+    }
+    crate::out(if on {
+        "Support access is back in the panel's hands: Settings, Security, Support access."
+    } else {
+        "Support access is off on this server: the panel opens none, and no support terminal runs here."
+    });
+    Ok(())
+}
+
 /// How long a restart the panel asked for waits: the answer to the page that asked goes out
 /// before the container it came from stops.
 const RESTART_GRACE: Duration = Duration::from_secs(2);

@@ -144,6 +144,12 @@ enum Cmd {
     /// the new command runs it after replacing the old one)
     #[command(hide = true)]
     PostUpdate,
+    /// Support access on this server: off turns it off for good (no access can be opened in
+    /// the panel, no support terminal on this server), on gives the choice back to the panel
+    SupportAccess {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
     /// Restart the containers
     Restart {
         /// The panel asked for it (a systemd path unit runs this)
@@ -259,6 +265,7 @@ fn main() -> ExitCode {
         Some(Cmd::Addon(c)) => addon_cmd(c),
         Some(Cmd::Join { key, panel_ip }) => ops::join_key(key).and_then(|k| ops::join(&k, panel_ip)),
         Some(Cmd::PostUpdate) => update::converge(&mut out),
+        Some(Cmd::SupportAccess { state }) => ops::support_access(state == "on"),
         Some(Cmd::Restart { requested: true }) => ops::restart_requested(),
         Some(Cmd::Restart { requested: false }) => ops::restart(),
         Some(Cmd::TerminalAgent) => terminal::agent(),

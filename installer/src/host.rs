@@ -356,11 +356,26 @@ WantedBy=paths.target
 /// (a server updated by an older command has the older ones; a node before 0.5.0.2 has no
 /// request unit at all).
 pub fn units_current(panel: bool) -> bool {
-    units_current_in(Path::new("/etc/systemd/system"), panel)
+    units_current_in(Path::new("/etc/systemd/system"), panel, terminal_off())
 }
 
-fn units_current_in(dir: &Path, panel: bool) -> bool {
-    units(panel).iter().all(|(name, text)| fs::read_to_string(dir.join(name)).is_ok_and(|have| have == *text))
+/// The support terminal's units, which a server with MIKAN_SUPPORT_ACCESS=off in its .env
+/// does not have: nothing there can start a shell for an operator.
+const TERMINAL_UNITS: [&str; 2] = ["mikan-terminal-request.service", "mikan-terminal-request.path"];
+
+/// Whether the server's .env turns support access off (MIKAN_SUPPORT_ACCESS=off).
+fn terminal_off() -> bool {
+    crate::envfile::EnvFile::load(Path::new(crate::DIR).join(".env")).is_ok_and(|e| e.get("MIKAN_SUPPORT_ACCESS") == Some("off"))
+}
+
+/// The units a server should have: all of them, or all but the terminal's (terminal_off).
+fn wanted(panel: bool, terminal_off: bool) -> Vec<(&'static str, String)> {
+    units(panel).into_iter().filter(|(name, _)| !(terminal_off && TERMINAL_UNITS.contains(name))).collect()
+}
+
+fn units_current_in(dir: &Path, panel: bool, terminal_off: bool) -> bool {
+    wanted(panel, terminal_off).iter().all(|(name, text)| fs::read_to_string(dir.join(name)).is_ok_and(|have| have == *text))
+        && !(terminal_off && TERMINAL_UNITS.iter().any(|name| dir.join(name).exists()))
 }
 
 /// The update timer and the watches on the requests of a panel (its Update button, a server
@@ -371,19 +386,34 @@ pub fn install_units(panel: bool) -> Result<()> {
     if !Path::new("/run/systemd/system").exists() {
         bail!("no systemd");
     }
-    write_units(Path::new("/etc/systemd/system"), panel)?;
+    let off = terminal_off();
+    if off {
+        // Turned off after the units were installed: they go, a session running ends.
+        let _ = systemctl(&["disable", "--now", TERMINAL_UNITS[1], TERMINAL_UNITS[0]]);
+    }
+    write_units(Path::new("/etc/systemd/system"), panel, off)?;
     systemctl(&["daemon-reload"])?;
     for name in WATCHES {
-        systemctl(&["enable", "--now", name])?;
+        if !(off && TERMINAL_UNITS.contains(&name)) {
+            systemctl(&["enable", "--now", name])?;
+        }
     }
     Ok(())
 }
 
-/// Writes the unit files into dir where they are not there or differ; returns how many it
-/// wrote. A second run writes none.
-fn write_units(dir: &Path, panel: bool) -> Result<usize> {
+/// Writes the unit files into dir where they are not there or differ, and removes the
+/// terminal's when it is off; returns how many it wrote. A second run writes none.
+fn write_units(dir: &Path, panel: bool, terminal_off: bool) -> Result<usize> {
+    if terminal_off {
+        for name in TERMINAL_UNITS {
+            match fs::remove_file(dir.join(name)) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e).with_context(|| format!("remove {name}")),
+                _ => {}
+            }
+        }
+    }
     let mut written = 0;
-    for (name, text) in units(panel) {
+    for (name, text) in wanted(panel, terminal_off) {
         let path = dir.join(name);
         if fs::read_to_string(&path).is_ok_and(|have| have == text) {
             continue;
@@ -557,25 +587,25 @@ mod tests {
     #[test]
     fn writing_the_units_is_idempotent() {
         let d = tmpdir("write-units");
-        assert_eq!(write_units(&d, true).unwrap(), UNIT_NAMES.len());
-        assert_eq!(write_units(&d, true).unwrap(), 0, "a second run rewrites nothing");
-        assert!(units_current_in(&d, true));
+        assert_eq!(write_units(&d, true, false).unwrap(), UNIT_NAMES.len());
+        assert_eq!(write_units(&d, true, false).unwrap(), 0, "a second run rewrites nothing");
+        assert!(units_current_in(&d, true, false));
         // An installer of 0.5.1.0 wrote the update units only.
         for gone in
             ["mikan-doctor-request.service", "mikan-doctor-request.path", "mikan-restart-request.service", "mikan-restart-request.path"]
         {
             fs::remove_file(d.join(gone)).unwrap();
         }
-        assert!(!units_current_in(&d, true), "an old install is not current: mikan update brings the new units");
-        assert_eq!(write_units(&d, true).unwrap(), 4);
-        assert!(units_current_in(&d, true));
+        assert!(!units_current_in(&d, true, false), "an old install is not current: mikan update brings the new units");
+        assert_eq!(write_units(&d, true, false).unwrap(), 4);
+        assert!(units_current_in(&d, true, false));
         // A changed file is put back, the others stay.
         fs::write(d.join("mikan-doctor-request.path"), "[Path]\nPathExists=/tmp/x\n").unwrap();
-        assert_eq!(write_units(&d, true).unwrap(), 1);
-        assert!(units_current_in(&d, true));
+        assert_eq!(write_units(&d, true, false).unwrap(), 1);
+        assert!(units_current_in(&d, true, false));
         // The same directory for a node: its own watches, the files that are the same stay.
         let before = fs::read_to_string(d.join("mikan-update.timer")).unwrap();
-        assert_eq!(write_units(&d, false).unwrap(), 4, "only the four path units differ");
+        assert_eq!(write_units(&d, false, false).unwrap(), 4, "only the four path units differ");
         assert_eq!(fs::read_to_string(d.join("mikan-update.timer")).unwrap(), before);
         assert!(fs::read_to_string(d.join("mikan-restart-request.path")).unwrap().contains("data/node/restart/request"));
         fs::remove_dir_all(&d).unwrap();
@@ -601,26 +631,26 @@ mod tests {
     #[test]
     fn units_are_current_for_the_mode_they_were_written_for() {
         let d = tmpdir("units");
-        assert!(!units_current_in(&d, true) && !units_current_in(&d, false), "nothing written yet");
+        assert!(!units_current_in(&d, true, false) && !units_current_in(&d, false, false), "nothing written yet");
         let write = |panel: bool| {
             for (name, text) in units(panel) {
                 fs::write(d.join(name), text).unwrap();
             }
         };
         write(false);
-        assert!(units_current_in(&d, false));
-        assert!(!units_current_in(&d, true), "a node's units are not a panel's");
+        assert!(units_current_in(&d, false, false));
+        assert!(!units_current_in(&d, true, false), "a node's units are not a panel's");
         write(true);
-        assert!(units_current_in(&d, true) && !units_current_in(&d, false));
+        assert!(units_current_in(&d, true, false) && !units_current_in(&d, false, false));
         // a node of 0.5.0.1: the timer and the services, no path unit
         write(false);
         fs::remove_file(d.join("mikan-update-request.path")).unwrap();
-        assert!(!units_current_in(&d, false), "a node without the request unit gets it on its next update");
+        assert!(!units_current_in(&d, false, false), "a node without the request unit gets it on its next update");
         // an older text of the path unit
         write(false);
         let old = fs::read_to_string(d.join("mikan-update-request.path")).unwrap().replace("data/node/", "data/panel/");
         fs::write(d.join("mikan-update-request.path"), old).unwrap();
-        assert!(!units_current_in(&d, false));
+        assert!(!units_current_in(&d, false, false));
         fs::remove_dir_all(&d).unwrap();
     }
 
@@ -636,5 +666,21 @@ mod tests {
         let u = update_rules();
         assert_eq!(u[0], "80/tcp");
         assert!(u.contains(&"12443/udp".to_string()) && u.iter().all(|r| valid_rule(r)));
+    }
+
+    // MIKAN_SUPPORT_ACCESS=off: the terminal's units are neither written nor left behind.
+    #[test]
+    fn support_access_off_keeps_the_terminal_units_away() {
+        let d = std::env::temp_dir().join(format!("mikan-units-off-{}", std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        write_units(&d, true, false).unwrap();
+        assert!(d.join(TERMINAL_UNITS[1]).exists());
+        assert!(!units_current_in(&d, true, true), "turned off with the units still there");
+        assert_eq!(write_units(&d, true, true).unwrap(), 0, "the other units are the current ones already");
+        assert!(TERMINAL_UNITS.iter().all(|n| !d.join(n).exists()));
+        assert!(units_current_in(&d, true, true));
+        assert!(!units_current_in(&d, true, false), "turned on again: the terminal's units come back");
+        assert_eq!(write_units(&d, true, false).unwrap(), 2);
+        let _ = fs::remove_dir_all(&d);
     }
 }

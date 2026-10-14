@@ -20,6 +20,7 @@ import { fieldErrors } from "../../../lib/fields";
 import { ago, bytes, time, timeLeft } from "../../../lib/format";
 import { nodeLabel, serverName } from "../../../lib/node-label";
 import { useNow } from "../../../lib/now";
+import { useSaveSettings } from "./shared";
 
 /** The support desk's bot: the link goes there. */
 const SUPPORT_BOT = "https://t.me/MikanSup_bot";
@@ -39,6 +40,7 @@ export function SupportCard() {
   const live = isLive(g);
   const actions = grants.data?.actions ?? [];
   const hadTerminal = g?.level === "terminal" || actions.some((a) => a.action === "support.terminal.start");
+  const off = grants.data?.off ?? "";
   return (
     <section id="support" className="card glass reveal" aria-labelledby="support-title">
       <div className="card-head">
@@ -48,14 +50,15 @@ export function SupportCard() {
           </h2>
           <div className="card-sub">{t("support.card.sub")}</div>
         </div>
-        {grants.data ? live ? <Pill tone="ok">{t("support.card.open")}</Pill> : <Pill tone="off">{t("support.card.closed")}</Pill> : null}
+        {grants.data ? live ? <Pill tone="ok">{t("support.card.open")}</Pill> : <Pill tone="off">{off ? t("support.switch.offPill") : t("support.card.closed")}</Pill> : null}
       </div>
-      <Scope />
+      {grants.data ? <AccessSwitch off={off} live={live} /> : null}
+      {off ? null : <Scope />}
       <QueryBoundary query={grants} pending={<Skeleton style={{ height: 112, borderRadius: 16 }} />} wrap={(state) => <div>{state}</div>}>
         {() => (
           <>
-            {made ? <MadeLink link={made} onDone={() => setMade(null)} /> : null}
-            {isLive(g) ? <ActiveGrant g={g} onReplace={() => setForm(true)} onRevoked={() => setMade(null)} /> : <Idle g={g} onOpen={() => setForm(true)} />}
+            {made && !off ? <MadeLink link={made} onDone={() => setMade(null)} /> : null}
+            {off ? null : isLive(g) ? <ActiveGrant g={g} onReplace={() => setForm(true)} onRevoked={() => setMade(null)} /> : <Idle g={g} onOpen={() => setForm(true)} />}
             {hadTerminal ? (
               <div className="mt-4">
                 <Button size="sm" onClick={() => setRec({ source: g?.terminal_targets[0] ?? "panel" })}>
@@ -78,6 +81,48 @@ export function SupportCard() {
       />
       <RecordingsDrawer state={rec} onChange={setRec} />
     </section>
+  );
+}
+
+/**
+ * Whether support access may be opened at all. Turned off, the live access ends at once; the
+ * server's .env (MIKAN_SUPPORT_ACCESS=off) keeps it off whatever the switch says.
+ */
+function AccessSwitch({ off, live }: { off: string; live: boolean }) {
+  const qc = useQueryClient();
+  const save = useSaveSettings();
+  const [confirm, setConfirm] = useState(false);
+  const set = (on: boolean) =>
+    save.mutate(
+      { support_access: on },
+      {
+        onSuccess: () => {
+          setConfirm(false);
+          void qc.invalidateQueries({ queryKey: supportKey.grants });
+        },
+      },
+    );
+  return (
+    <div className="mb-4">
+      <SwitchRow
+        label={t("support.switch.label")}
+        sub={off === "env" ? t("support.switch.env") : off ? t("support.switch.offSub") : t("support.switch.onSub")}
+        warn={off === "env"}
+        checked={!off}
+        disabled={off === "env" || save.isPending}
+        onChange={(v) => (v ? set(true) : live ? setConfirm(true) : set(false))}
+      />
+      <Confirm
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={t("support.switch.confirmTitle")}
+        text={t("support.switch.confirmText")}
+        confirm={t("support.switch.confirm")}
+        danger
+        loading={save.isPending}
+        onConfirm={() => set(false)}
+      />
+    </div>
   );
 }
 

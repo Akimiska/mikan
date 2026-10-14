@@ -3740,6 +3740,16 @@
       "position": "Recording position",
       "speed": "Speed",
       "note": "Pauses longer than {n} s are cut short. Only the terminal's output is shown: what was typed is in the recording but is not replayed."
+    },
+    "switch": {
+      "label": "Allow support access",
+      "onSub": "You can open a temporary access with the button below. Support never gets into the panel without it.",
+      "offSub": "Off: no access can be opened and support links do not work.",
+      "env": "Turned off on the server (MIKAN_SUPPORT_ACCESS=off). To give the choice back to the panel, run on the server: mikan support-access on",
+      "offPill": "off",
+      "confirmTitle": "Turn support access off?",
+      "confirmText": "The current access ends at once: the operator leaves the panel and open terminals close.",
+      "confirm": "Turn off"
     }
   },
   "diag": {

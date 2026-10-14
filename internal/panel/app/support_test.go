@@ -829,3 +829,58 @@ func TestSupportOperatorHostOperations(t *testing.T) {
 		t.Errorf("the admin's logs lost the lines: %s", body)
 	}
 }
+
+// The admin's switch: off, the operator is out at once and no access can be opened; the
+// operator can never flip it; MIKAN_SUPPORT_ACCESS=off keeps it off whatever the setting.
+func TestSupportAccessSwitch(t *testing.T) {
+	s := newSupportHarness(t)
+	g, code, out := s.grant(map[string]any{"hours": 2, "level": "change"})
+	if code != http.StatusCreated {
+		t.Fatalf("grant: %d %s", code, out)
+	}
+	op := s.newOperator()
+	if resp, body := op.enter(g.Token); resp.StatusCode != http.StatusOK {
+		t.Fatalf("enter: %d %s", resp.StatusCode, body)
+	}
+	// The operator cannot turn the switch, either way.
+	if resp, body := op.write(http.MethodPatch, "/settings", map[string]any{"support_access": false}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("operator flips the switch: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := s.do(http.MethodPatch, s.api+"/settings", map[string]any{"support_access": false}, s.csrf); resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin turns it off: %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := op.do(http.MethodGet, "/support/whoami", nil, nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("operator still in after off: %d", resp.StatusCode)
+	}
+	if resp, _ := op.do(http.MethodGet, "/support/whoami", nil, bearerOf(g.Token)); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("token still works after off: %d", resp.StatusCode)
+	}
+	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "view"}); code != http.StatusForbidden || detail(out) != "support_disabled" {
+		t.Fatalf("grant while off: %d %s", code, out)
+	}
+	resp, body := s.do(http.MethodGet, s.api+"/support/grants", nil, nil)
+	var list struct {
+		Off   string `json:"off"`
+		Grant *struct {
+			Status string `json:"status"`
+		} `json:"grant"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil || resp.StatusCode != http.StatusOK || list.Off != "setting" || list.Grant == nil || list.Grant.Status != "revoked" {
+		t.Fatalf("list while off: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := s.do(http.MethodPatch, s.api+"/settings", map[string]any{"support_access": true}, s.csrf); resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin turns it on: %d %s", resp.StatusCode, body)
+	}
+	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "view"}); code != http.StatusCreated {
+		t.Fatalf("grant after on: %d %s", code, out)
+	}
+
+	env := newSupportHarness(t, func(o *Options) { o.SupportOff = true })
+	if _, code, out := env.grant(map[string]any{"hours": 2, "level": "view"}); code != http.StatusForbidden || detail(out) != "support_disabled" {
+		t.Fatalf("grant with MIKAN_SUPPORT_ACCESS=off: %d %s", code, out)
+	}
+	_, body = env.do(http.MethodGet, env.api+"/support/grants", nil, nil)
+	if err := json.Unmarshal(body, &list); err != nil || list.Off != "env" {
+		t.Fatalf("list with the env switch: %s", body)
+	}
+}

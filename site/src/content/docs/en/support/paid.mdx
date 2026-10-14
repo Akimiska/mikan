@@ -70,6 +70,8 @@ Details:
 
 Money paid for support is not refunded: not for a one-off, not for a subscription, not for unused tickets. We cannot promise a result in advance, because the cause of a problem often becomes clear only after diagnosis. Paying means you agree to this.
 
+The service counts as provided from the moment the operator starts working on the ticket. The ticket history, the operator's action log and the terminal recordings are kept as proof. If a payment is disputed through the bank (a chargeback), paid support is closed for that account for good.
+
 You can check whether this kind of help fits you for free: the AI in the bot answers without payment, and the forum stays open to everyone.
 
 ## Access to the panel
@@ -80,6 +82,7 @@ The operator needs access to the panel, and you open and close it yourself: **Se
 - Choose the level. **View** is read-only: the operator sees nodes, logs and diagnostics but changes nothing. **Change** also lets them edit nodes, certificates and addons, start updates and restarts. If the fix needs no changes, leave it on view.
 - The **Show subscribers' data** checkbox is off by default. Then the names and Telegram of subscribers are hidden, and subscription links and keys are masked. Turn it on only if the problem cannot be solved without it.
 - The panel shows the link once. Send it to the bot: it checks the link and attaches it to your ticket. Do not post the link in the forum chat.
+- The link holds the secret address of your admin panel, and whoever has it still knows that address after the access ends. When the support is over, press "Issue a new link" on the "Panel link" card.
 - Only one access is active at a time. A new one cancels the previous one.
 
 Access covers all nodes of your panel, so there is no need to set up each one separately.
@@ -115,8 +118,9 @@ If the panel is not enough, you can turn on the **Terminal** level. It is full a
 - you mark the servers where it is allowed: the panel server or chosen nodes;
 - it works only for the length of the access and closes on revoke, on expiry and after 15 minutes of idling;
 - the whole session is recorded, input and output with timestamps, and you can watch the recording in the panel. Recordings are kept for 30 days and then deleted;
-- once it ends nothing is left on the server: no users, no keys, no cron jobs, no background processes;
-- no new ports are opened on the server and SSH is not needed.
+- the terminal itself leaves nothing behind when it ends: its processes are stopped, it opens no ports, and SSH is not needed.
+
+Keep in mind that root can change anything on the server, including adding a key, a cron job or a user and editing the recording itself. The recording lets you check what the operator did, but it is not a technical guarantee. Watch it after the session and open the terminal only for the time of the ticket.
 
 The terminal is rarely needed. We will not ask you to turn it on if the task can be done without it.
 
@@ -134,7 +138,7 @@ It collects the output of `mikan doctor`, `mikan status` and the tail of the log
 
 - **The ticket**: subject, description, diagnostics and the talk with the operator. The texts of a closed ticket are erased 30 days after it is closed. Unpaid ticket drafts are deleted after 30 days.
 - **The access link** is stored encrypted and erased when the ticket is closed or the access ends. It never gets into logs.
-- **Terminal recordings**, if you turned it on: 30 days, and only you can see them.
+- **Terminal recordings**, if you turned it on: 30 days, and in the panel only you can see them. They are kept on your server, so during a terminal session the operator has root access to them too.
 - **Payments**: the purchase id, amount, plan and dates. They are needed to match a payment to a ticket and to count the subscription limit. We have no access to your card details: Tribute handles the payment.
 - **Your subscribers**: the operator sees their names, Telegram and links only if you ticked "Show subscribers' data".
 

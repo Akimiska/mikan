@@ -80,7 +80,7 @@ The operator needs access to the panel, and you open and close it yourself: **Se
 
 - Choose the duration: 2, 6 or 24 hours. You can revoke access earlier with one button.
 - Choose the level. **View** is read-only: the operator sees nodes, logs and diagnostics but changes nothing. **Change** also lets them edit nodes, certificates and addons, start updates and restarts. If the fix needs no changes, leave it on view.
-- The **Show subscribers' data** checkbox is off by default. Then the names and Telegram of subscribers are hidden, and subscription links and keys are masked. Turn it on only if the problem cannot be solved without it.
+- The **Show client data** checkbox is off by default. Then the names and Telegram of subscribers are hidden, and subscription links and keys are masked. Turn it on only if the problem cannot be solved without it.
 - The panel shows the link once. Send it to the bot: it checks the link and attaches it to your ticket. Do not post the link in the forum chat.
 - The link holds the secret address of your admin panel, and whoever has it still knows that address after the access ends. When the support is over, press "Issue a new link" on the "Panel link" card.
 - Only one access is active at a time. A new one cancels the previous one.
@@ -142,7 +142,7 @@ It collects the output of `mikan doctor`, `mikan status` and the tail of the log
 - **The access link** is stored encrypted and erased when the ticket is closed or the access ends. It never gets into logs.
 - **Terminal recordings**, if you turned it on: 30 days, and in the panel only you can see them. They are kept on your server, so during a terminal session the operator has root access to them too.
 - **Payments**: the order number, amount, plan and dates. They are needed to match a payment to a ticket and to count the subscription limit. We have no access to your card details: Tribute handles the payment.
-- **Your subscribers**: the operator sees their names, Telegram and links only if you ticked "Show subscribers' data".
+- **Your subscribers**: the operator sees their names, Telegram and links only if you ticked "Show client data".
 
 You can ask to delete the text of a ticket earlier in the ticket itself. Payment records stay: they are needed for bookkeeping.
 

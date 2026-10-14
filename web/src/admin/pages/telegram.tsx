@@ -6,6 +6,8 @@ import { useMemo, useState, type Dispatch, type FormEvent, type SetStateAction }
 import { api, ApiError, apiCodeText, errorText, unwrap, type Schemas } from "../../api/client";
 import { onFormError } from "../../lib/fields";
 import { qk, useNodes, useSettings, useTelegram } from "../../api/hooks";
+import { useSupportMode } from "../../api/support";
+import { ClosedForSupport } from "../support-closed";
 import { useDraft } from "../../lib/draft";
 import { TELEGRAM_TABS } from "../search";
 import { BackToAddons } from "./addon-row";
@@ -352,10 +354,13 @@ function InfrastructureCard({ v, draft, setDraft, error }: { v: View; draft: Sch
 function BackupCard() {
   const qc = useQueryClient();
   const toast = useToast();
+  // The database copy goes to the admin's own chat: closed to a support operator.
+  const operator = useSupportMode();
   // While a backup is being made in the background, its end is looked for every few seconds.
   const q = useQuery({
     queryKey: qk.telegramBackup,
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/telegram/backup", { signal })),
+    enabled: !operator,
     refetchInterval: (query) => (query.state.data?.sending ? 3000 : false),
   });
   const [password, setPassword] = useState("");
@@ -393,6 +398,7 @@ function BackupCard() {
     },
   });
   const b = q.data;
+  if (operator) return <ClosedForSupport />;
   if (!b) return <Skeleton style={{ height: 220, borderRadius: 24 }} />;
   const size = b.last_size ? (b.last_size >= 1 << 20 ? `${(b.last_size / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(b.last_size / 1024))} KB`) : "";
   return (
@@ -877,6 +883,7 @@ function OptionsCard({ draft, setDraft, v }: { draft: Config; setDraft: (c: Conf
 }
 
 function BroadcastCard({ v }: { v: View }) {
+  const operator = useSupportMode();
   const toast = useToast();
   const qc = useQueryClient();
   const [text, setText] = useState("");
@@ -896,6 +903,8 @@ function BroadcastCard({ v }: { v: View }) {
   // A broadcast fills only {brand}.
   const sample = useSampleVars();
   const brandOnly = useMemo(() => ({ brand: sample.brand ?? "VPN" }), [sample.brand]);
+  // A mailing to every subscriber is the admin's alone.
+  if (operator) return <ClosedForSupport />;
   return (
     <section {...rise(4)}>
       <div className="card-head">

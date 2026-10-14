@@ -84,7 +84,7 @@ const STATUS_ICON: Record<Status, { icon: typeof CircleCheck; cls: string }> = {
 };
 
 /** A status as an icon with its word for screen readers: never by colour alone. */
-function StatusMark({ status }: { status: Status }) {
+export function StatusMark({ status }: { status: Status }) {
   const { icon: Icon, cls } = STATUS_ICON[status];
   return (
     <span className={`mt-px shrink-0 ${cls}`}>
@@ -200,7 +200,7 @@ function CheckList({ items, actions, panelServer }: { items: Item[]; actions?: F
   );
 }
 
-function CheckSkeleton({ rows = 6 }: { rows?: number }) {
+export function CheckSkeleton({ rows = 6 }: { rows?: number }) {
   return (
     <div className="space-y-3" aria-hidden>
       <Skeleton style={{ height: 44, borderRadius: 16 }} />

@@ -2,9 +2,10 @@ import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, createRoute, createRouter, lazyRouteComponent, Outlet, redirect, type AsyncRouteComponent } from "@tanstack/react-router";
 import { ApiError, basePath, setCsrf } from "../api/client";
 import { meQuery } from "../api/hooks";
+import { whoamiQuery } from "../api/support";
 import { useLocale } from "../i18n";
 import { NotFoundPage, PageLoading, RouteError } from "./route-states";
-import { ADDON_KINDS, ADDON_TABS, PAYMENT_TABS, PROMO_TABS, SETTINGS_PARTS, SETTINGS_TABS, TARIFF_TABS, TELEGRAM_TABS, USER_SOURCES, USER_STATES, type AddonsSearch, type PaymentsSearch, type SettingsSearch, type TariffsSearch, type TelegramSearch, type UsersSearch } from "./search";
+import { ADDON_KINDS, ADDON_TABS, PAYMENT_TABS, PROMO_TABS, DIAG_TABS, SETTINGS_PARTS, SETTINGS_TABS, TARIFF_TABS, TELEGRAM_TABS, USER_SOURCES, USER_STATES, type AddonsSearch, type DiagSearch, type PaymentsSearch, type SettingsSearch, type SupportSearch, type TariffsSearch, type TelegramSearch, type UsersSearch } from "./search";
 import { Shell } from "./shell";
 
 /**
@@ -32,17 +33,40 @@ export function createAppRouter(queryClient: QueryClient) {
     validateSearch: (s: Record<string, unknown>): { next?: string } => ({ next: typeof s.next === "string" ? s.next : undefined }),
   });
 
+  // Where a support operator comes in by the link the admin gave them (the token is in the
+  // address after #, so it never reaches a server log).
+  const supportEnter = createRoute({
+    getParentRoute: () => root,
+    path: "/support",
+    component: page(() => import("./pages/support-enter"), "SupportEnterPage"),
+    validateSearch: (s: Record<string, unknown>): SupportSearch => ({ ended: s.ended === true || s.ended === "true" ? true : undefined }),
+  });
+
   const app = createRoute({
     getParentRoute: () => root,
     id: "_app",
     component: Shell,
     beforeLoad: async ({ context, location }) => {
+      // Known as a support operator already: the admin's own data is not asked again.
+      if (context.queryClient.getQueryData(whoamiQuery.queryKey)) return;
       try {
-        const me = await context.queryClient.ensureQueryData(meQuery);
+        const me =await context.queryClient.ensureQueryData(meQuery);
         setCsrf(me.csrf_token);
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
           throw redirect({ to: "/login", search: { next: location.href } });
+        }
+        // The admin's own data is closed to a support operator (403): they are known by their
+        // own session, which says what they may do.
+        if (e instanceof ApiError && e.status === 403) {
+          try {
+            const who = await context.queryClient.ensureQueryData(whoamiQuery);
+            setCsrf(who.csrf_token ?? "");
+            return;
+          } catch (e2) {
+            if (e2 instanceof ApiError && e2.status === 401) throw redirect({ to: "/support", search: { ended: true } });
+            throw e2;
+          }
         }
         throw e;
       }
@@ -75,6 +99,15 @@ export function createAppRouter(queryClient: QueryClient) {
   });
   const inbounds = createRoute({ getParentRoute: () => app, path: "/inbounds", component: page(() => import("./pages/inbounds"), "InboundsPage") });
   const nodes = createRoute({ getParentRoute: () => app, path: "/nodes", component: page(() => import("./pages/nodes"), "NodesPage") });
+  const diagnostics = createRoute({
+    getParentRoute: () => app,
+    path: "/diagnostics",
+    component: page(() => import("./pages/diagnostics"), "DiagnosticsPage"),
+    validateSearch: (s: Record<string, unknown>): DiagSearch => ({
+      tab: DIAG_TABS.includes(s.tab as (typeof DIAG_TABS)[number]) && s.tab !== "logs" ? (s.tab as DiagSearch["tab"]) : undefined,
+      source: typeof s.source === "string" && /^(panel|node:\d{1,9})$/.test(s.source) && s.source !== "panel" ? s.source : undefined,
+    }),
+  });
   const settings = createRoute({
     getParentRoute: () => app,
     path: "/settings",
@@ -169,7 +202,7 @@ export function createAppRouter(queryClient: QueryClient) {
   // The API section lived in the sidebar until 0.4.2: old links land on its new place.
   const apiDocsOld = createRoute({ getParentRoute: () => app, path: "/api-docs", beforeLoad: () => { throw redirect({ to: "/settings/api" }); } });
 
-  const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, promocodes, payments, addons, telegram, torrent, filters, market, addonApp, telegramOld, apiDocs, apiDocsOld, settings])]);
+  const routeTree = root.addChildren([login, supportEnter, app.addChildren([dashboard, users, tariffs, inbounds, nodes, diagnostics, promocodes, payments, addons, telegram, torrent, filters, market, addonApp, telegramOld, apiDocs, apiDocsOld, settings])]);
   return createRouter({
     routeTree,
     basepath: basePath || "/",

@@ -4,6 +4,8 @@ import { ChevronLeft, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 import { lazy, Suspense, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { meQuery, qk } from "../../api/hooks";
+import { useSupportMode } from "../../api/support";
+import { ClosedForSupport } from "../support-closed";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
@@ -20,6 +22,8 @@ type APIKey = Schemas["APIKeyView"];
 type Scope = APIKey["scope"];
 
 export function ApiPage() {
+  // The keys are the admin's own: closed to a support operator, the reference stays open.
+  const operator = !!useSupportMode();
   return (
     <>
       <Link to="/settings" search={{ tab: "security" }} className="mb-2 inline-flex items-center gap-1 rounded-lg text-[13px] font-medium text-[var(--ink-500)] hover:text-[var(--ink-900)]">
@@ -27,7 +31,7 @@ export function ApiPage() {
       </Link>
       <PageHeader title={t("apiPage.title")} sub={t("apiPage.subtitle")} />
       <div className="flex flex-col gap-4">
-        <KeysCard />
+        {operator ? <ClosedForSupport /> : <KeysCard />}
         <Suspense fallback={<Skeleton style={{ height: 480, borderRadius: 20 }} />}>
           <ApiReference />
         </Suspense>

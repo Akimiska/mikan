@@ -99,6 +99,18 @@ export function ago(iso: string, now = Date.now()): string {
   return t("time.daysAgo", { n: Math.round(h / 24) });
 }
 
+/** What is left until iso, in the words uptime uses ("1 ч 12 мин"); under a minute is said so. */
+export function timeLeft(iso: string, now = Date.now()): string {
+  const s = Math.max(0, Math.floor((new Date(iso).getTime() - now) / 1000));
+  if (s < 60) return t("time.lessMinute");
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return t("time.uptimeDays", { d, h });
+  if (h > 0) return t("time.uptimeHours", { h, m });
+  return t("time.uptimeMinutes", { m });
+}
+
 export function uptime(iso: string, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   const d = Math.floor(s / 86400);

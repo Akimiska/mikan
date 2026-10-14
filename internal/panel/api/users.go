@@ -73,8 +73,9 @@ type userEnv struct {
 
 func (h *handlers) userEnv(ctx context.Context) userEnv {
 	var e userEnv
-	// A subscription link is the user's credential: a read-only key does not get it.
-	if h.d.SubBase != nil && !hidesSecrets(ctx) {
+	// A subscription link is the user's credential: a read-only key does not get it, nor does
+	// a support operator the admin did not let see the subscribers.
+	if h.d.SubBase != nil && !hidesLinks(ctx) {
 		e.subBase = h.d.SubBase(ctx)
 	}
 	e.online = h.online()
@@ -530,7 +531,7 @@ func (h *handlers) getUser(ctx context.Context, in *userIDInput) (*userOutput, e
 			out.Body.Telegram = &TelegramLink{ID: l.TgID, Username: l.Username, Name: l.FirstName}
 		}
 		// An old link is a credential like the own one: not for a key that may only read.
-		if !hidesSecrets(ctx) {
+		if !hidesLinks(ctx) {
 			out.Body.Legacy = h.legacyLinks(ctx, u.ID)
 		}
 	}

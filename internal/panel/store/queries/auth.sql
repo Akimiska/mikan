@@ -36,8 +36,9 @@ UPDATE admins SET recovery_codes = sqlc.arg(rest) WHERE id = sqlc.arg(id) AND re
 UPDATE admins SET last_login_at = $1 WHERE id = $2;
 
 -- name: CreateSession :exec
-INSERT INTO sessions (id_hash, admin_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+-- support_grant_id is set for a support operator's session (internal/panel/support), NULL for the admin's own.
+INSERT INTO sessions (id_hash, admin_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent, support_grant_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: GetSession :one
 SELECT * FROM sessions WHERE id_hash = $1;
@@ -55,7 +56,8 @@ DELETE FROM sessions WHERE admin_id = $1;
 DELETE FROM sessions WHERE admin_id = $1 AND id_hash <> $2;
 
 -- name: ListAdminSessions :many
-SELECT * FROM sessions WHERE admin_id = $1 ORDER BY last_seen_at DESC;
+-- The admin's own sessions: an operator's belong to its grant, which the admin ends there.
+SELECT * FROM sessions WHERE admin_id = $1 AND support_grant_id IS NULL ORDER BY last_seen_at DESC;
 
 -- name: DeleteStaleSessions :exec
 DELETE FROM sessions WHERE expires_at < sqlc.arg(now) OR last_seen_at < sqlc.arg(idle_before);

@@ -55,15 +55,19 @@ func (h *handlers) listAudit(ctx context.Context, in *auditInput) (*auditOutput,
 	out := &auditOutput{}
 	out.Body.Items = make([]AuditEntry, 0, len(rows))
 	for _, r := range rows {
-		e := AuditEntry{ID: r.ID, At: time.Unix(r.Ts, 0).UTC(), Action: r.Action, TargetType: r.TargetType.String, TargetID: r.TargetID.String,
-			IP: r.Ip.String, Details: json.RawMessage("null"), AdminID: store.Int64Ptr(r.AdminID)}
-		if r.Details.Valid {
-			e.Details = json.RawMessage(r.Details.String)
-		}
-		out.Body.Items = append(out.Body.Items, e)
+		out.Body.Items = append(out.Body.Items, auditEntry(r))
 	}
 	if len(rows) == in.Limit {
 		out.Body.Next = rows[len(rows)-1].ID
 	}
 	return out, nil
+}
+
+func auditEntry(r db.AuditLog) AuditEntry {
+	e := AuditEntry{ID: r.ID, At: time.Unix(r.Ts, 0).UTC(), Action: r.Action, TargetType: r.TargetType.String, TargetID: r.TargetID.String,
+		IP: r.Ip.String, Details: json.RawMessage("null"), AdminID: store.Int64Ptr(r.AdminID)}
+	if r.Details.Valid {
+		e.Details = json.RawMessage(r.Details.String)
+	}
+	return e
 }

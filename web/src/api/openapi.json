@@ -1733,6 +1733,83 @@
         ],
         "type": "object"
       },
+      "CreateSupportGrantInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "hours": {
+            "description": "Срок доступа в часах",
+            "enum": [
+              2,
+              6,
+              24
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "level": {
+            "enum": [
+              "view",
+              "change",
+              "terminal"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "description": "Пометка для себя, например номер обращения",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "password": {
+            "description": "Пароль админа: нужен для уровня terminal",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "show_people": {
+            "description": "Показывать оператору имена, Telegram и ссылки подписчиков",
+            "type": "boolean"
+          },
+          "terminal_targets": {
+            "description": "Уровень terminal: где разрешён терминал, panel и/или node:\u003cid\u003e. Полный доступ к этим серверам",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "totp": {
+            "description": "Код из приложения, если включена 2FA: нужен для уровня terminal",
+            "maxLength": 16,
+            "type": "string"
+          }
+        },
+        "required": [
+          "hours",
+          "level"
+        ],
+        "type": "object"
+      },
+      "CreateSupportGrantOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/SupportGrantView"
+          },
+          "link": {
+            "description": "Ссылка доступа для оператора, токен в части после #: показывается один раз",
+            "type": "string"
+          },
+          "token": {
+            "description": "Токен ms_…: показывается один раз",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant",
+          "token",
+          "link"
+        ],
+        "type": "object"
+      },
       "CreateUserInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -7237,6 +7314,197 @@
         ],
         "type": "object"
       },
+      "SupportEnterInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "description": "Токен из ссылки доступа (после #)",
+            "maxLength": 43,
+            "minLength": 43,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "SupportGrantView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "entered_at": {
+            "description": "Когда оператор вошёл по ссылке в браузере; null: ещё нет",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_ip": {
+            "description": "Адрес, с которого оператор был в последний раз",
+            "type": "string"
+          },
+          "last_used_at": {
+            "description": "Последнее обращение оператора (браузер или ключ); null: ещё не было",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "level": {
+            "description": "view: только чтение; change: ещё и изменения; terminal: ещё и терминал на серверах из terminal_targets",
+            "enum": [
+              "view",
+              "change",
+              "terminal"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "show_people": {
+            "description": "Оператор видит имена, Telegram и ссылки подписок; иначе они скрыты",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "terminal_targets": {
+            "description": "Где разрешён терминал: panel или node:\u003cid\u003e; пусто вне уровня terminal",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "level",
+          "show_people",
+          "terminal_targets",
+          "note",
+          "status",
+          "created_at",
+          "expires_at",
+          "entered_at",
+          "last_used_at",
+          "last_ip",
+          "revoked_at"
+        ],
+        "type": "object"
+      },
+      "SupportGrantsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "description": "Что делал оператор и что было с доступом, от новых к старым",
+            "items": {
+              "$ref": "#/components/schemas/AuditEntry"
+            },
+            "type": "array"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/SupportGrantView",
+            "description": "Последний выданный доступ, активный или нет; null: ещё не выдавался"
+          }
+        },
+        "required": [
+          "grant",
+          "actions"
+        ],
+        "type": "object"
+      },
+      "SupportNode": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "SupportWhoami": {
+        "additionalProperties": false,
+        "properties": {
+          "csrf_token": {
+            "description": "Для изменяющих запросов сессии оператора; у ключа ms_… нет",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "view",
+              "change",
+              "terminal"
+            ],
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SupportNode"
+            },
+            "type": "array"
+          },
+          "panel_version": {
+            "type": "string"
+          },
+          "show_people": {
+            "type": "boolean"
+          },
+          "terminal_targets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "level",
+          "expires_at",
+          "show_people",
+          "panel_version",
+          "nodes",
+          "terminal_targets"
+        ],
+        "type": "object"
+      },
       "System": {
         "additionalProperties": false,
         "properties": {
@@ -8993,11 +9261,16 @@
         "in": "cookie",
         "name": "__Host-mikan",
         "type": "apiKey"
+      },
+      "supportKey": {
+        "description": "Токен доступа для поддержки: Authorization: Bearer ms_…",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
   "info": {
-    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n## Подписка в приложениях\n\nСсылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: `profile-title` — название профиля (настройка `sub_title`, пусто — бренд), `announce` — строка над профилем или под его названием (`sub_announce`), `subscription-userinfo` — трафик и срок, `support-url`, `profile-web-page-url`. Настраиваются в `PATCH /api/v1/settings`.\n\nВ `sub_title` и `sub_announce` подставляются переменные каждого пользователя: `{brand}` — бренд, `{name}` — имя, `{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, `{total}` — лимит с пакетами, `{devices}` — привязанные устройства (`2/3`; без лимита `2`; `∞`, когда привязки нет и лимита тоже). Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`.",
+    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n«Доступ для поддержки» (Настройки → Безопасность) даёт оператору временный токен `ms_…`: `Authorization: Bearer ms_…` или вход по ссылке в браузере (`POST /support/enter`). Уровень `view` только читает, `change` ещё и меняет; вход, ключи, сессии, журнал, секретные адреса и сам доступ закрыты всегда (403 `support_denied`). Без галочки «показывать подписчиков» имена, Telegram и ссылки скрыты. Кто он и до какого времени: `GET /support/whoami`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n## Подписка в приложениях\n\nСсылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: `profile-title` — название профиля (настройка `sub_title`, пусто — бренд), `announce` — строка над профилем или под его названием (`sub_announce`), `subscription-userinfo` — трафик и срок, `support-url`, `profile-web-page-url`. Настраиваются в `PATCH /api/v1/settings`.\n\nВ `sub_title` и `sub_announce` подставляются переменные каждого пользователя: `{brand}` — бренд, `{name}` — имя, `{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, `{total}` — лимит с пакетами, `{devices}` — привязанные устройства (`2/3`; без лимита `2`; `∞`, когда привязки нет и лимита тоже). Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`.",
     "title": "mikan",
     "version": "dev"
   },
@@ -13847,6 +14120,201 @@
         "x-session-only": true
       }
     },
+    "/api/v1/support/enter": {
+      "post": {
+        "description": "Одна ссылка пускает в браузер один раз; повторный вход требует новой ссылки. Ключ ms_… в заголовке Authorization работает, пока доступ жив.",
+        "operationId": "support-enter",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportEnterInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportWhoami"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {}
+        ],
+        "summary": "Вход оператора по ссылке доступа",
+        "tags": [
+          "support-operator"
+        ]
+      }
+    },
+    "/api/v1/support/grants": {
+      "get": {
+        "operationId": "list-support-grants",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportGrantsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Доступ для поддержки и действия оператора",
+        "tags": [
+          "support"
+        ],
+        "x-session-only": true
+      },
+      "post": {
+        "description": "Одновременно активен один доступ: новый отзывает прежний. Ссылка и токен показываются один раз. Уровень terminal требует пароль и код 2FA.",
+        "operationId": "create-support-grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSupportGrantInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSupportGrantOutputBody"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Открыть доступ для поддержки",
+        "tags": [
+          "support"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/support/grants/{id}": {
+      "delete": {
+        "description": "Оператор теряет доступ сразу: его сессии удаляются, ключ ms_… перестаёт работать.",
+        "operationId": "revoke-support-grant",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отозвать доступ для поддержки",
+        "tags": [
+          "support"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/support/whoami": {
+      "get": {
+        "description": "Для оператора: сессия или ключ ms_…. Другим отвечает 403 support_only.",
+        "operationId": "support-whoami",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportWhoami"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Чей доступ и до какого времени",
+        "tags": [
+          "support-operator"
+        ]
+      }
+    },
     "/api/v1/system/check": {
       "post": {
         "operationId": "check-server",
@@ -15948,6 +16416,9 @@
     },
     {
       "session": []
+    },
+    {
+      "supportKey": []
     }
   ]
 }

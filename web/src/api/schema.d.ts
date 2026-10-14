@@ -1540,6 +1540,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/support/enter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Вход оператора по ссылке доступа
+         * @description Одна ссылка пускает в браузер один раз; повторный вход требует новой ссылки. Ключ ms_… в заголовке Authorization работает, пока доступ жив.
+         */
+        post: operations["support-enter"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Доступ для поддержки и действия оператора */
+        get: operations["list-support-grants"];
+        put?: never;
+        /**
+         * Открыть доступ для поддержки
+         * @description Одновременно активен один доступ: новый отзывает прежний. Ссылка и токен показываются один раз. Уровень terminal требует пароль и код 2FA.
+         */
+        post: operations["create-support-grant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/grants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отозвать доступ для поддержки
+         * @description Оператор теряет доступ сразу: его сессии удаляются, ключ ms_… перестаёт работать.
+         */
+        delete: operations["revoke-support-grant"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/support/whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Чей доступ и до какого времени
+         * @description Для оператора: сессия или ключ ms_…. Другим отвечает 403 support_only.
+         */
+        get: operations["support-whoami"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/check": {
         parameters: {
             query?: never;
@@ -2766,6 +2847,33 @@ export interface components {
             /** @description IP или имя сервера ноды */
             host: string;
             name: string;
+        };
+        CreateSupportGrantInputBody: {
+            /**
+             * Format: int64
+             * @description Срок доступа в часах
+             * @enum {integer}
+             */
+            hours: 2 | 6 | 24;
+            /** @enum {string} */
+            level: "view" | "change" | "terminal";
+            /** @description Пометка для себя, например номер обращения */
+            note?: string;
+            /** @description Пароль админа: нужен для уровня terminal */
+            password?: string;
+            /** @description Показывать оператору имена, Telegram и ссылки подписчиков */
+            show_people?: boolean;
+            /** @description Уровень terminal: где разрешён терминал, panel и/или node:<id>. Полный доступ к этим серверам */
+            terminal_targets?: string[];
+            /** @description Код из приложения, если включена 2FA: нужен для уровня terminal */
+            totp?: string;
+        };
+        CreateSupportGrantOutputBody: {
+            grant: components["schemas"]["SupportGrantView"];
+            /** @description Ссылка доступа для оператора, токен в части после #: показывается один раз */
+            link: string;
+            /** @description Токен ms_…: показывается один раз */
+            token: string;
         };
         CreateUserInputBody: {
             contact?: string;
@@ -4782,6 +4890,67 @@ export interface components {
             /** @description Страница по умолчанию — к ней ведёт «Сбросить» */
             defaults: components["schemas"]["Page"];
             logo?: components["schemas"]["PageAsset"];
+        };
+        SupportEnterInputBody: {
+            /** @description Токен из ссылки доступа (после #) */
+            token: string;
+        };
+        SupportGrantView: {
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Когда оператор вошёл по ссылке в браузере; null: ещё нет
+             */
+            entered_at: string | null;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Адрес, с которого оператор был в последний раз */
+            last_ip: string;
+            /**
+             * Format: date-time
+             * @description Последнее обращение оператора (браузер или ключ); null: ещё не было
+             */
+            last_used_at: string | null;
+            /**
+             * @description view: только чтение; change: ещё и изменения; terminal: ещё и терминал на серверах из terminal_targets
+             * @enum {string}
+             */
+            level: "view" | "change" | "terminal";
+            note: string;
+            /** Format: date-time */
+            revoked_at: string | null;
+            /** @description Оператор видит имена, Telegram и ссылки подписок; иначе они скрыты */
+            show_people: boolean;
+            /** @enum {string} */
+            status: "active" | "expired" | "revoked";
+            /** @description Где разрешён терминал: panel или node:<id>; пусто вне уровня terminal */
+            terminal_targets: string[];
+        };
+        SupportGrantsOutputBody: {
+            /** @description Что делал оператор и что было с доступом, от новых к старым */
+            actions: components["schemas"]["AuditEntry"][];
+            /** @description Последний выданный доступ, активный или нет; null: ещё не выдавался */
+            grant: components["schemas"]["SupportGrantView"];
+        };
+        SupportNode: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+        };
+        SupportWhoami: {
+            /** @description Для изменяющих запросов сессии оператора; у ключа ms_… нет */
+            csrf_token?: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @enum {string} */
+            level: "view" | "change" | "terminal";
+            nodes: components["schemas"]["SupportNode"][];
+            panel_version: string;
+            show_people: boolean;
+            terminal_targets: string[];
         };
         System: {
             /** Format: double */
@@ -9152,6 +9321,160 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "support-enter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportEnterInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportWhoami"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-support-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportGrantsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-support-grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSupportGrantInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateSupportGrantOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "revoke-support-grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "support-whoami": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportWhoami"];
+                };
             };
             /** @description Error */
             default: {

@@ -523,7 +523,8 @@
       "source_exists": "This source is already added.",
       "source_limit": "The sources are at their limit: remove one to add another.",
       "source_in_use": "An addon from this source is installed. Remove it first.",
-      "source_unknown": "No such source."
+      "source_unknown": "No such source.",
+      "support_disabled": "Support access is turned off: turn it on on the Support access card or with mikan support-access on on the server"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",

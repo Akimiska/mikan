@@ -478,6 +478,19 @@ fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {
     f
 }
 
+/// The payload of the hello frame: the recording of this session and the end of its grant.
+/// internal/hostchan (TerminalHello) reads it; tests.rs and terminal_test.go hold the same
+/// sample so that the two stay one format.
+fn hello_payload(recording: &str, expires_at: u64) -> String {
+    serde_json::json!({"recording": recording, "expires_at": expires_at}).to_string()
+}
+
+/// The payload of the exit frame: why the session ended and the shell's exit code, if it had
+/// one (internal/hostchan TerminalEnd).
+fn exit_payload(end: End, code: Option<i32>) -> String {
+    serde_json::json!({"reason": end.as_str(), "code": code}).to_string()
+}
+
 /// The frames the panel sends, put together from what arrives in pieces.
 #[derive(Default)]
 struct FrameReader {
@@ -805,7 +818,7 @@ fn write_some(dst: &mut impl Write, pending: &mut Vec<u8>) -> bool {
 /// Tells the panel the session cannot begin.
 fn refuse(conn: &mut UnixStream) {
     let _ = conn.set_write_timeout(Some(Duration::from_secs(1)));
-    let _ = conn.write_all(&frame(EXIT, br#"{"reason":"error","code":null}"#));
+    let _ = conn.write_all(&frame(EXIT, b"{\"code\":null,\"reason\":\"error\"}"));
 }
 
 /// The session: the shell, the recording and the stream to the panel, until one of the ways
@@ -835,8 +848,8 @@ fn session(p: &Params, req: &Request, term: &Dir, rec_fd: &OwnedFd, conn: UnixSt
     let mut frames = FrameReader::default();
     let mut to_conn: Vec<u8> = Vec::new();
     let mut to_shell: Vec<u8> = Vec::new();
-    let hello = serde_json::json!({"recording": rec_name, "expires_at": req.expires_at});
-    to_conn.extend(frame(HELLO, hello.to_string().as_bytes()));
+    let hello = hello_payload(&rec_name, req.expires_at);
+    to_conn.extend(frame(HELLO, hello.as_bytes()));
     let banner = b"\r\n*** mikan support: this session is recorded and the server's owner can watch it ***\r\n";
     to_conn.extend(frame(DATA, banner));
     let _ = rec.data(false, banner);
@@ -943,8 +956,8 @@ fn session(p: &Params, req: &Request, term: &Dir, rec_fd: &OwnedFd, conn: UnixSt
     // Whatever is left of the output, and the reason, for the panel to show; it may be gone.
     let _ = conn.set_nonblocking(false);
     let _ = conn.set_write_timeout(Some(Duration::from_secs(1)));
-    let reason = serde_json::json!({"reason": end.as_str(), "code": out.exit_code});
-    to_conn.extend(frame(EXIT, reason.to_string().as_bytes()));
+    let reason = exit_payload(end, out.exit_code);
+    to_conn.extend(frame(EXIT, reason.as_bytes()));
     let _ = conn.write_all(&to_conn);
     Ok(())
 }

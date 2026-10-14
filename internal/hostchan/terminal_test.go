@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,61 @@ func TestFramesRoundTripAndAreBounded(t *testing.T) {
 	// A cut stream is an error, not a short frame.
 	if _, _, err := hostchan.ReadFrame(bytes.NewReader([]byte{hostchan.FrameData, 0, 0, 0, 5, 'a'})); err == nil {
 		t.Error("a half frame was read")
+	}
+}
+
+// What this side writes and reads is what the host's agent (Rust, installer/src/terminal.rs)
+// writes and reads: the same bytes for a frame, the same JSON for the hello and the exit. The
+// agent's tests hold the same samples.
+func TestWireFormatMatchesTheAgent(t *testing.T) {
+	for _, c := range []struct {
+		kind byte
+		data []byte
+		want []byte
+	}{
+		{hostchan.FrameData, []byte("hi"), []byte{'D', 0, 0, 0, 2, 'h', 'i'}},
+		{hostchan.FrameResize, hostchan.ResizePayload(80, 24), []byte{'R', 0, 0, 0, 4, 0, 80, 0, 24}},
+		{hostchan.FrameExit, nil, []byte{'X', 0, 0, 0, 0}},
+	} {
+		var buf bytes.Buffer
+		if err := hostchan.WriteFrame(&buf, c.kind, c.data); err != nil || !bytes.Equal(buf.Bytes(), c.want) {
+			t.Errorf("%c: %v %v, want %v", c.kind, buf.Bytes(), err, c.want)
+		}
+	}
+	var hello hostchan.TerminalHello
+	if err := json.Unmarshal([]byte(`{"expires_at":1800000600,"recording":"7-1800000000.cast"}`), &hello); err != nil || hello.Recording != "7-1800000000.cast" || hello.ExpiresAt != 1800000600 {
+		t.Errorf("hello: %+v %v", hello, err)
+	}
+	var end hostchan.TerminalEnd
+	if err := json.Unmarshal([]byte(`{"code":3,"reason":"exit"}`), &end); err != nil || end.Reason != "exit" || end.Code == nil || *end.Code != 3 {
+		t.Errorf("exit: %+v %v", end, err)
+	}
+	end = hostchan.TerminalEnd{}
+	if err := json.Unmarshal([]byte(`{"code":null,"reason":"idle"}`), &end); err != nil || end.Reason != "idle" || end.Code != nil {
+		t.Errorf("exit without a code: %+v %v", end, err)
+	}
+	// The request the agent reads: these keys, an integer end, a socket name of its shape.
+	dir := t.TempDir()
+	hosttest.MakeLayout(t, dir)
+	short, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = hostchan.New(dir).OpenTerminal(short, hostchan.TerminalRequest{GrantID: 7, Target: "node:12", ExpiresAt: time.Now().Add(time.Hour)})
+	}()
+	defer func() { <-done }()
+	shape := regexp.MustCompile(`^\{"expires_at":[0-9]{10},"grant_id":7,"socket":"t-[0-9a-f]{24}\.sock","target":"node:12"\}$`)
+	var raw []byte
+	for range 100 {
+		var err error
+		if raw, err = os.ReadFile(filepath.Join(dir, "support/terminal/request")); err == nil {
+			break
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+	if !shape.Match(raw) {
+		t.Errorf("the request is %q", raw)
 	}
 }
 

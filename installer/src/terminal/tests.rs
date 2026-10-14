@@ -637,6 +637,36 @@ fn old_recordings_go_and_only_recordings() {
     fs::remove_dir_all(&d).unwrap();
 }
 
+// What the panel's side (internal/hostchan, in Go) writes and reads is what this side writes and
+// reads: the same bytes for a frame, the same JSON for a request, the hello and the exit.
+// internal/hostchan/terminal_test.go holds the same samples.
+#[test]
+fn the_wire_format_is_the_one_the_panel_speaks() {
+    assert_eq!(frame(DATA, b"hi"), [b'D', 0, 0, 0, 2, b'h', b'i']);
+    assert_eq!(frame(RESIZE, &[0, 80, 0, 24]), [b'R', 0, 0, 0, 4, 0, 80, 0, 24]);
+    assert_eq!(frame(EXIT, b""), [b'X', 0, 0, 0, 0]);
+    // What Go's json.Marshal makes of the request map (keys sorted).
+    let request = br#"{"expires_at":1800000600,"grant_id":7,"socket":"t-0123456789abcdef01234567.sock","target":"node:12"}"#;
+    assert_eq!(
+        parse_request(request, 1_800_000_000),
+        Ok(Request { grant_id: 7, target: "node:12".into(), expires_at: 1_800_000_600, socket: "t-0123456789abcdef01234567.sock".into() })
+    );
+    assert_eq!(hello_payload("7-1800000000.cast", 1_800_000_600), r#"{"expires_at":1800000600,"recording":"7-1800000000.cast"}"#);
+    assert_eq!(exit_payload(End::Exited, Some(3)), r#"{"code":3,"reason":"exit"}"#);
+    assert_eq!(exit_payload(End::Idle, None), r#"{"code":null,"reason":"idle"}"#);
+    // The reasons the panel knows (cleanReason in internal/panel/api/terminal.go).
+    for (end, word) in [
+        (End::Closed, "closed"),
+        (End::Idle, "idle"),
+        (End::Expired, "expired"),
+        (End::Revoked, "revoked"),
+        (End::Exited, "exit"),
+        (End::Recording, "recording"),
+    ] {
+        assert_eq!(end.as_str(), word);
+    }
+}
+
 #[test]
 fn recording_names() {
     for ok in ["7-1800000000.cast", "123-4.cast"] {

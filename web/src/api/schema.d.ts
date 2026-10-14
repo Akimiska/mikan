@@ -621,6 +621,26 @@ export interface paths {
         patch: operations["update-inbound"];
         trace?: never;
     };
+    "/api/v1/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Последние строки лога панели или ноды
+         * @description source=panel или node:<id>; до 2000 строк, самые новые последними. Токены, ключи, пароли, ссылки подписок и секретные пути вырезаны.
+         */
+        get: operations["get-logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/marketplace": {
         parameters: {
             query?: never;
@@ -883,6 +903,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * mikan doctor на сервере ноды
+         * @description То же для сервера удалённой ноды; для своей ноды панели это сервер панели.
+         */
+        post: operations["doctor-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/key": {
         parameters: {
             query?: never;
@@ -894,6 +934,26 @@ export interface paths {
         put?: never;
         /** Выпустить новый ключ ноды (старый перестаёт работать) */
         post: operations["rekey-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перезапустить контейнеры сервера ноды
+         * @description Для своей ноды панели используйте /system/restart: она живёт в одних контейнерах с панелью.
+         */
+        post: operations["restart-node"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1551,6 +1611,46 @@ export interface paths {
         put?: never;
         /** Проверить сервер панели */
         post: operations["check-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * mikan doctor на сервере панели
+         * @description Хост запускает mikan doctor и отдаёт отчёт (Docker, контейнеры, порты, файрвол, часы, DNS, GitHub, диск, память); ждём до минуты. Нужна команда mikan 0.5.1.1 или новее на сервере: mikan update.
+         */
+        post: operations["doctor-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перезапустить контейнеры сервера панели
+         * @description Хост перезапускает контейнеры через секунду-две: панель на это время недоступна.
+         */
+        post: operations["restart-server"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2986,6 +3086,28 @@ export interface components {
             /** @description happ://crypt5/…: Happ открывает подписку, не показывая её адрес; пусто — шифрованная ссылка выключена */
             link: string;
         };
+        HostItem: {
+            detail: string;
+            /** @description Что сделать; пусто, если всё хорошо */
+            fix?: string;
+            label: string;
+            /** @enum {string} */
+            level: "ok" | "warn" | "error";
+        };
+        HostReport: {
+            /** @description RFC 3339 */
+            at: string;
+            /** Format: int64 */
+            errors: number;
+            /** @description Заявка, на которую это ответ */
+            id: string;
+            items: components["schemas"]["HostItem"][];
+            /** @enum {string} */
+            kind: "panel" | "node";
+            version: string;
+            /** Format: int64 */
+            warnings: number;
+        };
         HostStatus: {
             /** @description RFC 3339 */
             at: string;
@@ -3205,11 +3327,23 @@ export interface components {
             name: string;
             ok: boolean;
         };
+        LogLine: {
+            /** Format: date-time */
+            at: string;
+            /** @description DEBUG, INFO, WARN или ERROR */
+            level: string;
+            /** @description Строка целиком, как её пишет slog, без секретов */
+            text: string;
+        };
         LoginInputBody: {
             password: string;
             /** @description Код из приложения или резервный код */
             totp?: string;
             username: string;
+        };
+        LogsView: {
+            lines: components["schemas"]["LogLine"][];
+            source: string;
         };
         MarketEntry: {
             description: {
@@ -4416,6 +4550,9 @@ export interface components {
         };
         ResetPathOutputBody: {
             admin_url: string;
+        };
+        RestartAccepted: {
+            id: string;
         };
         Result: {
             cert_valid: boolean;
@@ -6889,6 +7026,40 @@ export interface operations {
             };
         };
     };
+    "get-logs": {
+        parameters: {
+            query?: {
+                /** @description Чей лог: panel или node:<id> ноды */
+                source?: string;
+                /** @description Сколько последних строк */
+                tail?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-marketplace": {
         parameters: {
             query?: never;
@@ -7488,6 +7659,37 @@ export interface operations {
             };
         };
     };
+    "doctor-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostReport"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "rekey-node": {
         parameters: {
             query?: never;
@@ -7506,6 +7708,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "restart-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestartAccepted"];
                 };
             };
             /** @description Error */
@@ -9180,6 +9413,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "doctor-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostReport"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "restart-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestartAccepted"];
                 };
             };
             /** @description Error */

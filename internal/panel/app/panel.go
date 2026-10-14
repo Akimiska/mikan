@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/hostchan"
+	"mikan/internal/logbuf"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
@@ -128,6 +130,8 @@ type Options struct {
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// CheckHost checks nodes' ports from Russia; nil: the check is not offered (tests).
 	CheckHost *checkhost.Client
+	// Logs holds the last lines of the panel's log for the Diagnostics page; nil: none.
+	Logs *logbuf.Buffer
 }
 
 type noChanges struct{}
@@ -235,6 +239,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.DNS = o.DNS
 	deps.CheckHost = o.CheckHost
 	deps.DataDir = o.DataDir
+	deps.Logs, deps.Host = o.Logs, hostchan.New(o.DataDir)
 	promos := promo.New(st, o.Now)
 	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,

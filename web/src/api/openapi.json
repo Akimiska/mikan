@@ -2362,6 +2362,82 @@
         ],
         "type": "object"
       },
+      "HostItem": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "fix": {
+            "description": "Что сделать; пусто, если всё хорошо",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "ok",
+              "warn",
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "label",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "HostReport": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "RFC 3339",
+            "type": "string"
+          },
+          "errors": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Заявка, на которую это ответ",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HostItem"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "panel",
+              "node"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "warnings": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "version",
+          "kind",
+          "errors",
+          "warnings",
+          "items"
+        ],
+        "type": "object"
+      },
       "HostStatus": {
         "additionalProperties": false,
         "properties": {
@@ -2958,6 +3034,29 @@
         ],
         "type": "object"
       },
+      "LogLine": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "level": {
+            "description": "DEBUG, INFO, WARN или ERROR",
+            "type": "string"
+          },
+          "text": {
+            "description": "Строка целиком, как её пишет slog, без секретов",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "level",
+          "text"
+        ],
+        "type": "object"
+      },
       "LoginInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2980,6 +3079,25 @@
         "required": [
           "username",
           "password"
+        ],
+        "type": "object"
+      },
+      "LogsView": {
+        "additionalProperties": false,
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/LogLine"
+            },
+            "type": "array"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "lines"
         ],
         "type": "object"
       },
@@ -6215,6 +6333,18 @@
         },
         "required": [
           "admin_url"
+        ],
+        "type": "object"
+      },
+      "RestartAccepted": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
         ],
         "type": "object"
       },
@@ -10782,6 +10912,66 @@
         ]
       }
     },
+    "/api/v1/logs": {
+      "get": {
+        "description": "source=panel или node:\u003cid\u003e; до 2000 строк, самые новые последними. Токены, ключи, пароли, ссылки подписок и секретные пути вырезаны.",
+        "operationId": "get-logs",
+        "parameters": [
+          {
+            "description": "Чей лог: panel или node:\u003cid\u003e ноды",
+            "explode": false,
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "default": "panel",
+              "description": "Чей лог: panel или node:\u003cid\u003e ноды",
+              "maxLength": 24,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Сколько последних строк",
+            "explode": false,
+            "in": "query",
+            "name": "tail",
+            "schema": {
+              "default": 200,
+              "description": "Сколько последних строк",
+              "format": "int64",
+              "maximum": 2000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Последние строки лога панели или ноды",
+        "tags": [
+          "diagnostics"
+        ]
+      }
+    },
     "/api/v1/marketplace": {
       "get": {
         "operationId": "list-marketplace",
@@ -11576,6 +11766,50 @@
         ]
       }
     },
+    "/api/v1/nodes/{id}/doctor": {
+      "post": {
+        "description": "То же для сервера удалённой ноды; для своей ноды панели это сервер панели.",
+        "operationId": "doctor-node",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "mikan doctor на сервере ноды",
+        "tags": [
+          "node"
+        ]
+      }
+    },
     "/api/v1/nodes/{id}/key": {
       "post": {
         "operationId": "rekey-node",
@@ -11614,6 +11848,51 @@
           }
         },
         "summary": "Выпустить новый ключ ноды (старый перестаёт работать)",
+        "tags": [
+          "node"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/nodes/{id}/restart": {
+      "post": {
+        "description": "Для своей ноды панели используйте /system/restart: она живёт в одних контейнерах с панелью.",
+        "operationId": "restart-node",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestartAccepted"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Перезапустить контейнеры сервера ноды",
         "tags": [
           "node"
         ],
@@ -13876,6 +14155,71 @@
         "tags": [
           "settings"
         ]
+      }
+    },
+    "/api/v1/system/doctor": {
+      "post": {
+        "description": "Хост запускает mikan doctor и отдаёт отчёт (Docker, контейнеры, порты, файрвол, часы, DNS, GitHub, диск, память); ждём до минуты. Нужна команда mikan 0.5.1.1 или новее на сервере: mikan update.",
+        "operationId": "doctor-server",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "mikan doctor на сервере панели",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/system/restart": {
+      "post": {
+        "description": "Хост перезапускает контейнеры через секунду-две: панель на это время недоступна.",
+        "operationId": "restart-server",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestartAccepted"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Перезапустить контейнеры сервера панели",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/tariffs": {

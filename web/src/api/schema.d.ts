@@ -4247,6 +4247,7 @@ export interface components {
             sub_template?: string;
             /** @description Переменные — см. SettingsView.sub_title */
             sub_title?: string;
+            support_access?: boolean;
             /** @description https://… или tg://… */
             support_url?: string;
             wide_sni_scan?: boolean;
@@ -4939,6 +4940,8 @@ export interface components {
             sub_template: string;
             /** @description Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего, {devices} — привязанные устройства (2/3); без срока или лимита — ∞ */
             sub_title: string;
+            /** @description Разрешить доступ для поддержки (Настройки → Безопасность). Выключено: новый доступ не выдать, действующий закрывается. MIKAN_SUPPORT_ACCESS=off в .env сервера выключает его независимо от этой настройки */
+            support_access: boolean;
             support_url: string;
             /** @description Искать сайты маскировки REALITY не только в /24 ноды, но и в соседних /24 её /16, до 20 найденных сайтов или 2 минут. Много подключений: хостер может принять это за сканирование сети */
             wide_sni_scan: boolean;
@@ -5135,6 +5138,11 @@ export interface components {
             actions: components["schemas"]["AuditEntry"][];
             /** @description Последний выданный доступ, активный или нет; null: ещё не выдавался */
             grant: components["schemas"]["SupportGrantView"];
+            /**
+             * @description Выключен ли доступ для поддержки: пусто — включён, env — MIKAN_SUPPORT_ACCESS=off в .env сервера, setting — настройкой support_access
+             * @enum {string}
+             */
+            off: "" | "env" | "setting";
         };
         SupportNode: {
             /** Format: int64 */

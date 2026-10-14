@@ -5239,6 +5239,9 @@
             "maxLength": 200,
             "type": "string"
           },
+          "support_access": {
+            "type": "boolean"
+          },
           "support_url": {
             "description": "https://… или tg://…",
             "maxLength": 200,
@@ -7059,6 +7062,10 @@
             "description": "Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего, {devices} — привязанные устройства (2/3); без срока или лимита — ∞",
             "type": "string"
           },
+          "support_access": {
+            "description": "Разрешить доступ для поддержки (Настройки → Безопасность). Выключено: новый доступ не выдать, действующий закрывается. MIKAN_SUPPORT_ACCESS=off в .env сервера выключает его независимо от этой настройки",
+            "type": "boolean"
+          },
           "support_url": {
             "type": "string"
           },
@@ -7095,6 +7102,7 @@
           "auto_sni",
           "wide_sni_scan",
           "any_port",
+          "support_access",
           "device_binding",
           "device_require_hwid",
           "device_unbind",
@@ -7613,9 +7621,19 @@
           "grant": {
             "$ref": "#/components/schemas/SupportGrantView",
             "description": "Последний выданный доступ, активный или нет; null: ещё не выдавался"
+          },
+          "off": {
+            "description": "Выключен ли доступ для поддержки: пусто — включён, env — MIKAN_SUPPORT_ACCESS=off в .env сервера, setting — настройкой support_access",
+            "enum": [
+              "",
+              "env",
+              "setting"
+            ],
+            "type": "string"
           }
         },
         "required": [
+          "off",
           "grant",
           "actions"
         ],

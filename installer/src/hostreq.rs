@@ -45,15 +45,18 @@ pub fn dir(node: bool, name: &str) -> Result<Option<Dir>> {
 /// not fire again and again. None when there is none, or when it is not one (a link, a
 /// directory, a FIFO, a file of a size nobody writes): it is removed and nothing runs.
 pub fn take(dir: &Dir) -> Result<Option<Request>> {
+    Ok(take_bytes(dir)?.and_then(|data| parse(&data)))
+}
+
+/// The same for a request with a body of its own (the terminal's): the file's bytes, taken
+/// the same way. None when there is none, or it is not a small regular file.
+pub fn take_bytes(dir: &Dir) -> Result<Option<Vec<u8>>> {
     if !dir.exists("request") {
         return Ok(None);
     }
     let read = dir.read("request", REQUEST_LIMIT);
     dir.discard("request")?;
-    Ok(match read {
-        Ok(Some(data)) => parse(&data),
-        _ => None,
-    })
+    Ok(read.ok().flatten())
 }
 
 /// The request in a file's bytes: JSON with an optional "id". Anything that is not a JSON

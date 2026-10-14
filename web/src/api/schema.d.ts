@@ -3520,13 +3520,21 @@ export interface components {
             description: {
                 [key: string]: string;
             };
-            /** @description Дайджест образа записи источника */
+            /** @description Дайджест образа неофициальной записи */
             digest?: string;
+            /** @description Отпечаток ключа автора, которым подписан релиз (community) */
+            fingerprint?: string;
             homepage: string;
             id: string;
-            /** @description Образ записи источника: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто */
+            /** @description Образ неофициальной записи: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто */
             image?: string;
             installed: boolean;
+            /** @description Дайджест установленного неофициального аддона */
+            installed_digest?: string;
+            /** @description Одобренная версия установленного неофициального аддона */
+            installed_version?: string;
+            /** @description Релиз подписан не тем ключом, что при установке: обновление ждёт, пока админ сверит и примет новый ключ */
+            key_changed?: boolean;
             /** @enum {string} */
             kind: "bot" | "ui" | "generic";
             /** @enum {string} */
@@ -3535,12 +3543,22 @@ export interface components {
             name: {
                 [key: string]: string;
             };
-            /** @description Источник неофициального аддона; нет у аддона подписанного каталога */
+            /** @description Откуда неофициальный аддон; нет у аддона подписанного каталога */
             origin?: components["schemas"]["MarketOrigin"];
             /** @description Что аддон просит: это и одобряет админ при установке */
             permissions: string[];
+            /**
+             * Format: int64
+             * @description Звёзды репозитория автора (community)
+             */
+            stars?: number;
             /** @description Установлен, а в каталоге или источнике другая сборка */
             update: boolean;
+            /**
+             * Format: int64
+             * @description Когда реестр увидел эту сборку, unix (community)
+             */
+            updated_at?: number;
             version: string;
             /** @description Сборка просит больше прав, чем одобрено: обновление ждёт нового одобрения */
             wider: boolean;
@@ -3563,6 +3581,10 @@ export interface components {
             url?: string;
         };
         MarketInstallInputBody: {
+            /** @description Отпечаток нового ключа автора, который админ сверил (после author_key_changed) */
+            accept_key?: string;
+            /** @description Админ подтвердил, что ставит или обновляет неофициальный аддон на свой риск: без этого такая установка и обновление не проходят */
+            ack?: boolean;
             /** @description Права, которые админ видел и одобрил: ровно те, что просит сборка */
             permissions: string[];
         };
@@ -3583,7 +3605,7 @@ export interface components {
             mem_mb?: number;
             /** @enum {string} */
             mode: "http" | "client";
-            /** @description Источник, из которого поставлен аддон (custom) */
+            /** @description Откуда поставлен аддон (custom): источник или реестр сообщества */
             origin?: components["schemas"]["MarketOrigin"];
             /**
              * @description official — из подписанного каталога; custom — образ из источника или, у старых установок, свой образ админа; external — свой процесс админа; mikan неофициальные не проверял
@@ -3598,10 +3620,23 @@ export interface components {
             version: string;
         };
         MarketOrigin: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Источник (source); 0 у реестра
+             */
             id: number;
-            /** @description Источник подписан закреплённым ключом; без подписи тот, кто управляет адресом, управляет и обновлениями */
+            /**
+             * @description source — источник, который добавил админ; community — реестр аддонов сообщества
+             * @enum {string}
+             */
+            kind: "source" | "community";
+            /** @description Репозиторий автора (community) */
+            repo?: string;
+            /** @description mikan убрал аддон из реестра, причина: ставить и обновлять нельзя, установленный лучше удалить */
+            revoked?: string;
+            /** @description Подписан закреплённым ключом автора; без подписи тот, кто управляет адресом, управляет и обновлениями */
             signed: boolean;
+            /** @description Название источника или владелец/репозиторий автора */
             title: string;
         };
         MarketView: {
@@ -3609,6 +3644,10 @@ export interface components {
             catalog: components["schemas"]["MarketEntry"][];
             /** @description catalog_unavailable — каталог не загрузился */
             catalog_error?: string;
+            /** @description Реестр аддонов сообщества: сторонние авторы, mikan их код не проверял */
+            community: components["schemas"]["MarketEntry"][];
+            /** @description community_unavailable — реестр не загрузился */
+            community_error?: string;
             /** @description mikan на сервере умеет аддоны протокола 2; иначе сначала обновить сервер */
             host_ready: boolean;
             installed: components["schemas"]["MarketInstalled"][];

@@ -124,6 +124,8 @@ type Options struct {
 	WarpAPI string
 	// AddonsCatalog is the marketplace's signed catalog; "" is the real one.
 	AddonsCatalog string
+	// AddonsCommunity is the registry of community addons; "" is the real one.
+	AddonsCommunity string
 	// Dev is the panel running for development: addon sources may be read over plain http
 	// from 127.0.0.1.
 	Dev bool
@@ -252,6 +254,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		return ep.URL() + "/" + paths.Sub
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
+	if o.AddonsCommunity != "" {
+		p.Addons.SetCommunityURL(o.AddonsCommunity)
+	}
 	p.Addons.SetDev(o.Dev)
 	deps.Addons = p.Addons
 	addonPages := addonpages.New(addonpages.Deps{Addons: p.Addons, Store: st.Q, Log: o.Log, Now: o.Now})

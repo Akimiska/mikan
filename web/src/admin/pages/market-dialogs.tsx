@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { ApiError, api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk } from "../../api/hooks";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
@@ -9,12 +9,14 @@ import { t } from "../../i18n";
 import { fieldErrors } from "../../lib/fields";
 import { localized } from "../../lib/localized";
 import { ShieldBanner } from "./market-parts";
-import { ADDON_ID_RE, PERMISSIONS, actsAsAdmin, installMarket, installPayment, sortPermissions, type Kind, type MarketEntry, type MarketInstalled, type MarketOrigin } from "./market-common";
+import { safeHref } from "../../lib/url";
+import { ADDON_ID_RE, PERMISSIONS, actsAsAdmin, installMarket, installPayment, sortPermissions, sourceLabel, type Kind, type MarketEntry, type MarketInstalled, type MarketOrigin } from "./market-common";
 
 // The dialogs of the protocol 2 addons, shared by both tabs of the addons page: approving
 // what an addon may do, its details, and an addon of the admin's own. Each one gets exactly
-// the permissions the admin approved; an addon of a source or of the admin's own (a process on
-// the server) is code mikan has not seen, and says so everywhere.
+// the permissions the admin approved; an addon of a source, of the registry of community addons
+// or of the admin's own (a process on the server) is code mikan has not seen, and says so
+// everywhere: an install or an update of one waits for the admin to tick that they take the risk.
 
 /**
  * The server's queue is one for both kinds of addons: a request of either shows in both. Who
@@ -62,9 +64,62 @@ function PermissionList({ perms, fresh = [] }: { perms: string[]; fresh?: string
   );
 }
 
-/** Where an unofficial addon comes from, and what that does and does not vouch for. */
+/** Where an unofficial addon comes from, and what that does and does not vouch for; a revoked one says why. */
 function OriginWarning({ origin, className }: { origin: MarketOrigin; className?: string }) {
-  return <ShieldBanner className={className}>{t(origin.signed ? "market.originSigned" : "market.originUnsigned", { title: origin.title })}</ShieldBanner>;
+  if (origin.revoked) {
+    return (
+      <ShieldBanner tone="err" className={className}>
+        {t("market.revokedText", { reason: origin.revoked })}
+      </ShieldBanner>
+    );
+  }
+  const community = origin.kind === "community";
+  const key = community ? (origin.signed ? "market.communitySigned" : "market.communityUnsigned") : origin.signed ? "market.originSigned" : "market.originUnsigned";
+  return (
+    <ShieldBanner tone={community ? "err" : "warn"} className={className}>
+      {t(key, { title: origin.title })}
+    </ShieldBanner>
+  );
+}
+
+/** A box the admin ticks before an unofficial addon goes in. */
+function Tick({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: string }) {
+  return (
+    <label className="mt-4 flex items-start gap-2 text-[13px] font-medium">
+      <input type="checkbox" className="check mt-0.5 shrink-0" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="min-w-0 flex-1">{children}</span>
+    </label>
+  );
+}
+
+/** The image an unofficial addon runs, and for an update what it ran before; its author's repository. */
+function BuildChange({ entry }: { entry: MarketEntry }) {
+  const repo = safeHref(entry.origin?.repo ?? "");
+  return (
+    <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]">
+      {entry.installed_version ? (
+        <>
+          <dt className="text-[var(--ink-500)]">{t("addons.version")}</dt>
+          <dd className="num">{`${entry.installed_version} → ${entry.version}`}</dd>
+        </>
+      ) : null}
+      <dt className="text-[var(--ink-500)]">{t("market.image")}</dt>
+      <dd className="mono break-all">
+        {entry.installed_digest ? <span className="text-[var(--ink-500)]">{`${shortDigest(entry.installed_digest)} → `}</span> : null}
+        {`${entry.image}@${entry.digest}`}
+      </dd>
+      {repo ? (
+        <>
+          <dt className="text-[var(--ink-500)]">{t("market.repo")}</dt>
+          <dd className="break-all">
+            <a className="link-btn" href={repo} target="_blank" rel="noopener noreferrer">
+              {entry.origin?.title}
+            </a>
+          </dd>
+        </>
+      ) : null}
+    </dl>
+  );
 }
 
 function AdminWarning() {
@@ -81,39 +136,71 @@ function AdminWarning() {
  */
 export function ApproveDialog({ entry, granted, onClose }: { entry: MarketEntry | null; granted: string[]; onClose: () => void }) {
   const install = useInstallMarket({ onDone: onClose });
+  const [risk, setRisk] = useState(false);
+  const [keyTaken, setKeyTaken] = useState(false);
+  // Each build is confirmed on its own: a box ticked for another one does not carry over.
+  useEffect(() => {
+    setRisk(false);
+    setKeyTaken(false);
+  }, [entry?.id, entry?.digest]);
   const name = entry ? localized(entry.name, entry.id) : "";
   const fresh = entry?.installed ? entry.permissions.filter((p) => !granted.includes(p)) : [];
+  const other = !!entry?.origin;
+  const keyChanged = !!entry?.key_changed;
   return (
     <Confirm
       open={!!entry}
       onOpenChange={(v) => !v && onClose()}
       title={t(entry?.installed ? "market.approveUpdateTitle" : "market.approveTitle", { name })}
-      text={t("market.approveText")}
+      text={t(other ? "market.approveTextUnofficial" : "market.approveText")}
       confirm={t(entry?.installed ? "market.approveUpdate" : "market.approve")}
+      danger={other}
       loading={install.isPending}
-      onConfirm={() => entry && install.mutate(entry)}
+      confirmDisabled={other && (!risk || (keyChanged && !keyTaken))}
+      onConfirm={() => entry && install.mutate({ entry, ack: other, acceptKey: keyChanged ? entry.fingerprint : undefined })}
     >
       {entry ? (
         <>
           <PermissionList perms={entry.permissions} fresh={fresh} />
           {entry.origin ? <OriginWarning origin={entry.origin} className="mt-4" /> : null}
-          {entry.image ? (
-            <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]">
-              <dt className="text-[var(--ink-500)]">{t("market.image")}</dt>
-              <dd className="mono break-all">{`${entry.image}@${entry.digest}`}</dd>
-            </dl>
+          {entry.image ? <BuildChange entry={entry} /> : null}
+          {keyChanged ? (
+            <ShieldBanner tone="err" className="mt-4">
+              {t("market.keyChangedText", { fingerprint: entry.fingerprint ?? "" })}
+            </ShieldBanner>
           ) : null}
           {actsAsAdmin(entry.permissions) ? <AdminWarning /> : null}
+          {other ? (
+            <Tick checked={risk} onChange={setRisk}>
+              {t(entry.installed ? "market.riskUpdate" : "market.riskInstall")}
+            </Tick>
+          ) : null}
+          {keyChanged ? (
+            <Tick checked={keyTaken} onChange={setKeyTaken}>
+              {t("market.keyCompared", { fingerprint: entry.fingerprint ?? "" })}
+            </Tick>
+          ) : null}
         </>
       ) : null}
     </Confirm>
   );
 }
 
+/** The author's repository of an addon of the registry, as a link when it is one. */
+function RepoLink({ origin }: { origin: MarketOrigin }) {
+  const href = safeHref(origin.repo ?? "");
+  if (!href) return <>{origin.title}</>;
+  return (
+    <a className="link-btn" href={href} target="_blank" rel="noopener noreferrer">
+      {origin.title}
+    </a>
+  );
+}
+
 /** What an installed addon is: where it comes from, how it runs and what it was allowed. */
 export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null; name: string; onClose: () => void }) {
   return (
-    <Drawer open={!!a} onOpenChange={(v) => !v && onClose()} title={name} meta={a ? `${t(`market.kind.${a.kind}`)} · ${t(`market.source.${a.source}`)}` : undefined}>
+    <Drawer open={!!a} onOpenChange={(v) => !v && onClose()} title={name} meta={a ? `${t(`market.kind.${a.kind}`)} · ${sourceLabel(a)}` : undefined}>
       {a ? (
         <div className="flex flex-col gap-4 pt-1 text-[13px]">
           {a.origin ? (
@@ -130,7 +217,14 @@ export function MarketDetails({ a, name, onClose }: { a: MarketInstalled | null;
             ) : null}
             <dt className="text-[var(--ink-500)]">{t("market.ownMode")}</dt>
             <dd>{t(`market.mode.${a.mode}`)}</dd>
-            {a.origin ? (
+            {a.origin?.kind === "community" ? (
+              <>
+                <dt className="text-[var(--ink-500)]">{t("market.repo")}</dt>
+                <dd className="break-all">
+                  <RepoLink origin={a.origin} />
+                </dd>
+              </>
+            ) : a.origin ? (
               <>
                 <dt className="text-[var(--ink-500)]">{t("market.sourceOf")}</dt>
                 <dd className="break-words">{a.origin.title}</dd>

@@ -3191,7 +3191,11 @@
             "type": "object"
           },
           "digest": {
-            "description": "Дайджест образа записи источника",
+            "description": "Дайджест образа неофициальной записи",
+            "type": "string"
+          },
+          "fingerprint": {
+            "description": "Отпечаток ключа автора, которым подписан релиз (community)",
             "type": "string"
           },
           "homepage": {
@@ -3201,10 +3205,22 @@
             "type": "string"
           },
           "image": {
-            "description": "Образ записи источника: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто",
+            "description": "Образ неофициальной записи: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто",
             "type": "string"
           },
           "installed": {
+            "type": "boolean"
+          },
+          "installed_digest": {
+            "description": "Дайджест установленного неофициального аддона",
+            "type": "string"
+          },
+          "installed_version": {
+            "description": "Одобренная версия установленного неофициального аддона",
+            "type": "string"
+          },
+          "key_changed": {
+            "description": "Релиз подписан не тем ключом, что при установке: обновление ждёт, пока админ сверит и примет новый ключ",
             "type": "boolean"
           },
           "kind": {
@@ -3231,7 +3247,7 @@
           },
           "origin": {
             "$ref": "#/components/schemas/MarketOrigin",
-            "description": "Источник неофициального аддона; нет у аддона подписанного каталога"
+            "description": "Откуда неофициальный аддон; нет у аддона подписанного каталога"
           },
           "permissions": {
             "description": "Что аддон просит: это и одобряет админ при установке",
@@ -3240,9 +3256,19 @@
             },
             "type": "array"
           },
+          "stars": {
+            "description": "Звёзды репозитория автора (community)",
+            "format": "int64",
+            "type": "integer"
+          },
           "update": {
             "description": "Установлен, а в каталоге или источнике другая сборка",
             "type": "boolean"
+          },
+          "updated_at": {
+            "description": "Когда реестр увидел эту сборку, unix (community)",
+            "format": "int64",
+            "type": "integer"
           },
           "version": {
             "type": "string"
@@ -3321,6 +3347,16 @@
       "MarketInstallInputBody": {
         "additionalProperties": false,
         "properties": {
+          "accept_key": {
+            "description": "Отпечаток нового ключа автора, который админ сверил (после author_key_changed)",
+            "maxLength": 64,
+            "pattern": "^[0-9a-f:]*$",
+            "type": "string"
+          },
+          "ack": {
+            "description": "Админ подтвердил, что ставит или обновляет неофициальный аддон на свой риск: без этого такая установка и обновление не проходят",
+            "type": "boolean"
+          },
           "permissions": {
             "description": "Права, которые админ видел и одобрил: ровно те, что просит сборка",
             "items": {
@@ -3377,7 +3413,7 @@
           },
           "origin": {
             "$ref": "#/components/schemas/MarketOrigin",
-            "description": "Источник, из которого поставлен аддон (custom)"
+            "description": "Откуда поставлен аддон (custom): источник или реестр сообщества"
           },
           "source": {
             "description": "official — из подписанного каталога; custom — образ из источника или, у старых установок, свой образ админа; external — свой процесс админа; mikan неофициальные не проверял",
@@ -3418,18 +3454,37 @@
         "additionalProperties": false,
         "properties": {
           "id": {
+            "description": "Источник (source); 0 у реестра",
             "format": "int64",
             "type": "integer"
           },
+          "kind": {
+            "description": "source — источник, который добавил админ; community — реестр аддонов сообщества",
+            "enum": [
+              "source",
+              "community"
+            ],
+            "type": "string"
+          },
+          "repo": {
+            "description": "Репозиторий автора (community)",
+            "type": "string"
+          },
+          "revoked": {
+            "description": "mikan убрал аддон из реестра, причина: ставить и обновлять нельзя, установленный лучше удалить",
+            "type": "string"
+          },
           "signed": {
-            "description": "Источник подписан закреплённым ключом; без подписи тот, кто управляет адресом, управляет и обновлениями",
+            "description": "Подписан закреплённым ключом автора; без подписи тот, кто управляет адресом, управляет и обновлениями",
             "type": "boolean"
           },
           "title": {
+            "description": "Название источника или владелец/репозиторий автора",
             "type": "string"
           }
         },
         "required": [
+          "kind",
           "id",
           "title",
           "signed"
@@ -3448,6 +3503,17 @@
           },
           "catalog_error": {
             "description": "catalog_unavailable — каталог не загрузился",
+            "type": "string"
+          },
+          "community": {
+            "description": "Реестр аддонов сообщества: сторонние авторы, mikan их код не проверял",
+            "items": {
+              "$ref": "#/components/schemas/MarketEntry"
+            },
+            "type": "array"
+          },
+          "community_error": {
+            "description": "community_unavailable — реестр не загрузился",
             "type": "string"
           },
           "host_ready": {
@@ -3478,6 +3544,7 @@
         },
         "required": [
           "catalog",
+          "community",
           "installed",
           "supported",
           "host_ready"

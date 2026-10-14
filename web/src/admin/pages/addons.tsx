@@ -1,5 +1,5 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { LayoutGrid, Link2, Puzzle, Wrench } from "lucide-react";
+import { LayoutGrid, Link2, Puzzle, Users, Wrench } from "lucide-react";
 import { useState } from "react";
 import { useAddons, useMarketplace } from "../../api/hooks";
 import { Tabs } from "../../components/tabs";
@@ -7,6 +7,7 @@ import { Button, PageHeader, Spinner } from "../../components/ui";
 import { t } from "../../i18n";
 import { ADDON_TABS, type AddonsSearch } from "../search";
 import { CatalogTab } from "./addons-catalog";
+import { CommunityTab } from "./addons-community";
 import { InstalledTab, type AddonActions } from "./addons-installed";
 import { ApproveDialog, MarketDetails, OwnDrawer } from "./market-dialogs";
 import { marketName, marketReady, serverQueue, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
@@ -19,7 +20,8 @@ type Tab = (typeof ADDON_TABS)[number];
 /**
  * The addons: what is installed (the bot, the payment methods, pages and other addons of the
  * marketplace, the tools built into the panel), each in one row with its state and its
- * actions; and the catalog to install from, the signed one and the sources the admin added.
+ * actions; the catalog to install from, the signed one and the sources the admin added; and the
+ * registry of community addons, which mikan lists and does not vouch for.
  * The dialogs of both tabs live here.
  */
 export function AddonsPage() {
@@ -72,14 +74,17 @@ export function AddonsPage() {
         tabs={[
           { id: "installed", label: t("addons.tabs.installed"), icon: Puzzle },
           { id: "catalog", label: t("addons.tabs.catalog"), icon: LayoutGrid },
+          { id: "community", label: t("addons.tabs.community"), icon: Users },
         ]}
         value={tab}
-        onChange={(next) => go(next === "catalog" ? { tab: next, q: search.q, kind: search.kind } : {})}
+        onChange={(next) => go(next === "installed" ? {} : { tab: next })}
       >
         {tab === "installed" ? (
           <InstalledTab market={market} pay={pay} act={act} />
+        ) : tab === "community" ? (
+          <CommunityTab market={market} pay={pay} act={act} q={search.q ?? ""} kind={search.kind} onSearch={(next) => go({ tab, q: search.q, kind: search.kind, ...next })} />
         ) : (
-          <CatalogTab market={market} pay={pay} act={act} q={search.q ?? ""} kind={search.kind} onSearch={(next) => go({ tab: "catalog", q: search.q, kind: search.kind, ...next })} />
+          <CatalogTab market={market} pay={pay} act={act} q={search.q ?? ""} kind={search.kind} onSearch={(next) => go({ tab, q: search.q, kind: search.kind, ...next })} />
         )}
       </Tabs>
       <ApproveDialog entry={approve} granted={approve ? (m?.installed.find((a) => a.id === approve.id)?.granted ?? []) : []} onClose={() => setApprove(null)} />

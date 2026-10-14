@@ -21,14 +21,26 @@ import (
 // have addons.go). Installing one is approving what it may do through the panel's API for
 // addons: the admin sees the permissions and approves exactly them, and an update asking
 // for more waits for a new approval. Only a session may do it. The entries come from the
-// signed catalog and from the third-party sources the admin added (addon_sources.go); the
-// latter are marked unofficial everywhere.
+// signed catalog, from the registry of community addons (community.go) and from the
+// third-party sources the admin added (addon_sources.go); the latter two are marked unofficial
+// everywhere, and an install or an update of one takes the admin's word that they accept the
+// risk.
 
-// MarketOrigin is the source an unofficial entry or addon comes from.
+// Where an unofficial addon comes from.
+const (
+	originSource    = "source"
+	originCommunity = "community"
+)
+
+// MarketOrigin is where an unofficial entry or addon comes from: a source the admin added, or
+// the registry of community addons.
 type MarketOrigin struct {
-	ID     int64  `json:"id"`
-	Title  string `json:"title"`
-	Signed bool   `json:"signed" doc:"Источник подписан закреплённым ключом; без подписи тот, кто управляет адресом, управляет и обновлениями"`
+	Kind    string `json:"kind" enum:"source,community" doc:"source — источник, который добавил админ; community — реестр аддонов сообщества"`
+	ID      int64  `json:"id" doc:"Источник (source); 0 у реестра"`
+	Title   string `json:"title" doc:"Название источника или владелец/репозиторий автора"`
+	Repo    string `json:"repo,omitempty" doc:"Репозиторий автора (community)"`
+	Signed  bool   `json:"signed" doc:"Подписан закреплённым ключом автора; без подписи тот, кто управляет адресом, управляет и обновлениями"`
+	Revoked string `json:"revoked,omitempty" doc:"mikan убрал аддон из реестра, причина: ставить и обновлять нельзя, установленный лучше удалить"`
 }
 
 type MarketEntry struct {
@@ -43,9 +55,16 @@ type MarketEntry struct {
 	Installed   bool              `json:"installed"`
 	Update      bool              `json:"update" doc:"Установлен, а в каталоге или источнике другая сборка"`
 	Wider       bool              `json:"wider" doc:"Сборка просит больше прав, чем одобрено: обновление ждёт нового одобрения"`
-	Origin      *MarketOrigin     `json:"origin,omitempty" doc:"Источник неофициального аддона; нет у аддона подписанного каталога"`
-	Image       string            `json:"image,omitempty" doc:"Образ записи источника: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто"`
-	Digest      string            `json:"digest,omitempty" doc:"Дайджест образа записи источника"`
+	Origin      *MarketOrigin     `json:"origin,omitempty" doc:"Откуда неофициальный аддон; нет у аддона подписанного каталога"`
+	Image       string            `json:"image,omitempty" doc:"Образ неофициальной записи: админ видит, что именно будет запущено на сервере; у записи подписанного каталога пусто"`
+	Digest      string            `json:"digest,omitempty" doc:"Дайджест образа неофициальной записи"`
+	// What is running now, for an update of an unofficial addon: the admin sees what changes.
+	InstalledVersion string `json:"installed_version,omitempty" doc:"Одобренная версия установленного неофициального аддона"`
+	InstalledDigest  string `json:"installed_digest,omitempty" doc:"Дайджест установленного неофициального аддона"`
+	Stars            int    `json:"stars,omitempty" doc:"Звёзды репозитория автора (community)"`
+	UpdatedAt        int64  `json:"updated_at,omitempty" doc:"Когда реестр увидел эту сборку, unix (community)"`
+	Fingerprint      string `json:"fingerprint,omitempty" doc:"Отпечаток ключа автора, которым подписан релиз (community)"`
+	KeyChanged       bool   `json:"key_changed,omitempty" doc:"Релиз подписан не тем ключом, что при установке: обновление ждёт, пока админ сверит и примет новый ключ"`
 }
 
 type MarketInstalled struct {
@@ -54,7 +73,7 @@ type MarketInstalled struct {
 	Kind    string        `json:"kind" enum:"bot,ui,generic"`
 	Mode    string        `json:"mode" enum:"http,client"`
 	Source  string        `json:"source" enum:"official,custom,external" doc:"official — из подписанного каталога; custom — образ из источника или, у старых установок, свой образ админа; external — свой процесс админа; mikan неофициальные не проверял"`
-	Origin  *MarketOrigin `json:"origin,omitempty" doc:"Источник, из которого поставлен аддон (custom)"`
+	Origin  *MarketOrigin `json:"origin,omitempty" doc:"Откуда поставлен аддон (custom): источник или реестр сообщества"`
 	Image   string        `json:"image,omitempty" doc:"Образ неофициального аддона (custom)"`
 	Digest  string        `json:"digest,omitempty" doc:"Дайджест образа неофициального аддона (custom)"`
 	URL     string        `json:"url,omitempty" doc:"Адрес внешнего аддона (external); пусто у клиента панели"`
@@ -64,13 +83,15 @@ type MarketInstalled struct {
 }
 
 type MarketView struct {
-	Catalog      []MarketEntry     `json:"catalog" doc:"Подписанный каталог и записи источников, которые админ добавил"`
-	CatalogError string            `json:"catalog_error,omitempty" doc:"catalog_unavailable — каталог не загрузился"`
-	Installed    []MarketInstalled `json:"installed"`
-	Queue        []AddonRequest    `json:"queue,omitempty" doc:"Все заявки, которые сервер ещё не взял, по порядку"`
-	Last         *AddonResult      `json:"last,omitempty" doc:"Как сервер выполнил последнюю заявку"`
-	Supported    bool              `json:"supported" doc:"Панель видит каталог данных сервера; иначе ставить аддоны нельзя"`
-	HostReady    bool              `json:"host_ready" doc:"mikan на сервере умеет аддоны протокола 2; иначе сначала обновить сервер"`
+	Catalog        []MarketEntry     `json:"catalog" doc:"Подписанный каталог и записи источников, которые админ добавил"`
+	CatalogError   string            `json:"catalog_error,omitempty" doc:"catalog_unavailable — каталог не загрузился"`
+	Community      []MarketEntry     `json:"community" doc:"Реестр аддонов сообщества: сторонние авторы, mikan их код не проверял"`
+	CommunityError string            `json:"community_error,omitempty" doc:"community_unavailable — реестр не загрузился"`
+	Installed      []MarketInstalled `json:"installed"`
+	Queue          []AddonRequest    `json:"queue,omitempty" doc:"Все заявки, которые сервер ещё не взял, по порядку"`
+	Last           *AddonResult      `json:"last,omitempty" doc:"Как сервер выполнил последнюю заявку"`
+	Supported      bool              `json:"supported" doc:"Панель видит каталог данных сервера; иначе ставить аддоны нельзя"`
+	HostReady      bool              `json:"host_ready" doc:"mikan на сервере умеет аддоны протокола 2; иначе сначала обновить сервер"`
 }
 
 type marketOutput struct{ Body MarketView }
@@ -91,6 +112,8 @@ type marketInstallInput struct {
 	AddonIDInput
 	Body struct {
 		Permissions []string `json:"permissions" doc:"Права, которые админ видел и одобрил: ровно те, что просит сборка"`
+		Ack         bool     `json:"ack,omitempty" doc:"Админ подтвердил, что ставит или обновляет неофициальный аддон на свой риск: без этого такая установка и обновление не проходят"`
+		AcceptKey   string   `json:"accept_key,omitempty" maxLength:"64" pattern:"^[0-9a-f:]*$" doc:"Отпечаток нового ключа автора, который админ сверил (после author_key_changed)"`
 	}
 }
 
@@ -126,12 +149,15 @@ func marketEntry(e addons.Entry, origin *MarketOrigin, a addons.Installed, here 
 		Wider: here && !addons.Covers(granted, e.Permissions), Origin: origin}
 	if origin != nil {
 		me.Image, me.Digest = e.Image, e.Digest
+		if here {
+			me.InstalledDigest = a.Digest
+		}
 	}
 	return me
 }
 
 func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
-	v := MarketView{Catalog: []MarketEntry{}, Installed: []MarketInstalled{}}
+	v := MarketView{Catalog: []MarketEntry{}, Community: []MarketEntry{}, Installed: []MarketInstalled{}}
 	m := h.d.Addons
 	if m == nil {
 		return v, nil
@@ -152,18 +178,28 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 	if official == nil {
 		v.CatalogError = "catalog_unavailable"
 	}
+	// The registry first: the sources are judged with the ids it lists.
+	comm := h.community(ctx)
+	if comm == nil {
+		v.CommunityError = "community_unavailable"
+	}
+	rows, err := h.communityRows(ctx)
+	if err != nil {
+		return v, err
+	}
 	board, err := h.sourceBoard(ctx, st, official, true)
 	if err != nil {
 		return v, err
 	}
 	grants := map[string][]string{}
+	versions := map[string]string{}
 	for _, id := range slices.Sorted(maps.Keys(installed)) {
 		a := installed[id]
 		perms, version, err := h.grant(ctx, id)
 		if err != nil {
 			return v, err
 		}
-		grants[id] = perms
+		grants[id], versions[id] = perms, version
 		mi := MarketInstalled{ID: id, Version: a.Version, Kind: a.KindOf(), Mode: a.ModeOf(), Source: a.SourceOf(), MemMB: a.MemMB, Status: a.Status, Granted: listOrEmpty(perms)}
 		// Where an addon of the admin's own comes from is all there is to tell it by: nothing
 		// signed names it.
@@ -172,6 +208,13 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 			mi.Image, mi.Digest = a.Image, a.Digest
 			if s, ok := board.originOf(id); ok {
 				mi.Origin, mi.Version = board.mark(s), version
+				if comm != nil {
+					if r, out := comm.RevokedFor("", s.Url); out {
+						mi.Origin.Revoked = revokedText(r)
+					}
+				}
+			} else if row, ok := rows[id]; ok {
+				mi.Origin, mi.Version = communityMark(row.Repo, row.Key, comm, id), version
 			}
 		case addons.SourceExternal:
 			if a.Listen != "" {
@@ -180,24 +223,57 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 		}
 		v.Installed = append(v.Installed, mi)
 	}
-	if official != nil {
-		for _, e := range official.Adapters {
-			if e.Kind == addons.KindPayment {
-				continue
-			}
+	if official == nil {
+		// Sources and the registry are judged against the catalog, so they show only while it
+		// is there.
+		return v, nil
+	}
+	for _, e := range official.Adapters {
+		if e.Kind == addons.KindPayment {
+			continue
+		}
+		a, ok := installed[e.ID]
+		// An addon of the admin's own under an id the catalog took later is not this one.
+		ok = ok && a.SourceOf() == addons.SourceOfficial
+		v.Catalog = append(v.Catalog, marketEntry(e, nil, a, ok, grants[e.ID]))
+	}
+	for _, s := range board.list {
+		for _, e := range board.entriesOf(s) {
 			a, ok := installed[e.ID]
-			// An addon of the admin's own under an id the catalog took later is not this one.
-			ok = ok && a.SourceOf() == addons.SourceOfficial
-			v.Catalog = append(v.Catalog, marketEntry(e, nil, a, ok, grants[e.ID]))
-		}
-		// Sources are judged against the catalog, so they show only while it is there.
-		for _, s := range board.list {
-			for _, e := range board.entriesOf(s) {
-				a, ok := installed[e.ID]
-				here := ok && a.SourceOf() == addons.SourceCustom && board.origins[e.ID] == s.ID
-				v.Catalog = append(v.Catalog, marketEntry(e, board.mark(s), a, here, grants[e.ID]))
+			here := ok && a.SourceOf() == addons.SourceCustom && board.origins[e.ID] == s.ID
+			me := marketEntry(e, board.mark(s), a, here, grants[e.ID])
+			if here {
+				me.InstalledVersion = versions[e.ID]
 			}
+			if comm != nil {
+				if r, out := comm.RevokedFor("", s.Url); out {
+					me.Origin.Revoked = revokedText(r)
+				}
+			}
+			v.Catalog = append(v.Catalog, me)
 		}
+	}
+	if comm == nil {
+		return v, nil
+	}
+	for _, c := range comm.Addons {
+		if slices.ContainsFunc(official.Adapters, func(e addons.Entry) bool { return e.ID == c.ID }) {
+			continue
+		}
+		a, ok := installed[c.ID]
+		row, ours := rows[c.ID]
+		here := ok && ours && a.SourceOf() == addons.SourceCustom
+		// An id another addon holds (a source's, the admin's own) is not offered from here.
+		if owner, held := board.owners[c.ID]; held && !here && (owner != 0 || ok) {
+			continue
+		}
+		me := marketEntry(c.Entry, communityMark(c.Repo, c.Key, comm, c.ID), a, here, grants[c.ID])
+		me.Stars, me.UpdatedAt, me.Fingerprint = c.Stars, c.UpdatedAt, addons.Fingerprint(c.Key)
+		if here {
+			me.InstalledVersion = versions[c.ID]
+			me.KeyChanged = row.Key != c.Key
+		}
+		v.Community = append(v.Community, me)
 	}
 	return v, nil
 }
@@ -218,9 +294,10 @@ func (h *handlers) listMarketplace(ctx context.Context, _ *struct{}) (*marketOut
 }
 
 // installMarketplace records the approval first and then asks the host: an addon never runs
-// with permissions the admin has not seen. The entry is the signed catalog's, or the one a
-// source holds under that id; a source's addon runs as an image by its digest on the bridge
-// network, as every unofficial addon does.
+// with permissions the admin has not seen. The entry is the signed catalog's, the one a source
+// holds under that id, or the registry of community addons'; an unofficial one runs as an
+// image by its digest on the bridge network, and is installed or updated only with the
+// admin's word that they take the risk (ack).
 func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInput) (*marketOutput, error) {
 	st, err := h.addonHost()
 	if err != nil {
@@ -231,13 +308,21 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 		return nil, huma.Error502BadGateway("catalog_unavailable")
 	}
 	var (
-		e   addons.Entry
-		src *db.AddonSource
+		e    addons.Entry
+		src  *db.AddonSource
+		comm *addons.CommunityAddon
 	)
 	if slices.ContainsFunc(c.Adapters, func(x addons.Entry) bool { return x.ID == in.ID }) {
 		e, err = h.installEntry(ctx, st, in.ID, false)
-	} else {
-		e, src, err = h.installSourceEntry(ctx, st, c, in.ID)
+	} else if e, src, err = h.installSourceEntry(ctx, st, c, in.ID); errors.Is(err, errNotASource) {
+		board, berr := h.sourceBoard(ctx, st, &c, false)
+		if berr != nil {
+			return nil, berr
+		}
+		var a addons.CommunityAddon
+		if a, err = h.installCommunityEntry(ctx, st, board, in.ID, in.Body.AcceptKey); err == nil {
+			e, comm = a.Entry, &a
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -246,6 +331,10 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 	// again rather than approved blindly.
 	if !addons.SamePermissions(in.Body.Permissions, e.Permissions) {
 		return nil, huma.Error409Conflict("permissions_changed")
+	}
+	// Code mikan has not looked at, at every install and every update: the admin says so.
+	if (src != nil || comm != nil) && !in.Body.Ack {
+		return nil, fieldErr("body.ack", "addon_not_confirmed")
 	}
 	// A permission the host does not know yet would make it drop the addon: mikan update first.
 	if !addons.HostTakes(st.HostVersion, e.Permissions) {
@@ -257,21 +346,36 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 	admin := sessionOf(ctx).AdminID
 	req := addons.Request{Action: "install", ID: e.ID}
 	details := map[string]any{"version": e.Version, "digest": e.Digest, "permissions": e.Permissions}
-	if src != nil {
+	if src != nil || comm != nil {
 		req = addons.Request{Action: "install", ID: e.ID, Source: addons.SourceCustom, Image: e.Image, Digest: e.Digest,
 			Kind: e.Kind, Mode: e.Mode, Permissions: e.Permissions, MemMB: e.Resources.MemMB}
-		details["source"], details["source_id"], details["source_url"], details["image"] = addons.SourceCustom, src.ID, src.Url, e.Image
+		details["source"], details["image"], details["ack"] = addons.SourceCustom, e.Image, true
+	}
+	switch {
+	case src != nil:
+		details["source_id"], details["source_url"] = src.ID, src.Url
+	case comm != nil:
+		details["origin"], details["repo"], details["fingerprint"] = originCommunity, comm.Repo, addons.Fingerprint(comm.Key)
 	}
 	if err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
 		if err := q.UpsertAddonGrant(ctx, db.UpsertAddonGrantParams{AddonID: e.ID, Version: e.Version,
 			Permissions: addons.EncodePermissions(e.Permissions), ApprovedBy: sql.NullInt64{Int64: admin, Valid: true}, ApprovedAt: h.d.Now().Unix()}); err != nil {
 			return err
 		}
+		// Where the addon comes from is one row at most: a row left by an install that never
+		// happened must not make this one a source's or the registry's.
+		if comm != nil {
+			if err := q.DeleteAddonOrigin(ctx, e.ID); err != nil {
+				return err
+			}
+			return q.UpsertAddonCommunity(ctx, db.UpsertAddonCommunityParams{AddonID: e.ID, Repo: comm.Repo, Key: comm.Key})
+		}
+		if err := q.DeleteAddonCommunity(ctx, e.ID); err != nil {
+			return err
+		}
 		if src != nil {
 			return q.UpsertAddonOrigin(ctx, db.UpsertAddonOriginParams{AddonID: e.ID, SourceID: src.ID})
 		}
-		// An addon of the catalog has no source: a row left by an install that never
-		// happened must not make this one a source's.
 		return q.DeleteAddonOrigin(ctx, e.ID)
 	}); err != nil {
 		// The source was removed while the install was on its way.
@@ -284,8 +388,8 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 		return nil, err
 	}
 	// A bot from the catalog is the admin asking for a bot again: the official one is handed
-	// the bot once it runs, as on a fresh panel. A bot from a source is not the official one.
-	if e.Kind == addons.KindBot && src == nil {
+	// the bot once it runs, as on a fresh panel. An unofficial bot is not the official one.
+	if e.Kind == addons.KindBot && src == nil && comm == nil {
 		if err := settings.Set(ctx, h.d.Settings, panelapi.AutoBotKey, true); err != nil {
 			return nil, err
 		}
@@ -357,7 +461,7 @@ func (h *handlers) installExternal(ctx context.Context, in *marketExternalInput)
 	if err != nil {
 		return nil, err
 	}
-	if _, held := board.owners[b.ID]; held {
+	if _, held := board.owners[b.ID]; held || communityIDs(h.community(ctx))[b.ID] {
 		return nil, fieldErr("body.id", "addon_id_taken")
 	}
 	if queued(h.d.Addons, b.ID) {
@@ -369,7 +473,11 @@ func (h *handlers) installExternal(ctx context.Context, in *marketExternalInput)
 			Permissions: addons.EncodePermissions(b.Permissions), ApprovedBy: sql.NullInt64{Int64: admin, Valid: true}, ApprovedAt: h.d.Now().Unix()}); err != nil {
 			return err
 		}
-		// A row of an install from a source that never happened must not claim this one.
+		// A row of an install from a source or the registry that never happened must not
+		// claim this one.
+		if err := q.DeleteAddonCommunity(ctx, b.ID); err != nil {
+			return err
+		}
 		return q.DeleteAddonOrigin(ctx, b.ID)
 	}); err != nil {
 		return nil, err
@@ -403,6 +511,9 @@ func (h *handlers) removeMarketplace(ctx context.Context, in *AddonIDInput) (*ma
 			return err
 		}
 		if err := q.DeleteAddonOrigin(ctx, in.ID); err != nil {
+			return err
+		}
+		if err := q.DeleteAddonCommunity(ctx, in.ID); err != nil {
 			return err
 		}
 		if err := q.DeleteAddonData(ctx, in.ID); err != nil {

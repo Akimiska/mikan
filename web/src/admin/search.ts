@@ -41,8 +41,8 @@ export const PROMO_TABS = ["codes", "history"] as const;
 export const TELEGRAM_TABS = ["connect", "menu", "notify", "infra", "broadcast"] as const;
 export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };
 
-/** The addons open on what is installed; the catalog keeps its search and its filter by kind. */
-export const ADDON_TABS = ["installed", "catalog"] as const;
+/** The addons open on what is installed; the catalog and the community keep their search and filter by kind. */
+export const ADDON_TABS = ["installed", "catalog", "community"] as const;
 export const ADDON_KINDS = ["bot", "payment", "ui"] as const;
 export type AddonKind = (typeof ADDON_KINDS)[number];
 export type AddonsSearch = { tab?: (typeof ADDON_TABS)[number]; q?: string; kind?: AddonKind };

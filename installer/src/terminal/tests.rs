@@ -637,6 +637,40 @@ fn old_recordings_go_and_only_recordings() {
     fs::remove_dir_all(&d).unwrap();
 }
 
+// The daily sweep removes old recordings with no session to start it, on the panel's data and
+// on the node's, and makes nothing where there is nothing to sweep.
+#[test]
+fn old_recordings_go_without_a_session() {
+    let d = tmpdir("sweep");
+    // No data at all, and data without support/: nothing is made, nothing fails.
+    sweep(&d);
+    fs::create_dir_all(d.join("data/node")).unwrap();
+    sweep(&d);
+    assert!(!d.join("data/node/support").exists());
+    for kind in ["panel", "node"] {
+        fs::create_dir_all(d.join(format!("data/{kind}"))).unwrap();
+        prepare(&Dir::open(&d, &format!("data/{kind}"), false).unwrap().unwrap()).unwrap();
+        let rec = d.join(format!("data/{kind}/support/recordings"));
+        let age = |name: &str, days: u64| {
+            let f = fs::File::create(rec.join(name)).unwrap();
+            f.set_modified(SystemTime::now() - Duration::from_secs(days * 24 * 3600)).unwrap();
+        };
+        age("1-100.cast", 31);
+        age("2-200.cast", 400);
+        age("3-300.cast", 1);
+    }
+    sweep(&d);
+    for kind in ["panel", "node"] {
+        let mut left: Vec<String> = fs::read_dir(d.join(format!("data/{kind}/support/recordings")))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["3-300.cast"], "{kind}");
+    }
+    fs::remove_dir_all(&d).unwrap();
+}
+
 // What the panel's side (internal/hostchan, in Go) writes and reads is what this side writes and
 // reads: the same bytes for a frame, the same JSON for a request, the hello and the exit.
 // internal/hostchan/terminal_test.go holds the same samples.

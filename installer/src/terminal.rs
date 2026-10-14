@@ -657,6 +657,25 @@ fn prune(rec_fd: &OwnedFd, now: u64) {
     }
 }
 
+/// The daily sweep of old recordings, for a server that has had no terminal session since:
+/// `mikan update` (its timer runs every day, whether or not an update is due) calls it for
+/// the panel's and the node's data. Nothing is made here: no support/recordings, no sweep.
+pub fn sweep(root: &Path) {
+    for kind in ["panel", "node"] {
+        if let Err(e) = sweep_kind(root, kind) {
+            crate::out(&format!("support recordings of data/{kind} are not swept: {e:#}"));
+        }
+    }
+}
+
+fn sweep_kind(root: &Path, kind: &str) -> Result<()> {
+    let Some(data) = Dir::open(root, &format!("data/{kind}"), false)? else { return Ok(()) };
+    let Some(support) = data.sub(SUPPORT_DIR)? else { return Ok(()) };
+    let Some(rec) = support.sub(RECORDINGS_DIR)? else { return Ok(()) };
+    prune(rec.fd(), now_unix());
+    Ok(())
+}
+
 /// `<grant>-<unix time>.cast`: what the agent names a recording, and the only names the panel
 /// lists.
 fn is_recording_name(n: &str) -> bool {

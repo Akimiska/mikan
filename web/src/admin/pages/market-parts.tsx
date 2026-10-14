@@ -19,6 +19,13 @@ export function ShieldBanner({ tone = "warn", role, className, children }: { ton
 
 /** The badge of an addon from a source: whose it is, and what that does not vouch for in its hint. */
 export function OriginMark({ origin }: { origin: MarketOrigin }) {
+  if (origin.revoked) {
+    return (
+      <span title={t("market.revokedText", { reason: origin.revoked })}>
+        <Pill tone="bad">{t("market.revoked")}</Pill>
+      </span>
+    );
+  }
   return (
     <span title={t("market.unofficialHint", { title: origin.title })}>
       <Pill tone="warn">{unofficialLabel(origin)}</Pill>

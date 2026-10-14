@@ -123,6 +123,16 @@ DELETE FROM addon_origins WHERE addon_id = $1;
 -- name: DeleteAddonOriginsOf :exec
 DELETE FROM addon_origins WHERE source_id = $1;
 
+-- name: ListAddonCommunity :many
+SELECT * FROM addon_community ORDER BY addon_id;
+
+-- name: UpsertAddonCommunity :exec
+INSERT INTO addon_community (addon_id, repo, key) VALUES ($1, $2, $3)
+ON CONFLICT (addon_id) DO UPDATE SET repo = EXCLUDED.repo, key = EXCLUDED.key;
+
+-- name: DeleteAddonCommunity :exec
+DELETE FROM addon_community WHERE addon_id = $1;
+
 -- name: ListAddonClaims :many
 SELECT * FROM addon_id_claims ORDER BY addon_id;
 

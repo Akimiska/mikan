@@ -8,6 +8,12 @@ import (
 	"database/sql"
 )
 
+type AddonCommunity struct {
+	AddonID string
+	Repo    string
+	Key     string
+}
+
 type AddonCursor struct {
 	AddonID   string
 	LastID    int64

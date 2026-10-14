@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { ExternalLink, Search, Store, Wallet } from "lucide-react";
+import { ExternalLink, Search, Star, Store, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorText, type Schemas } from "../../api/client";
 import type { useAddons } from "../../api/hooks";
@@ -11,13 +11,13 @@ import { safeHref } from "../../lib/url";
 import { ADDON_KINDS, type AddonKind } from "../search";
 import type { AddonActions } from "./addons-installed";
 import { useInstallMarket, useInstallPayment, permLabel } from "./market-dialogs";
-import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, type Kind, type Market, type MarketEntry } from "./market-common";
+import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, unofficial, type Kind, type Market, type MarketEntry } from "./market-common";
 import { OriginMark } from "./market-parts";
 
 type ItemKind = Kind | "payment";
 
 /** One entry of either catalog, as a card shows it. */
-type Item = {
+export type Item = {
   id: string;
   kind: ItemKind;
   name: string;
@@ -36,7 +36,7 @@ function kindLabel(k: ItemKind): string {
   return k === "payment" ? t("addons.kindPayment") : t(`market.kind.${k}`);
 }
 
-function toItem(e: Schemas["AddonCatalogEntry"] | MarketEntry, kind: ItemKind, market?: MarketEntry): Item {
+export function toItem(e: Schemas["AddonCatalogEntry"] | MarketEntry, kind: ItemKind, market?: MarketEntry): Item {
   return { id: e.id, kind, name: localized(e.name, e.id), text: localized(e.description, ""), version: e.version, homepage: e.homepage, installed: e.installed, update: e.update, market };
 }
 
@@ -160,7 +160,7 @@ export function CatalogTab({
   );
 }
 
-function CatalogSkeleton() {
+export function CatalogSkeleton() {
   return (
     <ul className="addon-catalog" aria-busy aria-label={t("common.loading")}>
       {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -180,18 +180,22 @@ function CatalogSkeleton() {
   );
 }
 
-function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index: number; m: Market | undefined; p: ReturnType<typeof useAddons>["data"]; queued: boolean; act: AddonActions }) {
+export function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index: number; m: Market | undefined; p: ReturnType<typeof useAddons>["data"]; queued: boolean; act: AddonActions }) {
   const install = useInstallPayment();
   const update = useInstallMarket();
   const Icon = i.kind === "payment" ? Wallet : KIND_ICONS[i.kind];
   const href = safeHref(i.homepage);
   const e = i.market;
-  const blocked = i.kind === "payment" ? !p?.supported : !marketReady(m);
+  // An addon mikan revoked installs no more, from the registry or from a source of its repository.
+  const blocked = i.kind === "payment" ? !p?.supported : !marketReady(m) || !!e?.origin?.revoked;
   const busy = install.isPending || update.isPending;
+  const repo = safeHref(e?.origin?.repo);
   const act1 = () => {
     if (!e) install.mutate(i.id);
-    else if (!i.installed || e.wider) act.approve(e);
-    else update.mutate(e);
+    // Code mikan has not looked at goes in only through the dialog that asks the admin to
+    // take the risk, an update as much as an install.
+    else if (!i.installed || e.wider || unofficial(e)) act.approve(e);
+    else update.mutate({ entry: e });
   };
   return (
     <li className="addon-card card glass reveal" style={{ "--i": Math.min(index, 8) } as React.CSSProperties}>
@@ -218,7 +222,17 @@ function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index:
             <Pill tone={actsAsAdmin(e.permissions) ? "warn" : "off"}>{t("addons.permsBadge", { n: e.permissions.length })}</Pill>
           </span>
         ) : null}
-        {href ? (
+        {e?.stars ? (
+          <span className="inline-flex items-center gap-1 text-xs text-[var(--ink-500)]" title={t("market.stars")}>
+            <Star size={12} aria-hidden /> <span className="num">{num(e.stars)}</span>
+          </span>
+        ) : null}
+        {repo ? (
+          <a className="link-btn ml-1 inline-flex items-center gap-1 text-xs" href={repo} target="_blank" rel="noopener noreferrer">
+            {t("market.repo")} <ExternalLink size={12} aria-hidden />
+          </a>
+        ) : null}
+        {href && href !== repo ? (
           <a className="link-btn ml-1 inline-flex items-center gap-1 text-xs" href={href} target="_blank" rel="noopener noreferrer">
             {t("addons.homepage")} <ExternalLink size={12} aria-hidden />
           </a>

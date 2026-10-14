@@ -413,6 +413,9 @@
       "addon_url_invalid": "The address is http://127.0.0.1:<port>, port 1024 or higher.",
       "addon_permissions_invalid": "Unknown or repeated permission ({value}).",
       "addon_not_confirmed": "Confirm that you trust this code.",
+      "community_unavailable": "The registry of community addons did not load. Check that the server can reach GitHub.",
+      "addon_revoked": "mikan took this addon out of the registry: it cannot be installed or updated.",
+      "author_key_changed": "The release is signed with another key of the author. Compare the fingerprint with the author and accept the new key in the update window.",
       "addon_request_invalid": "The server would refuse this addon: check the fields.",
       "bad_bytes": "Size: from 1 GB to 100 TB",
       "bad_lifetime": "Pick how long it is valid",
@@ -2826,6 +2829,13 @@
     "allowWarn": "Only the listed networks can connect: every other user loses access",
     "nodes": "The nodes apply the filters. A node older than the panel skips them: update it on the Nodes page."
   },
+  "community": {
+    "warnTitle": "These are not mikan's addons.",
+    "warnText": "Third-party authors write and publish them. mikan does not review their code, does not build their images, does not support them and is not responsible for anything they do: a leaked bot token, subscribers' data, lost money, a broken panel. An addon may be a copy of someone else's work, change hands or turn malicious with its next release. Install only what you trust its author with as much as yourself with root on the server. Every install and every update asks you to confirm the risk again.",
+    "searchPlaceholder": "Name, author or repository",
+    "empty": "The registry is empty so far",
+    "emptyText": "Third-party addons with the mikan-addon topic on GitHub show up here once their format is checked. The official addons are on the Catalog tab."
+  },
   "market": {
     "openPages": "Open",
     "openPagesLabel": "Open the pages of {name}",
@@ -2843,6 +2853,7 @@
     "factPerms": "Permissions",
     "permsN": "{n, plural, =0 {none} one {# permission} other {# permissions}}",
     "source": {
+      "community": "from the community registry",
       "official": "mikan catalog",
       "custom": "image from a source",
       "external": "own program on the server"
@@ -2907,8 +2918,21 @@
     "ownUpdate": "Update",
     "unofficial": "unofficial · {title}",
     "unofficialHint": "From the source \"{title}\", not the mikan catalog: nobody has reviewed this code",
-    "originSigned": "An addon from the source \"{title}\", not from the mikan catalog. The source's signature only says the file is from its author, not that the code is safe: mikan has not reviewed it. The image is pinned by its digest. A new build with the same permissions is installed by the update button without a new approval; if it asks for more permissions, it has to be approved again.",
-    "originUnsigned": "An addon from the source \"{title}\", which is not signed: whoever controls its address controls what is offered to you. mikan has not reviewed the code. The image is pinned by its digest. A new build with the same permissions is installed by the update button without a new approval; if it asks for more permissions, it has to be approved again.",
+    "originSigned": "An addon from the source \"{title}\", not from the mikan catalog. The source's signature only says the file is from its author, not that the code is safe: mikan has not reviewed it. The image is pinned by its digest. Every update has to be confirmed again, and more permissions approved.",
+    "originUnsigned": "An addon from the source \"{title}\", which is not signed: whoever controls its address controls what is offered to you. mikan has not reviewed the code. The image is pinned by its digest. Every update has to be confirmed again, and more permissions approved.",
+    "community": "community · {title}",
+    "communitySigned": "A third-party addon from the community registry ({title}). mikan has not reviewed its code, has not built its image and is not responsible for it: the addon can leak the bot token, subscribers' data and money, and its next release can turn malicious. The signature only says the release is from the same author. Every update has to be confirmed again.",
+    "communityUnsigned": "A third-party addon from the community registry ({title}); the release is not signed: whoever gets access to the repository publishes the next version. mikan has not reviewed its code, has not built its image and is not responsible for it: the addon can leak the bot token, subscribers' data and money. Every update has to be confirmed again.",
+    "approveTextUnofficial": "This is an unofficial addon: nobody at mikan has reviewed its code. It gets exactly these permissions in the panel and runs on your server.",
+    "riskInstall": "I understand that mikan has not reviewed this addon and is not responsible for it, and I install it at my own risk",
+    "riskUpdate": "I understand that mikan has not reviewed the new build and it may work differently from the old one, and I update at my own risk",
+    "keyChangedText": "The release is signed with another key of the author: {fingerprint}. This happens when the author changes keys, but also when the repository falls into someone else's hands. Compare the fingerprint with the author through a channel you trust.",
+    "keyCompared": "I compared the fingerprint {fingerprint} with the author and accept the new key",
+    "revoked": "revoked",
+    "revokedText": "mikan took this addon out of the community registry: {reason}. It cannot be installed or updated; better remove it.",
+    "revokedInstalled": "{name}: mikan took this addon out of the community registry ({reason}). Remove it in the menu of its row.",
+    "repo": "Repository",
+    "stars": "Stars on GitHub",
     "sourceOf": "Source"
   },
   "addons": {
@@ -2961,7 +2985,8 @@
     "sections": "Addon sections",
     "tabs": {
       "installed": "Installed",
-      "catalog": "Catalog"
+      "catalog": "Catalog",
+      "community": "Community"
     },
     "groupBot": "Bot",
     "groupPayments": "Payments",
@@ -3000,7 +3025,7 @@
     "queued": "queued",
     "queuedMore": "{n, plural, one {# more request queued.} other {# more requests queued.}}",
     "updatesN": "{n, plural, one {An update for # addon} other {Updates for # addons}}",
-    "updatesWider": "{n, plural, one {# of them asks for more permissions: review it in the menu of its row.} other {# of them ask for more permissions: review them in the menus of their rows.}}",
+    "updatesWider": "{n, plural, one {# of them waits for a review: open it in the menu of its row.} other {# of them wait for a review: open them in the menus of their rows.}}",
     "updateAll": "Update all",
     "updateRest": "Update the rest",
     "updateFailed": "{n, plural, one {# update was not sent} other {# updates were not sent}}",

@@ -224,6 +224,7 @@ export function Confirm({
   confirm,
   danger,
   loading,
+  confirmDisabled,
   onConfirm,
   children,
 }: {
@@ -234,6 +235,8 @@ export function Confirm({
   confirm: string;
   danger?: boolean;
   loading?: boolean;
+  /** The confirm button waits for something the children ask of the admin (a box to tick). */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   /** What the text cannot hold: a list to approve, a warning. */
   children?: ReactNode;
@@ -267,7 +270,7 @@ export function Confirm({
                   <Dialog.Close asChild>
                     <Button variant="ghost">{t("common.cancel")}</Button>
                   </Dialog.Close>
-                  <Button variant={danger ? "danger-solid" : "primary"} loading={loading} onClick={onConfirm}>
+                  <Button variant={danger ? "danger-solid" : "primary"} loading={loading} disabled={confirmDisabled} onClick={onConfirm}>
                     {confirm}
                   </Button>
                 </div>

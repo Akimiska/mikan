@@ -201,6 +201,15 @@ func (q *Queries) CountAddonUpdates(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const deleteAddonCommunity = `-- name: DeleteAddonCommunity :exec
+DELETE FROM addon_community WHERE addon_id = $1
+`
+
+func (q *Queries) DeleteAddonCommunity(ctx context.Context, addonID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonCommunity, addonID)
+	return err
+}
+
 const deleteAddonCursor = `-- name: DeleteAddonCursor :exec
 DELETE FROM addon_cursors WHERE addon_id = $1
 `
@@ -389,6 +398,33 @@ func (q *Queries) ListAddonClaims(ctx context.Context) ([]AddonIDClaim, error) {
 	for rows.Next() {
 		var i AddonIDClaim
 		if err := rows.Scan(&i.AddonID, &i.SourceID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAddonCommunity = `-- name: ListAddonCommunity :many
+SELECT addon_id, repo, key FROM addon_community ORDER BY addon_id
+`
+
+func (q *Queries) ListAddonCommunity(ctx context.Context) ([]AddonCommunity, error) {
+	rows, err := q.db.QueryContext(ctx, listAddonCommunity)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AddonCommunity{}
+	for rows.Next() {
+		var i AddonCommunity
+		if err := rows.Scan(&i.AddonID, &i.Repo, &i.Key); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -764,6 +800,22 @@ type SetAddonSourceKeyParams struct {
 
 func (q *Queries) SetAddonSourceKey(ctx context.Context, arg SetAddonSourceKeyParams) error {
 	_, err := q.db.ExecContext(ctx, setAddonSourceKey, arg.ID, arg.Key)
+	return err
+}
+
+const upsertAddonCommunity = `-- name: UpsertAddonCommunity :exec
+INSERT INTO addon_community (addon_id, repo, key) VALUES ($1, $2, $3)
+ON CONFLICT (addon_id) DO UPDATE SET repo = EXCLUDED.repo, key = EXCLUDED.key
+`
+
+type UpsertAddonCommunityParams struct {
+	AddonID string
+	Repo    string
+	Key     string
+}
+
+func (q *Queries) UpsertAddonCommunity(ctx context.Context, arg UpsertAddonCommunityParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAddonCommunity, arg.AddonID, arg.Repo, arg.Key)
 	return err
 }
 

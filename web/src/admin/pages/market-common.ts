@@ -33,9 +33,25 @@ export function serverQueue(m: Market | undefined, p: Payments | undefined) {
   return m?.queue ?? p?.queue ?? [];
 }
 
+/**
+ * What an install sends beside the permissions: for an unofficial addon, the admin's word that
+ * they take the risk (every install and every update), and the author's new key they compared.
+ */
+export type InstallArgs = { entry: MarketEntry; ack?: boolean; acceptKey?: string };
+
 /** Install (or update) an addon of the catalog with the permissions its entry asks for. */
-export function installMarket(e: MarketEntry) {
-  return unwrap(api.POST("/api/v1/marketplace/{id}/install", { params: { path: { id: e.id } }, body: { permissions: e.permissions } }));
+export function installMarket({ entry, ack, acceptKey }: InstallArgs) {
+  return unwrap(
+    api.POST("/api/v1/marketplace/{id}/install", {
+      params: { path: { id: entry.id } },
+      body: { permissions: entry.permissions, ...(ack ? { ack } : {}), ...(acceptKey ? { accept_key: acceptKey } : {}) },
+    }),
+  );
+}
+
+/** Code mikan has not looked at: an addon of a source or of the registry of community addons. */
+export function unofficial(e: MarketEntry | undefined): boolean {
+  return !!e?.origin;
 }
 
 /** Install (or update) a payment method from the catalog. */
@@ -64,13 +80,19 @@ export function botStatus(tg: Telegram, words: Record<BotPhase, Key>): State {
 export function entryOf(id: string, d: Market | undefined): MarketEntry | undefined {
   const a = d?.installed.find((x) => x.id === id);
   if (a && a.source !== "official" && !a.origin) return undefined;
+  if (a?.origin?.kind === "community") return d?.community.find((e) => e.id === id);
   return d?.catalog.find((e) => e.id === id && (e.origin?.id ?? 0) === (a?.origin?.id ?? 0));
 }
 
 /** The badge of an unofficial addon: whose it is, short enough for a phone. */
 export function unofficialLabel(o: MarketOrigin): string {
   const title = o.title.length > 24 ? `${o.title.slice(0, 23)}…` : o.title;
-  return t("market.unofficial", { title });
+  return t(o.kind === "community" ? "market.community" : "market.unofficial", { title });
+}
+
+/** Where an installed addon comes from, in words: an image of the registry is not a source's. */
+export function sourceLabel(a: MarketInstalled): string {
+  return a.origin?.kind === "community" ? t("market.source.community") : t(`market.source.${a.source}`);
 }
 
 /** The addon's name in the catalog; an addon of the admin's own is known by its id. */

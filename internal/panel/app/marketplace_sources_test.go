@@ -25,17 +25,20 @@ import (
 // allowed there), a signed official catalog, a source server whose files the test changes, and
 // the host's state file.
 type srcLab struct {
-	t        *testing.T
-	h        *harness
-	dir      string
-	csrf     map[string]string
-	api      string
-	src      *httptest.Server
-	mu       sync.Mutex
-	files    map[string][]byte
-	failing  map[string]bool // paths that answer 503
-	hits     map[string]int
-	official ed25519.PublicKey
+	t           *testing.T
+	h           *harness
+	dir         string
+	csrf        map[string]string
+	api         string
+	src         *httptest.Server
+	mu          sync.Mutex
+	files       map[string][]byte
+	failing     map[string]bool // paths that answer 503
+	hits        map[string]int
+	official    ed25519.PublicKey
+	signer      ed25519.PrivateKey // signs the catalog and the registry of community addons
+	registry    []byte             // the registry's index.json; nil answers 404
+	registryURL string
 }
 
 func digestOf(c string) string { return "sha256:" + strings.Repeat(c, 64) }
@@ -56,21 +59,31 @@ func newSrcLab(t *testing.T) *srcLab {
 		{ID: "telegram", Version: "1.0.0", Protocol: 2, Kind: addons.KindBot, Permissions: []string{"bot"}, Image: "ghcr.io/getmikan/telegram", Digest: digestOf("a")},
 		{ID: "yookassa", Version: "1.0.0", Protocol: 1, Image: "ghcr.io/getmikan/adapter-yookassa", Digest: digestOf("a")},
 	}})
+	l := &srcLab{t: t, dir: t.TempDir(), files: map[string][]byte{}, failing: map[string]bool{}, hits: map[string]int{}, official: pub, signer: priv}
 	catalog := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/index.json":
+		l.mu.Lock()
+		registry := l.registry
+		l.mu.Unlock()
+		switch {
+		case r.URL.Path == "/index.json":
 			_, _ = w.Write(data)
-		case "/index.json.sig":
+		case r.URL.Path == "/index.json.sig":
 			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data)))
+		case r.URL.Path == "/community/index.json" && registry != nil:
+			_, _ = w.Write(registry)
+		case r.URL.Path == "/community/index.json.sig" && registry != nil:
+			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, registry)))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(catalog.Close)
-	l := &srcLab{t: t, dir: t.TempDir(), files: map[string][]byte{}, failing: map[string]bool{}, hits: map[string]int{}, official: pub}
 	l.src = httptest.NewServer(http.HandlerFunc(l.serve))
 	t.Cleanup(l.src.Close)
-	l.h = newHarness(t, func(o *Options) { o.DataDir, o.AddonsCatalog, o.Dev = l.dir, catalog.URL+"/index.json", true })
+	l.registryURL = catalog.URL + "/community/index.json"
+	l.h = newHarness(t, func(o *Options) {
+		o.DataDir, o.AddonsCatalog, o.AddonsCommunity, o.Dev = l.dir, catalog.URL+"/index.json", l.registryURL, true
+	})
 	l.h.p.Addons.SetKey(pub)
 	if resp, _ := l.h.login(password, ""); resp.StatusCode != http.StatusOK {
 		t.Fatalf("login: %d", resp.StatusCode)
@@ -285,8 +298,9 @@ func newKey(t *testing.T) ed25519.PrivateKey {
 	return priv
 }
 
+// approve is the admin's approval of the permissions, and of the risk of an unofficial addon.
 func approve(perms ...string) map[string]any {
-	return map[string]any{"permissions": append([]string{}, perms...)}
+	return map[string]any{"permissions": append([]string{}, perms...), "ack": true}
 }
 
 // Adding a source reads it first: what is no source, is not safe to read, lists nothing the

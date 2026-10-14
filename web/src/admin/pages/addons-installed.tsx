@@ -15,8 +15,8 @@ import type { AddonKind } from "../search";
 import { Group, Item, Row, RowMenu, type State } from "./addon-row";
 import { StorageRow } from "./addons-storage";
 import { useInstallMarket, useInstallPayment, useRemoveAddon, useRequested } from "./market-dialogs";
-import { KIND_ICONS, botStatus, entryOf, hasPages, installMarket, installPayment, marketName, marketReady, pagesPath, queuedIds, type BotPhase, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
-import { OriginMark } from "./market-parts";
+import { KIND_ICONS, botStatus, entryOf, hasPages, installMarket, installPayment, marketName, marketReady, pagesPath, queuedIds, sourceLabel, unofficial, type BotPhase, type Market, type MarketEntry, type MarketInstalled } from "./market-common";
+import { OriginMark, ShieldBanner } from "./market-parts";
 
 type Payments = Schemas["AddonsView"];
 type Payment = Schemas["AddonView"];
@@ -65,6 +65,13 @@ export function InstalledTab({ market, pay, act }: { market: UseQueryResult<Mark
       ) : null}
       {market.isError && !m ? <LoadError text={t("addons.loadMarketFailed")} error={market.error} onRetry={() => void market.refetch()} retrying={market.isFetching} /> : null}
       {pay.isError && !p ? <LoadError text={t("addons.loadPaymentsFailed")} error={pay.error} onRetry={() => void pay.refetch()} retrying={pay.isFetching} /> : null}
+      {m?.installed
+        .filter((a) => a.origin?.revoked)
+        .map((a) => (
+          <ShieldBanner key={a.id} tone="err">
+            {t("market.revokedInstalled", { name: marketName(a.id, m), reason: a.origin?.revoked ?? "" })}
+          </ShieldBanner>
+        ))}
       <Updates m={m} p={p} ready={ready} queued={queued} />
       {tg?.enabled && slotView && !slotView.addon && !slotView.auto ? <NoBotBanner m={m} ready={ready} queued={queued} act={act} /> : null}
       {loading ? <GroupSkeleton /> : null}
@@ -266,7 +273,7 @@ function BotRow({ a, m, tg, slot, ready, queued, act }: { a: MarketInstalled; m:
   const sub = [
     holds && tg?.bot ? `@${tg.bot.username}` : t(`market.kind.${a.kind}`),
     holds && tg ? t("addons.subsN", { n: tg.linked }) : null,
-    a.version ? `v${a.version}` : t(`market.source.${a.source}`),
+    a.version ? `v${a.version}` : sourceLabel(a),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -349,8 +356,9 @@ function MarketMenu({
           <Item icon={ShieldAlert} onSelect={() => act.approve(entry)}>
             {t("addons.reviewPerms")}
           </Item>
-        ) : !busy && entry?.update ? (
-          <Item icon={ArrowUpCircle} onSelect={() => update.mutate(entry)}>
+        ) : !busy && entry?.update && !a.origin?.revoked ? (
+          // An unofficial build goes through the dialog that asks the admin to take the risk.
+          <Item icon={ArrowUpCircle} onSelect={() => (unofficial(entry) ? act.approve(entry) : update.mutate({ entry }))}>
             {t("addons.update")}
           </Item>
         ) : null}
@@ -380,7 +388,7 @@ function MarketMenu({
 function MarketRow({ a, m, ready, queued, act }: { a: MarketInstalled; m: Market; ready: boolean; queued: boolean; act: AddonActions }) {
   const name = marketName(a.id, m);
   const entry = entryOf(a.id, m);
-  const sub = [t(`market.kind.${a.kind}`), a.version ? `v${a.version}` : t(`market.source.${a.source}`), `${t("market.factPerms")}: ${t("market.permsN", { n: a.granted.length })}`].join(" · ");
+  const sub = [t(`market.kind.${a.kind}`), a.version ? `v${a.version}` : sourceLabel(a), `${t("market.factPerms")}: ${t("market.permsN", { n: a.granted.length })}`].join(" · ");
   return (
     <Row
       icon={KIND_ICONS[a.kind]}
@@ -507,15 +515,17 @@ function Updates({ m, p, ready, queued }: { m: Market | undefined; p: Payments |
       .filter((e): e is MarketEntry => !!e && e.update && !queued.has(e.id))
       .map((e) => ({ id: e.id, name: localized(e.name, e.id), payment: false, entry: e })),
   ];
-  const wider = list.filter((u) => u.entry?.wider).length;
-  const silent = list.filter((u) => (u.payment ? !!p?.supported : ready && !u.entry?.wider));
+  // Neither a build that asks for more nor an unofficial one goes with the button: each waits in
+  // its row for the admin to look at it.
+  const wider = list.filter((u) => u.entry?.wider || unofficial(u.entry)).length;
+  const silent = list.filter((u) => (u.payment ? !!p?.supported : ready && !u.entry?.wider && !unofficial(u.entry)));
   const all = useMutation({
     mutationFn: async (items: Update[]) => {
       let failed = 0;
       for (const u of items) {
         try {
           if (u.payment) await installPayment(u.id);
-          else if (u.entry) await installMarket(u.entry);
+          else if (u.entry) await installMarket({ entry: u.entry });
         } catch {
           failed++;
         }

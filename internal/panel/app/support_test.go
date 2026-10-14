@@ -6,15 +6,20 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"mikan/internal/logbuf"
+	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -39,9 +44,9 @@ type grantReply struct {
 	Link  string `json:"link"`
 }
 
-func newSupportHarness(t *testing.T) *supportHarness {
+func newSupportHarness(t *testing.T, with ...func(*Options)) *supportHarness {
 	t.Helper()
-	return &supportHarness{newKeyHarness(t)}
+	return &supportHarness{newKeyHarness(t, with...)}
 }
 
 // grant opens an access the way the admin does: from the session.
@@ -708,5 +713,82 @@ func TestSupportGrantRemovalDropsSessions(t *testing.T) {
 	}
 	if resp, _ := op.do(http.MethodGet, "/users", nil, nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("session of a deleted grant: %d", resp.StatusCode)
+	}
+}
+
+// The host's operations under a support grant: a doctor run only reads, so the view level may
+// call it; a restart writes, so it needs the change level (browser and token alike), and at
+// view it leaves no request for the host.
+func TestSupportOperatorHostOperations(t *testing.T) {
+	dir := t.TempDir()
+	logs := logbuf.New(100)
+	s := newSupportHarness(t, func(o *Options) {
+		o.DataDir, o.Logs = dir, logs
+		o.Log = slog.New(logs.Handler(o.Log.Handler()))
+	})
+	restartRequest := filepath.Join(dir, "restart", "request")
+	// The host's unit: answers every doctor request until the test ends.
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		req := filepath.Join(dir, "doctor", "request")
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(2 * time.Millisecond):
+			}
+			raw, err := os.ReadFile(req)
+			if err != nil {
+				continue
+			}
+			_ = os.Remove(req)
+			var r struct{ ID string }
+			_ = json.Unmarshal(raw, &r)
+			out, _ := json.Marshal(nodeapi.HostReport{ID: r.ID, Kind: "panel", Items: []nodeapi.HostItem{{Level: "ok", Label: "Docker"}}})
+			_ = os.WriteFile(filepath.Join(dir, "doctor", "report.json"), out, 0o644)
+		}
+	}()
+	for _, level := range []string{"view", "change"} {
+		g, code, out := s.grant(map[string]any{"hours": 6, "level": level})
+		if code != http.StatusCreated {
+			t.Fatalf("%s grant: %d %s", level, code, out)
+		}
+		op := s.newOperator()
+		if resp, body := op.enter(g.Token); resp.StatusCode != http.StatusOK {
+			t.Fatalf("enter: %d %s", resp.StatusCode, body)
+		}
+		for how, call := range map[string]func(method, path string, body any) (*http.Response, []byte){
+			"browser": func(m, p string, b any) (*http.Response, []byte) { return op.write(m, p, b) },
+			"token": func(m, p string, b any) (*http.Response, []byte) {
+				return s.newOperator().do(m, p, b, bearerOf(g.Token))
+			},
+		} {
+			if resp, body := call(http.MethodGet, "/logs", nil); resp.StatusCode != http.StatusOK {
+				t.Errorf("%s %s logs: %d %s", level, how, resp.StatusCode, body)
+			}
+			// A diagnostic is allowed at every level.
+			for _, path := range []string{"/system/doctor", "/nodes/1/doctor"} {
+				if resp, body := call(http.MethodPost, path, nil); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"label":"Docker"`) {
+					t.Errorf("%s %s POST %s: %d %s", level, how, path, resp.StatusCode, body)
+				}
+			}
+			if level == "change" {
+				// Allowed: the first request is taken (202), the next waits for the host (409).
+				if resp, body := call(http.MethodPost, "/system/restart", nil); resp.StatusCode != http.StatusAccepted && detail(body) != "restart_pending" {
+					t.Errorf("change %s restart: %d %s", how, resp.StatusCode, body)
+				}
+				continue
+			}
+			for _, path := range []string{"/system/restart", "/nodes/2/restart"} {
+				resp, body := call(http.MethodPost, path, nil)
+				if resp.StatusCode != http.StatusForbidden || detail(body) != "support_read_only" {
+					t.Errorf("view %s POST %s: %d %s, want 403 support_read_only", how, path, resp.StatusCode, body)
+				}
+			}
+			if _, err := os.Stat(restartRequest); err == nil {
+				t.Fatalf("view %s left a restart request for the host", how)
+			}
+		}
 	}
 }

@@ -29,9 +29,9 @@ type keyHarness struct {
 	read, full string
 }
 
-func newKeyHarness(t *testing.T) *keyHarness {
+func newKeyHarness(t *testing.T, with ...func(*Options)) *keyHarness {
 	t.Helper()
-	h := newHarness(t)
+	h := newHarness(t, with...)
 	ctx := context.Background()
 	if err := domain.Seed(ctx, h.st, h.now); err != nil {
 		t.Fatal(err)

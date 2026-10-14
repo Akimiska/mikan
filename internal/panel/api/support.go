@@ -64,6 +64,16 @@ func supportTerminalAllowed(ctx context.Context, target string) bool {
 	return ok && support.TerminalAllowed(g, target)
 }
 
+// supportDiagnostic marks a POST that only reads: a server check or a doctor run changes
+// nothing on the server, so an operator at the view level may call it. A restart is no such
+// operation and stays a write.
+var supportDiagnostic = map[string]any{"supportDiagnostic": true}
+
+func supportReadOnlyPost(op *huma.Operation) bool {
+	ok, _ := op.Metadata["supportDiagnostic"].(bool)
+	return ok
+}
+
 // supportGate is the decision for an operation a support operator called: 0 lets it
 // through, otherwise the status and the code to refuse with. Closed operations first (the
 // code says closed, not read-only), then the level: view only reads.
@@ -76,7 +86,7 @@ func supportGate(op *huma.Operation, mutating bool, g db.SupportGrant) (int, str
 			return http.StatusForbidden, "support_denied"
 		}
 	}
-	if mutating && !support.Writes(g.Level) {
+	if mutating && !support.Writes(g.Level) && !supportReadOnlyPost(op) {
 		return http.StatusForbidden, "support_read_only"
 	}
 	return 0, ""

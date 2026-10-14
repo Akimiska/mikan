@@ -12,6 +12,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"mikan/internal/hostchan"
+	"mikan/internal/logbuf"
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
@@ -138,6 +140,11 @@ type Deps struct {
 	// Support keeps the support grants (internal/panel/support); nil in tests that do not
 	// need it: no grant then opens anything.
 	Support *support.Service
+	// Logs holds the last lines of the panel's log for the Diagnostics page; nil: none.
+	Logs *logbuf.Buffer
+	// Host asks the panel's own server for `mikan doctor` and a restart of the containers
+	// (the files its units watch); nil: not offered.
+	Host *hostchan.Channel
 }
 
 // NodeRuntime is what the API needs from the running nodes.
@@ -162,6 +169,12 @@ type NodeRuntime interface {
 	Hello(id int64) (nodesync.HelloView, bool)
 	// Diagnose asks a node how its server is: DNS, the internet, GitHub, disk, memory.
 	Diagnose(ctx context.Context, id int64) (nodeapi.Diagnosis, error)
+	// Logs is a node's own log, the last tail lines, secrets cut out.
+	Logs(ctx context.Context, id int64, tail int) (nodeapi.Logs, error)
+	// HostDoctor has a node's server run `mikan doctor` and returns its report.
+	HostDoctor(ctx context.Context, id int64) (nodeapi.HostReport, error)
+	// HostRestart has a node's server restart its containers.
+	HostRestart(ctx context.Context, id int64) (nodeapi.RestartAccepted, error)
 }
 
 type ctxKey int
@@ -291,6 +304,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerPackages()
 	h.registerAudit()
 	h.registerSupport()
+	h.registerHostOps()
 	return noStore(maskResponses(mux)), api, nil
 }
 

@@ -11,13 +11,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::docker::{self, Service};
 use crate::ops::Install;
 use crate::setup::mark;
 use crate::system::{self, Level, Proto};
-use crate::{DIR, acme, addon, clock, hello, net};
+use crate::{DIR, acme, addon, clock, hello, hostreq, net, redact};
 
 /// How long one request to the outside may take.
 const NET_TIMEOUT: Duration = Duration::from_secs(8);
@@ -63,11 +63,15 @@ impl Item {
     }
 }
 
-/// Prints the items as they come and counts the problems.
+/// Keeps the items, prints them as they come when someone is reading, and counts the
+/// problems.
 #[derive(Default)]
 struct Report {
     errors: usize,
     warnings: usize,
+    items: Vec<Item>,
+    /// Print each item at once (`mikan doctor`); not for the JSON the panel reads.
+    live: bool,
 }
 
 impl Report {
@@ -78,9 +82,70 @@ impl Report {
                 Level::Warn => self.warnings += 1,
                 Level::Ok => {}
             }
-            for line in item.lines() {
-                crate::out(&line);
+            if self.live {
+                for line in item.lines() {
+                    crate::out(&line);
+                }
             }
+            self.items.push(item);
+        }
+    }
+}
+
+/// One line of the JSON report, as the panel reads it (nodeapi.HostItem).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct JsonItem {
+    pub level: &'static str,
+    pub label: String,
+    pub detail: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub fix: String,
+}
+
+/// What `mikan doctor --json` prints and `--requested` writes to doctor/report.json
+/// (nodeapi.HostReport): the same checks as the text, with the secrets cut out.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct JsonReport {
+    /// The request this answers; "" for a run nobody asked for.
+    pub id: String,
+    pub at: String,
+    pub version: String,
+    pub kind: &'static str,
+    pub errors: usize,
+    pub warnings: usize,
+    pub items: Vec<JsonItem>,
+}
+
+fn level_name(l: Level) -> &'static str {
+    match l {
+        Level::Ok => "ok",
+        Level::Warn => "warn",
+        Level::Error => "error",
+    }
+}
+
+impl Report {
+    /// The report as data. Everything that is text goes through redact: the report leaves
+    /// the server, and what a container said (a node's contact lines) is in it.
+    fn json(&self, install: &Install, id: &str) -> JsonReport {
+        JsonReport {
+            id: id.to_owned(),
+            at: clock::rfc3339(),
+            version: install.version(),
+            kind: if install.node { "node" } else { "panel" },
+            errors: self.errors,
+            warnings: self.warnings,
+            items: self
+                .items
+                .iter()
+                .map(|i| JsonItem {
+                    level: level_name(i.level),
+                    label: redact::text(&i.label),
+                    detail: redact::text(&i.detail),
+                    // A fine line has no fix under it, in the JSON as in the text.
+                    fix: if i.level == Level::Ok { String::new() } else { i.fix.as_deref().map(redact::text).unwrap_or_default() },
+                })
+                .collect(),
         }
     }
 }
@@ -100,24 +165,65 @@ fn answer<T>(rx: &mpsc::Receiver<T>, deadline: Instant) -> Option<T> {
 
 type Reached = Result<net::Probe, String>;
 
+/// `mikan doctor`: the checks, printed as they finish.
 pub fn run() -> Result<()> {
     let install = Install::load()?;
+    let mut report = Report { live: true, ..Report::default() };
+    crate::out(&format!("mikan {}, {}", install.version(), if install.node { "node" } else { "panel" }));
+    gather(&install, &mut report);
+    match (report.errors, report.warnings) {
+        (0, 0) => crate::out("No problems found."),
+        (0, w) => crate::out(&format!("No errors; {w} thing{} to look at above.", if w == 1 { "" } else { "s" })),
+        (e, _) => bail!("{e} problem{} found", if e == 1 { "" } else { "s" }),
+    }
+    Ok(())
+}
+
+/// The checks as data for id's asker (the panel; "" for a run from the shell).
+pub fn collect(install: &Install, id: &str) -> JsonReport {
+    let mut report = Report::default();
+    gather(install, &mut report);
+    report.json(install, id)
+}
+
+/// `mikan doctor --json`: the report as JSON on stdout, exit status as for the text.
+pub fn json() -> Result<()> {
+    let r = collect(&Install::load()?, "");
+    crate::out(&serde_json::to_string_pretty(&r)?);
+    if r.errors > 0 {
+        bail!("{} problem{} found", r.errors, if r.errors == 1 { "" } else { "s" });
+    }
+    Ok(())
+}
+
+/// `mikan doctor --requested` (the doctor request unit): runs the checks the panel, or a
+/// node, asked for and writes doctor/report.json for it. A request that is not one is
+/// removed and nothing runs.
+pub fn requested() -> Result<()> {
+    let install = Install::load()?;
+    let Some(dir) = hostreq::dir(install.node, "doctor")? else { return Ok(()) };
+    let Some(req) = hostreq::take(&dir)? else { return Ok(()) };
+    let report = collect(&install, &req.id);
+    dir.write("report.json", serde_json::to_string(&report)?.as_bytes(), 0o644)?;
+    crate::out(&format!("doctor report written: {} problem(s), {} warning(s)", report.errors, report.warnings));
+    Ok(())
+}
+
+/// All the checks of this server into report.
+fn gather(install: &Install, report: &mut Report) {
     let deadline = Instant::now() + NET_DEADLINE;
     let github = background(|| net::probe("https://github.com", NET_TIMEOUT).map_err(|e| e.to_string()));
     let ghcr = background(|| net::probe("https://ghcr.io/v2/", NET_TIMEOUT).map_err(|e| e.to_string()));
     let dns = background(|| "github.com:443".to_socket_addrs().map(|a| a.count()).map_err(|e| e.to_string()));
-
-    let mut report = Report::default();
-    crate::out(&format!("mikan {}, {}", install.version(), if install.node { "node" } else { "panel" }));
 
     let engine = docker::version();
     report.add([docker_item(engine.as_deref())]);
     if engine.is_some() {
         report.add(containers(docker::services().map_err(|e| format!("{e:#}"))));
     }
-    report.add(ports(&install, engine.is_some()));
+    report.add(ports(install, engine.is_some()));
     report.add([port80_item(system::port_owner(80, Proto::Tcp).as_deref(), install.env.get("MIKAN_ACME_LISTEN"))]);
-    report.add(firewall(&install));
+    report.add(firewall(install));
 
     let github = answer(&github, deadline);
     let skew = github
@@ -136,13 +242,6 @@ pub fn run() -> Result<()> {
     if install.node {
         report.add(contact(install.node_port(), engine.is_some()));
     }
-
-    match (report.errors, report.warnings) {
-        (0, 0) => crate::out("No problems found."),
-        (0, w) => crate::out(&format!("No errors; {w} thing{} to look at above.", if w == 1 { "" } else { "s" })),
-        (e, _) => bail!("{e} problem{} found", if e == 1 { "" } else { "s" }),
-    }
-    Ok(())
 }
 
 fn docker_item(version: Option<&str>) -> Item {
@@ -831,6 +930,71 @@ Anywhere                   ALLOW       10.0.0.0/8
         assert_eq!(containers(Ok(Vec::new()))[0].level, Level::Error);
         assert_eq!(containers(Err("no docker".into()))[0].level, Level::Error);
         assert_eq!(containers(Ok(vec![service("running", "Up")])).len(), 1);
+    }
+
+    fn install(node: bool) -> Install {
+        Install { env: crate::envfile::EnvFile::from_text("/nonexistent/.env", "MIKAN_VERSION=0.5.1.1\n"), node }
+    }
+
+    fn report(items: Vec<Item>) -> Report {
+        let mut r = Report::default();
+        r.add(items);
+        r
+    }
+
+    // The JSON is what the panel's HostReport reads: these names, these levels, a fix only
+    // where something is wrong, the counts of the problems and the id of the request.
+    #[test]
+    fn the_json_has_the_shape_the_panel_reads() {
+        let r = report(vec![
+            Item::ok("Docker", "engine 28.0.1"),
+            Item::warn("Clock", "late", "timedatectl set-ntp true"),
+            Item::error("Disk", "0.3 GB free", "free space"),
+            Item { fix: Some("not shown for a fine line".into()), ..Item::ok("A", "b") },
+        ]);
+        let j = r.json(&install(false), "abc123");
+        let v: serde_json::Value = serde_json::to_value(&j).unwrap();
+        let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["at", "errors", "id", "items", "kind", "version", "warnings"]);
+        assert_eq!((v["id"].as_str(), v["kind"].as_str(), v["version"].as_str()), (Some("abc123"), Some("panel"), Some("0.5.1.1")));
+        assert_eq!((v["errors"].as_u64(), v["warnings"].as_u64()), (Some(1), Some(1)));
+        assert!(clock::parse_rfc3339(v["at"].as_str().unwrap()).is_some(), "at is RFC 3339");
+        let items = v["items"].as_array().unwrap();
+        let levels: Vec<&str> = items.iter().map(|i| i["level"].as_str().unwrap()).collect();
+        assert_eq!(levels, ["ok", "warn", "error", "ok"]);
+        assert_eq!(items[0], serde_json::json!({"level": "ok", "label": "Docker", "detail": "engine 28.0.1"}));
+        assert_eq!(items[2]["fix"], "free space");
+        assert!(items[3].get("fix").is_none(), "a fine line has no fix");
+        assert_eq!(install(true).env.get("MIKAN_VERSION"), Some("0.5.1.1"));
+        assert_eq!(r.json(&install(true), "").kind, "node");
+    }
+
+    // The report leaves the server: no secret is in it, whoever said it (a node's contact lines
+    // carry what the container wrote).
+    #[test]
+    fn the_report_has_no_secrets() {
+        let secret = "AbCdEfGhIjKlMnOpQrStUv0123456789";
+        let r = report(vec![
+            Item::warn(
+                "Panel contact",
+                format!("the panel said token={secret} and sent vless://u@h:443?pbk={secret} for ms_{secret}"),
+                format!("mikan join {secret}; password=hunter2hunter2"),
+            ),
+            Item::ok("Container node", format!("Up 3 hours  /{secret}/api")),
+        ]);
+        let text = serde_json::to_string(&r.json(&install(true), "x")).unwrap();
+        for s in [secret, "hunter2hunter2", "u@h"] {
+            assert!(!text.contains(s), "{s} is in the report: {text}");
+        }
+        assert!(text.contains("the panel said") && text.contains("Container node"), "{text}");
+    }
+
+    // The JSON of a run that nobody asked for has an empty id, which no asker takes for its own.
+    #[test]
+    fn the_report_of_a_plain_run_has_no_id() {
+        assert_eq!(report(Vec::new()).json(&install(false), "").id, "");
+        assert_eq!(report(Vec::new()).json(&install(false), "").errors, 0);
     }
 
     #[test]

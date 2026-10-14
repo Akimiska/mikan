@@ -95,6 +95,13 @@ func TestSupportGate(t *testing.T) {
 		// Closed before read-only: the answer for a write to a closed endpoint says closed.
 		{op("reset-admin-path", "settings"), true, view, 403, "support_denied"},
 		{op("support-whoami", supportOperatorTag), false, view, 0, ""},
+		// A doctor run only reads, so view may call it; a restart writes and needs change.
+		{&huma.Operation{OperationID: "doctor-server", Tags: []string{"settings"}, Metadata: supportDiagnostic}, true, view, 0, ""},
+		{&huma.Operation{OperationID: "doctor-node", Tags: []string{"node"}, Metadata: supportDiagnostic}, true, view, 0, ""},
+		{&huma.Operation{OperationID: "restart-server", Tags: []string{"settings"}, Metadata: sessionOnly}, true, view, 403, "support_read_only"},
+		{&huma.Operation{OperationID: "restart-node", Tags: []string{"node"}, Metadata: sessionOnly}, true, view, 403, "support_read_only"},
+		{&huma.Operation{OperationID: "restart-server", Tags: []string{"settings"}, Metadata: sessionOnly}, true, change, 0, ""},
+		{&huma.Operation{OperationID: "restart-node", Tags: []string{"node"}, Metadata: sessionOnly}, true, terminal, 0, ""},
 	} {
 		if status, code := supportGate(c.op, c.mutating, c.g); status != c.status || code != c.code {
 			t.Errorf("%s mutating=%v level=%s: %d %s, want %d %s", c.op.OperationID, c.mutating, c.g.Level, status, code, c.status, c.code)

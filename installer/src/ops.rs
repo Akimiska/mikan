@@ -232,52 +232,54 @@ pub fn inbound(args: &[String]) -> Result<()> {
 }
 
 pub fn status() -> Result<()> {
-    let install = Install::load()?;
+    status_to(&Install::load()?, &mut crate::out)
+}
+
+/// `mikan status`, said line by line to say (`mikan support` keeps the lines).
+pub fn status_to(install: &Install, say: &mut dyn FnMut(&str)) -> Result<()> {
     let version = install.version();
-    crate::out(&format!("mikan {version}, {}", if install.node { "node" } else { "panel" }));
+    say(&format!("mikan {version}, {}", if install.node { "node" } else { "panel" }));
     let mut wrong = false;
     let services = docker::services()?;
     for s in &services {
-        crate::out(&format!("  {:<6} {}", s.name, s.status));
+        say(&format!("  {:<6} {}", s.name, s.status));
         wrong |= s.state != "running";
     }
     for s in docker::stats(&services) {
-        crate::out(&format!("  {:<16} CPU {:>6}  memory {}", s.name, s.cpu, s.mem));
+        say(&format!("  {:<16} CPU {:>6}  memory {}", s.name, s.cpu, s.mem));
     }
     if let Some(p) = install.node_port() {
         match system::port_owner(p, system::Proto::Tcp) {
-            Some(_) => crate::out(&format!("The node waits for its panel on port {p}.")),
+            Some(_) => say(&format!("The node waits for its panel on port {p}.")),
             None => {
                 wrong = true;
-                crate::out(&format!("The node does not listen on port {p}: mikan logs node"));
+                say(&format!("The node does not listen on port {p}: mikan logs node"));
             }
         }
     } else if docker::panel_healthy() {
-        crate::out("The panel answers.");
+        say("The panel answers.");
     } else {
         wrong = true;
-        crate::out("The panel does not answer: mikan logs panel");
+        say("The panel does not answer: mikan logs panel");
     }
     if wrong {
-        crate::out("Run mikan doctor for a full check with fixes.");
+        say("Run mikan doctor for a full check with fixes.");
     }
-    match release::find(Some(&version), crate::update::channel(&install)) {
+    match release::find(Some(&version), crate::update::channel(install)) {
         Ok(found) => {
             // Where the answer came from is worth a line only when it is not the index.
             if let Some(why) = &found.fallback {
-                crate::out(&format!("The release index is unavailable ({why}): the latest release on GitHub answers instead."));
+                say(&format!("The release index is unavailable ({why}): the latest release on GitHub answers instead."));
             }
             let m = &found.manifest;
             match &found.newest {
-                Some(newest) if found.unreachable => {
-                    crate::out(&format!("mikan {newest} is out, but this version cannot update to it directly."))
-                }
-                Some(newest) => crate::out(&format!("mikan {newest} is out: mikan update (through mikan {} first)", m.version)),
-                None if release::newer(&m.version, &version) => crate::out(&format!("mikan {} is out: mikan update", m.version)),
-                None => crate::out("This is the latest release."),
+                Some(newest) if found.unreachable => say(&format!("mikan {newest} is out, but this version cannot update to it directly.")),
+                Some(newest) => say(&format!("mikan {newest} is out: mikan update (through mikan {} first)", m.version)),
+                None if release::newer(&m.version, &version) => say(&format!("mikan {} is out: mikan update", m.version)),
+                None => say("This is the latest release."),
             }
         }
-        Err(e) => crate::out(&format!("Cannot check for updates: {e:#}")),
+        Err(e) => say(&format!("Cannot check for updates: {e:#}")),
     }
     Ok(())
 }
@@ -297,6 +299,24 @@ pub fn restart() -> Result<()> {
     setup::wait_ready(install.node_port(), Duration::from_secs(90))?;
     crate::out("Restarted.");
     Ok(())
+}
+
+/// How long a restart the panel asked for waits: the answer to the page that asked goes out
+/// before the container it came from stops.
+const RESTART_GRACE: Duration = Duration::from_secs(2);
+
+/// `mikan restart --requested` (the restart request unit): takes the request the panel, or
+/// a node, wrote, and restarts the containers. A request that is not one is removed and
+/// nothing restarts.
+pub fn restart_requested() -> Result<()> {
+    let install = Install::load()?;
+    let Some(dir) = crate::hostreq::dir(install.node, "restart")? else { return Ok(()) };
+    if crate::hostreq::take(&dir)?.is_none() {
+        return Ok(());
+    }
+    crate::out("restart asked for by the panel");
+    std::thread::sleep(RESTART_GRACE);
+    restart()
 }
 
 pub fn confirm(question: &str) -> bool {

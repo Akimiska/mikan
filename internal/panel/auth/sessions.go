@@ -34,20 +34,36 @@ func NewSessions(q *db.Queries, now func() time.Time, log *slog.Logger) *Session
 
 // Create returns the raw cookie token; only its SHA-256 is stored.
 func (s *Sessions) Create(ctx context.Context, adminID int64, ip, userAgent string) (string, db.Session, error) {
+	return s.create(ctx, adminID, sql.NullInt64{}, 0, ip, userAgent)
+}
+
+// CreateSupport makes the session of a support operator for a grant: it acts for the
+// admin who opened the grant and ends with the grant, at expires (unix seconds) at the
+// latest.
+func (s *Sessions) CreateSupport(ctx context.Context, adminID, grantID, expires int64, ip, userAgent string) (string, db.Session, error) {
+	return s.create(ctx, adminID, sql.NullInt64{Int64: grantID, Valid: true}, expires, ip, userAgent)
+}
+
+func (s *Sessions) create(ctx context.Context, adminID int64, grant sql.NullInt64, expires int64, ip, userAgent string) (string, db.Session, error) {
 	token := secure.Token(43)
 	now := s.now().Unix()
 	if len(userAgent) > 256 {
 		userAgent = userAgent[:256]
 	}
+	end := now + int64(MaxTTL/time.Second)
+	if expires > 0 {
+		end = min(end, expires)
+	}
 	p := db.CreateSessionParams{
-		IDHash:     secure.SHA256Hex(token),
-		AdminID:    adminID,
-		CsrfToken:  secure.Token(32),
-		CreatedAt:  now,
-		LastSeenAt: now,
-		ExpiresAt:  now + int64(MaxTTL/time.Second),
-		Ip:         ip,
-		UserAgent:  userAgent,
+		IDHash:         secure.SHA256Hex(token),
+		AdminID:        adminID,
+		CsrfToken:      secure.Token(32),
+		CreatedAt:      now,
+		LastSeenAt:     now,
+		ExpiresAt:      end,
+		Ip:             ip,
+		UserAgent:      userAgent,
+		SupportGrantID: grant,
 	}
 	if err := s.q.CreateSession(ctx, p); err != nil {
 		return "", db.Session{}, err

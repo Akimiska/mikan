@@ -122,7 +122,7 @@ export default defineConfig({
 				{
 					label: 'Справка',
 					translations: { en: 'Reference' },
-					items: [{ slug: 'api' }, { slug: 'faq' }, { slug: 'changelog' }, { slug: 'support' }],
+					items: [{ slug: 'api' }, { slug: 'faq' }, { slug: 'changelog' }, { slug: 'support' }, { slug: 'support/paid' }],
 				},
 			],
 			plugins: [starlightLinksValidator({ errorOnLocalLinks: true })],

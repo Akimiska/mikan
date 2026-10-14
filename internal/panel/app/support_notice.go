@@ -49,9 +49,9 @@ func terminalNoticeText(ru bool, n support.Notice) string {
 	server := html.EscapeString(n.Terminal)
 	if !n.Leave {
 		if ru {
-			return fmt.Sprintf("🖥 <b>Поддержка открыла терминал</b>\nСервер: %s\nСеанс записывается. Отозвать: Настройки, Безопасность, Доступ для поддержки.", server)
+			return fmt.Sprintf("🖥 <b>Поддержка открыла терминал</b>\nСервер: %s\nСеанс записывается. Отозвать: Настройки, Поддержка.", server)
 		}
-		return fmt.Sprintf("🖥 <b>Support opened a terminal</b>\nServer: %s\nThe session is recorded. Revoke it: Settings, Security, Support access.", server)
+		return fmt.Sprintf("🖥 <b>Support opened a terminal</b>\nServer: %s\nThe session is recorded. Revoke it: Settings, Support.", server)
 	}
 	reason := map[bool]map[string]string{
 		true: {"closed": "терминал закрыт", "idle": "15 минут без действий", "expired": "срок доступа истёк", "revoked": "доступ отозван", "exit": "оболочка завершилась",
@@ -86,9 +86,9 @@ func supportNoticeText(lang string, n support.Notice) string {
 	}
 	if !n.Leave {
 		if ru {
-			return fmt.Sprintf("🔧 <b>Поддержка вошла в панель</b>\nУровень: %s, доступ до %s%s\nОтозвать: Настройки, Безопасность, Доступ для поддержки.", level, until, note)
+			return fmt.Sprintf("🔧 <b>Поддержка вошла в панель</b>\nУровень: %s, доступ до %s%s\nОтозвать: Настройки, Поддержка.", level, until, note)
 		}
-		return fmt.Sprintf("🔧 <b>Support entered the panel</b>\nLevel: %s, access until %s%s\nRevoke it: Settings, Security, Support access.", level, until, note)
+		return fmt.Sprintf("🔧 <b>Support entered the panel</b>\nLevel: %s, access until %s%s\nRevoke it: Settings, Support.", level, until, note)
 	}
 	reason := map[bool]map[string]string{
 		true:  {"revoked": "отозван", "replaced": "заменён новым", "expired": "срок истёк", "disabled": "доступ поддержки выключен", "left": "оператор закончил работу и вышел"},

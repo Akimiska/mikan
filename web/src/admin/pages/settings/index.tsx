@@ -1,5 +1,5 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowDownToLine, Cpu, Globe, LayoutTemplate, Link2, Route, ShieldCheck } from "lucide-react";
+import { ArrowDownToLine, Cpu, Globe, LayoutTemplate, LifeBuoy, Link2, Route, ShieldCheck } from "lucide-react";
 import { useSettings } from "../../../api/hooks";
 import { useSupportMode } from "../../../api/support";
 import { SectionNav } from "../../../components/layout";
@@ -23,7 +23,7 @@ import { SubPageSettings, type SubPagePart } from "./sub-page";
 type Tab = SettingsSearch["tab"];
 type RoutingPart = "simple" | "yaml";
 
-const ICONS = { general: Globe, subscription: Link2, page: LayoutTemplate, routing: Route, security: ShieldCheck, system: Cpu, import: ArrowDownToLine } as const;
+const ICONS = { general: Globe, subscription: Link2, page: LayoutTemplate, routing: Route, security: ShieldCheck, support: LifeBuoy, system: Cpu, import: ArrowDownToLine } as const;
 
 const PART_LABELS: Record<string, Key> = {
   look: "settings.page.tab.look",
@@ -103,9 +103,11 @@ export function SettingsPage() {
                     <AccessCard s={s} />
                     <CertificateCard s={s} />
                     <ApiCard />
-                    <SupportCard />
                   </>
                 )
+              ) : tab === "support" ? (
+                // Who may let a helper in is the admin's own business: an operator sees it closed.
+                operator ? <ClosedForSupport /> : <SupportCard />
               ) : tab === "system" ? (
                 <>
                   <UpdatesCard />

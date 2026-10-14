@@ -116,6 +116,8 @@ export default defineConfig({
 						{ slug: 'operations/backups' },
 						{ slug: 'operations/import' },
 						{ slug: 'operations/alerts' },
+						{ slug: 'operations/diagnostics' },
+						{ slug: 'operations/support-access' },
 						{ slug: 'operations/cli' },
 					],
 				},

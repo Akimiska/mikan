@@ -63,7 +63,7 @@ function LiveGrant({ g }: { g: SupportGrant }) {
         <span className="support-bar-more"> · {t(`support.level.${g.level}`)} · {t("support.left", { left: timeLeft(g.expires_at, now) })}</span>
         <span className="support-bar-more"> · {seen ? t("support.operatorSeen", { ago: ago(seen, now) }) : t("support.operatorNot")}</span>
       </p>
-      <Link to="/settings" search={{ tab: "security" }} hash="support" className="support-bar-link">
+      <Link to="/settings" search={{ tab: "support" }} className="support-bar-link">
         {t("support.details")}
       </Link>
       <Button size="sm" variant="danger-solid" loading={revoke.isPending} onClick={() => revoke.mutate()}>

@@ -112,7 +112,7 @@ Mikan ödemeyi iade edebilir.
 
 ## Destek erişimi
 
-Yardıma ihtiyacın olduğunda geçici erişimi kendin açarsın: Ayarlar → Güvenlik → Destek erişimi, 2, 6 veya 24 saatliğine, «görüntüleme», «değiştirme» veya «terminal» seviyesinde. Bu düğme olmadan mikan geliştiricileri dahil kimse panele giremez: projenin sunucularına kalıcı erişimi yoktur ve panel kendiliğinden hiçbir yere bağlanmaz. Operatörün her işlemi denetim günlüğüne yazılır, erişim tek düğmeyle geri alınır, terminal parolan ve 2FA ile açılır ve kaydedilir. Özelliği tamamen kapatmak için aynı karttaki anahtarı kullan veya sunucuda `mikan support-access off` çalıştır. Ücretli destek kuralları: [sitede](https://miroshka000.github.io/mikan/support/paid/).
+Yardıma ihtiyacın olduğunda geçici erişimi kendin açarsın: Ayarlar → Destek, 2, 6 veya 24 saatliğine, «görüntüleme», «değiştirme» veya «terminal» seviyesinde. Bu düğme olmadan mikan geliştiricileri dahil kimse panele giremez: projenin sunucularına kalıcı erişimi yoktur ve panel kendiliğinden hiçbir yere bağlanmaz. Operatörün her işlemi denetim günlüğüne yazılır, erişim tek düğmeyle geri alınır, terminal parolan ve 2FA ile açılır ve kaydedilir. Özelliği tamamen kapatmak için aynı karttaki anahtarı kullan veya sunucuda `mikan support-access off` çalıştır. Ücretli destek kuralları: [sitede](https://miroshka000.github.io/mikan/support/paid/).
 
 ## Ekran görüntüleri
 

@@ -113,7 +113,7 @@ the provider confirms it.
 
 ## Support access
 
-When you need help, you open a temporary access yourself: Settings → Security → Support access, for 2, 6 or 24 hours, at the "view", "change" or "terminal" level. Without that button nobody, mikan's developers included, gets into the panel: the project has no standing access to your servers, and the panel connects nowhere by itself. Every operator action goes into the audit log, access is revoked with one button, and the terminal needs your password and 2FA and is recorded. To turn the feature off for good, use the switch on the same card or run `mikan support-access off` on the server. Paid support rules: [on the website](https://miroshka000.github.io/mikan/support/paid/).
+When you need help, you open a temporary access yourself: Settings → Support, for 2, 6 or 24 hours, at the "view", "change" or "terminal" level. Without that button nobody, mikan's developers included, gets into the panel: the project has no standing access to your servers, and the panel connects nowhere by itself. Every operator action goes into the audit log, access is revoked with one button, and the terminal needs your password and 2FA and is recorded. To turn the feature off for good, use the switch on the same card or run `mikan support-access off` on the server. Paid support rules: [on the website](https://miroshka000.github.io/mikan/support/paid/).
 
 ## Screenshots
 

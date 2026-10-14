@@ -22,7 +22,7 @@ export type UsersSearch = {
   hidden?: Exclude<(typeof USER_HIDDEN)[number], "hide">;
 };
 
-export const SETTINGS_TABS = ["general", "subscription", "page", "routing", "security", "system", "import"] as const;
+export const SETTINGS_TABS = ["general", "subscription", "page", "routing", "security", "support", "system", "import"] as const;
 /** The parts of the sections that have them: the subscription page's editor and the routing. */
 export const SETTINGS_PARTS = {
   page: ["look", "brand", "blocks", "apps", "docs", "css"],

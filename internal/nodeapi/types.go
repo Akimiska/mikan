@@ -39,6 +39,9 @@ type DesiredState struct {
 	// Shaping splits the node's channel evenly between the users moving traffic; nil: off.
 	// Nodes older than it ignore it.
 	Shaping *Shaping `json:"shaping,omitempty"`
+	// DNS is how the node names the sites users reach (ExitDNS); nil: as before it, the
+	// address the user's device sent and the host's resolver. Nodes older than it ignore it.
+	DNS *ExitDNS `json:"dns,omitempty"`
 }
 
 // Shaping is the fair share of a node: ChannelMbps (each way) is split evenly between the

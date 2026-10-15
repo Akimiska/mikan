@@ -24,11 +24,11 @@ import (
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/autotune"
-	"mikan/internal/panel/checkhost"
 	"mikan/internal/panel/config"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/reach"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -85,7 +85,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 
 	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, SupportOff: cfg.SupportOff, Log: logger, Now: time.Now,
 		Autotune: autotune.DefaultOptions().Scaled(cfg.AutotuneScale), TelegramAPI: cfg.TelegramAPI,
-		DataDir: cfg.DataDir, Dev: cfg.Dev, Releases: updates.Fetch(release.IndexURL, release.LatestURL), DNS: dnscheck.New(), CheckHost: checkhost.New("", nil, time.Now), Logs: logs}
+		DataDir: cfg.DataDir, Dev: cfg.Dev, Releases: updates.Fetch(release.IndexURL, release.LatestURL), DNS: dnscheck.New(), Reach: reach.New("", nil, time.Now), Logs: logs}
 	botURL := cfg.SupportBotURL
 	if botURL == "" {
 		botURL = support.DefaultBotURL

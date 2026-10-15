@@ -1415,29 +1415,6 @@
         ],
         "type": "object"
       },
-      "CityResult": {
-        "additionalProperties": false,
-        "properties": {
-          "city": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "ports": {
-            "items": {
-              "$ref": "#/components/schemas/PortResult"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "ports",
-          "id",
-          "city"
-        ],
-        "type": "object"
-      },
       "ClientEndpoint": {
         "additionalProperties": false,
         "properties": {
@@ -2166,6 +2143,85 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "ExitDNSInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "presets": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Серверы готовых вариантов",
+            "type": "object"
+          },
+          "resolver": {
+            "description": "DNS-сервер ноды: host — DNS самого сервера, cloudflare, google, quad9 — их DoH, custom — свой список",
+            "enum": [
+              "host",
+              "cloudflare",
+              "google",
+              "quad9",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "servers": {
+            "description": "Свои серверы для custom: 1.1.1.1, tls://dns.google, https://1.1.1.1/dns-query, quic://dns.adguard-dns.com; хранятся и при другом выборе",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "sniff": {
+            "description": "Нода сама узнаёт, на какой сайт идёт пользователь (TLS, HTTP, QUIC на портах 443, 8443, 80, 8080–8880), и подключается к нему из своей страны: сайты видят страну ноды, а не пользователя",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "presets",
+          "sniff",
+          "resolver",
+          "servers"
+        ],
+        "type": "object"
+      },
+      "ExitDNSView": {
+        "additionalProperties": false,
+        "properties": {
+          "resolver": {
+            "description": "DNS-сервер ноды: host — DNS самого сервера, cloudflare, google, quad9 — их DoH, custom — свой список",
+            "enum": [
+              "host",
+              "cloudflare",
+              "google",
+              "quad9",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "servers": {
+            "description": "Свои серверы для custom: 1.1.1.1, tls://dns.google, https://1.1.1.1/dns-query, quic://dns.adguard-dns.com; хранятся и при другом выборе",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "sniff": {
+            "description": "Нода сама узнаёт, на какой сайт идёт пользователь (TLS, HTTP, QUIC на портах 443, 8443, 80, 8080–8880), и подключается к нему из своей страны: сайты видят страну ноды, а не пользователя",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sniff",
+          "resolver",
+          "servers"
+        ],
         "type": "object"
       },
       "ExtendInputBody": {
@@ -5839,33 +5895,6 @@
         ],
         "type": "object"
       },
-      "PortResult": {
-        "additionalProperties": false,
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "ms": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "ok": {
-            "type": "boolean"
-          },
-          "pending": {
-            "type": "boolean"
-          },
-          "port": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "port",
-          "ok"
-        ],
-        "type": "object"
-      },
       "Preview": {
         "additionalProperties": false,
         "properties": {
@@ -6369,6 +6398,151 @@
         ],
         "type": "object"
       },
+      "ReachCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cached": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "ports": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "probes": {
+            "items": {
+              "$ref": "#/components/schemas/ReachProbe"
+            },
+            "type": "array"
+          },
+          "verdict": {
+            "enum": [
+              "ok",
+              "partial",
+              "blocked",
+              "down"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "host",
+          "ports",
+          "verdict",
+          "probes",
+          "cached"
+        ],
+        "type": "object"
+      },
+      "ReachInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "description": "IP или домен сервера",
+            "maxLength": 253,
+            "type": "string"
+          },
+          "ports": {
+            "description": "TCP-порты: 22 у любого сервера с SSH, 443 у ноды",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "host",
+          "ports"
+        ],
+        "type": "object"
+      },
+      "ReachPort": {
+        "additionalProperties": false,
+        "properties": {
+          "got": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sent": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "port",
+          "ok",
+          "sent",
+          "got"
+        ],
+        "type": "object"
+      },
+      "ReachProbe": {
+        "additionalProperties": false,
+        "properties": {
+          "asn": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "city": {
+            "type": "string"
+          },
+          "control": {
+            "type": "boolean"
+          },
+          "country": {
+            "type": "string"
+          },
+          "home": {
+            "type": "boolean"
+          },
+          "network": {
+            "type": "string"
+          },
+          "ports": {
+            "items": {
+              "$ref": "#/components/schemas/ReachPort"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ports",
+          "country",
+          "city",
+          "network",
+          "asn",
+          "home",
+          "control"
+        ],
+        "type": "object"
+      },
       "RecordingInfo": {
         "additionalProperties": false,
         "properties": {
@@ -6850,23 +7024,46 @@
           "cached": {
             "type": "boolean"
           },
-          "cities": {
+          "host": {
+            "type": "string"
+          },
+          "names": {
+            "description": "Что за порты ноды проверены",
             "items": {
-              "$ref": "#/components/schemas/CityResult"
+              "$ref": "#/components/schemas/RussiaPort"
             },
             "type": "array"
           },
           "ports": {
             "items": {
-              "$ref": "#/components/schemas/RussiaPort"
+              "format": "int64",
+              "type": "integer"
             },
             "type": "array"
+          },
+          "probes": {
+            "items": {
+              "$ref": "#/components/schemas/ReachProbe"
+            },
+            "type": "array"
+          },
+          "verdict": {
+            "enum": [
+              "ok",
+              "partial",
+              "blocked",
+              "down"
+            ],
+            "type": "string"
           }
         },
         "required": [
-          "ports",
+          "names",
           "at",
-          "cities",
+          "host",
+          "ports",
+          "verdict",
+          "probes",
           "cached"
         ],
         "type": "object"
@@ -10562,6 +10759,77 @@
         ]
       }
     },
+    "/api/v1/exit-dns": {
+      "get": {
+        "operationId": "get-exit-dns",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExitDNSInfo"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "DNS на выходе",
+        "tags": [
+          "nodes"
+        ]
+      },
+      "put": {
+        "description": "Ноды получают настройку со своим состоянием; ноды старше неё её не применяют.",
+        "operationId": "update-exit-dns",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExitDNSView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExitDNSInfo"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Настроить DNS на выходе",
+        "tags": [
+          "nodes"
+        ]
+      }
+    },
     "/api/v1/filters": {
       "get": {
         "operationId": "get-filters",
@@ -12177,7 +12445,7 @@
             "description": "Error"
           }
         },
-        "summary": "Проверить порты ноды из России через check-host.net",
+        "summary": "Проверить порты ноды из России через Globalping",
         "tags": [
           "node"
         ]
@@ -14935,6 +15203,48 @@
           }
         },
         "summary": "mikan doctor на сервере панели",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/system/reach": {
+      "post": {
+        "description": "Зонды Globalping в домашних и мобильных сетях России и в дата-центрах подключаются к портам, контроль из Европы. Адрес сервера уходит в Globalping.",
+        "operationId": "check-reach",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReachInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReachCheck"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Проверить, открываются ли порты сервера из России",
         "tags": [
           "settings"
         ]

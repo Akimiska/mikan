@@ -25,12 +25,12 @@ import (
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/certcheck"
-	"mikan/internal/panel/checkhost"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
+	"mikan/internal/panel/reach"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
@@ -134,8 +134,8 @@ type Deps struct {
 	// DNS checks that a domain leads to the panel's or the node's server; nil: unchecked
 	// (tests, development).
 	DNS *dnscheck.Checker
-	// CheckHost checks a node's ports from Russia (check-host.net); nil: not offered.
-	CheckHost *checkhost.Client
+	// Reach checks ports of a node or any server from Russia (Globalping); nil: not offered.
+	Reach *reach.Client
 	// DataDir is the panel's data directory, whose disk "Check server" looks at; "": none.
 	DataDir string
 	// Support keeps the support grants (internal/panel/support); nil in tests that do not
@@ -298,6 +298,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerNodeChecks()
 	h.registerTorrent()
 	h.registerFilters()
+	h.registerExitDNS()
 	h.registerSpeedTests()
 	h.registerNodeUpdates()
 	h.registerAPIKeys()

@@ -467,6 +467,15 @@
       "user_not_found": "No such client",
       "filters_entry": "Not a port, a network or a domain: {value}",
       "filters_config": "At most 1000 lines in each list",
+      "reach_busy": "A check is running already, wait a moment",
+      "reach_limited": "Too many checks this hour, try later",
+      "reach_no_probes": "Nothing to check from right now: no check points in Russia, try later",
+      "reach_unavailable": "The check service did not answer, try later",
+      "reach_nothing": "The node has no public address or ports to check",
+      "reach_host": "Type the server's public IP or domain",
+      "reach_port": "Port: a number from 1 to 65535",
+      "exit_dns_server": "This does not look like a DNS server: {value}",
+      "exit_dns_servers": "Add at least one DNS server, at most 8",
       "torrent_config": "Check the ban length: from 0 to 30 days",
       "speed_test_busy": "A speed test is already running on this node",
       "speed_test_cooldown": "This node was tested less than 5 minutes ago: wait a little and try again",
@@ -501,9 +510,6 @@
       "background_missing": "Upload a background image first",
       "duplicate_id": "An instruction is listed twice",
       "too_many_docs": "No more than {value} instructions",
-      "checkhost_busy": "A check from Russia is running, wait a moment",
-      "checkhost_unavailable": "check-host.net did not answer, try later",
-      "checkhost_nothing": "The node has no address or TCP ports to check",
       "node_cert_not_ordered": "The panel does not get a certificate for this node: it has its own, or it is the panel's node",
       "email_invalid": "This is not an e-mail",
       "eab_kid_invalid": "The keyId without spaces, as the authority gave it",
@@ -1953,7 +1959,26 @@
     "reissueLimit": "Times",
     "reissueSummary": "The client replaces the link at most {n, plural, one {# time} other {# times}} per {period}.",
     "reissueSummaryFree": "The client replaces the link whenever they like.",
-    "reissueSummaryOff": "The client does not replace the link themselves: only you on the client's card. There is no “New link” button in the bot or the Mini App."
+    "reissueSummaryOff": "The client does not replace the link themselves: only you on the client's card. There is no “New link” button in the bot or the Mini App.",
+    "exitDns": {
+      "title": "DNS at the exit",
+      "lead": "Sites see the server's country, not the user's. It helps when a site says in some apps that it is not available in your country.",
+      "sniff": "Find out the site on the server",
+      "sniffSub": "The server finds out which site the user goes to and connects to it from its own country. Works in any app.",
+      "resolver": "DNS server",
+      "resolvers": {
+        "host": "The server's own (recommended)",
+        "cloudflare": "Cloudflare",
+        "google": "Google",
+        "quad9": "Quad9",
+        "custom": "Own"
+      },
+      "resolverHint": "Fits almost always: the server's DNS is in its country already.",
+      "servers": "Own DNS servers",
+      "serversHint": "One per line, up to 8. For example: 1.1.1.1 or https://1.1.1.1/dns-query",
+      "saved": "Saved, the servers apply it within seconds",
+      "off": "Off: sites may see the user's country."
+    }
   },
   "deviceMode": {
     "label": "How to count:",
@@ -3425,16 +3450,11 @@
     "russia": {
       "button": "Check from Russia",
       "title": "Reachability from Russia",
-      "lead": "The panel asks check-host.net to connect to the node's ports from cities in Russia.",
-      "caveat": "This check sees only blocks of an IP or a port. It does not show DPI blocking or the whitelists of mobile operators.",
-      "running": "Asking check-host.net, up to 30 seconds…",
+      "lead": "We check the node's ports from Russia: from home and mobile internet and from data centres, and from Europe to compare.",
+      "caveat": "The check does not see blocks by protocol or the whitelists of mobile operators.",
+      "running": "Checking, up to 40 seconds…",
       "checkedAt": "Checked {ago}",
-      "api": "API {port}",
-      "ok": "open, {ms} ms",
-      "pending": "no answer",
-      "allOk": "The ports open from every city",
-      "someFail": "The ports do not open from some cities: the IP or a port may be blocked",
-      "city": "City"
+      "api": "API {port}"
     },
     "join": {
       "title": "Connection",
@@ -3793,7 +3813,8 @@
     "tabs": {
       "logs": "Logs",
       "check": "Check",
-      "terminal": "Terminal"
+      "terminal": "Terminal",
+      "reach": "Reachability"
     },
     "server": "Server",
     "serverPanel": "Panel server",
@@ -3876,6 +3897,38 @@
         "recording": "The session is closed: the recording is full.",
         "error": "The session is closed because of an error on the server."
       }
+    },
+    "reach": {
+      "title": "Reachability from Russia",
+      "lead": "Shows whether the server opens for users in Russia. Handy to check a server before you buy it.",
+      "caveat": "To check, the server's address goes to the Globalping service. The check does not see blocks by protocol or the whitelists of mobile operators. Port 22 is open on almost any server, start with it.",
+      "host": "IP or domain",
+      "hostPlaceholder": "203.0.113.10",
+      "ports": "TCP ports",
+      "portsHint": "Up to three, comma separated",
+      "portsBad": "Give one to three ports from 1 to 65535, comma separated",
+      "run": "Check",
+      "running": "Checking, up to 40 seconds…",
+      "emptyTitle": "No checks yet",
+      "emptyText": "Type the server's IP or domain and press Check."
     }
+  },
+  "reach": {
+    "verdict": {
+      "ok": "The server opens from Russia",
+      "partial": "The server does not open for everyone: some operators in Russia block it",
+      "blocked": "The server is blocked in Russia: it opens from Europe, not from Russia",
+      "down": "The server answers from nowhere: the port is closed or the server is off"
+    },
+    "from": "From",
+    "home": "home or mobile internet",
+    "dc": "data centre",
+    "control": "To compare: from Europe",
+    "open": "open, {ms} ms",
+    "leaks": "{got} of {sent} got through",
+    "closed": "does not open",
+    "pending": "no data",
+    "checkedAt": "Checked {ago}",
+    "cached": "a recent check is shown"
   }
 }

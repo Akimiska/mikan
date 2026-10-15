@@ -25,6 +25,17 @@ Empty: the panel's default DNS. Ready sets: "The panel's", "All through the VPN"
 
 The **Show the profile** button shows what the app will get.
 
+## DNS at the exit
+
+**Settings → Routing → DNS at the exit.** On from the first start, on every node.
+
+Some apps (Happ, v2RayTun, v2rayNG and others on the Xray core) look a site's address up on the device and send the node a ready IP. A site may then decide the user is in their own country and say "not available in your region". With this setting the node finds out which site the user goes to and connects to it from its own country. It does not get in the way of mihomo (Clash) clients: they send the node the site's name anyway.
+
+- **Find out the site on the server**: the node reads the site's name from the connection (TLS, HTTP and QUIC on ports 443, 8443, 80 and 8080–8880). Other ports are left alone.
+- **DNS server**: "The server's own" fits almost always. There are presets for Cloudflare, Google and Quad9 (over DoH) and an own list: up to 8 servers, for example `1.1.1.1`, `tls://dns.google`, `https://1.1.1.1/dns-query`, `quic://dns.adguard-dns.com`.
+
+Nodes older than 0.5.1.1 skip this setting; after `mikan update` it works by itself.
+
 ## Your own Clash profile
 
 The "How to set it up" switch → **Own YAML** opens an editor for the whole mihomo config: DNS, fake-ip, TUN, sniffer, groups, rules. "Start from the simple one" copies the current settings as a starting point, and the ready snippets add DNS fake-ip, TUN, sniffer, QUIC blocking, and a group by country or by node.

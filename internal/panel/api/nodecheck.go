@@ -18,10 +18,10 @@ import (
 	"mikan/internal/diag"
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodehello"
-	"mikan/internal/panel/checkhost"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
+	"mikan/internal/panel/reach"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/release"
 )
@@ -63,19 +63,30 @@ type RussiaPort struct {
 }
 
 type RussiaView struct {
-	checkhost.Result
-	Ports []RussiaPort `json:"ports"`
+	reach.ReachCheck
+	Names []RussiaPort `json:"names" doc:"Что за порты ноды проверены"`
 }
 
 type russiaOutput struct{ Body RussiaView }
 
+type reachInput struct {
+	Body struct {
+		Host  string `json:"host" maxLength:"253" doc:"IP или домен сервера"`
+		Ports []int  `json:"ports" minItems:"1" maxItems:"3" doc:"TCP-порты: 22 у любого сервера с SSH, 443 у ноды"`
+	}
+}
+
+type reachOutput struct{ Body reach.ReachCheck }
+
 func (h *handlers) registerNodeChecks() {
 	tags := []string{"node"}
 	// The checks change nothing on a server, so an operator at the view level may run them
-	// (supportDiagnostic); check-node-russia asks check-host.net for the node's ports, which
-	// carries no data of subscribers.
+	// (supportDiagnostic); check-node-russia and check-reach ask Globalping about a server's
+	// ports, which carries no data of subscribers.
 	huma.Register(h.api, huma.Operation{OperationID: "check-node", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/check", Summary: "Проверить ноду: связь, версия, часы, протоколы, порты, интернет, каскад", Tags: tags}, h.checkNode)
-	huma.Register(h.api, huma.Operation{OperationID: "check-node-russia", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/check-russia", Summary: "Проверить порты ноды из России через check-host.net", Tags: tags}, h.checkNodeRussia)
+	huma.Register(h.api, huma.Operation{OperationID: "check-node-russia", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/check-russia", Summary: "Проверить порты ноды из России через Globalping", Tags: tags}, h.checkNodeRussia)
+	huma.Register(h.api, huma.Operation{OperationID: "check-reach", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/system/reach", Summary: "Проверить, открываются ли порты сервера из России",
+		Description: "Зонды Globalping в домашних и мобильных сетях России и в дата-центрах подключаются к портам, контроль из Европы. Адрес сервера уходит в Globalping.", Tags: []string{"settings"}}, h.checkReach)
 	huma.Register(h.api, huma.Operation{OperationID: "check-server", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/system/check", Summary: "Проверить сервер панели", Tags: []string{"settings"}}, h.checkServer)
 }
 
@@ -492,15 +503,15 @@ func (h *handlers) exitItem(ctx context.Context, entry, exit int64, name string)
 	return it
 }
 
-// checkNodeRussia asks check-host.net whether the node's ports open from Russian cities:
-// the API port and up to two TCP protocols.
+// checkNodeRussia asks Globalping whether the node's ports open from Russia: the API port
+// and up to two TCP protocols.
 func (h *handlers) checkNodeRussia(ctx context.Context, in *nodeIDInput) (*russiaOutput, error) {
 	n, err := h.getNode(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
-	if h.d.CheckHost == nil {
-		return nil, huma.Error409Conflict("checkhost_unavailable")
+	if h.d.Reach == nil {
+		return nil, huma.Error409Conflict("reach_unavailable")
 	}
 	host := n.PublicHost
 	var ports []RussiaPort
@@ -516,29 +527,67 @@ func (h *handlers) checkNodeRussia(ctx context.Context, in *nodeIDInput) (*russi
 		}
 	}
 	for _, p := range h.tcpPorts(ctx, n.ID) {
-		if len(ports) >= 3 {
+		if len(ports) >= reach.MaxPorts {
 			break
 		}
 		if p.name != "relay" && !slices.ContainsFunc(ports, func(x RussiaPort) bool { return x.Port == p.port }) {
 			ports = append(ports, RussiaPort{Port: p.port, Name: p.name})
 		}
 	}
-	if host == "" || len(ports) == 0 {
-		return nil, huma.Error409Conflict("checkhost_nothing")
+	// A node by a private address is reached from nowhere else.
+	if _, ok := reach.CanonHost(host); !ok || len(ports) == 0 {
+		return nil, huma.Error409Conflict("reach_nothing")
 	}
 	nums := make([]int, len(ports))
 	for i, p := range ports {
 		nums[i] = p.Port
 	}
-	res, err := h.d.CheckHost.CheckTCP(ctx, host, nums)
-	switch {
-	case errors.Is(err, checkhost.ErrBusy):
-		return nil, huma.Error409Conflict("checkhost_busy")
-	case err != nil:
-		h.d.Log.Warn("check-host.net", "node", n.ID, "err", err)
-		return nil, huma.Error502BadGateway("checkhost_unavailable")
+	res, err := h.d.Reach.CheckTCP(ctx, host, nums)
+	if err != nil {
+		return nil, h.reachErr(err, "node", n.ID)
 	}
-	return &russiaOutput{Body: RussiaView{Result: res, Ports: ports}}, nil
+	// The node's address is the panel's business: a support operator sees the ports only.
+	res.Host = ""
+	return &russiaOutput{Body: RussiaView{ReachCheck: res, Names: ports}}, nil
+}
+
+// checkReach asks Globalping whether ports of any server open from Russia: a server to
+// buy is checked before anything is installed on it.
+func (h *handlers) checkReach(ctx context.Context, in *reachInput) (*reachOutput, error) {
+	if h.d.Reach == nil {
+		return nil, huma.Error409Conflict("reach_unavailable")
+	}
+	host, ok := reach.CanonHost(in.Body.Host)
+	if !ok {
+		return nil, fieldErr("body.host", "reach_host")
+	}
+	for i, p := range in.Body.Ports {
+		if p < 1 || p > 65535 {
+			return nil, fieldErr("body.ports["+strconv.Itoa(i)+"]", "reach_port")
+		}
+	}
+	ports := slices.Compact(slices.Sorted(slices.Values(in.Body.Ports)))
+	res, err := h.d.Reach.CheckTCP(ctx, host, ports)
+	if err != nil {
+		return nil, h.reachErr(err, "host", host)
+	}
+	return &reachOutput{Body: res}, nil
+}
+
+// reachErr says why Globalping gave no answer.
+func (h *handlers) reachErr(err error, what string, of any) error {
+	switch {
+	case errors.Is(err, reach.ErrBusy):
+		return huma.Error409Conflict("reach_busy")
+	case errors.Is(err, reach.ErrLimited):
+		return huma.Error429TooManyRequests("reach_limited")
+	case errors.Is(err, reach.ErrNoProbes):
+		return huma.Error502BadGateway("reach_no_probes")
+	case errors.Is(err, reach.ErrHost):
+		return fieldErr("body.host", "reach_host")
+	}
+	h.d.Log.Warn("globalping", what, of, "err", err)
+	return huma.Error502BadGateway("reach_unavailable")
 }
 
 // checkServer looks at the panel's own server: its node, names, the internet, GitHub and

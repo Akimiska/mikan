@@ -1,6 +1,6 @@
 // What is wrong with a node and how to fix it: the reason in plain words on its card, the
 // full "Check node" list with a button or a command for each fix, the check of its ports
-// from Russia, the live steps of a node being added, and the same check list for the
+// from Russia (Globalping), the live steps of a node being added, and the same check list for the
 // panel's own server.
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { CircleCheck, CircleMinus, CircleX, ClipboardCopy, Copy, Globe, KeyRound, Pencil, RefreshCw, Stethoscope, TriangleAlert, ArrowUpCircle } from "lucide-react";
@@ -9,7 +9,7 @@ import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { useNodes } from "../../api/hooks";
 import { Drawer } from "../../components/overlay";
 import { Button, Skeleton } from "../../components/ui";
-import { t, tMaybe } from "../../i18n";
+import { getLocale, t, tMaybe } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { ago, bytes } from "../../lib/format";
 import { nodeLabel } from "../../lib/node-label";
@@ -278,14 +278,16 @@ export function NodeCheckDrawer({ node, onClose, actions }: { node: Node | null;
   );
 }
 
-/** The node's ports from Russian cities, through check-host.net: asked for on purpose. */
+/** The node's ports from Russia, through Globalping: asked for on purpose. */
 function RussiaCheck({ node }: { node: Node }) {
   const run = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/nodes/{id}/check-russia", { params: { path: { id: node.id } } })),
   });
   const res = run.data;
-  const label = (p: Schemas["RussiaPort"]) => (p.name === "api" ? t("nodeCheck.russia.api", { port: p.port }) : `${p.name} ${p.port}`);
-  const failing = res?.cities.some((c) => c.ports.some((p) => !p.ok));
+  const label = (port: number) => {
+    const p = res?.names.find((x) => x.port === port);
+    return !p ? String(port) : p.name === "api" ? t("nodeCheck.russia.api", { port }) : `${p.name} ${port}`;
+  };
   return (
     <section className="mt-6 border-t border-[var(--hairline)] pt-5" aria-labelledby="russia-title">
       <h3 id="russia-title" className="text-[15px] font-semibold text-[var(--ink-900)]">
@@ -307,44 +309,97 @@ function RussiaCheck({ node }: { node: Node }) {
             {errorText(run.error)}
           </div>
         ) : res ? (
-          <>
-            <div className={`banner ${failing ? "warn" : "info"} mb-3`} role="status">
-              <span>{failing ? t("nodeCheck.russia.someFail") : t("nodeCheck.russia.allOk")}</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[13px]">
-                <thead>
-                  <tr className="text-xs text-[var(--ink-500)]">
-                    <th className="py-2 pr-3 font-medium">{t("nodeCheck.russia.city")}</th>
-                    {res.ports.map((p) => (
-                      <th key={p.port} className="py-2 pr-3 font-medium">
-                        {label(p)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {res.cities.map((c) => (
-                    <tr key={c.id} className="border-t border-[var(--hairline)]">
-                      <td className="py-2 pr-3">{c.city || c.id}</td>
-                      {c.ports.map((p) => (
-                        <td key={p.port} className="py-2 pr-3">
-                          <span className="flex items-start gap-1">
-                            <StatusMark status={p.ok ? "ok" : p.pending ? "skip" : "fail"} />
-                            <span>{p.ok ? t("nodeCheck.russia.ok", { ms: p.ms ?? 0 }) : p.pending ? t("nodeCheck.russia.pending") : p.error}</span>
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-2 text-xs text-[var(--ink-500)]">{t("nodeCheck.russia.checkedAt", { ago: ago(res.at) })}</p>
-          </>
+          <ReachView res={res} label={label} />
         ) : null}
       </div>
     </section>
+  );
+}
+
+type Reach = Pick<Schemas["ReachCheck"], "at" | "cached" | "ports" | "probes" | "verdict">;
+type ReachPort = Schemas["ReachPort"];
+
+const VERDICT_TONE = { ok: "info", partial: "warn", blocked: "err", down: "err" } as const;
+
+/** A port as one probe saw it: open, a block that leaks (1 of 3), or nothing. */
+function reachMark(p: ReachPort): { status: Status; text: string } {
+  if (p.pending) return { status: "skip", text: t("reach.pending") };
+  if (p.ok) return { status: "ok", text: t("reach.open", { ms: p.ms ?? 0 }) };
+  if (p.got > 0) return { status: "warn", text: t("reach.leaks", { got: p.got, sent: p.sent }) };
+  return { status: "fail", text: t("reach.closed") };
+}
+
+function countryName(code: string): string {
+  try {
+    return new Intl.DisplayNames([getLocale()], { type: "region" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+/**
+ * A check of a server's ports from Russia: the verdict, then each probe by row (home and
+ * mobile networks, data centres, then the control outside Russia), a port per column.
+ */
+export function ReachView({ res, label }: { res: Reach; label?: (port: number) => string }) {
+  const russia = res.probes.filter((p) => !p.control);
+  const control = res.probes.filter((p) => p.control);
+  const row = (p: Reach["probes"][number], i: number) => (
+    <tr key={`${p.country}-${p.asn}-${i}`} className="border-t border-[var(--hairline)] align-top">
+      <td className="py-2 pr-3">
+        <div className="text-[var(--ink-900)]">{[p.city, countryName(p.country)].filter(Boolean).join(", ")}</div>
+        <div className="text-xs text-[var(--ink-500)]">
+          {p.network} · {p.home ? t("reach.home") : t("reach.dc")}
+        </div>
+      </td>
+      {p.ports.map((r) => {
+        const m = reachMark(r);
+        return (
+          <td key={r.port} className="py-2 pr-3">
+            <span className="flex items-start gap-1">
+              <StatusMark status={m.status} />
+              <span>{m.text}</span>
+            </span>
+          </td>
+        );
+      })}
+    </tr>
+  );
+  return (
+    <>
+      <div className={`banner ${VERDICT_TONE[res.verdict]} mb-3`} role="status">
+        <span>{t(`reach.verdict.${res.verdict}`)}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-[13px]">
+          <thead>
+            <tr className="text-xs text-[var(--ink-500)]">
+              <th className="py-2 pr-3 font-medium">{t("reach.from")}</th>
+              {res.ports.map((port) => (
+                <th key={port} className="py-2 pr-3 font-medium">
+                  {label ? label(port) : port}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {russia.map(row)}
+            {control.length > 0 ? (
+              <tr className="border-t border-[var(--hairline)]">
+                <th colSpan={res.ports.length + 1} scope="rowgroup" className="pt-4 pb-1 text-left text-xs font-medium text-[var(--ink-500)]">
+                  {t("reach.control")}
+                </th>
+              </tr>
+            ) : null}
+            {control.map(row)}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-[var(--ink-500)]">
+        {t("reach.checkedAt", { ago: ago(res.at) })}
+        {res.cached ? ` · ${t("reach.cached")}` : null}
+      </p>
+    </>
   );
 }
 

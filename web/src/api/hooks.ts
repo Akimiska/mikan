@@ -41,6 +41,7 @@ export const qk = {
   userGrants: (id: number) => ["users", "grants", id] as const,
   torrent: ["torrent"] as const,
   filters: ["filters"] as const,
+  exitDns: ["exit-dns"] as const,
   torrentHits: (user: number) => ["torrent", "hits", user] as const,
   speedTests: (node: number) => ["speedtests", node] as const,
   subPage: ["sub-page"] as const,
@@ -223,6 +224,11 @@ export function useTorrent() {
 /** The ingress and egress filters of the nodes. */
 export function useFilters() {
   return useQuery({ queryKey: qk.filters, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/filters", { signal })) });
+}
+
+/** The DNS at the exit of the nodes. */
+export function useExitDns() {
+  return useQuery({ queryKey: qk.exitDns, queryFn: ({ signal }) => unwrap(api.GET("/api/v1/exit-dns", { signal })) });
 }
 
 /** The torrent blocker's catches, newest first, a page at a time; user 0: everyone's. */

@@ -381,6 +381,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/exit-dns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** DNS на выходе */
+        get: operations["get-exit-dns"];
+        /**
+         * Настроить DNS на выходе
+         * @description Ноды получают настройку со своим состоянием; ноды старше неё её не применяют.
+         */
+        put: operations["update-exit-dns"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/filters": {
         parameters: {
             query?: never;
@@ -895,7 +916,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Проверить порты ноды из России через check-host.net */
+        /** Проверить порты ноды из России через Globalping */
         post: operations["check-node-russia"];
         delete?: never;
         options?: never;
@@ -1772,6 +1793,26 @@ export interface paths {
          * @description Хост запускает mikan doctor и отдаёт отчёт (Docker, контейнеры, порты, файрвол, часы, DNS, GitHub, диск, память); ждём до минуты. Нужна команда mikan 0.5.1.1 или новее на сервере: mikan update. Оператору поддержки с доступом «просмотр» разрешён: отчёт ничего не меняет.
          */
         post: operations["doctor-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/reach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Проверить, открываются ли порты сервера из России
+         * @description Зонды Globalping в домашних и мобильных сетях России и в дата-центрах подключаются к портам, контроль из Европы. Адрес сервера уходит в Globalping.
+         */
+        post: operations["check-reach"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2902,11 +2943,6 @@ export interface components {
             /** @description Отчёт для чата: адреса, домены, порт API и ключи скрыты */
             report: string;
         };
-        CityResult: {
-            city: string;
-            id: string;
-            ports: components["schemas"]["PortResult"][];
-        };
         ClientEndpoint: {
             /**
              * Format: int64
@@ -3160,6 +3196,32 @@ export interface components {
             torrent?: boolean;
             update?: boolean;
             warp?: boolean;
+        };
+        ExitDNSInfo: {
+            /** @description Серверы готовых вариантов */
+            presets: {
+                [key: string]: string[];
+            };
+            /**
+             * @description DNS-сервер ноды: host — DNS самого сервера, cloudflare, google, quad9 — их DoH, custom — свой список
+             * @enum {string}
+             */
+            resolver: "host" | "cloudflare" | "google" | "quad9" | "custom";
+            /** @description Свои серверы для custom: 1.1.1.1, tls://dns.google, https://1.1.1.1/dns-query, quic://dns.adguard-dns.com; хранятся и при другом выборе */
+            servers: string[];
+            /** @description Нода сама узнаёт, на какой сайт идёт пользователь (TLS, HTTP, QUIC на портах 443, 8443, 80, 8080–8880), и подключается к нему из своей страны: сайты видят страну ноды, а не пользователя */
+            sniff: boolean;
+        };
+        ExitDNSView: {
+            /**
+             * @description DNS-сервер ноды: host — DNS самого сервера, cloudflare, google, quad9 — их DoH, custom — свой список
+             * @enum {string}
+             */
+            resolver: "host" | "cloudflare" | "google" | "quad9" | "custom";
+            /** @description Свои серверы для custom: 1.1.1.1, tls://dns.google, https://1.1.1.1/dns-query, quic://dns.adguard-dns.com; хранятся и при другом выборе */
+            servers: string[];
+            /** @description Нода сама узнаёт, на какой сайт идёт пользователь (TLS, HTTP, QUIC на портах 443, 8443, 80, 8080–8880), и подключается к нему из своей страны: сайты видят страну ноды, а не пользователя */
+            sniff: boolean;
         };
         ExtendInputBody: {
             /** Format: int64 */
@@ -4521,15 +4583,6 @@ export interface components {
             inbounds: string[];
             name: string;
         };
-        PortResult: {
-            error?: string;
-            /** Format: int64 */
-            ms?: number;
-            ok: boolean;
-            pending?: boolean;
-            /** Format: int64 */
-            port: number;
-        };
         Preview: {
             /** @description Пользователи, которых mikan не примет, с причиной */
             invalid: components["schemas"]["List"];
@@ -4718,6 +4771,44 @@ export interface components {
             brand_accent?: string;
             config: components["schemas"]["Page"];
         };
+        ReachCheck: {
+            /** Format: date-time */
+            at: string;
+            cached: boolean;
+            host: string;
+            ports: number[];
+            probes: components["schemas"]["ReachProbe"][];
+            /** @enum {string} */
+            verdict: "ok" | "partial" | "blocked" | "down";
+        };
+        ReachInputBody: {
+            /** @description IP или домен сервера */
+            host: string;
+            /** @description TCP-порты: 22 у любого сервера с SSH, 443 у ноды */
+            ports: number[];
+        };
+        ReachPort: {
+            /** Format: int64 */
+            got: number;
+            /** Format: int64 */
+            ms?: number;
+            ok: boolean;
+            pending?: boolean;
+            /** Format: int64 */
+            port: number;
+            /** Format: int64 */
+            sent: number;
+        };
+        ReachProbe: {
+            /** Format: int64 */
+            asn: number;
+            city: string;
+            control: boolean;
+            country: string;
+            home: boolean;
+            network: string;
+            ports: components["schemas"]["ReachPort"][];
+        };
         RecordingInfo: {
             /**
              * Format: date-time
@@ -4881,8 +4972,13 @@ export interface components {
             /** Format: date-time */
             at: string;
             cached: boolean;
-            cities: components["schemas"]["CityResult"][];
-            ports: components["schemas"]["RussiaPort"][];
+            host: string;
+            /** @description Что за порты ноды проверены */
+            names: components["schemas"]["RussiaPort"][];
+            ports: number[];
+            probes: components["schemas"]["ReachProbe"][];
+            /** @enum {string} */
+            verdict: "ok" | "partial" | "blocked" | "down";
         };
         ScanTargetsOutputBody: {
             /** @description Адрес сервера, вокруг которого искали */
@@ -6691,6 +6787,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TotpSetupOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-exit-dns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitDNSInfo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-exit-dns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExitDNSView"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitDNSInfo"];
                 };
             };
             /** @description Error */
@@ -9996,6 +10154,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostReport"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "check-reach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReachInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReachCheck"];
                 };
             };
             /** @description Error */

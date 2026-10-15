@@ -13,6 +13,7 @@ import { AutoCard, LanguageCard, ServiceCard, UpdatesCard } from "./general";
 import { ServerCheckCard } from "../node-check";
 import { GoalsCard } from "./goals";
 import { ImportCard, LegacyLinksCard } from "./import";
+import { ExitDnsCard } from "./exit-dns";
 import { RoutingSection } from "./routing";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
 import { SupportCard } from "./support";
@@ -88,7 +89,10 @@ export function SettingsPage() {
                   <SubPortCard s={s} />
                 </>
               ) : tab === "routing" ? (
-                <RoutingSection s={s} view={routingPart} onView={(v) => go("routing", v)} />
+                <>
+                  <RoutingSection s={s} view={routingPart} onView={(v) => go("routing", v)} />
+                  <ExitDnsCard />
+                </>
               ) : tab === "security" ? (
                 operator ? (
                   <>

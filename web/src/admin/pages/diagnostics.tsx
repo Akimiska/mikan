@@ -1,11 +1,12 @@
 // Diagnostics: what the panel's server and its nodes say about themselves, without a shell.
-// The logs (redacted at the source), a check of the host with the restart, and, for a
-// support operator whose access allows it, the terminal. The same page serves the admin
+// The logs (redacted at the source), a check of the host with the restart, whether a
+// server opens from Russia, and, for a support operator whose access allows it, the
+// terminal. The same page serves the admin
 // and the operator; the API decides what each may do.
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ClipboardCopy, FileText, Power, RefreshCw, Search, Stethoscope, TerminalSquare } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { ClipboardCopy, FileText, Globe, Power, RefreshCw, Search, Stethoscope, TerminalSquare } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { useNodes } from "../../api/hooks";
 import { useSupportMode } from "../../api/support";
@@ -20,7 +21,7 @@ import { useCopy } from "../../lib/copy";
 import { ago, time } from "../../lib/format";
 import { nodeLabel } from "../../lib/node-label";
 import { DIAG_TABS } from "../search";
-import { CheckSkeleton, StatusMark } from "./node-check";
+import { CheckSkeleton, ReachView, StatusMark } from "./node-check";
 
 const TerminalTab = lazy(() => import("./diag-terminal").then((m) => ({ default: m.TerminalTab })));
 
@@ -46,6 +47,7 @@ export function DiagnosticsPage() {
   const tabs: { id: Tab; label: string; icon: typeof FileText }[] = [
     { id: "logs", label: t("diag.tabs.logs"), icon: FileText },
     { id: "check", label: t("diag.tabs.check"), icon: Stethoscope },
+    { id: "reach", label: t("diag.tabs.reach"), icon: Globe },
     ...(terminal ? [{ id: "terminal" as const, label: t("diag.tabs.terminal"), icon: TerminalSquare }] : []),
   ];
   return (
@@ -54,6 +56,7 @@ export function DiagnosticsPage() {
       <Tabs id="diag" tabs={tabs} value={current} onChange={go} label={t("diag.sections")}>
         {current === "logs" ? <LogsTab servers={servers} source={shown} onSource={pick} /> : null}
         {current === "check" ? <CheckTab servers={servers} source={shown} onSource={pick} level={who?.level} /> : null}
+        {current === "reach" ? <ReachTab /> : null}
         {current === "terminal" && who ? (
           <Suspense fallback={<Skeleton style={{ height: 320, borderRadius: 20 }} />}>
             <TerminalTab who={who} />
@@ -329,4 +332,100 @@ function ReportView({ report, onCopy }: { report: Report; onCopy: () => void }) 
 function reportText(r: Report, name: string): string {
   const mark = { ok: "OK", warn: "WARN", error: "ERROR" } as const;
   return [`${name} (${r.kind}) ${r.version} ${r.at}`, ...r.items.map((it) => `[${mark[it.level]}] ${it.label}${it.detail ? `: ${it.detail}` : ""}${it.fix ? ` (${it.fix})` : ""}`)].join("\n");
+}
+
+/* ----------------------------------------------------------------- reach */
+
+/** "22, 443" as ports: one to three, each 1–65535; null when it is not. */
+function parsePorts(text: string): number[] | null {
+  const parts = text.split(/[\s,;]+/).filter(Boolean);
+  const ports = [...new Set(parts.map((p) => (/^\d{1,5}$/.test(p) ? Number(p) : NaN)))];
+  return ports.length >= 1 && ports.length <= 3 && ports.every((p) => p >= 1 && p <= 65535) ? ports : null;
+}
+
+/** Whether a server opens from Russia, before anything is installed on it or after. */
+function ReachTab() {
+  const nodes = useNodes();
+  const [host, setHost] = useState("");
+  const [portsText, setPortsText] = useState("22");
+  const [touched, setTouched] = useState(false);
+  const ports = parsePorts(portsText);
+  const check = useMutation({
+    mutationFn: (body: { host: string; ports: number[] }) => unwrap(api.POST("/api/v1/system/reach", { body })),
+  });
+  const hosts = [...new Set((nodes.data ?? []).map((n) => n.host).filter(Boolean))];
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setTouched(true);
+    if (!host.trim() || !ports) return;
+    check.mutate({ host: host.trim(), ports });
+  };
+  return (
+    <section className="card glass reveal" aria-labelledby="diag-reach-title">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title" id="diag-reach-title">
+            {t("diag.reach.title")}
+          </h2>
+          <div className="card-sub">{t("diag.reach.lead")}</div>
+        </div>
+      </div>
+      <form className="flex flex-wrap items-start gap-x-4 gap-y-1" onSubmit={submit} noValidate>
+        <Field label={t("diag.reach.host")} htmlFor="reach-host">
+          <input
+            id="reach-host"
+            className="input min-w-[240px]"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            placeholder={t("diag.reach.hostPlaceholder")}
+            list={hosts.length ? "reach-hosts" : undefined}
+            autoComplete="off"
+            spellCheck={false}
+            inputMode="url"
+            required
+          />
+        </Field>
+        {hosts.length ? (
+          <datalist id="reach-hosts">
+            {hosts.map((h) => (
+              <option key={h} value={h} />
+            ))}
+          </datalist>
+        ) : null}
+        <Field label={t("diag.reach.ports")} htmlFor="reach-ports" hint={t("diag.reach.portsHint")} error={touched && !ports ? t("diag.reach.portsBad") : undefined}>
+          <input
+            id="reach-ports"
+            className="input w-[160px]"
+            value={portsText}
+            onChange={(e) => setPortsText(e.target.value)}
+            inputMode="numeric"
+            autoComplete="off"
+            aria-invalid={touched && !ports}
+          />
+        </Field>
+        <div className="mt-[26px] mb-4">
+          <Button type="submit" variant="primary" loading={check.isPending} disabled={check.isPending || !host.trim()}>
+            <Globe size={16} aria-hidden /> {t("diag.reach.run")}
+          </Button>
+        </div>
+      </form>
+      <p className="mb-4 text-xs text-[var(--ink-500)]">{t("diag.reach.caveat")}</p>
+      <div aria-live="polite" aria-busy={check.isPending}>
+        {check.isPending ? (
+          <>
+            <p className="mb-3 text-[13px] text-[var(--ink-600)]">{t("diag.reach.running")}</p>
+            <Skeleton style={{ height: 240, borderRadius: 16 }} />
+          </>
+        ) : check.isError ? (
+          <div className="banner err mb-3" role="alert">
+            {errorText(check.error)}
+          </div>
+        ) : check.data ? (
+          <ReachView res={check.data} />
+        ) : (
+          <EmptyState icon={Globe} title={t("diag.reach.emptyTitle")} text={t("diag.reach.emptyText")} />
+        )}
+      </div>
+    </section>
+  );
 }

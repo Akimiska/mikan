@@ -96,6 +96,7 @@ type Engine struct {
 	host hostPortsCache
 
 	routes  string             // routesKey of what tunnel's proxies and rules hold now
+	exitDNS string             // exitDNSKey of the sniffer and resolver mihomo holds now
 	probeMu sync.Mutex         // one outbound probe at a time
 	warpMu  sync.Mutex         // the kept results below
 	warpGen int                // moves when a new config drops the kept results
@@ -224,6 +225,7 @@ func Start(o Options) (*Engine, error) {
 	// runs exactly once, with no listeners; ours are patched separately in Apply.
 	cfg.Listeners = map[string]C.InboundListener{}
 	executor.ApplyConfig(cfg, true)
+	e.exitDNS = exitDNSKey(nil)
 
 	st, ok, err := loadState(filepath.Join(dataDir, stateFile), log)
 	if err != nil {
@@ -296,6 +298,14 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		e.probes = nil
 		e.warpGen++
 		e.warpMu.Unlock()
+	}
+
+	if key := exitDNSKey(st.DNS); key != e.exitDNS {
+		if err := applyExitDNS(cfg); err != nil {
+			e.log.Error("exit dns", "err", err)
+		} else {
+			e.exitDNS = key
+		}
 	}
 
 	e.Reg.SetSlots(st.Slots)

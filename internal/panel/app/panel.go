@@ -26,7 +26,6 @@ import (
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
-	"mikan/internal/panel/checkhost"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
@@ -35,6 +34,7 @@ import (
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
 	"mikan/internal/panel/promo"
+	"mikan/internal/panel/reach"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -137,8 +137,8 @@ type Options struct {
 	// Resolve looks up the names the panel is told to dial (REALITY targets); nil is the
 	// system's resolver, tests set their own.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
-	// CheckHost checks nodes' ports from Russia; nil: the check is not offered (tests).
-	CheckHost *checkhost.Client
+	// Reach checks ports from Russia (Globalping); nil: the check is not offered (tests).
+	Reach *reach.Client
 	// Logs holds the last lines of the panel's log for the Diagnostics page; nil: none.
 	Logs *logbuf.Buffer
 }
@@ -262,7 +262,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	addonPages := addonpages.New(addonpages.Deps{Addons: p.Addons, Store: st.Q, Log: o.Log, Now: o.Now})
 	deps.Pages = addonPages
 	deps.DNS = o.DNS
-	deps.CheckHost = o.CheckHost
+	deps.Reach = o.Reach
 	deps.DataDir = o.DataDir
 	deps.Logs, deps.Host = o.Logs, hostchan.New(o.DataDir)
 	promos := promo.New(st, o.Now)

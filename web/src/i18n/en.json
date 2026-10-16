@@ -159,6 +159,7 @@
       "free_no_channel": "Set the bot's channel first: Telegram → Menu and texts → Channel subscription",
       "trial_rub_min": "The trial's price in rubles: 1 ₽ or more",
       "bad_billing_day": "The billing day is a number from 1 to 31",
+      "bad_expiry": "The end date: a year from 0000 to 9999",
       "extend_amount": "Give either days or months",
       "name_blank": "The name cannot be empty or start/end with spaces",
       "name_too_long": "At most 48 characters",

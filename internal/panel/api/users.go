@@ -179,19 +179,20 @@ func (h *handlers) userSlots(ctx context.Context, ids []int64) (map[int64][]stri
 }
 
 type listUsersInput struct {
-	State  string `query:"state" enum:"all,active,expiring,limited,expired,disabled" default:"all"`
+	State  string `query:"state" enum:"all,active,expiring,limited,expired,disabled,no_subscription" default:"all"`
 	Query  string `query:"q" maxLength:"100"`
 	Limit  int    `query:"limit" minimum:"1" maximum:"500" default:"100"`
 	Offset int    `query:"offset" minimum:"0" default:"0"`
 }
 
 type UserCounts struct {
-	All      int `json:"all"`
-	Active   int `json:"active"`
-	Expiring int `json:"expiring"`
-	Limited  int `json:"limited"`
-	Expired  int `json:"expired"`
-	Disabled int `json:"disabled"`
+	All            int `json:"all"`
+	Active         int `json:"active"`
+	Expiring       int `json:"expiring"`
+	Limited        int `json:"limited"`
+	Expired        int `json:"expired"`
+	Disabled       int `json:"disabled"`
+	NoSubscription int `json:"no_subscription"`
 }
 
 type listUsersOutput struct {
@@ -352,7 +353,16 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 		case domain.StateDisabled:
 			c.Disabled++
 		}
-		if in.State != "all" && !(st == in.State || (in.State == domain.StateActive && st == domain.StateExpiring)) {
+		// Без подписки: срока нет вовсе (новые) или он уже прошёл; отключённые
+		// считаются только в своей вкладке.
+		if st != domain.StateDisabled && (!u.ExpiresAt.Valid || now.Unix() >= u.ExpiresAt.Int64) {
+			c.NoSubscription++
+		}
+		if in.State == "no_subscription" {
+			if st == domain.StateDisabled || (u.ExpiresAt.Valid && now.Unix() < u.ExpiresAt.Int64) {
+				continue
+			}
+		} else if in.State != "all" && !(st == in.State || (in.State == domain.StateActive && st == domain.StateExpiring)) {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(u.Name+" "+u.Contact+" "+u.Note+" "+u.Tags), q) {

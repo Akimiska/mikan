@@ -466,7 +466,8 @@
       "expiring": "Истекают",
       "limited": "Исчерпан лимит",
       "expired": "Истекли",
-      "disabled": "Отключены"
+      "disabled": "Отключены",
+      "no_subscription": "Без подписки"
     },
     "searchPlaceholder": "Имя, контакт, тег или заметка",
     "searchLabel": "Поиск пользователей",

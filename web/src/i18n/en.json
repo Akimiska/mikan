@@ -466,7 +466,8 @@
       "expiring": "Expiring",
       "limited": "Limit reached",
       "expired": "Expired",
-      "disabled": "Disabled"
+      "disabled": "Disabled",
+      "no_subscription": "No subscription"
     },
     "searchPlaceholder": "Name, contact, tag or note",
     "searchLabel": "Search users",

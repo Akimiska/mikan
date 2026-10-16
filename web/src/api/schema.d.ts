@@ -3465,6 +3465,8 @@ export interface components {
             expiring: number;
             /** Format: int64 */
             limited: number;
+            /** Format: int64 */
+            no_subscription: number;
         };
         UserPoolView: {
             /** @description Пул закрыт для пользователя: его подключений нет в подписке, ноды их не пускают */
@@ -6696,7 +6698,7 @@ export interface operations {
     "list-users": {
         parameters: {
             query?: {
-                state?: "all" | "active" | "expiring" | "limited" | "expired" | "disabled";
+                state?: "all" | "active" | "expiring" | "limited" | "expired" | "disabled" | "no_subscription";
                 q?: string;
                 limit?: number;
                 offset?: number;

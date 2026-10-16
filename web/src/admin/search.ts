@@ -3,8 +3,8 @@
 // first chunk.
 import type { User } from "../api/client";
 
-export const USER_STATES = ["all", "active", "expiring", "limited", "expired", "disabled"] as const;
-export type UsersSearch = { state: "all" | User["state"]; q: string; user?: number; create?: true };
+export const USER_STATES = ["all", "active", "expiring", "limited", "expired", "disabled", "no_subscription"] as const;
+export type UsersSearch = { state: "all" | "no_subscription" | User["state"]; q: string; user?: number; create?: true };
 
 export const SETTINGS_TABS = ["general", "subscription", "rules", "security", "import"] as const;
 export type SettingsSearch = { tab: (typeof SETTINGS_TABS)[number] };

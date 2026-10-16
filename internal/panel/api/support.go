@@ -279,7 +279,7 @@ func (h *handlers) viewSupportGrant(g db.SupportGrant) SupportGrantView {
 		targets = []string{}
 	}
 	return SupportGrantView{ID: g.ID, Level: g.Level, ShowPeople: g.ShowPeople, TerminalTargets: targets, Note: g.Note, Status: status,
-		CreatedAt: time.Unix(g.CreatedAt, 0).UTC(), ExpiresAt: support.Expires(g), EnteredAt: store.TimePtr(g.EnteredAt),
+		CreatedAt: store.Time(g.CreatedAt), ExpiresAt: support.Expires(g), EnteredAt: store.TimePtr(g.EnteredAt),
 		LastUsedAt: store.TimePtr(g.LastUsedAt), LastIP: g.LastIp, RevokedAt: store.TimePtr(g.RevokedAt)}
 }
 

@@ -47,7 +47,7 @@ func State(u db.User, grants int64, now time.Time) string {
 		return StateExpired
 	case TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants) == 0:
 		return StateLimited
-	case u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).Sub(now) <= expiringWindow:
+	case u.ExpiresAt.Valid && store.Time(u.ExpiresAt.Int64).Sub(now) <= expiringWindow:
 		return StateExpiring
 	}
 	return StateActive
@@ -65,9 +65,9 @@ func NextReset(u db.User, now time.Time) (time.Time, bool) {
 	switch u.ResetStrategy {
 	case "month_start":
 		// Monthly: on the billing day, or the 1st without one.
-		return nextMonthPeriod(MonthPeriodStart(now, u.BillingDay), u.BillingDay), true
+		return store.ClampTime(nextMonthPeriod(MonthPeriodStart(now, u.BillingDay), u.BillingDay)), true
 	case "period":
-		return time.Unix(u.PeriodStart+max(u.PeriodDays, 1)*day, 0).UTC(), true
+		return store.Time(u.PeriodStart + max(u.PeriodDays, 1)*day), true
 	}
 	return time.Time{}, false
 }
@@ -258,8 +258,8 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, in PurchaseInput) (
 	}
 	now := s.now()
 	base := now
-	if u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).After(now) {
-		base = time.Unix(u.ExpiresAt.Int64, 0)
+	if u.ExpiresAt.Valid && store.Time(u.ExpiresAt.Int64).After(now) {
+		base = store.Time(u.ExpiresAt.Int64)
 	}
 	billingDay := t.BillingDay
 	if !billingDay.Valid {
@@ -336,7 +336,7 @@ func expiry(from, days int64) sql.NullInt64 {
 	if days <= 0 {
 		return sql.NullInt64{}
 	}
-	return sql.NullInt64{Int64: from + days*day, Valid: true}
+	return sql.NullInt64{Int64: store.ClampUnix(from + days*day), Valid: true}
 }
 
 func (s *Users) Get(ctx context.Context, id int64) (db.User, error) {
@@ -391,18 +391,25 @@ type Extension struct {
 // until is where the term ends after the extension, counted from the expiry exp.
 func (e Extension) until(now time.Time, exp sql.NullInt64, billingDay sql.NullInt64) time.Time {
 	base := now
-	if exp.Valid && time.Unix(exp.Int64, 0).After(now) {
-		base = time.Unix(exp.Int64, 0)
+	if exp.Valid {
+		t := store.Time(exp.Int64)
+		if t.After(now) {
+			base = t
+		}
 	}
+	var res time.Time
 	switch {
 	case e.Period && billingDay.Valid:
-		return AddMonths(base, 1, billingDay)
+		res = AddMonths(base, 1, billingDay)
 	case e.Period:
-		return base.Add(30 * 24 * time.Hour)
+		res = base.Add(30 * 24 * time.Hour)
 	case e.Months > 0:
-		return AddMonths(base, e.Months, billingDay)
+		res = AddMonths(base, e.Months, billingDay)
+	default:
+		res = base.Add(time.Duration(e.Days) * 24 * time.Hour)
 	}
-	return base.Add(time.Duration(e.Days) * 24 * time.Hour)
+	res = store.ClampTime(res)
+	return res
 }
 
 // ErrBadBillingDay: a billing day is 1–31.
@@ -532,13 +539,16 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 	case p.ClearExpiry:
 		par.ExpiresAt = sql.NullInt64{}
 	case p.ExpiresAt != nil:
-		par.ExpiresAt = sql.NullInt64{Int64: p.ExpiresAt.Unix(), Valid: true}
+		sec := store.ClampUnix(p.ExpiresAt.Unix())
+		par.ExpiresAt = sql.NullInt64{Int64: sec, Valid: true}
 	}
 	if p.Extend != nil {
 		if p.Extend.Days < 0 || p.Extend.Days > MaxExtendDays {
 			return db.User{}, fieldErr("days", "bad_days")
 		}
-		par.ExpiresAt = sql.NullInt64{Int64: p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay).Unix(), Valid: true}
+		res := p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay)
+		sec := store.ClampUnix(res.Unix())
+		par.ExpiresAt = sql.NullInt64{Int64: sec, Valid: true}
 		par.Status = "active"
 	}
 	if p.Inbounds != nil {

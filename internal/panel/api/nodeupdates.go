@@ -12,6 +12,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/nodeupdate"
+	"mikan/internal/panel/store"
 	"mikan/internal/release"
 )
 
@@ -24,7 +25,7 @@ func (h *handlers) registerNodeUpdates() {
 // report when the node sent one, else what the panel knows of its request.
 func nodeUpdateStatus(a nodeupdate.Attempt, asked bool, reported *nodeapi.UpdateStatus, nodeVersion string) *nodeapi.UpdateStatus {
 	own := func(state string) *nodeapi.UpdateStatus {
-		return &nodeapi.UpdateStatus{State: state, Version: a.Version, From: a.From, Error: a.Error, At: time.Unix(a.At, 0).UTC().Format(time.RFC3339)}
+		return &nodeapi.UpdateStatus{State: state, Version: a.Version, From: a.From, Error: a.Error, At: store.Time(a.At).Format(time.RFC3339)}
 	}
 	switch {
 	case asked && a.State == nodeupdate.Running:

@@ -64,7 +64,7 @@ func (h *handlers) listAudit(ctx context.Context, in *auditInput) (*auditOutput,
 }
 
 func auditEntry(r db.AuditLog) AuditEntry {
-	e := AuditEntry{ID: r.ID, At: time.Unix(r.Ts, 0).UTC(), Action: r.Action, TargetType: r.TargetType.String, TargetID: r.TargetID.String,
+	e := AuditEntry{ID: r.ID, At: store.Time(r.Ts), Action: r.Action, TargetType: r.TargetType.String, TargetID: r.TargetID.String,
 		IP: r.Ip.String, Details: json.RawMessage("null"), AdminID: store.Int64Ptr(r.AdminID)}
 	if r.Details.Valid {
 		e.Details = json.RawMessage(r.Details.String)

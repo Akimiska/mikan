@@ -10,6 +10,7 @@ import (
 
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -113,7 +114,7 @@ func reissueState(ctx context.Context, q *db.Queries, rules ReissueRules, userID
 	}
 	st.Used = len(ats)
 	if st.Used >= rules.Limit {
-		st.Next = time.Unix(ats[st.Used-rules.Limit], 0).Add(rules.window()).UTC()
+		st.Next = store.Time(ats[st.Used-rules.Limit]).Add(rules.window())
 	}
 	return st, nil
 }

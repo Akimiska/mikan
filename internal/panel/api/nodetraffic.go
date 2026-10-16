@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -56,7 +57,7 @@ func (h *handlers) nodeTraffic(ctx context.Context, in *trafficInput) (*trafficO
 			return nil, err
 		}
 		for _, r := range rows {
-			out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Day*86400, 0).UTC(), Up: r.Up, Down: r.Down})
+			out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Day * 86400), Up: r.Up, Down: r.Down})
 		}
 		return out, nil
 	}
@@ -65,7 +66,7 @@ func (h *handlers) nodeTraffic(ctx context.Context, in *trafficInput) (*trafficO
 		return nil, err
 	}
 	for _, r := range rows {
-		out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Hour*3600, 0).UTC(), Up: r.Up, Down: r.Down})
+		out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Hour * 3600), Up: r.Up, Down: r.Down})
 	}
 	return out, nil
 }
@@ -116,7 +117,7 @@ func (h *handlers) nodeShares(ctx context.Context, in *rangeInput) (*nodeSharesO
 	if err != nil {
 		return nil, err
 	}
-	if start := time.Unix(first*86400, 0).UTC(); first > 0 && start.After(periodStart(h.d.Now(), in.Range)) {
+	if start := store.Time(first * 86400); first > 0 && start.After(periodStart(h.d.Now(), in.Range)) {
 		out.Body.Since = &start
 	}
 	return out, nil
@@ -126,7 +127,7 @@ func (h *handlers) nodeShares(ctx context.Context, in *rangeInput) (*nodeSharesO
 func periodStart(now time.Time, rng string) time.Time {
 	daily, since := trafficSince(now, rng)
 	if daily {
-		return time.Unix(since*86400, 0).UTC()
+		return store.Time(since * 86400)
 	}
-	return time.Unix(since*3600, 0).UTC()
+	return store.Time(since * 3600)
 }

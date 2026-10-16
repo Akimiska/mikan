@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -108,7 +109,7 @@ func (s *Server) feedOf(rows []db.AddonEvent, holder bool) []events.Event {
 		if holder {
 			s.talk.mark(e.TgID.Int64)
 		}
-		out = append(out, events.Event{ID: e.ID, Type: e.Type, At: time.Unix(e.CreatedAt, 0).UTC(),
+		out = append(out, events.Event{ID: e.ID, Type: e.Type, At: store.Time(e.CreatedAt),
 			UserID: e.UserID.Int64, TgID: e.TgID.Int64, Data: json.RawMessage(e.Data)})
 	}
 	return out

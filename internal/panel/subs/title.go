@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -32,7 +33,7 @@ func titleValues(u db.User, grants int64, bound int64, cfg Config, now time.Time
 	v := map[string]string{"brand": cfg.Brand, "name": u.Name, "date": "∞", "days": "∞",
 		"used": sizeText(u.UsedUp+u.UsedDown, en), "left": "∞", "total": "∞", "devices": devicesText(u, bound, en)}
 	if u.ExpiresAt.Valid {
-		exp := time.Unix(u.ExpiresAt.Int64, 0)
+		exp := store.Time(u.ExpiresAt.Int64)
 		v["date"] = exp.In(msk).Format("02.01.2006")
 		days := int64(0)
 		if left := exp.Sub(now); left > 0 {

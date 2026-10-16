@@ -11,6 +11,7 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
@@ -265,7 +266,7 @@ func (b *Bot) paid(ctx context.Context, chat int64, p events.Payment, u db.User)
 	default:
 		until := w.forever
 		if u.ExpiresAt.Valid {
-			until = w.date(time.Unix(u.ExpiresAt.Int64, 0).UTC())
+			until = w.date(store.Time(u.ExpiresAt.Int64))
 		}
 		text = fmt.Sprintf(w.paidRenew, html.EscapeString(u.Name), html.EscapeString(until))
 	}
@@ -292,7 +293,7 @@ func (b *Bot) refunded(ctx context.Context, chat int64, p events.Payment, u db.U
 	default:
 		until := w.forever
 		if u.ExpiresAt.Valid {
-			until = w.date(time.Unix(u.ExpiresAt.Int64, 0).UTC())
+			until = w.date(store.Time(u.ExpiresAt.Int64))
 		}
 		text = fmt.Sprintf(w.refundedRenew, html.EscapeString(p.TariffName), html.EscapeString(u.Name), html.EscapeString(until))
 	}

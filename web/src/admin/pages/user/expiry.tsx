@@ -77,7 +77,7 @@ function ExactDateField({ u }: { u: User }) {
   const current = u.expires_at ? inputDate(u.expires_at) : "";
   const { draft: date, setDraft: setDate } = useDraft(current);
   // Chrome takes a six-digit year unless max caps it; such a date is not saved.
-  const valid = /^\d{4}-\d{2}-\d{2}$/.test(date);
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(date) && Number(date.slice(0, 4)) <= 9999;
   const apply = () =>
     update.mutate(
       { id: u.id, body: { expires_at: fromInputDate(date, u.expires_at) } },

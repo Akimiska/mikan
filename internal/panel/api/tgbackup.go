@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgbackup"
 )
@@ -75,7 +76,7 @@ func (h *handlers) backupView(ctx context.Context) (BackupView, error) {
 		if unix == 0 {
 			return nil
 		}
-		t := time.Unix(unix, 0).UTC()
+		t := store.Time(unix)
 		return &t
 	}
 	v.LastOK, v.LastTry, v.LastError, v.LastSize = at(st.LastOK), at(st.LastTry), st.LastError, st.LastSize

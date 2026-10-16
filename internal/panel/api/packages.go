@@ -193,5 +193,5 @@ func (h *handlers) viewGrant(g db.TrafficGrant, packages map[int64]string) Grant
 	return GrantView{ID: g.ID, PoolID: store.Int64Ptr(g.PoolID), Bytes: g.Bytes, Remaining: g.Remaining, Lifetime: g.Lifetime,
 		ExpiresAt: store.TimePtr(g.ExpiresAt), Active: domain.GrantActive(g, h.d.Now()), Source: g.Source,
 		PaymentID: store.Int64Ptr(g.PaymentID), PackageName: packages[g.PackageID.Int64], Note: g.Note,
-		CreatedAt: time.Unix(g.CreatedAt, 0).UTC()}
+		CreatedAt: store.Time(g.CreatedAt)}
 }

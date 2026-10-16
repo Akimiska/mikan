@@ -68,7 +68,11 @@ export function inputDate(iso: string): string {
 export function fromInputDate(date: string, clock?: string | null): string {
   const [y, m, d] = date.split("-").map(Number);
   const c = clock ? new Date(clock) : new Date();
-  return new Date(y!, m! - 1, d!, c.getHours(), c.getMinutes(), c.getSeconds()).toISOString();
+  const dt = new Date(y!, m! - 1, d!, c.getHours(), c.getMinutes(), c.getSeconds());
+  if (dt.getUTCFullYear() >= 10000) {
+    return "9999-12-31T23:59:59.000Z";
+  }
+  return dt.toISOString();
 }
 
 export function time(iso: string): string {

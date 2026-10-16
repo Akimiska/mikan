@@ -10,6 +10,7 @@ import (
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
@@ -83,7 +84,7 @@ func due(u db.User, grants int64, now time.Time, n Notify) []notice {
 	}
 	var out []notice
 	if u.ExpiresAt.Valid {
-		exp := time.Unix(u.ExpiresAt.Int64, 0)
+		exp := store.Time(u.ExpiresAt.Int64)
 		left := exp.Sub(now)
 		switch {
 		case left <= 0 && left > -3*24*time.Hour && n.Expired:

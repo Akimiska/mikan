@@ -607,7 +607,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 		}
 		for _, d := range devs {
 			out.Bound = append(out.Bound, DeviceItem{ID: d.ID, Name: d.Name, OS: d.Os, OSVersion: d.OsVersion, Model: d.Model, App: d.App, Shared: d.Hwid == "",
-				CreatedAt: time.Unix(d.CreatedAt, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC(), Used: used[d.ID]})
+				CreatedAt: store.Time(d.CreatedAt), LastSeen: store.Time(d.LastSeen), Used: used[d.ID]})
 		}
 		st, err := h.devices.UnbindState(ctx, u.ID)
 		if err != nil {
@@ -621,10 +621,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 	if u.TrafficLimit.Valid {
 		out.Limit = &u.TrafficLimit.Int64
 	}
-	if u.ExpiresAt.Valid {
-		t := time.Unix(u.ExpiresAt.Int64, 0).UTC()
-		out.ExpiresAt = &t
-	}
+	out.ExpiresAt = store.TimePtr(u.ExpiresAt)
 	if t, ok := domain.NextReset(u, now); ok {
 		out.ResetsAt = &t
 	}

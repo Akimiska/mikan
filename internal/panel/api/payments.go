@@ -280,7 +280,7 @@ func freeConditionView(c string) string {
 // paymentView is a payment without the names; the list's query brings those along.
 func paymentView(p db.Payment) PaymentView {
 	v := PaymentView{ID: p.ID, Provider: p.Provider, Kind: p.Kind, Status: p.Status, TgID: p.TgID, TariffName: p.TariffName, TermDays: store.Int64Ptr(p.TermDays), Amount: p.Amount,
-		Currency: p.Currency, ExternalID: p.ExternalID.String, Error: p.Error, CreatedAt: time.Unix(p.CreatedAt, 0).UTC(),
+		Currency: p.Currency, ExternalID: p.ExternalID.String, Error: p.Error, CreatedAt: store.Time(p.CreatedAt),
 		PaidAt: store.TimePtr(p.PaidAt), AppliedAt: store.TimePtr(p.AppliedAt), RefundedAt: store.TimePtr(p.RefundedAt)}
 	if p.UserID.Valid {
 		id := p.UserID.Int64

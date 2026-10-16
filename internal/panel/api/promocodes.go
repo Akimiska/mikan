@@ -376,7 +376,7 @@ func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemp
 				return &x
 			}
 			return nil
-		}(), Status: r.Status, RedeemedAt: store.Time(r.RedeemedAt), ExpiresAt: ts(r.ExpiresAt), Days: r.Days, Bytes: r.Bytes, DiscountAmount: r.DiscountAmount, OriginalAmount: r.OriginalAmount, FinalAmount: r.FinalAmount, Currency: r.Currency, Code: row.Code})
+		}(), Status: r.Status, RedeemedAt: store.Time(r.RedeemedAt), ExpiresAt: store.TimePtr(r.ExpiresAt), Days: r.Days, Bytes: r.Bytes, DiscountAmount: r.DiscountAmount, OriginalAmount: r.OriginalAmount, FinalAmount: r.FinalAmount, Currency: r.Currency, Code: row.Code})
 	}
 	return o, nil
 }

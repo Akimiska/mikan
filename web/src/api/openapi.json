@@ -5284,6 +5284,11 @@
           "limited": {
             "format": "int64",
             "type": "integer"
+          },
+          "no_subscription": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Без активной подписки: срока нет или он прошёл"
           }
         },
         "required": [
@@ -5292,7 +5297,8 @@
           "expiring",
           "limited",
           "expired",
-          "disabled"
+          "disabled",
+          "no_subscription"
         ],
         "type": "object"
       },
@@ -9739,7 +9745,8 @@
                 "expiring",
                 "limited",
                 "expired",
-                "disabled"
+                "disabled",
+                "no_subscription"
               ],
               "type": "string"
             }

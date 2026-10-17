@@ -6,14 +6,14 @@ use std::fs;
 use std::io::{BufRead, IsTerminal, Write};
 use std::net::IpAddr;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::process::Stdio;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::envfile::EnvFile;
 use crate::setup;
-use crate::{DIR, addon, docker, host, lock, release, system};
+use crate::{DIR, acme, addon, docker, hello, host, lock, release, system};
 
 pub struct Install {
     pub env: EnvFile,
@@ -85,6 +85,86 @@ const MAX_PEM: u64 = 64 << 10;
 
 /// Installs an own certificate: both files go to the panel on stdin, never on the
 /// command line or into another file; the panel checks them and serves them at once.
+/// `mikan cert proxy <domain>`: Let's Encrypt checks domain on port 80, which nginx or Caddy
+/// may hold on this server. The rule that passes the check to mikan goes into that web
+/// server (backed up, tested, reloaded; or shown when it cannot be added), and mikan
+/// answers on a local port behind it. With port 80 free again, mikan takes it back.
+pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    if !crate::net::valid_domain(&domain) && domain.parse::<IpAddr>().is_err() {
+        bail!("{domain:?} is not a domain or an IP address: give the address clients reach this server by");
+    }
+    let mut install = Install::load()?;
+    // recreate writes this release's compose file, which runs the panel on PostgreSQL: a
+    // panel still on SQLite moves there only through `mikan update`. Asked only where
+    // something is about to change.
+    let movable = |install: &Install| -> Result<()> {
+        if !install.node && install.env.get("MIKAN_DATABASE_URL").is_none() {
+            bail!("this panel still keeps its data in SQLite (mikan 0.4): run `mikan update` first, then this command");
+        }
+        Ok(())
+    };
+    let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
+    let what = if install.node { "node" } else { "panel" };
+    let owner = system::port_owner(80, system::Proto::Tcp);
+    match acme::port80(owner.as_deref(), install.env.get("MIKAN_ACME_LISTEN"), acme::free_port) {
+        acme::Port80::Own { drop: false } => {
+            crate::out(&format!("Port 80 is free: the {what} answers Let's Encrypt there by itself, nothing to change."));
+            Ok(())
+        }
+        acme::Port80::Own { drop: true } => {
+            movable(&install)?;
+            install.env.remove("MIKAN_ACME_LISTEN");
+            install.env.save()?;
+            recreate(&install)?;
+            crate::out(&format!("Port 80 is free now: the {what} answers Let's Encrypt there by itself again."));
+            Ok(())
+        }
+        acme::Port80::Other(who) => bail!(
+            "port 80 is held by {who}, which mikan cannot configure. Free port 80, or make {who} pass /.well-known/acme-challenge/ to 127.0.0.1:{port}, set MIKAN_ACME_LISTEN=127.0.0.1:{port} in {DIR}/.env and run: mikan restart",
+            port = acme::free_port()
+        ),
+        acme::Port80::Front(front, port) => {
+            movable(&install)?;
+            let question = format!(
+                "{} holds port 80, where Let's Encrypt checks {domain}. Add a rule that passes only those checks to the {what}? Its config is backed up and tested before a reload.",
+                front.name()
+            );
+            if !yes && !confirm(&question) {
+                crate::out(&format!(
+                    "Nothing changed. What to add by hand:
+
+{}",
+                    acme::manual_text(front, &domain, port)
+                ));
+                return Ok(());
+            }
+            let report = acme::setup(front, &domain, port, true);
+            // The rule may be in, or left for the admin: mikan answers behind it either way.
+            install.env.set("MIKAN_ACME_LISTEN", &acme::listen(port))?;
+            install.env.save()?;
+            recreate(&install)?;
+            crate::out(&report.note());
+            match report.text() {
+                Some(t) => crate::out(&t),
+                None => crate::out(&format!(
+                    "Done. The {what} gets its certificate by itself within minutes; on the panel's {} page Retry asks for it now.",
+                    if install.node { "Nodes" } else { "Settings → Security" }
+                )),
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Starts the containers again with what .env says now, through this release's compose
+/// file: one written by an older mikan may not pass MIKAN_ACME_LISTEN on.
+fn recreate(install: &Install) -> Result<()> {
+    docker::ensure_compose(Path::new(DIR), install.node)?;
+    docker::compose_run(&["up", "-d"])?;
+    setup::wait_ready(install.node_port(), Duration::from_secs(90))
+}
+
 pub fn cert_set(cert: &Path, key: &Path, node: Option<u32>) -> Result<()> {
     Install::load()?.panel_only()?;
     let mut pem = String::new();
@@ -152,42 +232,54 @@ pub fn inbound(args: &[String]) -> Result<()> {
 }
 
 pub fn status() -> Result<()> {
-    let install = Install::load()?;
+    status_to(&Install::load()?, &mut crate::out)
+}
+
+/// `mikan status`, said line by line to say (`mikan support` keeps the lines).
+pub fn status_to(install: &Install, say: &mut dyn FnMut(&str)) -> Result<()> {
     let version = install.version();
-    crate::out(&format!("mikan {version}, {}", if install.node { "node" } else { "panel" }));
-    for s in docker::services()? {
-        crate::out(&format!("  {:<6} {}", s.name, s.status));
+    say(&format!("mikan {version}, {}", if install.node { "node" } else { "panel" }));
+    let mut wrong = false;
+    let services = docker::services()?;
+    for s in &services {
+        say(&format!("  {:<6} {}", s.name, s.status));
+        wrong |= s.state != "running";
     }
-    for s in docker::stats() {
-        crate::out(&format!("  {:<16} CPU {:>6}  memory {}", s.name, s.cpu, s.mem));
+    for s in docker::stats(&services) {
+        say(&format!("  {:<16} CPU {:>6}  memory {}", s.name, s.cpu, s.mem));
     }
     if let Some(p) = install.node_port() {
         match system::port_owner(p, system::Proto::Tcp) {
-            Some(_) => crate::out(&format!("The node waits for its panel on port {p}.")),
-            None => crate::out(&format!("The node does not listen on port {p}: mikan logs node")),
+            Some(_) => say(&format!("The node waits for its panel on port {p}.")),
+            None => {
+                wrong = true;
+                say(&format!("The node does not listen on port {p}: mikan logs node"));
+            }
         }
     } else if docker::panel_healthy() {
-        crate::out("The panel answers.");
+        say("The panel answers.");
     } else {
-        crate::out("The panel does not answer: mikan logs panel");
+        wrong = true;
+        say("The panel does not answer: mikan logs panel");
     }
-    match release::find(Some(&version), crate::update::channel(&install)) {
+    if wrong {
+        say("Run mikan doctor for a full check with fixes.");
+    }
+    match release::find(Some(&version), crate::update::channel(install)) {
         Ok(found) => {
             // Where the answer came from is worth a line only when it is not the index.
             if let Some(why) = &found.fallback {
-                crate::out(&format!("The release index is unavailable ({why}): the latest release on GitHub answers instead."));
+                say(&format!("The release index is unavailable ({why}): the latest release on GitHub answers instead."));
             }
             let m = &found.manifest;
             match &found.newest {
-                Some(newest) if found.unreachable => {
-                    crate::out(&format!("mikan {newest} is out, but this version cannot update to it directly."))
-                }
-                Some(newest) => crate::out(&format!("mikan {newest} is out: mikan update (through mikan {} first)", m.version)),
-                None if release::newer(&m.version, &version) => crate::out(&format!("mikan {} is out: mikan update", m.version)),
-                None => crate::out("This is the latest release."),
+                Some(newest) if found.unreachable => say(&format!("mikan {newest} is out, but this version cannot update to it directly.")),
+                Some(newest) => say(&format!("mikan {newest} is out: mikan update (through mikan {} first)", m.version)),
+                None if release::newer(&m.version, &version) => say(&format!("mikan {} is out: mikan update", m.version)),
+                None => say("This is the latest release."),
             }
         }
-        Err(e) => crate::out(&format!("Cannot check for updates: {e:#}")),
+        Err(e) => say(&format!("Cannot check for updates: {e:#}")),
     }
     Ok(())
 }
@@ -207,6 +299,51 @@ pub fn restart() -> Result<()> {
     setup::wait_ready(install.node_port(), Duration::from_secs(90))?;
     crate::out("Restarted.");
     Ok(())
+}
+
+/// `mikan support-access on|off`: MIKAN_SUPPORT_ACCESS in .env, the support terminal's units
+/// (host.rs keeps them away while it is off) and, on a panel, its container, which reads the
+/// variable when it is created.
+pub fn support_access(on: bool) -> Result<()> {
+    let mut install = Install::load()?;
+    let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
+    if on {
+        install.env.remove("MIKAN_SUPPORT_ACCESS");
+    } else {
+        install.env.set("MIKAN_SUPPORT_ACCESS", "off")?;
+    }
+    install.env.save()?;
+    if Path::new("/run/systemd/system").exists() {
+        host::install_units(!install.node)?;
+    }
+    if !install.node {
+        docker::compose_run(&["up", "-d"])?;
+        setup::wait_ready(None, Duration::from_secs(90))?;
+    }
+    crate::out(if on {
+        "Support access is back in the panel's hands: Settings, Security, Support access."
+    } else {
+        "Support access is off on this server: the panel opens none, and no support terminal runs here."
+    });
+    Ok(())
+}
+
+/// How long a restart the panel asked for waits: the answer to the page that asked goes out
+/// before the container it came from stops.
+const RESTART_GRACE: Duration = Duration::from_secs(2);
+
+/// `mikan restart --requested` (the restart request unit): takes the request the panel, or
+/// a node, wrote, and restarts the containers. A request that is not one is removed and
+/// nothing restarts.
+pub fn restart_requested() -> Result<()> {
+    let install = Install::load()?;
+    let Some(dir) = crate::hostreq::dir(install.node, "restart")? else { return Ok(()) };
+    if crate::hostreq::take(&dir)?.is_none() {
+        return Ok(());
+    }
+    crate::out("restart asked for by the panel");
+    std::thread::sleep(RESTART_GRACE);
+    restart()
 }
 
 pub fn confirm(question: &str) -> bool {
@@ -258,9 +395,17 @@ pub fn join(key: &str, panel_ip: Option<IpAddr>) -> Result<()> {
             None => host::allow(&format!("{port}/tcp"))?,
         }
     }
+    let since = SystemTime::now();
     docker::compose_run(&["up", "-d"])?;
     setup::wait_ready(Some(port), Duration::from_secs(90))?;
     crate::out(&format!("The node runs with the new key and waits for its panel on port {port}."));
+    // What the panel found is told, never made an error: the key is in place either way.
+    crate::out("Waiting for the panel to connect…");
+    if let Some(h) = hello::wait(since, hello::LIMIT) {
+        for line in hello::render(&hello::lines(&h, Some(port))) {
+            crate::out(&line);
+        }
+    }
     Ok(())
 }
 
@@ -271,9 +416,10 @@ pub fn uninstall() -> Result<bool> {
     let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
     docker::compose_run(&["down"])?;
     addon::down();
+    addon::drop_network();
     host::remove_units();
     if fs::remove_file(host::SYSCTL).is_ok() {
-        let _ = Command::new("sysctl").arg("--system").stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = system::succeeds("sysctl", &["--system"]);
     }
     let _ = fs::remove_file(host::BIN);
     Ok(panel)

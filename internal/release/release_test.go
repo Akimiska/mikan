@@ -204,3 +204,26 @@ func TestNotes(t *testing.T) {
 		t.Fatalf("no section: %q", n)
 	}
 }
+
+// A beta takes its own section when there is one, else the section of the release it
+// leads to; a stable release never borrows.
+func TestNotesFor(t *testing.T) {
+	log := []byte("# Changelog\n\n## 0.5.0.3-rc.2\n### en\n- rc2 only\n\n## 0.5.0.3\n### en\n- the release\n### ru\n- релиз\n")
+	if n := NotesFor(log, "0.5.0.3-rc.1"); n["en"] != "- the release" || n["ru"] != "- релиз" {
+		t.Fatalf("rc.1 borrows: %q", n)
+	}
+	if n := NotesFor(log, "0.5.0.3-rc.2"); n["en"] != "- rc2 only" {
+		t.Fatalf("rc.2 has its own: %q", n)
+	}
+	if n := NotesFor(log, "0.5.0.4"); len(n) != 0 {
+		t.Fatalf("a stable release without a section: %q", n)
+	}
+}
+
+// The support desk knows the official build by this fingerprint (mikan-bot keeps a copy):
+// a changed release key changes it, and the desk must be told.
+func TestKeyFingerprint(t *testing.T) {
+	if got := KeyFingerprint(); got != "f278e3dde3431658" {
+		t.Fatalf("KeyFingerprint() = %s", got)
+	}
+}

@@ -88,7 +88,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -166,6 +166,18 @@ func (c *Client) RequestUpdate(ctx context.Context, version string) error {
 	return c.do(ctx, http.MethodPost, "/v1/update", UpdateRequest{Version: version}, nil, 10*time.Second)
 }
 
+// PresentChallenge has the node answer an ACME HTTP-01 challenge on its port 80 until
+// CleanUpChallenge. Nodes that predate it answer 404 (a *StatusError); a port 80 held by
+// another program is *Error{Code: CodePort80Busy}, its Message the holder when known.
+func (c *Client) PresentChallenge(ctx context.Context, token, keyAuth string) error {
+	return c.do(ctx, http.MethodPut, "/v1/acme/challenge/"+url.PathEscape(token), ChallengeRequest{KeyAuth: keyAuth}, nil, 15*time.Second)
+}
+
+// CleanUpChallenge stops answering token; the node gives port 80 back once none is left.
+func (c *Client) CleanUpChallenge(ctx context.Context, token string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/acme/challenge/"+url.PathEscape(token), nil, nil, 15*time.Second)
+}
+
 // Torrents returns the torrent blocker's hits after seq of epoch. Nodes that predate the
 // blocker answer 404.
 func (c *Client) Torrents(ctx context.Context, epoch string, after int64) (TorrentHits, error) {
@@ -198,7 +210,11 @@ func (c *Client) CheckTarget(ctx context.Context, req TargetCheckRequest) (Targe
 // ScanTargets opens ~250 connections on the node; it runs one scan at a time.
 func (c *Client) ScanTargets(ctx context.Context, req TargetScanRequest) (TargetScan, error) {
 	var r TargetScan
-	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, 45*time.Second)
+	wait := ScanTime + 15*time.Second
+	if req.Wide {
+		wait = WideScanTime + 15*time.Second
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, wait)
 	return r, err
 }
 
@@ -228,33 +244,49 @@ var TunnelHosts = []string{"api.telegram.org:443"}
 
 // Tunnel opens a TCP stream to addr through the node (HTTP CONNECT on the Node API).
 func (c *Client) Tunnel(ctx context.Context, addr string) (net.Conn, error) {
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: addr}, Host: addr, Header: http.Header{}}
+	return c.upgrade(ctx, req, http.StatusOK, 15*time.Second)
+}
+
+// upgrade sends req on a bare connection to the Node API and, when the node answers with the
+// status want, hands the connection over to the caller: from then on it is a stream (a CONNECT
+// tunnel, an Upgrade). wait bounds the answer when ctx has no deadline. Any other answer is the
+// node's *Error, or a *StatusError of the node that predates the path.
+func (c *Client) upgrade(ctx context.Context, req *http.Request, want int, wait time.Duration) (net.Conn, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if d, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(d)
 	} else {
-		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+		_ = conn.SetDeadline(time.Now().Add(wait))
 	}
-	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: addr}, Host: addr, Header: http.Header{}}
+	// Cancelling ctx while the node answers closes the connection: the read below ends.
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
 	if err := req.Write(conn); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != want {
 		defer conn.Close()
 		var e Error
 		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&e) == nil && e.Code != "" {
 			return nil, &e
 		}
-		return nil, fmt.Errorf("node tunnel: status %d", resp.StatusCode)
+		return nil, &StatusError{Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode}
+	}
+	// A caller that gave up while the node answered gets no stream.
+	if !stop() {
+		conn.Close()
+		return nil, ctx.Err()
 	}
 	_ = conn.SetDeadline(time.Time{})
 	if br.Buffered() > 0 {
@@ -270,3 +302,11 @@ type bufConn struct {
 }
 
 func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+// Diagnose asks the node how its server is: DNS, the internet, GitHub and GHCR for
+// updates, its clock, disk and memory. Nodes that predate it answer 404 (a *StatusError).
+func (c *Client) Diagnose(ctx context.Context) (Diagnosis, error) {
+	var r Diagnosis
+	err := c.do(ctx, http.MethodPost, "/v1/diagnose", nil, &r, 25*time.Second)
+	return r, err
+}

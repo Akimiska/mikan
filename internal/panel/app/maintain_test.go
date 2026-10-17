@@ -33,6 +33,12 @@ func TestMaintainCutsWhatOnlyGrows(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The nodes' days go with the users' days.
+	for _, day := range []int64{today - 500, today - 399} {
+		if _, err := h.st.DB.ExecContext(ctx, "INSERT INTO node_traffic_daily(node_id,day,up,down) VALUES (1,$1,1,1)", day); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, age := range []time.Duration{200 * 24 * time.Hour, 181 * 24 * time.Hour, 179 * 24 * time.Hour, time.Hour} {
 		if err := h.st.Q.InsertAudit(ctx, db.InsertAuditParams{Ts: h.now.Add(-age).Unix(), Action: "test"}); err != nil {
 			t.Fatal(err)
@@ -44,6 +50,9 @@ func TestMaintainCutsWhatOnlyGrows(t *testing.T) {
 	var days, entries int
 	if err := h.st.DB.QueryRow("SELECT count(*) FROM traffic_daily").Scan(&days); err != nil || days != 2 {
 		t.Fatalf("daily traffic rows: %d %v, want the two within 400 days", days, err)
+	}
+	if err := h.st.DB.QueryRow("SELECT count(*) FROM node_traffic_daily").Scan(&days); err != nil || days != 1 {
+		t.Fatalf("daily node traffic rows: %d %v, want the one within 400 days", days, err)
 	}
 	if err := h.st.DB.QueryRow("SELECT count(*) FROM audit_log WHERE action = 'test'").Scan(&entries); err != nil || entries != 2 {
 		t.Fatalf("audit rows: %d %v, want the two within 180 days", entries, err)

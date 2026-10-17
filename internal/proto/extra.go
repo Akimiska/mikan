@@ -186,6 +186,10 @@ func (c *clientBuilder) finishExtra() (Client, bool) {
 		if tt := c.t.str("table-type"); tt != "" {
 			c.y["table-type"] = tt
 		}
+		// The downlink mode must match the node's, or the client cannot read its replies.
+		if p, ok := c.t["enable-pure-downlink"].(bool); ok {
+			c.y["enable-pure-downlink"] = p
+		}
 		if h := c.t.section("httpmask"); h != nil {
 			c.y["httpmask"] = clone(h)
 		}

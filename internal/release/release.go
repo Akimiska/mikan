@@ -6,7 +6,9 @@ package release
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,14 @@ import (
 // private half lives only in the RELEASE_SIGNING_KEY secret of the release workflow and
 // with the maintainer.
 const PublicKey = "Z3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8="
+
+// KeyFingerprint names the release key a build trusts: the first 16 hex digits of the
+// SHA-256 of PublicKey. The support desk compares it with the official one; a build that
+// trusts another key is not mikan's own.
+func KeyFingerprint() string {
+	sum := sha256.Sum256([]byte(PublicKey))
+	return hex.EncodeToString(sum[:8])
+}
 
 // Repo is where releases are published.
 const Repo = "Miroshka000/mikan"
@@ -75,9 +85,8 @@ func Sign(data []byte, key ed25519.PrivateKey) string {
 // Parse checks the signature over the manifest's exact bytes, then decodes and checks it.
 func Parse(data []byte, sig string, pub ed25519.PublicKey) (Manifest, error) {
 	var m Manifest
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(sig))
-	if err != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, data, raw) {
-		return m, ErrSignature
+	if err := Verify(data, sig, pub); err != nil {
+		return m, err
 	}
 	// Unknown fields are ignored: the signature already vouches for every byte, and a
 	// manifest that gains a field must still be read by the panels already out there.
@@ -222,6 +231,17 @@ func comparePrerelease(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+// NotesFor is the notes of version: its own section, or for a pre-release without one
+// (0.5.0.3-rc.1) the section of the release it leads to (0.5.0.3), so a beta needs no
+// changelog entry of its own.
+func NotesFor(changelog []byte, version string) map[string]string {
+	notes := Notes(changelog, version)
+	if base, _, pre := strings.Cut(version, "-"); pre && len(notes) == 0 {
+		notes = Notes(changelog, base)
+	}
+	return notes
 }
 
 // Notes takes a version's section out of CHANGELOG.md:

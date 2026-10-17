@@ -68,21 +68,8 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 		return nil, err
 	}
 	b.UsersTotal, b.UsersActive, b.Expiring7d = int(counts.Total), int(counts.Active+counts.Expiring), int(counts.Expiring)
-	if online := h.online(); len(online) > 0 {
-		// Online counts users: one with several bound devices has several slots online.
-		names := make([]string, 0, len(online))
-		for n := range online {
-			names = append(names, n)
-		}
-		owners, err := h.d.Store.Q.SlotOwners(ctx, names)
-		if err != nil {
-			return nil, err
-		}
-		seen := map[int64]bool{}
-		for _, o := range owners {
-			seen[o.UserID] = true
-		}
-		b.Online = len(seen)
+	if b.Online, err = h.onlineUsers(ctx); err != nil {
+		return nil, err
 	}
 	today := now.Unix() / 86400
 	days, err := h.d.Store.Q.TotalTrafficDaily(ctx, today-1)
@@ -116,12 +103,24 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 	return out, nil
 }
 
+// trafficSince is where a range of the traffic charts starts: a day number for 30 days
+// (the charts then go by the day), an hour number otherwise (by the hour).
+func trafficSince(now time.Time, rng string) (daily bool, since int64) {
+	switch rng {
+	case "30d":
+		return true, now.Add(-30*24*time.Hour).Unix() / 86400
+	case "7d":
+		return false, now.Add(-7*24*time.Hour).Unix() / 3600
+	}
+	return false, now.Add(-24*time.Hour).Unix() / 3600
+}
+
 func (h *handlers) serverTraffic(ctx context.Context, in *rangeInput) (*trafficOutput, error) {
-	now := h.d.Now()
 	out := &trafficOutput{}
 	out.Body.Points = []TrafficPoint{}
-	if in.Range == "30d" {
-		rows, err := h.d.Store.Q.TotalTrafficDaily(ctx, now.Add(-30*24*time.Hour).Unix()/86400)
+	daily, since := trafficSince(h.d.Now(), in.Range)
+	if daily {
+		rows, err := h.d.Store.Q.TotalTrafficDaily(ctx, since)
 		if err != nil {
 			return nil, err
 		}
@@ -130,11 +129,7 @@ func (h *handlers) serverTraffic(ctx context.Context, in *rangeInput) (*trafficO
 		}
 		return out, nil
 	}
-	span := 24 * time.Hour
-	if in.Range == "7d" {
-		span = 7 * 24 * time.Hour
-	}
-	rows, err := h.d.Store.Q.TotalTrafficHourly(ctx, now.Add(-span).Unix()/3600)
+	rows, err := h.d.Store.Q.TotalTrafficHourly(ctx, since)
 	if err != nil {
 		return nil, err
 	}
@@ -169,4 +164,26 @@ func (h *handlers) nodeHealth(ctx context.Context, in *nodeHealthInput) (*nodeOu
 	}
 	out.Body = v
 	return out, nil
+}
+
+// onlineUsers is how many users have a connection now. It counts users: one with several
+// bound devices has several slots online.
+func (h *handlers) onlineUsers(ctx context.Context) (int, error) {
+	online := h.online()
+	if len(online) == 0 {
+		return 0, nil
+	}
+	names := make([]string, 0, len(online))
+	for n := range online {
+		names = append(names, n)
+	}
+	owners, err := h.d.Store.Q.SlotOwners(ctx, names)
+	if err != nil {
+		return 0, err
+	}
+	seen := map[int64]bool{}
+	for _, o := range owners {
+		seen[o.UserID] = true
+	}
+	return len(seen), nil
 }

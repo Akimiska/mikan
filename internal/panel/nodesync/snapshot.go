@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/exitdns"
+	"mikan/internal/panel/filters"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/torrent"
@@ -30,6 +32,8 @@ type snapshot struct {
 	counters map[int64]counterPos
 	torrent  torrent.Config
 	bans     map[int64]int64 // user → when the torrent blocker's ban ends (unix)
+	filters  filters.Config
+	exitDNS  exitdns.Config
 }
 
 type counterPos struct {
@@ -85,6 +89,12 @@ func (m *Manager) readSnapshot(ctx context.Context) (s *snapshot, err error) {
 		return nil, err
 	}
 	if s.torrent, err = torrent.Load(ctx, settings.New(q)); err != nil {
+		return nil, err
+	}
+	if s.filters, err = filters.Load(ctx, settings.New(q)); err != nil {
+		return nil, err
+	}
+	if s.exitDNS, err = exitdns.Load(ctx, settings.New(q)); err != nil {
 		return nil, err
 	}
 	if s.torrent.Enabled {

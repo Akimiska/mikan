@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"mikan/internal/panel/store/db"
 	"mikan/internal/release"
@@ -26,11 +30,19 @@ const (
 	KeySubPublicBase = "sub_public_base"
 	KeyDomain        = "domain"
 	KeyACMEEmail     = "acme_email"
-	KeyGroupMain = "sub_group_main" // subscription group names, see subs.Groups
-	KeyGroupAuto = "sub_group_auto"
-	KeyGroupIcon = "sub_group_icon" // AoiVPN fork: icon URL for the main group
-	KeyRouting   = "sub_routing" // subs.Routing
-	KeyRules     = "sub_rules"   // the admin's own Clash rules, as typed (subs.ParseRules)
+	// KeyACMECA is the certificate authority of the panel and its nodes (acme.ValidCA);
+	// unset: Let's Encrypt. KeyACMEEABKID and KeyACMEEABHMAC are Google Trust Services'
+	// external account key; the HMAC is a secret and never shown back.
+	KeyACMECA      = "acme_ca"
+	KeyACMEEABKID  = "acme_eab_kid"
+	KeyACMEEABHMAC = "acme_eab_hmac"
+	KeyGroupMain   = "sub_group_main" // subscription group names, see subs.Groups
+	KeyGroupAuto   = "sub_group_auto"
+	KeyGroupIcon   = "sub_group_icon" // AoiVPN fork: icon URL for the main group
+	KeyRouting     = "sub_routing"    // subs.Routing
+	KeyRules       = "sub_rules"      // the admin's own Clash rules, as typed (subs.ParseRules)
+	KeyRoutes      = "sub_routes"     // services, direct apps and DNS of the profiles (subs.Routes)
+	KeyTemplate    = "sub_template"   // the admin's own Clash profile (subs.Template); empty: none
 	// KeySubBypass (AoiVPN fork): JSON {group, proxies:[mihomo maps]} of external bypass
 	// proxies injected into the sub as a second select group. Fed by an external script
 	// (not the panel UI); not tracked as mikan slots/inbounds.
@@ -44,10 +56,25 @@ const (
 	// Automatic moves (internal/panel/autotune), on unless switched off.
 	KeyAutoPort = "auto_port" // move an inbound whose port is blocked on the way to clients
 	KeyAutoSNI  = "auto_sni"  // replace a REALITY target that stopped working
+	// KeyAnyPort lets the panel's own port picks go past domain.PortPool when every port
+	// of it is taken: a new inbound with no port named, an automatic move.
+	KeyAnyPort = "any_port"
+	// KeyWideScan lets the search for REALITY sites go past the node's /24 to the rest of
+	// its /16 (scan.Options.Wide): more candidates, and many more connections.
+	KeyWideScan = "wide_sni_scan"
+	// KeySupportAccess lets the admin open support access (internal/panel/support); off, no
+	// grant can be made and the live one ends.
+	KeySupportAccess = "support_access"
 	// Devices (domain.Devices): bind subscriptions to devices, on unless switched off;
 	// refuse apps that send no device id instead of seating them together, off by default.
 	KeyDeviceBinding = "device_binding"
 	KeyRequireHWID   = "device_require_hwid"
+	// KeyUnbindRules is how the subscriber may unbind devices (domain.UnbindRules); unset:
+	// domain.DefaultUnbindRules.
+	KeyUnbindRules = "device_unbind"
+	// KeyReissueRules is how often the subscriber may reissue their own link
+	// (domain.ReissueRules); unset: domain.DefaultReissueRules.
+	KeyReissueRules = "link_reissue"
 	// KeyDefaultLang is the language chosen at install: the admin panel and the subscription
 	// page open in it until a visitor picks one, and new names (tariffs, the auto group, the
 	// bot's menu) are written in it. "auto" or unset: the visitor's browser decides.
@@ -61,6 +88,9 @@ const (
 	// KeyNodesFollow lets the panel update its remote nodes to its own version, one at a
 	// time, after it updated itself; on unless switched off (internal/panel/nodeupdate).
 	KeyNodesFollow = "nodes_follow_panel"
+	// KeyShowGoals shows the goals the project collects money for (release.Goals) on the
+	// updates card; on unless switched off.
+	KeyShowGoals = "show_goals"
 	// Branding and support: the bot's and the subscription page's name and the support link.
 	KeyBrand      = "brand"
 	KeySupportURL = "support_url"
@@ -75,6 +105,12 @@ const (
 	KeyAppBranding = "app_branding"
 	KeyBrandAccent = "brand_accent"   // #RRGGBB, empty: the app's own
 	KeyBrandLogo   = "brand_logo_url" // https, empty: the app's own
+	// Happ (subs.Happ): a routing profile link, the happ-proxy.com provider id and what
+	// needs it, and how the page's Happ button hides the address ("", "api", "local").
+	KeyHappRouting  = "happ_routing"
+	KeyHappProvider = "happ_provider_id"
+	KeyHappHide     = "happ_hide_settings"
+	KeyHappCrypt    = "happ_crypt"
 	// KeyLegacySubPath is the path of the subscription links of the panel users were
 	// imported from: "sub" for Marzban and PasarGuard, "api/sub" for Remnawave. The old
 	// tokens lead to the users (legacy_sub_tokens); empty: off.
@@ -86,6 +122,9 @@ const (
 	KeyLegacySubSecret = "legacy_sub_secret"
 	// KeyQuietHour is the UTC hour the slot pool is refilled, which reconnects QUIC clients.
 	KeyQuietHour = "quiet_hour_utc"
+	// KeySubPage is the subscription page as the admin built it (subpage.Config): its look,
+	// blocks, apps and own CSS; unset: the page as it always was.
+	KeySubPage = "sub_page"
 )
 
 // Switch is an on/off setting with its default: read it with On, so the default lives
@@ -99,27 +138,97 @@ type Switch struct {
 var (
 	AutoPort      = Switch{KeyAutoPort, true}
 	AutoSNI       = Switch{KeyAutoSNI, true}
+	AnyPort       = Switch{KeyAnyPort, false}
+	WideScan      = Switch{KeyWideScan, false}
 	DeviceBinding = Switch{KeyDeviceBinding, true}
 	RequireHWID   = Switch{KeyRequireHWID, false}
 	AutoUpdate    = Switch{KeyAutoUpdate, false}
 	NodesFollow   = Switch{KeyNodesFollow, true}
+	ShowGoals     = Switch{KeyShowGoals, true}
 	AppBranding   = Switch{KeyAppBranding, false}
+	HappHide      = Switch{KeyHappHide, false}
+	SupportAccess = Switch{KeySupportAccess, true}
 )
 
 // ValidLang says whether s is a language of the panel.
 func ValidLang(s string) bool { return s == "ru" || s == "en" }
 
-type Settings struct{ q *db.Queries }
+type Settings struct {
+	q     *db.Queries
+	cache *cache // nil: every read goes to the database
+}
 
 func New(q *db.Queries) *Settings { return &Settings{q: q} }
 
-// Get decodes the JSON value stored under key. ok is false when the key is absent.
-func Get[T any](ctx context.Context, s *Settings, key string) (v T, ok bool, err error) {
+// Cached is a Settings for a loop that reads the same settings every few seconds: a value
+// is kept for ttl and dropped as soon as this process writes any setting. What another
+// process writes (the CLI) is seen within ttl. Not for a transaction's queries, and not
+// where a value must be read right after it is written.
+func Cached(q *db.Queries, ttl time.Duration) *Settings {
+	return &Settings{q: q, cache: &cache{ttl: ttl, items: map[string]cachedValue{}}}
+}
+
+type cache struct {
+	ttl   time.Duration
+	mu    sync.Mutex
+	items map[string]cachedValue
+}
+
+type cachedValue struct {
+	raw   string
+	found bool
+	gen   uint64
+	at    time.Time
+}
+
+// writeGrace: a value read this soon after a write in this process is not kept. Set moves
+// the generation before its transaction commits, so such a read may still see the old value
+// under the new generation.
+const writeGrace = 2 * time.Second
+
+// raw is the stored JSON under key; found is false when the key is absent.
+func (s *Settings) raw(ctx context.Context, key string) (string, bool, error) {
+	if s.cache == nil {
+		return s.read(ctx, key)
+	}
+	gen, now := generation.Load(), time.Now()
+	s.cache.mu.Lock()
+	v, ok := s.cache.items[key]
+	s.cache.mu.Unlock()
+	if ok && v.gen == gen && now.Sub(v.at) < s.cache.ttl {
+		return v.raw, v.found, nil
+	}
+	raw, found, err := s.read(ctx, key)
+	if err != nil {
+		return "", false, err
+	}
+	if now.Sub(time.Unix(0, writtenAt.Load())) >= writeGrace {
+		s.cache.mu.Lock()
+		s.cache.items[key] = cachedValue{raw: raw, found: found, gen: gen, at: now}
+		s.cache.mu.Unlock()
+	}
+	return raw, found, nil
+}
+
+// Raw is the stored JSON under key as it is, for a reader that falls back on its own
+// when the value does not parse; found is false when the key is absent.
+func (s *Settings) Raw(ctx context.Context, key string) (string, bool, error) { return s.raw(ctx, key) }
+
+func (s *Settings) read(ctx context.Context, key string) (string, bool, error) {
 	raw, err := s.q.GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
-		return v, false, nil
+		return "", false, nil
 	}
 	if err != nil {
+		return "", false, err
+	}
+	return raw, true, nil
+}
+
+// Get decodes the JSON value stored under key. ok is false when the key is absent.
+func Get[T any](ctx context.Context, s *Settings, key string) (v T, ok bool, err error) {
+	raw, found, err := s.raw(ctx, key)
+	if err != nil || !found {
 		return v, false, err
 	}
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
@@ -131,11 +240,8 @@ func Get[T any](ctx context.Context, s *Settings, key string) (v T, ok bool, err
 // GetOver decodes the value stored under key over def: what the stored JSON lacks, such
 // as a field added after it was saved, keeps def's value.
 func GetOver[T any](ctx context.Context, s *Settings, key string, def T) (T, bool, error) {
-	raw, err := s.q.GetSetting(ctx, key)
-	if errors.Is(err, sql.ErrNoRows) {
-		return def, false, nil
-	}
-	if err != nil {
+	raw, found, err := s.raw(ctx, key)
+	if err != nil || !found {
 		return def, false, err
 	}
 	v := def
@@ -153,7 +259,7 @@ func Set[T any](ctx context.Context, s *Settings, key string, v T) error {
 	if err := s.q.SetSetting(ctx, db.SetSettingParams{Key: key, Value: string(raw)}); err != nil {
 		return err
 	}
-	generation.Add(1)
+	moved()
 	return nil
 }
 
@@ -162,8 +268,20 @@ func Set[T any](ctx context.Context, s *Settings, key string, v T) error {
 // process (the CLI) do not move it: they are seen when what is kept expires.
 var generation atomic.Uint64
 
+// writtenAt is when generation last moved (unix nanoseconds).
+var writtenAt atomic.Int64
+
+func moved() {
+	writtenAt.Store(time.Now().UnixNano())
+	generation.Add(1)
+}
+
 // Generation is how many settings have been written by this process so far.
 func Generation() uint64 { return generation.Load() }
+
+// Touch moves the generation for a change kept outside the settings table that what is
+// built from settings reads too (the subscription page's uploaded logo).
+func Touch() { moved() }
 
 func (s *Settings) String(ctx context.Context, key string) (string, error) {
 	v, _, err := Get[string](ctx, s, key)
@@ -224,6 +342,14 @@ func (s *Settings) Paths(ctx context.Context) (Paths, error) {
 type Endpoint struct {
 	Host string
 	Port int
+}
+
+// URL is https://host:port, the panel's base address; "" while it has no host or port.
+func (e Endpoint) URL() string {
+	if e.Host == "" || e.Port <= 0 {
+		return ""
+	}
+	return "https://" + net.JoinHostPort(e.Host, strconv.Itoa(e.Port))
 }
 
 // SubEndpoint is where subscription links point: the subscription port when one is set.

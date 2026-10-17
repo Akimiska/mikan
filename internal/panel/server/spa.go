@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -48,7 +49,11 @@ func (s *SPA) SetPrefix(p string) { s.prefix.Store(&p) }
 // SetLang sets the default language, "ru" or "en"; "" leaves it to the browser.
 func (s *SPA) SetLang(l string) { s.lang.Store(&l) }
 
-func (s *SPA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *SPA) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.ServeHead(w, r, nil) }
+
+// ServeHead serves like ServeHTTP and puts extra at the end of the entry's <head>, after
+// the bundle's own tags (a style there wins over the bundle's at equal specificity).
+func (s *SPA) ServeHead(w http.ResponseWriter, r *http.Request, extra []byte) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -64,6 +69,11 @@ func (s *SPA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		head += `<meta name="mikan-lang" content="` + html.EscapeString(l) + `">`
 	}
 	page := bytes.Replace(s.entry, []byte(baseMarker), []byte(head), 1)
+	if len(extra) > 0 {
+		if i := bytes.Index(page, []byte("</head>")); i >= 0 {
+			page = slices.Concat(page[:i], extra, page[i:])
+		}
+	}
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")

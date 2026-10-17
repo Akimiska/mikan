@@ -79,7 +79,7 @@ export default defineConfig({
 					items: [{ slug: 'nodes/nodes' }, { slug: 'nodes/cascades' }, { slug: 'nodes/warp' }],
 				},
 				{
-					label: 'Подключения',
+					label: 'Протоколы',
 					translations: { en: 'Protocols' },
 					items: [
 						{ slug: 'protocols/presets' },
@@ -116,13 +116,16 @@ export default defineConfig({
 						{ slug: 'operations/backups' },
 						{ slug: 'operations/import' },
 						{ slug: 'operations/alerts' },
+						{ slug: 'operations/diagnostics' },
+						{ slug: 'operations/community-addons' },
+						{ slug: 'operations/support-access' },
 						{ slug: 'operations/cli' },
 					],
 				},
 				{
 					label: 'Справка',
 					translations: { en: 'Reference' },
-					items: [{ slug: 'api' }, { slug: 'faq' }, { slug: 'changelog' }],
+					items: [{ slug: 'api' }, { slug: 'faq' }, { slug: 'changelog' }, { slug: 'support' }, { slug: 'support/paid' }],
 				},
 			],
 			plugins: [starlightLinksValidator({ errorOnLocalLinks: true })],

@@ -44,9 +44,14 @@ if [ "$status" = 0 ]; then
   sleep 3
   docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver devices-check || status=$?
 fi
-# Automatic moves: the client's 443/tcp to the node is dropped; the panel must move XHTTP.
+# Automatic moves: two clients on two networks lose the node's 443/tcp; the panel must
+# move XHTTP.
 if [ "$status" = 0 ]; then
+  docker compose --profile client2 up -d client2
   docker compose --profile client --profile blocker run --rm blocker || status=$?
+fi
+if [ "$status" = 0 ]; then
+  docker compose --profile client2 --profile blocker2 run --rm blocker2 || status=$?
 fi
 if [ "$status" = 0 ]; then
   docker compose exec -T -e SLICE_PW="$PW" driver go run ./test/slice/driver autotune || status=$?
@@ -62,9 +67,9 @@ if [ "$status" = 0 ]; then
 fi
 if [ "$status" != 0 ]; then
   docker compose --profile node2 logs --tail 60 panel node node2
-  docker compose --profile client logs --tail 30 client
+  docker compose --profile client --profile client2 logs --tail 30 client client2
 fi
 if [ "${KEEP:-0}" != 1 ]; then
-  docker compose --profile client --profile node2 --profile blocker down -v --remove-orphans
+  docker compose --profile client --profile client2 --profile node2 --profile blocker --profile blocker2 down -v --remove-orphans
 fi
 exit "$status"

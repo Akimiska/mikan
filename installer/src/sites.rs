@@ -53,16 +53,35 @@ pub fn check(site: &Site) -> Result<Site> {
     serde_json::from_slice(&out.stdout).context("read the panel's check")
 }
 
-/// Points every REALITY inbound at site; returns what the panel reports.
-pub fn apply(site: &Site) -> Result<String> {
-    let out = docker::check(docker::admin(&["targets", "apply", "--all", "--dest", &site.dest, "--sni", &site.sni], None)?)?;
-    Ok(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+/// Said when the camouflage is someone else's site: hosters and filters notice a name that
+/// does not lead to the server's address (GitHub issue #67).
+pub const FOREIGN: &str = "⚠ This is someone else's site next to your server: hosters and filters notice a name \
+    that does not lead to the server's address. With a domain of your own pointed here, pick it in mikan → REALITY sites.";
+
+/// Points every REALITY inbound at site; returns what the panel reports. own is the
+/// panel's own domain, when it has one: anything else gets the FOREIGN note.
+pub fn apply(site: &Site, own: Option<&Site>) -> Result<String> {
+    let mut args = vec!["targets", "apply", "--all", "--dest", &site.dest, "--sni", &site.sni];
+    // Only the own domain fails the check here (neighbors are listed when they pass): its
+    // certificate comes within minutes, and clients do not need it to connect.
+    if !site.ok {
+        args.push("--force");
+    }
+    let out = docker::check(docker::admin(&args, None)?)?;
+    let mut msg = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+    if !own.is_some_and(|o| o.dest == site.dest && o.sni == site.sni) {
+        msg.push('\n');
+        msg.push_str(FOREIGN);
+    } else if !site.ok {
+        msg.push_str(&format!("\nThe certificate of {} is on its way: the panel gets it by itself.", site.sni));
+    }
+    Ok(msg)
 }
 
-/// The site to take: the panel's own domain once its certificate is there, else the
-/// fastest neighbor; None keeps the current sites.
+/// The site to take: the panel's own domain whenever there is one, its certificate ready
+/// or not, else the fastest neighbor; None keeps the current sites.
 pub fn best(scan: &Scan) -> Option<Site> {
-    scan.self_steal.clone().filter(|s| s.ok).or_else(|| scan.results.first().cloned())
+    scan.self_steal.clone().or_else(|| scan.results.first().cloned())
 }
 
 /// The domain's Let's Encrypt certificate comes a few seconds after the panel starts:
@@ -99,7 +118,7 @@ pub fn auto(mut say: impl FnMut(&str)) {
         say("  no site next to the server passed the checks: the default site stays");
         return;
     };
-    match apply(&site) {
+    match apply(&site, s.self_steal.as_ref()) {
         Ok(msg) => msg.lines().for_each(|l| say(&format!("  {l}"))),
         Err(e) => say(&format!("  {e:#}")),
     }
@@ -116,10 +135,11 @@ mod tests {
             "results":[{"dest":"203.0.113.45:443","sni":"shop.example.net","ip":"203.0.113.45","rtt_ms":3,"tls13":true,"h2":true,"x25519":true,"cert_valid":true,"dns_match":true,"ok":true}],
             "current":[{"inbound":"vless-xhttp","enabled":true,"dest":"www.microsoft.com:443","sni":"www.microsoft.com"}]}"#;
         let mut s: Scan = serde_json::from_str(json).unwrap();
-        assert_eq!(best(&s).unwrap().sni, "shop.example.net");
-        s.self_steal.as_mut().unwrap().ok = true;
+        // Even before its certificate: someone else's domain next door gets the server
+        // noticed (GitHub issue #67).
         assert_eq!(best(&s).unwrap().sni, "vpn.example.com");
         s.self_steal = None;
+        assert_eq!(best(&s).unwrap().sni, "shop.example.net");
         s.results.clear();
         assert!(best(&s).is_none());
     }

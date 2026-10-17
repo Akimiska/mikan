@@ -42,7 +42,8 @@ func TestNodeSortMigrationKeepsTheOldOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := p.UpTo(ctx, migration); err != nil {
+	// Up to the newest, as a panel updates: the queries below read the columns of all of it.
+	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
 	nodes, err := s.Q.ListNodes(ctx)

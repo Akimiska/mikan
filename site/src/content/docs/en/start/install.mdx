@@ -92,7 +92,7 @@ Full list: `mikan install --help`.
 | Docker volume `mikan_pg-data` | the PostgreSQL database |
 | `/usr/local/bin/mikan` | the server management command |
 
-The installer opens these in ufw (if it is enabled): the panel port, 80, 443 and the spare ports 2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443 over TCP and UDP. Automatic fixes move blocked protocols to them. If ufw is off and your hosting provider has its own firewall, open at least 443, 8443 and the panel port there.
+The installer opens these in ufw (if it is enabled): the panel port, 80, 443 and the spare ports 2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443, 10443, 11443, 12443 over TCP and UDP. Automatic fixes move blocked protocols to them; `mikan update` opens them again when the list grows. If ufw is off and your hosting provider has its own firewall, open at least 443, 8443 and the panel port there.
 
 :::tip[Installation interrupted]
 Run `mikan install` again and the installer continues from where it stopped. On an already installed server, the `mikan` command opens the management menu.

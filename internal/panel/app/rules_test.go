@@ -63,7 +63,7 @@ func TestClashRulesOverHTTP(t *testing.T) {
 		var cfg struct {
 			Rules []string `json:"rules"`
 		}
-		if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &cfg) != nil {
+		if resp.StatusCode != http.StatusOK || unmarshalProfile(body, &cfg) != nil {
 			t.Fatalf("%s: %d %s", ua, resp.StatusCode, body)
 		}
 		return cfg.Rules

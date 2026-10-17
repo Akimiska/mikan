@@ -96,7 +96,7 @@ func TestTrafficPoolsOverHTTP(t *testing.T) {
 		var prof struct {
 			Proxies []any `json:"proxies"`
 		}
-		_ = json.Unmarshal(body, &prof)
+		_ = unmarshalProfile(body, &prof)
 		return len(prof.Proxies)
 	}
 	before := countLinks()

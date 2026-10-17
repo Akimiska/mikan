@@ -98,7 +98,8 @@ type InboundPatch struct {
 	ServerName  *string // the name clients send with Dest; "" takes the host of Dest
 	Fingerprint *string
 	Obfs        *string
-	Client      *ClientEndpoint // replaces all three
+	XHTTP       *proto.XHTTPTuning // the whole XHTTP tuning, as the form shows it
+	Client      *ClientEndpoint    // replaces all three
 	DisplayName *string
 	// What only the node uses.
 	Listen     *string
@@ -116,7 +117,7 @@ type InboundPatch struct {
 
 // EditsTemplate: the patch changes the listener's template.
 func (p InboundPatch) EditsTemplate() bool {
-	return p.Config != nil || p.Dest != nil || p.Fingerprint != nil || p.Obfs != nil || p.Client != nil
+	return p.Config != nil || p.Dest != nil || p.Fingerprint != nil || p.Obfs != nil || p.XHTTP != nil || p.Client != nil
 }
 
 // ForClients: the patch changes what clients get.
@@ -144,7 +145,9 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 	}
 	port := in.Port
 	if port == "" {
-		port = info.Port
+		if port, err = s.defaultPort(ctx, node, info.Port, info.Network); err != nil {
+			return db.Inbound{}, err
+		}
 	}
 	if !ValidPort(port) {
 		return db.Inbound{}, ErrBadPort
@@ -178,6 +181,34 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 		return err
 	})
 	return row, err
+}
+
+// defaultPort is the port of an inbound the admin named none for: the preset's own, or,
+// when something holds it already (another inbound of the preset, another program on the
+// server), the first port an automatic move would pick (PickPorts: PortPool, and past it
+// with settings.AnyPort on). With none free the preset's port stays and the usual check
+// names what holds it.
+func (s *Inbounds) defaultPort(ctx context.Context, node db.Node, port, network string) (string, error) {
+	lo, hi, ok := parsePort(port)
+	if !ok || lo != hi {
+		return port, nil
+	}
+	m, err := NodePorts(ctx, s.st.Q, node)
+	if err != nil {
+		return "", err
+	}
+	m = m.WithHost(s.host.of(node.ID))
+	if _, busy := m.Busy(port, network, PortHolder{}); !busy && !m.host.Listens(network, lo) {
+		return port, nil
+	}
+	anyPort, err := settings.New(s.st.Q).On(ctx, settings.AnyPort)
+	if err != nil {
+		return "", err
+	}
+	if free := m.PickPorts(network, anyPort, nil); len(free) > 0 {
+		return free[0], nil
+	}
+	return port, nil
 }
 
 // Update changes an inbound and returns it before and after. Every field is checked
@@ -386,6 +417,9 @@ func editTemplate(config string, p InboundPatch) (string, error) {
 	if p.Obfs != nil {
 		edits = append(edits, templateEdit{"obfs", func(t proto.Template) error { return proto.SetObfs(t, *p.Obfs, secure.Token(24)) }})
 	}
+	if p.XHTTP != nil {
+		edits = append(edits, templateEdit{"xhttp", func(t proto.Template) error { return proto.SetXHTTP(t, *p.XHTTP) }})
+	}
 	if c := p.Client; c != nil {
 		edits = append(edits, templateEdit{"client", func(t proto.Template) error {
 			return proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI))
@@ -427,6 +461,11 @@ func (s *Inbounds) CheckTemplate(ctx context.Context, node db.Node, config, port
 	// Checked here, not in proto.Validate: nodes keep applying templates saved before.
 	if fp := t.Ext().Client.Fingerprint; fp != "" && !proto.ValidFingerprint(fp) {
 		return nil, &proto.Error{Code: "config_fingerprint", Field: "mikan.client.fingerprint", Detail: fp}
+	}
+	// mihomo's ws client ignores reality-opts and Xray has no REALITY over WebSocket: the
+	// client would do plain TLS to the masking site.
+	if t["ws-path"] != nil && t["reality-config"] != nil {
+		return nil, &proto.Error{Code: "config_ws_reality", Field: "ws-path"}
 	}
 	if err := s.checkDestResolves(ctx, t); err != nil {
 		return nil, err

@@ -8,6 +8,80 @@ import (
 	"database/sql"
 )
 
+type AddonCommunity struct {
+	AddonID string
+	Repo    string
+	Key     string
+}
+
+type AddonCursor struct {
+	AddonID   string
+	LastID    int64
+	UpdatedAt int64
+}
+
+type AddonEvent struct {
+	ID        int64
+	Type      string
+	UserID    sql.NullInt64
+	TgID      sql.NullInt64
+	Data      string
+	DedupeKey sql.NullString
+	CreatedAt int64
+}
+
+type AddonGrant struct {
+	AddonID     string
+	Version     string
+	Permissions string
+	ApprovedBy  sql.NullInt64
+	ApprovedAt  int64
+}
+
+type AddonGrantKey struct {
+	AddonID   string
+	Key       string
+	UserID    int64
+	Result    string
+	CreatedAt int64
+}
+
+type AddonIDClaim struct {
+	AddonID  string
+	SourceID int64
+}
+
+type AddonKv struct {
+	AddonID   string
+	Key       string
+	Value     []byte
+	Version   int64
+	ExpiresAt sql.NullInt64
+	UpdatedAt int64
+}
+
+type AddonOrigin struct {
+	AddonID  string
+	SourceID int64
+}
+
+type AddonSource struct {
+	ID        int64
+	Url       string
+	Key       string
+	Title     string
+	AddedBy   sql.NullInt64
+	AddedAt   int64
+	FetchedAt int64
+	Error     string
+}
+
+type AddonUpdate struct {
+	UpdateID  int64
+	Body      string
+	CreatedAt int64
+}
+
 type Admin struct {
 	ID            int64
 	Username      string
@@ -54,6 +128,7 @@ type BoundDevice struct {
 	LastIp    string
 	CreatedAt int64
 	LastSeen  int64
+	Name      string
 }
 
 type Device struct {
@@ -61,6 +136,30 @@ type Device struct {
 	Ip        string
 	FirstSeen int64
 	LastSeen  int64
+}
+
+type DeviceBan struct {
+	ID       int64
+	UserID   int64
+	Hwid     string
+	Label    string
+	AdminID  sql.NullInt64
+	BannedAt int64
+	Until    sql.NullInt64
+}
+
+type DeviceUnbind struct {
+	ID     int64
+	UserID int64
+	At     int64
+}
+
+type FreePlan struct {
+	TgID      int64
+	UserID    sql.NullInt64
+	TariffID  sql.NullInt64
+	Taken     int64
+	CreatedAt int64
 }
 
 type Inbound struct {
@@ -114,23 +213,33 @@ type LegacySubToken struct {
 	NotBefore int64
 }
 
+type LinkReissue struct {
+	ID     int64
+	UserID int64
+	At     int64
+}
+
 type MikanSqliteImport struct {
 	ID     int64
 	Report string
 }
 
 type Node struct {
-	ID         int64
-	Name       string
-	Address    string
-	PublicHost string
-	Domain     string
-	CertSha256 string
-	Enabled    int64
-	CreatedAt  int64
-	UpdatedAt  int64
-	PublicName string
-	Sort       int64
+	ID          int64
+	Name        string
+	Address     string
+	PublicHost  string
+	Domain      string
+	CertSha256  string
+	Enabled     int64
+	CreatedAt   int64
+	UpdatedAt   int64
+	PublicName  string
+	Sort        int64
+	TotalUp     int64
+	TotalDown   int64
+	FairShare   int64
+	ChannelMbps sql.NullInt64
 }
 
 type NodeRelay struct {
@@ -157,6 +266,20 @@ type NodeSpeedtest struct {
 type NodeState struct {
 	Key   string
 	Value string
+}
+
+type NodeTrafficDaily struct {
+	NodeID int64
+	Day    int64
+	Up     int64
+	Down   int64
+}
+
+type NodeTrafficHourly struct {
+	NodeID int64
+	Hour   int64
+	Up     int64
+	Down   int64
 }
 
 type NodeWarp struct {
@@ -254,14 +377,15 @@ type RelayUser struct {
 }
 
 type Session struct {
-	IDHash     string
-	AdminID    int64
-	CsrfToken  string
-	CreatedAt  int64
-	LastSeenAt int64
-	ExpiresAt  int64
-	Ip         string
-	UserAgent  string
+	IDHash         string
+	AdminID        int64
+	CsrfToken      string
+	CreatedAt      int64
+	LastSeenAt     int64
+	ExpiresAt      int64
+	Ip             string
+	UserAgent      string
+	SupportGrantID sql.NullInt64
 }
 
 type Setting struct {
@@ -284,10 +408,54 @@ type SlotCounter struct {
 	Last int64
 }
 
+type SlotTraffic struct {
+	SlotID int64
+	Up     int64
+	Down   int64
+}
+
+type SubAsset struct {
+	Name        string
+	ContentType string
+	Data        []byte
+	Hash        string
+	UpdatedAt   int64
+}
+
+type SubDoc struct {
+	ID        int64
+	Title     string
+	Emoji     string
+	Body      string
+	Platform  string
+	Position  int64
+	Published int64
+	CreatedAt int64
+	UpdatedAt int64
+}
+
 type SubFetch struct {
 	UserID    int64
 	Ip        string
 	FetchedAt int64
+}
+
+type SupportGrant struct {
+	ID              int64
+	TokenHash       string
+	AdminID         int64
+	Level           string
+	ShowPeople      bool
+	TerminalTargets []string
+	Note            string
+	CreatedAt       int64
+	ExpiresAt       int64
+	EnteredAt       sql.NullInt64
+	OperatorSeenAt  sql.NullInt64
+	LastUsedAt      sql.NullInt64
+	LastIp          string
+	RevokedAt       sql.NullInt64
+	EndedNotedAt    sql.NullInt64
 }
 
 type Tariff struct {
@@ -305,6 +473,9 @@ type Tariff struct {
 	PriceStars    sql.NullInt64
 	PriceRub      sql.NullInt64
 	OnSale        int64
+	SpeedLimit    sql.NullInt64
+	Description   string
+	DeviceMode    string
 }
 
 type TariffPool struct {
@@ -444,7 +615,20 @@ type User struct {
 	CreatedAt     int64
 	UpdatedAt     int64
 	BillingDay    sql.NullInt64
-	UnboundAt     int64
+	Source        string
+	Hidden        int64
+	FolderID      sql.NullInt64
+	SpeedLimit    sql.NullInt64
+	DeviceMode    string
+}
+
+type UserFolder struct {
+	ID        int64
+	Name      string
+	Color     string
+	Emoji     string
+	Sort      int64
+	CreatedAt int64
 }
 
 type UserPool struct {

@@ -1,17 +1,20 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RotateCcw } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, errorText, unwrap, type Inbound, type Schemas } from "../../../api/client";
+import { api, unwrap, type Inbound, type Schemas } from "../../../api/client";
+import { fieldErrors, onFormError } from "../../../lib/fields";
 import { qk, useNodes, usePools, usePresets, useSettings } from "../../../api/hooks";
-import { Drawer } from "../../../components/overlay";
+import { Disclosure } from "../../../components/layout";
+import { Drawer, DrawerFooter } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
 import { Button, Field, Segmented } from "../../../components/ui";
-import { Switch } from "../../../components/switch";
+import { XHTTP_DEFAULT, XhttpTuning, type XHTTP } from "./xhttp";
+import { SwitchRow } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
 import { fingerprintLabel, validFingerprint } from "../../../lib/fingerprints";
 import { destIsIP } from "../../../lib/format";
-import { nodeLabel } from "../nodes";
+import { nodeLabel } from "../../../lib/node-label";
 import { useWarp } from "../node-warp";
 import { Editor, type ListenAt, ValidateResult, hostPort, listenAt, loopback, preloadEditor, useValidate } from "./shared";
 import { TargetPicker } from "./target";
@@ -21,12 +24,13 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
   const toast = useToast();
   const presets = usePresets();
   const validate = useValidate();
-  const [tab, setTab] = useState<"main" | "config">("main");
+  const [tab, setTab] = useState<"main" | "xhttp" | "config">("main");
   const [port, setPort] = useState("");
   const [dest, setDest] = useState("");
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
   const [obfs, setObfs] = useState(""); // Hysteria2: salamander or gecko
+  const [xhttp, setXhttp] = useState<XHTTP>(XHTTP_DEFAULT); // the masking tab, XHTTP only
   const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
   const [exitNode, setExitNode] = useState<number>(0);
   const [poolId, setPoolId] = useState<number>(0);
@@ -52,6 +56,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     setSni(inbound.server_names?.[0] ?? "");
     setFp(inbound.fingerprint ?? "");
     setObfs(inbound.obfs ?? "");
+    setXhttp({ ...XHTTP_DEFAULT, ...inbound.xhttp });
     setOutbound(inbound.outbound);
     setExitNode(inbound.exit_node_id ?? 0);
     setPoolId(inbound.pool_id ?? 0);
@@ -91,10 +96,10 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     },
     onError: (e) => {
       validate.reset();
-      if (e instanceof ApiError && Object.keys(e.fields).length) {
-        setErrors(e.fields);
-        setTab(e.fields.config ? "config" : "main");
-      } else toast.error(errorText(e));
+      if (onFormError(e, toast, setErrors)) {
+        const fields = fieldErrors(e);
+        setTab(fields.config ? "config" : fields.xhttp ? "xhttp" : "main");
+      }
     },
   });
   const configChanged = !!inbound && config !== inbound.config;
@@ -132,6 +137,8 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     }
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
     if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && (obfs === "salamander" || obfs === "gecko")) body.obfs = obfs;
+    // The whole tuning goes: an emptied field is a value too (back to the default).
+    if (!configChanged && inbound?.xhttp && JSON.stringify(xhttp) !== JSON.stringify(inbound.xhttp)) body.xhttp = xhttp;
     if (listenMode === "custom" && !listen) {
       reject({ listen: t("inbounds.listenRequired") });
       return;
@@ -179,29 +186,29 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
         ) : undefined
       }
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="primary" type="submit" form="edit-inbound" loading={save.isPending}>
-            {t("common.save")}
-          </Button>
-        </>
+        <DrawerFooter form="edit-inbound" onCancel={onClose} loading={save.isPending}>
+          {t("common.save")}
+        </DrawerFooter>
       }
     >
       <form id="edit-inbound" onSubmit={submit} className="pt-5" noValidate>
         <Segmented
+          block
           label={t("inbounds.tabs")}
           value={tab}
           onChange={setTab}
           options={[
             { value: "main", label: t("inbounds.tabMain") },
+            ...(inbound?.xhttp ? [{ value: "xhttp" as const, label: t("inbounds.xhttp.tab") }] : []),
             { value: "config", label: t("inbounds.tabConfig") },
           ]}
         />
         <div className="mt-4">
           {tab === "main" ? (
             <>
+              <p className="banner info mb-4" role="note">
+                {t("inbounds.reconnectWarning")}
+              </p>
               <Field label={t("inbounds.subName")} htmlFor="ed-name" hint={t("inbounds.subNameHint")} error={errors.display_name}>
                 <input id="ed-name" className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={defaultName} maxLength={48} aria-invalid={!!errors.display_name} autoComplete="off" />
               </Field>
@@ -354,11 +361,8 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                   </select>
                 </Field>
               ) : null}
-              <div className="mb-4 border-t border-[var(--hairline)] pt-4" role="group" aria-labelledby="ed-proxy">
-                <div id="ed-proxy" className="text-[13px] font-semibold">
-                  {t("inbounds.proxy")}
-                </div>
-                <p className="mt-1 mb-4 text-xs text-[var(--ink-500)]">{t("inbounds.proxySub")}</p>
+              <Disclosure title={t("inbounds.proxy")} sub={t("common.forExperts")} open={!!(errors.listen || errors["client.server"] || errors["client.port"] || errors["client.sni"]) || behindProxy}>
+                <p className="mb-4 text-xs text-[var(--ink-500)]">{t("inbounds.proxySub")}</p>
                 <Field
                   label={t("inbounds.listen")}
                   htmlFor={listenMode === "custom" ? "ed-listen" : undefined}
@@ -460,9 +464,8 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                         ? t("inbounds.clientHintReality")
                         : t("inbounds.clientHint")}
                 </p>
-              </div>
-              <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("inbounds.auto")}>
-                <div className="mb-1 text-[13px] font-semibold">{t("inbounds.auto")}</div>
+              </Disclosure>
+              <Disclosure title={t("inbounds.auto")} sub={t("settings.autoSub")}>
                 <AutoSwitch
                   title={t("inbounds.autoPort")}
                   sub={t("inbounds.autoPortSub")}
@@ -481,8 +484,13 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                     onChange={setAutoSni}
                   />
                 ) : null}
-              </div>
+              </Disclosure>
             </>
+          ) : tab === "xhttp" ? (
+            <XhttpTuning value={xhttp} onChange={(x) => {
+              setXhttp(x);
+              clearError("xhttp");
+            }} error={errors.xhttp} />
           ) : (
             <Field label={t("inbounds.configLabel")} hint={t("inbounds.configHint")} error={errors.config}>
               <Editor value={config} onChange={editConfig} invalid={!!errors.config} />
@@ -521,13 +529,5 @@ function AutoSwitch({
   onChange: (v: boolean) => void;
 }) {
   const note = locked ?? (globalOff ? t("inbounds.autoOffGlobal") : sub);
-  return (
-    <div className="flex items-start justify-between gap-4 py-2">
-      <div className="min-w-0">
-        <div className="text-[13px] font-medium">{title}</div>
-        <div className={locked || globalOff ? "mt-1 text-xs text-[var(--honey-600)]" : "mt-1 text-xs text-[var(--ink-500)]"}>{note}</div>
-      </div>
-      <Switch checked={locked ? false : on} label={title} onChange={onChange} disabled={!!locked} />
-    </div>
-  );
+  return <SwitchRow label={title} sub={note} warn={!!locked || globalOff} checked={locked ? false : on} onChange={onChange} disabled={!!locked} />;
 }

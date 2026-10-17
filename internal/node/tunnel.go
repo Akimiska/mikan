@@ -39,6 +39,10 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 		t.inner.HandleTCPConn(conn, m)
 		return
 	}
+	if !t.reg.admitFrom(m.SrcIP) {
+		_ = conn.Close()
+		return
+	}
 	ip := m.SrcIP.Unmap().String()
 	s, b := t.reg.admitIn(userOf(conn, m), m.InName, ip, true)
 	if s == nil {
@@ -55,9 +59,16 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 			return
 		}
 	}
+	// A cap or the fair share holds the connection: it goes through the limiter, and then
+	// never spliced (shaper.go).
+	var through net.Conn = c
+	if g := t.reg.shapedGroup(s); g != nil {
+		c.shaped = true
+		through = &shapedConn{Conn: c, g: g}
+	}
 	s.addConn(c)
 	defer c.Close()
-	t.inner.HandleTCPConn(c, m)
+	t.inner.HandleTCPConn(through, m)
 }
 
 // peekFirst returns the bytes the client sent first, waiting torrentPeekWait at most;
@@ -82,6 +93,10 @@ func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
 		t.inner.HandleUDPPacket(p, m)
 		return
 	}
+	if !t.reg.admitFrom(m.SrcIP) {
+		p.Drop()
+		return
+	}
 	ip := m.SrcIP.Unmap().String()
 	s, b := t.reg.admitIn(m.InUser, m.InName, ip, false)
 	if s == nil {
@@ -95,8 +110,14 @@ func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
 			return
 		}
 	}
+	// UDP is held back by dropping what goes over the ceiling, as a router would.
+	g := s.group.Load()
+	if g != nil && !g.up.AllowN(t.reg.now(), len(p.Data())) {
+		p.Drop()
+		return
+	}
 	s.countIn(b, int64(len(p.Data())), 0)
-	t.inner.HandleUDPPacket(&countingPacket{UDPPacket: p, slot: s, bucket: b}, m)
+	t.inner.HandleUDPPacket(&countingPacket{UDPPacket: p, slot: s, bucket: b, g: g}, m)
 }
 
 func (t *Tunnel) NatTable() C.NatTable { return t.inner.NatTable() }
@@ -124,6 +145,7 @@ type countingConn struct {
 	ip     string
 	now    func() time.Time
 	once   sync.Once
+	shaped bool // goes through the speed limiter (a shapedConn wraps it)
 }
 
 func (c *countingConn) Read(b []byte) (int, error) {
@@ -159,9 +181,13 @@ type countingPacket struct {
 	C.UDPPacket
 	slot   *slot
 	bucket *bucket
+	g      *group // the user's speed group: an answer over its ceiling is dropped
 }
 
 func (p *countingPacket) WriteBack(b []byte, addr net.Addr) (int, error) {
+	if p.g != nil && !p.g.down.AllowN(time.Now(), len(b)) {
+		return len(b), nil
+	}
 	n, err := p.UDPPacket.WriteBack(b, addr)
 	if n > 0 {
 		p.slot.countIn(p.bucket, 0, int64(n))

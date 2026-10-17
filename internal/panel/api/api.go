@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"sync"
@@ -12,24 +13,32 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
+	"mikan/internal/hostchan"
+	"mikan/internal/logbuf"
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/addons/pages"
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/certcheck"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
+	"mikan/internal/panel/reach"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/subs"
+	"mikan/internal/panel/support"
+	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbackup"
 	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
@@ -58,6 +67,24 @@ type Deps struct {
 	Online    func() map[string]nodeapi.Online
 	Cert      func() acme.Status
 	RenewCert func()
+	// RenewCertNow tries the panel's certificate now and waits up to wait for the outcome;
+	// done is false when the order still runs then. nil in development.
+	RenewCertNow func(ctx context.Context, wait time.Duration) (st acme.Status, done bool)
+	// NodeTLS is the certificate a node's protocols on TLS use now; nil: not known.
+	NodeTLS func(ctx context.Context, n db.Node) *NodeTLSView
+	// RenewNodeCert orders a remote node's public certificate now (acme.Nodes.Renew).
+	RenewNodeCert func(ctx context.Context, id int64, wait time.Duration) (acme.NodeStatus, bool, error)
+	// WakeNodeCerts has every remote node's certificate looked at now: another CA.
+	WakeNodeCerts func()
+	// CheckCerts is «Проверить сертификат»; nil in development.
+	CheckCerts func(ctx context.Context) (certcheck.CertReport, error)
+	// RoutesPreview renders a Clash profile with routing in place of the saved one
+	// (subs.Handler.Preview); nil: no preview.
+	RoutesPreview func(ctx context.Context, req subs.PreviewRequest) ([]byte, error)
+	// CheckTemplate checks an own Clash profile (subs.Handler.CheckTemplate); nil: unchecked.
+	CheckTemplate func(ctx context.Context, src string) error
+	// HappLink is the Happ crypt link of a user's subscription (subs.Handler.HappLink); nil: none.
+	HappLink func(ctx context.Context, u db.User) (string, error)
 	// Nodes is the live side of the nodes; nil when the panel runs without them.
 	Nodes NodeRuntime
 	// PanelCert is the client certificate remote nodes pin; their join keys carry its hash.
@@ -66,8 +93,12 @@ type Deps struct {
 	Tuner interface {
 		Status(inboundID int64) (autotune.Status, bool)
 	}
-	// Telegram is the subscription owners' bot.
-	Telegram *tgbot.Bot
+	// Telegram is the admin's setup of the subscription owners' bot: its menu, texts and
+	// broadcasts.
+	Telegram *tgbot.Panel
+	// Gateway is the panel's side of Telegram: the token, the route, the bot's status, the
+	// admin's chat and the channel.
+	Gateway *tgate.Gateway
 	// Backups send the database to the admin's Telegram chat; nil in tests.
 	Backups *tgbackup.Service
 	// Importer brings users over from another panel; nil in tests that do not need it.
@@ -95,12 +126,26 @@ type Deps struct {
 	NodeUpdates *nodeupdate.Service
 	// Addons are the marketplace's payment adapters; nil in tests.
 	Addons *addons.Manager
+	// Pages are the addons' own pages in the admin panel; nil: none.
+	Pages *pages.Pages
 	// Resolve looks a name up for what the panel dials on the admin's word (a REALITY
 	// target); nil asks the system's resolver.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// DNS checks that a domain leads to the panel's or the node's server; nil: unchecked
 	// (tests, development).
 	DNS *dnscheck.Checker
+	// Reach checks ports of a node or any server from Russia (Globalping); nil: not offered.
+	Reach *reach.Client
+	// DataDir is the panel's data directory, whose disk "Check server" looks at; "": none.
+	DataDir string
+	// Support keeps the support grants (internal/panel/support); nil in tests that do not
+	// need it: no grant then opens anything.
+	Support *support.Service
+	// Logs holds the last lines of the panel's log for the Diagnostics page; nil: none.
+	Logs *logbuf.Buffer
+	// Host asks the panel's own server for `mikan doctor` and a restart of the containers
+	// (the files its units watch); nil: not offered.
+	Host *hostchan.Channel
 }
 
 // NodeRuntime is what the API needs from the running nodes.
@@ -119,6 +164,25 @@ type NodeRuntime interface {
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 	// SpeedTest measures a node's own way to the internet.
 	SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error)
+	// CheckNow asks a node for its health at once (Check node, a node's hello).
+	CheckNow(ctx context.Context, id int64) (nodesync.HealthView, bool)
+	// Hello is a node's last hello since the panel started.
+	Hello(id int64) (nodesync.HelloView, bool)
+	// Diagnose asks a node how its server is: DNS, the internet, GitHub, disk, memory.
+	Diagnose(ctx context.Context, id int64) (nodeapi.Diagnosis, error)
+	// Logs is a node's own log, the last tail lines, secrets cut out.
+	Logs(ctx context.Context, id int64, tail int) (nodeapi.Logs, error)
+	// HostDoctor has a node's server run `mikan doctor` and returns its report.
+	HostDoctor(ctx context.Context, id int64) (nodeapi.HostReport, error)
+	// HostRestart has a node's server restart its containers.
+	HostRestart(ctx context.Context, id int64) (nodeapi.RestartAccepted, error)
+	// Terminal opens a support terminal session on a node's server: the stream of frames
+	// (hostchan.ReadFrame); closing it ends the session.
+	Terminal(ctx context.Context, id int64, o nodeapi.TerminalOpen) (net.Conn, error)
+	// Recordings lists the terminal recordings on a node's server.
+	Recordings(ctx context.Context, id int64) (nodeapi.RecordingList, error)
+	// Recording returns one of them.
+	Recording(ctx context.Context, id int64, name string) ([]byte, error)
 }
 
 type ctxKey int
@@ -144,6 +208,9 @@ type handlers struct {
 
 	// speedCooldown spaces the speed tests of a node.
 	speedCooldown speedCooldown
+
+	// terms are the open support terminal sessions (terminal.go).
+	terms terminalHub
 }
 
 // Config builds the huma config shared by the server and the `mikan openapi` command.
@@ -161,6 +228,8 @@ func Config(version string) huma.Config {
 		"Скрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. " +
 		"Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\n" +
 		"Админка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n" +
+		"«Доступ для поддержки» (Настройки → Безопасность) даёт оператору временный токен `ms_…`: `Authorization: Bearer ms_…` или вход по ссылке в браузере (`POST /support/enter`). " +
+		"Уровень `view` только читает, `change` ещё и меняет; вход, ключи, сессии, журнал, секретные адреса и сам доступ закрыты всегда (403 `support_denied`). Без галочки «показывать подписчиков» имена, Telegram и ссылки скрыты. Кто он и до какого времени: `GET /support/whoami`.\n\n" +
 		"Ошибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n" +
 		"## Подписка в приложениях\n\n" +
 		"Ссылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: " +
@@ -168,12 +237,13 @@ func Config(version string) huma.Config {
 		"`subscription-userinfo` — трафик и срок, `support-url`, `profile-web-page-url`. Настраиваются в `PATCH /api/v1/settings`.\n\n" +
 		"В `sub_title` и `sub_announce` подставляются переменные каждого пользователя: `{brand}` — бренд, `{name}` — имя, " +
 		"`{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, " +
-		"`{total}` — лимит с пакетами. Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`."
+		"`{total}` — лимит с пакетами, `{devices}` — привязанные устройства (`2/3`; без лимита `2`; `∞`, когда привязки нет и лимита тоже). Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
-		"apiKey":  {Type: "http", Scheme: "bearer", Description: "Ключ API: Authorization: Bearer mk_…"},
-		"session": {Type: "apiKey", In: "cookie", Name: auth.CookieName, Description: "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах"},
+		"apiKey":     {Type: "http", Scheme: "bearer", Description: "Ключ API: Authorization: Bearer mk_…"},
+		"session":    {Type: "apiKey", In: "cookie", Name: auth.CookieName, Description: "Сессия админки + заголовок X-CSRF-Token на изменяющих запросах"},
+		"supportKey": {Type: "http", Scheme: "bearer", Description: "Токен доступа для поддержки: Authorization: Bearer ms_…"},
 	}
-	cfg.Security = []map[string][]string{{"apiKey": {}}, {"session": {}}}
+	cfg.Security = []map[string][]string{{"apiKey": {}}, {"session": {}}, {"supportKey": {}}}
 	return cfg
 }
 
@@ -208,31 +278,50 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	api.UseMiddleware(h.middleware)
 	h.registerAuth()
 	h.registerUsers()
+	h.registerFolders()
+	h.registerHapp()
 	h.registerCatalog()
 	h.registerInbounds()
 	h.registerTargets()
 	h.registerStats()
+	h.registerNodeTraffic()
 	h.registerMetrics()
 	h.registerBackups()
 	h.registerImport()
 	h.registerSettings()
+	h.registerSubPage()
+	h.registerRoutes()
 	h.registerCerts()
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()
+	h.registerNodeChecks()
 	h.registerTorrent()
+	h.registerFilters()
+	h.registerExitDNS()
 	h.registerSpeedTests()
 	h.registerNodeUpdates()
 	h.registerAPIKeys()
 	h.registerPayments()
 	h.registerPromocodes()
 	h.registerAddons()
+	h.registerAddonSources()
+	h.registerMarketplace()
+	h.registerBotSlot()
+	h.registerAddonStorage()
+	h.registerAddonPages()
 	h.registerWarp()
 	h.registerCascade()
 	h.registerPools()
 	h.registerPackages()
 	h.registerAudit()
-	return noStore(mux), api, nil
+	h.registerSupport()
+	h.registerHostOps()
+	h.registerTerminal(mux)
+	if d.Support != nil {
+		d.Support.SetEndedHook(h.grantEnded)
+	}
+	return noStore(maskResponses(mux)), api, nil
 }
 
 func noStore(next http.Handler) http.Handler {
@@ -277,6 +366,12 @@ func (h *handlers) middleware(ctx huma.Context, next func(huma.Context)) {
 		_ = huma.WriteErr(h.api, ctx, http.StatusForbidden, "csrf")
 		return
 	}
+	// A support operator's session is the grant's: it lives as long as the grant and goes
+	// only where support access lets it (support.go).
+	if sess.SupportGrantID.Valid {
+		h.supportSession(ctx, next, mutating, sess)
+		return
+	}
 	next(huma.WithValue(ctx, keySession, sess))
 }
 
@@ -299,14 +394,25 @@ func sessionOf(ctx context.Context) db.Session {
 
 func (h *handlers) audit(ctx context.Context, adminID int64, action, targetType, targetID string, details any) {
 	// What an API key did says which key: the admin may hand keys to several scripts.
+	// What a support operator did is not the admin's: no admin id, the actor is the grant.
+	var who map[string]any
 	if k, ok := apiKeyOf(ctx); ok {
-		m := map[string]any{"api_key": k.Prefix}
+		who = map[string]any{"api_key": k.Prefix}
+	} else if actor, ok := supportActor(ctx); ok {
+		adminID, who = 0, map[string]any{"actor": actor}
+	}
+	if who != nil {
+		m := map[string]any{}
 		if d, isMap := details.(map[string]any); isMap {
 			for key, v := range d {
 				m[key] = v
 			}
 		} else if details != nil {
 			m["details"] = details
+		}
+		// The line says who acted whatever the details hold.
+		for key, v := range who {
+			m[key] = v
 		}
 		details = m
 	}

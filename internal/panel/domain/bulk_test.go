@@ -35,7 +35,7 @@ func TestBulkIsAllOrNothing(t *testing.T) {
 	if _, err := st.DB.ExecContext(ctx, "ALTER TABLE users ADD CONSTRAINT no_third CHECK(id <> "+strconv.FormatInt(ids[2], 10)+" OR expires_at = "+strconv.FormatInt(before[2], 10)+")"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Bulk(ctx, ids, BulkExtend, 10); err == nil {
+	if _, err := users.Bulk(ctx, ids, BulkExtend, BulkOpt{Days: 10}); err == nil {
 		t.Fatal("the bulk change did not fail")
 	}
 	for i, id := range ids {
@@ -51,7 +51,7 @@ func TestBulkIsAllOrNothing(t *testing.T) {
 	}
 
 	// Gone users are skipped, a user named twice is changed once.
-	n, err := users.Bulk(ctx, []int64{ids[0], 9999, ids[0], ids[1]}, BulkExtend, 10)
+	n, err := users.Bulk(ctx, []int64{ids[0], 9999, ids[0], ids[1]}, BulkExtend, BulkOpt{Days: 10})
 	if err != nil || n != 2 {
 		t.Fatalf("bulk: %d changed, %v, want 2", n, err)
 	}
@@ -61,13 +61,13 @@ func TestBulkIsAllOrNothing(t *testing.T) {
 	if ch.policies != pushes+1 {
 		t.Fatalf("policy pushes %d, want one for the whole list", ch.policies-pushes)
 	}
-	if n, err := users.Bulk(ctx, ids, BulkDelete, 0); err != nil || n != 3 {
+	if n, err := users.Bulk(ctx, ids, BulkDelete, BulkOpt{}); err != nil || n != 3 {
 		t.Fatalf("delete: %d %v", n, err)
 	}
 	if _, err := st.Q.GetUser(ctx, ids[1]); err == nil {
 		t.Fatal("a deleted user is still there")
 	}
-	if _, err := users.Bulk(ctx, ids, "explode", 0); err == nil {
+	if _, err := users.Bulk(ctx, ids, "explode", BulkOpt{}); err == nil {
 		t.Fatal("an unknown action was accepted")
 	}
 }
@@ -95,10 +95,10 @@ func TestBulkActions(t *testing.T) {
 		}
 		return u
 	}
-	if n, err := users.Bulk(ctx, ids, BulkDisable, 0); err != nil || n != 2 || get(ids[0]).Status != "disabled" || get(ids[1]).Status != "disabled" {
+	if n, err := users.Bulk(ctx, ids, BulkDisable, BulkOpt{}); err != nil || n != 2 || get(ids[0]).Status != "disabled" || get(ids[1]).Status != "disabled" {
 		t.Fatalf("disable: %d %v", n, err)
 	}
-	if n, err := users.Bulk(ctx, ids, BulkEnable, 0); err != nil || n != 2 || get(ids[0]).Status != "active" {
+	if n, err := users.Bulk(ctx, ids, BulkEnable, BulkOpt{}); err != nil || n != 2 || get(ids[0]).Status != "active" {
 		t.Fatalf("enable: %d %v", n, err)
 	}
 
@@ -108,7 +108,7 @@ func TestBulkActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	exp0 := get(ids[0]).ExpiresAt.Int64
-	if n, err := users.Bulk(ctx, ids, BulkExtend, 0); err != nil || n != 2 {
+	if n, err := users.Bulk(ctx, ids, BulkExtend, BulkOpt{}); err != nil || n != 2 {
 		t.Fatalf("extend: %d %v", n, err)
 	}
 	if got := get(ids[0]).ExpiresAt.Int64; got != exp0+30*86400 {
@@ -126,7 +126,7 @@ func TestBulkActions(t *testing.T) {
 	once, _ := GrantTx(ctx, st.Q, u0, GrantSpec{Bytes: 50, Lifetime: LifetimePeriod, Source: SourceAdmin}, now)
 	keep, _ := GrantTx(ctx, st.Q, u0, GrantSpec{Bytes: 50, Lifetime: LifetimeUsed, Source: SourceAdmin}, now)
 	now = now.Add(time.Hour)
-	if n, err := users.Bulk(ctx, ids, BulkReset, 0); err != nil || n != 2 {
+	if n, err := users.Bulk(ctx, ids, BulkReset, BulkOpt{}); err != nil || n != 2 {
 		t.Fatalf("reset: %d %v", n, err)
 	}
 	for _, id := range ids {
@@ -145,7 +145,7 @@ func TestBulkActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := get(ids[1]).SlotID.Int64
-	if n, err := users.Bulk(ctx, ids, BulkDelete, 0); err != nil || n != 2 {
+	if n, err := users.Bulk(ctx, ids, BulkDelete, BulkOpt{}); err != nil || n != 2 {
 		t.Fatalf("delete: %d %v", n, err)
 	}
 	for _, id := range []int64{dev.ID, own} {

@@ -91,6 +91,24 @@ impl Dir {
         Ok(Some(Dir { fd, path }))
     }
 
+    /// The open directory, for what is done relative to it (a socket, a recording).
+    pub fn fd(&self) -> &OwnedFd {
+        &self.fd
+    }
+
+    /// A directory below this one, opened without following a link; None when it is not
+    /// there.
+    pub fn sub(&self, name: &str) -> Result<Option<Dir>> {
+        check_name(name)?;
+        let path = self.path.join(name);
+        match rustix::fs::openat(&self.fd, name, DIR_FLAGS, Mode::empty()) {
+            Ok(fd) => Ok(Some(Dir { fd, path })),
+            Err(Errno::NOENT) => Ok(None),
+            Err(Errno::LOOP | Errno::NOTDIR) => bail!("{} is a link or not a directory", path.display()),
+            Err(e) => Err(errno(e, || format!("open {}", path.display()))),
+        }
+    }
+
     /// Reads a small regular file; None when it is not there. A link, a directory, a FIFO
     /// and a file larger than limit are errors.
     pub fn read(&self, name: &str, limit: u64) -> Result<Option<Vec<u8>>> {
@@ -119,6 +137,12 @@ impl Dir {
     /// Whether anything, a link or a directory included, is called name.
     pub fn exists(&self, name: &str) -> bool {
         check_name(name).is_ok() && rustix::fs::statat(&self.fd, name, AtFlags::SYMLINK_NOFOLLOW).is_ok()
+    }
+
+    /// The names in this directory; one that is not UTF-8 is none the panel writes and is
+    /// left out.
+    pub fn names(&self) -> Result<Vec<String>> {
+        Ok(children(&self.fd)?.into_iter().filter_map(|n| n.into_string().ok()).collect())
     }
 
     /// Writes name for the panel to read: a fresh file (never an existing one, never
@@ -159,7 +183,8 @@ impl Dir {
     }
 
     /// Hands every file below this directory to the panel, links themselves not their
-    /// targets.
+    /// targets. `support/` stays root's: it holds the terminal's socket and recordings, which
+    /// the panel must not be able to replace (terminal.rs makes it and its parts).
     pub fn own(&self) -> Result<()> {
         let (uid, gid) = panel_owner();
         rustix::fs::fchown(&self.fd, uid, gid)?;
@@ -213,6 +238,9 @@ fn chown_below(dir: &OwnedFd, depth: usize) -> Result<()> {
     }
     let (uid, gid) = panel_owner();
     for name in children(dir)? {
+        if depth == 0 && name.as_bytes() == crate::terminal::SUPPORT_DIR.as_bytes() {
+            continue;
+        }
         let Ok(st) = rustix::fs::statat(dir, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) else { continue };
         if FileType::from_raw_mode(st.st_mode) == FileType::Directory {
             if let Ok(sub) = rustix::fs::openat(dir, name.as_c_str(), DIR_FLAGS, Mode::empty()) {
@@ -238,6 +266,10 @@ pub fn own_dirs(root: &Path, panel: bool) -> Result<()> {
     for part in parts {
         let dir = Dir::open(&data, part, true)?.with_context(|| format!("no {}", data.join(part).display()))?;
         dir.own()?;
+        // The terminal is an extra: what cannot be made there is said, and the update goes on.
+        if let Err(e) = crate::terminal::prepare(&dir) {
+            crate::out(&format!("the support terminal's directories in {} are not ready: {e:#}", data.join(part).display()));
+        }
     }
     Ok(())
 }
@@ -383,6 +415,18 @@ mod tests {
         dir.discard("fifo").unwrap();
         assert!(!dir.exists("fifo"));
         dir.discard("never-there").unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn names_of_a_directory() {
+        let d = tmpdir("names");
+        fs::write(d.join("b"), "").unwrap();
+        fs::create_dir(d.join("a")).unwrap();
+        symlink("/", d.join("c")).unwrap();
+        let mut names = open(&d, ".").names().unwrap();
+        names.sort();
+        assert_eq!(names, ["a", "b", "c"]);
         fs::remove_dir_all(&d).unwrap();
     }
 

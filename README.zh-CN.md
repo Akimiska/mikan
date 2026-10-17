@@ -12,7 +12,9 @@
 [![发布版本](https://img.shields.io/github/v/release/Miroshka000/mikan?color=f07a2e&label=发布版本&style=flat-square)](https://github.com/Miroshka000/mikan/releases)
 [![镜像](https://img.shields.io/badge/ghcr.io-miroshka000%2Fmikan-2b8c9e?style=flat-square&logo=docker&logoColor=white)](https://github.com/Miroshka000/mikan/pkgs/container/mikan)
 [![许可证](https://img.shields.io/badge/许可证-GPL--3.0-2f9e6b?style=flat-square)](LICENSE)
-[![mihomo](https://img.shields.io/badge/内核-mihomo%201.19.31-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![mihomo](https://img.shields.io/badge/内核-mihomo%201.19.32-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![Telegram](https://img.shields.io/badge/Telegram-频道-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/mikanvpn)
+[![Telegram](https://img.shields.io/badge/Telegram-论坛-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+I2JFR7DbPow1ZmQy)
 
 [English](README.md) · [Русский](README.ru.md) · **简体中文** · [فارسی](README.fa.md) · [Türkçe](README.tr.md) · [Español](README.es.md)
 
@@ -106,6 +108,10 @@ Go 和 PostgreSQL，三个小容器。在带客户端的实际运行服务器上
 只能通过支持退款的支付方式支付：Telegram Stars，以及声明支持退款的适配器。这样，如果优惠码的预留
 在支付服务商确认之前过期，mikan 就能把款项退回。
 
+## 支持访问
+
+需要帮助时，由你自己开启临时访问：设置 → 支持，时长 2、6 或 24 小时，级别为「查看」「修改」或「终端」。没有这个按钮，任何人（包括 mikan 的开发者）都进不了面板：项目对你的服务器没有常驻访问，面板也不会自行连接任何地方。操作员的每个操作都写入审计日志，一键即可撤销访问，终端需要你的密码和 2FA 才能开启，并且全程录制。要彻底关闭此功能，可使用同一卡片上的开关，或在服务器上运行 `mikan support-access off`。付费支持规则：[见网站](https://miroshka000.github.io/mikan/support/paid/)。
+
 ## 截图
 
 <table>
@@ -127,7 +133,7 @@ Go 和 PostgreSQL，三个小容器。在带客户端的实际运行服务器上
 
 ## 协议
 
-十五种协议，每种都是预设，密钥自动生成。订阅只给每个应用下发它能运行的协议：
+十七种协议，每种都是预设，密钥自动生成。订阅只给每个应用下发它能运行的协议：
 
 | 协议 | Clash 类应用<br><sub>mihomo 内核</sub> | Xray 类应用<br><sub>Happ, v2RayTun</sub> | sing-box 类应用<br><sub>Hiddify, Karing</sub> |
 |---|:---:|:---:|:---:|
@@ -136,6 +142,8 @@ Go 和 PostgreSQL，三个小容器。在带客户端的实际运行服务器上
 | VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
 | VLESS PQ（后量子加密） | ✅ | ✅ | — |
 | Trojan · REALITY | ✅ | ✅ | ✅ |
+| VLESS · TLS · XHTTP | ✅ | ✅ | — |
+| VLESS · TLS · Vision | ✅ | ✅ | ✅ |
 | Hysteria2 | ✅ | ✅ | ✅ |
 | TUIC v5 | ✅ | — | ✅ |
 | AnyTLS | ✅ | — | ✅ |
@@ -179,6 +187,9 @@ flowchart LR
 | `mikan targets scan` · `apply` | 服务器附近的 REALITY 伪装站点 |
 | `mikan join KEY` | 在节点上执行：从面板获取新密钥 |
 | `mikan restart` | 重启容器 |
+| `mikan doctor` | 检查服务器：Docker、端口、防火墙、时钟、DNS、磁盘 |
+| `mikan support 代码` | 面板无法访问时，把诊断发送到支持工单 |
+| `mikan support-access on\|off` | 允许或禁止本服务器的支持访问 |
 | `mikan uninstall` | 停止并删除该命令，保留数据 |
 
 ## 更新
@@ -198,9 +209,24 @@ cd installer && cargo test                    # the installer (Rust)
 
 开发在 `dev` 分支进行；合并到 `main` 的拉取请求会被构建和测试，发布版本由标签生成。
 
+## ⛔ 分叉与第三方构建
+
+> [!CAUTION]
+> **官方 mikan 只在这里**：仓库 `Miroshka000/mikan`、镜像 `ghcr.io/miroshka000/mikan`，以及用 mikan 密钥签名的发布版本。官方插件只来自 `getmikan/marketplace` 目录；社区注册表 `getmikan/marketplace-community` 收录的是第三方插件，mikan 不审查也不为其负责。其他一切，无论叫什么名字，都不是 mikan。
+>
+> **mikan 项目认为，所有分叉以及所有来自其他来源的构建都存在潜在的安全风险。**
+>
+> **官方构建可以验证**。每个版本都由本仓库的开源代码自动构建并签名，面板和安装程序只接受带有此签名的更新。别人的构建由什么组成，只有其作者知道。
+>
+> **分叉收不到我们的更新**。分叉无法用 mikan 密钥签名其版本，因此错误和漏洞的修复不会到达它，除非其作者自行移植。
+>
+> **我们不支持分叉**。我们不审查它们，也不对其中的错误、漏洞或数据丢失负责。关于他人构建的问题在聊天和 issues 中不予处理。
+>
+> **名称不属于许可证**。GPL v3 涵盖代码，不涵盖 mikan 的名称和标志（GPL v3 第 7 条，见 [NOTICE.md](NOTICE.md) 和 [TRADEMARK.md](TRADEMARK.md)）。分叉必须使用其他名称，且不得冒充 mikan。
+
 ## 许可证
 
-mikan 是基于 [GNU GPL v3](LICENSE) 的自由软件，内嵌 [mihomo](https://github.com/MetaCubeX/mihomo)（GPL-3.0）。字体：Unbounded、Onest、JetBrains Mono（SIL OFL 1.1）。
+mikan 是基于 [GNU GPL v3](LICENSE) 的自由软件，并附有 [NOTICE.md](NOTICE.md) 中的附加条款：保留署名、不得将修改版冒充原版、不授予名称和标志的权利。Copyright (C) 2026 Miroshka and Mikan。内嵌 [mihomo](https://github.com/MetaCubeX/mihomo)（GPL-3.0），部分代码改编自 [3x-ui](https://github.com/MHSanaei/3x-ui)（GPL-3.0）。字体：Unbounded、Onest、JetBrains Mono（SIL OFL 1.1）。
 
 <div align="center">
 <sub>用 🍊 制作</sub>

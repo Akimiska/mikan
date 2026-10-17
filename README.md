@@ -20,7 +20,9 @@
 [![Release](https://img.shields.io/github/v/release/Miroshka000/mikan?color=f07a2e&label=release&style=flat-square)](https://github.com/Miroshka000/mikan/releases)
 [![Image](https://img.shields.io/badge/ghcr.io-miroshka000%2Fmikan-2b8c9e?style=flat-square&logo=docker&logoColor=white)](https://github.com/Miroshka000/mikan/pkgs/container/mikan)
 [![License](https://img.shields.io/badge/license-GPL--3.0-2f9e6b?style=flat-square)](LICENSE)
-[![mihomo](https://img.shields.io/badge/core-mihomo%201.19.31-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![mihomo](https://img.shields.io/badge/core-mihomo%201.19.32-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![Telegram](https://img.shields.io/badge/Telegram-channel-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/mikanvpn)
+[![Telegram](https://img.shields.io/badge/Telegram-forum-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+I2JFR7DbPow1ZmQy)
 
 **English** · [Русский](README.ru.md) · [简体中文](README.zh-CN.md) · [فارسی](README.fa.md) · [Türkçe](README.tr.md) · [Español](README.es.md)
 
@@ -116,6 +118,10 @@ through payment methods that support refunds: Telegram Stars and adapters that a
 refund support. Mikan can then return a payment if its promo reservation expires before
 the provider confirms it.
 
+## Support access
+
+When you need help, you open a temporary access yourself: Settings → Support, for 2, 6 or 24 hours, at the "view", "change" or "terminal" level. Without that button nobody, mikan's developers included, gets into the panel: the project has no standing access to your servers, and the panel connects nowhere by itself. Every operator action goes into the audit log, access is revoked with one button, and the terminal needs your password and 2FA and is recorded. To turn the feature off for good, use the switch on the same card or run `mikan support-access off` on the server. Paid support rules: [on the website](https://miroshka000.github.io/mikan/support/paid/).
+
 ## Screenshots
 
 <table>
@@ -137,7 +143,7 @@ the provider confirms it.
 
 ## Protocols
 
-Fifteen protocols, each a preset with keys generated for you. The subscription gives every app only what it runs:
+Seventeen protocols, each a preset with keys generated for you. The subscription gives every app only what it runs:
 
 | Protocol | Clash apps<br><sub>mihomo core</sub> | Xray apps<br><sub>Happ, v2RayTun</sub> | sing-box apps<br><sub>Hiddify, Karing</sub> |
 |---|:---:|:---:|:---:|
@@ -146,6 +152,8 @@ Fifteen protocols, each a preset with keys generated for you. The subscription g
 | VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
 | VLESS PQ (post-quantum encryption) | ✅ | ✅ | — |
 | Trojan · REALITY | ✅ | ✅ | ✅ |
+| VLESS · TLS · XHTTP | ✅ | ✅ | — |
+| VLESS · TLS · Vision | ✅ | ✅ | ✅ |
 | Hysteria2 | ✅ | ✅ | ✅ |
 | TUIC v5 | ✅ | — | ✅ |
 | AnyTLS | ✅ | — | ✅ |
@@ -189,6 +197,9 @@ Run `mikan` for the menu, or use the commands directly:
 | `mikan targets scan` · `apply` | REALITY camouflage sites next to the server |
 | `mikan join KEY` | on a node: take a new key from the panel |
 | `mikan restart` | restart the containers |
+| `mikan doctor` | check the server: Docker, ports, firewall, clock, DNS, disk |
+| `mikan support CODE` | send diagnostics to a support ticket when the panel is down |
+| `mikan support-access on\|off` | allow or forbid support access on this server |
 | `mikan uninstall` | stop and remove the command, keep the data |
 
 ## Updates
@@ -208,9 +219,24 @@ cd installer && cargo test                    # the installer (Rust)
 
 Development happens on the `dev` branch; pull requests into `main` are built and tested, releases are published from tags.
 
+## ⛔ Forks and third-party builds
+
+> [!CAUTION]
+> **The official mikan lives only here:** the repository `Miroshka000/mikan`, the image `ghcr.io/miroshka000/mikan` and releases signed with the mikan key. Official addons come only from the `getmikan/marketplace` catalog; the community registry `getmikan/marketplace-community` lists third-party addons that mikan does not review and is not responsible for. Anything else is not mikan, whatever it calls itself.
+>
+> **The mikan project considers every fork and every build from other sources potentially unsafe.**
+>
+> **Official builds can be checked.** Every release is built automatically from the open code of this repository and signed, and the panel and the installer take updates only with that signature. What someone else's build is made of, only its author knows.
+>
+> **A fork does not get our updates.** It cannot sign releases with the mikan key, so fixes of bugs and vulnerabilities do not reach it until its author carries them over, if ever.
+>
+> **We do not support forks.** We do not review them and are not responsible for bugs, vulnerabilities or lost data in them. Questions about someone else's build are not handled in the chat or in issues.
+>
+> **The name is not part of the license.** GPL v3 covers the code, not the name mikan or its logo (GPL v3 section 7, see [NOTICE.md](NOTICE.md) and [TRADEMARK.md](TRADEMARK.md)). A fork must use another name and must not pass itself off as mikan.
+
 ## License
 
-mikan is free software under the [GNU GPL v3](LICENSE). It embeds [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0). Fonts: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
+mikan is free software under the [GNU GPL v3](LICENSE) with the additional terms in [NOTICE.md](NOTICE.md): keep the attribution, do not pass a modified version off as the original, no rights to the name and the logo. Copyright (C) 2026 Miroshka and Mikan. It embeds [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0) and adapts parts of [3x-ui](https://github.com/MHSanaei/3x-ui) (GPL-3.0). Fonts: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
 
 <div align="center">
 <sub>Made with 🍊</sub>

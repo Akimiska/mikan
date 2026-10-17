@@ -79,12 +79,13 @@ func TestExtraTypes(t *testing.T) {
 				t.Errorf("ss link key: %q", p)
 			}
 		}},
-		{"type: sudoku\nkey: 6f1a44b8-c4e1-4a36-9d62-0b4ddc4c7c4f\naead-method: chacha20-poly1305\npadding-min: 2\npadding-max: 7\ntable-type: prefer_ascii\n", true, func(c Client, l map[string]any) {
+		{"type: sudoku\nkey: 6f1a44b8-c4e1-4a36-9d62-0b4ddc4c7c4f\naead-method: chacha20-poly1305\npadding-min: 2\npadding-max: 7\ntable-type: prefer_ascii\nenable-pure-downlink: false\n", true, func(c Client, l map[string]any) {
 			if _, has := l["users"]; has {
 				t.Errorf("one key, no users: %v", l)
 			}
 			m := c.Mihomo
-			if m["type"] != "sudoku" || m["key"] != "6f1a44b8-c4e1-4a36-9d62-0b4ddc4c7c4f" || m["aead-method"] != "chacha20-poly1305" || m["table-type"] != "prefer_ascii" || m["padding-max"] != 7 {
+			if m["type"] != "sudoku" || m["key"] != "6f1a44b8-c4e1-4a36-9d62-0b4ddc4c7c4f" || m["aead-method"] != "chacha20-poly1305" || m["table-type"] != "prefer_ascii" || m["padding-max"] != 7 ||
+				m["enable-pure-downlink"] != false {
 				t.Errorf("sudoku client: %v", m)
 			}
 		}},

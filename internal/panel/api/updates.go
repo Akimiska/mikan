@@ -29,6 +29,10 @@ type UpdatesView struct {
 	RequestedAt int64               `json:"requested_at" doc:"Когда нажали «Обновить»; 0 — заявки нет или сервер её уже взял"`
 	Host        *updates.HostStatus `json:"host,omitempty" doc:"Как прошло последнее обновление на сервере"`
 	NodesFollow bool                `json:"nodes_follow" doc:"Удалённые ноды следуют за панелью: после её обновления панель обновляет их до своей версии, по одной"`
+	// The goals come with the release index, signed: the panel asks nothing more for them.
+	Goals     []release.Goal `json:"goals" doc:"На что проект собирает деньги: из подписанного индекса релизов; пусто, пока проверки не было"`
+	Donate    string         `json:"donate" doc:"Куда поддержать проект без цели"`
+	ShowGoals bool           `json:"show_goals" doc:"Показывать цели в карточке обновлений"`
 }
 
 type updatesOutput struct{ Body UpdatesView }
@@ -39,6 +43,7 @@ type patchUpdatesInput struct {
 		Channel *string `json:"channel,omitempty" enum:"stable,beta"`
 		// NodesFollow turning on also lets the panel try again the nodes whose update failed.
 		NodesFollow *bool `json:"nodes_follow,omitempty"`
+		ShowGoals   *bool `json:"show_goals,omitempty"`
 	}
 }
 
@@ -65,6 +70,10 @@ func (h *handlers) updatesView(ctx context.Context) (UpdatesView, error) {
 	if v.NodesFollow, err = h.d.Settings.On(ctx, settings.NodesFollow); err != nil {
 		return v, err
 	}
+	if v.ShowGoals, err = h.d.Settings.On(ctx, settings.ShowGoals); err != nil {
+		return v, err
+	}
+	v.Goals = []release.Goal{}
 	u := h.d.Updates
 	if u == nil {
 		return v, nil
@@ -78,6 +87,9 @@ func (h *handlers) updatesView(ctx context.Context) (UpdatesView, error) {
 	}
 	v.Available, v.Error = s.Available(), s.Error
 	v.Newest, v.Unreachable = s.Found.Newest, s.Found.Unreachable
+	if s.Found.Goals.Items != nil {
+		v.Goals, v.Donate = s.Found.Goals.Items, s.Found.Goals.Donate
+	}
 	if !s.CheckedAt.IsZero() {
 		v.CheckedAt = s.CheckedAt.Unix()
 	}
@@ -116,6 +128,11 @@ func (h *handlers) patchUpdates(ctx context.Context, in *patchUpdatesInput) (*up
 			h.audit(ctx, sessionOf(ctx).AdminID, "updates.nodes_follow", "", "", map[string]any{"nodes_follow": *in.Body.NodesFollow})
 		}
 	}
+	if in.Body.ShowGoals != nil {
+		if err := settings.Set(ctx, h.d.Settings, settings.KeyShowGoals, *in.Body.ShowGoals); err != nil {
+			return nil, err
+		}
+	}
 	if in.Body.Auto == nil && in.Body.Channel == nil {
 		return h.getUpdates(ctx, nil)
 	}
@@ -123,7 +140,7 @@ func (h *handlers) patchUpdates(ctx context.Context, in *patchUpdatesInput) (*up
 		return nil, huma.Error409Conflict("updates_unavailable")
 	}
 	if in.Body.Channel != nil && !release.ValidChannel(*in.Body.Channel) {
-		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.channel", Message: "bad_channel"})
+		return nil, fieldErr("body.channel", "bad_channel")
 	}
 	auto, err := h.d.Settings.On(ctx, settings.AutoUpdate)
 	if err != nil {

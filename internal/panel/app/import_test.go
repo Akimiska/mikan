@@ -165,6 +165,10 @@ func TestImportFromMarzbanOverHTTP(t *testing.T) {
 	list, _ := h.st.Q.ListUsers(ctx)
 	for _, u := range list {
 		byName[u.Name] = u.ID
+		// An imported user says where it came from, on the list and in the card.
+		if u.Source != domain.UserFromImport {
+			t.Fatalf("user %s came from %q, want an import", u.Name, u.Source)
+		}
 	}
 	ivan, _ := h.st.Q.GetUser(ctx, byName["ivan_petrov"])
 	if !ivan.TrafficLimit.Valid || ivan.TrafficLimit.Int64 != 107374182400 || ivan.UsedDown != 5368709120 || ivan.TotalDown != 21474836480 ||

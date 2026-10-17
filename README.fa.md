@@ -16,7 +16,9 @@
 [![Release](https://img.shields.io/github/v/release/Miroshka000/mikan?color=f07a2e&label=release&style=flat-square)](https://github.com/Miroshka000/mikan/releases)
 [![Image](https://img.shields.io/badge/ghcr.io-miroshka000%2Fmikan-2b8c9e?style=flat-square&logo=docker&logoColor=white)](https://github.com/Miroshka000/mikan/pkgs/container/mikan)
 [![License](https://img.shields.io/badge/license-GPL--3.0-2f9e6b?style=flat-square)](LICENSE)
-[![mihomo](https://img.shields.io/badge/core-mihomo%201.19.31-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![mihomo](https://img.shields.io/badge/core-mihomo%201.19.32-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![Telegram](https://img.shields.io/badge/Telegram-channel-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/mikanvpn)
+[![Telegram](https://img.shields.io/badge/Telegram-forum-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+I2JFR7DbPow1ZmQy)
 
 [English](README.md) · [Русский](README.ru.md) · [简体中文](README.zh-CN.md) · **فارسی** · [Türkçe](README.tr.md) · [Español](README.es.md)
 
@@ -121,6 +123,10 @@ Go و PostgreSQL، سه کانتینر کوچک. روی یک سرور فعال �
 
 مدیران می‌توانند کدهای تخفیف و کدهای روز یا ترافیک هدیه بسازند. مشترکان کدها را در Telegram Mini App وارد می‌کنند که تاریخچهٔ استفاده از کدها را هم نشان می‌دهد. ترافیک هدیه می‌تواند به موجودی اصلی یا یک استخر انتخاب‌شده برود. فاکتورهای تخفیف‌دار فقط با روش‌های پرداختی ممکن‌اند که بازپرداخت را پشتیبانی می‌کنند: Telegram Stars و آداپتورهایی که پشتیبانی از بازپرداخت را اعلام می‌کنند. به این ترتیب اگر رزرو کد پیش از تأیید ارائه‌دهندهٔ پرداخت منقضی شود، Mikan می‌تواند پرداخت را برگرداند.
 
+## دسترسی پشتیبانی
+
+اگر به کمک نیاز دارید، خودتان دسترسی موقت را باز می‌کنید: تنظیمات ← پشتیبانی، برای ۲، ۶ یا ۲۴ ساعت، با سطح «مشاهده»، «تغییر» یا «ترمینال». بدون این دکمه هیچ‌کس، حتی توسعه‌دهندگان mikan، وارد پنل نمی‌شود: پروژه دسترسی دائمی به سرورهای شما ندارد و پنل خودش به جایی وصل نمی‌شود. هر کار اپراتور در گزارش ممیزی ثبت می‌شود، دسترسی با یک دکمه لغو می‌شود و ترمینال فقط با رمز عبور و 2FA باز می‌شود و ضبط می‌شود. برای خاموش کردن کامل این قابلیت، از کلید همان کارت استفاده کنید یا روی سرور <span dir="ltr">`mikan support-access off`</span> را اجرا کنید. قوانین پشتیبانی پولی: [در سایت](https://miroshka000.github.io/mikan/support/paid/).
+
 ## تصاویر محیط
 
 </div>
@@ -146,7 +152,7 @@ Go و PostgreSQL، سه کانتینر کوچک. روی یک سرور فعال �
 
 ## پروتکل‌ها
 
-پانزده پروتکل، هرکدام یک پیش‌تنظیم با کلیدهایی که برایتان ساخته می‌شود. اشتراک به هر برنامه فقط آنچه را می‌دهد که اجرا می‌کند:
+هفده پروتکل، هرکدام یک پیش‌تنظیم با کلیدهایی که برایتان ساخته می‌شود. اشتراک به هر برنامه فقط آنچه را می‌دهد که اجرا می‌کند:
 
 </div>
 
@@ -157,6 +163,8 @@ Go و PostgreSQL، سه کانتینر کوچک. روی یک سرور فعال �
 | VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
 | VLESS PQ (رمزنگاری پساکوانتومی) | ✅ | ✅ | — |
 | Trojan · REALITY | ✅ | ✅ | ✅ |
+| VLESS · TLS · XHTTP | ✅ | ✅ | — |
+| VLESS · TLS · Vision | ✅ | ✅ | ✅ |
 | Hysteria2 | ✅ | ✅ | ✅ |
 | TUIC v5 | ✅ | — | ✅ |
 | AnyTLS | ✅ | — | ✅ |
@@ -206,6 +214,9 @@ flowchart LR
 | <span dir="ltr">`mikan targets scan` · `apply`</span> | سایت‌های استتار REALITY نزدیک سرور |
 | <span dir="ltr">`mikan join KEY`</span> | روی یک نود: گرفتن کلید جدید از پنل |
 | <span dir="ltr">`mikan restart`</span> | راه‌اندازی مجدد کانتینرها |
+| <span dir="ltr">`mikan doctor`</span> | بررسی سرور: Docker، پورت‌ها، فایروال، ساعت، DNS، دیسک |
+| <span dir="ltr">`mikan support CODE`</span> | ارسال عیب‌یابی به تیکت پشتیبانی وقتی پنل در دسترس نیست |
+| <span dir="ltr">`mikan support-access on\|off`</span> | اجازه یا منع دسترسی پشتیبانی روی این سرور |
 | <span dir="ltr">`mikan uninstall`</span> | توقف و حذف دستور، داده‌ها می‌مانند |
 
 ## به‌روزرسانی‌ها
@@ -229,9 +240,24 @@ cd installer && cargo test                    # the installer (Rust)
 
 توسعه روی شاخهٔ `dev` انجام می‌شود؛ pull requestهایی که به `main` می‌روند ساخته و تست می‌شوند و نسخه‌ها از روی تگ‌ها منتشر می‌شوند.
 
+## ⛔ فورک‌ها و بیلدهای شخص ثالث
+
+> [!CAUTION]
+> **mikan رسمی فقط اینجاست:** مخزن `Miroshka000/mikan`، ایمیج `ghcr.io/miroshka000/mikan` و نسخه‌هایی که با کلید mikan امضا شده‌اند. افزونه‌های رسمی فقط از کاتالوگ `getmikan/marketplace` می‌آیند؛ مخزن جامعه `getmikan/marketplace-community` افزونه‌های شخص ثالث را فهرست می‌کند که mikan آن‌ها را بررسی نمی‌کند و مسئولیتی در قبالشان ندارد. هر چیز دیگری، با هر نامی، mikan نیست.
+>
+> **پروژه mikan هر فورک و هر بیلدی از منابع دیگر را بالقوه ناامن می‌داند.**
+>
+> **بیلدهای رسمی قابل بررسی‌اند.** هر نسخه به‌طور خودکار از کد باز همین مخزن ساخته و امضا می‌شود و پنل و نصب‌کننده فقط به‌روزرسانی‌هایی با این امضا را می‌پذیرند. اینکه بیلد دیگران از چه ساخته شده، فقط سازنده‌اش می‌داند.
+>
+> **فورک به‌روزرسانی‌های ما را دریافت نمی‌کند.** فورک نمی‌تواند نسخه‌هایش را با کلید mikan امضا کند، پس رفع اشکال‌ها و آسیب‌پذیری‌ها به آن نمی‌رسد، مگر اینکه سازنده‌اش آن‌ها را منتقل کند.
+>
+> **ما از فورک‌ها پشتیبانی نمی‌کنیم.** آن‌ها را بررسی نمی‌کنیم و مسئول اشکال‌ها، آسیب‌پذیری‌ها یا از دست رفتن داده‌ها در آن‌ها نیستیم. پرسش‌ها درباره بیلدهای دیگران در چت و issues بررسی نمی‌شوند.
+>
+> **نام بخشی از مجوز نیست.** GPL v3 کد را پوشش می‌دهد، نه نام mikan یا لوگوی آن را (بخش ۷ GPL v3، ببینید [NOTICE.md](NOTICE.md) و [TRADEMARK.md](TRADEMARK.md)). فورک باید نام دیگری داشته باشد و خود را mikan معرفی نکند.
+
 ## مجوز
 
-mikan نرم‌افزار آزاد تحت [GNU GPL v3](LICENSE) است. [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0) در آن تعبیه شده است. فونت‌ها: Unbounded، Onest، JetBrains Mono (SIL OFL 1.1).
+mikan نرم‌افزار آزاد تحت [GNU GPL v3](LICENSE) با شرایط تکمیلی [NOTICE.md](NOTICE.md) است: حفظ نام سازنده، معرفی نکردن نسخه تغییریافته به‌عنوان نسخه اصلی، و عدم اعطای حق بر نام و لوگو. Copyright (C) 2026 Miroshka and Mikan. [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0) در آن تعبیه شده و بخش‌هایی از [3x-ui](https://github.com/MHSanaei/3x-ui) (GPL-3.0) در آن اقتباس شده است. فونت‌ها: Unbounded، Onest، JetBrains Mono (SIL OFL 1.1).
 
 </div>
 

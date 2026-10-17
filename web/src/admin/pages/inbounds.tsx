@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api, errorText, unwrap, type Inbound, type Schemas } from "../../api/client";
 import { qk, useInbounds, useNodes } from "../../api/hooks";
@@ -10,7 +10,7 @@ import { Button, EmptyState, PageHeader, Pill, Segmented, Skeleton } from "../..
 import { Switch } from "../../components/switch";
 import { t, tMaybe } from "../../i18n";
 import { ago, maskedAs } from "../../lib/format";
-import { nodeLabel } from "./nodes";
+import { nodeLabel } from "../../lib/node-label";
 import { hostPort, listenerError } from "./inbound/shared";
 import { AddDrawer } from "./inbound/add";
 import { EditDrawer } from "./inbound/edit";
@@ -57,19 +57,25 @@ export function InboundsPage() {
           </Button>
         }
       />
-      <div className="banner warn">
-        <TriangleAlert size={18} className="shrink-0" aria-hidden />
-        <span>{t("inbounds.reconnectWarning")}</span>
-      </div>
       {multi && nodes.data ? (
-        <div className="mb-4">
-          <Segmented
-            value={String(nodeId)}
-            label={t("inbounds.node")}
-            options={nodes.data.map((n) => ({ value: String(n.id), label: nodeLabel(n) }))}
-            onChange={(v) => setNodeId(Number(v))}
-          />
-        </div>
+        nodes.data.length <= 4 ? (
+          <div className="max-w-full overflow-x-auto">
+            <Segmented value={String(nodeId)} label={t("inbounds.node")} options={nodes.data.map((n) => ({ value: String(n.id), label: nodeLabel(n) }))} onChange={(v) => setNodeId(Number(v))} />
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="inbounds-node" className="text-[13px] font-medium text-[var(--ink-700)]">
+              {t("inbounds.node")}
+            </label>
+            <select id="inbounds-node" className="input max-w-[320px]" value={nodeId} onChange={(e) => setNodeId(Number(e.target.value))}>
+              {nodes.data.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {nodeLabel(n)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )
       ) : null}
       <QueryBoundary
         query={all}
@@ -94,7 +100,7 @@ export function InboundsPage() {
           ) : (
             <div className="grid gap-4 lg:grid-cols-2">
               {inbounds.map((i, idx) => (
-                <section key={i.id} className="card glass reveal" style={{ "--i": idx } as React.CSSProperties}>
+                <section key={i.id} className="card glass reveal flex flex-col" style={{ "--i": idx } as React.CSSProperties}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="font-display truncate text-lg font-medium tracking-tight">{i.sub_name}</h2>
@@ -133,12 +139,16 @@ export function InboundsPage() {
                   {i.apps.length > 0 && i.apps.length < 5 ? (
                     <p className="mt-2 text-xs text-[var(--ink-500)]">{t("inbounds.appsLine", { list: i.apps.map((a) => tMaybe(`inbounds.apps.${a}`) ?? a).join(", ") })}</p>
                   ) : null}
+                  {i.enabled && i.node_cert && nodes.data?.find((n) => n.id === i.node_id)?.tls?.pinned ? (
+                    <p className="mt-2 text-xs text-[var(--ink-500)]">{t("certs.pinnedNote")}</p>
+                  ) : null}
                   {i.status === "error" && i.error ? (
                     <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">
                       {listenerError(i.error)}
                     </p>
                   ) : null}
                   <AutoInfo i={i} />
+                  <div className="flex-1" aria-hidden />
                   <div className="mt-4 flex gap-2 border-t border-[var(--hairline)] pt-4">
                     <Button size="sm" onClick={() => setEditing(i)}>
                       <Pencil size={16} aria-hidden /> {t("inbounds.configure")}

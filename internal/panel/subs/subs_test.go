@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v3"
+
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/proto"
@@ -13,16 +15,20 @@ import (
 
 func TestFormat(t *testing.T) {
 	cases := map[string]string{
-		"clash-verge/v2.2.3":         "clash",
-		"FlClash/v0.8.80 clash-meta": "clash",
-		"mihomo/1.19.31":             "clash",
-		"Stash/3.1.1 Clash/1.9.0":    "clash",
-		"Happ/3.4.1":                 "uri",
-		"v2rayNG/1.10.2":             "uri",
-		"v2RayTun/Android":           "uri",
-		"Streisand/1.6":              "uri",
-		"HiddifyNext/2.5.7":          "uri",
-		"curl/8.9":                   "uri",
+		"clash-verge/v2.2.3":                          "clash",
+		"FlClash/v0.8.80 clash-meta":                  "clash",
+		"mihomo/1.19.31":                              "clash",
+		"Stash/3.1.1 Clash/1.9.0":                     "clash",
+		"Happ/3.4.1":                                  "uri",
+		"SFA (sing-box 1.14.2; language en_US)":       "singbox",
+		"SFM (sing-box 1.12.20; language ru_RU)":      "singbox",
+		"SFI (sing-box 1.11.4; language en_US)":       "uri", // a config of 1.12 would not load
+		"Karing/1.2.26 platform/tvos sing-box 1.14.0": "uri", // routes by its own settings
+		"v2rayNG/1.10.2":                              "uri",
+		"v2RayTun/Android":                            "uri",
+		"Streisand/1.6":                               "uri",
+		"HiddifyNext/2.5.7":                           "uri",
+		"curl/8.9":                                    "uri",
 	}
 	for ua, want := range cases {
 		if got := Format(ua, "*/*", ""); got != want {
@@ -32,7 +38,7 @@ func TestFormat(t *testing.T) {
 	if Format("Mozilla/5.0 (iPhone)", "text/html,application/xhtml+xml", "") != "html" {
 		t.Error("browser must get the page")
 	}
-	if Format("Happ/3", "", "clash") != "clash" {
+	if Format("Happ/3", "", "clash") != "clash" || Format("HiddifyNext/4.1.1", "", "singbox") != "singbox" {
 		t.Error("?format= must override the User-Agent")
 	}
 }
@@ -122,7 +128,7 @@ func TestMihomoProfile(t *testing.T) {
 		} `json:"proxy-groups"`
 		Rules []string `json:"rules"`
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	if err := unmarshalProfile(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.Proxies) != 4 || cfg.Groups[0].Name != "VPN" || cfg.Groups[1].Name != "Авто" {
@@ -132,7 +138,7 @@ func TestMihomoProfile(t *testing.T) {
 	if alias := cfg.Groups[2]; alias.Name != "PROXY" || !alias.Hidden || len(alias.Proxies) != 1 || alias.Proxies[0] != "VPN" {
 		t.Fatalf("PROXY alias: %+v", cfg.Groups)
 	}
-	wantRules := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "DOMAIN,vpn.example.com,DIRECT", "GEOIP,LAN,DIRECT,no-resolve", "MATCH,VPN"}
+	wantRules := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "DOMAIN,vpn.example.com,DIRECT", "GEOIP,LAN,DIRECT,no-resolve", "MATCH,VPN", "MATCH,REJECT"}
 	if strings.Join(cfg.Rules, "|") != strings.Join(wantRules, "|") {
 		t.Fatalf("rules: %v", cfg.Rules)
 	}
@@ -168,13 +174,13 @@ func TestCustomNames(t *testing.T) {
 		} `json:"proxy-groups"`
 		Rules []string `json:"rules"`
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	if err := unmarshalProfile(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Proxies[0]["name"] != "🇳🇱 Нидерланды" || cfg.Proxies[1]["name"] != "🇳🇱 Нидерланды 2" {
 		t.Fatalf("names: %v %v", cfg.Proxies[0]["name"], cfg.Proxies[1]["name"])
 	}
-	if cfg.Groups[0].Name != "🚀 Мой VPN" || cfg.Groups[0].Proxies[0] != "⚡ Быстрый" || cfg.Rules[len(cfg.Rules)-1] != "MATCH,🚀 Мой VPN" {
+	if cfg.Groups[0].Name != "🚀 Мой VPN" || cfg.Groups[0].Proxies[0] != "⚡ Быстрый" || cfg.Rules[len(cfg.Rules)-2] != "MATCH,🚀 Мой VPN" {
 		t.Fatalf("groups: %+v rules: %v", cfg.Groups, cfg.Rules)
 	}
 	links, err := URIs(prof)
@@ -210,14 +216,14 @@ func TestRouting(t *testing.T) {
 			t.Fatal(err)
 		}
 		var cfg profileJSON
-		if err := json.Unmarshal(raw, &cfg); err != nil {
+		if err := unmarshalProfile(raw, &cfg); err != nil {
 			t.Fatal(err)
 		}
 		return cfg
 	}
 
 	ru := render(Groups{}, RoutingRUDirect)
-	want := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "GEOIP,LAN,DIRECT,no-resolve", "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT", "MATCH,VPN"}
+	want := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "GEOIP,LAN,DIRECT,no-resolve", "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT", "MATCH,VPN", "MATCH,REJECT"}
 	if strings.Join(ru.Rules, "|") != strings.Join(want, "|") {
 		t.Fatalf("ru_direct rules: %v", ru.Rules)
 	}
@@ -240,7 +246,7 @@ func TestRouting(t *testing.T) {
 
 	// The "#PROXY" suffix must name a group even when the admin calls the main group PROXY.
 	named := render(Groups{Main: "PROXY"}, RoutingRUDirect)
-	if named.Groups[0].Name != "PROXY" || named.Rules[len(named.Rules)-1] != "MATCH,PROXY" {
+	if named.Groups[0].Name != "PROXY" || named.Rules[len(named.Rules)-2] != "MATCH,PROXY" {
 		t.Fatalf("main group named PROXY: %+v %v", named.Groups, named.Rules)
 	}
 
@@ -254,7 +260,7 @@ func TestRouting(t *testing.T) {
 		t.Errorf("all mode keeps plain DNS: %+v %v", all.DNS, all.GeoxURL)
 	}
 
-	for in, want := range map[string]Routing{"": RoutingRUDirect, "all": RoutingAll, "ru_direct": RoutingRUDirect, "blocked": RoutingRUDirect} {
+	for in, want := range map[string]Routing{"": RoutingRUDirect, "all": RoutingAll, "ru_direct": RoutingRUDirect, "blocked": RoutingBlocked, "nope": RoutingRUDirect} {
 		if got := ParseRouting(in); got != want {
 			t.Errorf("ParseRouting(%q) = %q, want %q", in, got, want)
 		}
@@ -303,7 +309,7 @@ func TestMultiNodeProfile(t *testing.T) {
 			Proxies []string `json:"proxies"`
 		} `json:"proxy-groups"`
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	if err := unmarshalProfile(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	server := map[string]any{}
@@ -347,7 +353,7 @@ func TestMultiNodeProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.Groups = nil
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	if err := unmarshalProfile(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	vpn := 0
@@ -404,7 +410,7 @@ func TestDefaultFingerprint(t *testing.T) {
 	var cfg struct {
 		Proxies []map[string]any `json:"proxies"`
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	if err := unmarshalProfile(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range cfg.Proxies {
@@ -473,7 +479,7 @@ func TestNodeOrderFollowsTheProfile(t *testing.T) {
 				Proxies []string `json:"proxies"`
 			} `json:"proxy-groups"`
 		}
-		if err := json.Unmarshal(raw, &cfg); err != nil {
+		if err := unmarshalProfile(raw, &cfg); err != nil {
 			t.Fatal(err)
 		}
 		var servers []string
@@ -501,4 +507,17 @@ func TestNodeOrderFollowsTheProfile(t *testing.T) {
 			}
 		}
 	}
+}
+
+// unmarshalProfile reads a YAML profile into a struct with json tags.
+func unmarshalProfile(raw []byte, v any) error {
+	var m any
+	if err := yaml.Unmarshal(raw, &m); err != nil {
+		return err
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, v)
 }

@@ -2,7 +2,6 @@ package release
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,6 +62,8 @@ type Index struct {
 	Schema    int       `json:"schema"`
 	Published time.Time `json:"published"`
 	Releases  []Entry   `json:"releases"`
+	// Goals: see goals.go; empty when the index has none.
+	Goals Goals `json:"goals"`
 }
 
 type Entry struct {
@@ -81,9 +82,8 @@ func (e Entry) valid() bool {
 
 // ParseIndex checks the signature over the index's exact bytes, then decodes it.
 func ParseIndex(data []byte, sig string, pub ed25519.PublicKey) (Index, error) {
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(sig))
-	if err != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, data, raw) {
-		return Index{}, ErrSignature
+	if err := Verify(data, sig, pub); err != nil {
+		return Index{}, err
 	}
 	return DecodeIndex(data)
 }
@@ -107,6 +107,7 @@ func DecodeIndex(data []byte) (Index, error) {
 	var ix Index
 	_ = json.Unmarshal(doc["schema"], &ix.Schema)
 	_ = json.Unmarshal(doc["published"], &ix.Published)
+	ix.Goals = decodeGoals(doc["goals"])
 	for _, r := range releases {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(r, &fields) != nil {

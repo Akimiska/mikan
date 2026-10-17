@@ -41,6 +41,22 @@ impl EnvFile {
         Some(v).filter(|v| !v.is_empty())
     }
 
+    /// The values of the keys that hold a secret (a join key, a database password, a token),
+    /// for text that leaves the server to be cleaned of them whatever form they come in.
+    pub fn secret_values(&self) -> Vec<String> {
+        const NAMES: [&str; 8] = ["KEY", "SECRET", "TOKEN", "PASS", "JOIN", "DATABASE_URL", "DSN", "CREDENTIAL"];
+        self.lines
+            .iter()
+            .filter_map(|l| l.split_once('='))
+            .filter(|(k, _)| {
+                let k = k.trim().to_ascii_uppercase();
+                NAMES.iter().any(|n| k.contains(n))
+            })
+            .filter_map(|(k, _)| self.get(k.trim()).map(str::to_owned))
+            .filter(|v| v.len() >= 6)
+            .collect()
+    }
+
     /// Sets key to value, in place when the key is there; a key repeated by a hand edit is
     /// left once, because compose takes the last and a change of the first would not show.
     pub fn set(&mut self, key: &str, value: &str) -> Result<()> {

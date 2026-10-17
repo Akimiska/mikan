@@ -1,0 +1,43 @@
+---
+title: Diagnostics without SSH
+description: Panel and node logs, server checks, restarts and a terminal right from the panel.
+---
+
+The **Diagnostics** page in the panel's menu gathers what you used to need SSH for. Pick a server: the panel's server or any node.
+
+## Logs
+
+The last 2000 lines of the panel's log and of each node's. Tokens, keys, passwords, subscription links and secret paths are cut out before a line reaches the log. There is a level filter (all, warnings, errors), a text search, a refresh every 5 seconds and copying of the lines shown.
+
+## Check
+
+**Run the check** runs `mikan doctor` on the server itself, not in a container: Docker and the containers, ports, ufw rules, port 80, the clock, DNS, access to GitHub and GHCR, disk and memory. Every line has a hint on what to do. Waiting for the report takes up to a minute.
+
+**Restart** restarts the containers of the panel's server or of a node. The panel or the node is unreachable for a couple of seconds.
+
+How it works: the panel writes a request file into its data directory and a systemd unit on the server runs the command and returns the result. For a node the request goes over the node API. A server installed before 0.5.1.1 needs one `mikan update` for this; until then the check answers "the server did not answer".
+
+## Reachability
+
+Checks whether the server opens for users in Russia. Handy before you buy a server or install mikan on it: type an IP or a domain and up to three TCP ports. Port 22 is open on almost any server with SSH, start with it.
+
+The [Globalping](https://globalping.io) service does the check: its points in home and mobile internet in Russia (where the blocks are) and in Russian data centres connect to the ports three times each. To compare, points in Germany, the Netherlands and Finland do the same. The result in one line:
+
+- **opens from Russia**: it opens from everywhere;
+- **does not open for everyone**: some operators block it;
+- **blocked in Russia**: it opens from Europe, not from Russia. Another IP or another host is needed;
+- **answers from nowhere**: the port is closed, the host's firewall drops it, or the server is off.
+
+"1 of 3 got through" is a sign of a block too: an open port lets every try through.
+
+:::caution[What this check does not see]
+The server's address goes to Globalping. The check sees a block of the IP and the port, not a block by protocol and not the whitelists of mobile operators. Without a key Globalping gives about 250 checks an hour from one address; the result is kept for 2 minutes, and one check runs at a time.
+:::
+
+## Terminal
+
+The tab appears for an operator with "Terminal" level access and only for the servers you ticked for it. Details and limits are in [Support access](/mikan/en/operations/support-access/#terminal).
+
+## When the panel does not open
+
+Then the page is out of reach. Run `mikan doctor` on the server: the same report in the terminal. For a support ticket there is `mikan support <code>`, see [The mikan command](/mikan/en/operations/cli/).

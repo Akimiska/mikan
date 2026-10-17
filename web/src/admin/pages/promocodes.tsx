@@ -1,11 +1,18 @@
-import { useMemo, useState } from "react";
-import { Plus, Power, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { errorText } from "../../api/client";
 import { usePools, usePromoMutations, usePromoRedemptions, usePromocodes, useTariffs, type PromoCode, type PromoRedemption } from "../../api/hooks";
+import { Disclosure } from "../../components/layout";
+import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
+import { QueryBoundary } from "../../components/query";
+import { Switch, SwitchRow } from "../../components/switch";
 import { useToast } from "../../components/toast";
-import { Button, ErrorState, PageHeader, Pill } from "../../components/ui";
+import { Button, EmptyState, Field, Pill, Segmented, Skeleton } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
-import { money } from "../../lib/format";
+import { dateShort, GiB, money, time } from "../../lib/format";
+import { PROMO_TABS } from "../search";
+
+type PromoTab = (typeof PROMO_TABS)[number];
 
 const empty: PromoCode = {
   id: 0, code: "", name: "", description: "", type: "days", value: 30, currency: "", used_count: 0,
@@ -39,6 +46,19 @@ function dateInput(value?: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Chrome takes up to six digits for the year and moves on to the time only after them, so
+// "2026" and then "00" for the hours makes the year 202600. A max with a four-digit year
+// makes it move on after four.
+const DATE_MIN = "2000-01-01T00:00";
+const DATE_MAX = "9999-12-31T23:59";
+
+/** A filled date field that is not a date in four digits: saving it would drop it silently. */
+function badDate(value: string) {
+  if (!value) return false;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) || d.getFullYear() > 9999;
+}
+
 function epoch(value?: string) {
   if (!value) return undefined;
   const ms = new Date(value).getTime();
@@ -50,15 +70,7 @@ function statusTone(status: string): "ok" | "off" | "warn" {
 }
 
 function statusText(status: string) {
-  switch (status) {
-    case "active": return t("promocodes.status.active");
-    case "inactive": return t("promocodes.status.inactive");
-    case "expired": return t("promocodes.status.expired");
-    case "exhausted": return t("promocodes.status.exhausted");
-    case "disabled": return t("promocodes.status.disabled");
-    case "deleted": return t("promocodes.status.deleted");
-    default: return status;
-  }
+  return tMaybe(`promocodes.status.${status}`) ?? status;
 }
 
 function redemptionStatusText(status: string) {
@@ -66,24 +78,20 @@ function redemptionStatusText(status: string) {
 }
 
 function valueText(p: PromoCode) {
-  if (p.type === "traffic") return `${(p.value / 1073741824).toFixed(1)} ${t("promocodes.trafficUnit")}`;
+  if (p.type === "traffic") return `${(p.value / GiB).toFixed(1)} ${t("promocodes.trafficUnit")}`;
   if (p.type === "days") return `${p.value} ${t("promocodes.daysUnit")}`;
   return p.type === "percent" ? `${p.value}%` : money(p.value, p.currency);
 }
 
-export function PromocodesPage() {
+/** Promo codes: the codes with their switches, and the history of what they gave. */
+/**
+ * Promo codes, a tab of Payments: the codes and their activations, and the editor. sub is
+ * which of the two shows (the address keeps it), onSub switches it.
+ */
+export function PromoSection({ sub, onSub }: { sub: PromoTab; onSub: (next: PromoTab) => void }) {
   const toast = useToast();
-  const codes = usePromocodes();
-  const history = usePromoRedemptions();
-  const { create, update, toggle, remove } = usePromoMutations();
+  const { create, update } = usePromoMutations();
   const [edit, setEdit] = useState<PromoCode | null>(null);
-  const [tab, setTab] = useState<"codes" | "history">("codes");
-  const [search, setSearch] = useState("");
-
-  const items = codes.data?.items ?? [];
-  const redemptions = history.data?.items ?? [];
-  const filtered = useMemo(() => redemptions.filter((r: PromoRedemption) => !search || r.code.toLowerCase().includes(search.toLowerCase()) || String(r.user_id ?? "").includes(search)), [redemptions, search]);
-  const loading = codes.isLoading || history.isLoading;
 
   const save = async (p: Omit<PromoCode, "created_at" | "created_by">) => {
     const body = {
@@ -95,112 +103,357 @@ export function PromocodesPage() {
       pool_id: p.type === "traffic" ? p.pool_id : undefined,
       first_purchase_only: p.first_purchase_only, new_users_only: p.new_users_only, enabled: p.enabled,
     };
-    try {
-      if (p.id) await update.mutateAsync({ id: p.id, body });
-      else await create.mutateAsync(body);
-      toast.ok(t("promocodes.saved"));
-      setEdit(null);
-    } catch (e) {
-      toast.error(errorText(e));
-      throw e;
-    }
-  };
-
-  const toggleCode = async (p: PromoCode) => {
-    try { await toggle.mutateAsync({ id: p.id, enabled: !p.enabled }); }
-    catch (e) { toast.error(errorText(e)); }
-  };
-
-  const removeCode = async (p: PromoCode) => {
-    if (!window.confirm(t("promocodes.deleteConfirm", { code: p.code }))) return;
-    try { await remove.mutateAsync(p.id); }
-    catch (e) { toast.error(errorText(e)); }
+    if (p.id) await update.mutateAsync({ id: p.id, body });
+    else await create.mutateAsync(body);
+    toast.ok(t("promocodes.saved"));
+    setEdit(null);
   };
 
   return (
-    <>
-      <PageHeader title={t("promocodes.title")} sub={t("promocodes.subtitle")} />
-      <div className="mb-4 flex gap-2">
-        <Button variant={tab === "codes" ? "primary" : "glass"} onClick={() => setTab("codes")}>{t("promocodes.codes")}</Button>
-        <Button variant={tab === "history" ? "primary" : "glass"} onClick={() => setTab("history")}>{t("promocodes.history")}</Button>
-        {tab === "codes" && <Button className="ml-auto" variant="primary" onClick={() => setEdit({ ...empty })}><Plus size={16} />{t("promocodes.create")}</Button>}
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Segmented label={t("promocodes.sections")} value={sub} onChange={onSub} options={PROMO_TABS.map((id) => ({ value: id, label: t(`promocodes.${id}`) }))} />
+        <Button variant="primary" size="sm" onClick={() => setEdit({ ...empty })}>
+          <Plus size={16} aria-hidden />
+          {t("promocodes.create")}
+        </Button>
       </div>
-      {tab === "codes" ? (
-        <section className="card glass">
-          {codes.isError && !codes.data ? <ErrorState text={errorText(codes.error)} onRetry={() => void codes.refetch()} /> : loading ? <p>{t("promocodes.loading")}</p> : items.length === 0 ? <p>{t("promocodes.empty")}</p> : (
+      {sub === "codes" ? <Codes onEdit={setEdit} onCreate={() => setEdit({ ...empty })} /> : <Redemptions />}
+      <PromoEditor value={edit} onClose={() => setEdit(null)} onSave={save} />
+    </div>
+  );
+}
+
+function Codes({ onEdit, onCreate }: { onEdit: (p: PromoCode) => void; onCreate: () => void }) {
+  const toast = useToast();
+  const codes = usePromocodes();
+  const { toggle, remove } = usePromoMutations();
+  const [removing, setRemoving] = useState<PromoCode | null>(null);
+  return (
+    <section className="card glass reveal" aria-busy={codes.isFetching}>
+      <QueryBoundary
+        query={codes}
+        pending={
+          <div className="flex flex-col gap-2" role="status" aria-busy aria-label={t("common.loading")}>
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} style={{ height: 56 }} />
+            ))}
+          </div>
+        }
+      >
+        {(data) =>
+          data.items.length === 0 ? (
+            <EmptyState title={t("promocodes.empty")} text={t("promocodes.emptyText")}>
+              <Button variant="primary" onClick={onCreate}>
+                <Plus size={18} aria-hidden /> {t("promocodes.create")}
+              </Button>
+            </EmptyState>
+          ) : (
             <ul className="row-list">
-              {items.map((p) => (
+              {data.items.map((p) => (
                 <li key={p.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3">
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <b className="num">{p.code}</b>
+                      <b className="mono text-[13px]">{p.code}</b>
                       <Pill tone={statusTone(p.status)}>{statusText(p.status)}</Pill>
-                      <span className="text-xs">{valueText(p)}</span>
+                      <span className="text-[13px] font-medium">{valueText(p)}</span>
                     </div>
-                    <div className="mt-1 text-xs text-[var(--ink-500)]">{p.name || p.description || "—"} · {t("promocodes.used")} {p.used_count}{p.max_uses ? ` / ${p.max_uses}` : ""}</div>
+                    <div className="mt-1 truncate text-xs text-[var(--ink-500)]">
+                      {[p.name || p.description, t("promocodes.usedOf", { n: p.used_count, max: p.max_uses ? String(p.max_uses) : "∞" })].filter(Boolean).join(" · ")}
+                    </div>
                   </div>
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => void toggleCode(p)}><Power size={15} /></Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEdit(p)}>{t("promocodes.edit")}</Button>
-                    <Button size="sm" variant="ghost" onClick={() => void removeCode(p)}><Trash2 size={15} /></Button>
+                  <div className="flex items-center gap-1">
+                    <Switch
+                      checked={p.enabled}
+                      label={t("promocodes.toggleLabel", { code: p.code })}
+                      disabled={toggle.isPending && toggle.variables?.id === p.id}
+                      onChange={(enabled) => toggle.mutate({ id: p.id, enabled }, { onError: (e) => toast.error(errorText(e)) })}
+                    />
+                    <button type="button" className="icon-btn ml-2" aria-label={t("promocodes.editLabel", { code: p.code })} title={t("promocodes.edit")} onClick={() => onEdit(p)}>
+                      <Pencil size={16} aria-hidden />
+                    </button>
+                    <button type="button" className="icon-btn" aria-label={t("promocodes.deleteLabel", { code: p.code })} title={t("common.delete")} onClick={() => setRemoving(p)}>
+                      <Trash2 size={16} aria-hidden />
+                    </button>
                   </div>
                 </li>
               ))}
             </ul>
-          )}
-        </section>
-      ) : (
-        <section className="card glass">
-          <div className="mb-3 flex gap-2"><input className="input" placeholder={t("promocodes.historySearch")} value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-          {history.isError && !history.data ? <ErrorState text={errorText(history.error)} onRetry={() => void history.refetch()} /> : history.isLoading ? <p>{t("promocodes.loading")}</p> : filtered.length === 0 ? <p>{t("promocodes.noHistory")}</p> : (
-            <ul className="row-list">
-              {filtered.map((r) => <li key={r.id} className="py-3 text-sm"><b>{r.code}</b> · {t("promocodes.user")} #{r.user_id ?? t("promocodes.emptyValue")} · {t("promocodes.telegramId")} {r.tg_id} · {redemptionStatusText(r.status)}<div className="text-xs text-[var(--ink-500)]">{new Date(r.redeemed_at).toLocaleString()} · {r.days ? `${r.days} ${t("promocodes.daysUnit")} ` : ""}{r.bytes ? `${(r.bytes / 1073741824).toFixed(1)} ${t("promocodes.trafficUnit")} ` : ""}{r.discount_amount ? `−${r.discount_amount} ${r.currency}` : ""}</div></li>)}
-            </ul>
-          )}
-        </section>
-      )}
-      {edit && <PromoEditor value={edit} onClose={() => setEdit(null)} onSave={save} />}
-    </>
+          )
+        }
+      </QueryBoundary>
+      <Confirm
+        open={!!removing}
+        onOpenChange={(v) => !v && setRemoving(null)}
+        title={t("promocodes.deleteTitle", { code: removing?.code ?? "" })}
+        text={t("promocodes.deleteText")}
+        confirm={t("common.delete")}
+        danger
+        loading={remove.isPending}
+        onConfirm={() =>
+          removing &&
+          remove.mutate(removing.id, {
+            onSuccess: () => setRemoving(null),
+            onError: (e) => toast.error(errorText(e)),
+          })
+        }
+      />
+    </section>
   );
 }
 
-function PromoEditor({ value, onClose, onSave }: { value: PromoCode; onClose: () => void; onSave: (p: Omit<PromoCode, "created_at" | "created_by">) => Promise<void> }) {
+function Redemptions() {
+  const history = usePromoRedemptions();
+  const [search, setSearch] = useState("");
+  const list = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (history.data?.items ?? []).filter((r: PromoRedemption) => !q || r.code.toLowerCase().includes(q) || String(r.user_id ?? "").includes(q));
+  }, [history.data, search]);
+  return (
+    <section className="card glass reveal">
+      <label className="search-field mb-4 max-w-[420px]">
+        <Search size={16} aria-hidden />
+        <input type="search" placeholder={t("promocodes.historySearch")} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t("promocodes.historySearch")} />
+      </label>
+      <QueryBoundary
+        query={history}
+        pending={
+          <div className="flex flex-col gap-2" role="status" aria-busy aria-label={t("common.loading")}>
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} style={{ height: 48 }} />
+            ))}
+          </div>
+        }
+      >
+        {() =>
+          list.length === 0 ? (
+            <EmptyState search={!!search.trim()} title={t("promocodes.noHistory")} text={search.trim() ? t("promocodes.noHistoryFound") : t("promocodes.noHistoryText")} />
+          ) : (
+            <ul className="row-list">
+              {list.map((r) => (
+                <li key={r.id} className="py-3">
+                  <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                    <b className="mono">{r.code}</b>
+                    <span className="text-[var(--ink-500)]">{redemptionStatusText(r.status)}</span>
+                    {r.days ? <span>+{r.days} {t("promocodes.daysUnit")}</span> : null}
+                    {r.bytes ? (
+                      <span>
+                        +{(r.bytes / GiB).toFixed(1)} {t("promocodes.trafficUnit")}
+                      </span>
+                    ) : null}
+                    {r.discount_amount ? <span>−{money(r.discount_amount, r.currency)}</span> : null}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--ink-500)]">
+                    {dateShort(r.redeemed_at)} {time(r.redeemed_at)} · {r.user_id != null ? `${t("promocodes.user")} #${r.user_id}` : t("promocodes.noUser")} · {t("promocodes.telegramId")} {r.tg_id}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </QueryBoundary>
+    </section>
+  );
+}
+
+/** A promo code in a side sheet: what it gives first, who may use it and when folded below. */
+function PromoEditor({ value, onClose, onSave }: { value: PromoCode | null; onClose: () => void; onSave: (p: Omit<PromoCode, "created_at" | "created_by">) => Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  return (
+    <Drawer
+      open={!!value}
+      onOpenChange={(v) => !v && onClose()}
+      title={value?.id ? t("promocodes.edit") : t("promocodes.new")}
+      footer={
+        <DrawerFooter form="promo-form" onCancel={onClose} loading={saving} disabled={blocked}>
+          {t("common.save")}
+        </DrawerFooter>
+      }
+    >
+      {value ? <PromoForm key={value.id || "new"} value={value} onSave={onSave} onSaving={setSaving} onBlocked={setBlocked} /> : null}
+    </Drawer>
+  );
+}
+
+function PromoForm({ value, onSave, onSaving, onBlocked }: { value: PromoCode; onSave: (p: Omit<PromoCode, "created_at" | "created_by">) => Promise<void>; onSaving: (v: boolean) => void; onBlocked: (v: boolean) => void }) {
   const pools = usePools();
   const tariffs = useTariffs();
-  const [p, setP] = useState<Draft>(() => ({ ...value, value: value.type === "traffic" ? value.value / 1073741824 : value.type === "fixed" ? fromUnits(value.value, value.currency) : value.value, min_order: fromUnits(value.min_order, value.currency), max_discount: fromUnits(value.max_discount, value.currency), starts_at: dateInput(value.starts_at), ends_at: dateInput(value.ends_at), max_uses: value.max_uses, tariff_ids: [...value.tariff_ids] }));
-  const [saving, setSaving] = useState(false);
+  const [p, setP] = useState<Draft>(() => ({
+    ...value,
+    value: value.type === "traffic" ? value.value / GiB : value.type === "fixed" ? fromUnits(value.value, value.currency) : value.value,
+    min_order: fromUnits(value.min_order, value.currency),
+    max_discount: fromUnits(value.max_discount, value.currency),
+    starts_at: dateInput(value.starts_at),
+    ends_at: dateInput(value.ends_at),
+    max_uses: value.max_uses,
+    tariff_ids: [...value.tariff_ids],
+  }));
   const [error, setError] = useState("");
-  const set = (key: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setP((x) => ({ ...x, [key]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value }));
-  const submit = async (e: React.FormEvent) => {
+  const [dateErrors, setDateErrors] = useState<{ starts_at?: string; ends_at?: string }>({});
+  const set = (key: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setP((x) => ({ ...x, [key]: e.target.value }));
+  const flag = (key: "first_purchase_only" | "new_users_only" | "enabled") => (on: boolean) => setP((x) => ({ ...x, [key]: on }));
+  // What the form needs to be saved is missing: the sheet's save button waits.
+  const blocked = tariffs.isError || (p.type === "traffic" && pools.isError);
+  useEffect(() => onBlocked(blocked), [blocked, onBlocked]);
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
-    setSaving(true);
+    const dates = {
+      starts_at: badDate(p.starts_at) ? t("promocodes.badDate") : undefined,
+      ends_at: badDate(p.ends_at) ? t("promocodes.badDate") : undefined,
+    };
+    setDateErrors(dates);
+    if (dates.starts_at || dates.ends_at) return;
+    onSaving(true);
     try {
-      await onSave({ ...p, value: p.type === "traffic" ? Math.round(Number(p.value) * 1073741824) : p.type === "fixed" ? toUnits(p.value, p.currency) : Number(p.value), per_user_limit: Number(p.per_user_limit), discount_ttl: Number(p.discount_ttl),
+      await onSave({
+        ...p,
+        value: p.type === "traffic" ? Math.round(Number(p.value) * GiB) : p.type === "fixed" ? toUnits(p.value, p.currency) : Number(p.value),
+        per_user_limit: Number(p.per_user_limit),
+        discount_ttl: Number(p.discount_ttl),
         // Sums mean nothing without a currency: a code for any currency has none.
-        min_order: p.currency ? toUnits(p.min_order, p.currency) : 0, max_discount: p.currency ? toUnits(p.max_discount, p.currency) : 0, max_uses: p.max_uses ? Number(p.max_uses) : undefined, tariff_ids: p.tariff_ids, starts_at: p.starts_at || undefined, ends_at: p.ends_at || undefined });
-    } catch (e) {
-      setError(errorText(e));
+        min_order: p.currency ? toUnits(p.min_order, p.currency) : 0,
+        max_discount: p.currency ? toUnits(p.max_discount, p.currency) : 0,
+        max_uses: p.max_uses ? Number(p.max_uses) : undefined,
+        tariff_ids: p.tariff_ids,
+        starts_at: p.starts_at || undefined,
+        ends_at: p.ends_at || undefined,
+      });
+    } catch (err) {
+      setError(errorText(err));
     } finally {
-      setSaving(false);
+      onSaving(false);
     }
   };
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"><div className="card glass max-h-[90vh] w-full max-w-2xl overflow-auto"><div className="card-head"><div><h2 className="card-title">{p.id ? t("promocodes.edit") : t("promocodes.new")}</h2><div className="card-sub">{t("promocodes.createHint")}</div></div></div>{error && <div className="mb-3 rounded-xl border border-[var(--berry-600)]/30 bg-[var(--berry-50)] p-3 text-sm text-[var(--berry-600)]" role="alert">{error}</div>}<form className="grid gap-3" onSubmit={(e) => void submit(e)}>
-    <label className="field"><span className="lbl">{t("promocodes.code")}</span><input className="input" value={p.code} onChange={set("code")} maxLength={64} /></label>
-    <label className="field"><span className="lbl">{t("promocodes.name")}</span><input className="input" value={p.name} onChange={set("name")} /></label>
-    <label className="field"><span className="lbl">{t("promocodes.description")}</span><input className="input" value={p.description} onChange={set("description")} /></label>
-    <label className="field"><span className="lbl">{t("promocodes.type")}</span><select className="input" value={p.type} onChange={set("type")}><option value="days">{t("promocodes.days")}</option><option value="traffic">{t("promocodes.traffic")}</option><option value="percent">{t("promocodes.percent")}</option><option value="fixed">{t("promocodes.fixed")}</option></select></label>
-    <label className="field"><span className="lbl">{p.type === "fixed" && p.currency ? `${t("promocodes.value")}, ${unitOf(p.currency)}` : t("promocodes.value")}</span><input className="input" type="number" min={p.type === "fixed" && p.currency === "RUB" ? "0.01" : "1"} step={p.type === "fixed" && p.currency === "RUB" ? "0.01" : "1"} max={p.type === "days" ? 36500 : undefined} value={p.value} onChange={set("value")} /></label>
-    {(p.type === "fixed" || p.type === "percent") && <label className="field"><span className="lbl">{t("promocodes.currency")}</span><select className="input" value={p.currency} onChange={set("currency")}>{p.type === "percent" || !p.currency ? <option value="">{t("promocodes.anyCurrency")}</option> : null}<option value="RUB">RUB</option><option value="XTR">XTR</option></select>{p.type === "percent" && !p.currency ? <span className="hint">{t("promocodes.anyCurrencyHint")}</span> : null}</label>}
-    <label className="field"><span className="lbl">{t("promocodes.startsAt")}</span><input className="input" type="datetime-local" value={p.starts_at} onChange={set("starts_at")} /></label>
-    <label className="field"><span className="lbl">{t("promocodes.endsAt")}</span><input className="input" type="datetime-local" value={p.ends_at} onChange={set("ends_at")} /></label>
-    <label className="field"><span className="lbl">{t("promocodes.maxUses")}</span><input className="input" type="number" min="1" placeholder={t("promocodes.noLimit")} value={p.max_uses ?? ""} onChange={set("max_uses")} /></label>
-    <label className="field"><span className="lbl">{t("promocodes.perUserLimit")}</span><input className="input" type="number" min="1" value={p.per_user_limit} onChange={set("per_user_limit")} /></label>
-    {(p.type === "percent" || p.type === "fixed") && <>{p.currency ? <><label className="field"><span className="lbl">{`${t("promocodes.minOrder")}, ${unitOf(p.currency)}`}</span><input className="input" type="number" min="0" step={p.currency === "RUB" ? "0.01" : "1"} value={p.min_order} onChange={set("min_order")} /><span className="hint">{t("promocodes.zeroNoLimit")}</span></label><label className="field"><span className="lbl">{`${t("promocodes.maxDiscount")}, ${unitOf(p.currency)}`}</span><input className="input" type="number" min="0" step={p.currency === "RUB" ? "0.01" : "1"} value={p.max_discount} onChange={set("max_discount")} /><span className="hint">{t("promocodes.zeroNoLimit")}</span></label></> : null}<label className="field"><span className="lbl">{t("promocodes.discountTtl")}</span><input className="input" type="number" min="0" max={30 * 24 * 60 * 60} value={p.discount_ttl} onChange={set("discount_ttl")} /><span className="hint">{t("promocodes.discountTtlHint")}</span></label></>}
-    <div className="field"><span className="lbl">{t("promocodes.tariffs")}</span><span className="hint">{t("promocodes.allTariffsHint")}</span>{tariffs.isError ? <p className="text-sm text-[var(--berry-600)]" role="alert">{errorText(tariffs.error)}</p> : <div className="flex max-h-32 flex-col gap-2 overflow-auto rounded-xl border border-[var(--hairline)] p-3">{(tariffs.data ?? []).map((tariff) => <label key={tariff.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={p.tariff_ids.includes(tariff.id)} onChange={(e) => setP((x) => ({ ...x, tariff_ids: e.target.checked ? [...x.tariff_ids, tariff.id] : x.tariff_ids.filter((id) => id !== tariff.id) }))} />{tariff.name}</label>)}</div>}</div>
-    <label className="flex gap-2"><input type="checkbox" checked={p.first_purchase_only} onChange={set("first_purchase_only")} />{t("promocodes.firstPurchaseOnly")}</label>
-    <label className="flex gap-2"><input type="checkbox" checked={p.new_users_only} onChange={set("new_users_only")} />{t("promocodes.newUsersOnly")}</label>
-    {p.type === "traffic" && <label className="field"><span className="lbl">{t("promocodes.trafficPool")}</span>{pools.isError ? <p className="text-sm text-[var(--berry-600)]" role="alert">{errorText(pools.error)}</p> : <select className="input" value={p.pool_id ?? ""} onChange={(e) => setP((x) => ({ ...x, pool_id: e.target.value ? Number(e.target.value) : undefined }))}><option value="">{t("promocodes.mainTraffic")}</option>{(pools.data ?? []).map((pool) => <option key={pool.id} value={pool.id}>{pool.name}</option>)}</select>}</label>}
-    <label className="flex gap-2"><input type="checkbox" checked={p.enabled} onChange={set("enabled")} />{t("promocodes.enabled")}</label>
-    <div className="flex justify-end gap-2 pt-3"><Button variant="ghost" type="button" onClick={onClose}>{t("promocodes.cancel")}</Button><Button variant="primary" type="submit" loading={saving} disabled={tariffs.isError || (p.type === "traffic" && pools.isError)}>{t("promocodes.save")}</Button></div></form></div></div>;
+  const discount = p.type === "percent" || p.type === "fixed";
+  const step = p.type === "fixed" && p.currency === "RUB" ? "0.01" : "1";
+  return (
+    <form id="promo-form" className="pt-4" onSubmit={(e) => void submit(e)} noValidate>
+      <p className="mb-4 text-[13px] text-[var(--ink-500)]">{t("promocodes.createHint")}</p>
+      {error ? (
+        <div className="banner err mb-4" role="alert">
+          {error}
+        </div>
+      ) : null}
+      <Field label={t("promocodes.code")} htmlFor="pc-code">
+        <input id="pc-code" className="input mono" value={p.code} onChange={set("code")} maxLength={64} autoComplete="off" spellCheck={false} />
+      </Field>
+      <div className="grid gap-x-3 sm:grid-cols-2">
+        <Field label={t("promocodes.type")} htmlFor="pc-type">
+          <select id="pc-type" className="input" value={p.type} onChange={set("type")}>
+            <option value="days">{t("promocodes.days")}</option>
+            <option value="traffic">{t("promocodes.traffic")}</option>
+            <option value="percent">{t("promocodes.percent")}</option>
+            <option value="fixed">{t("promocodes.fixed")}</option>
+          </select>
+        </Field>
+        <Field label={p.type === "fixed" && p.currency ? `${t("promocodes.value")}, ${unitOf(p.currency)}` : t("promocodes.value")} htmlFor="pc-value">
+          <input id="pc-value" className="input" type="number" inputMode="decimal" min={step === "0.01" ? "0.01" : "1"} step={step} max={p.type === "days" ? 36500 : undefined} value={p.value} onChange={set("value")} />
+        </Field>
+      </div>
+      {discount ? (
+        <Field label={t("promocodes.currency")} htmlFor="pc-currency" hint={p.type === "percent" && !p.currency ? t("promocodes.anyCurrencyHint") : undefined}>
+          <select id="pc-currency" className="input" value={p.currency} onChange={set("currency")}>
+            {p.type === "percent" || !p.currency ? <option value="">{t("promocodes.anyCurrency")}</option> : null}
+            <option value="RUB">RUB</option>
+            <option value="XTR">XTR</option>
+          </select>
+        </Field>
+      ) : null}
+      {p.type === "traffic" ? (
+        <Field label={t("promocodes.trafficPool")} htmlFor="pc-pool" error={pools.isError ? errorText(pools.error) : undefined}>
+          <select id="pc-pool" className="input" value={p.pool_id ?? ""} disabled={pools.isError} onChange={(e) => setP((x) => ({ ...x, pool_id: e.target.value ? Number(e.target.value) : undefined }))}>
+            <option value="">{t("promocodes.mainTraffic")}</option>
+            {(pools.data ?? []).map((pool) => (
+              <option key={pool.id} value={pool.id}>
+                {pool.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : null}
+      <Field label={t("promocodes.name")} htmlFor="pc-name">
+        <input id="pc-name" className="input" value={p.name} onChange={set("name")} />
+      </Field>
+      <SwitchRow label={t("promocodes.enabled")} checked={p.enabled} onChange={flag("enabled")} />
+      <Disclosure title={t("promocodes.limits")} sub={t("promocodes.limitsSub")}>
+        <div className="grid gap-x-3 sm:grid-cols-2">
+          <Field label={t("promocodes.startsAt")} htmlFor="pc-start" error={dateErrors.starts_at}>
+            <input
+              id="pc-start"
+              className="input"
+              type="datetime-local"
+              min={DATE_MIN}
+              max={DATE_MAX}
+              value={p.starts_at}
+              onChange={set("starts_at")}
+              aria-invalid={!!dateErrors.starts_at}
+            />
+          </Field>
+          <Field label={t("promocodes.endsAt")} htmlFor="pc-end" error={dateErrors.ends_at}>
+            <input
+              id="pc-end"
+              className="input"
+              type="datetime-local"
+              min={DATE_MIN}
+              max={DATE_MAX}
+              value={p.ends_at}
+              onChange={set("ends_at")}
+              aria-invalid={!!dateErrors.ends_at}
+            />
+          </Field>
+          <Field label={t("promocodes.maxUses")} htmlFor="pc-max">
+            <input id="pc-max" className="input" type="number" min="1" placeholder={t("promocodes.noLimit")} value={p.max_uses ?? ""} onChange={set("max_uses")} />
+          </Field>
+          <Field label={t("promocodes.perUserLimit")} htmlFor="pc-per-user">
+            <input id="pc-per-user" className="input" type="number" min="1" value={p.per_user_limit} onChange={set("per_user_limit")} />
+          </Field>
+        </div>
+        {discount && p.currency ? (
+          <div className="grid gap-x-3 sm:grid-cols-2">
+            <Field label={`${t("promocodes.minOrder")}, ${unitOf(p.currency)}`} htmlFor="pc-min" hint={t("promocodes.zeroNoLimit")}>
+              <input id="pc-min" className="input" type="number" min="0" step={p.currency === "RUB" ? "0.01" : "1"} value={p.min_order} onChange={set("min_order")} />
+            </Field>
+            <Field label={`${t("promocodes.maxDiscount")}, ${unitOf(p.currency)}`} htmlFor="pc-max-discount" hint={t("promocodes.zeroNoLimit")}>
+              <input id="pc-max-discount" className="input" type="number" min="0" step={p.currency === "RUB" ? "0.01" : "1"} value={p.max_discount} onChange={set("max_discount")} />
+            </Field>
+          </div>
+        ) : null}
+        {discount ? (
+          <Field label={t("promocodes.discountTtl")} htmlFor="pc-ttl" hint={t("promocodes.discountTtlHint")}>
+            <input id="pc-ttl" className="input max-w-[200px]" type="number" min="0" max={30 * 24 * 60 * 60} value={p.discount_ttl} onChange={set("discount_ttl")} />
+          </Field>
+        ) : null}
+        <Field label={t("promocodes.tariffsLabel")} hint={t("promocodes.allTariffsHint")}>
+          {tariffs.isError ? (
+            <p className="text-[13px] text-[var(--berry-600)]" role="alert">
+              {errorText(tariffs.error)}
+            </p>
+          ) : (
+            <div className="panel-soft flex max-h-40 flex-col gap-2 overflow-auto p-3">
+              {(tariffs.data ?? []).map((tariff) => (
+                <label key={tariff.id} className="flex items-center gap-2 text-[13px]">
+                  <input
+                    type="checkbox"
+                    className="check"
+                    checked={p.tariff_ids.includes(tariff.id)}
+                    onChange={(e) => setP((x) => ({ ...x, tariff_ids: e.target.checked ? [...x.tariff_ids, tariff.id] : x.tariff_ids.filter((id) => id !== tariff.id) }))}
+                  />
+                  {tariff.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </Field>
+        <div className="row-list">
+          <SwitchRow label={t("promocodes.firstPurchaseOnly")} checked={p.first_purchase_only} onChange={flag("first_purchase_only")} />
+          <SwitchRow label={t("promocodes.newUsersOnly")} checked={p.new_users_only} onChange={flag("new_users_only")} />
+        </div>
+        <Field label={t("promocodes.description")} htmlFor="pc-description">
+          <input id="pc-description" className="input" value={p.description} onChange={set("description")} />
+        </Field>
+      </Disclosure>
+    </form>
+  );
 }

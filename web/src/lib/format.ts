@@ -99,6 +99,18 @@ export function ago(iso: string, now = Date.now()): string {
   return t("time.daysAgo", { n: Math.round(h / 24) });
 }
 
+/** What is left until iso, in the words uptime uses ("1 ч 12 мин"); under a minute is said so. */
+export function timeLeft(iso: string, now = Date.now()): string {
+  const s = Math.max(0, Math.floor((new Date(iso).getTime() - now) / 1000));
+  if (s < 60) return t("time.lessMinute");
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return t("time.uptimeDays", { d, h });
+  if (h > 0) return t("time.uptimeHours", { h, m });
+  return t("time.uptimeMinutes", { m });
+}
+
 export function uptime(iso: string, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   const d = Math.floor(s / 86400);
@@ -139,11 +151,25 @@ export function maskIP(ip: string): string {
 
 /** Kopecks as rubles: 19900 → "199 ₽", 19950 → "199,50 ₽". */
 export function rubles(kopecks: number): string {
-  const f = new Intl.NumberFormat(getLocale(), { minimumFractionDigits: kopecks % 100 ? 2 : 0, maximumFractionDigits: 2 });
+  const min = kopecks % 100 ? 2 : 0;
+  const key = `r${getLocale()}${min}`;
+  let f = cache.get(key) as Intl.NumberFormat | undefined;
+  if (!f) cache.set(key, (f = new Intl.NumberFormat(getLocale(), { minimumFractionDigits: min, maximumFractionDigits: 2 })));
   return `${f.format(kopecks / 100)} ₽`;
 }
 
 /** A payment's sum: Stars or kopecks. */
 export function money(amount: number, currency: string): string {
   return currency === "XTR" ? `⭐ ${num(amount)}` : rubles(amount);
+}
+
+/**
+ * An hour the server keeps in UTC, as this browser's local time; the UTC hour follows in
+ * brackets when the two differ, so nobody has to count the time zone.
+ */
+export function utcHourLabel(h: number): string {
+  const d = new Date(Date.UTC(2000, 0, 1, h));
+  const local = d.getHours();
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return local === h ? `${pad(h)}:00` : `${pad(local)}:00 (UTC ${pad(h)}:00)`;
 }

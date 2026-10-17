@@ -2,17 +2,19 @@
 // sold in the bot and the Mini App like tariffs. The base quota of the period is spent
 // first, then the packages, the soonest to expire first.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Archive, Pencil, Plus } from "lucide-react";
+import { Archive, Pencil } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
+import { api, errorText, unwrap, type Schemas } from "../../api/client";
+import { onFormError } from "../../lib/fields";
 import { qk, usePackages, usePaymentSettings, usePools } from "../../api/hooks";
-import { Confirm, Drawer } from "../../components/overlay";
+import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Button, Field, Pill, Segmented, Skeleton } from "../../components/ui";
+import { Field, Pill, Segmented, Skeleton } from "../../components/ui";
 import { Switch } from "../../components/switch";
 import { t } from "../../i18n";
 import { bytes, days as daysText, GiB, rubles } from "../../lib/format";
+import { isKopecks, isLifetimeDays, isStars, isTrafficGB, LIFETIME_DAYS_PRESETS, parseDecimal, rubKopecks } from "../../lib/validate";
 
 type Package = Schemas["PackageView"];
 type Pool = Schemas["PoolView"];
@@ -30,7 +32,8 @@ function lifetimeText(lifetime: Lifetime, days: number): string {
   return t(`packages.lifetime.${lifetime}`);
 }
 
-export function PackagesCard() {
+/** The packages; a new one is started from the page's header (`creating`) or the empty list. */
+export function PackagesCard({ creating, onCreateClose }: { creating: boolean; onCreateClose: () => void }) {
   const packages = usePackages();
   const pools = usePools();
   const selling = usePaymentSettings().data?.enabled === true;
@@ -55,9 +58,6 @@ export function PackagesCard() {
           <h2 className="card-title">{t("packages.title")}</h2>
           <div className="card-sub">{t("packages.sub")}</div>
         </div>
-        <Button size="sm" onClick={() => setEdit("new")}>
-          <Plus size={16} aria-hidden /> {t("packages.add")}
-        </Button>
       </div>
       <QueryBoundary query={packages} pending={<Skeleton style={{ height: 64 }} />}>
         {(list) =>
@@ -92,7 +92,15 @@ export function PackagesCard() {
           )
         }
       </QueryBoundary>
-      <PackageDrawer pkg={edit} pools={pools.data ?? []} selling={selling} onClose={() => setEdit(null)} />
+      <PackageDrawer
+        pkg={creating ? "new" : edit}
+        pools={pools.data ?? []}
+        selling={selling}
+        onClose={() => {
+          setEdit(null);
+          onCreateClose();
+        }}
+      />
       <Confirm
         open={!!archive}
         onOpenChange={(v) => !v && setArchive(null)}
@@ -142,23 +150,22 @@ function PackageDrawer({ pkg, pools, selling, onClose }: { pkg: Package | "new" 
       onClose();
     },
     onError: (e) => {
-      if (e instanceof ApiError && Object.keys(e.fields).length) setErrors(e.fields);
-      else toast.error(errorText(e));
+      onFormError(e, toast, setErrors);
     },
   });
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    const gbN = Number(gb.replace(",", "."));
+    const gbN = parseDecimal(gb);
     const daysN = Number(days);
     const starsN = Number(stars);
-    const rubN = Math.round(Number(rub.replace(",", ".")) * 100);
+    const rubN = rubKopecks(rub);
     if (!name.trim()) errs.name = t("packages.errName");
-    if (!Number.isFinite(gbN) || gbN < 1 || gbN > 102400) errs.bytes = t("errors.api.bad_bytes");
-    if (lifetime === "days" && (!Number.isInteger(daysN) || daysN < 1 || daysN > 3650)) errs.days = t("errors.api.bad_days");
-    if (stars.trim() && (!Number.isInteger(starsN) || starsN < 1 || starsN > 10000)) errs.price_stars = t("tariffs.errStars");
-    if (rub.trim() && (!Number.isFinite(rubN) || rubN < 100 || rubN > 100000000)) errs.price_rub = t("tariffs.errRub");
+    if (!isTrafficGB(gbN)) errs.bytes = t("errors.api.bad_bytes");
+    if (lifetime === "days" && !isLifetimeDays(daysN)) errs.days = t("errors.api.bad_days");
+    if (stars.trim() && !isStars(starsN)) errs.price_stars = t("tariffs.errStars");
+    if (rub.trim() && !isKopecks(rubN)) errs.price_rub = t("tariffs.errRub");
     if (onSale && !stars.trim() && !rub.trim()) errs.on_sale = t("errors.api.on_sale_no_price");
     setErrors(errs);
     if (Object.keys(errs).length) return;
@@ -183,14 +190,9 @@ function PackageDrawer({ pkg, pools, selling, onClose }: { pkg: Package | "new" 
       title={pkg === "new" ? t("packages.new") : t("packages.edit")}
       meta={t("packages.drawerMeta")}
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            {t("common.cancel")}
-          </Button>
-          <Button variant="primary" type="submit" form="package-form" loading={save.isPending}>
-            {t("common.save")}
-          </Button>
-        </>
+        <DrawerFooter form="package-form" onCancel={onClose} loading={save.isPending}>
+          {t("common.save")}
+        </DrawerFooter>
       }
     >
       <form id="package-form" onSubmit={submit} className="pt-5" noValidate>
@@ -227,7 +229,7 @@ function PackageDrawer({ pkg, pools, selling, onClose }: { pkg: Package | "new" 
           {lifetime === "days" ? (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <input id="pk-days" className="input max-w-[100px]" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} aria-invalid={!!errors.days} />
-              {[7, 30, 90].map((n) => (
+              {LIFETIME_DAYS_PRESETS.map((n) => (
                 <button key={n} type="button" className="chip-btn" onClick={() => setDays(String(n))}>
                   {daysText(n)}
                 </button>

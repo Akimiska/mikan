@@ -19,7 +19,9 @@
 [![Релиз](https://img.shields.io/github/v/release/Miroshka000/mikan?color=f07a2e&label=релиз&style=flat-square)](https://github.com/Miroshka000/mikan/releases)
 [![Образ](https://img.shields.io/badge/ghcr.io-miroshka000%2Fmikan-2b8c9e?style=flat-square&logo=docker&logoColor=white)](https://github.com/Miroshka000/mikan/pkgs/container/mikan)
 [![Лицензия](https://img.shields.io/badge/лицензия-GPL--3.0-2f9e6b?style=flat-square)](LICENSE)
-[![mihomo](https://img.shields.io/badge/ядро-mihomo%201.19.31-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![mihomo](https://img.shields.io/badge/ядро-mihomo%201.19.32-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![Telegram](https://img.shields.io/badge/Telegram-канал-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/mikanvpn)
+[![Telegram](https://img.shields.io/badge/Telegram-форум-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+I2JFR7DbPow1ZmQy)
 
 [English](README.md) · **Русский** · [简体中文](README.zh-CN.md) · [فارسی](README.fa.md) · [Türkçe](README.tr.md) · [Español](README.es.md)
 
@@ -138,6 +140,10 @@ REST API с документацией прямо в панели, ключи с
 такую возможность. Тогда Mikan сможет вернуть оплату, если резерв промокода истёк до
 подтверждения платежа провайдером.
 
+## Доступ для поддержки
+
+Если нужна помощь, вы сами открываете временный доступ: «Настройки → Поддержка», на 2, 6 или 24 часа, с уровнем «просмотр», «изменение» или «терминал». Без этой кнопки никто, включая разработчиков mikan, в панель не попадает: у проекта нет постоянного доступа к вашим серверам, и панель сама никуда не подключается. Все действия оператора пишутся в журнал, доступ отзывается одной кнопкой, терминал включается только паролем и 2FA и записывается. Выключить функцию совсем можно тумблером в той же карточке или командой `mikan support-access off` на сервере. Правила платной поддержки: [на сайте](https://miroshka000.github.io/mikan/support/paid/).
+
 ## Скриншоты
 
 <table>
@@ -159,7 +165,7 @@ REST API с документацией прямо в панели, ключи с
 
 ## Протоколы
 
-Пятнадцать протоколов, для каждого есть готовый пресет, ключи генерируются сами. Подписка отдаёт каждому приложению только то, что оно запускает:
+Семнадцать протоколов, для каждого есть готовый пресет, ключи генерируются сами. Подписка отдаёт каждому приложению только то, что оно запускает:
 
 | Протокол | Clash-приложения<br><sub>ядро mihomo</sub> | Приложения на Xray<br><sub>Happ, v2RayTun</sub> | Приложения на sing-box<br><sub>Hiddify, Karing</sub> |
 |---|:---:|:---:|:---:|
@@ -168,6 +174,8 @@ REST API с документацией прямо в панели, ключи с
 | VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
 | VLESS PQ (постквантовое шифрование) | ✅ | ✅ | — |
 | Trojan · REALITY | ✅ | ✅ | ✅ |
+| VLESS · TLS · XHTTP | ✅ | ✅ | — |
+| VLESS · TLS · Vision | ✅ | ✅ | ✅ |
 | Hysteria2 | ✅ | ✅ | ✅ |
 | TUIC v5 | ✅ | — | ✅ |
 | AnyTLS | ✅ | — | ✅ |
@@ -211,6 +219,9 @@ flowchart LR
 | `mikan targets scan` · `apply` | сайты для маскировки REALITY рядом с сервером |
 | `mikan join КЛЮЧ` | на ноде: взять новый ключ из панели |
 | `mikan restart` | перезапустить контейнеры |
+| `mikan doctor` | проверить сервер: Docker, порты, файрвол, часы, DNS, диск |
+| `mikan support КОД` | отправить диагностику в обращение поддержки, когда панель недоступна |
+| `mikan support-access on\|off` | разрешить или запретить доступ для поддержки на этом сервере |
 | `mikan uninstall` | остановить и удалить команду, данные остаются |
 
 ## Обновления
@@ -238,9 +249,24 @@ cd installer && cargo test                    # установщик (Rust)
 
 Разработка идёт в ветке `dev`. Пулл-реквесты в `main` собираются и проходят тесты, релизы публикуются по тегам.
 
+## ⛔ Форки и чужие сборки
+
+> [!CAUTION]
+> **Официальный mikan есть только здесь:** репозиторий `Miroshka000/mikan`, образ `ghcr.io/miroshka000/mikan` и релизы, подписанные ключом mikan. Официальные аддоны — только из каталога `getmikan/marketplace`; реестр `getmikan/marketplace-community` — это сторонние аддоны, которые mikan не проверяет и за которые не отвечает. Всё остальное — не mikan, как бы оно ни называлось.
+>
+> **Проект mikan считает любой форк и любую сборку не из официальных источников потенциально небезопасными.**
+>
+> **Официальные сборки можно проверить.** Каждый релиз собирается автоматически из открытого кода этого репозитория и подписывается, а панель и установщик принимают обновления только с этой подписью. Из чего собрана чужая сборка, знает только её автор.
+>
+> **Форк не получает наших обновлений.** Подписать релиз ключом mikan форк не может, поэтому исправления ошибок и уязвимостей до него не доходят, пока их не перенесёт автор форка, если перенесёт.
+>
+> **Форки мы не поддерживаем.** Мы не проверяем их и не отвечаем за ошибки, уязвимости и потерю данных в них. Вопросы о чужих сборках в чате и в issues не рассматриваются.
+>
+> **Название не входит в лицензию.** GPL v3 даёт права на код, но не на название mikan и логотип (п. 7 GPL v3, подробнее в [NOTICE.md](NOTICE.md) и [TRADEMARK.md](TRADEMARK.md)). Форк должен называться по-другому и не выдавать себя за mikan.
+
 ## Лицензия
 
-mikan — свободная программа под [GNU GPL v3](LICENSE). Внутри [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0). Шрифты: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
+mikan — свободная программа под [GNU GPL v3](LICENSE) с дополнительными условиями из [NOTICE.md](NOTICE.md): сохранять указание авторства, не выдавать изменённую версию за оригинал, права на название и логотип не передаются. Copyright (C) 2026 Miroshka and Mikan. Внутри [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0), часть кода взята из [3x-ui](https://github.com/MHSanaei/3x-ui) (GPL-3.0). Шрифты: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
 
 <div align="center">
 <sub>Сделано с 🍊</sub>

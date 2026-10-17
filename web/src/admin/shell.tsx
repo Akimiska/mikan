@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowUpCircle, Bot, LayoutDashboard, LogOut, MoreHorizontal, Network, Server, SlidersHorizontal, Tag, Ticket, Users, Wallet } from "lucide-react";
+import { Activity, ArrowUpCircle, LayoutDashboard, LogOut, MoreHorizontal, Network, PanelLeftClose, PanelLeftOpen, Puzzle, Server, SlidersHorizontal, Tag, Users, Wallet } from "lucide-react";
+import { useState } from "react";
 import { api, unwrap } from "../api/client";
-import { meQuery, useNode, useOverview, usePaymentSettings, useUpdates } from "../api/hooks";
+import { meQuery, useNode, useOverview, useUpdates } from "../api/hooks";
+import { useSupportMode } from "../api/support";
 import { Logo } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
 import { Avatar, Bar, Pill } from "../components/ui";
 import { t, useLocale } from "../i18n";
 import { num, uptime } from "../lib/format";
+import { SupportBar } from "./support-bar";
 
 const NAV = [
   { to: "/", key: "overview", icon: LayoutDashboard },
@@ -17,31 +20,51 @@ const NAV = [
   { to: "/inbounds", key: "inbounds", icon: Server },
   { to: "/nodes", key: "nodes", icon: Network },
   { to: "/payments", key: "payments", icon: Wallet },
-  { to: "/promocodes", key: "promocodes", icon: Ticket },
-  { to: "/telegram", key: "telegram", icon: Bot },
+  { to: "/addons", key: "addons", icon: Puzzle },
+  { to: "/diagnostics", key: "diagnostics", icon: Activity },
   { to: "/settings", key: "settings", icon: SlidersHorizontal },
 ] as const;
 
-// Payments shows in the menu only while selling is on; the page stays reachable from Settings.
-function useNav() {
-  const payments = usePaymentSettings();
-  return NAV.filter((n) => n.to !== "/payments" || payments.data?.enabled === true);
+// The sidebar folded to its icons on a wide screen, as the admin left it; per browser.
+const FOLD_KEY = "mikan.sidebar";
+
+function readFolded(): boolean {
+  try {
+    return localStorage.getItem(FOLD_KEY) === "folded";
+  } catch {
+    return false;
+  }
 }
 
 export function Shell() {
   useLocale(); // the sidebar and the bar read their texts at render time
-  const nav = useNav();
-  const overview = useOverview();
+  const overview = useOverview({ poll: false });
+  const [folded, setFolded] = useState(readFolded);
+  const fold = () =>
+    setFolded((f) => {
+      try {
+        if (f) localStorage.removeItem(FOLD_KEY);
+        else localStorage.setItem(FOLD_KEY, "folded");
+      } catch {
+        // private mode: folded for this visit only
+      }
+      return !f;
+    });
+  const foldLabel = folded ? t("shell.unfold") : t("shell.fold");
   return (
     <>
-      <div className="app">
+      <SupportBar />
+      <div className="app" data-folded={folded || undefined}>
         <aside className="sidebar glass" aria-label={t("shell.sidebar")}>
           <div className="brand">
             <Logo />
             <span className="brand-name">mikan</span>
+            <button type="button" className="icon-btn fold-btn" onClick={fold} aria-label={foldLabel} title={foldLabel}>
+              {folded ? <PanelLeftOpen size={18} aria-hidden /> : <PanelLeftClose size={18} aria-hidden />}
+            </button>
           </div>
           <nav className="nav" aria-label={t("shell.sections")}>
-            {nav.map((n) => (
+            {NAV.map((n) => (
               <Link key={n.to} to={n.to} className="nav-item" activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }} title={t(`nav.${n.key}`)}>
                 <n.icon size={18} aria-hidden />
                 <span className="nav-label">{t(`nav.${n.key}`)}</span>
@@ -69,15 +92,17 @@ export function Shell() {
 // The phone's bottom bar has room for four sections; the rest sit under "More".
 const MOBILE_MAIN = 4;
 
+// A section is current on its own page and on the pages below it (/addons/telegram).
+const isIn = (path: string, to: string) => path.endsWith(to) || path.includes(`${to}/`);
+
 function MobileNav() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const nav = useNav();
-  const more = nav.slice(MOBILE_MAIN);
-  const inMore = more.some((n) => path.endsWith(n.to));
+  const more = NAV.slice(MOBILE_MAIN);
+  const inMore = more.some((n) => isIn(path, n.to));
   return (
     <nav className="mnav glass" aria-label={t("shell.sections")}>
-      {nav.slice(0, MOBILE_MAIN).map((n) => (
+      {NAV.slice(0, MOBILE_MAIN).map((n) => (
         <Link key={n.to} to={n.to} activeProps={{ className: "active", "aria-current": "page" }} activeOptions={{ exact: n.to === "/" }}>
           <n.icon size={20} aria-hidden />
           <span>{t(`navShort.${n.key}`)}</span>
@@ -93,7 +118,7 @@ function MobileNav() {
         <Menu.Portal>
           <Menu.Content className="menu glass-strong" side="top" align="end" sideOffset={12}>
             {more.map((n) => (
-              <Menu.Item key={n.to} className="menu-item" onSelect={() => void navigate({ to: n.to })} aria-current={path.endsWith(n.to) ? "page" : undefined}>
+              <Menu.Item key={n.to} className="menu-item" onSelect={() => void navigate({ to: n.to })} aria-current={isIn(path, n.to) ? "page" : undefined}>
                 <n.icon size={16} aria-hidden /> {t(`nav.${n.key}`)}
               </Menu.Item>
             ))}
@@ -109,9 +134,9 @@ function UpdateChip() {
   const u = useUpdates();
   if (!u.data?.available) return null;
   return (
-    <Link to="/settings" search={{ tab: "general" }} hash="updates" className="update-chip" title={t("shell.updateHint")}>
+    <Link to="/settings" search={{ tab: "system" }} hash="updates" className="update-chip" title={t("shell.updateHint")}>
       <ArrowUpCircle size={16} aria-hidden />
-      <span className="truncate">{t("shell.update", { v: u.data.latest })}</span>
+      <span className="update-label truncate">{t("shell.update", { v: u.data.latest })}</span>
     </Link>
   );
 }
@@ -163,7 +188,9 @@ function NodeCard() {
 }
 
 function AdminRow() {
-  const me = useQuery(meQuery);
+  // A support operator has no account of their own to show (the admin's data is closed to them).
+  const operator = useSupportMode();
+  const me = useQuery({ ...meQuery, enabled: !operator });
   const qc = useQueryClient();
   const navigate = useNavigate();
   const logout = useMutation({
@@ -173,6 +200,18 @@ function AdminRow() {
       void navigate({ to: "/login", search: {} });
     },
   });
+  if (operator) {
+    // No sign-out for an operator: the access ends when the admin revokes it or its time is up.
+    return (
+      <div className="admin-row">
+        <Avatar name={t("support.operator")} seed={2} size="sm" />
+        <div className="who-wrap min-w-0">
+          <div className="truncate text-[13px] font-medium">{t("support.operator")}</div>
+          <div className="text-xs text-[var(--ink-500)]">{t(`support.level.${operator.level}`)}</div>
+        </div>
+      </div>
+    );
+  }
   const name = me.data?.admin.username ?? "…";
   return (
     <div className="admin-row">

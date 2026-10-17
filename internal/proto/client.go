@@ -137,6 +137,19 @@ type Client struct {
 // those get the server's port frozen by the RU DPI.
 var xmux = map[string]any{"max-concurrency": "16-32", "h-max-request-times": "600-900", "h-max-reusable-secs": "1800-3000"}
 
+// xhttpShared are the xhttp-config keys both ends read (mihomo v1.19.31 XHTTPConfig and
+// XHTTPOptions), with their names in the "extra" of an Xray share link.
+var xhttpShared = []struct{ mihomo, xray string }{
+	{"x-padding-bytes", "xPaddingBytes"}, {"x-padding-obfs-mode", "xPaddingObfsMode"},
+	{"x-padding-key", "xPaddingKey"}, {"x-padding-header", "xPaddingHeader"},
+	{"x-padding-placement", "xPaddingPlacement"}, {"x-padding-method", "xPaddingMethod"},
+	{"uplink-http-method", "uplinkHTTPMethod"},
+	{"session-placement", "sessionIDPlacement"}, {"session-key", "sessionIDKey"}, // Xray's own names; mihomo reads both
+	{"seq-placement", "seqPlacement"}, {"seq-key", "seqKey"},
+	{"uplink-data-placement", "uplinkDataPlacement"}, {"uplink-data-key", "uplinkDataKey"},
+	{"uplink-chunk-size", "uplinkChunkSize"}, {"sc-max-each-post-bytes", "scMaxEachPostBytes"},
+}
+
 // ClientConfig derives the client side of a template.
 func ClientConfig(t Template, in ClientInput) (Client, error) {
 	if err := Validate(t, Options{AnyDest: true}); err != nil {
@@ -269,6 +282,43 @@ func (c *clientBuilder) transport() {
 				opts[k] = v
 				c.q.Set(k, v)
 			}
+		}
+		// Padding, session and uplink settings must match on both ends: a client on the
+		// defaults gets "400 invalid xpadding" from a node with its own x-padding-bytes.
+		extra := map[string]any{}
+		for _, k := range xhttpShared {
+			if v, ok := x[k.mihomo]; ok && v != nil {
+				opts[k.mihomo], extra[k.xray] = v, v
+			}
+		}
+		// The admin's own reuse settings replace the panel's: they are one setting, and
+		// max-connections cannot go with the default max-concurrency.
+		if cl := xhttpClient(c.t); cl != nil {
+			if own, _ := cl["xmux"].(map[string]any); len(own) > 0 {
+				reuse, link := map[string]any{}, map[string]any{}
+				for _, k := range xmuxKeys {
+					if v := scalar(own[k.mihomo]); v != "" {
+						reuse[k.mihomo], link[k.xray] = v, v
+					}
+				}
+				opts["reuse-settings"], extra["xmux"] = reuse, link
+			}
+			if v := scalar(cl["sc-min-posts-interval-ms"]); v != "" {
+				opts["sc-min-posts-interval-ms"], extra["scMinPostsIntervalMs"] = v, v
+			}
+			// Without a length Xray finds the table "too small" where mihomo draws 16-32.
+			if v := scalar(cl["session-table"]); v != "" {
+				l := scalar(cl["session-length"])
+				if l == "" {
+					l = defaultSessionLength
+				}
+				opts["session-table"], extra["sessionIDTable"] = v, v
+				opts["session-length"], extra["sessionIDLength"] = l, l
+			}
+		}
+		if len(extra) > 0 {
+			b, _ := json.Marshal(extra)
+			c.q.Set("extra", string(b))
 		}
 		c.y["network"], c.y["xhttp-opts"] = "xhttp", opts
 		c.q.Set("type", "xhttp")

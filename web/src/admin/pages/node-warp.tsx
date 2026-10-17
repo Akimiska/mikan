@@ -10,7 +10,7 @@ import { Confirm, Drawer } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { QueryBoundary } from "../../components/query";
 import { Button, Field, Pill, Segmented, Skeleton } from "../../components/ui";
-import { Switch } from "../../components/switch";
+import { SwitchRow } from "../../components/switch";
 import { t, tMaybe } from "../../i18n";
 import { useDraft } from "../../lib/draft";
 import { fieldErrors } from "../../lib/fields";
@@ -204,13 +204,7 @@ function Configured({ nodeId, w, onCheck, checking, onClose }: { nodeId: number;
       ) : null}
 
       {save.error && !Object.keys(fields).length ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[13px] font-semibold">{t("warp.enabled")}</div>
-          <div className="text-xs text-[var(--ink-500)]">{t("warp.enabledSub")}</div>
-        </div>
-        <Switch checked={enabled} onChange={setEnabled} label={t("warp.enabled")} />
-      </div>
+      <SwitchRow className="mb-4" label={t("warp.enabled")} sub={t("warp.enabledSub")} checked={enabled} onChange={setEnabled} />
 
       <dl className="mb-4 grid grid-cols-2 gap-3 text-xs">
         <div>
@@ -247,12 +241,12 @@ function Configured({ nodeId, w, onCheck, checking, onClose }: { nodeId: number;
         </Field>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="form-actions">
+        <Button variant="danger" className="mr-auto" onClick={() => setRemove(true)}>
+          <Trash2 size={16} aria-hidden /> {t("warp.delete")}
+        </Button>
         <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>
           {t("common.save")}
-        </Button>
-        <Button variant="danger" onClick={() => setRemove(true)}>
-          <Trash2 size={16} aria-hidden /> {t("warp.delete")}
         </Button>
       </div>
       <Confirm open={remove} onOpenChange={setRemove} title={t("warp.deleteTitle")} text={t("warp.deleteText")} confirm={t("warp.delete")} danger loading={del.isPending} onConfirm={() => del.mutate()} />

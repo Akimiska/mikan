@@ -21,7 +21,10 @@ var privateRules = []string{
 	"IP-CIDR,172.16.0.0/12,REJECT",
 	"IP-CIDR,192.168.0.0/16,REJECT",
 	"IP-CIDR,224.0.0.0/3,REJECT",
+	"IP-CIDR6,::/128,REJECT", // "any address": a connection to it reaches the host itself
 	"IP-CIDR6,::1/128,REJECT",
+	// IPv4 written as IPv6 (::ffff:127.0.0.1) does not match the IPv4 ranges above.
+	"IP-CIDR6,::ffff:0:0/96,REJECT",
 	"IP-CIDR6,fc00::/7,REJECT",
 	"IP-CIDR6,fe80::/10,REJECT",
 }
@@ -33,6 +36,7 @@ func rules(st nodeapi.DesiredState, allowPrivate bool) []string {
 	}
 	// Outbound SMTP from a shared VPN IP gets the address blacklisted within hours.
 	r = append(r, "DST-PORT,25,REJECT")
+	r = append(r, egressRules(st.Filters)...)
 	r = append(r, exitRules(st)...)
 	r = append(r, warpRules(st)...)
 	return append(r, "MATCH,DIRECT")
@@ -99,7 +103,8 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (r
 		"mixed-port":        0,
 		"find-process-mode": "off",
 		"profile":           map[string]any{"store-selected": false, "store-fake-ip": false},
-		"dns":               map[string]any{"enable": false},
+		"dns":               dnsConfig(st.DNS),
+		"sniffer":           snifferConfig(st.DNS),
 		"proxies":           proxies,
 		"rules":             rules(st, allowPrivate),
 		"listeners":         listeners,

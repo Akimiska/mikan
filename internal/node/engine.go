@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -19,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	C "github.com/metacubex/mihomo/constant"
@@ -27,7 +29,10 @@ import (
 	mlog "github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
 
+	"mikan/internal/acmechallenge"
 	"mikan/internal/fsutil"
+	"mikan/internal/hostchan"
+	"mikan/internal/logbuf"
 	"mikan/internal/nodeapi"
 	"mikan/internal/proto"
 	"mikan/internal/scan"
@@ -46,6 +51,11 @@ type Options struct {
 	DeviceRelease time.Duration
 	// AllowPrivate lets VPN users reach private and loopback networks of the server.
 	AllowPrivate bool
+	// ACMEListen is where the panel's HTTP-01 challenges for this node are answered
+	// (acmechallenge.ParseListen); "" is port 80.
+	ACMEListen string
+	// Logs holds the last lines of the node's log for GET /v1/logs; nil: none to show.
+	Logs *logbuf.Buffer
 }
 
 type Engine struct {
@@ -55,9 +65,17 @@ type Engine struct {
 	version      string
 	started      time.Time
 	allowPrivate bool
+	logs         *logbuf.Buffer
+
+	// hostCh is the channel to the units on the node's server (see hostChan).
+	hostOnce sync.Once
+	hostCh   *hostchan.Channel
 
 	Reg *Registry
 	tun *Tunnel
+	// Challenge answers the ACME challenges the panel orders for the node's address, on
+	// port 80 while one is pending.
+	Challenge *acmechallenge.Server
 
 	mu         sync.Mutex // serializes Apply
 	savedShape string     // policyShape of the policies in the state file
@@ -65,6 +83,10 @@ type Engine struct {
 	applied    nodeapi.DesiredState
 	cert       proto.Cert // node certificate files written by the last Apply
 	listeners  map[string]nodeapi.ListenerStatus
+	// shown is what Health reports of the last Apply, published at its end: Health never
+	// waits on mu, which a long Apply (or a big SetPolicies) holds, and the panel, which
+	// asks every few seconds with a short timeout, does not take the node for down.
+	shown atomic.Pointer[shownState]
 
 	errsMu sync.Mutex
 	errs   map[string]string // listener name → last listen error
@@ -73,9 +95,12 @@ type Engine struct {
 	sys  *sysSampler
 	host hostPortsCache
 
-	routes string // routesKey of what tunnel's proxies and rules hold now
-	warpMu sync.Mutex
-	warp   nodeapi.WarpStatus // the last check, kept for a minute
+	routes  string             // routesKey of what tunnel's proxies and rules hold now
+	exitDNS string             // exitDNSKey of the sniffer and resolver mihomo holds now
+	probeMu sync.Mutex         // one outbound probe at a time
+	warpMu  sync.Mutex         // the kept results below
+	warpGen int                // moves when a new config drops the kept results
+	warp    nodeapi.WarpStatus // the last check, kept for a minute
 	// warpState is what the log last said about WARP: "ok" or the error code; empty
 	// before the first check of a config.
 	warpState string
@@ -112,21 +137,32 @@ func (e *Engine) WarpStatus(ctx context.Context, force bool) nodeapi.WarpStatus 
 	if !configured {
 		return nodeapi.WarpStatus{}
 	}
+	// One probe at a time; warpMu guards only the kept result, so an Apply that resets it
+	// (under mu) never waits out a probe of up to 16 seconds.
+	e.probeMu.Lock()
+	defer e.probeMu.Unlock()
 	e.warpMu.Lock()
-	defer e.warpMu.Unlock()
 	if !e.warp.CheckedAt.IsZero() {
 		age := time.Since(e.warp.CheckedAt)
 		if age < warpCacheTTL && (!force || age < warpForceEvery) {
+			defer e.warpMu.Unlock()
 			return e.warp
 		}
 	}
+	gen := e.warpGen
+	e.warpMu.Unlock()
 	check := e.warpCheck
 	if check == nil {
 		check = probe
 	}
-	e.warp = check(ctx, warpProxy, endpoint)
-	e.logWarp(e.warp, endpoint)
-	return e.warp
+	st := check(ctx, warpProxy, endpoint)
+	e.warpMu.Lock()
+	defer e.warpMu.Unlock()
+	if gen == e.warpGen { // not of a config replaced meanwhile
+		e.warp = st
+		e.logWarp(st, endpoint)
+	}
+	return st
 }
 
 // logWarp writes a failed WARP check to the log once per change (ok to failed, failed
@@ -163,9 +199,10 @@ func Start(o Options) (*Engine, error) {
 	C.SetHomeDir(home)
 
 	e := &Engine{
-		dataDir: dataDir, home: home, log: log, version: version, started: time.Now(), allowPrivate: o.AllowPrivate,
+		dataDir: dataDir, home: home, log: log, version: version, started: time.Now(), allowPrivate: o.AllowPrivate, logs: o.Logs,
 		listeners: map[string]nodeapi.ListenerStatus{},
 		errs:      map[string]string{}, marker: make(chan string, 8), sys: newSysSampler(),
+		Challenge: acmechallenge.New(cmp.Or(o.ACMEListen, acmechallenge.DefaultListen)),
 	}
 	go e.pumpLogs()
 
@@ -188,6 +225,7 @@ func Start(o Options) (*Engine, error) {
 	// runs exactly once, with no listeners; ours are patched separately in Apply.
 	cfg.Listeners = map[string]C.InboundListener{}
 	executor.ApplyConfig(cfg, true)
+	e.exitDNS = exitDNSKey(nil)
 
 	st, ok, err := loadState(filepath.Join(dataDir, stateFile), log)
 	if err != nil {
@@ -200,6 +238,7 @@ func Start(o Options) (*Engine, error) {
 	}
 	e.restoreCounters(cs)
 	go e.sys.run()
+	go e.Reg.RunShaper(context.Background())
 	return e, nil
 }
 
@@ -257,13 +296,24 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		e.warp = nodeapi.WarpStatus{}
 		e.warpState = ""
 		e.probes = nil
+		e.warpGen++
 		e.warpMu.Unlock()
 	}
 
+	if key := exitDNSKey(st.DNS); key != e.exitDNS {
+		if err := applyExitDNS(cfg); err != nil {
+			e.log.Error("exit dns", "err", err)
+		} else {
+			e.exitDNS = key
+		}
+	}
+
 	e.Reg.SetSlots(st.Slots)
+	e.Reg.SetShaping(st.Shaping)
 	e.Reg.SetPolicies(st.Epoch, st.Policies)
 	e.Reg.SetShared(sharedListeners(st))
 	e.Reg.SetTorrent(st.Torrent)
+	e.Reg.SetIngress(st.Filters)
 	pools := map[string]string{}
 	for _, in := range st.Inbounds {
 		if in.Pool != "" {
@@ -308,6 +358,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	for _, s := range statuses {
 		e.listeners[s.Name] = s
 	}
+	e.shown.Store(&shownState{listeners: statuses, revision: st.Revision})
 	if err := e.saveState(st); err != nil {
 		e.log.Error("save state", "err", err)
 	}
@@ -387,24 +438,26 @@ func policyShape(ps []nodeapi.Policy) string {
 			pools = append(pools, q.Pool+strconv.FormatBool(q.Remaining < 0))
 		}
 		_ = enc.Encode([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, pools,
-			p.TorrentExempt, p.BannedUntil})
+			p.TorrentExempt, p.BannedUntil, p.SpeedMbps, p.Group})
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (e *Engine) Health() nodeapi.Health {
-	e.mu.Lock()
-	ls := make([]nodeapi.ListenerStatus, 0, len(e.listeners))
-	for _, s := range e.listeners {
-		ls = append(ls, s)
+	ls, rev := []nodeapi.ListenerStatus{}, int64(0)
+	if sh := e.shown.Load(); sh != nil {
+		ls, rev = append(ls, sh.listeners...), sh.revision
 	}
-	rev := e.applied.Revision
-	e.mu.Unlock()
-	sort.Slice(ls, func(i, j int) bool { return ls[i].Name < ls[j].Name })
 	return nodeapi.Health{
 		Version: e.version, Core: "mihomo " + mihomoVersion(), Revision: rev, StartedAt: e.started,
-		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(), Update: e.UpdateStatus(), Host: e.host.get(),
+		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(), Update: e.UpdateStatus(), Host: e.host.get(), Time: time.Now(),
 	}
+}
+
+// shownState is the last Apply as Health reports it: the listeners sorted by name.
+type shownState struct {
+	listeners []nodeapi.ListenerStatus
+	revision  int64
 }
 
 // PersistCounters is called periodically and on shutdown; at most the last interval
@@ -632,15 +685,23 @@ func (e *Engine) Probe(ctx context.Context, proxy string) (nodeapi.ProbeResult, 
 	if !known {
 		return nodeapi.ProbeResult{}, false
 	}
+	e.probeMu.Lock()
+	defer e.probeMu.Unlock()
 	e.warpMu.Lock()
-	defer e.warpMu.Unlock()
 	if r, ok := e.probes[proxy]; ok && time.Since(r.CheckedAt) < time.Minute {
+		defer e.warpMu.Unlock()
 		return r, true
 	}
+	gen := e.warpGen
+	e.warpMu.Unlock()
 	r := probe(ctx, proxy, "")
-	if e.probes == nil {
-		e.probes = map[string]nodeapi.ProbeResult{}
+	e.warpMu.Lock()
+	defer e.warpMu.Unlock()
+	if gen == e.warpGen {
+		if e.probes == nil {
+			e.probes = map[string]nodeapi.ProbeResult{}
+		}
+		e.probes[proxy] = r
 	}
-	e.probes[proxy] = r
 	return r, true
 }

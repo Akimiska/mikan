@@ -112,3 +112,47 @@ func TestUpdatesForTheHost(t *testing.T) {
 		t.Fatalf("without CSRF: %d", resp.StatusCode)
 	}
 }
+
+// The goals of the release index reach the updates card, and the admin can hide them.
+func TestUpdatesGoals(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.DataDir = t.TempDir()
+		o.Releases = func(context.Context, updates.Query) (updates.Found, error) {
+			return updates.Found{Manifest: release.Manifest{Version: "0.0.1", Published: time.Unix(1_800_000_000, 0), Image: "ghcr.io/miroshka000/mikan", Digest: "sha256:" + strings.Repeat("a", 64)},
+				Goals: release.Goals{Donate: "https://web.tribute.tg/d/REA", Items: []release.Goal{{ID: "utm", Title: map[string]string{"ru": "Метки"}, Target: 150, Raised: 40, Currency: "USD", Status: release.GoalOpen}}}}, nil
+		}
+	})
+	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("login: %d", resp.StatusCode)
+	}
+	csrf := map[string]string{"X-CSRF-Token": h.csrf}
+	api := "/" + adminPath + "/api/v1/updates"
+	type view struct {
+		Goals []struct {
+			ID     string `json:"id"`
+			Raised int    `json:"raised"`
+		} `json:"goals"`
+		Donate    string `json:"donate"`
+		ShowGoals bool   `json:"show_goals"`
+	}
+	read := func(resp *http.Response, body []byte) view {
+		t.Helper()
+		var v view
+		if resp.StatusCode/100 != 2 || json.Unmarshal(body, &v) != nil {
+			t.Fatalf("updates: %d %s", resp.StatusCode, body)
+		}
+		return v
+	}
+	if v := read(h.do(http.MethodGet, api, nil, nil)); v.Goals == nil || len(v.Goals) != 0 || !v.ShowGoals {
+		t.Fatalf("before a check: %+v", v)
+	}
+	if v := read(h.do(http.MethodPost, api+"/check", nil, csrf)); len(v.Goals) != 1 || v.Goals[0].Raised != 40 || v.Donate != "https://web.tribute.tg/d/REA" {
+		t.Fatalf("after a check: %+v", v)
+	}
+	if v := read(h.do(http.MethodPatch, api, map[string]any{"show_goals": false}, csrf)); v.ShowGoals {
+		t.Fatalf("hidden: %+v", v)
+	}
+	if v := read(h.do(http.MethodGet, api, nil, nil)); v.ShowGoals {
+		t.Fatalf("the switch is kept: %+v", v)
+	}
+}

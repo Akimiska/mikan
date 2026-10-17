@@ -13,7 +13,7 @@ import { t } from "../../i18n";
 import { useDraft } from "../../lib/draft";
 import { fieldErrors } from "../../lib/fields";
 import { ago } from "../../lib/format";
-import { nodeLabel } from "./nodes";
+import { nodeLabel } from "../../lib/node-label";
 
 type Cascade = Schemas["CascadeView"];
 type Route = "direct" | "warp" | "node";
@@ -138,9 +138,11 @@ function Body({ nodeId, c, refetch, checking }: { nodeId: number; c: Cascade; re
             </select>
           ) : null}
         </Field>
-        <Button variant="primary" loading={save.isPending} disabled={!changed || (route === "node" && !exit)} onClick={() => save.mutate()}>
-          {t("common.save")}
-        </Button>
+        <div className="form-actions">
+          <Button variant="primary" loading={save.isPending} disabled={!changed || (route === "node" && !exit)} onClick={() => save.mutate()}>
+            {t("common.save")}
+          </Button>
+        </div>
       </section>
     </>
   );

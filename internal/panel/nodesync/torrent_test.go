@@ -8,6 +8,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/filters"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -361,5 +362,29 @@ func TestTorrentExemptGetsNoBan(t *testing.T) {
 	h.s.m.PoliciesChanged()
 	if p := policyOf(t, h.s, u.ID); !p.TorrentExempt || p.BannedUntil != 0 {
 		t.Fatalf("an exempt user gets no ban: %+v", p)
+	}
+}
+
+// The filters reach the nodes with their state, and a change of them is a new state.
+func TestFiltersInState(t *testing.T) {
+	s, _, st, _, _ := setup(t)
+	ctx := context.Background()
+	before, err := s.desired(ctx)
+	if err != nil || before.Filters != nil {
+		t.Fatalf("off by default: %+v %v", before.Filters, err)
+	}
+	cfg := filters.Default()
+	cfg.Egress.Enabled = true
+	cfg.Ingress = filters.Ingress{Enabled: true, Networks: []string{"203.0.113.0/24"}}
+	if err := settings.Set(ctx, settings.New(st.Q), filters.KeyConfig, cfg); err != nil {
+		t.Fatal(err)
+	}
+	s.m.SlotsChanged() // as the API does after saving
+	after, err := s.desired(ctx)
+	if err != nil || after.Filters == nil || len(after.Filters.Egress.Ports) != 3 || after.Filters.Ingress.Networks[0] != "203.0.113.0/24" {
+		t.Fatalf("state: %+v %v", after.Filters, err)
+	}
+	if stateKey(before) == stateKey(after) {
+		t.Fatal("the filters do not change the state key")
 	}
 }

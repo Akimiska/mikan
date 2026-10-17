@@ -42,12 +42,12 @@ export function LimitBadges({ clashOnly, shared }: { clashOnly: boolean; shared:
 }
 
 /** What the admin gives up with the chosen preset, said before it is added. */
-export function LimitNotes({ clashOnly, shared }: { clashOnly: boolean; shared: boolean }) {
-  if (!clashOnly && !shared) return null;
+export function LimitNotes({ clashOnly, shared, domainCert = false }: { clashOnly: boolean; shared: boolean; domainCert?: boolean }) {
+  if (!clashOnly && !shared && !domainCert) return null;
   return (
     <div className="mb-4 flex flex-col gap-2" role="note">
       {shared ? (
-        <div className="rounded-2xl border border-[rgba(224,160,33,0.35)] bg-[var(--honey-50)] p-3 text-[13px] text-[var(--ink-700)]">
+        <div className="rounded-2xl border border-[color-mix(in_srgb,var(--honey-500)_35%,transparent)] bg-[var(--honey-50)] p-3 text-[13px] text-[var(--ink-700)]">
           <div className="mb-1 flex items-center gap-2 font-semibold text-[var(--ink-900)]">
             <TriangleAlert size={16} className="text-[var(--honey-600)]" aria-hidden /> {t("inbounds.sharedWarnTitle")}
           </div>
@@ -55,6 +55,7 @@ export function LimitNotes({ clashOnly, shared }: { clashOnly: boolean; shared: 
         </div>
       ) : null}
       {clashOnly ? <p className="text-xs text-[var(--ink-500)]">{t("inbounds.clashOnlyNote")}</p> : null}
+      {domainCert ? <p className="text-xs text-[var(--ink-500)]">{t("inbounds.domainCertNote")}</p> : null}
     </div>
   );
 }

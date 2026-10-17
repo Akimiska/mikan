@@ -178,8 +178,19 @@ func TestBotOldPanelLinks(t *testing.T) {
 	n := e.tg.count()
 	chat++
 	e.say(chat, "https://old.example.com/api/sub/"+remnaToken)
-	c, _ := find(e.tg.wait(t, n, "sendMessage"), "sendMessage")
-	if !strings.Contains(text(c), "Эта подписка уже подключена") || ownedBy(rema) {
-		t.Errorf("a held subscription is taken without its owner: %q", text(c))
+	// The answer and the question to the owner go out in either order: wait for both.
+	e.tg.until(t, n, func(cs []call) bool {
+		told, asked := false, false
+		for _, c := range cs {
+			if c.method != "sendMessage" {
+				continue
+			}
+			told = told || c.body["chat_id"] == float64(chat) && strings.Contains(text(c), "Эта подписка уже подключена")
+			asked = asked || c.body["chat_id"] == float64(777) && strings.Contains(text(c), "хотят подключить")
+		}
+		return told && asked
+	})
+	if ownedBy(rema) {
+		t.Error("a held subscription is taken without its owner")
 	}
 }

@@ -29,8 +29,11 @@ var Families = []Family{FamilyMihomo, FamilyXray, FamilySingBox, FamilyStash, Fa
 // App is a subscription client as its User-Agent describes it.
 type App struct {
 	Family Family
-	Core   Version // the mihomo core, when the app tells it or its version implies it
-	Legacy bool    // Hiddify: sing-box of 2024, before AnyTLS
+	Core   Version // the mihomo or sing-box core, when the app tells it or its version implies it
+	Legacy bool    // Hiddify before 4: sing-box of 2024, before AnyTLS
+	// Whole: the app runs a whole sing-box config, route and DNS too (the official SFA,
+	// SFI, SFM, SFT); the others take its outbounds and route by their own settings.
+	Whole bool
 }
 
 // Version is major.minor.patch; zero when unknown.
@@ -52,7 +55,12 @@ var (
 	// "AoiVPN/vX FlClash X/vX core/1.19.31 Platform/…" — the mihomo core
 	// version rides on `core/`, so detect it to serve the full protocol set.
 	mihomoVersion = regexp.MustCompile(`(?:mihomo|clash[.-]?meta|core)/v?(\d+)\.(\d+)\.(\d+)`)
-	koalaVersion  = regexp.MustCompile(`koala-clash/v?(\d+)\.(\d+)\.(\d+)`)
+	// hiddifyVersion: "HiddifyNext/4.1.1 (android) like ClashMeta v2ray sing-box", or
+	// HiddifyNextX with the Xray core on.
+	hiddifyVersion = regexp.MustCompile(`hiddifynextx?/v?(\d+)\.(\d+)\.(\d+)`)
+	koalaVersion   = regexp.MustCompile(`koala-clash/v?(\d+)\.(\d+)\.(\d+)`)
+	// singboxVersion: the core the official sing-box apps, Karing and Husi name.
+	singboxVersion = regexp.MustCompile(`sing-box v?(\d+)\.(\d+)\.(\d+)`)
 )
 
 func versionOf(m []string) Version {
@@ -94,10 +102,18 @@ func DetectApp(userAgent string) App {
 	case strings.HasPrefix(ua, "stash"):
 		return App{Family: FamilyStash}
 	case has("hiddify"):
-		return App{Family: FamilySingBox, Legacy: true}
+		// Hiddify 4 (2026) runs a sing-box 1.13 fork; the 2.x of 2024 had no AnyTLS. One
+		// that does not say its version is taken for the old one.
+		m := hiddifyVersion.FindStringSubmatch(ua)
+		return App{Family: FamilySingBox, Legacy: m == nil || versionOf(m)[0] < 4}
 	case has("karing", "sing-box", "singbox", "nekobox", "nekoray", "husi", "throne", "deskbox", "inhive") ||
 		strings.HasPrefix(ua, "sfa") || strings.HasPrefix(ua, "sfi") || strings.HasPrefix(ua, "sfm") || strings.HasPrefix(ua, "sft"):
-		return App{Family: FamilySingBox}
+		// "SFA (sing-box 1.14.2; language en_US)"
+		a := App{Family: FamilySingBox, Whole: strings.HasPrefix(ua, "sfa") || strings.HasPrefix(ua, "sfi") || strings.HasPrefix(ua, "sfm") || strings.HasPrefix(ua, "sft")}
+		if m := singboxVersion.FindStringSubmatch(ua); m != nil {
+			a.Core = versionOf(m)
+		}
+		return a
 	case has("mihomo", "clash", "koala", "verge", "prizrak", "flowvy", "murge", "rabbit"):
 		a := App{Family: FamilyMihomo}
 		if m := mihomoVersion.FindStringSubmatch(ua); m != nil {

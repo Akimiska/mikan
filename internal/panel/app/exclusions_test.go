@@ -60,7 +60,7 @@ func TestTariffClosesPool(t *testing.T) {
 		return string(body)
 	}
 	// One proxy per inbound on the one node: the count says whether the pool's is there.
-	proxies := func() int { return strings.Count(sub(), `"server": `) }
+	proxies := func() int { return strings.Count(sub(), "\n    server: ") }
 	all := proxies()
 	if all == 0 {
 		t.Fatal("no proxies")

@@ -1,4 +1,5 @@
 import { Copy, ExternalLink, RefreshCw, Send } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, errorText, unwrap, type User } from "../../../api/client";
 import { useInbounds, userActions, useUserMutation } from "../../../api/hooks";
@@ -45,8 +46,38 @@ export function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () =
           </Button>
         </div>
       </div>
+      <HappLink id={u.id} token={u.sub_url} />
       {u.legacy ? <LegacyLink legacy={u.legacy} /> : null}
     </Section>
+  );
+}
+
+/** Happ's crypt link, when the panel makes them (Settings → Subscription → Happ): what to
+ * send instead of the address when the address must stay hidden. Nothing while it loads
+ * or when the crypt link is off; token refetches it after a reissue. */
+function HappLink({ id, token }: { id: number; token: string }) {
+  const copyText = useCopy();
+  const q = useQuery({
+    queryKey: ["happ-link", id, token],
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/happ-link", { params: { path: { id } }, signal })),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const link = q.data?.link;
+  if (!link) return null;
+  return (
+    <div className="mt-4">
+      <div className="mb-1 text-[13px] font-medium">{t("settings.happLink")}</div>
+      <div className="link-field">
+        <span className="mono" title={link}>
+          {link}
+        </span>
+        <button type="button" className="icon-btn" onClick={() => copyText(link, t("common.linkCopied"))} aria-label={t("common.copyLink")}>
+          <Copy size={18} />
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.happLinkHint")}</p>
+    </div>
   );
 }
 

@@ -55,7 +55,7 @@ impl Section {
 
     fn lead(self) -> &'static str {
         match self {
-            Section::Status => "Containers, resources and the release. Refreshes every 5 seconds.",
+            Section::Status => "Containers, resources and the release. Refreshes every 10 seconds.",
             Section::Update => "Updates pull the signed release, back up first and go back if the new version does not start.",
             Section::Logs => "The last lines of the panel and the node, live.",
             Section::Access => "The panel's link and the admin's login.",
@@ -270,13 +270,16 @@ impl Menu {
     fn refresh_status(&mut self) {
         self.policy_on = update::policy_on();
         let node_port = self.install.node_port();
-        self.status = Task::start(move || Status {
-            services: docker::services().unwrap_or_default(),
-            stats: docker::stats(),
-            healthy: match node_port {
-                Some(p) => system::port_owner(p, system::Proto::Tcp).is_some(),
-                None => docker::panel_healthy(),
-            },
+        self.status = Task::start(move || {
+            let services = docker::services().unwrap_or_default();
+            Status {
+                stats: docker::stats(&services),
+                healthy: match node_port {
+                    Some(p) => system::port_owner(p, system::Proto::Tcp).is_some(),
+                    None => docker::panel_healthy(),
+                },
+                services,
+            }
         });
         self.status_at = Instant::now();
     }
@@ -399,11 +402,12 @@ impl Menu {
                 }
             }
             Section::Sites => match self.scan.done() {
-                Some(Ok(_)) if self.pick < self.rows.len() => {
+                Some(Ok(scan)) if self.pick < self.rows.len() => {
                     let site = self.rows[self.pick].clone();
+                    let own = scan.self_steal.clone();
                     self.job_title = format!("REALITY site {}", site.sni);
                     self.job_at = Section::Sites;
-                    self.job = job(move || sites::apply(&site));
+                    self.job = job(move || sites::apply(&site, own.as_ref()));
                 }
                 Some(Ok(_)) => {}
                 _ if !self.scan.running() => self.scan = Task::start(sites::scan),
@@ -497,7 +501,9 @@ impl Screen for Menu {
         if self.status.poll() {
             self.last_status = self.status.take().or(self.last_status.take());
         }
-        if self.section() == Section::Status && !self.status.running() && self.status_at.elapsed() > Duration::from_secs(5) {
+        // Every refresh starts docker processes (`docker stats` samples for a second or two):
+        // on a small server, every 10 s is enough.
+        if self.section() == Section::Status && !self.status.running() && self.status_at.elapsed() > Duration::from_secs(10) {
             self.refresh_status();
         }
         self.latest.poll();

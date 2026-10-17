@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"strconv"
 	"testing"
+	"time"
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
@@ -16,6 +17,7 @@ import (
 // after a grant and the node's quota grows by it, and the period reset keeps grants.
 func TestTrafficGrantsOnThePanel(t *testing.T) {
 	s, node, st, users, _ := setup(t)
+	s.m.storeInterval = 0 // batch after batch, each stored
 	ctx := context.Background()
 	q := st.Q
 	pool, err := q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})
@@ -105,7 +107,7 @@ func TestTrafficGrantsOnThePanel(t *testing.T) {
 	if st := domain.State(got, left.Main(u.ID), s.m.now()); st != domain.StateActive {
 		t.Fatalf("after the grant: %s", st)
 	}
-	spent, _ := domain.ExhaustedPools(ctx, q, u.ID, s.m.now())
+	spent, _ := domain.ExhaustedPools(ctx, q, u.ID, mustLeft(t, ctx, q, u.ID, s.m.now()))
 	if spent[pool.ID] {
 		t.Fatal("the pool is back after its grant")
 	}
@@ -117,4 +119,14 @@ func TestTrafficGrantsOnThePanel(t *testing.T) {
 	if p := policy(); p.QuotaRemaining != 12*domain.GiB || p.Pools[0].Remaining != 2*domain.GiB {
 		t.Fatalf("after the reset: quota %d pool %+v", p.QuotaRemaining, p.Pools)
 	}
+}
+
+// mustLeft is what is left of the user's grants now.
+func mustLeft(t *testing.T, ctx context.Context, q *db.Queries, userID int64, now time.Time) domain.GrantsLeft {
+	t.Helper()
+	left, err := domain.UserGrantsLeft(ctx, q, userID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return left
 }

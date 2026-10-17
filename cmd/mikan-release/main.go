@@ -44,7 +44,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: mikan-release keygen|manifest|verify|legacy-check|index …")
+		return errors.New("usage: mikan-release keygen|manifest|verify|legacy-check|index|goals …")
 	}
 	switch args[0] {
 	case "keygen":
@@ -57,6 +57,8 @@ func run(args []string) error {
 		return legacyCheckFile(args[1:])
 	case "index":
 		return makeIndex(args[1:])
+	case "goals":
+		return makeGoals(args[1:])
 	}
 	return fmt.Errorf("unknown command %q", args[0])
 }
@@ -166,7 +168,7 @@ func makeManifest(args []string) error {
 		}
 	}
 	m := release.Manifest{Version: *version, MinInstaller: *minInstaller, Published: time.Now().UTC().Truncate(time.Second), Image: *image, Digest: *digest,
-		Installer: map[string]release.Asset{}, Notes: release.Notes(log, *version)}
+		Installer: map[string]release.Asset{}, Notes: release.NotesFor(log, *version)}
 	for _, lang := range languages {
 		if m.Notes[lang] == "" {
 			return fmt.Errorf("%s has no %q notes for %s (want \"## %s\" with \"### en\" and \"### ru\")", *changelog, lang, *version, *version)

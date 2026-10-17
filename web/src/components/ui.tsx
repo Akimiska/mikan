@@ -1,6 +1,6 @@
 import clsx from "clsx";
-import { LoaderCircle, SearchX, TriangleAlert, UserRound } from "lucide-react";
-import { cloneElement, isValidElement, lazy, Suspense, useId, type ButtonHTMLAttributes, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { LoaderCircle, SearchX, TriangleAlert, UserRound, type LucideIcon } from "lucide-react";
+import { cloneElement, isValidElement, lazy, Suspense, useEffect, useId, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import type { UserState } from "../api/client";
 import { t } from "../i18n";
 
@@ -67,9 +67,9 @@ export function Avatar({ name, seed, size }: { name: string; seed: number; size?
   );
 }
 
-export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+export function Segmented<T extends string>({ value, options, onChange, label, block }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string; block?: boolean }) {
   return (
-    <div className="seg" role="group" aria-label={label}>
+    <div className={block ? "seg seg-block" : "seg"} role="group" aria-label={label}>
       {options.map((o) => (
         <button key={o.value} type="button" aria-pressed={o.value === value} onClick={() => onChange(o.value)}>
           {o.label}
@@ -144,10 +144,10 @@ export function Spinner({ size = 16 }: { size?: number }) {
   return <LoaderCircle size={size} className="spin" role="img" aria-label={t("common.loading")} />;
 }
 
-export function EmptyState({ title, text, children, search }: { title: string; text: ReactNode; children?: ReactNode; search?: boolean }) {
+export function EmptyState({ title, text, children, search, icon: Icon = UserRound }: { title: string; text: ReactNode; children?: ReactNode; search?: boolean; icon?: LucideIcon }) {
   return (
     <div className="state-box">
-      <div className="state-mark">{search ? <SearchX size={22} /> : <UserRound size={22} />}</div>
+      <div className="state-mark">{search ? <SearchX size={22} /> : <Icon size={22} />}</div>
       <h2>{title}</h2>
       <p>{text}</p>
       {children ? <div className="mt-2 flex flex-wrap justify-center gap-2">{children}</div> : null}
@@ -200,8 +200,17 @@ export function Field({ label, htmlFor, hint, error, children }: { label: string
 }
 
 export function PageHeader({ title, sub, actions }: { title: string; sub?: ReactNode; actions?: ReactNode }) {
+  // The header lies flat on the page and turns into a floating bar once the page scrolls
+  // under it.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setStuck(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
   return (
-    <header className="topbar">
+    <header className="topbar" data-stuck={stuck || undefined}>
       <div className="min-w-0">
         <h1 className="page-title">{title}</h1>
         {sub ? <p className="page-sub">{sub}</p> : null}

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, errorText, unwrap, type User } from "../../../api/client";
 import { qk, useTorrent, useTorrentHits } from "../../../api/hooks";
-import { Switch } from "../../../components/switch";
+import { SwitchRow } from "../../../components/switch";
 import { useToast } from "../../../components/toast";
 import { Button } from "../../../components/ui";
 import { t } from "../../../i18n";
@@ -46,13 +46,7 @@ export function TorrentSection({ u }: { u: User }) {
           </Button>
         </div>
       ) : null}
-      <div className="flex items-start justify-between gap-3 py-1">
-        <div>
-          <div className="text-[13px] font-medium">{t("userDrawer.torrent.exempt")}</div>
-          <div className="text-xs text-[var(--ink-500)]">{t("userDrawer.torrent.exemptHint")}</div>
-        </div>
-        <Switch checked={exempt} label={t("userDrawer.torrent.exempt")} disabled={save.isPending} onChange={setExempt} />
-      </div>
+      <SwitchRow className="py-1" label={t("userDrawer.torrent.exempt")} sub={t("userDrawer.torrent.exemptHint")} checked={exempt} disabled={save.isPending} onChange={setExempt} />
       {recent.length ? (
         <>
           <div className="mt-3 text-xs font-medium text-[var(--ink-600)]">{t("userDrawer.torrent.recent")}</div>

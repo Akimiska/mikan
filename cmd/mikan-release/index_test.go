@@ -155,3 +155,59 @@ func TestUpgradeFromFile(t *testing.T) {
 		}
 	}
 }
+
+// Goals go into the signed index in place of the old ones, the releases stay as they were,
+// and the next release carries them on.
+func TestGoalsIntoIndex(t *testing.T) {
+	f := newFixture(t, changelog)
+	first := filepath.Join(f.dir, "first")
+	if err := makeIndex([]string{"-version", "0.5.0.1", "-from", "0.4.5", "-seed", "-out", first}); err != nil {
+		t.Fatal(err)
+	}
+	goals := f.write("goals.json", `{"donate": "https://web.tribute.tg/d/REA", "items": [
+		{"id": "device-addon", "title": {"ru": "Продажа +1 устройства", "en": "Selling +1 device"}, "target": 150, "raised": 40, "currency": "USD", "status": "open"},
+		{"id": "singbox", "title": {"en": "sing-box profiles"}, "target": 100, "raised": 100, "currency": "USD", "status": "done", "version": "0.5.0.3"}]}`)
+	withGoals := filepath.Join(f.dir, "goals")
+	if err := makeGoals([]string{"-file", goals, "-in", filepath.Join(first, "index.json"), "-out", withGoals}); err != nil {
+		t.Fatal(err)
+	}
+	ix := f.readIndex(withGoals)
+	if len(ix.Goals.Items) != 2 || ix.Goals.Items[0].Raised != 40 || ix.Goals.Items[1].Version != "0.5.0.3" || ix.Goals.Donate != "https://web.tribute.tg/d/REA" {
+		t.Fatalf("goals: %+v", ix.Goals)
+	}
+	if got := versions(ix); got != "0.4.5/stable/0.4.0 0.5.0.0/stable/0.4.5 0.5.0.1/stable/0.4.5" {
+		t.Fatalf("releases changed: %s", got)
+	}
+	next := filepath.Join(f.dir, "next")
+	if err := makeIndex([]string{"-version", "0.5.0.2", "-from", "0.4.5", "-in", filepath.Join(withGoals, "index.json"), "-out", next}); err != nil {
+		t.Fatal(err)
+	}
+	if ix := f.readIndex(next); len(ix.Goals.Items) != 2 {
+		t.Fatalf("a release lost the goals: %+v", ix.Goals)
+	}
+	// A file the readers would not show whole is refused before anything is signed.
+	for name, body := range map[string]string{
+		"no donate link":       `{"items": []}`,
+		"http donate link":     `{"donate": "http://x.example", "items": []}`,
+		"unknown field":        `{"donate": "https://x.example", "items": [], "extra": 1}`,
+		"bad id":               `{"donate": "https://x.example", "items": [{"id": "Device", "title": {"ru": "a"}, "target": 1, "currency": "USD", "status": "open"}]}`,
+		"twice":                `{"donate": "https://x.example", "items": [{"id": "a", "title": {"ru": "a"}, "target": 1, "currency": "USD", "status": "open"}, {"id": "a", "title": {"ru": "b"}, "target": 1, "currency": "USD", "status": "open"}]}`,
+		"done without release": `{"donate": "https://x.example", "items": [{"id": "a", "title": {"ru": "a"}, "target": 1, "currency": "USD", "status": "done"}]}`,
+		"markup":               `{"donate": "https://x.example", "items": [{"id": "a", "title": {"ru": "<script>"}, "target": 1, "currency": "USD", "status": "open"}]}`,
+	} {
+		if err := makeGoals([]string{"-file", f.write("bad.json", body), "-in", filepath.Join(first, "index.json"), "-out", filepath.Join(f.dir, "bad")}); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// The repository's goals file is one the workflow signs.
+func TestGoalsFile(t *testing.T) {
+	data, err := os.ReadFile("../../.github/goals.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := release.ParseGoals(data); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -1,0 +1,66 @@
+---
+title: Support access
+description: How to let the official mikan support into the panel for a few hours by a code from the bot, without a password or SSH, what it can and cannot do, and how to close the access.
+---
+
+When you need help with the setup, you can let the [paid mikan support](/mikan/en/support/paid/) into your panel for a while: it needs neither your password nor SSH. The access lives for 2, 6 or 24 hours and closes with one button. Without your button nobody, mikan's developers included, gets into the panel: the project has no standing access to your servers.
+
+The access opens for the official support only, and only by a code from a paid ticket in [@MikanSup_bot](https://t.me/MikanSup_bot). The panel checks the code with the bot and hands the access to it itself: the link is never shown to you, there is nothing to copy or forward. Nobody else can be let in this way. The panel reaches the support bot only at that moment.
+
+Section: **Settings → Support**.
+
+## Opening it
+
+1. In your ticket in the bot, press "🔑 Support access": the bot shows a code. It works once and for an hour, a new one cancels the previous.
+2. In the panel, press "Open access" and type the code.
+3. Choose the duration: 2, 6 or 24 hours.
+4. Choose the level:
+   - **View**: read everything diagnosis needs (nodes, protocols, logs, server checks), change nothing;
+   - **Change**: also edit nodes, protocols, certificates and addons, start updates and restarts;
+   - **Terminal**: all of that plus a shell on chosen servers, see [below](#terminal).
+5. The **Show client data** checkbox is off by default: names, Telegram, subscription links, device addresses and the client search are hidden. Turn it on only if the problem cannot be solved without it.
+6. Press "Open access". The panel asks the bot whether the code fits, opens the access and hands it to the ticket. The bot checks that the panel answers at its address and is an official mikan build, and tells you "Access received".
+
+If the code does not fit, or the bot does not answer or refuses the access, nothing opens: an access that did not reach the bot is closed by the panel at once. One access is active at a time, a new one cancels the previous. The access covers every node of the panel at once.
+
+The support bot learns your admin panel's secret address. After the support you can issue a new panel link: **Settings → Security → Panel link → Issue a new link**.
+
+## Always closed
+
+At every level the operator cannot reach:
+
+- the password, 2FA, sessions and API keys;
+- the panel's audit log;
+- the bot's settings (token, route, the admin's notice chat);
+- the Telegram backup and broadcasts;
+- resetting the panel's secret path;
+- opening new support access and this section itself;
+- terminal recordings.
+
+## Control
+
+- While the access is open, every page shows a "Support is connected" strip with a **Revoke** button. Revoking works at once: the operator's sessions are deleted, open terminals close, the link and the key stop working.
+- Every operator action goes into the audit log marked "support". The access card shows when they came in, from which address and what they did.
+- If the panel's bot is on, Telegram tells you when the operator came in, opened and closed a terminal, and when the access ended.
+- The operator can press **Finish and leave** when the work is done: the access closes just as with your revoke.
+- When the time runs out, the access closes by itself.
+
+## Terminal
+
+The **Terminal** level gives a root shell on the panel's server and on chosen nodes right from the panel, on the **Diagnostics → Terminal** page. No ports open on the server and SSH is not needed: the panel hands the session to `mikan terminal-agent` on the server over a unix socket that a systemd unit creates for one session.
+
+- Only you turn it on, with your password and 2FA code, and only for the servers you tick.
+- A session closes on revoke, when the access runs out and after 15 minutes without input.
+- Everything typed and printed is recorded. Recordings are kept for 30 days and only you can watch them: **Settings → Support → Terminal recordings**.
+- The terminal itself leaves nothing behind, but root has full rights: it can change the server and the recording itself. The recording lets you check what was done, it is not a guarantee. Open the terminal only to someone you trust and only for the time of the work.
+
+## Turning it off
+
+- The **Allow support access** switch on the same card. Off: no access can be opened, the open one closes at once, links stop working.
+- On the server: `mikan support-access off`. It turns the feature off for good, whatever the panel says, and removes the support terminal's units from the server. `mikan support-access on` gives the choice back to the panel.
+
+## When the panel does not open
+
+Then no access can be opened. Run `mikan support <code>` on the server with the code from your ticket: it gathers the server check, the status and the last log lines without secrets and sends them to the ticket. More in [The mikan command](/mikan/en/operations/cli/).
+
+mikan's paid support works through this access, its rules: [Paid support](/mikan/en/support/paid/).

@@ -8,7 +8,6 @@ package autotune
 import (
 	"net/netip"
 	"slices"
-	"strconv"
 	"time"
 
 	"mikan/internal/nodeapi"
@@ -44,11 +43,15 @@ type Evidence struct {
 type Verdict struct {
 	Blocked int // did not reach it
 	Reached int // reached it
+	// Networks is how many networks (see netOf) the blocked devices are on.
+	Networks int
 }
 
 // CutOff: devices that reach everything else do not reach this inbound. A few devices
-// failing next to many that get through are their own networks' problem.
-func (v Verdict) CutOff() bool { return v.Blocked > 0 && 4*v.Blocked >= v.Reached }
+// failing next to many that get through are their own networks' problem, and so is one
+// network: a device with a second VPN beside the app, or a home router that drops one
+// port, would move the port for everyone (GitHub issue #67).
+func (v Verdict) CutOff() bool { return v.Networks >= 2 && 4*v.Blocked >= v.Reached }
 
 // Detect finds inbounds the node's devices cannot reach. Only devices that clearly try
 // every inbound count: a Clash profile's url-test group checks all proxies every few
@@ -72,6 +75,7 @@ func Detect(e Evidence) map[int64]Verdict {
 	}
 	since := e.Since.Unix()
 	reachedFrom := map[string]map[string]bool{} // inbound name → networks it was reached from
+	blockedOn := map[int64]map[string]bool{}    // inbound id → networks of its blocked devices
 	for _, c := range e.Activity.Clients {
 		for name, at := range c.Seen {
 			if at >= since {
@@ -117,6 +121,11 @@ func Detect(e Evidence) map[int64]Verdict {
 				v.Reached++
 			case e.Reach[c.Slot][x.ID] > 0 && !reachedFrom[x.Name][netOf(c.IP)]:
 				v.Blocked++
+				if blockedOn[x.ID] == nil {
+					blockedOn[x.ID] = map[string]bool{}
+				}
+				blockedOn[x.ID][netOf(c.IP)] = true
+				v.Networks = len(blockedOn[x.ID])
 			default:
 				continue
 			}
@@ -142,14 +151,9 @@ func netOf(ip string) string {
 	return p.String()
 }
 
-// FreePorts returns the ports of domain.PortPool a blocked inbound of the node may move
-// to on network: free on the node's port map and not given up lately.
-func FreePorts(ports domain.PortMap, network string, abandoned map[string]bool) []string {
-	var out []string
-	for _, p := range domain.PortPool {
-		if port := strconv.Itoa(p); !abandoned[port] && ports.Free(p, network) {
-			out = append(out, port)
-		}
-	}
-	return out
+// FreePorts returns the ports a blocked inbound of the node may move to on network: free
+// on the node's port map and not given up lately, of domain.PortPool, and past it when
+// anyPort (settings.AnyPort) is on and the pool is full.
+func FreePorts(ports domain.PortMap, network string, abandoned map[string]bool, anyPort bool) []string {
+	return ports.PickPorts(network, anyPort, abandoned)
 }

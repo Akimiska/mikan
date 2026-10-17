@@ -11,14 +11,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
+	"mikan/internal/logbuf"
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/acme"
@@ -27,9 +28,11 @@ import (
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/nodesync"
+	"mikan/internal/panel/reach"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/support"
 	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
 	"mikan/internal/release"
@@ -39,7 +42,9 @@ import (
 const workerStopTimeout = 20 * time.Second
 
 func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) error {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	// The last lines of the log, secrets cut out, for the Diagnostics page.
+	logs := logbuf.New(logbuf.DefaultLines)
+	logger := slog.New(logs.Handler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel})))
 	dsn, err := store.DatabaseURL()
 	if err != nil {
 		return err
@@ -68,8 +73,8 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	if host == "" {
 		host = "localhost"
 	}
-	// The self-signed certificate is long-lived and pinned in Hysteria2/TUIC links, so
-	// renewing the panel's public certificate never recreates the node's QUIC listeners.
+	// The self-signed certificate is long-lived and pinned in Hysteria2/TUIC links where
+	// the local node has no public one.
 	tlsDir := filepath.Join(cfg.DataDir, "tls")
 	self, err := tlscert.LoadOrCreateSelfSigned(tlsDir, host, time.Now())
 	if err != nil {
@@ -78,61 +83,68 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	holder := &tlscert.Holder{}
 	holder.Set(self)
 
-	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, Log: logger, Now: time.Now,
+	opts := Options{Version: version, Web: web, TrustProxy: cfg.TrustProxy, SupportOff: cfg.SupportOff, Log: logger, Now: time.Now,
 		Autotune: autotune.DefaultOptions().Scaled(cfg.AutotuneScale), TelegramAPI: cfg.TelegramAPI,
-		DataDir: cfg.DataDir, Releases: updates.Fetch(release.IndexURL, release.LatestURL), DNS: dnscheck.New()}
+		DataDir: cfg.DataDir, Dev: cfg.Dev, Releases: updates.Fetch(release.IndexURL, release.LatestURL), DNS: dnscheck.New(), Reach: reach.New("", nil, time.Now), Logs: logs}
+	botURL := cfg.SupportBotURL
+	if botURL == "" {
+		botURL = support.DefaultBotURL
+	}
+	bot, err := support.NewHTTPBot(botURL)
+	if err != nil {
+		return fmt.Errorf("MIKAN_SUPPORT_BOT_URL: %w", err)
+	}
+	opts.SupportBot = bot
 	nodesDir := filepath.Join(tlsDir, "nodes")
 	nodeCerts := tlscert.NewNodeStore(filepath.Join(tlsDir, "custom-nodes"), time.Now)
 	opts.NodeCerts = nodeCerts
 	set := settings.New(st.Q)
-	// A node's own certificate (Nodes → Certificate) goes first: links pin it only when
-	// clients cannot trust it, so a renewal of a public one changes nothing for them.
-	// Otherwise the local node shares the panel's self-signed certificate and each remote
-	// node gets its own for its address, pinned in links the same way.
-	opts.QUIC = func(n db.Node) (*nodeapi.TLSFiles, string, error) {
-		host := domain.NodeHost(n)
-		if n.Address == "" {
-			if ep, err := set.Endpoint(context.Background()); err == nil {
-				host = ep.Host
-			}
-		}
-		if c, trusted, err := nodeCerts.Get(n.ID, host); c != nil {
-			certPEM, keyPEM, err := tlscert.CustomPEM(c)
+	var (
+		certs     *acme.Manager
+		nodesACME *acme.Nodes
+	)
+	if !cfg.Dev {
+		certs = acme.New(cfg.DataDir, holder, self, set, logger, time.Now)
+		// The certificate already on disk is served before the nodes are first synced: links
+		// drop the pin once it is public, so the local node must start with it too.
+		certs.Load(ctx)
+		opts.Certs = certs
+		opts.HSTS = certs.Trusted
+		// Each remote node's public certificate, the challenge answered on its port 80.
+		nodesACME = certs.Nodes(func(ctx context.Context) ([]acme.NodeTarget, error) {
+			nodes, err := st.Q.ListNodes(ctx)
 			if err != nil {
-				return nil, "", err
+				return nil, err
 			}
-			pin := tlscert.Pin(c)
-			if trusted {
-				pin = ""
+			var out []acme.NodeTarget
+			for _, n := range nodes {
+				if n.Address == "" {
+					continue
+				}
+				t := acme.NodeTarget{ID: n.ID, Host: domain.NodeHost(n)}
+				if ip, err := netip.ParseAddr(n.PublicHost); err == nil {
+					t.Own = []netip.Addr{ip.Unmap()}
+				}
+				if own, _, _ := nodeCerts.Get(n.ID, t.Host); own != nil {
+					t.HasOwn = true
+				}
+				if c, err := NodeClient(cfg, n); err == nil {
+					t.Client = c
+				}
+				out = append(out, t)
 			}
-			return &nodeapi.TLSFiles{CertPEM: certPEM, KeyPEM: keyPEM}, pin, nil
-		} else if err != nil {
-			logger.Warn("tls: a node's own certificate is not used", "node", n.ID, "err", err)
-		}
-		dir := tlsDir
-		if n.Address != "" {
-			dir = filepath.Join(nodesDir, strconv.FormatInt(n.ID, 10))
-			if _, err := tlscert.LoadOrCreateSelfSigned(dir, domain.NodeHost(n), time.Now()); err != nil {
-				return nil, "", err
-			}
-		}
-		c, k, pin, err := tlscert.PEM(dir)
-		if err != nil {
-			return nil, "", err
-		}
-		return &nodeapi.TLSFiles{CertPEM: c, KeyPEM: k}, pin, nil
+			return out, nil
+		})
+		opts.NodesACME = nodesACME
 	}
+	opts.TLS = NewNodeTLS(cfg.DataDir, nodeCerts, certs, nodesACME, set, logger, time.Now)
 	opts.PanelCert = func() (nodetls.Pair, error) { return nodetls.LoadOrCreate(nodesDir, time.Now()) }
 	opts.Connect = func(n db.Node) (nodesync.Target, error) {
 		c, err := NodeClient(cfg, n)
 		if err != nil {
 			return nodesync.Target{}, err
 		}
-		quic := func() (*nodeapi.TLSFiles, error) {
-			f, _, err := opts.QUIC(n)
-			return f, err
-		}
-		return nodesync.Target{Node: c, TLS: quic, Local: n.Address == ""}, nil
+		return nodesync.Target{Node: c, TLS: opts.TLS.Source(n), Local: n.Address == "", Address: n.Address}, nil
 	}
 	var panelTLS *tls.Config
 	if !cfg.Dev {
@@ -145,15 +157,19 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	subPort := NewSubPort(listenHost, panelTLS, logger)
 	defer subPort.Close()
 	opts.SubPort, opts.SubPortError = subPort.Set, subPort.Error
-	var certs *acme.Manager
-	if !cfg.Dev {
-		certs = acme.New(cfg.DataDir, holder, self, settings.New(st.Q), logger, time.Now)
-		opts.Certs = certs
-		opts.HSTS = certs.Trusted
-	}
 	p, err := NewPanel(st, opts)
 	if err != nil {
 		return err
+	}
+	// A certificate issued, renewed or uploaded later goes to the nodes at once: they get it
+	// only with their state, which is sent again on a change.
+	if certs != nil && p.Nodes != nil {
+		certs.OnChange(p.Nodes.SlotsChanged)
+		nodesACME.OnChange(func(id int64) {
+			if s, ok := p.Nodes.Syncer(id); ok {
+				s.SlotsChanged()
+			}
+		})
 	}
 	paths, err := p.Apply(ctx)
 	if err != nil {
@@ -184,6 +200,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	running.Go(func() { p.Run(workers) })
 	if certs != nil {
 		running.Go(func() { certs.Run(workers) })
+		running.Go(func() { nodesACME.Run(workers) })
 		// kill -HUP (an external tool's renewal hook) serves a new custom certificate now.
 		hup := make(chan os.Signal, 1)
 		signal.Notify(hup, syscall.SIGHUP)
@@ -231,9 +248,12 @@ func httpServer(h http.Handler) *http.Server {
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    64 << 10,
-		ErrorLog:          log.New(dropHandshakeNoise{}, "", log.LstdFlags),
+		// A reader slower than this does not hold a connection: the longest answers (a
+		// certificate ordered on the spot, 90 s; a node's speed test, 100 s) fit well within.
+		WriteTimeout:   3 * time.Minute,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 64 << 10,
+		ErrorLog:       log.New(dropHandshakeNoise{}, "", log.LstdFlags),
 	}
 }
 

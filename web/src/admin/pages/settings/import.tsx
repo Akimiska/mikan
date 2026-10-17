@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/client";
+import { api, apiCodeText, errorText, unwrap, type Schemas } from "../../../api/client";
 import { useTariffs } from "../../../api/hooks";
+import { FormActions } from "../../../components/layout";
 import { useToast } from "../../../components/toast";
 import { Button, Field } from "../../../components/ui";
-import { t, tMaybe, type Key } from "../../../i18n";
+import { t, type Key } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
-import { fieldErrors } from "../../../lib/fields";
+import { fieldErrors, onFormError } from "../../../lib/fields";
 
 type Kind = "marzban" | "pasarguard" | "remnawave";
 const KINDS: Kind[] = ["marzban", "pasarguard", "remnawave"];
@@ -23,7 +24,7 @@ export function ImportCard() {
   const [tariff, setTariff] = useState<number | "">("");
   const job = useQuery({
     queryKey: ["import-status"],
-    queryFn: () => unwrap(api.GET("/api/v1/import/status", {})),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/import/status", { signal })),
     refetchInterval: (q) => (busy(q.state.data?.state) ? 1000 : false),
   });
   const st = job.data;
@@ -103,11 +104,9 @@ export function ImportCard() {
             </Button>
           </div>
         ) : (
-          <Button type="submit" variant="primary" loading={check.isPending} disabled={!src.url.trim()}>
-            {t("settings.import.check")}
-          </Button>
+          <FormActions saving={check.isPending} disabled={!src.url.trim()} label={t("settings.import.check")} />
         )}
-        {st?.state === "failed" ? <div className="banner bad mt-3">{t("settings.import.failed", { error: tMaybe(`errors.api.${st.error}`) ?? st.error ?? "" })}</div> : null}
+        {st?.state === "failed" ? <div className="banner err mt-3">{t("settings.import.failed", { error: apiCodeText(st.error ?? "") })}</div> : null}
         {preview ? (
           <div className="panel-soft mt-3 p-3 text-[13px]">
             <div className="font-medium">{t("settings.import.found", { total: preview.total, n: preview.new })}</div>
@@ -166,9 +165,9 @@ function Names({ label, list, bad }: { label: Key; list: { names: string[]; coun
 export function LegacyLinksCard() {
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: ["legacy-links"], queryFn: () => unwrap(api.GET("/api/v1/import/legacy", {})) });
+  const q = useQuery({ queryKey: ["legacy-links"], queryFn: ({ signal }) => unwrap(api.GET("/api/v1/import/legacy", { signal })) });
   const v = q.data;
-  const { draft, setDraft } = useDraft({ path: v?.path ?? "", kind: (v?.kind || "") as Kind | "" });
+  const { draft, setDraft, dirty, reset } = useDraft({ path: v?.path ?? "", kind: (v?.kind || "") as Kind | "" });
   const [secret, setSecret] = useState("");
   const save = useMutation({
     mutationFn: (body: { path?: string; kind?: Kind | ""; secret?: string }) => unwrap(api.PATCH("/api/v1/import/legacy", { body })),
@@ -178,7 +177,7 @@ export function LegacyLinksCard() {
       toast.ok(t("settings.import.legacySaved"));
     },
     onError: (e) => {
-      if (!(e instanceof ApiError && Object.keys(e.fields).length)) toast.error(errorText(e));
+      onFormError(e, toast);
     },
   });
   const errors = fieldErrors(save.error);
@@ -186,6 +185,13 @@ export function LegacyLinksCard() {
   const signed = draft.kind === "marzban" || draft.kind === "pasarguard";
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+      <form
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate({ path: draft.path.trim(), kind: draft.kind, ...(signed && secret ? { secret } : {}) });
+        }}
+      >
       <div className="card-head">
         <div>
           <h2 className="card-title">{t("settings.import.legacy")}</h2>
@@ -210,22 +216,8 @@ export function LegacyLinksCard() {
           <input id="leg-secret" className="input mono" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" />
         </Field>
       ) : null}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="text-xs text-[var(--ink-500)]">{t("settings.import.legacyCount", { n: v.links })}</span>
-        <Button
-          variant="primary"
-          loading={save.isPending}
-          onClick={() =>
-            save.mutate({
-              path: draft.path.trim(),
-              kind: draft.kind,
-              ...(signed && secret ? { secret } : {}),
-            })
-          }
-        >
-          {t("common.save")}
-        </Button>
-      </div>
+      <FormActions dirty={dirty || !!secret} saving={save.isPending} onReset={reset} note={t("settings.import.legacyCount", { n: v.links })} />
+      </form>
     </section>
   );
 }

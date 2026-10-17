@@ -17,7 +17,7 @@ Clients connect to node A, and sites see node B's address. This way you can keep
 2. In the **Exit node** field choose node B.
 3. Save.
 
-The panel itself opens a hidden relay on node B with a separate key for each source node. The relay listens on a TCP port: the first free one among the spare ports (2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443), or a random one from 30000 to 59999 if all are taken.
+The panel itself opens a hidden relay on node B with a separate key for each source node. The relay listens on a TCP port: the first free one among the spare ports (2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443, 10443, 11443, 12443), or a random one from 30000 to 59999 if all are taken.
 
 Traffic is counted once, on the first node. A cascade does not need WARP.
 
@@ -30,6 +30,16 @@ If the exit node is unavailable, this protocol's traffic does not go direct, the
 The **Cascade** button on a node card shows which nodes it sends traffic through, the check status (which address sites see) and the relay status: listening on a port, port taken, or did not start.
 
 There is also the **Where other nodes' traffic goes next** field: direct, through this node's WARP, or through one more node. This is how chains of three or more servers are built. The panel will not save loops, and a protocol cannot choose its own node as the exit.
+
+## Checking a cascade
+
+Open **Check node** on the entry node (A), see [Nodes](/mikan/en/nodes/nodes/#check-node). The panel checks the entry → exit → internet path and shows where it breaks:
+
+- **the exit node does not answer**: open its card, it has its own reason and hint;
+- **the relay on the exit node is not started**: the exit node did not bring up its port, see that node's check;
+- **the entry cannot reach the relay port on the exit** or **the exit has no internet**: the port is closed by the exit node's hoster firewall, or the exit server does not go out to the internet.
+
+On the exit node itself, if others go out through it, the check shows its relay port.
 
 ## If the relay port is taken
 

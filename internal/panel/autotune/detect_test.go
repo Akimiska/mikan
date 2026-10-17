@@ -66,7 +66,19 @@ func TestDetect(t *testing.T) {
 		{
 			name:    "a device that reaches everything but one port is cut off from it",
 			clients: []nodeapi.ClientActivity{device("s1", "203.0.113.1", seen(without("vless-xhttp")...))},
-			want:    map[int64]Verdict{1: {Blocked: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
+			want:    map[int64]Verdict{1: {Blocked: 1, Networks: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
+		},
+		{
+			name: "devices cut off on one network are one network",
+			clients: []nodeapi.ClientActivity{device("s1", "203.0.113.1", seen(without("vless-xhttp")...)),
+				device("s2", "203.0.113.2", seen(without("vless-xhttp")...))},
+			want: map[int64]Verdict{1: {Blocked: 2, Networks: 1}, 2: {Reached: 2}, 3: {Reached: 2}, 4: {Reached: 2}, 5: {Reached: 2}},
+		},
+		{
+			name: "devices cut off on two networks",
+			clients: []nodeapi.ClientActivity{device("s1", "203.0.113.1", seen(without("vless-xhttp")...)),
+				device("phone", "198.51.100.9", seen(without("vless-xhttp")...))},
+			want: map[int64]Verdict{1: {Blocked: 2, Networks: 2}, 2: {Reached: 2}, 3: {Reached: 2}, 4: {Reached: 2}, 5: {Reached: 2}},
 		},
 		{
 			// Its TCP inbounds see only two others each: not enough to judge them either.
@@ -82,7 +94,7 @@ func TestDetect(t *testing.T) {
 			clients: []nodeapi.ClientActivity{
 				device("s1", "203.0.113.1", seen("vless-xhttp", "vless-vision", "vless-grpc", "tuic")),
 			},
-			want: map[int64]Verdict{1: {Reached: 1}, 2: {Blocked: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
+			want: map[int64]Verdict{1: {Reached: 1}, 2: {Blocked: 1, Networks: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
 		},
 		{
 			name: "a client with one or two chosen links says nothing",
@@ -97,7 +109,7 @@ func TestDetect(t *testing.T) {
 			clients: []nodeapi.ClientActivity{
 				device("s1", "203.0.113.1", map[string]int64{"vless-xhttp": old, "hysteria2": fresh, "tuic": fresh, "vless-vision": fresh, "vless-grpc": fresh}),
 			},
-			want: map[int64]Verdict{1: {Blocked: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
+			want: map[int64]Verdict{1: {Blocked: 1, Networks: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
 		},
 		{
 			name:    "a profile older than the inbound's last change may still use the old port",
@@ -142,12 +154,12 @@ func TestDetect(t *testing.T) {
 				device("s1", "203.0.113.1", seen(without("vless-xhttp")...)),
 				device("s2", "198.51.100.5", seen("vless-xhttp")),
 			},
-			want: map[int64]Verdict{1: {Blocked: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
+			want: map[int64]Verdict{1: {Blocked: 1, Networks: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
 		},
 		{
 			name:    "a bound device counts by its own profile fetch, wherever it is",
 			clients: []nodeapi.ClientActivity{device("dev", "192.0.2.50", seen(without("vless-xhttp")...))},
-			want:    map[int64]Verdict{1: {Blocked: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
+			want:    map[int64]Verdict{1: {Blocked: 1, Networks: 1}, 2: {Reached: 1}, 3: {Reached: 1}, 4: {Reached: 1}, 5: {Reached: 1}},
 		},
 		{
 			// Another device at the same address took the new profile; this one did not.
@@ -177,10 +189,11 @@ func TestCutOff(t *testing.T) {
 		v    Verdict
 		want bool
 	}{
-		{Verdict{Blocked: 1}, true},
-		{Verdict{Blocked: 1, Reached: 4}, true},
-		{Verdict{Blocked: 1, Reached: 5}, false}, // one device's own network, next to many that get through
-		{Verdict{Blocked: 2, Reached: 5}, true},
+		{Verdict{Blocked: 2, Networks: 2}, true},
+		{Verdict{Blocked: 2, Reached: 8, Networks: 2}, true},
+		{Verdict{Blocked: 2, Reached: 9, Networks: 2}, false}, // a few devices failing next to many that get through
+		{Verdict{Blocked: 1, Networks: 1}, false},             // one device: its second VPN, its router (GitHub issue #67)
+		{Verdict{Blocked: 3, Networks: 1}, false},             // one network, however many devices on it
 		{Verdict{Reached: 3}, false},
 	} {
 		if got := c.v.CutOff(); got != c.want {
@@ -224,14 +237,14 @@ func TestFreePorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := FreePorts(ports, "tcp", map[string]bool{"2443": true})
-	want := []string{"2083", "3443", "4443", "5443", "6443", "7443", "9443"} // 2053 gRPC, 2087 a disabled inbound, 2096 subscriptions, 8443 Vision
+	got := FreePorts(ports, "tcp", map[string]bool{"2443": true}, false)
+	want := []string{"2083", "3443", "4443", "5443", "6443", "7443", "9443", "10443", "11443", "12443"} // 2053 gRPC, 2087 a disabled inbound, 2096 subscriptions, 8443 Vision
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tcp: got %v, want %v", got, want)
 	}
 	// UDP: TUIC's 8443 and the hopping range's 5443 and 6443 are taken there.
-	want = []string{"2053", "2083", "2087", "2096", "2443", "3443", "4443", "7443", "9443"}
-	if got := FreePorts(ports, "udp", nil); !reflect.DeepEqual(got, want) {
+	want = []string{"2053", "2083", "2087", "2096", "2443", "3443", "4443", "7443", "9443", "10443", "11443", "12443"}
+	if got := FreePorts(ports, "udp", nil, false); !reflect.DeepEqual(got, want) {
 		t.Fatalf("udp: got %v, want %v", got, want)
 	}
 }

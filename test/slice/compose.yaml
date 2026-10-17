@@ -14,6 +14,8 @@ services:
     networks:
       default:
         aliases: [node.test]
+      isp2:
+        aliases: [node.test]
 
   panel:
     image: mikan:slice
@@ -27,6 +29,7 @@ services:
       # The automatic moves' windows in seconds instead of half hours.
       MIKAN_AUTOTUNE_SCALE: "0.01"
     volumes: ["data:/data", "run:/run/mikan", "pg-run:/run/postgresql"]
+    networks: [default, isp2]
 
   # As the installer runs it (installer/src/docker.rs): no network, the panel talks to it
   # over the shared unix socket with a scram-sha-256 password.
@@ -70,6 +73,15 @@ services:
     volumes: ["work:/work:ro"]
     profiles: ["client"]
 
+  # A second device of the same subscription on another ISP (isp2, another /24): the
+  # panel moves a port only when devices of two networks are cut off from it.
+  client2:
+    image: metacubex/mihomo:v1.19.31
+    command: ["-d", "/tmp/mihomo", "-f", "/work/client.yaml"]
+    volumes: ["work:/work:ro"]
+    networks: [isp2]
+    profiles: ["client2"]
+
   # Plays the client's ISP: inside the client's network namespace it drops the client's
   # packets to the node's 443/tcp, like the DPI that blocks one port of a server.
   blocker:
@@ -81,6 +93,16 @@ services:
       - apk add -q iptables >/dev/null && iptables -I OUTPUT -p tcp -d "$$(getent hosts node | cut -d' ' -f1)" --dport 443 -j REJECT --reject-with tcp-reset && echo "client → node:443/tcp dropped"
     profiles: ["blocker"]
 
+  # The same for client2's ISP.
+  blocker2:
+    image: alpine:3
+    network_mode: "service:client2"
+    cap_add: [NET_ADMIN]
+    entrypoint: ["sh", "-c"]
+    command:
+      - apk add -q iptables >/dev/null && iptables -I OUTPUT -p tcp -d "$$(getent hosts node | cut -d' ' -f1)" --dport 443 -j REJECT --reject-with tcp-reset && echo "client2 → node:443/tcp dropped"
+    profiles: ["blocker2"]
+
   driver:
     image: golang:1.27
     working_dir: /src
@@ -90,6 +112,13 @@ services:
       - "work:/work"
       - "mikan-gomod:/go/pkg/mod"
       - "mikan-gocache:/root/.cache/go-build"
+    networks: [default, isp2]
+
+networks:
+  default: {}
+  isp2:
+    ipam:
+      config: [{subnet: 10.77.2.0/24}]
 
 volumes:
   pg-data: {}

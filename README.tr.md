@@ -12,7 +12,9 @@
 [![Sürüm](https://img.shields.io/github/v/release/Miroshka000/mikan?color=f07a2e&label=sürüm&style=flat-square)](https://github.com/Miroshka000/mikan/releases)
 [![İmaj](https://img.shields.io/badge/ghcr.io-miroshka000%2Fmikan-2b8c9e?style=flat-square&logo=docker&logoColor=white)](https://github.com/Miroshka000/mikan/pkgs/container/mikan)
 [![Lisans](https://img.shields.io/badge/lisans-GPL--3.0-2f9e6b?style=flat-square)](LICENSE)
-[![mihomo](https://img.shields.io/badge/çekirdek-mihomo%201.19.31-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![mihomo](https://img.shields.io/badge/çekirdek-mihomo%201.19.32-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
+[![Telegram](https://img.shields.io/badge/Telegram-kanal-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/mikanvpn)
+[![Telegram](https://img.shields.io/badge/Telegram-forum-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+I2JFR7DbPow1ZmQy)
 
 [English](README.md) · [Русский](README.ru.md) · [简体中文](README.zh-CN.md) · [فارسی](README.fa.md) · **Türkçe** · [Español](README.es.md)
 
@@ -108,6 +110,10 @@ iade destekleyen ödeme yöntemleriyle ödenebilir: Telegram Stars ve iade deste
 adaptörler. Böylece sağlayıcı ödemeyi onaylamadan promosyon rezervasyonunun süresi dolarsa
 Mikan ödemeyi iade edebilir.
 
+## Destek erişimi
+
+Yardıma ihtiyacın olduğunda geçici erişimi kendin açarsın: Ayarlar → Destek, 2, 6 veya 24 saatliğine, «görüntüleme», «değiştirme» veya «terminal» seviyesinde. Bu düğme olmadan mikan geliştiricileri dahil kimse panele giremez: projenin sunucularına kalıcı erişimi yoktur ve panel kendiliğinden hiçbir yere bağlanmaz. Operatörün her işlemi denetim günlüğüne yazılır, erişim tek düğmeyle geri alınır, terminal parolan ve 2FA ile açılır ve kaydedilir. Özelliği tamamen kapatmak için aynı karttaki anahtarı kullan veya sunucuda `mikan support-access off` çalıştır. Ücretli destek kuralları: [sitede](https://miroshka000.github.io/mikan/support/paid/).
+
 ## Ekran görüntüleri
 
 <table>
@@ -129,7 +135,7 @@ Mikan ödemeyi iade edebilir.
 
 ## Protokoller
 
-On beş protokol, her biri sizin için üretilmiş anahtarlarla hazır bir ön ayar. Abonelik her uygulamaya yalnızca çalıştırabildiğini verir:
+On yedi protokol, her biri sizin için üretilmiş anahtarlarla hazır bir ön ayar. Abonelik her uygulamaya yalnızca çalıştırabildiğini verir:
 
 | Protokol | Clash uygulamaları<br><sub>mihomo çekirdeği</sub> | Xray uygulamaları<br><sub>Happ, v2RayTun</sub> | sing-box uygulamaları<br><sub>Hiddify, Karing</sub> |
 |---|:---:|:---:|:---:|
@@ -138,6 +144,8 @@ On beş protokol, her biri sizin için üretilmiş anahtarlarla hazır bir ön a
 | VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
 | VLESS PQ (kuantum sonrası şifreleme) | ✅ | ✅ | — |
 | Trojan · REALITY | ✅ | ✅ | ✅ |
+| VLESS · TLS · XHTTP | ✅ | ✅ | — |
+| VLESS · TLS · Vision | ✅ | ✅ | ✅ |
 | Hysteria2 | ✅ | ✅ | ✅ |
 | TUIC v5 | ✅ | — | ✅ |
 | AnyTLS | ✅ | — | ✅ |
@@ -181,6 +189,9 @@ Menü için `mikan` komutunu çalıştırın veya komutları doğrudan kullanın
 | `mikan targets scan` · `apply` | sunucunun yakınındaki REALITY kamuflaj siteleri |
 | `mikan join KEY` | düğümde: panelden yeni bir anahtar al |
 | `mikan restart` | konteynerleri yeniden başlat |
+| `mikan doctor` | sunucuyu denetle: Docker, portlar, güvenlik duvarı, saat, DNS, disk |
+| `mikan support KOD` | panel erişilemezken tanılamayı destek talebine gönder |
+| `mikan support-access on\|off` | bu sunucuda destek erişimine izin ver veya yasakla |
 | `mikan uninstall` | durdur ve komutu kaldır, veriyi koru |
 
 ## Güncellemeler
@@ -200,9 +211,24 @@ cd installer && cargo test                    # the installer (Rust)
 
 Geliştirme `dev` dalında yapılır. `main` dalına açılan çekme istekleri derlenir ve test edilir, sürümler etiketlerden yayımlanır.
 
+## ⛔ Fork'lar ve üçüncü taraf derlemeler
+
+> [!CAUTION]
+> **Resmî mikan yalnızca burada:** `Miroshka000/mikan` deposu, `ghcr.io/miroshka000/mikan` imajı ve mikan anahtarıyla imzalanmış sürümler. Resmî eklentiler yalnızca `getmikan/marketplace` kataloğundan gelir; topluluk kaydı `getmikan/marketplace-community`, mikan'ın incelemediği ve sorumluluğunu almadığı üçüncü taraf eklentileri listeler. Geri kalan her şey, adı ne olursa olsun, mikan değildir.
+>
+> **mikan projesi, her fork'u ve başka kaynaklardan gelen her derlemeyi potansiyel olarak güvensiz kabul eder.**
+>
+> **Resmî derlemeler doğrulanabilir.** Her sürüm bu deponun açık kodundan otomatik olarak derlenir ve imzalanır; panel ve kurulum aracı yalnızca bu imzayı taşıyan güncellemeleri kabul eder. Başkasının derlemesinin neyden yapıldığını yalnızca yazarı bilir.
+>
+> **Fork'lar güncellemelerimizi almaz.** Bir fork, sürümlerini mikan anahtarıyla imzalayamaz; bu yüzden hata ve güvenlik açığı düzeltmeleri, yazarı onları taşımadıkça ona ulaşmaz.
+>
+> **Fork'ları desteklemiyoruz.** Onları incelemiyoruz ve içlerindeki hatalardan, güvenlik açıklarından veya veri kaybından sorumlu değiliz. Başkalarının derlemeleriyle ilgili sorular sohbette ve issue'larda ele alınmaz.
+>
+> **Ad lisansın parçası değildir.** GPL v3 kodu kapsar, mikan adını ve logosunu değil (GPL v3 bölüm 7, bkz. [NOTICE.md](NOTICE.md) ve [TRADEMARK.md](TRADEMARK.md)). Bir fork başka bir ad kullanmalı ve kendini mikan olarak tanıtmamalıdır.
+
 ## Lisans
 
-mikan, [GNU GPL v3](LICENSE) altında özgür yazılımdır. İçine [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0) gömülüdür. Yazı tipleri: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
+mikan, [GNU GPL v3](LICENSE) ve [NOTICE.md](NOTICE.md) dosyasındaki ek koşullar altında özgür yazılımdır: atıf korunur, değiştirilmiş bir sürüm orijinal gibi tanıtılmaz, ad ve logo üzerinde hak verilmez. Copyright (C) 2026 Miroshka and Mikan. İçine [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0) gömülüdür ve [3x-ui](https://github.com/MHSanaei/3x-ui) (GPL-3.0) kodunun bazı bölümleri uyarlanmıştır. Yazı tipleri: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
 
 <div align="center">
 <sub>🍊 ile yapıldı</sub>

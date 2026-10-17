@@ -228,6 +228,29 @@ func TestSelfSignedLinksCarryThePin(t *testing.T) {
 	}
 }
 
+func TestXHTTPSettingsReachTheClient(t *testing.T) {
+	priv, _ := realityKey(t)
+	src := "type: vless\nxhttp-config: {path: /x, mode: stream-one, x-padding-bytes: 2000-3000, x-padding-obfs-mode: true, sc-max-buffered-posts: 30}\n" +
+		"reality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
+	c, err := ClientConfig(mustParse(t, src), ClientInput{Name: "X", Host: "203.0.113.7", Port: 443, Slot: slots[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := c.Mihomo["xhttp-opts"].(map[string]any)
+	if opts["x-padding-bytes"] != "2000-3000" || opts["x-padding-obfs-mode"] != true || opts["sc-max-buffered-posts"] != nil {
+		t.Fatalf("xhttp-opts: %v", opts)
+	}
+	u, _ := url.Parse(c.URI)
+	if extra := u.Query().Get("extra"); extra != `{"xPaddingBytes":"2000-3000","xPaddingObfsMode":true}` {
+		t.Fatalf("link extra: %q", extra)
+	}
+
+	plain, err := ClientConfig(mustParse(t, strings.Replace(src, ", x-padding-bytes: 2000-3000, x-padding-obfs-mode: true", "", 1)), ClientInput{Name: "X", Host: "203.0.113.7", Port: 443, Slot: slots[0]})
+	if err != nil || strings.Contains(plain.URI, "extra=") {
+		t.Fatalf("no shared settings, no extra: %v %s", err, plain.URI)
+	}
+}
+
 func TestValidateRefusesDangerousTemplates(t *testing.T) {
 	priv, _ := realityKey(t)
 	reality := "reality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"

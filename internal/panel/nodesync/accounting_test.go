@@ -22,6 +22,7 @@ import (
 // is counted once.
 func TestBackgroundAccountingWritersDoNotConflict(t *testing.T) {
 	s1, node1, st, users, now := setup(t)
+	s1.m.storeInterval = 0 // batch after batch, each stored
 	ctx := context.Background()
 	tariffs, _ := st.Q.ListTariffs(ctx)
 	var slots []string
@@ -150,6 +151,7 @@ func TestSnapshotSharedAndConsistent(t *testing.T) {
 // soonest to expire first, whatever order the batches of the two nodes come in.
 func TestConcurrentBatchesSpendGrantsExactly(t *testing.T) {
 	s1, node1, st, users, now := setup(t)
+	s1.m.storeInterval = 0 // batch after batch, each stored
 	ctx := context.Background()
 	q := st.Q
 	pool, err := q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})

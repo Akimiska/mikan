@@ -181,6 +181,12 @@ func (t Template) Network() string {
 	return rules[t.Type()].network
 }
 
+// NodeCert says whether the listener runs on the node's certificate: Hysteria2, TUIC,
+// AnyTLS, TrustTunnel, and VLESS with TLS on the node certificate.
+func (t Template) NodeCert() bool {
+	return rules[t.Type()].cert || t.Ext().TLS == "node"
+}
+
 func (t Template) Ext() Ext {
 	var e Ext
 	if raw, ok := t[extKey]; ok {
@@ -258,6 +264,13 @@ func Validate(t Template, o Options) error {
 		}
 		if p, _ := x["path"].(string); p != "" && !strings.HasPrefix(p, "/") {
 			return fail("config_path", "xhttp-config.path")
+		}
+		// The same checks as the form's: a value the core refuses would only show when the
+		// node loads the inbound.
+		if tune, ok := XHTTPOf(t); ok {
+			if err := tune.check(); err != nil {
+				return err
+			}
 		}
 	}
 	if p := t.str("ws-path"); t["ws-path"] != nil && !strings.HasPrefix(p, "/") {

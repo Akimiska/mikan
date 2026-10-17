@@ -76,6 +76,8 @@ function ExactDateField({ u }: { u: User }) {
   const update = useUserMutation(userActions.update);
   const current = u.expires_at ? inputDate(u.expires_at) : "";
   const { draft: date, setDraft: setDate } = useDraft(current);
+  // Chrome takes a six-digit year unless max caps it; such a date is not saved.
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(date);
   const apply = () =>
     update.mutate(
       { id: u.id, body: { expires_at: fromInputDate(date, u.expires_at) } },
@@ -84,8 +86,8 @@ function ExactDateField({ u }: { u: User }) {
   return (
     <Field label={t("userDrawer.exactDate")} htmlFor={`u-date-${u.id}`} hint={t("userDrawer.exactDateHint")}>
       <div className="flex items-center gap-2">
-        <input id={`u-date-${u.id}`} type="date" className="input min-w-0" value={date} min={inputDate(new Date().toISOString())} onChange={(e) => setDate(e.target.value)} />
-        {date && date !== current ? (
+        <input id={`u-date-${u.id}`} type="date" className="input min-w-0" value={date} min={inputDate(new Date().toISOString())} max="9999-12-31" onChange={(e) => setDate(e.target.value)} />
+        {valid && date !== current ? (
           <Button variant="primary" className="h-11 w-11 shrink-0 px-0" loading={update.isPending} onClick={apply} aria-label={t("common.save")} title={t("common.save")}>
             {update.isPending ? null : <Check size={18} aria-hidden />}
           </Button>

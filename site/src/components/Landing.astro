@@ -2,6 +2,8 @@
 import { Image } from 'astro:assets';
 import { Code } from '@astrojs/starlight/components';
 import mandarin from '../assets/mandarin.webp';
+import Goals from './Goals.astro';
+import goals from '../../../.github/goals.json';
 import { installCommand, links, protocolMatrix, strings, type Lang, type Screen } from '../landing';
 
 interface Props {
@@ -18,11 +20,25 @@ const shots = import.meta.glob<{ default: ImageMetadata }>('../../../.github/ass
 });
 const shot = (name: string) => shots[`../../../.github/assets/screens/${lang}/${name}.webp`].default;
 const screens = Object.keys(t.screens.items) as Screen[];
+// The goals still collecting money: a badge in the hero and a strip right under it.
+const collecting = goals.items.filter((g) => g.status === 'open').length;
 ---
 
 <div class="landing not-content">
 	<section class="hero" aria-labelledby="hero-title">
 		<div class="hero-copy">
+			{
+				collecting > 0 ? (
+					<a class="funding-badge" href="#funding-title">
+						<span class="dot" aria-hidden="true" />
+						{t.funding.badge}
+						<b>{collecting}</b>
+						<svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14">
+							<path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					</a>
+				) : null
+			}
 			<h1 id="hero-title">{t.hero.title}</h1>
 			<p class="lead">{t.hero.lead}</p>
 			<div class="install">
@@ -43,6 +59,21 @@ const screens = Object.keys(t.screens.items) as Screen[];
 			<span class="shade" aria-hidden="true"></span>
 		</div>
 	</section>
+
+	{
+		collecting > 0 ? (
+			<section class="block funding" aria-labelledby="funding-title">
+				<header class="block-head funding-head">
+					<div>
+						<h2 id="funding-title">{t.funding.title}</h2>
+						<p>{t.funding.lead}</p>
+					</div>
+					<a class="more" href={docs('support/')}>{t.funding.all}</a>
+				</header>
+				<Goals lang={lang} compact />
+			</section>
+		) : null
+	}
 
 	<section class="block" aria-labelledby="screens-title">
 		<header class="block-head">
@@ -159,7 +190,10 @@ const screens = Object.keys(t.screens.items) as Screen[];
 		<aside class="sponsor" aria-labelledby="sponsor-title">
 			<h3 id="sponsor-title">{t.cta.sponsorTitle}</h3>
 			<p>{t.cta.sponsorText}</p>
-			<a class="btn btn-accent" href={links.sponsor}>{t.cta.sponsor}</a>
+			<div class="actions">
+				<a class="btn btn-accent" href={links.sponsor}>{t.cta.sponsor}</a>
+				<a class="btn btn-ghost" href={docs('support/')}>{t.cta.goals}</a>
+			</div>
 		</aside>
 	</section>
 </div>
@@ -368,6 +402,74 @@ const screens = Object.keys(t.screens.items) as Screen[];
 
 	.more:hover {
 		text-decoration-color: currentColor;
+	}
+
+	/* ---------- funding ---------- */
+
+	.funding-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 1.25rem;
+		padding: 0.375rem 0.75rem 0.375rem 0.625rem;
+		border-radius: 999px;
+		background: var(--mk-accent-soft);
+		border: 1px solid color-mix(in srgb, var(--mk-accent) 30%, transparent);
+		color: var(--mk-accent-text);
+		font-size: 0.875rem;
+		font-weight: 600;
+		text-decoration: none;
+		transition: border-color 0.2s var(--mk-ease);
+	}
+
+	.funding-badge:hover {
+		border-color: var(--mk-accent);
+	}
+
+	.funding-badge:focus-visible {
+		outline: 2px solid var(--mk-accent);
+		outline-offset: 2px;
+	}
+
+	.funding-badge b {
+		display: inline-grid;
+		place-items: center;
+		min-width: 1.25rem;
+		height: 1.25rem;
+		padding: 0 0.25rem;
+		border-radius: 999px;
+		background: var(--mk-orange);
+		color: var(--mk-on-orange);
+		font-size: 0.75rem;
+	}
+
+	.funding-badge .dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--mk-orange);
+	}
+
+	.funding-head {
+		max-width: none;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 0.5rem 2rem;
+	}
+
+	.funding-head > div {
+		max-width: 40rem;
+	}
+
+	.funding-head .more {
+		margin-top: 0;
+	}
+
+	/* The strip comes right after the hero: closer than the other blocks. */
+	.funding {
+		margin-top: calc(var(--gap) * 0.6);
 	}
 
 	/* ---------- screenshots ---------- */

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/audit"
+	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/tlscert"
@@ -33,9 +34,18 @@ func certCmd(ctx context.Context, st *store.Store, set *settings.Settings, dataD
 	now := time.Now()
 	panelDir := filepath.Join(dataDir, "tls", "custom")
 	nodes := tlscert.NewNodeStore(filepath.Join(dataDir, "tls", "custom-nodes"), time.Now)
+	// nodeHost is where clients reach the node: a certificate is publicly trusted for a name.
+	var nodeHost string
 	if *node != 0 {
-		if _, err := st.Q.GetNode(ctx, *node); err != nil {
+		n, err := st.Q.GetNode(ctx, *node)
+		if err != nil {
 			return fmt.Errorf("no node %d: see mikan admin node list", *node)
+		}
+		nodeHost = domain.NodeHost(n)
+		if n.Address == "" { // the panel's own node
+			if nodeHost, err = panelHost(ctx, set); err != nil {
+				return err
+			}
 		}
 	}
 	target := "the panel"
@@ -54,7 +64,7 @@ func certCmd(ctx context.Context, st *store.Store, set *settings.Settings, dataD
 			if err != nil {
 				return certCLIError(err, "")
 			}
-			describe(stdout, target, tlscert.Describe(cert, "", now))
+			describe(stdout, target, tlscert.Describe(cert, nodeHost, now))
 			fmt.Fprintln(stdout, "The node gets it with its next sync, within a minute.")
 		} else {
 			cert, err := tlscert.ParseCustom(raw, raw, now)
@@ -98,9 +108,9 @@ func certCmd(ctx context.Context, st *store.Store, set *settings.Settings, dataD
 			err  error
 		)
 		if *node != 0 {
-			c, _, e := nodes.Get(*node, "")
+			c, _, e := nodes.Get(*node, nodeHost)
 			if c != nil {
-				i := tlscert.Describe(c, "", now)
+				i := tlscert.Describe(c, nodeHost, now)
 				cert = &i
 			}
 			err = e

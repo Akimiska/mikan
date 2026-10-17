@@ -1,0 +1,35 @@
+---
+title: Community addons
+description: What the registry of community addons is, why mikan is not responsible for them, how the panel warns at install and at every update, what a revocation means and how an author gets listed.
+---
+
+:::danger[These are not mikan's addons]
+Community addons are written and published by third-party authors. mikan **does not review their code, does not build their images, does not support them and is not responsible** for anything they do: a leaked bot token, subscribers' data, lost money, a broken panel. An addon may be a copy of someone else's work, change hands or turn malicious with its next release. Install only what you trust its author with as much as yourself with root on the server.
+:::
+
+The official addons are on **Addons → Catalog**: mikan builds and signs them. **Addons → Community** shows the registry [getmikan/marketplace-community](https://github.com/getmikan/marketplace-community): links to third-party authors' repositories and a snapshot of their latest release (version, image by digest, permissions).
+
+## How the panel protects you
+
+- **The panel never goes to the authors.** A mikan workflow reads the authors' releases every hour and publishes one signed `index.json`. The panel reads only that, from GitHub, with the same key as the catalog. Third-party servers never see your panels' addresses.
+- **The image is pinned by its digest.** The server runs exactly the build you saw in the install window, not "the latest tag".
+- **Every install and every update** opens a window with the permissions, the image, a link to the repository and an "I take the risk" box. Without the box the panel neither installs nor updates the addon, through the API either. "Update all" leaves unofficial addons alone.
+- **The author's key.** For a signed release the panel remembers the key at install. An update signed with another key waits until you compare the fingerprint with the author and tick that in the window. A release that is no longer signed cannot be updated: only removed and installed again.
+- **Revocation.** mikan can take an addon out of the registry (stolen code, a malicious build). An installed one is marked red with the reason, and can be neither installed nor updated again. Remove it in the menu of its row.
+- **Ids.** A community addon cannot take an official addon's id, and a third-party source cannot take an id of the registry.
+
+An addon from the registry runs as any unofficial addon: in its own container, on the bridge network, with the permissions you approved. `users:all` and `users:grant` give an addon every subscriber: such addons enter the registry only after a pull request is reviewed by hand, and that is still no review of the code.
+
+## How an author gets listed
+
+1. Publish the addon on [protocol 2](https://github.com/getmikan/marketplace/blob/main/PROTOCOL-v2.md), with its image on a public registry.
+2. Attach `mikan-addon.json` to a GitHub release (one entry, or `{"title", "key", "adapters": [...]}`), preferably with its signature `mikan-addon.json.sig` and your key in `key`.
+3. Add the topic **`mikan-addon`** to the repository.
+
+Every hour the indexer finds new repositories and opens a pull request in the registry. After the merge, new releases go in by themselves, except for what needs a person again: another signing key, a renamed or transferred repository, a new `users:all` or `users:grant` permission, a new id. The `noindex` topic, archiving or deleting the repository takes its addons out.
+
+Payment adapters are not accepted: money goes only through the official ones.
+
+## Report an addon
+
+Open an issue in [getmikan/marketplace-community](https://github.com/getmikan/marketplace-community/issues) with the repository and what is wrong.

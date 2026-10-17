@@ -41,6 +41,9 @@ func TestTrialOncePerAccount(t *testing.T) {
 		u.ExpiresAt.Int64 != e.now.Add(time.Duration(trial.DurationDays)*24*time.Hour).Unix() {
 		t.Fatalf("trial user %+v on %+v", u, trial)
 	}
+	if u.Source != domain.UserFromTrial {
+		t.Fatalf("a trial user came from %q", u.Source)
+	}
 	links, err := e.st.Q.ListTgLinksOf(ctx, 901)
 	if err != nil || len(links) != 1 || links[0].ID != u.ID {
 		t.Fatalf("the trial is not linked to the account: %+v %v", links, err)
@@ -159,7 +162,7 @@ func TestTrialIsTheTariffWhole(t *testing.T) {
 	clock := func() time.Time { return e.now }
 	changes := &countChanges{}
 	svc := New(Deps{Store: e.st, Settings: e.s.d.Settings, Users: domain.NewUsers(e.st, domain.NewPool(e.st, clock), changes, clock),
-		Log: e.s.d.Log, Now: clock})
+		Log: e.s.d.Log, Now: clock, MaxLinks: 5})
 	u, err := svc.Trial(ctx, 906)
 	must(t, err)
 	if u.ResetStrategy != trial.ResetStrategy || u.SlotID.Int64 == 0 {

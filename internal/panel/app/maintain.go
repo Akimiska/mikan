@@ -22,6 +22,9 @@ func (p *Panel) maintain(ctx context.Context) {
 	if err := p.st.Q.PruneTrafficDaily(ctx, now.Add(-trafficDailyKeep).Unix()/86400); err != nil {
 		p.log.Error("prune daily traffic", "err", err)
 	}
+	if err := p.st.Q.PruneNodeTrafficDaily(ctx, now.Add(-trafficDailyKeep).Unix()/86400); err != nil {
+		p.log.Error("prune daily node traffic", "err", err)
+	}
 	if _, err := p.st.Q.PruneAudit(ctx, now.Add(-auditKeep).Unix()); err != nil {
 		p.log.Error("prune audit log", "err", err)
 	}
@@ -29,5 +32,8 @@ func (p *Panel) maintain(ctx context.Context) {
 		p.log.Error("forget idle devices", "err", err)
 	} else if n > 0 {
 		p.log.Info("forgot idle devices", "count", n)
+	}
+	if err := p.devices.Prune(ctx); err != nil {
+		p.log.Error("prune device pauses and unbinds", "err", err)
 	}
 }

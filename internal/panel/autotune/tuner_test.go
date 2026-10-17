@@ -118,14 +118,17 @@ func setup(t *testing.T) *env {
 	return e
 }
 
-// device is the user's device the node sees.
-const device = "198.51.100.20"
+// device is the user's device the node sees; laptop is another of theirs, on another
+// network: one network alone is never a block.
+const device, laptop = "198.51.100.20", "192.0.2.80"
 
 // refreshProfile: the device fetched the subscription just now.
 func (e *env) refreshProfile(t *testing.T) {
 	t.Helper()
-	if err := e.st.Q.RecordSubFetch(e.ctx, db.RecordSubFetchParams{UserID: e.user, Ip: device, FetchedAt: e.now.Unix() + 1}); err != nil {
-		t.Fatal(err)
+	for _, ip := range []string{device, laptop} {
+		if err := e.st.Q.RecordSubFetch(e.ctx, db.RecordSubFetchParams{UserID: e.user, Ip: ip, FetchedAt: e.now.Unix() + 1}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -149,7 +152,7 @@ func (e *env) activity() {
 	for _, n := range e.reaching {
 		seen[n] = e.now.Add(-time.Minute).Unix()
 	}
-	e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: e.slot, IP: device, Seen: seen}}}
+	e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: e.slot, IP: device, Seen: seen}, {Slot: e.slot, IP: laptop, Seen: seen}}}
 }
 
 func (e *env) step(t *testing.T, d time.Duration) {
@@ -207,7 +210,7 @@ func TestMovesABlockedPortAfterHold(t *testing.T) {
 	e.reaches("hysteria2", "tuic", "vless-vision")
 	e.step(t, 0)
 	s, ok := e.tn.Status(x.ID)
-	if !ok || !s.CutOff || s.Blocked != 1 || e.inbound(t, "vless-xhttp").Port != "443" {
+	if !ok || !s.CutOff || s.Blocked != 2 || e.inbound(t, "vless-xhttp").Port != "443" {
 		t.Fatalf("cut off, but not moved yet: %+v", s)
 	}
 	e.reaches("hysteria2", "tuic", "vless-vision")
@@ -425,7 +428,7 @@ func TestBoundDevices(t *testing.T) {
 			seen[n] = e.now.Add(-time.Minute).Unix()
 		}
 		// An address the user never fetched the subscription from.
-		e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: phone.Name, IP: "192.0.2.7", Seen: seen}}}
+		e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: phone.Name, IP: "192.0.2.7", Seen: seen}, {Slot: phone.Name, IP: "203.0.113.70", Seen: seen}}}
 	}
 	act("vless-xhttp", "hysteria2", "tuic", "vless-vision")
 	e.step(t, 0)
@@ -434,7 +437,7 @@ func TestBoundDevices(t *testing.T) {
 	e.now = e.now.Add(time.Minute)
 	act("hysteria2", "tuic", "vless-vision")
 	e.tn.Step(e.ctx)
-	if s, _ := e.tn.Status(x.ID); !s.CutOff || s.Blocked != 1 {
+	if s, _ := e.tn.Status(x.ID); !s.CutOff || s.Blocked != 2 {
 		t.Fatalf("the bound device must count, and what it reached must survive a restart: %+v", s)
 	}
 }

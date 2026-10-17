@@ -166,6 +166,12 @@ func addEntry(top map[string]json.RawMessage, entries []json.RawMessage, e relea
 	if !replaced {
 		entries = append(entries, raw)
 	}
+	return writeIndex(top, entries, now)
+}
+
+// writeIndex writes an index of the entries, with the fields of top it does not set
+// carried as they were.
+func writeIndex(top map[string]json.RawMessage, entries []json.RawMessage, now time.Time) ([]byte, error) {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, `{"schema":%d,"published":%s,"releases":[`, release.IndexSchema, mustJSON(now.Format(time.RFC3339)))
 	for i, r := range entries {
@@ -192,6 +198,78 @@ func addEntry(top map[string]json.RawMessage, entries []json.RawMessage, e relea
 	}
 	out.WriteByte('\n')
 	return out.Bytes(), nil
+}
+
+// makeGoals puts the goals of a file into the signed index in place of its goals, and
+// signs it again; the releases are carried as they are.
+func makeGoals(args []string) error {
+	fs := flag.NewFlagSet("goals", flag.ContinueOnError)
+	file := fs.String("file", ".github/goals.json", "the goals")
+	in := fs.String("in", "", "the current index.json (its signature next to it, .sig)")
+	out := fs.String("out", "dist", "output directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *in == "" {
+		return errors.New("-in index.json: goals go into an index a release made")
+	}
+	key, err := privateKey(os.Getenv("RELEASE_SIGNING_KEY"))
+	if err != nil {
+		return err
+	}
+	pub := key.Public().(ed25519.PublicKey)
+	raw, err := os.ReadFile(*file)
+	if err != nil {
+		return err
+	}
+	goals, err := release.ParseGoals(raw)
+	if err != nil {
+		return fmt.Errorf("%s: %w", *file, err)
+	}
+	data, err := os.ReadFile(*in)
+	if err != nil {
+		return err
+	}
+	sig, err := os.ReadFile(*in + ".sig")
+	if err != nil {
+		return err
+	}
+	before, err := release.ParseIndex(data, string(sig), pub)
+	if err != nil {
+		return fmt.Errorf("%s: %w", *in, err)
+	}
+	var top map[string]json.RawMessage
+	var entries []json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return fmt.Errorf("%s: %w", *in, err)
+	}
+	if err := json.Unmarshal(top["releases"], &entries); err != nil {
+		return fmt.Errorf("%s: releases: %w", *in, err)
+	}
+	top["goals"] = mustJSON(goals)
+	next, err := writeIndex(top, entries, time.Now().UTC().Truncate(time.Second))
+	if err != nil {
+		return err
+	}
+	nextSig := release.Sign(next, key)
+	ix, err := release.ParseIndex(next, nextSig, pub)
+	if err != nil {
+		return err
+	}
+	// The readers must see every goal, and the releases exactly as before.
+	if len(ix.Goals.Items) != len(goals.Items) || !slices.Equal(ix.Releases, before.Releases) {
+		return errors.New("the signed index does not read back as written")
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return err
+	}
+	for name, content := range map[string][]byte{"index.json": next, "index.json.sig": []byte(nextSig + "\n")} {
+		if err := os.WriteFile(filepath.Join(*out, name), content, 0o644); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("index: %d goals, %d releases\n", len(ix.Goals.Items), len(ix.Releases))
+	return nil
 }
 
 func mustJSON(v any) []byte {

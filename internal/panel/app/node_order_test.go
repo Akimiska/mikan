@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"go.yaml.in/yaml/v3"
+
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
@@ -100,11 +102,11 @@ func TestNodeOrder(t *testing.T) {
 		}
 		var cfg struct {
 			Groups []struct {
-				Name    string   `json:"name"`
-				Proxies []string `json:"proxies"`
-			} `json:"proxy-groups"`
+				Name    string   `yaml:"name"`
+				Proxies []string `yaml:"proxies"`
+			} `yaml:"proxy-groups"`
 		}
-		if err := json.Unmarshal(body, &cfg); err != nil || len(cfg.Groups) == 0 {
+		if err := yaml.Unmarshal(body, &cfg); err != nil || len(cfg.Groups) == 0 {
 			t.Fatalf("clash profile: %v %s", err, body)
 		}
 		// The main group: the auto group, then the country groups.

@@ -1,0 +1,40 @@
+# The goals the project collects money for (.github/goals.json) go into the signed release
+# index, where the panels read them; the documentation site builds its page from the same
+# file (pages.yml). Only main's file is signed: what is on main is what was reviewed.
+name: goals
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/goals.json]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  index:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # The release workflow writes the same index: one writer at a time, each carrying the
+    # other's work on.
+    concurrency:
+      group: release-index
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - name: index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          # Goals go into an index a release made; with none yet there is nothing to add to.
+          gh release download updates -p index.json -p index.json.sig -D updates
+          go run ./cmd/mikan-release goals -file .github/goals.json -in updates/index.json -out dist
+          gh release upload updates dist/index.json dist/index.json.sig --clobber

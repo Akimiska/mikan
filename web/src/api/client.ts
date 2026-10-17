@@ -8,13 +8,17 @@ export type Tariff = Schemas["TariffView"];
 export type Inbound = Schemas["InboundView"];
 export type Preset = Schemas["Info"];
 export type Overview = Schemas["OverviewOutputBody"];
-export type SettingsView = Schemas["SettingsView"];
 export type TrafficPoint = Schemas["TrafficPoint"];
 export type UserState = User["state"];
 
 // The server injects <base href="/<secret>/">; everything is relative to it.
 const base = new URL("./", document.baseURI);
 export const basePath = base.pathname.replace(/\/$/, "");
+
+/** A WebSocket address of an API path (the terminal): the page's own origin and secret path. */
+export function wsUrl(path: string): string {
+  return base.origin.replace(/^http/, "ws") + basePath + path;
+}
 
 let csrfToken = "";
 export function setCsrf(token: string) {
@@ -52,6 +56,11 @@ export class ApiError extends Error {
   }
 }
 
+/** What a code the server sends (a failed payment, import, backup or source read) says, in words; a code with no text as is. */
+export function apiCodeText(code: string): string {
+  return tMaybe(`errors.api.${code}`) ?? code;
+}
+
 function apiMessage(code: string, value: unknown): string {
   return tMaybe(`errors.api.${code}`, { value: typeof value === "string" || typeof value === "number" ? value : "" }) ?? code;
 }
@@ -74,18 +83,6 @@ const session: Middleware = {
 export const api = createClient<paths>({ baseUrl: base.origin + basePath });
 api.use(session);
 
-export async function rawApi(path: string, init: RequestInit = {}): Promise<any> {
-  const headers = new Headers(init.headers);
-  if (init.method && init.method !== "GET" && init.method !== "HEAD" && csrfToken) headers.set("X-CSRF-Token", csrfToken);
-  const response = await fetch(base.origin + basePath + path, { ...init, headers });
-  const body = await response.json().catch(() => ({}));
-  if (response.status === 401 && !path.endsWith("/auth/login")) {
-    window.dispatchEvent(new Event("mikan:unauthorized"));
-  }
-  if (!response.ok) throw new ApiError(response.status, body, Number(response.headers.get("Retry-After") ?? 0));
-  return body;
-}
-
 type Result<T> = { data?: T; error?: unknown; response: Response };
 
 export async function unwrap<T>(p: Promise<Result<T>>): Promise<T> {
@@ -107,7 +104,8 @@ export function errorText(e: unknown): string {
   if (e.status === 0) return t("errors.network");
   if (e.status === 503 && e.detail === "no_free_slots") return t("errors.noSlots");
   if (e.status === 503) return t("errors.nodeDown");
-  if (e.status === 403) return t("errors.forbidden");
+  // A support operator is refused with a code that says why (read-only access, a closed part).
+  if (e.status === 403) return (e.detail ? tMaybe(`errors.api.${e.detail}`) : undefined) ?? t("errors.forbidden");
   if (e.status === 404) return t("errors.notFound");
   if (e.status === 400 || e.status === 409 || e.status === 422) return Object.values(e.fields)[0] || tMaybe(`errors.api.${e.detail}`) || t("errors.checkInput");
   if (e.status === 429) return t("errors.tooMany", { s: e.retryAfter || 60 });

@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image tag + reported panel version (default 0.5.0.4)"
+        description: "Image tag + reported panel version (default 0.5.1.1)"
         required: false
 
 permissions:
@@ -24,7 +24,7 @@ permissions:
 # default image tag. Bump this on every fork release so a plain push to main
 # still produces a correctly-versioned image instead of a bare git sha.
 env:
-  FORK_VERSION: "0.5.0.4"
+  FORK_VERSION: "0.5.1.1"
 
 jobs:
   image:

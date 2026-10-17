@@ -25,14 +25,14 @@ type TelegramLink struct {
 }
 
 type UserView struct {
-	Telegram      *TelegramLink `json:"telegram,omitempty" doc:"Только в карточке пользователя"`
+	Telegram      *TelegramLink `json:"telegram,omitempty" doc:"Привязанный Telegram-аккаунт подписки, если он есть"`
 	Legacy        *LegacyLinks  `json:"legacy,omitempty" doc:"Старые ссылки подписки из панели, откуда импортирован пользователь. Только в карточке и не для ключа только на чтение: это тоже ссылка"`
 	ID            int64         `json:"id"`
 	Name          string        `json:"name"`
 	Contact       string        `json:"contact"`
 	Note          string        `json:"note"`
 	Tags          []string      `json:"tags"`
-	State         string        `json:"state" enum:"active,expiring,limited,expired,disabled"`
+	State         string        `json:"state" enum:"active,expiring,limited,expired,disabled,no_subscription"`
 	TariffID      *int64        `json:"tariff_id"`
 	TrafficLimit  *int64        `json:"traffic_limit" doc:"Байты за период; null — без лимита"`
 	TrafficExtra  int64         `json:"traffic_extra" doc:"Байты, оставшиеся в пакетах трафика основного лимита: тратятся после лимита тарифа"`
@@ -111,9 +111,15 @@ func (h *handlers) online() map[string]nodeapi.Online {
 
 func (h *handlers) viewUser(u db.User, slots []string, bound int64, grants domain.GrantsLeft, env userEnv) UserView {
 	now := h.d.Now()
+	// The card's state pill follows the list: in this deployment a missing or spent term
+	// is "no subscription" (see listUsers) rather than an active perpetual one.
+	st := domain.State(u, grants.Main(u.ID), now)
+	if u.Status != "disabled" && (!u.ExpiresAt.Valid || now.Unix() >= u.ExpiresAt.Int64) {
+		st = domain.StateNoSubscription
+	}
 	v := UserView{
 		ID: u.ID, Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: domain.DecodeTags(u.Tags),
-		State: domain.State(u, grants.Main(u.ID), now), TariffID: ptrInt(u.TariffID.Int64, u.TariffID.Valid),
+		State: st, TariffID: ptrInt(u.TariffID.Int64, u.TariffID.Valid),
 		TrafficLimit: ptrInt(u.TrafficLimit.Int64, u.TrafficLimit.Valid), TrafficExtra: grants.Main(u.ID), UsedUp: u.UsedUp, UsedDown: u.UsedDown,
 		TotalUp: u.TotalUp, TotalDown: u.TotalDown, DeviceLimit: ptrInt(u.DeviceLimit.Int64, u.DeviceLimit.Valid),
 		ResetStrategy: u.ResetStrategy, ExpiresAt: ptrTime(u.ExpiresAt.Int64, u.ExpiresAt.Valid),
@@ -340,6 +346,13 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 		st := domain.State(u, grants.Main(u.ID), now)
 		c := &out.Body.Counts
 		c.All++
+		// In this deployment a missing term (never_expires) is only ever set by the bot
+		// for a user who has not bought anything yet: it is "no subscription", not a
+		// perpetual one. They show and count as no_subscription, and disabled stays only
+		// in its own tab.
+		if u.Status != "disabled" && (!u.ExpiresAt.Valid || now.Unix() >= u.ExpiresAt.Int64) {
+			st = domain.StateNoSubscription
+		}
 		switch st {
 		case domain.StateActive:
 			c.Active++
@@ -350,19 +363,13 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 			c.Limited++
 		case domain.StateExpired:
 			c.Expired++
+			c.NoSubscription++
 		case domain.StateDisabled:
 			c.Disabled++
-		}
-		// Без подписки: срока нет вовсе (новые) или он уже прошёл; отключённые
-		// считаются только в своей вкладке.
-		if st != domain.StateDisabled && (!u.ExpiresAt.Valid || now.Unix() >= u.ExpiresAt.Int64) {
+		case domain.StateNoSubscription:
 			c.NoSubscription++
 		}
-		if in.State == "no_subscription" {
-			if st == domain.StateDisabled || (u.ExpiresAt.Valid && now.Unix() < u.ExpiresAt.Int64) {
-				continue
-			}
-		} else if in.State != "all" && !(st == in.State || (in.State == domain.StateActive && st == domain.StateExpiring)) {
+		if in.State != "all" && st != in.State {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(u.Name+" "+u.Contact+" "+u.Note+" "+u.Tags), q) {
@@ -392,8 +399,20 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 			bound[c.UserID] = c.N
 		}
 		env := h.userEnv(ctx)
+		tgs, err := h.d.Store.Q.TgLinksOfUsers(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		tgsByID := make(map[int64]TelegramLink, len(tgs))
+		for _, l := range tgs {
+			tgsByID[l.UserID] = TelegramLink{ID: l.TgID, Username: l.Username, Name: l.FirstName}
+		}
 		for _, u := range page {
-			out.Body.Items = append(out.Body.Items, h.viewUser(u, names[u.ID], bound[u.ID], grants, env))
+			v := h.viewUser(u, names[u.ID], bound[u.ID], grants, env)
+			if t, ok := tgsByID[u.ID]; ok {
+				v.Telegram = &t
+			}
+			out.Body.Items = append(out.Body.Items, v)
 		}
 	}
 	return out, nil

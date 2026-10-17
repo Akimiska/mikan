@@ -64,7 +64,8 @@
     "expiring": "expiring",
     "limited": "limit reached",
     "expired": "expired",
-    "disabled": "disabled"
+    "disabled": "disabled",
+    "no_subscription": "no subscription"
   },
   "units": {
     "b": "B",

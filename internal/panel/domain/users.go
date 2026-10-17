@@ -22,6 +22,12 @@ const (
 	StateLimited  = "limited"
 	StateExpired  = "expired"
 	StateDisabled = "disabled"
+	// StateNoSubscription is a list-level state, not a domain one: the user's term is
+	// absent or already over, so they have nothing to connect with. It is derived where
+	// the list is built (the API and CountUserStates), State itself still says active
+	// for a missing term so that nodes and the subscription handler keep treating it as
+	// they always have.
+	StateNoSubscription = "no_subscription"
 
 	expiringWindow = 7 * 24 * time.Hour
 	day            = int64(24 * time.Hour / time.Second)

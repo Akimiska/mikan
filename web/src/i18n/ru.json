@@ -64,7 +64,8 @@
     "expiring": "истекает",
     "limited": "лимит исчерпан",
     "expired": "истёк",
-    "disabled": "отключён"
+    "disabled": "отключён",
+    "no_subscription": "без подписки"
   },
   "units": {
     "b": "Б",

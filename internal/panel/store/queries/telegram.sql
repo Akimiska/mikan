@@ -35,6 +35,13 @@ SELECT COUNT(*) FROM tg_links WHERE tg_id = $1;
 SELECT l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
 FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = $1;
 
+-- name: TgLinksOfUsers :many
+-- The Telegram identities of these users, one row per linked user (a user has at most
+-- one link): for a list's page, instead of a TgLinkOfUser per row.
+SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
+FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id
+WHERE l.user_id = ANY(sqlc.arg(ids)::bigint[]);
+
 -- name: CountTgChats :one
 SELECT COUNT(DISTINCT tg_id) FROM tg_links;
 

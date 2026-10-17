@@ -13,6 +13,7 @@ import { t, useLocale } from "../../i18n";
 import { bytes, dateShort, expiryText, num } from "../../lib/format";
 import { useMediaQuery } from "../../lib/media";
 import { USER_STATES } from "../search";
+import { tgLabel } from "../identity";
 import { CreateUserDrawer } from "./user-create";
 import { UserDrawer } from "./user-drawer";
 
@@ -233,11 +234,12 @@ const UserRow = memo(function UserRow({ u, tariff, selected, onToggle, onOpen }:
           <div className="min-w-0">
             <div className="truncate font-medium">
               <Link from="/users" to="/users" search={(s) => ({ ...s, user: u.id, create: undefined })} className="row-link" onClick={(e) => e.stopPropagation()}>
-                {u.name}
+                {u.telegram ? tgLabel(u) : u.name}
               </Link>
               {u.online ? <span className="online-dot" title={t("users.onlineNow")} role="img" aria-label={t("users.onlineNow")} /> : null}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--ink-500)]">
+              {u.telegram && u.name ? <span>{u.name}</span> : null}
               {u.contact ? <span>{u.contact}</span> : null}
               {u.tags.map((tag) => (
                 <span key={tag} className="tag">
@@ -284,10 +286,11 @@ const UserCard = memo(function UserCard({ u, tariff }: { u: User; tariff?: Tarif
       <Avatar name={u.name} seed={u.id} />
       <div className="min-w-0">
         <div className="truncate font-medium">
-          {u.name}
+          {u.telegram ? tgLabel(u) : u.name}
           {u.online ? <span className="online-dot" role="img" aria-label={t("users.onlineNow")} /> : null}
         </div>
         <div className="truncate text-xs text-[var(--ink-500)]">
+          {u.telegram && u.name ? `${u.name} · ` : ""}
           {tariff?.name ?? t("users.noTariff")} · {e.text}
         </div>
       </div>

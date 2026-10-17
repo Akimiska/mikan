@@ -37,6 +37,7 @@ const stateTone: Record<UserState, "ok" | "warn" | "bad" | "off"> = {
   limited: "bad",
   expired: "bad",
   disabled: "off",
+  no_subscription: "off",
 };
 
 export function Pill({ tone, children }: { tone: "ok" | "warn" | "bad" | "off"; children: ReactNode }) {

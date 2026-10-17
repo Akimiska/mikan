@@ -229,9 +229,10 @@ WITH g AS (
 ), s AS (
   SELECT CASE
     WHEN u.status = 'disabled' THEN 'disabled'
-    WHEN u.expires_at IS NOT NULL AND u.expires_at <= $1::bigint THEN 'expired'
+    WHEN u.expires_at IS NULL THEN 'no_subscription'
+    WHEN u.expires_at <= $1::bigint THEN 'expired'
     WHEN u.traffic_limit IS NOT NULL AND u.used_up + u.used_down >= u.traffic_limit AND COALESCE(g.left_bytes, 0) <= 0 THEN 'limited'
-    WHEN u.expires_at IS NOT NULL AND u.expires_at - $1::bigint <= $2::bigint THEN 'expiring'
+    WHEN u.expires_at - $1::bigint <= $2::bigint THEN 'expiring'
     ELSE 'active' END AS state
   FROM users u LEFT JOIN g ON g.user_id = u.id
 )
@@ -258,9 +259,12 @@ type CountUserStatesRow struct {
 	Disabled int64
 }
 
-// How many users are in each state as domain.State decides it (keep the two alike):
-// disabled, expired, limited (past the base quota with no main grants left), expiring
-// (the term ends within expiring_within seconds), otherwise active.
+// How many users are in each state as listUsers decides it (keep the two alike):
+// disabled, no_subscription (term absent — in this deployment a missing term is the
+// bot's "not bought anything yet", never a perpetual one), expired, limited (past the
+// base quota with no main grants left), expiring (the term ends within
+// expiring_within seconds), otherwise active. Expired counts inside no_subscription is
+// the list's Expired count; the dashboard's Expired also includes it.
 func (q *Queries) CountUserStates(ctx context.Context, arg CountUserStatesParams) (CountUserStatesRow, error) {
 	row := q.db.QueryRowContext(ctx, countUserStates, arg.Now, arg.ExpiringWithin)
 	var i CountUserStatesRow

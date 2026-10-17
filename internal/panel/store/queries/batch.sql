@@ -135,9 +135,12 @@ DELETE FROM bound_devices WHERE user_id = ANY(sqlc.arg(ids)::bigint[]);
 DELETE FROM users WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: CountUserStates :one
--- How many users are in each state as domain.State decides it (keep the two alike):
--- disabled, expired, limited (past the base quota with no main grants left), expiring
--- (the term ends within expiring_within seconds), otherwise active.
+-- How many users are in each state as listUsers decides it (keep the two alike):
+-- disabled, no_subscription (term absent — in this deployment a missing term is the
+-- bot's "not bought anything yet", never a perpetual one), expired, limited (past the
+-- base quota with no main grants left), expiring (the term ends within
+-- expiring_within seconds), otherwise active. Expired counts inside no_subscription is
+-- the list's Expired count; the dashboard's Expired also includes it.
 WITH g AS (
   SELECT user_id, SUM(remaining) AS left_bytes FROM traffic_grants
   WHERE pool_id IS NULL AND remaining > 0 AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::bigint)
@@ -145,9 +148,10 @@ WITH g AS (
 ), s AS (
   SELECT CASE
     WHEN u.status = 'disabled' THEN 'disabled'
-    WHEN u.expires_at IS NOT NULL AND u.expires_at <= sqlc.arg(now)::bigint THEN 'expired'
+    WHEN u.expires_at IS NULL THEN 'no_subscription'
+    WHEN u.expires_at <= sqlc.arg(now)::bigint THEN 'expired'
     WHEN u.traffic_limit IS NOT NULL AND u.used_up + u.used_down >= u.traffic_limit AND COALESCE(g.left_bytes, 0) <= 0 THEN 'limited'
-    WHEN u.expires_at IS NOT NULL AND u.expires_at - sqlc.arg(now)::bigint <= sqlc.arg(expiring_within)::bigint THEN 'expiring'
+    WHEN u.expires_at - sqlc.arg(now)::bigint <= sqlc.arg(expiring_within)::bigint THEN 'expiring'
     ELSE 'active' END AS state
   FROM users u LEFT JOIN g ON g.user_id = u.id
 )

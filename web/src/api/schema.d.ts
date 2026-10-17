@@ -3532,12 +3532,12 @@ export interface components {
             /** Format: date-time */
             resets_at: string | null;
             /** @enum {string} */
-            state: "active" | "expiring" | "limited" | "expired" | "disabled";
+            state: "active" | "expiring" | "limited" | "expired" | "disabled" | "no_subscription";
             sub_url: string;
             tags: string[];
             /** Format: int64 */
             tariff_id: number | null;
-            /** @description Только в карточке пользователя */
+            /** @description Привязанный Telegram-аккаунт подписки, если он есть */
             telegram?: components["schemas"]["TelegramLink"];
             /**
              * Format: date-time

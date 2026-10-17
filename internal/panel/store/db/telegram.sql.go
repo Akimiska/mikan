@@ -7,6 +7,8 @@ package db
 
 import (
 	"context"
+
+	"github.com/lib/pq"
 )
 
 const addTgNotice = `-- name: AddTgNotice :execrows
@@ -262,6 +264,49 @@ func (q *Queries) TgLinkOfUser(ctx context.Context, userID int64) (TgLinkOfUserR
 	var i TgLinkOfUserRow
 	err := row.Scan(&i.TgID, &i.Username, &i.FirstName)
 	return i, err
+}
+
+const tgLinksOfUsers = `-- name: TgLinksOfUsers :many
+SELECT l.user_id, l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '') AS first_name
+FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id
+WHERE l.user_id = ANY($1::bigint[])
+`
+
+type TgLinksOfUsersRow struct {
+	UserID    int64
+	TgID      int64
+	Username  string
+	FirstName string
+}
+
+// The Telegram identities of these users, one row per linked user (a user has at most
+// one link): for a list's page, instead of a TgLinkOfUser per row.
+func (q *Queries) TgLinksOfUsers(ctx context.Context, ids []int64) ([]TgLinksOfUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, tgLinksOfUsers, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TgLinksOfUsersRow{}
+	for rows.Next() {
+		var i TgLinksOfUsersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.TgID,
+			&i.Username,
+			&i.FirstName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const unlinkTg = `-- name: UnlinkTg :exec

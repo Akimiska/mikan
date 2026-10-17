@@ -220,7 +220,13 @@ func TestCountStatesMatchesState(t *testing.T) {
 	grants, _ := LoadGrantsLeft(ctx, st.Q, now)
 	want := db.CountUserStatesRow{Total: int64(len(all))}
 	for _, u := range all {
-		switch State(u, grants.Main(u.ID), now) {
+		// The count follows the list's classification, not domain.State alone: a missing
+		// term is "no subscription", an over one is expired and also no-subscription.
+		st := State(u, grants.Main(u.ID), now)
+		if u.Status != "disabled" && !u.ExpiresAt.Valid {
+			st = StateNoSubscription
+		}
+		switch st {
 		case StateActive:
 			want.Active++
 		case StateExpiring:
@@ -237,7 +243,7 @@ func TestCountStatesMatchesState(t *testing.T) {
 	if err != nil || got != want {
 		t.Fatalf("counts %+v (%v), State says %+v", got, err, want)
 	}
-	if want.Active != 4 || want.Expiring != 1 || want.Limited != 2 || want.Expired != 1 || want.Disabled != 1 {
+	if want.Active != 3 || want.Expiring != 1 || want.Limited != 2 || want.Expired != 1 || want.Disabled != 1 {
 		t.Fatalf("the cases do not cover every state: %+v", want)
 	}
 }

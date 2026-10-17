@@ -44,8 +44,8 @@ dns:
     - +.rbx.com
   fake-ip-range: 198.18.0.1/16
   nameserver:
-    - https://1.1.1.1/dns-query#PROXY
-    - https://8.8.8.8/dns-query#PROXY
+    - https://1.1.1.1/dns-query#VPN
+    - https://8.8.8.8/dns-query#VPN
   nameserver-policy:
     geosite:category-ru:
       - 77.88.8.8
@@ -117,26 +117,10 @@ proxy-groups:
   - name: VPN
     type: select
     proxies:
-      - Auto
       - VLESS XHTTP
       - Hysteria2
       - TUIC
       - VLESS Vision
-  - name: Auto
-    type: url-test
-    proxies:
-      - VLESS XHTTP
-      - Hysteria2
-      - TUIC
-      - VLESS Vision
-    interval: 300
-    tolerance: 50
-    url: https://www.gstatic.com/generate_204
-  - name: PROXY
-    type: select
-    proxies:
-      - VPN
-    hidden: true
 rules:
   - IP-CIDR,203.0.113.7/32,DIRECT,no-resolve
   - DOMAIN,vpn.example.com,DIRECT

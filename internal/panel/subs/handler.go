@@ -57,7 +57,7 @@ type Config struct {
 	// NodeOrder/ProtoOrder (AoiVPN fork): custom node/inbound display order.
 	NodeOrder  []string
 	ProtoOrder []string
-	Routes Routes // services, direct apps and DNS (settings.KeyRoutes)
+	Routes     Routes // services, direct apps and DNS (settings.KeyRoutes)
 	// Template is the admin's own Clash profile (settings.KeyTemplate, see Template); it
 	// takes the place of Groups, Routing, Rules and Routes for mihomo apps. "": none.
 	Template string

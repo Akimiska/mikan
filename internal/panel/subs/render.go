@@ -293,63 +293,41 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 	for i, x := range ps {
 		proxies[i], names[i] = x.yaml, x.name
 	}
-	var countries []map[string]any
-	if !p.Routes.Servers.NoCountries {
-		countries = countryGroups(p.Nodes, ps, g, names)
-	}
-	selector := []string{g.Auto}
-	for _, c := range countries {
-		selector = append(selector, c["name"].(string))
-	}
-	auto := urlTest(g.Auto, names)
-	if p.Routes.Servers.Auto == "fallback" {
-		auto["type"] = "fallback" // the first that works, in the order of the nodes
-		delete(auto, "tolerance")
-	}
-	// AoiVPN fork: bypass proxies ("🇷🇺 Обход БС") go into the main group's own list, as
-	// its last members, and have a select group of their own after the auto group.
+	// AoiVPN fork: flat two-group layout — one select group (g.Main) with every proxy and
+	// an optional "🇷🇺 Обход БС" select group of the injected bypass proxies (also the main
+	// group's last members). No url-test, per-country or per-service groups, whatever the
+	// routing page's "a group per node" switch says: the fork's subscription stays flat.
+	// Bypass proxies ("🇷🇺 Обход БС") go into the main group's own list, as
+	// its last members, and have a select group of their own.
+	var bnames []string
 	if p.Bypass != nil && len(p.Bypass.Proxies) > 0 {
 		for _, bp := range p.Bypass.Proxies {
 			proxies = append(proxies, bp)
 			if n, ok := bp["name"].(string); ok {
 				names = append(names, n)
-			}
-		}
-	}
-	groups := []map[string]any{
-		{"name": g.Main, "type": "select", "proxies": append(selector, names...)},
-		auto,
-	}
-	if p.Bypass != nil && len(p.Bypass.Proxies) > 0 {
-		bnames := make([]string, 0, len(p.Bypass.Proxies))
-		for _, bp := range p.Bypass.Proxies {
-			if n, ok := bp["name"].(string); ok {
 				bnames = append(bnames, n)
 			}
 		}
-		groups = append(groups, selectGroup(p.Bypass.Group, bnames, ""))
 	}
-	groups = append(groups, countries...)
-	if n := p.Routes.Servers.Interval; n > 0 {
-		for _, gr := range groups[1:] {
-			gr["interval"] = n
-		}
+	mainMembers := append([]string{}, names...)
+	if p.Bypass != nil && len(p.Bypass.Proxies) > 0 {
+		mainMembers = append(mainMembers, p.Bypass.Group)
+	}
+	var groups []map[string]any
+	if p.Bypass != nil && len(p.Bypass.Proxies) > 0 {
+		groups = append(groups, selectGroup(g.Main, mainMembers, g.Icon), selectGroup(p.Bypass.Group, bnames, ""))
+	} else {
+		groups = append(groups, selectGroup(g.Main, mainMembers, g.Icon))
 	}
 	taken := map[string]bool{}
 	for _, n := range append(append([]string{}, names...), g.Main, g.Auto, AliasGroup) {
 		taken[strings.ToLower(n)] = true
-	}
-	for _, c := range countries {
-		taken[strings.ToLower(c["name"].(string))] = true
 	}
 	if !p.routable() && r == RoutingBlocked {
 		r = RoutingRUDirect
 	}
 	rt := p.route(g, ps, taken, r)
 	groups = append(groups, rt.groups...)
-	if g.Main != AliasGroup {
-		groups = append(groups, map[string]any{"name": AliasGroup, "type": "select", "proxies": []string{g.Main}, "hidden": true})
-	}
 	dns := map[string]any{
 		"enable": true, "ipv6": false, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
 		"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
@@ -412,10 +390,18 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 	}
 	if r != RoutingAll {
 		// GEOIP,ru makes the app resolve every domain itself. DoH straight from Russia
-		// stalls under TSPU throttling, so it goes through the tunnel (the alias group has
-		// a fixed name: "&" or "=" in a renamed group would break the "#group" suffix).
+		// stalls under TSPU throttling, so it goes through the tunnel via the main group's
+		// "#group" suffix. It MUST be the real group name (g.Main, e.g. "AoiVPN"), not the
+		// AliasGroup constant "PROXY": a renamed main group with "#PROXY" points at a group
+		// that does not exist, so mihomo cannot route DNS through the tunnel and falls back
+		// to resolving straight from the device (RU DNS) — a region leak. A '#' in a renamed
+		// group would break the suffix, so fall back to the alias only then.
 		// Russian domains resolve with Yandex DNS directly and keep working without the VPN.
-		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + AliasGroup, "https://8.8.8.8/dns-query#" + AliasGroup}
+		dnsGroup := g.Main
+		if strings.ContainsAny(dnsGroup, "#") {
+			dnsGroup = AliasGroup
+		}
+		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + dnsGroup, "https://8.8.8.8/dns-query#" + dnsGroup}
 		dns["proxy-server-nameserver"] = slices.Clone(defaultNameservers)
 		dns["nameserver-policy"] = map[string]any{"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"}}
 	}
@@ -477,35 +463,6 @@ func orderNodes(nodes []Node, order []string) {
 
 func orderInbounds(ins []db.Inbound, order []string) {
 	sortByOrder(ins, order, func(in db.Inbound) string { return in.Preset }, false)
-}
-
-// countryGroups picks the fastest proxy of each node when there are several nodes. A
-// node whose name would clash with another group or a proxy gets no group: the profile
-// must load whatever the admin typed.
-func countryGroups(nodes []Node, ps []proxy, g Groups, names []string) []map[string]any {
-	if len(nodes) < 2 {
-		return nil
-	}
-	taken := map[string]bool{strings.ToLower(g.Main): true, strings.ToLower(g.Auto): true, strings.ToLower(AliasGroup): true}
-	for _, n := range names {
-		taken[strings.ToLower(n)] = true
-	}
-	var out []map[string]any
-	for _, n := range nodes {
-		var own []string
-		for _, x := range ps {
-			if x.node == n.ID {
-				own = append(own, x.name)
-			}
-		}
-		key := strings.ToLower(n.Name)
-		if len(own) == 0 || ValidName(n.Name) != nil || taken[key] {
-			continue
-		}
-		taken[key] = true
-		out = append(out, urlTest(n.Name, own))
-	}
-	return out
 }
 
 // directRules keep traffic to the server itself (panel, SSH, subscription updates) out

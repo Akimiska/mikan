@@ -86,7 +86,8 @@ func TestSingBox(t *testing.T) {
 			t.Errorf("sing-box has no XHTTP: %v", o)
 		}
 	}
-	for _, want := range []string{"selector", "urltest", "vless", "hysteria2", "tuic", "direct"} {
+	// AoiVPN fork: the Clash profile is flat — one selector, no urltest group.
+	for _, want := range []string{"selector", "vless", "hysteria2", "tuic", "direct"} {
 		if !slices.Contains(types, want) {
 			t.Errorf("no %s outbound: %v", want, types)
 		}

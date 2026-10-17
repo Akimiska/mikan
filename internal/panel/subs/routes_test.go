@@ -135,7 +135,8 @@ func TestServiceOnAMissingNode(t *testing.T) {
 	prof := profile(t, "")
 	prof.Routes = Routes{Services: map[string]string{"youtube": NodeTarget(7)}}
 	cfg, _ := renderRouted(t, prof, RoutingAll)
-	if !slices.Contains(cfg.Rules, "GEOSITE,youtube,VPN") || len(cfg.Groups) != 3 {
+	// AoiVPN fork: the profile is flat — the main group and no node/service groups.
+	if !slices.Contains(cfg.Rules, "GEOSITE,youtube,VPN") || len(cfg.Groups) != 1 || cfg.Groups[0].Name != "VPN" {
 		t.Fatalf("groups %+v rules %v", cfg.Groups, cfg.Rules)
 	}
 }

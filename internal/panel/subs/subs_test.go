@@ -131,12 +131,10 @@ func TestMihomoProfile(t *testing.T) {
 	if err := unmarshalProfile(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Proxies) != 4 || cfg.Groups[0].Name != "VPN" || cfg.Groups[1].Name != "Авто" {
+	// AoiVPN fork: the profile is flat — one select group, no Auto group and no
+	// hidden PROXY alias; the rules end with MATCH,<main> and a REJECT twin.
+	if len(cfg.Proxies) != 4 || len(cfg.Groups) != 1 || cfg.Groups[0].Name != "VPN" {
 		t.Fatalf("profile: %s", raw)
-	}
-	// Rules injected by the app itself ("PROCESS-NAME,x.exe,PROXY") need a PROXY group.
-	if alias := cfg.Groups[2]; alias.Name != "PROXY" || !alias.Hidden || len(alias.Proxies) != 1 || alias.Proxies[0] != "VPN" {
-		t.Fatalf("PROXY alias: %+v", cfg.Groups)
 	}
 	wantRules := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "DOMAIN,vpn.example.com,DIRECT", "GEOIP,LAN,DIRECT,no-resolve", "MATCH,VPN", "MATCH,REJECT"}
 	if strings.Join(cfg.Rules, "|") != strings.Join(wantRules, "|") {
@@ -180,7 +178,8 @@ func TestCustomNames(t *testing.T) {
 	if cfg.Proxies[0]["name"] != "🇳🇱 Нидерланды" || cfg.Proxies[1]["name"] != "🇳🇱 Нидерланды 2" {
 		t.Fatalf("names: %v %v", cfg.Proxies[0]["name"], cfg.Proxies[1]["name"])
 	}
-	if cfg.Groups[0].Name != "🚀 Мой VPN" || cfg.Groups[0].Proxies[0] != "⚡ Быстрый" || cfg.Rules[len(cfg.Rules)-2] != "MATCH,🚀 Мой VPN" {
+	// AoiVPN fork: flat — the group's first member is a proxy, not an Auto group.
+	if cfg.Groups[0].Name != "🚀 Мой VPN" || cfg.Groups[0].Proxies[0] != "🇳🇱 Нидерланды" || cfg.Rules[len(cfg.Rules)-2] != "MATCH,🚀 Мой VPN" {
 		t.Fatalf("groups: %+v rules: %v", cfg.Groups, cfg.Rules)
 	}
 	links, err := URIs(prof)
@@ -232,9 +231,12 @@ func TestRouting(t *testing.T) {
 	}
 	// Every domain gets resolved on the client for GEOIP,ru: through the tunnel, except
 	// Russian ones and the server's own name (resolving it through itself would deadlock).
+	// The "#group" suffix MUST name the real main group (default "VPN"), not the fixed
+	// AliasGroup "PROXY" — a renamed main group with "#PROXY" points at nothing and mihomo
+	// falls back to resolving straight from the device (region leak).
 	for _, ns := range ru.DNS.Nameserver {
-		if !strings.HasSuffix(ns, "#PROXY") {
-			t.Errorf("nameserver %q must go through the tunnel", ns)
+		if !strings.HasSuffix(ns, "#VPN") {
+			t.Errorf("nameserver %q must go through the main group", ns)
 		}
 	}
 	if len(ru.DNS.ProxyServer) == 0 || strings.Contains(strings.Join(ru.DNS.ProxyServer, ""), "#") {
@@ -244,10 +246,15 @@ func TestRouting(t *testing.T) {
 		t.Errorf("Russian domains need a Russian resolver: %v", ru.DNS.Policy)
 	}
 
-	// The "#PROXY" suffix must name a group even when the admin calls the main group PROXY.
-	named := render(Groups{Main: "PROXY"}, RoutingRUDirect)
-	if named.Groups[0].Name != "PROXY" || named.Rules[len(named.Rules)-2] != "MATCH,PROXY" {
-		t.Fatalf("main group named PROXY: %+v %v", named.Groups, named.Rules)
+	// A renamed main group: the DNS "#group" suffix must follow it, not stay on "PROXY".
+	named := render(Groups{Main: "AoiVPN"}, RoutingRUDirect)
+	if named.Groups[0].Name != "AoiVPN" || named.Rules[len(named.Rules)-2] != "MATCH,AoiVPN" {
+		t.Fatalf("main group renamed: %+v %v", named.Groups, named.Rules)
+	}
+	for _, ns := range named.DNS.Nameserver {
+		if !strings.HasSuffix(ns, "#AoiVPN") {
+			t.Errorf("nameserver %q must follow the renamed main group", ns)
+		}
 	}
 
 	all := render(Groups{}, RoutingAll)
@@ -335,11 +342,13 @@ func TestMultiNodeProfile(t *testing.T) {
 	for _, g := range cfg.Groups {
 		byName[g.Name] = g.Proxies
 	}
-	if strings.Join(main.Proxies[:3], "|") != "Авто|🇳🇱 Нидерланды|🇺🇸 США" {
-		t.Fatalf("main group lists the country groups first: %v", main.Proxies)
+	// AoiVPN fork: flat — the main group lists every proxy of both nodes, no country
+	// groups and no Auto group.
+	if strings.Join(main.Proxies, "|") != strings.Join(want, "|") {
+		t.Fatalf("main group lists every proxy: %v", main.Proxies)
 	}
-	if strings.Join(byName["🇺🇸 США"], "|") != "🇺🇸 VLESS XHTTP|Особый" || len(byName["Авто"]) != len(want) {
-		t.Fatalf("country groups: %v", byName)
+	if len(cfg.Groups) != 1 {
+		t.Fatalf("country groups must stay out of the fork's profile: %+v", cfg.Groups)
 	}
 	links, err := URIs(prof)
 	if err != nil || strings.Count(links, "\n") != len(want)-1 {
@@ -489,16 +498,19 @@ func TestNodeOrderFollowsTheProfile(t *testing.T) {
 		if strings.Join(servers, " ") != strings.Join(wantHosts, " ") {
 			t.Fatalf("proxies for %v: %v", order, servers)
 		}
-		// The main group lists the auto group and then the country groups in order.
-		if got := cfg.Groups[0].Proxies[1:4]; strings.Join(got, "|") != strings.Join(wantGroups, "|") {
-			t.Fatalf("country groups for %v: %v", order, cfg.Groups[0].Proxies)
+		// AoiVPN fork: flat — no country groups; the main group lists every proxy in the
+		// nodes' order, each node's flag prefixing its proxies.
+		if got := cfg.Groups[0].Proxies; len(got) != len(wantHosts) {
+			t.Fatalf("main group must list every proxy for %v: %v", order, got)
 		}
-		var groups []string
-		for _, g := range cfg.Groups[2:5] {
-			groups = append(groups, g.Name)
+		for i, name := range wantGroups {
+			// Only the leading flag prefixes a proxy name in a multi-node subscription.
+			if !strings.HasPrefix(cfg.Groups[0].Proxies[i*2], string([]rune(name)[:2])) {
+				t.Fatalf("proxy order for %v: %v", order, cfg.Groups[0].Proxies)
+			}
 		}
-		if strings.Join(groups, "|") != strings.Join(wantGroups, "|") {
-			t.Fatalf("group list for %v: %v", order, groups)
+		if len(cfg.Groups) != 1 {
+			t.Fatalf("flat profile: one group, got %+v", cfg.Groups)
 		}
 		// Within a node the inbounds keep their order.
 		for i := 0; i < len(servers); i += 2 {

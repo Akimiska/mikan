@@ -10,7 +10,7 @@ import (
 func TestMihomoParsesTheProfile(t *testing.T) {
 	prof := profile(t, "")
 	for _, r := range []Routing{RoutingAll, RoutingRUDirect} {
-		raw, err := Mihomo(prof, Groups{Main: "🚀 Мой VPN", Auto: "on"}, r)
+		raw, err := Mihomo(prof, Groups{Main: "AoiVPN"}, r)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -21,8 +21,9 @@ func TestMihomoParsesTheProfile(t *testing.T) {
 		if len(rc.Proxy) == 0 || len(rc.ProxyGroup) == 0 || len(rc.Rule) == 0 {
 			t.Fatalf("%s: an empty section:\n%s", r, raw)
 		}
-		if g := rc.ProxyGroup[1]["name"]; g != "on" {
-			t.Fatalf("a group named %q came back as %v", "on", g)
+		// AoiVPN fork: the profile has one select group (the main one), no Auto group.
+		if g := rc.ProxyGroup[0]["name"]; g != "AoiVPN" {
+			t.Fatalf("a group named %q came back as %v", "AoiVPN", g)
 		}
 	}
 }

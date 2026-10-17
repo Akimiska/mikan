@@ -50,9 +50,6 @@
   "outbounds": [
     {
       "outbounds": [
-        "Fast",
-        "🇳🇱 Нидерланды",
-        "🇺🇸 США",
         "🇳🇱 VLESS Vision",
         "🇳🇱 Trojan",
         "🇳🇱 VLESS gRPC",
@@ -62,52 +59,11 @@
       "type": "selector"
     },
     {
-      "interval": "120s",
-      "outbounds": [
-        "🇳🇱 VLESS Vision",
-        "🇳🇱 Trojan",
-        "🇳🇱 VLESS gRPC",
-        "🇺🇸 VLESS Vision"
-      ],
-      "tag": "Fast",
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
-      "interval": "120s",
-      "outbounds": [
-        "🇳🇱 VLESS Vision",
-        "🇳🇱 Trojan",
-        "🇳🇱 VLESS gRPC"
-      ],
-      "tag": "🇳🇱 Нидерланды",
-      "tolerance": 50,
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
-      "interval": "120s",
-      "outbounds": [
-        "🇺🇸 VLESS Vision"
-      ],
-      "tag": "🇺🇸 США",
-      "tolerance": 50,
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
       "outbounds": [
         "🇺🇸 VLESS Vision",
         "Прокси"
       ],
       "tag": "🤖 ChatGPT · Claude · Gemini",
-      "type": "selector"
-    },
-    {
-      "outbounds": [
-        "Прокси"
-      ],
-      "tag": "PROXY",
       "type": "selector"
     },
     {

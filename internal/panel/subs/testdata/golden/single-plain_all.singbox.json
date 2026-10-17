@@ -37,27 +37,9 @@
   "outbounds": [
     {
       "outbounds": [
-        "Авто",
         "VLESS Vision"
       ],
       "tag": "VPN",
-      "type": "selector"
-    },
-    {
-      "interval": "300s",
-      "outbounds": [
-        "VLESS Vision"
-      ],
-      "tag": "Авто",
-      "tolerance": 50,
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
-      "outbounds": [
-        "VPN"
-      ],
-      "tag": "PROXY",
       "type": "selector"
     },
     {

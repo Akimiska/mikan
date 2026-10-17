@@ -50,26 +50,9 @@
   "outbounds": [
     {
       "outbounds": [
-        "Fast",
         "VLESS Vision"
       ],
       "tag": "Прокси",
-      "type": "selector"
-    },
-    {
-      "interval": "120s",
-      "outbounds": [
-        "VLESS Vision"
-      ],
-      "tag": "Fast",
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
-      "outbounds": [
-        "Прокси"
-      ],
-      "tag": "PROXY",
       "type": "selector"
     },
     {

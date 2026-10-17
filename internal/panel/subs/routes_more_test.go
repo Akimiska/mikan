@@ -34,16 +34,18 @@ func TestOwnLists(t *testing.T) {
 	}
 }
 
-// How servers are picked: no group per country, the first that works, the interval.
+// The admin's server-choice switch has no effect on the fork's flat profile: one select
+// group, no per-country groups and no auto group of its own.
 func TestServerChoice(t *testing.T) {
 	prof := twoNodes(t)
 	prof.Routes.Servers = Servers{NoCountries: true, Auto: "fallback", Interval: 120}
 	cfg, raw := renderRouted(t, prof, RoutingAll)
-	if len(cfg.Groups) != 3 || strings.Contains(string(raw), "🇺🇸 США\n") {
+	// AoiVPN fork: flat — the main group only; both nodes' proxies in it, in node order.
+	if len(cfg.Groups) != 1 || cfg.Groups[0].Name != "VPN" || strings.Contains(string(raw), "🇺🇸 США\n") {
 		t.Fatalf("groups: %+v", cfg.Groups)
 	}
-	if !strings.Contains(string(raw), "type: fallback") || !strings.Contains(string(raw), "interval: 120") || strings.Contains(string(raw), "tolerance") {
-		t.Fatalf("auto:\n%s", raw)
+	if len(cfg.Groups[0].Proxies) != 5 || strings.Contains(string(raw), "url-test") || strings.Contains(string(raw), "tolerance") {
+		t.Fatalf("no auto group must be rendered:\n%s", raw)
 	}
 }
 

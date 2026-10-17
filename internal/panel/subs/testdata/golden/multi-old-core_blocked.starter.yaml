@@ -56,32 +56,7 @@ dns:
 proxy-groups:
   - name: VPN
     type: select
-    proxies:
-      - Auto
-      - "\U0001F1F3\U0001F1F1 Нидерланды"
-      - "\U0001F1FA\U0001F1F8 США"
     include-all-proxies: true
-  - name: Auto
-    type: fallback
-    include-all-proxies: true
-    interval: 120
-    url: https://www.gstatic.com/generate_204
-  - name: "\U0001F1F3\U0001F1F1 Нидерланды"
-    type: url-test
-    interval: 120
-    mikan:
-      nodes:
-        - "\U0001F1F3\U0001F1F1 Нидерланды"
-    tolerance: 50
-    url: https://www.gstatic.com/generate_204
-  - name: "\U0001F1FA\U0001F1F8 США"
-    type: url-test
-    interval: 120
-    mikan:
-      nodes:
-        - "\U0001F1FA\U0001F1F8 США"
-    tolerance: 50
-    url: https://www.gstatic.com/generate_204
   - name: "\U0001F916 ChatGPT · Claude · Gemini"
     type: select
     proxies:
@@ -89,11 +64,6 @@ proxy-groups:
     mikan:
       nodes:
         - "\U0001F1FA\U0001F1F8 США"
-  - name: PROXY
-    type: select
-    proxies:
-      - VPN
-    hidden: true
 rules:
   - GEOIP,LAN,DIRECT,no-resolve
   - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT

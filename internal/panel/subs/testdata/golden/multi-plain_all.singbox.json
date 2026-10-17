@@ -37,57 +37,12 @@
   "outbounds": [
     {
       "outbounds": [
-        "Авто",
-        "🇳🇱 Нидерланды",
-        "🇺🇸 США",
         "🇳🇱 VLESS Vision",
         "🇳🇱 Trojan",
         "🇳🇱 VLESS gRPC",
         "🇺🇸 VLESS Vision"
       ],
       "tag": "VPN",
-      "type": "selector"
-    },
-    {
-      "interval": "300s",
-      "outbounds": [
-        "🇳🇱 VLESS Vision",
-        "🇳🇱 Trojan",
-        "🇳🇱 VLESS gRPC",
-        "🇺🇸 VLESS Vision"
-      ],
-      "tag": "Авто",
-      "tolerance": 50,
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
-      "interval": "300s",
-      "outbounds": [
-        "🇳🇱 VLESS Vision",
-        "🇳🇱 Trojan",
-        "🇳🇱 VLESS gRPC"
-      ],
-      "tag": "🇳🇱 Нидерланды",
-      "tolerance": 50,
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
-      "interval": "300s",
-      "outbounds": [
-        "🇺🇸 VLESS Vision"
-      ],
-      "tag": "🇺🇸 США",
-      "tolerance": 50,
-      "type": "urltest",
-      "url": "https://www.gstatic.com/generate_204"
-    },
-    {
-      "outbounds": [
-        "VPN"
-      ],
-      "tag": "PROXY",
       "type": "selector"
     },
     {

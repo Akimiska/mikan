@@ -36,7 +36,9 @@ const TARGETS = [
 // Ready DNS sets for the advanced part (GitHub issue #70): the panel's own is the empty one.
 const DNS_PRESETS: { id: string; dns: DNS }[] = [
   { id: "panel", dns: {} },
-  { id: "tunnel", dns: { nameserver: ["https://1.1.1.1/dns-query#PROXY", "https://8.8.8.8/dns-query#PROXY"], proxy_server_nameserver: ["1.1.1.1", "8.8.8.8"] } },
+  // AoiVPN fork: the main group is renamed "AoiVPN" — "#PROXY" points at nothing and DNS
+  // leaks the region; the preset must follow the real group name.
+  { id: "tunnel", dns: { nameserver: ["https://1.1.1.1/dns-query#AoiVPN", "https://8.8.8.8/dns-query#AoiVPN"], proxy_server_nameserver: ["1.1.1.1", "8.8.8.8"] } },
   {
     id: "ruYandex",
     dns: {
@@ -274,7 +276,10 @@ export function RoutingSection({ s, view, onView }: { s: Schemas["SettingsView"]
               <RulesEditor value={draft.rules} onChange={(f) => setDraft((d) => ({ ...d, rules: f(d.rules) }))} error={errors.sub_rules} badLine={badLine} targets={s.rule_targets} />
             </Field>
 
-            <Disclosure title={t("settings.routesServers")} sub={t("settings.routesServersSub")} open={!!errors.sub_routes && apiErr?.fields.sub_routes === t("errors.api.routes_servers")}>
+            {/* AoiVPN fork: the subscription is flat (one select group), the server-choice
+                controls render nothing — hidden so the admin does not tune a dead knob. */}
+            <div hidden>
+              <Disclosure title={t("settings.routesServers")} sub={t("settings.routesServersSub")}>
               <Field label={t("settings.routesAutoKind")} hint={t(servers.auto === "fallback" ? "settings.routesAutoFallbackHint" : "settings.routesAutoFastestHint")}>
                 <Segmented
                   label={t("settings.routesAutoKind")}
@@ -296,7 +301,8 @@ export function RoutingSection({ s, view, onView }: { s: Schemas["SettingsView"]
                 </select>
               </Field>
               <SwitchRow label={t("settings.routesCountries")} sub={t("settings.routesCountriesSub")} checked={!servers.no_countries} onChange={(v) => setServers({ no_countries: v ? undefined : true })} />
-            </Disclosure>
+              </Disclosure>
+            </div>
 
             <Disclosure title={t("settings.routesTune")} sub={t("common.forExperts")}>
               <SwitchRow label={t("settings.routesQuic")} sub={t("settings.routesQuicSub")} checked={!!tune.block_quic} onChange={(v) => setTune({ block_quic: v || undefined })} />

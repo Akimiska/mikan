@@ -87,6 +87,7 @@ export function SettingsPage() {
                   <HappCard s={s} />
                   <SubscriptionCard s={s} />
                   <SubPortCard s={s} />
+                  <SubPublicBaseCard s={s} />
                 </>
               ) : tab === "routing" ? (
                 <>

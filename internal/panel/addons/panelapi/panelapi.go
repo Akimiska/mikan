@@ -52,6 +52,12 @@ type Deps struct {
 	// Users are the rules the grants of users:grant go through (days, traffic: the admin's
 	// own paths). nil: the routes of users:all and users:grant are not served.
 	Users *domain.Users
+	// Inbounds and Changes are what inbounds:write goes through (the admin's own rules) and
+	// tells the nodes; NodeState is what the panel knows of a node now, for nodes:read and
+	// inbounds:read. Inbounds nil: the routes of nodes and inbounds are not served.
+	Inbounds  *domain.Inbounds
+	Changes   interface{ SlotsChanged() }
+	NodeState func(id int64) NodeState
 }
 
 // Caller is the addon a request came from and what it may do.
@@ -113,6 +119,9 @@ func New(d Deps) *Server {
 	s.handleEvents()
 	if d.Users != nil {
 		s.handleUsers()
+	}
+	if d.Inbounds != nil {
+		s.handleInfra()
 	}
 	if d.Bot != nil {
 		s.Handle(http.MethodPost, "/bot/{method}", "bot", func(w http.ResponseWriter, r *http.Request) {

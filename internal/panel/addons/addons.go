@@ -75,7 +75,7 @@ const (
 // users:read and users:write are the bot's: the subscribers it talks to. users:all (read
 // every subscriber) and users:grant (give anyone days and traffic) reach all of them, are
 // implied by neither of those, and the admin is warned of both.
-var Permissions = []string{"bot", "users:read", "users:write", "users:all", "users:grant", "billing:invoice", "events", "kv", "ui"}
+var Permissions = []string{"bot", "users:read", "users:write", "users:all", "users:grant", "nodes:read", "inbounds:read", "inbounds:write", "billing:invoice", "events", "kv", "ui"}
 
 // MinMemMB and MaxMemMB bound what an addon may ask for; 0 is the host's default.
 const (

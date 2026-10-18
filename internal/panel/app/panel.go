@@ -298,7 +298,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	// The panel's API for addons, with the Bot API proxy over the gateway for the addon that
 	// holds the bot.
 	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
-		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend), Users: deps.Users})
+		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend), Users: deps.Users,
+		Inbounds: deps.Inbounds, Changes: deps.Changes, NodeState: nodeState(p.Nodes)})
 	// What the bot says comes from the bot addon (the official one is installed by itself,
 	// botaddon.go): the panel tells it through events, and keeps the broadcasts and the
 	// previews of the admin's texts.
@@ -709,5 +710,24 @@ func settingsCached(read func(context.Context) (string, error)) func() string {
 			}
 		}
 		return v
+	}
+}
+
+// nodeState is what addons with nodes:read and inbounds:read learn of a node: whether the
+// panel reached it, its version and connections, which listeners run.
+func nodeState(m *nodesync.Manager) func(int64) panelapi.NodeState {
+	return func(id int64) panelapi.NodeState {
+		if m == nil {
+			return panelapi.NodeState{}
+		}
+		hv, ok := m.Health(id)
+		if !ok || hv.CheckedAt.IsZero() {
+			return panelapi.NodeState{}
+		}
+		st := panelapi.NodeState{Known: true, OK: hv.OK, Version: hv.Health.Version, Conns: hv.Health.Conns, Statuses: map[string]bool{}}
+		for _, l := range hv.Listeners {
+			st.Statuses[l.Name] = l.OK
+		}
+		return st
 	}
 }

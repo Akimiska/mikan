@@ -117,13 +117,13 @@ export function createAppRouter(queryClient: QueryClient) {
       if (search.tab === "routing" && search.part === "torrent") throw redirect({ to: "/addons/torrent" });
     },
     validateSearch: (s: Record<string, unknown>): SettingsSearch => {
-      // Sections that moved keep their old links working: the Clash rules are a field of the
-      // simple routing now, the torrent blocker is an addon (its link goes on in beforeLoad).
-      if (s.tab === "rules" || (s.tab === "routing" && s.part === "rules")) return { tab: "routing", part: "simple" };
+      // Sections that moved keep their old links working: the Clash rules are a part of the
+      // routing now, its old simple view is the mode, the torrent blocker is an addon (its
+      // link goes on in beforeLoad).
+      if (s.tab === "rules") return { tab: "routing", part: "rules" };
+      if (s.tab === "routing" && s.part === "simple") return { tab: "routing", part: "mode" };
       if (s.tab === "routing" && s.part === "torrent") return { tab: "routing", part: "torrent" };
       const tab = SETTINGS_TABS.includes(s.tab as SettingsSearch["tab"]) ? (s.tab as SettingsSearch["tab"]) : "general";
-      // The routing has no parts in the list beside it, but its view is in the URL.
-      if (tab === "routing") return { tab, part: s.part === "simple" || s.part === "yaml" ? s.part : undefined };
       const parts: readonly string[] | undefined = (SETTINGS_PARTS as Record<string, readonly string[]>)[tab];
       return { tab, part: parts && typeof s.part === "string" && parts.includes(s.part) ? s.part : undefined };
     },

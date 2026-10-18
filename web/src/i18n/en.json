@@ -1331,8 +1331,6 @@
     "routingAllSub": "All traffic except the local network goes through the server.",
     "routingBlocked": "Only what is blocked",
     "routingBlockedSub": "Sites and apps blocked or slowed down in Russia (the privWL-clash lists) and the services sent to the VPN below go through it. The rest goes direct.",
-    "routes": "Routing",
-    "routesSub": "What goes through the VPN, what goes direct and what is blocked. For Koala Clash, FlClash, Clash Verge and other apps on mihomo.",
     "routesCount": "{n, plural, one {# setting} other {# settings}}",
     "routesServices": "Services",
     "routesServicesHint": "\"Like the rest\" follows the mode above. \"Server\" always sends the service through that node; the app shows it as a group of its own.",
@@ -1397,10 +1395,7 @@
     "routesSnifferSub": "Rules by domain work for apps that connect by IP too.",
     "routesRealIP": "Real addresses instead of fake-ip",
     "routesRealIPSub": "For apps that break on fake addresses; every connection waits for DNS.",
-    "routesView": "How to set it up",
     "routesPreviewAgain": "Refresh",
-    "routesViewSimple": "Simple",
-    "routesViewYaml": "Own YAML",
     "routesYamlLive": "Clash apps get your own YAML now (the Own YAML view): the settings below do not reach them. Stash and apps not on mihomo get the simple profile.",
     "template": "Own Clash profile",
     "templateSub": "A whole mihomo config: DNS, fake-ip, TUN, sniffer, your groups and rules. The panel adds the client's servers itself.",
@@ -1979,7 +1974,26 @@
       "serversHint": "One per line, up to 8. For example: 1.1.1.1 or https://1.1.1.1/dns-query",
       "saved": "Saved, the servers apply it within seconds",
       "off": "Off: sites may see the user's country."
-    }
+    },
+    "routingParts": {
+      "mode": "Mode and services",
+      "lists": "Lists and apps",
+      "rules": "Own rules",
+      "dns": "DNS",
+      "advanced": "For experts",
+      "yaml": "Own YAML"
+    },
+    "routingPartsSub": {
+      "rules": "Clash rules that go before the mode. The panel's and the nodes' addresses go direct anyway."
+    },
+    "routesShowProfile": "View the profile",
+    "routesDnsDevice": "DNS on the device",
+    "routesDnsDeviceSub": "How the user's Clash app looks up sites. Empty: as in the panel.",
+    "routesChanged": "{n, plural, one {# changed} other {# changed}}",
+    "routesSearch": "Find a service",
+    "routesSearchEmpty": "Nothing found",
+    "routesSearchEmptyText": "Try another name.",
+    "routesListsEmpty": "No own lists yet."
   },
   "deviceMode": {
     "label": "How to count:",

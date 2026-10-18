@@ -13,8 +13,7 @@ import { AutoCard, LanguageCard, ServiceCard, UpdatesCard } from "./general";
 import { ServerCheckCard } from "../node-check";
 import { GoalsCard } from "./goals";
 import { ImportCard, LegacyLinksCard } from "./import";
-import { ExitDnsCard } from "./exit-dns";
-import { RoutingSection } from "./routing";
+import { ROUTING_PARTS, RoutingSection, type RoutingPart } from "./routing";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
 import { SupportCard } from "./support";
 import { AppsCard, DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
@@ -22,7 +21,6 @@ import { HappCard } from "./happ";
 import { SubPageSettings, type SubPagePart } from "./sub-page";
 
 type Tab = SettingsSearch["tab"];
-type RoutingPart = "simple" | "yaml";
 
 const ICONS = { general: Globe, subscription: Link2, page: LayoutTemplate, routing: Route, security: ShieldCheck, support: LifeBuoy, system: Cpu, import: ArrowDownToLine } as const;
 
@@ -33,6 +31,12 @@ const PART_LABELS: Record<string, Key> = {
   apps: "settings.page.tab.apps",
   docs: "settings.page.tab.docs",
   css: "settings.page.tab.css",
+  mode: "settings.routingParts.mode",
+  lists: "settings.routingParts.lists",
+  rules: "settings.routingParts.rules",
+  dns: "settings.routingParts.dns",
+  advanced: "settings.routingParts.advanced",
+  yaml: "settings.routingParts.yaml",
 };
 
 /**
@@ -47,10 +51,11 @@ export function SettingsPage() {
   const { tab, part } = useSearch({ from: "/_app/settings" });
   const navigate = useNavigate({ from: "/settings" });
   const go = (next: Tab, nextPart?: string) => void navigate({ search: { tab: next, part: nextPart }, replace: true });
-  // The routing opens where it is in use: the own YAML once there is one.
-  const routingPart: RoutingPart = part === "simple" || part === "yaml" ? part : settings.data?.sub_template.trim() ? "yaml" : "simple";
+  // The routing opens where it is in use: the own YAML once there is one. An old link to the
+  // simple mode ("simple") opens the mode.
+  const routingPart: RoutingPart = ROUTING_PARTS.includes(part as RoutingPart) ? (part as RoutingPart) : settings.data?.sub_template.trim() && part !== "simple" ? "yaml" : "mode";
   const pagePart: SubPagePart = (part as SubPagePart | undefined) ?? "look";
-  const shownPart = tab === "page" ? pagePart : undefined;
+  const shownPart = tab === "page" ? pagePart : tab === "routing" ? routingPart : undefined;
   const wide = tab === "page" || tab === "routing";
   return (
     <>
@@ -89,10 +94,7 @@ export function SettingsPage() {
                   <SubPortCard s={s} />
                 </>
               ) : tab === "routing" ? (
-                <>
-                  <RoutingSection s={s} view={routingPart} onView={(v) => go("routing", v)} />
-                  <ExitDnsCard />
-                </>
+                <RoutingSection s={s} part={routingPart} onPart={(p) => go("routing", p)} />
               ) : tab === "security" ? (
                 operator ? (
                   <>

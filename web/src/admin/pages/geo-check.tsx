@@ -4,11 +4,11 @@ import { useMutation } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
-import { useNodes } from "../../api/hooks";
 import { Button, EmptyState, Field, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { ago } from "../../lib/format";
 import { countryName, StatusMark } from "./node-check";
+import { ServerPicks, useServerPicks } from "./server-picks";
 
 type Geo = Schemas["GeoCheck"];
 type Node = Schemas["NodeInfo"];
@@ -97,12 +97,11 @@ export function NodeGeoCheck({ node }: { node: Node }) {
 
 /** Any server's address in the geo bases, a node's or one to buy. */
 export function GeoTab() {
-  const nodes = useNodes();
+  const picks = useServerPicks();
   const [host, setHost] = useState("");
   const check = useMutation({
     mutationFn: (h: string) => unwrap(api.POST("/api/v1/system/geo", { body: { host: h } })),
   });
-  const hosts = [...new Set((nodes.data ?? []).map((n) => n.host).filter(Boolean))];
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (host.trim()) check.mutate(host.trim());
@@ -125,26 +124,19 @@ export function GeoTab() {
             value={host}
             onChange={(e) => setHost(e.target.value)}
             placeholder={t("diag.reach.hostPlaceholder")}
-            list={hosts.length ? "geo-hosts" : undefined}
             autoComplete="off"
             spellCheck={false}
             inputMode="url"
             required
           />
         </Field>
-        {hosts.length ? (
-          <datalist id="geo-hosts">
-            {hosts.map((h) => (
-              <option key={h} value={h} />
-            ))}
-          </datalist>
-        ) : null}
         <div className="mt-[26px] mb-4">
           <Button type="submit" variant="primary" loading={check.isPending} disabled={check.isPending || !host.trim()}>
             <MapPin size={16} aria-hidden /> {t("geo.button")}
           </Button>
         </div>
       </form>
+      <ServerPicks picks={picks} value={host} onPick={setHost} />
       <p className="mb-4 text-xs text-[var(--ink-500)]">{t("geo.caveat")}</p>
       <div aria-live="polite" aria-busy={check.isPending}>
         {check.isPending ? (

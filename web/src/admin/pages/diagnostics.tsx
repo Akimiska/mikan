@@ -23,6 +23,7 @@ import { nodeLabel } from "../../lib/node-label";
 import { DIAG_TABS } from "../search";
 import { GeoTab } from "./geo-check";
 import { CheckSkeleton, ReachView, StatusMark } from "./node-check";
+import { ServerPicks, useServerPicks } from "./server-picks";
 
 const TerminalTab = lazy(() => import("./diag-terminal").then((m) => ({ default: m.TerminalTab })));
 
@@ -348,7 +349,7 @@ function parsePorts(text: string): number[] | null {
 
 /** Whether a server opens from Russia, before anything is installed on it or after. */
 function ReachTab() {
-  const nodes = useNodes();
+  const picks = useServerPicks();
   const [host, setHost] = useState("");
   const [portsText, setPortsText] = useState("22");
   const [touched, setTouched] = useState(false);
@@ -356,7 +357,6 @@ function ReachTab() {
   const check = useMutation({
     mutationFn: (body: { host: string; ports: number[] }) => unwrap(api.POST("/api/v1/system/reach", { body })),
   });
-  const hosts = [...new Set((nodes.data ?? []).map((n) => n.host).filter(Boolean))];
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setTouched(true);
@@ -381,20 +381,12 @@ function ReachTab() {
             value={host}
             onChange={(e) => setHost(e.target.value)}
             placeholder={t("diag.reach.hostPlaceholder")}
-            list={hosts.length ? "reach-hosts" : undefined}
             autoComplete="off"
             spellCheck={false}
             inputMode="url"
             required
           />
         </Field>
-        {hosts.length ? (
-          <datalist id="reach-hosts">
-            {hosts.map((h) => (
-              <option key={h} value={h} />
-            ))}
-          </datalist>
-        ) : null}
         <Field label={t("diag.reach.ports")} htmlFor="reach-ports" hint={t("diag.reach.portsHint")} error={touched && !ports ? t("diag.reach.portsBad") : undefined}>
           <input
             id="reach-ports"
@@ -412,6 +404,7 @@ function ReachTab() {
           </Button>
         </div>
       </form>
+      <ServerPicks picks={picks} value={host} onPick={setHost} />
       <p className="mb-4 text-xs text-[var(--ink-500)]">{t("diag.reach.caveat")}</p>
       <div aria-live="polite" aria-busy={check.isPending}>
         {check.isPending ? (

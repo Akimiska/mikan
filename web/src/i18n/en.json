@@ -4254,5 +4254,10 @@
     "reason": "Reason",
     "reasonHint": "The client sees it in the bot. May stay empty.",
     "reasonPlaceholder": "The transfer is not found"
+  },
+  "serverPicks": {
+    "title": "Your servers:",
+    "panel": "Panel",
+    "sub": "Subscription"
   }
 }

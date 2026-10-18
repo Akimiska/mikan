@@ -18,7 +18,7 @@ the signed manifest, and the panel shows the one in its language.
 - **A notice in place of the servers** (Settings → Subscription): a subscription whose term or traffic is over, or that is off, gets one entry that says so and what to do; `{tariff}` names the plan in the title, the announcement and the notice.
 - **Deleting a node moves what went through it**: protocols and cascades that left through it go through another enabled node (never the panel's own), or straight out when there is none.
 - **The exit of several protocols at once** (Protocols: tick them, then Exit to the internet): straight out, through the node's WARP or through another node.
-- **The country of a server in the geo bases** (Diagnostics → Geo bases, and the node check): ten public bases (MaxMind, ipinfo.io, IP2Location and others) say where the IP is, the ones that disagree are marked.
+- **The country of a server in the geo bases** (Diagnostics → Geo bases, and the node check): ten public bases (MaxMind, ipinfo.io, IP2Location and others) say where the IP is, the ones that disagree are marked. Here and in Diagnostics → Reach, the panel's IP and domain, the subscription domain and each node's address go into the field with one tap.
 - **HTTP → HTTPS on a node** (the node's settings): the node holds port 80 and answers plain HTTP with 301 to https, as a real site does; HTTP-01 certificates keep working.
 - **A front page for strangers** (Settings → Security → Front page): "Maintenance" or a cat clicker at the panel's address instead of a bare 404; files of your own in data/panel/www still win.
 - **Another subscription in the bot**: bought from the list of subscriptions, up to five per Telegram account.
@@ -51,7 +51,7 @@ the signed manifest, and the panel shows the one in its language.
 - **Уведомление вместо серверов** («Настройки → Подписка»): подписка, у которой закончился срок или трафик или которая отключена, получает одну запись с объяснением и тем, что делать; `{tariff}` называет тариф в названии подписки, объявлении и уведомлении.
 - **Удаление ноды переносит то, что шло через неё**: протоколы и каскады, которые выходили через неё, переходят на другую включённую ноду (никогда не на ноду панели), а если такой нет, идут напрямую.
 - **Выход в интернет для нескольких протоколов разом** («Протоколы»: отметьте нужные, затем «Выход в интернет»): напрямую, через WARP своей ноды или через другую ноду.
-- **Страна сервера по геобазам** («Диагностика → Геобазы» и проверка ноды): десять публичных баз (MaxMind, ipinfo.io, IP2Location и другие) говорят, где IP, расходящиеся отмечены.
+- **Страна сервера по геобазам** («Диагностика → Геобазы» и проверка ноды): десять публичных баз (MaxMind, ipinfo.io, IP2Location и другие) говорят, где IP, расходящиеся отмечены. Здесь и в «Диагностика → Доступность» IP и домен панели, домен подписки и адрес каждой ноды вставляются в поле одной кнопкой.
 - **HTTP → HTTPS на ноде** (настройки ноды): нода занимает порт 80 и отвечает на обычный HTTP редиректом 301 на https, как настоящий сайт; сертификаты по HTTP-01 продолжают выпускаться.
 - **Первая страница для посторонних** («Настройки → Безопасность → Первая страница»): «Технические работы» или котики-кликер по адресу панели вместо пустого 404; свои файлы в data/panel/www по-прежнему важнее.
 - **Ещё одна подписка в боте**: покупается из списка подписок, до пяти на Telegram-аккаунт.

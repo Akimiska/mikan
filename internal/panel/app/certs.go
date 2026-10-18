@@ -47,7 +47,7 @@ func nodeTLSView(x *NodeTLS, nodes *nodesync.Manager, orders *acme.Nodes, now fu
 }
 
 // checkCerts gathers what «Проверить сертификат» looks at and runs it.
-func checkCerts(st *store.Store, set *settings.Settings, certs *acme.Manager, x *NodeTLS, nodes *nodesync.Manager, orders *acme.Nodes, dns *dnscheck.Checker) func(ctx context.Context) (certcheck.CertReport, error) {
+func checkCerts(st *store.Store, set *settings.Settings, certs, subCerts *acme.Manager, x *NodeTLS, nodes *nodesync.Manager, orders *acme.Nodes, dns *dnscheck.Checker) func(ctx context.Context) (certcheck.CertReport, error) {
 	checker := certcheck.New(dns)
 	return func(ctx context.Context) (certcheck.CertReport, error) {
 		ep, err := set.Endpoint(ctx)
@@ -68,6 +68,17 @@ func checkCerts(st *store.Store, set *settings.Settings, certs *acme.Manager, x 
 		}
 		in := certcheck.Input{Domain: dom, Host: ep.Host, Ports: []int{ep.Port, sub}, Own: dnscheck.Own(public),
 			Expected: certs.Served(), Status: certs.Status(), Challenge: certs.Challenge()}
+		// The subscription domain is checked where its links lead: a proxy in front of the
+		// panel that answers for it with a certificate of its own breaks them all.
+		if subDomain, err := set.String(ctx, settings.KeySubDomain); err != nil {
+			return certcheck.CertReport{}, err
+		} else if subDomain != "" && subCerts != nil {
+			subEP, err := set.SubEndpoint(ctx)
+			if err != nil {
+				return certcheck.CertReport{}, err
+			}
+			in.Sub = &certcheck.Sub{Domain: subDomain, Port: subEP.Port, Expected: subCerts.Served(), Status: subCerts.Status()}
+		}
 		all, err := st.Q.ListNodes(ctx)
 		if err != nil {
 			return certcheck.CertReport{}, err

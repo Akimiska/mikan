@@ -229,7 +229,7 @@
       "local_node_lockdown": "The panel's own node works over a socket: there is no API port to close",
       "api_allow_invalid": "Not an address or a network: {value}",
       "api_allow_many": "16 addresses at most",
-      "sni443_type": "Only VLESS, Trojan and AnyTLS over TCP with TLS or REALITY can share port 443",
+      "sni443_type": "Only VLESS, Trojan or AnyTLS over TCP with TLS or REALITY can go behind the SNI router",
       "panel_not_release": "This panel is a development build: there is no release to update nodes to",
       "node_offline": "The node does not answer, so it cannot be updated now",
       "node_not_behind": "The node is not behind the panel",
@@ -566,8 +566,7 @@
       "balance_bounds": "The upper bound is below the lower one",
       "balance_details": "Say how to transfer the money",
       "not_a_picture": "Telegram gave something that is not a picture",
-      "telegram_unavailable": "Telegram did not give the file, try again later",
-      "sni443_type": "Only VLESS, Trojan or AnyTLS over TCP with TLS or REALITY can go behind the SNI router"
+      "telegram_unavailable": "Telegram did not give the file, try again later"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -3769,7 +3768,10 @@
       "port80": "Port 80",
       "acme": "Issuance",
       "node_cert": "Node certificate",
-      "node_port": "Node port"
+      "node_port": "Node port",
+      "sub_served": "Subscription domain",
+      "sub_dns": "Subscription domain DNS",
+      "sub_acme": "Subscription domain certificate"
     },
     "served_ok": "Port {port}: {issuer} certificate for {names}, {days} more days",
     "served_expiring": "Port {port}: the certificate expires in {days} days",
@@ -3808,7 +3810,8 @@
     "node_port_ok": "{inbound}, port {port}: public certificate",
     "node_port_pinned": "{inbound}, port {port}: self-signed certificate pinned in links. sing-box apps do not show the protocol",
     "node_port_other": "{inbound}, port {port}: serves another certificate ({issuer}). The node has not taken the new one yet, or another program holds the port",
-    "node_port_unreachable": "{inbound}, port {port}: does not answer from outside"
+    "node_port_unreachable": "{inbound}, port {port}: does not answer from outside",
+    "sub_served_wrong_host": "Port {port}: the subscription domain has no certificate of its own yet, the panel's ({names}) is served. Apps will not take the subscription"
   },
   "sources": {
     "open": "Sources",

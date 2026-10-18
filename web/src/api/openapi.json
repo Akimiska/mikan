@@ -1490,7 +1490,7 @@
             "$ref": "#/components/schemas/CertFix"
           },
           "id": {
-            "description": "Что проверено: served, compat, dns, port80, acme, node_cert, node_port",
+            "description": "Что проверено: served, compat, dns, port80, acme, sub_served, sub_dns, sub_acme, node_cert, node_port",
             "type": "string"
           },
           "node": {
@@ -1531,6 +1531,7 @@
             "enum": [
               "renew",
               "renew_node",
+              "renew_sub",
               "use_zerossl",
               "update_node",
               "copy"

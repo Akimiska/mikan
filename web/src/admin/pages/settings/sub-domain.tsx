@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
+import { LoaderCircle, RefreshCw, ShieldCheck, Stethoscope } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../../api/client";
 import { qk } from "../../../api/hooks";
-import { AcmeAttempts, AcmeProblem, caName } from "../../../components/acme";
+import { AcmeAttempts, AcmeProblem, caName, CertCheckDrawer } from "../../../components/acme";
 import { CertDrawer, certUntil, type CertInfo } from "../../../components/cert-drawer";
 import { FormActions } from "../../../components/layout";
 import { useToast } from "../../../components/toast";
@@ -73,6 +73,7 @@ function SubCertificate({ s, c }: { s: Settings; c: Schemas["Status"] }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [own, setOwn] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [outcome, setOutcome] = useState<"got" | "running" | null>(null);
   const renew = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/settings/sub-certificate/renew")),
@@ -125,10 +126,14 @@ function SubCertificate({ s, c }: { s: Settings; c: Schemas["Status"] }) {
             <RefreshCw size={16} aria-hidden /> {failed ? t("certs.retry") : t("certs.getNow")}
           </Button>
         ) : null}
+        <Button size="sm" onClick={() => setChecking(true)}>
+          <Stethoscope size={16} aria-hidden /> {t("certs.check")}
+        </Button>
         <Button size="sm" onClick={() => setOwn(true)}>
           <ShieldCheck size={16} aria-hidden /> {custom ? t("settings.certReplace") : t("settings.certOwnButton")}
         </Button>
       </div>
+      <CertCheckDrawer open={checking} onClose={() => setChecking(false)} />
       <CertDrawer
         open={own}
         onClose={() => setOwn(false)}

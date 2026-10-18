@@ -250,7 +250,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			if dns == nil {
 				dns = dnscheck.New()
 			}
-			deps.CheckCerts = checkCerts(st, set, o.Certs, o.TLS, p.Nodes, o.NodesACME, dns)
+			deps.CheckCerts = checkCerts(st, set, o.Certs, o.SubCerts, o.TLS, p.Nodes, o.NodesACME, dns)
 		}
 	}
 	deps.NodeCerts = o.NodeCerts

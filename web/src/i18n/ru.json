@@ -229,7 +229,7 @@
       "local_node_lockdown": "Своя нода панели работает через сокет, закрывать её API не нужно",
       "api_allow_invalid": "Не адрес и не сеть: {value}",
       "api_allow_many": "Не больше 16 адресов",
-      "sni443_type": "На общий 443 встают только VLESS, Trojan и AnyTLS по TCP с TLS или REALITY",
+      "sni443_type": "За SNI-роутер можно только VLESS, Trojan или AnyTLS по TCP с TLS или REALITY",
       "panel_not_release": "Эта панель собрана для разработки: релиза, до которого обновлять ноды, нет",
       "node_offline": "Нода не отвечает, обновить её сейчас нельзя",
       "node_not_behind": "Нода не отстаёт от панели",
@@ -566,8 +566,7 @@
       "balance_bounds": "Верхняя граница меньше нижней",
       "balance_details": "Укажите, как переводить деньги",
       "not_a_picture": "Telegram отдал не картинку",
-      "telegram_unavailable": "Telegram не отдал файл, попробуйте позже",
-      "sni443_type": "За SNI-роутер можно только VLESS, Trojan или AnyTLS по TCP с TLS или REALITY"
+      "telegram_unavailable": "Telegram не отдал файл, попробуйте позже"
     },
     "acme": {
       "port80_busy": "Порт 80 занят другой программой, а центр сертификации проверяет сервер через него. Если это nginx или Caddy, команда ниже пропустит проверку к mikan; иначе освободите порт",
@@ -3769,7 +3768,10 @@
       "port80": "Порт 80",
       "acme": "Выпуск",
       "node_cert": "Сертификат ноды",
-      "node_port": "Порт ноды"
+      "node_port": "Порт ноды",
+      "sub_served": "Домен подписки",
+      "sub_dns": "DNS домена подписки",
+      "sub_acme": "Выпуск для домена подписки"
     },
     "served_ok": "Порт {port}: сертификат {issuer} для {names}, ещё {days} дн.",
     "served_expiring": "Порт {port}: сертификат истекает через {days} дн.",
@@ -3808,7 +3810,8 @@
     "node_port_ok": "{inbound}, порт {port}: публичный сертификат",
     "node_port_pinned": "{inbound}, порт {port}: самоподписанный сертификат, ссылки его закрепляют. В sing-box приложениях протокол не появится",
     "node_port_other": "{inbound}, порт {port}: отдаёт другой сертификат ({issuer}). Нода ещё не взяла новый, или порт занят другой программой",
-    "node_port_unreachable": "{inbound}, порт {port}: не отвечает снаружи"
+    "node_port_unreachable": "{inbound}, порт {port}: не отвечает снаружи",
+    "sub_served_wrong_host": "Порт {port}: у домена подписки ещё нет своего сертификата, отдаётся сертификат панели ({names}). Приложения подписку не примут"
   },
   "sources": {
     "open": "Источники",

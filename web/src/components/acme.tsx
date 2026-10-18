@@ -152,7 +152,7 @@ function checkText(c: Check): string {
 }
 
 /** "Check the certificate": what apps see from outside, with a fix for each problem. */
-export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean; onClose: () => void; onUseZeroSSL: () => void }) {
+export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean; onClose: () => void; onUseZeroSSL?: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const run = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/settings/certificate/check")) });
@@ -168,6 +168,16 @@ export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean
   };
   const renew = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/settings/certificate/renew")),
+    onSuccess: (st) => {
+      if (st.error) toast.error(tMaybe(`errors.acme.${st.error}`) ?? t("errors.acme.acme_failed"));
+      else if (st.ordering) toast.ok(t("certs.stillRunning"));
+      else toast.ok(t("certs.got"));
+      after();
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  const renewSub = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/settings/sub-certificate/renew")),
     onSuccess: (st) => {
       if (st.error) toast.error(tMaybe(`errors.acme.${st.error}`) ?? t("errors.acme.acme_failed"));
       else if (st.ordering) toast.ok(t("certs.stillRunning"));
@@ -209,6 +219,12 @@ export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean
             <RefreshCw size={16} aria-hidden /> {c.status === "fail" ? t("certs.retry") : t("certs.getNow")}
           </Button>
         );
+      case "renew_sub":
+        return (
+          <Button size="sm" loading={renewSub.isPending} disabled={renewSub.isPending} onClick={() => renewSub.mutate()}>
+            <RefreshCw size={16} aria-hidden /> {c.status === "fail" ? t("certs.retry") : t("certs.getNow")}
+          </Button>
+        );
       case "renew_node":
         return (
           <Button size="sm" loading={renewNode.isPending && renewNode.variables === f.node_id} disabled={renewNode.isPending} onClick={() => f.node_id && renewNode.mutate(f.node_id)}>
@@ -222,6 +238,7 @@ export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean
           </Button>
         );
       case "use_zerossl":
+        if (!onUseZeroSSL) return null;
         return (
           <Button
             size="sm"
@@ -280,6 +297,7 @@ export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean
                   <div className="text-xs text-[var(--ink-500)]">
                     {tMaybe(`certCheck.title.${c.id}`) ?? c.id}
                     {c.node ? ` · ${t("certs.node", { name: c.node })}` : ""}
+                    {c.id.startsWith("sub_") && c.params?.domain ? ` · ${c.params.domain}` : ""}
                   </div>
                   {c.code === "acme_error" || c.code === "node_acme_error" ? (
                     <AcmeProblem code={c.params?.error ?? ""} detail={c.detail} holder={c.params?.holder} retryAt={c.params?.retry_at} className="mt-0.5" />

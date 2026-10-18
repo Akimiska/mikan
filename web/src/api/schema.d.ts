@@ -3313,7 +3313,7 @@ export interface components {
             /** @description Подробности как есть: ошибка соединения или ответ центра сертификации */
             detail?: string;
             fix?: components["schemas"]["CertFix"];
-            /** @description Что проверено: served, compat, dns, port80, acme, node_cert, node_port */
+            /** @description Что проверено: served, compat, dns, port80, acme, sub_served, sub_dns, sub_acme, node_cert, node_port */
             id: string;
             /** @description Имя ноды, если проверка про ноду */
             node?: string;
@@ -3327,7 +3327,7 @@ export interface components {
         };
         CertFix: {
             /** @enum {string} */
-            action: "renew" | "renew_node" | "use_zerossl" | "update_node" | "copy";
+            action: "renew" | "renew_node" | "renew_sub" | "use_zerossl" | "update_node" | "copy";
             /** @description Команда для сервера (action copy) */
             command?: string;
             /** Format: int64 */

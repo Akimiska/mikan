@@ -4290,6 +4290,12 @@ export interface components {
         NodeInfo: {
             /** @description host:port API ноды; пусто у своей ноды */
             address: string;
+            /** @description Сети и адреса, которые админ добавил к адресам панели */
+            api_allow: string[];
+            /** @description Почему на сервере ноды нет правила файрвола для API */
+            api_lock_error?: string;
+            /** @description API ноды отвечает только адресам панели */
+            api_lockdown: boolean;
             /** @description Группа балансировки; пусто — вне групп */
             balance_group: string;
             /** @description Нода старее панели */
@@ -4800,6 +4806,10 @@ export interface components {
             secret?: string;
         };
         PatchNodeInputBody: {
+            /** @description Ещё сети или адреса (203.0.113.5, 198.51.100.0/24), с которых панель ходит к ноде */
+            api_allow?: string[];
+            /** @description API ноды только с адресов панели; не для ноды панели */
+            api_lockdown?: boolean;
             /**
              * Format: int64
              * @description Ширина канала ноды, Мбит/с в каждую сторону

@@ -241,6 +241,8 @@ fn gather(install: &Install, report: &mut Report) {
     report.add([disk_item(system::disk_free_bytes(Path::new(DIR))), memory_item(system::mem_available_mb())]);
     if install.node {
         report.add(contact(install.node_port(), engine.is_some()));
+        let lock = crate::apilock::report(install);
+        report.add([Item { level: lock.level, label: "API lockdown".into(), detail: lock.detail, fix: lock.fix }]);
     }
 }
 

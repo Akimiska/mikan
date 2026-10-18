@@ -4292,6 +4292,21 @@
             "description": "host:port API ноды; пусто у своей ноды",
             "type": "string"
           },
+          "api_allow": {
+            "description": "Сети и адреса, которые админ добавил к адресам панели",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "api_lock_error": {
+            "description": "Почему на сервере ноды нет правила файрвола для API",
+            "type": "string"
+          },
+          "api_lockdown": {
+            "description": "API ноды отвечает только адресам панели",
+            "type": "boolean"
+          },
           "balance_group": {
             "description": "Группа балансировки; пусто — вне групп",
             "type": "string"
@@ -4492,6 +4507,8 @@
           "fair_share",
           "balance_group",
           "http_redirect",
+          "api_lockdown",
+          "api_allow",
           "capacity",
           "channel_mbps"
         ],
@@ -5673,6 +5690,18 @@
       "PatchNodeInputBody": {
         "additionalProperties": false,
         "properties": {
+          "api_allow": {
+            "description": "Ещё сети или адреса (203.0.113.5, 198.51.100.0/24), с которых панель ходит к ноде",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "api_lockdown": {
+            "description": "API ноды только с адресов панели; не для ноды панели",
+            "type": "boolean"
+          },
           "channel_mbps": {
             "description": "Ширина канала ноды, Мбит/с в каждую сторону",
             "format": "int64",

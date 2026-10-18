@@ -25,6 +25,9 @@ UPDATE nodes SET http_redirect = $1, updated_at = $2 WHERE id = $3;
 -- name: SetNodeSNIRouter :exec
 UPDATE nodes SET sni_router = $1, updated_at = $2 WHERE id = $3;
 
+-- name: SetNodeAPILockdown :exec
+UPDATE nodes SET api_lockdown = $1, api_allow = $2, updated_at = $3 WHERE id = $4;
+
 -- name: SetNodeCert :exec
 UPDATE nodes SET cert_sha256 = $1, updated_at = $2 WHERE id = $3;
 

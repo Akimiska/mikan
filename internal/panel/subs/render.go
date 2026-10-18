@@ -293,18 +293,18 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 	for i, x := range ps {
 		proxies[i], names[i] = x.yaml, x.name
 	}
-	// AoiVPN fork: flat two-group layout — one select group (g.Main) with every proxy and
-	// an optional "🇷🇺 Обход БС" select group of the injected bypass proxies (also the main
-	// group's last members). No url-test, per-country or per-service groups, whatever the
+	// AoiVPN fork: flat two-group layout — one select group (g.Main) with the panel's own
+	// proxies (nodes only) and an optional "🇷🇺 Обход БС" select group of the injected
+	// bypass proxies. No url-test, per-country or per-service groups, whatever the
 	// routing page's "a group per node" switch says: the fork's subscription stays flat.
-	// Bypass proxies ("🇷🇺 Обход БС") go into the main group's own list, as
-	// its last members, and have a select group of their own.
+	// The main group holds the node proxies and, last, a reference to the bypass group —
+	// NOT the bypass proxies themselves: there are hundreds of them, and picking one from
+	// a 500-entry list buries the nodes.
 	var bnames []string
 	if p.Bypass != nil && len(p.Bypass.Proxies) > 0 {
 		for _, bp := range p.Bypass.Proxies {
 			proxies = append(proxies, bp)
 			if n, ok := bp["name"].(string); ok {
-				names = append(names, n)
 				bnames = append(bnames, n)
 			}
 		}

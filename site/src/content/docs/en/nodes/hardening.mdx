@@ -1,0 +1,58 @@
+---
+title: Hardening a node
+description: The node's API for the panel's address only (an nftables rule, self-lift, mikan api-lockdown) and an HTTP to HTTPS redirect on port 80.
+---
+
+:::note[In beta 0.5.1.1]
+Both settings are new in beta 0.5.1.1 and exist for remote nodes. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+Two settings in **Nodes → the node → Configure** make a node's server less visible to scanners. The node on the panel's own server ("Own node") has neither: it talks to the panel over a socket and opens no API port.
+
+## Node API from the panel's IP only
+
+The **Node API from the panel's IP only** switch. The node's API port is needed only by the panel, but scanners find any open port. The pinned certificate and the key keep them out, yet they still reach the TLS handshake. With this setting the node answers on the API port to the panel's addresses only.
+
+It works in two layers:
+
+1. The node itself refuses connections from other addresses.
+2. The node asks its server to put in an `nftables` firewall rule (a table `inet mikan_api`) that drops TCP to the API port from every address but the panel and loopback. A scanner does not reach the node at all. The rule touches nothing else of the firewall, and ufw's rules still apply to what it lets through. The rule is kept by the `mikan-apilock` system service on the node's server.
+
+The node takes the panel's address and the address the panel connected from by itself. If the panel reaches nodes from an IP other than its public one (NAT, a second address), add the addresses in the **More panel addresses** field: addresses or networks separated by commas, up to 16.
+
+:::tip[If the panel moved to another IP]
+The node is not lost. If the panel has not shown up on the node for 15 minutes, the rule lifts itself, the panel connects from its new address, and the rule comes back with it.
+:::
+
+### If the rule gets in the way: mikan api-lockdown
+
+On the node's server as root:
+
+```bash
+mikan api-lockdown status   # the rule's state (the command with no argument does the same)
+mikan api-lockdown off      # lift the rule at once
+```
+
+`off` removes the rule and opens the port, and the node stops refusing within ten seconds. The rule comes back the next time the panel connects to the node with the setting on. To keep it from coming back, turn the switch off in the node's settings in the panel. The command works only on a node's server: on the panel's server it stops with an error.
+
+`mikan doctor` on the node shows the rule's state too and suggests the command.
+
+### No nftables
+
+Without the `nftables` package the node still closes the port itself (the first layer), but scanners reach it. The node card then shows "The node closes the port itself, but its server's firewall has no rule" and the reason. Install the package on the node's server:
+
+```bash
+apt install nftables
+```
+
+The rule appears by itself within a minute.
+
+A node server set up before beta 0.5.1.1 gets the system service for the rule after `mikan update` on it, see [Nodes](/mikan/en/nodes/nodes/#updating-nodes-from-the-panel).
+
+## HTTP → HTTPS on port 80
+
+The **HTTP → HTTPS** switch. The node takes port 80 and answers plain HTTP with a 301 to https, as a real site does. A closed port 80 gives away a bare VPN server, and the redirect makes it look like an ordinary site.
+
+HTTP-01 certificates keep being issued: the node handles the certificate authority's checks on `/.well-known/acme-challenge/` as before, see [Node certificate](/mikan/en/nodes/nodes/#node-certificate).
+
+Do not turn it on if another web server on this server needs port 80. If the port is taken, the node card shows "Port 80 cannot be taken" and the reason.

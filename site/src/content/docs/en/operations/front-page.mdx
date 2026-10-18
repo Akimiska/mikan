@@ -1,0 +1,26 @@
+---
+title: Front page
+description: 'What a stranger sees at the panel''s address: an empty 404, a "Maintenance" page or a cat clicker, and your own site in data/panel/www.'
+---
+
+:::note[In beta 0.5.1.1]
+The front page templates are new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+Whoever opens the panel's address without the secret path sees the server's answer. A bare 404 with no page at all gives away that this is not a site: the panel answers so, and scanners know it. An ordinary page makes the server look like any ordinary site.
+
+## Pick a template
+
+**Settings → Security → Front page**: three tiles, the choice is saved at once.
+
+| Template | What a stranger sees |
+|---|---|
+| Empty (404) | a 404 with no page, as before |
+| Maintenance | a "Scheduled maintenance" page: the site is down for upkeep and back soon |
+| Cat clicker | a small game: pet the cat and collect treats. Progress stays in the visitor's browser |
+
+The **Open the front page** link under the tiles opens the panel's address without the secret path, so you see what a stranger sees. The admin panel's secret path does not depend on the template.
+
+## Your own site wins over a template
+
+If `/opt/mikan/data/panel/www` holds your files, the panel shows them, and the chosen template does not apply. The card then says "data/panel/www holds files of your own". How your own site works (paths, `404.html`) is in [Domain and certificates](/mikan/en/start/domain/#your-own-site-on-the-domain). This folder is not part of a backup, see [Backups](/mikan/en/operations/backups/).

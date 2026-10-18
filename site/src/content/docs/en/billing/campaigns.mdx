@@ -1,0 +1,49 @@
+---
+title: Ad campaigns
+description: 'Links to the bot with a code for each advert and their stats: how many people came, bought, renewed and paid.'
+---
+
+:::note[In beta 0.5.1.1]
+Campaigns are new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+A campaign is a link to your bot with a code. For each advert (a post in VK, a blogger's channel, a banner) you make a link of its own, and the panel counts how many people came by it, how many of them bought and renewed and how much money it brought. That shows which advert pays off.
+
+The link looks like this:
+
+```text
+https://t.me/<bot>?start=c_<code>
+```
+
+## Create a campaign
+
+**Payments → Campaigns → New campaign**:
+
+- **Name**: for you, for example "VK post, October". Up to 80 characters.
+- **Code in the link**: Latin letters, digits, `_` and `-`, up to 32 characters. Empty: the panel makes up a random one. The code is unique, the panel refuses a taken one.
+
+The "Copy the link" button copies the link. While the bot is not running there is no link: it appears once the bot works, see [Telegram bot and Mini App](/mikan/en/billing/telegram/).
+
+## Who belongs to a campaign
+
+A person belongs to a campaign if they came to the bot **for the first time** by its link and have no subscription yet. A second visit by the link and people who are clients already do not count.
+
+## Stats
+
+A period is picked above the list: 7, 30, 90 days or all time. Each campaign has four numbers:
+
+| Number | What it counts |
+|---|---|
+| Came | how many people came by the link in the period |
+| Bought | how many of them bought a plan or a paid trial |
+| Renewed | how many of them renewed the subscription |
+| Revenue | how much they paid, in rubles and in Stars separately |
+
+## Archive and delete
+
+- **Archive**: the link stops marking new people, the stats stay. An archived campaign can be restored.
+- **Delete**: people who came by the campaign no longer belong to it. If you need the stats, archive the campaign instead.
+
+## API
+
+Campaigns are managed through the API too: `GET /api/v1/campaigns?days=30` (stats for a period, `0` for all time), `POST /api/v1/campaigns`, `PATCH /api/v1/campaigns/{id}` (rename or archive), `DELETE /api/v1/campaigns/{id}`. Every change goes into the audit log. More: [API](/mikan/en/api/).

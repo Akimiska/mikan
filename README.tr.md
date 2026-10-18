@@ -192,6 +192,7 @@ Menü için `mikan` komutunu çalıştırın veya komutları doğrudan kullanın
 | `mikan doctor` | sunucuyu denetle: Docker, portlar, güvenlik duvarı, saat, DNS, disk |
 | `mikan support KOD` | panel erişilemezken tanılamayı destek talebine gönder |
 | `mikan support-access on\|off` | bu sunucuda destek erişimine izin ver veya yasakla |
+| `mikan api-lockdown [status\|off]` | bir düğümde: «düğüm API'si yalnızca panel IP'sinden» kuralının durumu veya kuralı hemen kaldırma |
 | `mikan uninstall` | durdur ve komutu kaldır, veriyi koru |
 
 ## Güncellemeler

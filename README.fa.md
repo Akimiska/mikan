@@ -217,6 +217,7 @@ flowchart LR
 | <span dir="ltr">`mikan doctor`</span> | بررسی سرور: Docker، پورت‌ها، فایروال، ساعت، DNS، دیسک |
 | <span dir="ltr">`mikan support CODE`</span> | ارسال عیب‌یابی به تیکت پشتیبانی وقتی پنل در دسترس نیست |
 | <span dir="ltr">`mikan support-access on\|off`</span> | اجازه یا منع دسترسی پشتیبانی روی این سرور |
+| <span dir="ltr">`mikan api-lockdown [status\|off]`</span> | روی نود: وضعیت قاعده «API نود فقط از IP پنل» یا برداشتن فوری آن |
 | <span dir="ltr">`mikan uninstall`</span> | توقف و حذف دستور، داده‌ها می‌مانند |
 
 ## به‌روزرسانی‌ها

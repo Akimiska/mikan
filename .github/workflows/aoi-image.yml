@@ -13,18 +13,18 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image tag + reported panel version (default 0.5.1.2)"
+        description: "Image tag + reported panel version (default 0.5.1.3)"
         required: false
 
 permissions:
   contents: read
   packages: write
 
-# Fork version reported by the panel (sidebar "Aoi · mikan X") and used as the
+# Fork version reported by the panel (sidebar "AoiVPN · mikan fork X") and used as the
 # default image tag. Bump this on every fork release so a plain push to main
 # still produces a correctly-versioned image instead of a bare git sha.
 env:
-  FORK_VERSION: "0.5.1.2"
+  FORK_VERSION: "0.5.1.3"
 
 jobs:
   image:

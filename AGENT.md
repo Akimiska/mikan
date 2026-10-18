@@ -110,7 +110,7 @@ merge — обязательный чек-лист из §6.
 
 - Telegram-identity в списке People + состояние `no_subscription` (`NULL expires_at` = «без подписки», не «active»): `2350e33`, `3284450`, `379d11f`, `371e95c` (openapi) — ✅ в main.
 - Версия форка в сайдбаре («AoiVPN · форк mikan X»), ручная проверка ядер протоколов нод: `23e1963`.
-- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` (сейчас 0.5.1.2) → тег образа + версия в сайдбаре.
+- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` (сейчас 0.5.1.3) → тег образа + версия в сайдбаре.
 - Брендинг AoiVPN (логотип/название/favicon вместо mikan) — см. §4.
 
 ### 3.5 Только на ветке `origin/aoi-0.5.0.4` (в main НЕТ; см. §3.2–3.3 и §7)

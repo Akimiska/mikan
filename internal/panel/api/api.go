@@ -62,6 +62,8 @@ type Deps struct {
 	Inbounds  *domain.Inbounds
 	Devices   *domain.Devices
 	Packages  *domain.Packages
+	Campaigns *domain.Campaigns
+	Balancer  *domain.Balancer
 	Pool      *domain.Pool
 	Changes   domain.Changes
 	Online    func() map[string]nodeapi.Online
@@ -297,6 +299,8 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerRoutes()
 	h.registerCerts()
 	h.registerSubDomain()
+	h.registerCampaigns()
+	h.registerBalance()
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()

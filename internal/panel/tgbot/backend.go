@@ -47,6 +47,9 @@ type Backend interface {
 	// tgate.ErrLinkInvalid); UserOfAddress the one an address path leads to, the panel's own
 	// or an old panel's (POST /tg/link/redeem).
 	UserOfCode(ctx context.Context, code string) (int64, error)
+	// TagCampaign makes the account an ad campaign's when it starts the bot by the
+	// campaign's link with no subscription yet (domain.Campaigns.Tag).
+	TagCampaign(ctx context.Context, tgID int64, code string) (bool, error)
 	UserOfAddress(ctx context.Context, urlPath string) (int64, bool)
 	// Link ties subscription userID to account tgID, unless another account it can ask
 	// owns it (LinkTaken) or tgID holds tgate.MaxLinks already.

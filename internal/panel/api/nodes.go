@@ -67,8 +67,11 @@ type NodeInfo struct {
 	// TLS is the certificate its protocols on TLS use now; nil when not known.
 	TLS *NodeTLSView `json:"tls,omitempty"`
 	// FairShare splits ChannelMbps evenly between the users moving traffic through the node.
-	FairShare   bool   `json:"fair_share" doc:"Канал ноды делится поровну между теми, кто сейчас качает"`
-	ChannelMbps *int64 `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
+	FairShare bool `json:"fair_share" doc:"Канал ноды делится поровну между теми, кто сейчас качает"`
+	// BalanceGroup and Capacity: the node shares its group's clients out (domain.Balancer).
+	BalanceGroup string `json:"balance_group" doc:"Группа балансировки; пусто — вне групп"`
+	Capacity     *int64 `json:"capacity" doc:"Мест для клиентов в группе; null — без ограничения"`
+	ChannelMbps  *int64 `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
 }
 
 type nodesOutput struct{ Body []NodeInfo }
@@ -166,7 +169,7 @@ func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct
 func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {
 	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
 		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown",
-		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps)}
+		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps), BalanceGroup: n.BalanceGroup, Capacity: store.Int64Ptr(n.Capacity)}
 	if v.Local {
 		// The panel's own node is reached at the panel's address.
 		ep, _ := h.d.Settings.Endpoint(ctx)

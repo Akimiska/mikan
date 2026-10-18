@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { HandCoins, History as HistoryIcon, ListChecks, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
+import { HandCoins, History as HistoryIcon, ListChecks, Megaphone, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api, apiCodeText, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useAddons, usePaymentSettings, useTariffs, useTelegram } from "../../api/hooks";
@@ -18,6 +18,7 @@ import { isKopecks, isStars, rubKopecks } from "../../lib/validate";
 import { PAYMENT_TABS, type PaymentsSearch } from "../search";
 import { addonName } from "./payment-addons";
 import { PromoSection } from "./promocodes";
+import { CampaignsSection } from "./campaigns";
 
 type Settings = Schemas["PaymentSettingsView"];
 type Payment = Schemas["PaymentView"];
@@ -35,7 +36,7 @@ const STATUS_TONE: Record<Status, "ok" | "warn" | "bad" | "off"> = {
 };
 const STATUSES: Status[] = ["applied", "paid", "pending", "failed", "expired", "refunded"];
 const BUILT_IN: Provider[] = ["stars"];
-const TAB_ICONS = { history: HistoryIcon, methods: Wallet, rules: ListChecks, promocodes: Ticket } as const;
+const TAB_ICONS = { history: HistoryIcon, methods: Wallet, rules: ListChecks, promocodes: Ticket, campaigns: Megaphone } as const;
 type PaymentTab = NonNullable<PaymentsSearch["tab"]>;
 
 /** A payment's provider as the admin knows it; adapters by their own name. */
@@ -77,6 +78,8 @@ export function PaymentsPage() {
       >
         {shown === "history" ? (
           <History />
+        ) : shown === "campaigns" ? (
+          <CampaignsSection />
         ) : shown === "promocodes" ? (
           <PromoSection sub={promo ?? "codes"} onSub={(next) => void navigate({ search: { tab: "promocodes", promo: next }, replace: true })} />
         ) : (

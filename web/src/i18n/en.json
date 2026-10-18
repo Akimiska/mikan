@@ -552,7 +552,10 @@
       "sub_domain_panel": "This is the panel's domain: enter another one, sub.your-domain for example",
       "sub_domain_unset": "Save the subscription domain first",
       "extra_devices_unlimited": "Extra devices need a tariff with a device limit",
-      "extra_devices_price": "Enter the device price in Stars or rubles"
+      "extra_devices_price": "Enter the device price in Stars or rubles",
+      "campaign_code": "Tag: Latin letters, digits, _ and -, up to 32",
+      "campaign_taken": "This tag is taken",
+      "balance_group": "Group: letters, digits, space, _ . -, up to 40"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -2680,7 +2683,8 @@
       "promocodes": "Promo codes",
       "history": "Payments",
       "methods": "Payment methods",
-      "rules": "Sales rules"
+      "rules": "Sales rules",
+      "campaigns": "Campaigns"
     },
     "history": "History",
     "total": "{n} for {sum}",
@@ -4024,5 +4028,56 @@
     "pending": "no data",
     "checkedAt": "Checked {ago}",
     "cached": "a recent check is shown"
+  },
+  "campaigns": {
+    "title": "Ad campaigns",
+    "sub": "A tagged link to the bot for each ad: how many came by it, bought and renewed",
+    "new": "New campaign",
+    "create": "Create",
+    "period": "Period",
+    "periodAll": "All time",
+    "periodDays": "{n} days",
+    "emptyTitle": "No campaigns yet",
+    "emptyText": "Create a campaign and put its link in the ad: the panel counts who came by it and how much they paid.",
+    "archived": "archived",
+    "stats": "Campaign stats",
+    "came": "Came",
+    "bought": "Bought",
+    "renewed": "Renewed",
+    "revenue": "Revenue",
+    "copy": "Copy the link",
+    "copied": "Link copied",
+    "noBot": "The link appears once the bot runs",
+    "archive": "Archive",
+    "restore": "Restore",
+    "deleteTitle": "Delete campaign “{name}”?",
+    "deleteText": "The people who came by it no longer count to it. To keep the stats, archive the campaign instead.",
+    "created": "Campaign created",
+    "name": "Name",
+    "namePlaceholder": "VK post, October",
+    "nameRequired": "Enter a name",
+    "code": "Tag in the link",
+    "codeHint": "Latin letters, digits, _ and -. Empty: a random one.",
+    "note": "A person counts to the campaign when they first come to the bot by its link without a subscription. Coming again, and existing clients, do not count."
+  },
+  "balance": {
+    "title": "Load balancing",
+    "sub": "Nodes of one group share their clients: each is kept on one node of the group and gets only that one in the subscription",
+    "groupFull": "full",
+    "redistribute": "Redistribute",
+    "load": "{n} of {cap}",
+    "loadUnlimited": "{n}, no limit",
+    "note": "A new client goes to the node with the most room left. When every node is full, the client still gets the one with the most room.",
+    "redistributeTitle": "Redistribute the clients of group “{group}”?",
+    "redistributeText": "Every client of the group goes to the node with the most room at their next subscription update. The app has to update the subscription to get the new server.",
+    "redistributed": "Done: clients to be placed again — {n}",
+    "nodeTitle": "Load balancing",
+    "nodeSub": "Nodes with the same group name share their clients. Empty: the node is in no group, everyone gets it.",
+    "group": "Group",
+    "groupHint": "For example “Europe”. Nodes of the same group share their clients.",
+    "groupPlaceholder": "no group",
+    "capacity": "Places",
+    "capacityHint": "How many clients the node takes; empty: no limit",
+    "capacityErr": "Places: a whole number from 1"
   }
 }

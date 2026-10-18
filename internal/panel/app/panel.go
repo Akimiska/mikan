@@ -231,6 +231,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.Devices.SetEvents(hub)
 	p.st, p.devices = st, deps.Devices
 	deps.Packages = domain.NewPackages(st, o.Now)
+	deps.Campaigns = domain.NewCampaigns(st, o.Now)
+	deps.Balancer = domain.NewBalancer(st, o.Now, o.Log)
 	if o.Certs != nil {
 		deps.Cert, deps.RenewCert, deps.RenewCertNow = o.Certs.Status, o.Certs.Renew, o.Certs.RenewNow
 		deps.SetCert, deps.ClearCert = o.Certs.SetCustom, o.Certs.ClearCustom
@@ -484,6 +486,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}}
 	subCfg := func(ctx context.Context) (subs.Config, error) { return cache.get(ctx, buildSubCfg) }
 	subHandler = subs.NewHandler(st, subCfg, subPageHandler, o.Now, deps.Devices, o.TrustProxy)
+	subHandler.SetBalancer(deps.Balancer)
 	subHandler.SetLogger(o.Log)
 	subHandler.SetTelegram(p.Gateway)
 	subHandler.SetReissuer(deps.Users)

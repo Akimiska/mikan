@@ -95,7 +95,7 @@ func (q *Queries) CountTgLinksOf(ctx context.Context, tgID int64) (int64, error)
 }
 
 const getTgChat = `-- name: GetTgChat :one
-SELECT tg_id, username, first_name, menu_msg_id, current, blocked, created_at, updated_at FROM tg_chats WHERE tg_id = $1
+SELECT tg_id, username, first_name, menu_msg_id, current, blocked, created_at, updated_at, campaign_id, campaign_at FROM tg_chats WHERE tg_id = $1
 `
 
 func (q *Queries) GetTgChat(ctx context.Context, tgID int64) (TgChat, error) {
@@ -110,6 +110,8 @@ func (q *Queries) GetTgChat(ctx context.Context, tgID int64) (TgChat, error) {
 		&i.Blocked,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CampaignID,
+		&i.CampaignAt,
 	)
 	return i, err
 }

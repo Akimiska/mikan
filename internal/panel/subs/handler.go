@@ -95,6 +95,7 @@ type Handler struct {
 	shop       *billing.Service // nil: nothing on sale
 	promos     *promo.Service
 	pages      *subpage.Service // nil: the page as built, nothing of the admin's
+	balance    *domain.Balancer // nil: every node shows
 	happ       *HappLinks       // Happ crypt links, kept per subscription
 	log        *slog.Logger
 	logged     sync.Map // what has been logged lately → when, so a standing fault is one line an hour
@@ -134,6 +135,9 @@ func (h *Handler) warn(key, msg string, args ...any) {
 // SetShop takes payments: the providers' webhooks under /pay/ and the Mini App's shop.
 func (h *Handler) SetShop(s *billing.Service) { h.shop = s }
 func (h *Handler) SetPromo(s *promo.Service)  { h.promos = s }
+
+// SetBalancer keeps each client on one node of every balance group.
+func (h *Handler) SetBalancer(b *domain.Balancer) { h.balance = b }
 
 // SetPages gives the page what the admin made of it: its look, blocks, instructions, images.
 func (h *Handler) SetPages(s *subpage.Service) { h.pages = s }
@@ -435,6 +439,15 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 	nodes := map[int64]bool{}
 	for _, n := range cfg.Nodes {
 		nodes[n.ID] = true
+	}
+	// One node of each balance group: the client's own. A balancer that fails shows the
+	// group whole rather than leave the client without servers.
+	if h.balance != nil && u.ID != 0 {
+		if picked, err := h.balance.Nodes(ctx, u.ID, nodes); err != nil {
+			h.warn("balance", "subscriptions: load balancing", "err", err)
+		} else {
+			nodes = picked
+		}
 	}
 	for _, in := range all {
 		if in.Enabled == 0 || !nodes[in.NodeID] || (len(allowed) > 0 && !slices.Contains(allowed, in.ID)) || in.PoolID.Valid && spent[in.PoolID.Int64] {

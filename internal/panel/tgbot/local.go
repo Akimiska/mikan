@@ -37,6 +37,10 @@ type Local struct {
 	Now     func() time.Time
 }
 
+func (l *Local) TagCampaign(ctx context.Context, tgID int64, code string) (bool, error) {
+	return domain.NewCampaigns(l.Store, l.Now).Tag(ctx, tgID, code)
+}
+
 func (l *Local) Config(ctx context.Context) Config {
 	// A setup saved before an option existed gets that option's default. A saved menu
 	// replaces the default one whole.

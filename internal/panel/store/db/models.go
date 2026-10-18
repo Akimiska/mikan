@@ -131,6 +131,14 @@ type BoundDevice struct {
 	Name      string
 }
 
+type Campaign struct {
+	ID        int64
+	Code      string
+	Name      string
+	Archived  int64
+	CreatedAt int64
+}
+
 type Device struct {
 	UserID    int64
 	Ip        string
@@ -225,21 +233,30 @@ type MikanSqliteImport struct {
 }
 
 type Node struct {
-	ID          int64
-	Name        string
-	Address     string
-	PublicHost  string
-	Domain      string
-	CertSha256  string
-	Enabled     int64
-	CreatedAt   int64
-	UpdatedAt   int64
-	PublicName  string
-	Sort        int64
-	TotalUp     int64
-	TotalDown   int64
-	FairShare   int64
-	ChannelMbps sql.NullInt64
+	ID           int64
+	Name         string
+	Address      string
+	PublicHost   string
+	Domain       string
+	CertSha256   string
+	Enabled      int64
+	CreatedAt    int64
+	UpdatedAt    int64
+	PublicName   string
+	Sort         int64
+	TotalUp      int64
+	TotalDown    int64
+	FairShare    int64
+	ChannelMbps  sql.NullInt64
+	Capacity     sql.NullInt64
+	BalanceGroup string
+}
+
+type NodeAssignment struct {
+	UserID       int64
+	BalanceGroup string
+	NodeID       int64
+	AssignedAt   int64
 }
 
 type NodeRelay struct {
@@ -498,14 +515,16 @@ type TariffTerm struct {
 }
 
 type TgChat struct {
-	TgID      int64
-	Username  string
-	FirstName string
-	MenuMsgID int64
-	Current   int64
-	Blocked   int64
-	CreatedAt int64
-	UpdatedAt int64
+	TgID       int64
+	Username   string
+	FirstName  string
+	MenuMsgID  int64
+	Current    int64
+	Blocked    int64
+	CreatedAt  int64
+	UpdatedAt  int64
+	CampaignID sql.NullInt64
+	CampaignAt sql.NullInt64
 }
 
 type TgLink struct {

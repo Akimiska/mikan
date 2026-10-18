@@ -381,6 +381,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Группы балансировки и загрузка их нод */
+        get: operations["list-balance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/balance/{group}/redistribute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Распределить клиентов группы заново: каждый попадёт на самую свободную ноду при следующем обновлении подписки */
+        post: operations["redistribute-balance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Рекламные кампании и их статистика */
+        get: operations["list-campaigns"];
+        put?: never;
+        /** Создать кампанию: ссылку на бота с меткой */
+        post: operations["create-campaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Удалить кампанию: пришедшие по ней люди перестают к ней относиться */
+        delete: operations["delete-campaign"];
+        options?: never;
+        head?: never;
+        /** Переименовать кампанию или убрать в архив */
+        patch: operations["update-campaign"];
+        trace?: never;
+    };
     "/api/v1/exit-dns": {
         parameters: {
             query?: never;
@@ -852,6 +922,23 @@ export interface paths {
         head?: never;
         /** Изменить ноду */
         patch: operations["update-node"];
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Группа балансировки ноды и сколько клиентов она принимает */
+        put: operations["set-node-balance"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/nodes/{id}/cascade": {
@@ -2801,6 +2888,26 @@ export interface components {
             /** @description Бэкап делается прямо сейчас */
             sending: boolean;
         };
+        BalanceGroupView: {
+            group: string;
+            nodes: components["schemas"]["BalanceNodeView"][];
+        };
+        BalanceNodeView: {
+            /**
+             * Format: int64
+             * @description Мест для клиентов; null — без ограничения
+             */
+            capacity: number | null;
+            /**
+             * Format: int64
+             * @description Сколько действующих клиентов закреплено за нодой
+             */
+            clients: number;
+            /** @description Мест не осталось: новые клиенты группы идут на наименее загруженную ноду */
+            full: boolean;
+            /** Format: int64 */
+            node_id: number;
+        };
         BotSlotInputBody: {
             /** @description id аддона с правом bot или пусто */
             addon: string;
@@ -2868,6 +2975,40 @@ export interface components {
         BulkOutputBody: {
             /** Format: int64 */
             affected: number;
+        };
+        CampaignView: {
+            /** @description В архиве: ссылка больше не метит новых людей, статистика остаётся */
+            archived: boolean;
+            /**
+             * Format: int64
+             * @description Сколько из них купили тариф или платный пробный период
+             */
+            bought: number;
+            /**
+             * Format: int64
+             * @description Сколько человек пришло по ссылке за период
+             */
+            came: number;
+            code: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Ссылка на бота с меткой; пусто, пока бот не запущен */
+            link: string;
+            name: string;
+            /**
+             * Format: int64
+             * @description Сколько из них продлили
+             */
+            renewed: number;
+            /**
+             * Format: int64
+             * @description Копейки
+             */
+            revenue_rub: number;
+            /** Format: int64 */
+            revenue_stars: number;
         };
         CascadeExit: {
             /** @description Подключения этой ноды, которые выходят через ту ноду */
@@ -3083,6 +3224,11 @@ export interface components {
             prefix: string;
             /** @enum {string} */
             scope: "read" | "full";
+        };
+        CreateCampaignInputBody: {
+            /** @description Метка в ссылке: латиница, цифры, _ и -; пусто — случайная */
+            code?: string;
+            name: string;
         };
         CreateFolderInputBody: {
             /**
@@ -3870,10 +4016,17 @@ export interface components {
         NodeInfo: {
             /** @description host:port API ноды; пусто у своей ноды */
             address: string;
+            /** @description Группа балансировки; пусто — вне групп */
+            balance_group: string;
             /** @description Нода старее панели */
             behind: boolean;
             /** @description Панель может обновить ноду сама: удалённая, отвечает, версия 0.5.0.2 или новее; старую обновляют один раз вручную командой mikan update на её сервере */
             can_update: boolean;
+            /**
+             * Format: int64
+             * @description Мест для клиентов в группе; null — без ограничения
+             */
+            capacity: number | null;
             certificate?: components["schemas"]["NodeCertView"];
             /**
              * Format: int64
@@ -4300,6 +4453,10 @@ export interface components {
             hour?: number;
             /** @description Пароль, которым шифруется файл: от 20 символов. Файл остаётся в истории чата навсегда; без пароля его не открыть */
             password?: string;
+        };
+        PatchCampaignInputBody: {
+            archived?: boolean;
+            name?: string;
         };
         PatchFiltersInputBody: {
             /** @description Весь исходящий фильтр */
@@ -4939,6 +5096,13 @@ export interface components {
             /** @description Показываются один раз */
             recovery_codes: string[];
         };
+        RedistributeOutputBody: {
+            /**
+             * Format: int64
+             * @description Сколько клиентов распределится заново при следующем обновлении подписки
+             */
+            moved: number;
+        };
         ReissueRules: {
             /**
              * Format: int64
@@ -5106,6 +5270,15 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string;
             user_agent: string;
+        };
+        SetNodeBalanceInputBody: {
+            /**
+             * Format: int64
+             * @description Мест для клиентов; не передано — без ограничения
+             */
+            capacity?: number;
+            /** @description Группа балансировки; пусто — нода вне групп, её получают все */
+            group: string;
         };
         SettingsView: {
             /**
@@ -6913,6 +7086,195 @@ export interface operations {
             };
         };
     };
+    "list-balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceGroupView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "redistribute-balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedistributeOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-campaigns": {
+        parameters: {
+            query?: {
+                /** @description За сколько дней статистика; 0 — за всё время */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-campaign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCampaignInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-campaign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "update-campaign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchCampaignInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-exit-dns": {
         parameters: {
             query?: never;
@@ -8024,6 +8386,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PatchNodeInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeInfo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-node-balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetNodeBalanceInputBody"];
             };
         };
         responses: {

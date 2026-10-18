@@ -71,6 +71,12 @@ func (r *Remote) SetCurrent(ctx context.Context, tgID, userID int64) error {
 	return r.call(ctx, "SetCurrent", []any{tgID, userID})
 }
 
+func (r *Remote) TagCampaign(ctx context.Context, tgID int64, code string) (bool, error) {
+	var tagged bool
+	err := r.call(ctx, "TagCampaign", []any{tgID, code}, &tagged)
+	return tagged, err
+}
+
 func (r *Remote) UserOfCode(ctx context.Context, code string) (int64, error) {
 	var id int64
 	err := r.call(ctx, "UserOfCode", []any{code}, &id)

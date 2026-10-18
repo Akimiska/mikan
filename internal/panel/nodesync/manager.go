@@ -403,6 +403,17 @@ func (m *Manager) SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, e
 	return c.SpeedTest(ctx)
 }
 
+// ServiceRegions asks the sites from the node what they make of its address.
+func (m *Manager) ServiceRegions(ctx context.Context, id int64) (nodeapi.ServiceRegions, error) {
+	c, err := clientOf[interface {
+		ServiceRegions(context.Context) (nodeapi.ServiceRegions, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.ServiceRegions{}, err
+	}
+	return c.ServiceRegions(ctx)
+}
+
 // clientOf returns a node's client as T: methods beyond Node are optional, and tests
 // stand in for nodes with fakes that have only some of them.
 func clientOf[T any](m *Manager, id int64) (T, error) {

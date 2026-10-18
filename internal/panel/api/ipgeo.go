@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/nodeapi"
 	"mikan/internal/panel/ipgeo"
 	"mikan/internal/panel/reach"
 )
@@ -28,6 +29,39 @@ func (h *handlers) registerGeo() {
 		Description: "Адрес ноды уходит в публичные геобазы (MaxMind, ipinfo.io, IP2Location и другие); каждая отвечает, в какой стране он для неё.", Tags: []string{"node"}}, h.checkNodeGeo)
 	huma.Register(h.api, huma.Operation{OperationID: "check-geo", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/system/geo", Summary: "Страна IP любого сервера по геобазам",
 		Description: "Адрес сервера уходит в публичные геобазы.", Tags: []string{"settings"}}, h.checkGeo)
+	huma.Register(h.api, huma.Operation{OperationID: "check-node-regions", Metadata: supportDiagnostic, Method: http.MethodPost, Path: "/api/v1/nodes/{id}/regions", Summary: "Регион ноды в сервисах",
+		Description: "Нода сама открывает Google, YouTube, Netflix, ChatGPT и другие сайты по IPv4 и IPv6 и читает, какую страну они ей дают или пускают ли её. Около 10 секунд; на ноде одна проверка за раз (409 regions_busy).", Tags: []string{"node"}}, h.checkNodeRegions)
+}
+
+type regionsOutput struct{ Body nodeapi.ServiceRegions }
+
+// checkNodeRegions asks the sites from the node. Its addresses stay the panel's business,
+// as with the geo bases: the answer carries the countries only.
+func (h *handlers) checkNodeRegions(ctx context.Context, in *nodeIDInput) (*regionsOutput, error) {
+	if _, err := h.getNode(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	if h.d.Nodes == nil {
+		return nil, huma.Error502BadGateway("node_unavailable")
+	}
+	res, err := h.d.Nodes.ServiceRegions(ctx, in.ID)
+	if err != nil {
+		var ne *nodeapi.Error
+		var se *nodeapi.StatusError
+		switch {
+		case errors.As(err, &ne) && ne.Code == "regions_busy":
+			return nil, huma.Error409Conflict("regions_busy")
+		case errors.As(err, &se) && se.Status == http.StatusNotFound:
+			return nil, huma.Error409Conflict("node_too_old")
+		}
+		h.d.Log.Warn("node service regions", "node", in.ID, "err", err)
+		return nil, huma.Error502BadGateway("node_unavailable")
+	}
+	res.IPv4, res.IPv6 = "", ""
+	if res.Services == nil {
+		res.Services = []nodeapi.ServiceRegion{}
+	}
+	return &regionsOutput{Body: res}, nil
 }
 
 // checkNodeGeo asks the geo bases where the node's address is. Its address stays the

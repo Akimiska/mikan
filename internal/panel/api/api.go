@@ -173,6 +173,8 @@ type NodeRuntime interface {
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 	// SpeedTest measures a node's own way to the internet.
 	SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error)
+	// ServiceRegions asks the sites from a node what they make of its address.
+	ServiceRegions(ctx context.Context, id int64) (nodeapi.ServiceRegions, error)
 	// CheckNow asks a node for its health at once (Check node, a node's hello).
 	CheckNow(ctx context.Context, id int64) (nodesync.HealthView, bool)
 	// Hello is a node's last hello since the panel started.

@@ -235,7 +235,7 @@
       "node_not_behind": "The node is not behind the panel",
       "node_cannot_update": "This node is too old to be updated from the panel: run mikan update on its server once",
       "update_running": "The node is already updating",
-      "node_unavailable": "The node did not answer the update request",
+      "node_unavailable": "The node did not answer: check that it runs",
       "node_update_failed": "The node refused the update request",
       "tg_token_format": "Not a bot token: it looks like 123456789:AAH…",
       "tg_token_invalid": "Telegram refused the token: check it with @BotFather",
@@ -567,7 +567,8 @@
       "not_a_picture": "Telegram gave something that is not a picture",
       "telegram_unavailable": "Telegram did not give the file, try again later",
       "xhttp_client_placement": "The server does not take the apps' data there: set the same place, or auto, on the server",
-      "xhttp_client_key": "The apps' header or cookie name does not match the server's"
+      "xhttp_client_key": "The apps' header or cookie name does not match the server's",
+      "regions_busy": "The node is checking the services already, wait a few seconds"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -4217,7 +4218,7 @@
   "geo": {
     "title": "Country in the geo bases",
     "lead": "Sites and apps tell a client's country by geo bases, and the bases often disagree. A base that puts the IP in another country makes a service show the wrong region or refuse.",
-    "caveat": "The server's address goes to 10 public geo bases (MaxMind, ipinfo.io, IP2Location and others). How services such as YouTube or Netflix see the IP is not shown.",
+    "caveat": "The server's address goes to 10 public geo bases (MaxMind, ipinfo.io, IP2Location and others). How the sites themselves see it is the check below: the node runs it.",
     "button": "Check the geo bases",
     "running": "Asking the geo bases, up to 10 seconds…",
     "agree": "All {n} bases put the address in {country}",
@@ -4231,7 +4232,47 @@
     "checkedAt": "Checked {ago}",
     "cached": "a recent result is shown",
     "emptyTitle": "No checks yet",
-    "emptyText": "Enter the server's IP or domain and press “Check the geo bases”."
+    "emptyText": "Enter the server's IP or domain and press “Check the geo bases”.",
+    "services": {
+      "title": "Region in the services",
+      "lead": "The node opens Google, YouTube, Netflix, ChatGPT and other sites over IPv4 and IPv6, as its clients' apps do, and shows the country each gives it and whether it lets it in.",
+      "button": "Check the services",
+      "running": "The node is asking the sites, up to 15 seconds…",
+      "service": "Service",
+      "node": "Node",
+      "yes": "Yes",
+      "no": "No",
+      "agree": "Every service sees the node in {country}",
+      "disagree": "The services disagree; mostly {country}",
+      "noV6": "The node has no IPv6",
+      "noNodesTitle": "No nodes yet",
+      "noNodesText": "A node runs the check: add one under Nodes.",
+      "error": {
+        "unreachable": "no answer",
+        "unknown": "unreadable",
+        "no_ip": "N/A"
+      },
+      "names": {
+        "google": "Google",
+        "google_search": "Google: search without a captcha",
+        "youtube": "YouTube",
+        "youtube_premium": "YouTube Premium",
+        "youtube_music": "YouTube Music",
+        "netflix": "Netflix",
+        "chatgpt": "ChatGPT",
+        "cloudflare": "Cloudflare",
+        "prime_video": "Prime Video",
+        "deezer": "Deezer",
+        "apple": "Apple",
+        "steam": "Steam",
+        "playstation": "PlayStation",
+        "tiktok": "TikTok",
+        "ookla": "Ookla Speedtest",
+        "jetbrains": "JetBrains",
+        "bing": "Microsoft (Bing)",
+        "reddit": "Reddit without signing in"
+      }
+    }
   },
   "topups": {
     "title": "Balance top-ups",

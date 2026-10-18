@@ -1136,6 +1136,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Регион ноды в сервисах
+         * @description Нода сама открывает Google, YouTube, Netflix, ChatGPT и другие сайты по IPv4 и IPv6 и читает, какую страну они ей дают или пускают ли её. Около 10 секунд; на ноде одна проверка за раз (409 regions_busy).
+         */
+        post: operations["check-node-regions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/restart": {
         parameters: {
             query?: never;
@@ -5418,6 +5438,15 @@ export interface components {
              */
             moved: number;
         };
+        RegionAnswer: {
+            country?: string;
+            /**
+             * @description unreachable — сайт не ответил, unknown — ответ не разобрать, no_ip — у ноды нет адреса этого семейства
+             * @enum {string}
+             */
+            error?: "unreachable" | "unknown" | "no_ip";
+            open?: boolean;
+        };
         ReissueRules: {
             /**
              * Format: int64
@@ -5575,6 +5604,22 @@ export interface components {
             /** Format: int64 */
             interval?: number;
             no_countries?: boolean;
+        };
+        ServiceRegion: {
+            /** @description Ответ — пускает ли сайт адрес (open), а не страна */
+            access: boolean;
+            /** @description google, google_search, youtube, youtube_premium, youtube_music, netflix, chatgpt, cloudflare, prime_video, deezer, apple, steam, playstation, tiktok, ookla, jetbrains, bing, reddit */
+            service: string;
+            v4: components["schemas"]["RegionAnswer"];
+            v6: components["schemas"]["RegionAnswer"];
+        };
+        ServiceRegions: {
+            /** Format: date-time */
+            at: string;
+            /** @description Адрес ноды, как его видит Cloudflare */
+            ipv4?: string;
+            ipv6?: string;
+            services: components["schemas"]["ServiceRegion"][];
         };
         SessionView: {
             /** Format: date-time */
@@ -9255,6 +9300,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "check-node-regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceRegions"];
                 };
             };
             /** @description Error */

@@ -7295,6 +7295,27 @@
         ],
         "type": "object"
       },
+      "RegionAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "type": "string"
+          },
+          "error": {
+            "description": "unreachable — сайт не ответил, unknown — ответ не разобрать, no_ip — у ноды нет адреса этого семейства",
+            "enum": [
+              "unreachable",
+              "unknown",
+              "no_ip"
+            ],
+            "type": "string"
+          },
+          "open": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ReissueRules": {
         "additionalProperties": false,
         "properties": {
@@ -7796,6 +7817,59 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "ServiceRegion": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "description": "Ответ — пускает ли сайт адрес (open), а не страна",
+            "type": "boolean"
+          },
+          "service": {
+            "description": "google, google_search, youtube, youtube_premium, youtube_music, netflix, chatgpt, cloudflare, prime_video, deezer, apple, steam, playstation, tiktok, ookla, jetbrains, bing, reddit",
+            "type": "string"
+          },
+          "v4": {
+            "$ref": "#/components/schemas/RegionAnswer"
+          },
+          "v6": {
+            "$ref": "#/components/schemas/RegionAnswer"
+          }
+        },
+        "required": [
+          "service",
+          "access",
+          "v4",
+          "v6"
+        ],
+        "type": "object"
+      },
+      "ServiceRegions": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ipv4": {
+            "description": "Адрес ноды, как его видит Cloudflare",
+            "type": "string"
+          },
+          "ipv6": {
+            "type": "string"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceRegion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "at",
+          "services"
+        ],
         "type": "object"
       },
       "SessionView": {
@@ -14045,6 +14119,50 @@
           "node"
         ],
         "x-session-only": true
+      }
+    },
+    "/api/v1/nodes/{id}/regions": {
+      "post": {
+        "description": "Нода сама открывает Google, YouTube, Netflix, ChatGPT и другие сайты по IPv4 и IPv6 и читает, какую страну они ей дают или пускают ли её. Около 10 секунд; на ноде одна проверка за раз (409 regions_busy).",
+        "operationId": "check-node-regions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRegions"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Регион ноды в сервисах",
+        "tags": [
+          "node"
+        ]
       }
     },
     "/api/v1/nodes/{id}/restart": {

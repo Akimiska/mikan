@@ -536,6 +536,31 @@ type TorrentHits struct {
 	Hits  []TorrentHit `json:"hits"`
 }
 
+// ServiceRegions is what the sites themselves make of the node's address (POST
+// /v1/regions): the country each one serves it, or whether it lets it in, over IPv4 and
+// IPv6 apart. Unlike a geo base, it is asked from the node, as its clients' apps come.
+type ServiceRegions struct {
+	At       time.Time       `json:"at"`
+	IPv4     string          `json:"ipv4,omitempty" doc:"Адрес ноды, как его видит Cloudflare"`
+	IPv6     string          `json:"ipv6,omitempty"`
+	Services []ServiceRegion `json:"services"`
+}
+
+// ServiceRegion is one site.
+type ServiceRegion struct {
+	Service string       `json:"service" doc:"google, google_search, youtube, youtube_premium, youtube_music, netflix, chatgpt, cloudflare, prime_video, deezer, apple, steam, playstation, tiktok, ookla, jetbrains, bing, reddit"`
+	Access  bool         `json:"access" doc:"Ответ — пускает ли сайт адрес (open), а не страна"`
+	V4      RegionAnswer `json:"v4"`
+	V6      RegionAnswer `json:"v6"`
+}
+
+// RegionAnswer is a country, or open for an access check, or the reason there is none.
+type RegionAnswer struct {
+	Country string `json:"country,omitempty"`
+	Open    *bool  `json:"open,omitempty"`
+	Error   string `json:"error,omitempty" enum:"unreachable,unknown,no_ip" doc:"unreachable — сайт не ответил, unknown — ответ не разобрать, no_ip — у ноды нет адреса этого семейства"`
+}
+
 // SpeedTest is the node's own way to the internet (POST /v1/speedtest): latency, jitter
 // and loss of small UDP DNS queries, then download and upload against a speed test
 // server. A test that broke off keeps what it measured and says where in Error.

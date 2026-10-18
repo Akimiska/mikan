@@ -152,6 +152,16 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("POST /v1/regions", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+		defer cancel()
+		res, err := e.ServiceRegions(ctx)
+		if errors.Is(err, ErrRegionsBusy) {
+			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: "regions_busy", Message: "the sites are being asked already"})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("GET /v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Reg.Activity())
 	})

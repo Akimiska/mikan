@@ -3314,6 +3314,14 @@
             "description": "Один ключ на всех: учёт, лимиты и отключение по пользователям не работают",
             "type": "boolean"
           },
+          "sni443": {
+            "description": "Подключение делит порт 443 ноды с другими по имени TLS (SNI-роутер ноды); клиенты подключаются на 443",
+            "type": "boolean"
+          },
+          "sni443_possible": {
+            "description": "Можно ли поставить за SNI-роутер: VLESS, Trojan или AnyTLS по TCP с TLS или REALITY",
+            "type": "boolean"
+          },
           "status": {
             "enum": [
               "ok",
@@ -3366,7 +3374,9 @@
           "client",
           "client_sni",
           "client_host",
-          "cdn_possible"
+          "cdn_possible",
+          "sni443",
+          "sni443_possible"
         ],
         "type": "object"
       },
@@ -4445,6 +4455,14 @@
             "description": "Почему нода не смогла занять порт 80",
             "type": "string"
           },
+          "router_error": {
+            "description": "Почему нода не смогла занять порт 443",
+            "type": "string"
+          },
+          "sni_router": {
+            "description": "Порт 443 ноды делят подключения по имени TLS (SNI-роутер)",
+            "type": "boolean"
+          },
           "status": {
             "enum": [
               "ok",
@@ -4492,6 +4510,7 @@
           "fair_share",
           "balance_group",
           "http_redirect",
+          "sni_router",
           "capacity",
           "channel_mbps"
         ],
@@ -5639,6 +5658,10 @@
             "maxLength": 253,
             "type": "string"
           },
+          "sni443": {
+            "description": "Поставить за SNI-роутер ноды на 443 (true) или вернуть на свой порт (false)",
+            "type": "boolean"
+          },
           "xhttp": {
             "$ref": "#/components/schemas/XHTTPTuning",
             "description": "Тонкая настройка XHTTP целиком: пустое поле — значение ядра по умолчанию"
@@ -5707,6 +5730,10 @@
             "description": "Публичное имя ноды; пустое — не публиковать её в канале",
             "maxLength": 80,
             "type": "string"
+          },
+          "sni_router": {
+            "description": "SNI-роутер на 443: подключения с отметкой «через общий 443» слушают на loopback за ним",
+            "type": "boolean"
           }
         },
         "type": "object"

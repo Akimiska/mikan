@@ -3944,6 +3944,10 @@ export interface components {
             server_names?: string[];
             /** @description Один ключ на всех: учёт, лимиты и отключение по пользователям не работают */
             shared?: boolean;
+            /** @description Подключение делит порт 443 ноды с другими по имени TLS (SNI-роутер ноды); клиенты подключаются на 443 */
+            sni443: boolean;
+            /** @description Можно ли поставить за SNI-роутер: VLESS, Trojan или AnyTLS по TCP с TLS или REALITY */
+            sni443_possible: boolean;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
             /** @description Имя, которое увидит клиент */
@@ -4377,6 +4381,10 @@ export interface components {
             public_name: string;
             /** @description Почему нода не смогла занять порт 80 */
             redirect_error?: string;
+            /** @description Почему нода не смогла занять порт 443 */
+            router_error?: string;
+            /** @description Порт 443 ноды делят подключения по имени TLS (SNI-роутер) */
+            sni_router: boolean;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
             tls?: components["schemas"]["NodeTLSView"];
@@ -4789,6 +4797,8 @@ export interface components {
             port?: string;
             /** @description SNI для клиентов, если dest — IP (цель из подбора соседей) */
             server_name?: string;
+            /** @description Поставить за SNI-роутер ноды на 443 (true) или вернуть на свой порт (false) */
+            sni443?: boolean;
             /** @description Тонкая настройка XHTTP целиком: пустое поле — значение ядра по умолчанию */
             xhttp?: components["schemas"]["XHTTPTuning"];
         };
@@ -4815,6 +4825,8 @@ export interface components {
             name?: string;
             /** @description Публичное имя ноды; пустое — не публиковать её в канале */
             public_name?: string;
+            /** @description SNI-роутер на 443: подключения с отметкой «через общий 443» слушают на loopback за ним */
+            sni_router?: boolean;
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;

@@ -544,3 +544,32 @@ func TestSitesStoredOnce(t *testing.T) {
 		t.Fatalf("sites: %+v %v", rows, err)
 	}
 }
+
+// The SNI router takes the inbounds marked for it, each by the names its clients send, the
+// first REALITY one for any other name; nothing marked, no router.
+func TestSNIRouterRoutes(t *testing.T) {
+	in := func(name, cfg string) nodeapi.Inbound {
+		return nodeapi.Inbound{Name: name, Port: "8443", Config: []byte(cfg)}
+	}
+	r := sniRouter([]nodeapi.Inbound{
+		in("plain", `{"type":"vless","reality-config":{"server-names":["www.example.com"]}}`),
+		in("reality", `{"type":"vless","reality-config":{"server-names":["www.microsoft.com","microsoft.com"]},"mikan":{"sni443":true}}`),
+		in("tls", `{"type":"trojan","mikan":{"tls":"node","sni443":true}}`),
+		in("udp", `{"type":"hysteria2","mikan":{"sni443":true}}`),
+	}, "node.example.net")
+	if r == nil || len(r.Routes) != 2 || r.Default != "reality" {
+		t.Fatalf("router: %+v", r)
+	}
+	if got := r.Routes[0]; got.Inbound != "reality" || len(got.Names) != 2 || got.Names[0] != "www.microsoft.com" {
+		t.Fatalf("reality route: %+v", got)
+	}
+	if got := r.Routes[1]; got.Inbound != "tls" || len(got.Names) != 1 || got.Names[0] != "node.example.net" {
+		t.Fatalf("tls route: %+v", got)
+	}
+	if !r.Routed("tls") || r.Routed("plain") {
+		t.Fatal("Routed")
+	}
+	if sniRouter([]nodeapi.Inbound{in("plain", `{"type":"vless","reality-config":{}}`)}, "") != nil {
+		t.Fatal("a router with nothing behind it")
+	}
+}

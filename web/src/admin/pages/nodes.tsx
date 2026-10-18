@@ -675,13 +675,13 @@ function KeyDrawer({ joined, onClose, actions }: { joined: Joined | null; onClos
 function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false });
+  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false, sni_router: false });
   const balance = useBalance();
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     if (node) {
       setForm({ name: node.name, public_name: node.public_name, host: node.host, domain: node.domain, enabled: node.enabled, fair_share: node.fair_share, channel: node.channel_mbps != null ? String(node.channel_mbps) : "",
-        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect });
+        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect, sni_router: node.sni_router });
       setErrors({});
     }
   }, [node]);
@@ -723,6 +723,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
       body.domain = form.domain.trim();
       body.http_redirect = form.http_redirect;
     }
+    body.sni_router = form.sni_router;
     const group = form.group.trim();
     const capacity = group && form.capacity.trim() ? Number(form.capacity) : undefined;
     if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1)) {
@@ -819,6 +820,20 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
             ) : null}
           </div>
         ) : null}
+        <div className="dr-sec">
+          <div className="switch-row pt-0">
+            <div>
+              <div className="switch-row-title">{t("nodes.sniRouter")}</div>
+              <div className="switch-row-sub">{t("nodes.sniRouterHint")}</div>
+            </div>
+            <Switch checked={form.sni_router} onChange={(v) => setForm((f) => ({ ...f, sni_router: v }))} label={t("nodes.sniRouter")} />
+          </div>
+          {node?.sni_router && node.router_error ? (
+            <p className="text-xs text-[var(--berry-600)]" role="alert">
+              {t("nodes.sniRouterBusy", { error: node.router_error })}
+            </p>
+          ) : null}
+        </div>
         <BalanceFields
           group={form.group}
           capacity={form.capacity}

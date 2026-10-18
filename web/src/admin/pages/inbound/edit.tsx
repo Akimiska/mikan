@@ -47,9 +47,11 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
   const [clientPort, setClientPort] = useState("");
   const [clientSni, setClientSni] = useState("");
   const [cdn, setCdn] = useState<CdnForm | null>(null);
+  const [sni443, setSni443] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const settings = useSettings();
   const warp = useWarp(inbound?.node_id ?? null, !!inbound);
+  const nodeRouter = !!allNodes.data?.find((n) => n.id === inbound?.node_id)?.sni_router;
   useEffect(() => {
     if (!inbound) return;
     setTab("main");
@@ -72,6 +74,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     setClientPort(inbound.client.port ? String(inbound.client.port) : "");
     setClientSni(inbound.client.sni);
     setCdn(cdnFormOf(inbound));
+    setSni443(inbound.sni443);
     setErrors({});
     validate.reset();
     // `validate` changes identity on every render; reset only for another inbound.
@@ -142,6 +145,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && (obfs === "salamander" || obfs === "gecko")) body.obfs = obfs;
     // The whole tuning goes: an emptied field is a value too (back to the default).
     if (!configChanged && inbound?.xhttp && JSON.stringify(xhttp) !== JSON.stringify(inbound.xhttp)) body.xhttp = xhttp;
+    if (!configChanged && inbound && sni443 !== inbound.sni443) body.sni443 = sni443;
     if (listenMode === "custom" && !listen) {
       reject({ listen: t("inbounds.listenRequired") });
       return;
@@ -377,6 +381,16 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                     ))}
                   </select>
                 </Field>
+              ) : null}
+              {inbound?.sni443_possible ? (
+                <SwitchRow
+                  label={t("inbounds.sni443.title")}
+                  sub={sni443 && !nodeRouter ? t("inbounds.sni443.routerOff") : t("inbounds.sni443.sub")}
+                  warn={sni443 && !nodeRouter}
+                  checked={sni443}
+                  disabled={configChanged}
+                  onChange={setSni443}
+                />
               ) : null}
               {inbound?.cdn_possible && cdn ? (
                 <Disclosure title={t("inbounds.cdn.title")} sub={t("inbounds.cdn.sub")} open={cdn.on || Object.keys(errors).some((k) => k.startsWith("client.cdn"))}>

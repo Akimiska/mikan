@@ -562,7 +562,8 @@
       "balance_bounds": "The upper bound is below the lower one",
       "balance_details": "Say how to transfer the money",
       "not_a_picture": "Telegram gave something that is not a picture",
-      "telegram_unavailable": "Telegram did not give the file, try again later"
+      "telegram_unavailable": "Telegram did not give the file, try again later",
+      "sni443_type": "Only VLESS, Trojan or AnyTLS over TCP with TLS or REALITY can go behind the SNI router"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -1366,6 +1367,11 @@
         "direct": "{n, plural, one {# protocol goes} other {# protocols go}} out directly",
         "warp": "{n, plural, one {# protocol goes} other {# protocols go}} out through WARP"
       }
+    },
+    "sni443": {
+      "title": "Through shared 443",
+      "sub": "The protocol shares the node's port 443 with others by TLS name; clients connect to 443. Needs the SNI router in the node's settings.",
+      "routerOff": "The node's SNI router is off: the protocol stays on its own port until it is on."
     }
   },
   "settings": {
@@ -2413,7 +2419,10 @@
     "certButton": "Certificate",
     "httpRedirect": "HTTP → HTTPS",
     "httpRedirectHint": "The node takes port 80 and answers plain HTTP with a 301 to https, as a real site does. HTTP-01 certificates keep working. Leave it off if another web server needs port 80.",
-    "httpRedirectBusy": "Port 80 cannot be taken: {error}"
+    "httpRedirectBusy": "Port 80 cannot be taken: {error}",
+    "sniRouter": "Shared port 443 (SNI router)",
+    "sniRouterHint": "The node listens on 443 and hands each connection to the inbound by the TLS name in its ClientHello. Turn on “Through shared 443” for protocols (VLESS, Trojan, AnyTLS with TLS or REALITY): they move to loopback behind the router, clients connect to 443, and the node still sees the client's real IP. An unknown name goes to the first REALITY one and on to its masking site.",
+    "sniRouterBusy": "Port 443 cannot be taken: {error}"
   },
   "telegram": {
     "subtitle": "A bot for subscription owners and a Mini App with the subscription page",

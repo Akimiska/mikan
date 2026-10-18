@@ -238,11 +238,21 @@ func TestHostFiles(t *testing.T) {
 	if _, ok := c.Requested(); ok {
 		t.Fatal("no request yet")
 	}
+	c.Check(context.Background()) // the channel changed: what was found is asked for again
 	if err := c.Request(); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.Requested(); !ok {
 		t.Fatal("the request is there for the host")
+	}
+	// It names the release the page shows: a host with an older copy of the index reads
+	// it again instead of calling its own version the latest.
+	var req map[string]string
+	if b, err := os.ReadFile(filepath.Join(dir, "update", "request")); err != nil || json.Unmarshal(b, &req) != nil {
+		t.Fatalf("request: %s %v", b, err)
+	}
+	if s := c.State(); !s.Available() || req["version"] != s.Latest.Version || req["at"] == "" {
+		t.Fatalf("the request names the release shown: %v, %+v", req, s.Latest)
 	}
 	if _, ok := c.Host(); ok {
 		t.Fatal("the host has not reported")

@@ -286,9 +286,15 @@ func (c *Checker) SetPolicy(p Policy) error {
 	return c.write("policy.json", data)
 }
 
-// Request asks the host to update now.
+// Request asks the host to update now, to the release the page shows when it shows one: a
+// host whose copy of the release index is older (GitHub's cache, for minutes after a
+// release) reads it again instead of calling its own version the latest.
 func (c *Checker) Request() error {
-	data, _ := json.Marshal(map[string]string{"at": c.now().UTC().Format(time.RFC3339)})
+	req := map[string]string{"at": c.now().UTC().Format(time.RFC3339)}
+	if s := c.State(); s.Available() {
+		req["version"] = s.Latest.Version
+	}
+	data, _ := json.Marshal(req)
 	return c.write("request", data)
 }
 

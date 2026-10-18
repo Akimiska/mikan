@@ -215,7 +215,8 @@ enum Asked {
     Nothing,
     /// The panel's Update button: the newest release.
     Update,
-    /// A node's panel asked for this release, and no further.
+    /// This release and no further: the one a node's panel asked for, or the one the panel's
+    /// own page showed when its Update button was pressed.
     Version(String),
     /// The adapters ({"do": "addons"}), not an update.
     Addons,
@@ -230,7 +231,8 @@ const REQUEST_LIMIT: u64 = 4096;
 /// Takes the request: whatever it is, it goes first, so the unit that watches for it does
 /// not fire again and again. node says whose request it is: a node's must name a release,
 /// {"version": "X"}, the only thing taken from it, and is nothing else; the panel's is any
-/// small file (what it says does not matter) except the adapters' {"do": "addons"}.
+/// small file except the adapters' {"do": "addons"}, and the release it names, when it names
+/// a valid one, is the one its page showed.
 fn take_request(dir: &Dir, node: bool) -> Result<Asked> {
     if !dir.exists("request") {
         return Ok(Asked::Nothing);
@@ -244,7 +246,7 @@ fn take_request(dir: &Dir, node: bool) -> Result<Asked> {
         },
         Ok(Some(data)) => match serde_json::from_slice::<serde_json::Value>(&data) {
             Ok(v) if v["do"] == "addons" => Asked::Addons,
-            _ => Asked::Update,
+            _ => requested_version(&data).map_or(Asked::Update, Asked::Version),
         },
         Ok(None) => Asked::Nothing,
         Err(e) => Asked::Garbage(format!("{e:#}")),
@@ -602,7 +604,12 @@ fn resolve_target(
         }
         None => {
             let found = match &upto {
-                Some(upto) => release::find_upto(current, upto_channel(channel(install), upto), upto)?,
+                Some(upto) => {
+                    let channel = upto_channel(channel(install), upto);
+                    retry_refused(INDEX_TRIES, &mut || std::thread::sleep(INDEX_WAIT), say, upto, || {
+                        release::find_upto(current, channel, upto)
+                    })?
+                }
                 None => release::find(Some(current), channel(install))?,
             };
             if let Some(why) = &found.fallback {
@@ -876,6 +883,42 @@ fn upto_step(current: &str, upto: &str) -> Step {
 
 /// The channel a request for upto is looked up in: the server's, and beta for a
 /// pre-release, which the panel runs and the admin chose.
+/// How often the index is read again for a release it does not list yet, and how long apart:
+/// GitHub serves an old copy of index.json for a few minutes after a release, while the
+/// panel that asked may already have the new one.
+const INDEX_TRIES: u32 = 4;
+const INDEX_WAIT: Duration = Duration::from_secs(15);
+
+/// find, again after wait while the index refuses upto (an old copy of it), at most tries
+/// times; the last refusal says what to do.
+fn retry_refused<T>(
+    tries: u32,
+    wait: &mut dyn FnMut(),
+    say: &mut dyn FnMut(&str),
+    upto: &str,
+    mut find: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let mut left = tries.max(1);
+    loop {
+        left -= 1;
+        match find() {
+            Err(e) if release::refused(&e) && left > 0 => {
+                say(&format!(
+                    "The release index here does not list mikan {upto} yet: GitHub may still serve an old copy. Reading it again in {} s.",
+                    INDEX_WAIT.as_secs()
+                ));
+                wait();
+            }
+            Err(e) if release::refused(&e) => {
+                return Err(e.context(format!(
+                    "GitHub still serves this server an old release index without mikan {upto}: press Update again in a few minutes"
+                )));
+            }
+            r => return r,
+        }
+    }
+}
+
 fn upto_channel(channel: Channel, upto: &str) -> Channel {
     if release::is_prerelease(upto) { Channel::Beta } else { channel }
 }
@@ -1265,20 +1308,51 @@ mod tests {
         Dir::open(d, ".", false).unwrap().unwrap()
     }
 
-    // The panel's Update button writes {"at": …}; its adapters write {"do": "addons"}.
+    // The panel's Update button writes {"at": …} and the release its page showed; its adapters
+    // write {"do": "addons"}. A version that is not one is no version.
     #[test]
     fn the_panels_requests() {
         let d = tmpdir("requests");
         let dir = open(&d);
         assert_eq!(take_request(&dir, false).unwrap(), Asked::Nothing);
-        for (body, want) in
-            [(r#"{"at":"2026-10-01T00:00:00Z"}"#, Asked::Update), (r#"{"do":"addons"}"#, Asked::Addons), ("not json", Asked::Update)]
-        {
+        for (body, want) in [
+            (r#"{"at":"2026-10-01T00:00:00Z"}"#, Asked::Update),
+            (r#"{"at":"2026-10-01T00:00:00Z","version":"0.5.1.1-rc.9"}"#, Asked::Version("0.5.1.1-rc.9".into())),
+            (r#"{"at":"2026-10-01T00:00:00Z","version":"latest"}"#, Asked::Update),
+            (r#"{"do":"addons"}"#, Asked::Addons),
+            ("not json", Asked::Update),
+        ] {
             fs::write(d.join("request"), body).unwrap();
             assert_eq!(take_request(&dir, false).unwrap(), want, "{body}");
             assert!(!d.join("request").exists(), "the request must go at once");
         }
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    // An old copy of the index (GitHub's cache after a release) is read again, a few times,
+    // and the last refusal says to press Update again; anything else is not retried.
+    #[test]
+    fn an_old_index_is_read_again() {
+        let refused = || -> Result<u32> { Err(release::refused_for_test("mikan 9.9.9 is not a release")) };
+        let (mut waits, mut said) = (0, Vec::new());
+        let mut calls = 0;
+        let r = retry_refused(3, &mut || waits += 1, &mut |s| said.push(s.to_owned()), "9.9.9", || {
+            calls += 1;
+            if calls < 3 { refused() } else { Ok(calls) }
+        });
+        assert_eq!((r.unwrap(), waits, said.len()), (3, 2, 2), "found on the third read");
+
+        let mut waits = 0;
+        let r = retry_refused(3, &mut || waits += 1, &mut |_| {}, "9.9.9", refused);
+        let e = r.unwrap_err();
+        assert!(release::refused(&e) && format!("{e:#}").contains("press Update again") && waits == 2, "{e:#}");
+
+        let mut calls = 0;
+        let r: Result<u32> = retry_refused(3, &mut || {}, &mut |_| {}, "9.9.9", || {
+            calls += 1;
+            bail!("no network")
+        });
+        assert!(r.is_err() && calls == 1, "a failure to get the index is not retried here");
     }
 
     // What the panel may plant instead of a request: it is removed and logged, never

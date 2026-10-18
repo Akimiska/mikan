@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"time"
+
+	"mikan/internal/panel/domain"
+	"mikan/internal/panel/settings"
 )
 
 // What only grows is cut here, every ten minutes with the rest of the housekeeping. The
@@ -24,6 +27,9 @@ func (p *Panel) maintain(ctx context.Context) {
 	}
 	if err := p.st.Q.PruneNodeTrafficDaily(ctx, now.Add(-trafficDailyKeep).Unix()/86400); err != nil {
 		p.log.Error("prune daily node traffic", "err", err)
+	}
+	if _, err := p.st.Q.PruneUserSites(ctx, domain.SiteDay(now.AddDate(0, 0, -domain.DetailDays(ctx, settings.New(p.st.Q))))); err != nil {
+		p.log.Error("prune user sites", "err", err)
 	}
 	if _, err := p.st.Q.PruneAudit(ctx, now.Add(-auditKeep).Unix()); err != nil {
 		p.log.Error("prune audit log", "err", err)

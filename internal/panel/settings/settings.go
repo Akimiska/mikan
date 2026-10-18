@@ -98,7 +98,11 @@ const (
 	// KeySiteTemplate is the built-in front page a stranger sees at the panel's address
 	// (server.Templates); "" for none.
 	KeySiteTemplate = "site_template"
-	KeyInactiveText = "sub_inactive_text"
+	// KeyTrafficDetail: the nodes sum each subscription's bytes by site (user_sites), kept
+	// KeyTrafficDetailDays days.
+	KeyTrafficDetail     = "traffic_detail"
+	KeyTrafficDetailDays = "traffic_detail_days"
+	KeyInactiveText      = "sub_inactive_text"
 	// App branding: the brand, logo and accent colour go to the apps that read operator
 	// headers (subs.OperatorHeaders); off by default.
 	KeyAppBranding = "app_branding"
@@ -147,6 +151,7 @@ var (
 	AppBranding    = Switch{KeyAppBranding, false}
 	HappHide       = Switch{KeyHappHide, false}
 	InactiveServer = Switch{KeyInactiveServer, false}
+	TrafficDetail  = Switch{KeyTrafficDetail, false}
 	SupportAccess  = Switch{KeySupportAccess, true}
 )
 

@@ -264,6 +264,7 @@ func (s *Syncer) desiredPin(ctx context.Context) (st nodeapi.DesiredState, pin s
 	st.Torrent = snap.torrent.Block()
 	st.Filters = snap.filters.State()
 	st.DNS = snap.exitDNS.State()
+	st.Detail = snap.detail
 	st.HTTPRedirect = n.HttpRedirect != 0 && n.Address != ""
 	if n.FairShare != 0 && n.ChannelMbps.Valid {
 		st.Shaping = &nodeapi.Shaping{ChannelMbps: int(n.ChannelMbps.Int64)}
@@ -629,6 +630,9 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		}
 		// Each slot's own total, main and pools: what every bound device used.
 		if err := countSlots(ctx, q, c, owner); err != nil {
+			return err
+		}
+		if err := countSites(ctx, q, c, owner, now); err != nil {
 			return err
 		}
 		if c.Epoch != epoch {
@@ -1079,4 +1083,26 @@ func countSlots(ctx context.Context, q *db.Queries, c nodeapi.Counters, owner ma
 		return nil
 	}
 	return q.AddSlotsTraffic(ctx, p)
+}
+
+// countSites keeps a batch's bytes by site, by subscription and day. What a node could not
+// have sent (too many sites, a name past the DNS bound, a negative or absurd amount) is
+// dropped; the rest of the batch counts as ever.
+func countSites(ctx context.Context, q *db.Queries, c nodeapi.Counters, owner map[string]int64, now time.Time) error {
+	day := domain.SiteDay(now)
+	for slot, sites := range c.Sites {
+		uid, ok := owner[slot]
+		if !ok || len(sites) > domain.MaxSitesPerSlot {
+			continue
+		}
+		for site, t := range sites {
+			if site == "" || len(site) > 253 || t.Up < 0 || t.Down < 0 || t.Up > maxBytesPerSecond*86400 || t.Down > maxBytesPerSecond*86400 {
+				continue
+			}
+			if err := q.AddUserSite(ctx, db.AddUserSiteParams{Day: day, UserID: uid, Site: site, Up: t.Up, Down: t.Down}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

@@ -2337,6 +2337,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/traffic-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Детализация трафика по сайтам */
+        get: operations["get-traffic-detail"];
+        /**
+         * Включить или выключить детализацию по сайтам
+         * @description Ноды получают её со своим состоянием; ноды старше неё не считают.
+         */
+        put: operations["put-traffic-detail"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/updates": {
         parameters: {
             query?: never;
@@ -2644,6 +2665,23 @@ export interface paths {
         put?: never;
         /** Сбросить трафик */
         post: operations["reset-user-traffic"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Куда ходит подписка: трафик по сайтам */
+        get: operations["user-sites"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5280,6 +5318,11 @@ export interface components {
             brand_accent?: string;
             config: components["schemas"]["Page"];
         };
+        PutTrafficDetailInputBody: {
+            /** Format: int64 */
+            days: number;
+            enabled: boolean;
+        };
         ReachCheck: {
             /** Format: date-time */
             at: string;
@@ -5657,6 +5700,14 @@ export interface components {
             support_url: string;
             /** @description Искать сайты маскировки REALITY не только в /24 ноды, но и в соседних /24 её /16, до 20 найденных сайтов или 2 минут. Много подключений: хостер может принять это за сканирование сети */
             wide_sni_scan: boolean;
+        };
+        SiteBytes: {
+            /** Format: int64 */
+            down: number;
+            /** @description Домен второго уровня или адрес; * — остальные сайты */
+            site: string;
+            /** Format: int64 */
+            up: number;
         };
         SourceSkipView: {
             /** @description Идентификатор записи, как его написал источник */
@@ -6254,6 +6305,15 @@ export interface components {
             secret: string;
             uri: string;
         };
+        TrafficDetailView: {
+            /**
+             * Format: int64
+             * @description Сколько дней хранить
+             */
+            days: number;
+            /** @description Ноды считают трафик подписок по сайтам */
+            enabled: boolean;
+        };
         TrafficOutputBody: {
             points: components["schemas"]["TrafficPoint"][];
         };
@@ -6383,6 +6443,12 @@ export interface components {
         };
         UserPoolsInputBody: {
             pools: components["schemas"]["PoolLimit"][];
+        };
+        UserSitesOutputBody: {
+            enabled: boolean;
+            items: components["schemas"]["SiteBytes"][];
+            /** Format: int64 */
+            keep_days: number;
         };
         UserView: {
             /**
@@ -12025,6 +12091,68 @@ export interface operations {
             };
         };
     };
+    "get-traffic-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrafficDetailView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "put-traffic-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutTrafficDetailInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrafficDetailView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-updates": {
         parameters: {
             query?: never;
@@ -12816,6 +12944,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "user-sites": {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSitesOutputBody"];
                 };
             };
             /** @description Error */

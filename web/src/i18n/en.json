@@ -983,7 +983,7 @@
       "block": "Block {site} for everyone",
       "blocked": "{site} is in the filters: the nodes let nobody there",
       "isBlocked": "In the filters already",
-      "hint": "Traffic by site, with no times or addresses. Kept for {n, plural, one {# day} other {# days}}; turned on in Settings → Routing."
+      "hint": "Traffic by site, with no times or addresses. Kept for {n, plural, one {# day} other {# days}}; turned on on the Filters page."
     }
   },
   "tariffs": {

@@ -45,6 +45,9 @@ type DesiredState struct {
 	// HTTPRedirect: the node holds port 80 (or MIKAN_ACME_LISTEN) for good and answers plain
 	// HTTP with 301 to https, the ACME challenges as before. Nodes older than it ignore it.
 	HTTPRedirect bool `json:"http_redirect,omitempty"`
+	// Detail: the node sums each slot's bytes by site (Counters.Sites). Off by default;
+	// nodes older than it ignore it.
+	Detail bool `json:"detail,omitempty"`
 }
 
 // Shaping is the fair share of a node: ChannelMbps (each way) is split evenly between the
@@ -153,11 +156,14 @@ const (
 // Counters is a batch of traffic deltas. The node returns the same batch until it is
 // acknowledged, so the panel can apply it idempotently by (Epoch, Seq).
 type Counters struct {
-	Epoch  string                        `json:"epoch"`
-	Seq    int64                         `json:"seq"`
-	Slots  map[string]Traffic            `json:"slots"`           // outside every pool
-	Pools  map[string]map[string]Traffic `json:"pools,omitempty"` // slot → pool → traffic
-	Online map[string]Online             `json:"online"`          // live view, not part of the batch
+	Epoch string                        `json:"epoch"`
+	Seq   int64                         `json:"seq"`
+	Slots map[string]Traffic            `json:"slots"`           // outside every pool
+	Pools map[string]map[string]Traffic `json:"pools,omitempty"` // slot → pool → traffic
+	// Sites are the slots' bytes by site (DesiredState.Detail): slot → site → traffic, a
+	// part of the batch like the rest. Nodes older than it send none.
+	Sites  map[string]map[string]Traffic `json:"sites,omitempty"`
+	Online map[string]Online             `json:"online"` // live view, not part of the batch
 	// Idle: no batch was cut because there was no traffic to report. There is nothing to
 	// store and nothing to acknowledge; only Online is of use. Nodes before 0.4.4 cut an
 	// empty batch instead, which must be acknowledged like any other.

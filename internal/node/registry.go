@@ -39,6 +39,8 @@ type Registry struct {
 
 	ingress atomic.Pointer[ingress] // nil: anyone may connect
 
+	detail atomic.Bool // the sites' sums are on (sites.go)
+
 	shaper *shaper // speed caps and the fair share (shaper.go)
 
 	core    core
@@ -86,8 +88,9 @@ type slot struct {
 	online     nodeapi.Online        // as the core saw the slot at the last drain
 	seen       map[seenKey]time.Time // last admitted connection per device and inbound
 	seenPruned time.Time
-	pools      map[string]*bucket // traffic pools of the slot, made on first use
-	shaped     bool               // its connections go through the limiter
+	pools      map[string]*bucket   // traffic pools of the slot, made on first use
+	shaped     bool                 // its connections go through the limiter
+	sites      map[string]*[2]int64 // bytes by site since the last batch, while detail is on
 
 	group atomic.Pointer[group] // the user's speed group; nil before the first policy
 }
@@ -628,6 +631,17 @@ func (r *Registry) Counters() nodeapi.Counters {
 				b.Slots[s.name] = nodeapi.Traffic{Up: t.Up + up, Down: t.Down + down}
 			}
 			s.mu.Lock()
+			for site, t := range s.sites {
+				if b.Sites == nil {
+					b.Sites = map[string]map[string]nodeapi.Traffic{}
+				}
+				if b.Sites[s.name] == nil {
+					b.Sites[s.name] = map[string]nodeapi.Traffic{}
+				}
+				cur := b.Sites[s.name][site]
+				b.Sites[s.name][site] = nodeapi.Traffic{Up: cur.Up + t[0], Down: cur.Down + t[1]}
+			}
+			s.sites = nil
 			for pool, pb := range s.pools {
 				up, down := pb.up.Swap(0), pb.down.Swap(0)
 				if up == 0 && down == 0 {
@@ -647,7 +661,7 @@ func (r *Registry) Counters() nodeapi.Counters {
 		// A batch without traffic is not cut: it would cost the panel a transaction every
 		// couple of seconds to learn nothing. The reply says Idle, so the panel keeps to
 		// the live view; an older panel takes it for the last batch again and drops it.
-		if len(b.Slots) > 0 || len(b.Pools) > 0 {
+		if len(b.Slots) > 0 || len(b.Pools) > 0 || len(b.Sites) > 0 {
 			r.seq = b.Seq
 			r.pending = b
 		} else {

@@ -321,6 +321,12 @@ func (c *clientBuilder) transport() {
 				}
 				opts["reuse-settings"], extra["xmux"] = reuse, link
 			}
+			// The apps' own upload, over the server's (a CDN that passes only GET).
+			for _, k := range xhttpClientUplink {
+				if v := scalar(cl[k.mihomo]); v != "" {
+					opts[k.mihomo], extra[k.xray] = v, v
+				}
+			}
 			if v := scalar(cl["sc-min-posts-interval-ms"]); v != "" {
 				opts["sc-min-posts-interval-ms"], extra["scMinPostsIntervalMs"] = v, v
 			}

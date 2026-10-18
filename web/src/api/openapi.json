@@ -10504,6 +10504,35 @@
       "XHTTPTuning": {
         "additionalProperties": false,
         "properties": {
+          "client_uplink_chunk_size": {
+            "description": "Размер куска отправки у приложений, байт: число или диапазон",
+            "type": "string"
+          },
+          "client_uplink_data_key": {
+            "description": "Имя заголовка или cookie с данными у приложений; должно совпасть с серверным",
+            "type": "string"
+          },
+          "client_uplink_data_placement": {
+            "description": "Где приложения везут данные отправки вместо серверного; сервер должен принимать их там же (его auto принимает всё)",
+            "enum": [
+              "",
+              "body",
+              "header",
+              "cookie"
+            ],
+            "type": "string"
+          },
+          "client_uplink_http_method": {
+            "description": "Метод отправки у приложений вместо серверного; GET — только packet-up",
+            "enum": [
+              "",
+              "POST",
+              "PUT",
+              "PATCH",
+              "GET"
+            ],
+            "type": "string"
+          },
           "mode": {
             "description": "Режим XHTTP; пусто — по умолчанию",
             "enum": [
@@ -10592,7 +10621,7 @@
             "type": "string"
           },
           "uplink_http_method": {
-            "description": "Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up, данные в заголовке или cookie",
+            "description": "Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up. Нода принимает отправку любым методом",
             "enum": [
               "",
               "POST",

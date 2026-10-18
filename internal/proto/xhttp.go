@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"cmp"
 	"math/big"
 	"regexp"
 	"strconv"
@@ -20,7 +21,7 @@ type XHTTPTuning struct {
 	PaddingKey       string `json:"x_padding_key" required:"false"`
 	PaddingHeader    string `json:"x_padding_header" required:"false"`
 	PaddingMethod    string `json:"x_padding_method" required:"false" enum:",repeat-x,tokenish"`
-	UplinkMethod     string `json:"uplink_http_method" required:"false" enum:",POST,PUT,PATCH,GET" doc:"Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up, данные в заголовке или cookie"`
+	UplinkMethod     string `json:"uplink_http_method" required:"false" enum:",POST,PUT,PATCH,GET" doc:"Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up. Нода принимает отправку любым методом"`
 	UplinkChunkSize  string `json:"uplink_chunk_size" required:"false" doc:"Размер куска отправки, байт: число или диапазон"`
 	MaxEachPostBytes string `json:"sc_max_each_post_bytes" required:"false" doc:"Наибольший запрос отправки (packet-up), байт: число или диапазон"`
 	// Where the session id, the request number and the upload data travel: both ends must
@@ -45,6 +46,13 @@ type XHTTPTuning struct {
 	// What the app draws its session id from; the node takes any id.
 	SessionTable  string `json:"session_table" required:"false" doc:"Из каких ASCII-символов приложение составляет номер сессии: свой набор или имя hex, base36, Base62, number, alphabet, Alphabet"`
 	SessionLength string `json:"session_length" required:"false" doc:"Длина номера сессии: число или диапазон; с набором по умолчанию 16-32"`
+	// The apps' own upload, over the server's: a CDN that passes only GET gets GET from
+	// the apps while the node keeps POST (it takes an upload by any method, and its data
+	// from wherever its placement allows).
+	ClientUplinkMethod    string `json:"client_uplink_http_method" required:"false" enum:",POST,PUT,PATCH,GET" doc:"Метод отправки у приложений вместо серверного; GET — только packet-up"`
+	ClientUplinkPlacement string `json:"client_uplink_data_placement" required:"false" enum:",body,header,cookie" doc:"Где приложения везут данные отправки вместо серверного; сервер должен принимать их там же (его auto принимает всё)"`
+	ClientUplinkDataKey   string `json:"client_uplink_data_key" required:"false" doc:"Имя заголовка или cookie с данными у приложений; должно совпасть с серверным"`
+	ClientUplinkChunkSize string `json:"client_uplink_chunk_size" required:"false" doc:"Размер куска отправки у приложений, байт: число или диапазон"`
 }
 
 // rangeKind says whether a key holds a byte or count range ("N" or "N-M"), and whether it
@@ -96,6 +104,18 @@ var xmuxKeys = []struct {
 	{"h-max-reusable-secs", "hMaxReusableSecs", func(x *XHTTPTuning) *string { return &x.MaxReusableSecs }},
 }
 
+// The apps' own upload keys in mikan.client.xhttp, which replace the server's in the
+// links (xhttpShared names them the same).
+var xhttpClientUplink = []struct {
+	mihomo, xray string
+	get          func(*XHTTPTuning) *string
+}{
+	{"uplink-http-method", "uplinkHTTPMethod", func(x *XHTTPTuning) *string { return &x.ClientUplinkMethod }},
+	{"uplink-data-placement", "uplinkDataPlacement", func(x *XHTTPTuning) *string { return &x.ClientUplinkPlacement }},
+	{"uplink-data-key", "uplinkDataKey", func(x *XHTTPTuning) *string { return &x.ClientUplinkDataKey }},
+	{"uplink-chunk-size", "uplinkChunkSize", func(x *XHTTPTuning) *string { return &x.ClientUplinkChunkSize }},
+}
+
 // XHTTPOf reads the tuning of an XHTTP template; ok is false for other transports.
 func XHTTPOf(t Template) (x XHTTPTuning, ok bool) {
 	sec := t.section("xhttp-config")
@@ -115,6 +135,9 @@ func XHTTPOf(t Template) (x XHTTPTuning, ok bool) {
 	}
 	x.MinPostsIntervalMs = scalar(c["sc-min-posts-interval-ms"])
 	x.SessionTable, x.SessionLength = scalar(c["session-table"]), scalar(c["session-length"])
+	for _, k := range xhttpClientUplink {
+		*k.get(&x) = scalar(c[k.mihomo])
+	}
 	return x, true
 }
 
@@ -185,6 +208,11 @@ func SetXHTTP(t Template, x XHTTPTuning) error {
 	if v := strings.TrimSpace(x.MinPostsIntervalMs); v != "" {
 		client["sc-min-posts-interval-ms"] = v
 	}
+	for _, k := range xhttpClientUplink {
+		if v := strings.TrimSpace(*k.get(&x)); v != "" {
+			client[k.mihomo] = v
+		}
+	}
 	// The length only means something next to a table (check refuses it alone).
 	if v := strings.TrimSpace(x.SessionTable); v != "" {
 		client["session-table"] = v
@@ -248,6 +276,9 @@ func (x XHTTPTuning) check() error {
 		{x.SeqPlacement, "xhttp-config.seq-placement", []string{"path", "query", "header", "cookie"}},
 		// No "query" for the data: mihomo sends nothing in that case.
 		{x.UplinkDataPlacement, "xhttp-config.uplink-data-placement", []string{"body", "header", "cookie", "auto"}},
+		{x.ClientUplinkMethod, extKey + ".client.xhttp.uplink-http-method", []string{"POST", "PUT", "PATCH", "GET"}},
+		// auto is the server's: an app sends its data in one place.
+		{x.ClientUplinkPlacement, extKey + ".client.xhttp.uplink-data-placement", []string{"body", "header", "cookie"}},
 	} {
 		if err := enum(e.v, e.field, e.ok...); err != nil {
 			return err
@@ -256,6 +287,7 @@ func (x XHTTPTuning) check() error {
 	for _, v := range []struct{ v, field string }{
 		{x.PaddingKey, "xhttp-config.x-padding-key"}, {x.PaddingHeader, "xhttp-config.x-padding-header"},
 		{x.SessionKey, "xhttp-config.session-key"}, {x.SeqKey, "xhttp-config.seq-key"}, {x.UplinkDataKey, "xhttp-config.uplink-data-key"},
+		{x.ClientUplinkDataKey, extKey + ".client.xhttp.uplink-data-key"},
 	} {
 		if s := strings.TrimSpace(v.v); s != "" && !xhttpToken.MatchString(s) {
 			return fail("xhttp_value", v.field)
@@ -283,6 +315,7 @@ func (x XHTTPTuning) check() error {
 		ranges = append(ranges, rangeField{*k.get(&x), extKey + ".client.xhttp.xmux." + k.mihomo, false})
 	}
 	ranges = append(ranges, rangeField{x.MinPostsIntervalMs, extKey + ".client.xhttp.sc-min-posts-interval-ms", true})
+	ranges = append(ranges, rangeField{x.ClientUplinkChunkSize, extKey + ".client.xhttp.uplink-chunk-size", true})
 	for _, r := range ranges {
 		if s := strings.TrimSpace(r.v); s != "" && !validRange(s, r.min1) {
 			return fail("xhttp_range", r.field)
@@ -342,28 +375,11 @@ var sessionTableChars = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
 // checkSession is what depends on several of the new settings at once, and the client's
 // id table.
 func (x XHTTPTuning) checkSession() error {
-	// A GET carries no body a CDN passes on: the core takes it as an upload in packet-up,
-	// with the data in a header or a cookie.
-	if strings.TrimSpace(x.UplinkMethod) == "GET" {
-		if strings.TrimSpace(x.Mode) != "packet-up" {
-			return fail("xhttp_get_mode", "xhttp-config.uplink-http-method")
-		}
-		switch strings.TrimSpace(x.UplinkDataPlacement) {
-		case "header", "cookie":
-		default:
-			return fail("xhttp_get_placement", "xhttp-config.uplink-data-placement")
-		}
+	if err := uplinkSide(x.Mode, x.UplinkMethod, x.UplinkDataPlacement, x.UplinkDataKey, "xhttp-config."); err != nil {
+		return err
 	}
-	switch strings.TrimSpace(x.UplinkDataPlacement) {
-	case "header", "cookie":
-		// Xray refuses these in other modes; without a key mihomo uses an empty name where
-		// Xray uses X-Data / x_data, so the two would not meet.
-		if strings.TrimSpace(x.Mode) != "packet-up" {
-			return fail("xhttp_packet_up", "xhttp-config.uplink-data-placement")
-		}
-		if strings.TrimSpace(x.UplinkDataKey) == "" {
-			return fail("xhttp_key_needed", "xhttp-config.uplink-data-key")
-		}
+	if err := x.checkClientUplink(); err != nil {
+		return err
 	}
 	// One request carries both: the same place and name would overwrite one with the other.
 	sp, qp := orPath(x.SessionPlacement), orPath(x.SeqPlacement)
@@ -410,6 +426,71 @@ func (x XHTTPTuning) checkSession() error {
 		return fail("xhttp_table_small", field+"table")
 	}
 	return nil
+}
+
+// uplinkSide checks one end's upload: a GET is an upload only in packet-up (the cores take
+// its body, a header or a cookie there; whether a CDN passes a GET's body on is the CDN's
+// matter), and so is data in a header or a cookie, which also needs its name: without one
+// mihomo uses an empty name where Xray uses X-Data / x_data, so the two would not meet.
+func uplinkSide(mode, method, placement, key, at string) error {
+	mode = strings.TrimSpace(mode)
+	if strings.TrimSpace(method) == "GET" && mode != "packet-up" {
+		return fail("xhttp_get_mode", at+"uplink-http-method")
+	}
+	switch strings.TrimSpace(placement) {
+	case "header", "cookie":
+		if mode != "packet-up" {
+			return fail("xhttp_packet_up", at+"uplink-data-placement")
+		}
+		if strings.TrimSpace(key) == "" {
+			return fail("xhttp_key_needed", at+"uplink-data-key")
+		}
+	}
+	return nil
+}
+
+// checkClientUplink: what the apps send, their own settings over the server's, is what
+// the server takes. The method does not matter to the server (it takes an upload by any),
+// the place of the data does: its auto (or unset) takes all, otherwise only its own.
+func (x XHTTPTuning) checkClientUplink() error {
+	own := func(v string) bool { return strings.TrimSpace(v) != "" }
+	if !own(x.ClientUplinkMethod) && !own(x.ClientUplinkPlacement) && !own(x.ClientUplinkDataKey) {
+		return nil
+	}
+	const at = extKey + ".client.xhttp."
+	pick := func(client, server string) string {
+		return strings.TrimSpace(cmp.Or(strings.TrimSpace(client), server))
+	}
+	method, placement := pick(x.ClientUplinkMethod, x.UplinkMethod), pick(x.ClientUplinkPlacement, x.UplinkDataPlacement)
+	key := pick(x.ClientUplinkDataKey, x.UplinkDataKey)
+	if placement == "auto" {
+		placement = "body" // an app sends its data in the body unless told otherwise
+	}
+	if err := uplinkSide(x.Mode, method, placement, key, at); err != nil {
+		return err
+	}
+	if server := strings.TrimSpace(x.UplinkDataPlacement); server != "" && server != "auto" && orBody(placement) != server {
+		return fail("xhttp_client_placement", at+"uplink-data-placement")
+	}
+	// The server reads a header or a cookie by its own name, X-Data / x_data unless set.
+	if placement == "header" || placement == "cookie" {
+		want := strings.TrimSpace(x.UplinkDataKey)
+		if want == "" {
+			want = map[string]string{"header": "X-Data", "cookie": "x_data"}[placement]
+		}
+		if key != want {
+			return fail("xhttp_client_key", at+"uplink-data-key")
+		}
+	}
+	return nil
+}
+
+// orBody is an app's placement: unset is the body.
+func orBody(p string) string {
+	if p == "" {
+		return "body"
+	}
+	return p
 }
 
 func orPath(p string) string {

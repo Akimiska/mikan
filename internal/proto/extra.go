@@ -225,7 +225,11 @@ func NeedsOf(t Template) Needs {
 	n.Encryption = n.Type == "vless" && t.hasEncryption()
 	n.Gecko = n.Type == "hysteria2" && t.str("obfs") == ObfsGecko
 	if x := t.section("xhttp-config"); x != nil {
+		// What the apps send: their own method over the server's.
 		m, _ := x["uplink-http-method"].(string)
+		if own := scalar(xhttpClient(t)["uplink-http-method"]); own != "" {
+			m = own
+		}
 		n.GetUplink = strings.EqualFold(m, "GET")
 	}
 	return n

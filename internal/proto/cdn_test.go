@@ -124,13 +124,14 @@ func TestCDNClients(t *testing.T) {
 	}
 }
 
-// GET uploads are for CDNs that drop POST: packet-up only, with the data in a header or a
-// cookie, and only apps that can send them get the inbound.
+// GET uploads are for CDNs that drop POST: packet-up only, the data in the body (the CDN
+// must pass a GET's body on), a header or a cookie, and only apps that can send them get
+// the inbound.
 func TestXHTTPGetUplink(t *testing.T) {
 	for x, want := range map[XHTTPTuning]string{
 		{UplinkMethod: "GET", Mode: "stream-one"}:                                                        "xhttp_get_mode",
-		{UplinkMethod: "GET", Mode: "packet-up"}:                                                         "xhttp_get_placement",
-		{UplinkMethod: "GET", Mode: "packet-up", UplinkDataPlacement: "body"}:                            "xhttp_get_placement",
+		{UplinkMethod: "GET", Mode: "packet-up"}:                                                         "",
+		{UplinkMethod: "GET", Mode: "packet-up", UplinkDataPlacement: "body"}:                            "",
 		{UplinkMethod: "GET", Mode: "packet-up", UplinkDataPlacement: "header", UplinkDataKey: "X-Data"}: "",
 	} {
 		if got := code(x.check()); got != want {

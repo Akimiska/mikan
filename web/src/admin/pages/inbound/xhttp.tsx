@@ -34,6 +34,10 @@ export const XHTTP_DEFAULT: XHTTP = {
   no_sse_header: false,
   session_table: "",
   session_length: "",
+  client_uplink_http_method: "",
+  client_uplink_data_placement: "",
+  client_uplink_data_key: "",
+  client_uplink_chunk_size: "",
 };
 
 /** The names both cores use when a placement has no key of its own. */
@@ -91,6 +95,8 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
   const strong =
     value.x_padding_obfs_mode ||
     value.uplink_http_method !== "" ||
+    value.client_uplink_http_method !== "" ||
+    value.client_uplink_data_placement !== "" ||
     !["", "path"].includes(value.session_placement ?? "") ||
     !["", "path"].includes(value.seq_placement ?? "") ||
     !["", "body"].includes(value.uplink_data_placement ?? "");
@@ -204,18 +210,8 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
             value={value.uplink_http_method}
             onChange={(e) => {
               const m = e.target.value as XHTTP["uplink_http_method"];
-              // GET carries no body a CDN passes on: packet-up with the data in a header.
-              onChange(
-                m === "GET"
-                  ? {
-                      ...value,
-                      uplink_http_method: m,
-                      mode: "packet-up",
-                      uplink_data_placement: value.uplink_data_placement === "cookie" ? "cookie" : "header",
-                      uplink_data_key: value.uplink_data_key || "X-Data",
-                    }
-                  : { ...value, uplink_http_method: m },
-              );
+              // A GET is an upload only in packet-up.
+              onChange({ ...value, uplink_http_method: m, mode: m === "GET" ? "packet-up" : value.mode });
             }}
           >
             <option value="">POST</option>
@@ -226,6 +222,58 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
         </Field>
         {input("uplink_chunk_size", "", t("inbounds.xhttp.chunk"))}
         {input("sc_max_each_post_bytes", "1000000", t("inbounds.xhttp.maxPost"))}
+      </div>
+
+      <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.clientUpload")}</h3>
+      <p className="mb-2 text-xs text-[var(--ink-500)]">{t("inbounds.xhttp.clientUploadHint")}</p>
+      <div className="grid gap-x-3 sm:grid-cols-2">
+        <Field
+          label={t("inbounds.xhttp.uplinkMethod")}
+          htmlFor="x-client-uplink"
+          hint={value.client_uplink_http_method === "GET" ? t("inbounds.xhttp.getHint") : undefined}
+        >
+          <select
+            id="x-client-uplink"
+            className="input"
+            value={value.client_uplink_http_method ?? ""}
+            onChange={(e) => {
+              const m = e.target.value as XHTTP["client_uplink_http_method"];
+              onChange({ ...value, client_uplink_http_method: m, mode: m === "GET" ? "packet-up" : value.mode });
+            }}
+          >
+            <option value="">{t("inbounds.xhttp.asServer")}</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="PATCH">PATCH</option>
+            <option value="GET">GET</option>
+          </select>
+        </Field>
+        <Field label={t("inbounds.xhttp.dataPlace")} htmlFor="x-client-placement">
+          <select
+            id="x-client-placement"
+            className="input"
+            value={value.client_uplink_data_placement ?? ""}
+            onChange={(e) => {
+              const v = e.target.value as XHTTP["client_uplink_data_placement"];
+              const named = v === "header" || v === "cookie";
+              onChange({
+                ...value,
+                client_uplink_data_placement: v,
+                mode: named ? "packet-up" : value.mode,
+                client_uplink_data_key: named && !value.client_uplink_data_key ? value.uplink_data_key || (v === "header" ? "X-Data" : "x_data") : value.client_uplink_data_key,
+              });
+            }}
+          >
+            <option value="">{t("inbounds.xhttp.asServer")}</option>
+            <option value="body">body</option>
+            <option value="header">header</option>
+            <option value="cookie">cookie</option>
+          </select>
+        </Field>
+        {value.client_uplink_data_placement === "header" || value.client_uplink_data_placement === "cookie"
+          ? input("client_uplink_data_key", value.client_uplink_data_placement === "header" ? "X-Data" : "x_data", t("inbounds.xhttp.key"), t("inbounds.xhttp.clientKeyHint"), false)
+          : null}
+        {input("client_uplink_chunk_size", value.uplink_chunk_size || "", t("inbounds.xhttp.chunk"), t("inbounds.xhttp.rangeHint"))}
       </div>
 
       <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.sessionGroup")}</h3>

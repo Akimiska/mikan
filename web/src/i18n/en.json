@@ -549,7 +549,6 @@
       "cdn_server_needed": "Enter the CDN domain",
       "config_client_host": "Host: a domain name; only WebSocket and XHTTP have one",
       "xhttp_get_mode": "GET works in packet-up mode only",
-      "xhttp_get_placement": "With GET the data go in a header or a cookie: pick one under “where the data go”",
       "sub_domain_invalid": "Subscription domain: a domain name, not an IP address",
       "sub_domain_panel": "This is the panel's domain: enter another one, sub.your-domain for example",
       "sub_domain_unset": "Save the subscription domain first",
@@ -566,7 +565,9 @@
       "balance_bounds": "The upper bound is below the lower one",
       "balance_details": "Say how to transfer the money",
       "not_a_picture": "Telegram gave something that is not a picture",
-      "telegram_unavailable": "Telegram did not give the file, try again later"
+      "telegram_unavailable": "Telegram did not give the file, try again later",
+      "xhttp_client_placement": "The server does not take the apps' data there: set the same place, or auto, on the server",
+      "xhttp_client_key": "The apps' header or cookie name does not match the server's"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -1276,7 +1277,11 @@
       "bufferedPostsHint": "From 1; by default 30. How many requests may wait for their turn.",
       "noSse": "No event-stream header",
       "noSseHint": "Do not mark answers as text/event-stream. Some proxies buffer such streams; without the mark they may not.",
-      "getHint": "For CDNs that cut POST: packet-up mode, the data in a header. mihomo 1.19.32+ and Xray apps get the inbound."
+      "getHint": "GET works in packet-up mode only. Data in the body get through when the CDN passes a GET's body on; header and cookie are bound by the header size, so uploads are slower with them.",
+      "clientUpload": "Upload in the apps",
+      "clientUploadHint": "The apps' own settings over the server's. For a CDN that passes only GET and HEAD: keep POST with the data in the body on the node and give the apps GET. The node takes an upload by any method, and its data where its “where the data go” allows (auto or empty takes all).",
+      "asServer": "As the server",
+      "clientKeyHint": "Must match the server's name"
     },
     "cutOff": "Devices that cannot reach it: {n}",
     "cutOffOf": "Devices that cannot reach it: {n} of {total}",

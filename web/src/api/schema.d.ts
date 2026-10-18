@@ -6622,6 +6622,20 @@ export interface components {
             status?: components["schemas"]["WarpCheck"];
         };
         XHTTPTuning: {
+            /** @description Размер куска отправки у приложений, байт: число или диапазон */
+            client_uplink_chunk_size?: string;
+            /** @description Имя заголовка или cookie с данными у приложений; должно совпасть с серверным */
+            client_uplink_data_key?: string;
+            /**
+             * @description Где приложения везут данные отправки вместо серверного; сервер должен принимать их там же (его auto принимает всё)
+             * @enum {string}
+             */
+            client_uplink_data_placement?: "" | "body" | "header" | "cookie";
+            /**
+             * @description Метод отправки у приложений вместо серверного; GET — только packet-up
+             * @enum {string}
+             */
+            client_uplink_http_method?: "" | "POST" | "PUT" | "PATCH" | "GET";
             /**
              * @description Режим XHTTP; пусто — по умолчанию
              * @enum {string}
@@ -6665,7 +6679,7 @@ export interface components {
              */
             uplink_data_placement?: "" | "body" | "header" | "cookie" | "auto";
             /**
-             * @description Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up, данные в заголовке или cookie
+             * @description Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up. Нода принимает отправку любым методом
              * @enum {string}
              */
             uplink_http_method?: "" | "POST" | "PUT" | "PATCH" | "GET";

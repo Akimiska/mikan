@@ -71,6 +71,9 @@ type Engine struct {
 	// hostCh is the channel to the units on the node's server (see hostChan).
 	hostOnce sync.Once
 	hostCh   *hostchan.Channel
+	// lock keeps the TCP API for the panel alone (apilock.go); made on first use.
+	lockOnce sync.Once
+	lock     *apiLock
 
 	Reg *Registry
 	tun *Tunnel
@@ -338,6 +341,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	e.Reg.SetTorrent(st.Torrent)
 	e.Reg.SetIngress(st.Filters)
 	e.setRedirect(st.HTTPRedirect)
+	e.apiLock().set(st.APIAllow)
 	e.Reg.SetDetail(st.Detail)
 	pools := map[string]string{}
 	for _, in := range st.Inbounds {
@@ -479,7 +483,7 @@ func (e *Engine) Health() nodeapi.Health {
 	return nodeapi.Health{
 		Version: e.version, Core: coreVersion(), Revision: rev, StartedAt: e.started,
 		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(), Update: e.UpdateStatus(), Host: e.host.get(), Time: time.Now(),
-		Redirect: e.redirect.Load(), Router: e.routerStatus.Load(),
+		Redirect: e.redirect.Load(), Router: e.routerStatus.Load(), APILock: e.apiLock().status(),
 	}
 }
 

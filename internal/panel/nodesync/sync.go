@@ -266,6 +266,7 @@ func (s *Syncer) desiredPin(ctx context.Context) (st nodeapi.DesiredState, pin s
 	st.DNS = snap.exitDNS.State()
 	st.Detail = snap.detail
 	st.HTTPRedirect = n.HttpRedirect != 0 && n.Address != ""
+	st.APIAllow = s.apiAllow(ctx, n)
 	if n.SniRouter != 0 {
 		st.Router = sniRouter(st.Inbounds, n.Domain)
 	}
@@ -829,7 +830,12 @@ func stateKey(st nodeapi.DesiredState) string {
 		F *nodeapi.Filters
 		H *nodeapi.Shaping
 		D *nodeapi.ExitDNS
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent, st.Filters, st.Shaping, st.DNS})
+		A []string
+		X bool
+		V bool
+		O *nodeapi.SNIRouter
+	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent, st.Filters, st.Shaping, st.DNS, st.APIAllow,
+		st.HTTPRedirect, st.Detail, st.Router})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

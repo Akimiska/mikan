@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -91,6 +92,13 @@ type Manager struct {
 	// The nodes' last hellos (check.go).
 	helloMu sync.Mutex
 	hellos  map[int64]HelloView
+
+	// The panel's own addresses for the nodes' API locks (apilock.go), looked up at most
+	// every panelAddrsTTL; lookup is the resolver, which tests replace.
+	addrMu sync.Mutex
+	addrs  []string
+	addrAt time.Time
+	lookup func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type running struct {

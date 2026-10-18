@@ -4,6 +4,7 @@
 
 mod acme;
 mod addon;
+mod apilock;
 mod backup;
 mod clock;
 mod config;
@@ -140,6 +141,16 @@ enum Cmd {
         #[arg(long, value_name = "IP")]
         panel_ip: Option<IpAddr>,
     },
+    /// Node: the API port for the panel's addresses only ("API only from the panel" in the
+    /// node's settings): status says how the firewall rule is, off takes it away at once (it
+    /// comes back when the panel reaches the node with the setting on)
+    ApiLockdown {
+        #[arg(value_parser = ["status", "off"])]
+        state: Option<String>,
+        /// The node asked for the rule, or the timer looks again (the apilock units run this)
+        #[arg(long, hide = true, conflicts_with = "state")]
+        requested: bool,
+    },
     /// The files of this release: compose.yaml and the update units (`update` runs it, and
     /// the new command runs it after replacing the old one)
     #[command(hide = true)]
@@ -264,6 +275,9 @@ fn main() -> ExitCode {
         Some(Cmd::Update(a)) => update::update(&a, &mut out, &mut progress_line()),
         Some(Cmd::Addon(c)) => addon_cmd(c),
         Some(Cmd::Join { key, panel_ip }) => ops::join_key(key).and_then(|k| ops::join(&k, panel_ip)),
+        Some(Cmd::ApiLockdown { requested: true, .. }) => apilock::requested(),
+        Some(Cmd::ApiLockdown { state, .. }) if state.as_deref() == Some("off") => apilock::off(),
+        Some(Cmd::ApiLockdown { .. }) => apilock::show(),
         Some(Cmd::PostUpdate) => update::converge(&mut out),
         Some(Cmd::SupportAccess { state }) => ops::support_access(state == "on"),
         Some(Cmd::Restart { requested: true }) => ops::restart_requested(),

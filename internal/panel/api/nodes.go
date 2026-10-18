@@ -77,8 +77,14 @@ type NodeInfo struct {
 	// RouterError says why it could not take the port.
 	SNIRouter   bool   `json:"sni_router" doc:"Порт 443 ноды делят подключения по имени TLS (SNI-роутер)"`
 	RouterError string `json:"router_error,omitempty" doc:"Почему нода не смогла занять порт 443"`
-	Capacity    *int64 `json:"capacity" doc:"Мест для клиентов в группе; null — без ограничения"`
-	ChannelMbps *int64 `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
+	// APILockdown: the node's API answers only the panel's addresses and APIAllow;
+	// APILockError says why the node's server has no firewall rule for it (the node refuses
+	// strangers in its own listener all the same).
+	APILockdown  bool     `json:"api_lockdown" doc:"API ноды отвечает только адресам панели"`
+	APIAllow     []string `json:"api_allow" doc:"Сети и адреса, которые админ добавил к адресам панели"`
+	APILockError string   `json:"api_lock_error,omitempty" doc:"Почему на сервере ноды нет правила файрвола для API"`
+	Capacity     *int64   `json:"capacity" doc:"Мест для клиентов в группе; null — без ограничения"`
+	ChannelMbps  *int64   `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
 }
 
 type nodesOutput struct{ Body []NodeInfo }
@@ -114,6 +120,9 @@ type patchNodeInput struct {
 		ChannelMbps  *int64 `json:"channel_mbps,omitempty" minimum:"1" maximum:"100000" doc:"Ширина канала ноды, Мбит/с в каждую сторону"`
 		HTTPRedirect *bool  `json:"http_redirect,omitempty" doc:"Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели"`
 		SNIRouter    *bool  `json:"sni_router,omitempty" doc:"SNI-роутер на 443: подключения с отметкой «через общий 443» слушают на loopback за ним"`
+		// The node's API for the panel alone, and the networks added to the panel's own.
+		APILockdown *bool     `json:"api_lockdown,omitempty" doc:"API ноды только с адресов панели; не для ноды панели"`
+		APIAllow    *[]string `json:"api_allow,omitempty" maxItems:"16" doc:"Ещё сети или адреса (203.0.113.5, 198.51.100.0/24), с которых панель ходит к ноде"`
 	}
 }
 
@@ -179,7 +188,10 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
 		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown",
 		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps), BalanceGroup: n.BalanceGroup, Capacity: store.Int64Ptr(n.Capacity),
-		HTTPRedirect: n.HttpRedirect != 0, SNIRouter: n.SniRouter != 0}
+		HTTPRedirect: n.HttpRedirect != 0, SNIRouter: n.SniRouter != 0, APILockdown: n.ApiLockdown != 0, APIAllow: n.ApiAllow}
+	if v.APIAllow == nil {
+		v.APIAllow = []string{}
+	}
 	if v.Local {
 		// The panel's own node is reached at the panel's address.
 		ep, _ := h.d.Settings.Endpoint(ctx)
@@ -226,6 +238,9 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 		if l.OK {
 			v.ListenersOK++
 		}
+	}
+	if l := hv.Health.APILock; v.APILockdown && !v.Local && l != nil && !l.OK {
+		v.APILockError = l.Error
 	}
 	if r := hv.Health.Redirect; v.HTTPRedirect && r != nil && !r.OK {
 		v.RedirectError = r.Error
@@ -313,14 +328,14 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 		return nil, err
 	}
 	n, err := domain.UpdateNode(ctx, h.d.Store, in.ID, domain.NodePatch{Name: b.Name, PublicName: b.PublicName, Host: b.Host, Domain: b.Domain,
-		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, HTTPRedirect: b.HTTPRedirect, SNIRouter: b.SNIRouter, Rules: rules}, h.d.Now())
+		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, HTTPRedirect: b.HTTPRedirect, SNIRouter: b.SNIRouter, APILockdown: b.APILockdown, APIAllow: b.APIAllow, Rules: rules}, h.d.Now())
 	if err != nil {
 		return nil, h.nodeErr(err)
 	}
 	h.nodesChanged()
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "public_name": n.PublicName, "enabled": n.Enabled != 0,
-		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64, "http_redirect": n.HttpRedirect != 0, "sni_router": n.SniRouter != 0})
+		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64, "http_redirect": n.HttpRedirect != 0, "sni_router": n.SniRouter != 0, "api_lockdown": n.ApiLockdown != 0, "api_allow": n.ApiAllow})
 	return h.nodeInfo(ctx, n.ID)
 }
 
@@ -349,6 +364,15 @@ func (h *handlers) nodeErr(err error) error {
 		return huma.Error422UnprocessableEntity("local_node")
 	case errors.Is(err, domain.ErrChannelRequired):
 		return fieldErr("body.channel_mbps", "channel_required")
+	case errors.Is(err, domain.ErrLocalLockdown):
+		// The panel reaches its own node over the socket: there is no API port to close.
+		return huma.Error422UnprocessableEntity("local_node_lockdown")
+	case errors.Is(err, domain.ErrManyAPIAllow):
+		return fieldErr("body.api_allow", "api_allow_many")
+	}
+	var bad *domain.APIAllowError
+	if errors.As(err, &bad) {
+		return fieldErrValue("body.api_allow", "api_allow_invalid", bad.Value)
 	}
 	var details []error
 	if errors.Is(err, domain.ErrBadHost) {

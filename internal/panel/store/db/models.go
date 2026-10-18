@@ -270,6 +270,8 @@ type Node struct {
 	BalanceGroup string
 	HttpRedirect int64
 	SniRouter    int64
+	ApiLockdown  int64
+	ApiAllow     []string
 }
 
 type NodeAssignment struct {

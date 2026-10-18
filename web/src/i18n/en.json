@@ -226,6 +226,10 @@
       "local_node": "This is the panel's own node: its address is set in the panel settings",
       "nodes_disabled": "Nodes are unavailable: the panel runs without nodes",
       "local_node_update": "The panel's own node updates together with the panel",
+      "local_node_lockdown": "The panel's own node works over a socket: there is no API port to close",
+      "api_allow_invalid": "Not an address or a network: {value}",
+      "api_allow_many": "16 addresses at most",
+      "sni443_type": "Only VLESS, Trojan and AnyTLS over TCP with TLS or REALITY can share port 443",
       "panel_not_release": "This panel is a development build: there is no release to update nodes to",
       "node_offline": "The node does not answer, so it cannot be updated now",
       "node_not_behind": "The node is not behind the panel",
@@ -2422,7 +2426,13 @@
     "httpRedirectBusy": "Port 80 cannot be taken: {error}",
     "sniRouter": "Shared port 443 (SNI router)",
     "sniRouterHint": "The node listens on 443 and hands each connection to the inbound by the TLS name in its ClientHello. Turn on “Through shared 443” for protocols (VLESS, Trojan, AnyTLS with TLS or REALITY): they move to loopback behind the router, clients connect to 443, and the node still sees the client's real IP. An unknown name goes to the first REALITY one and on to its masking site.",
-    "sniRouterBusy": "Port 443 cannot be taken: {error}"
+    "sniRouterBusy": "Port 443 cannot be taken: {error}",
+    "apiLockdown": "Node API from the panel's IP only",
+    "apiLockdownHint": "The node's API port answers the panel's addresses only: scanners that find the port do not even reach TLS. The node closes the port itself and puts an nftables rule on its server. If the panel moves to another IP, the rule lifts itself after 15 minutes without the panel, the panel connects from its new address, and the rule comes back with it. To lift it at once: mikan api-lockdown off on the node's server.",
+    "apiAllow": "More panel addresses",
+    "apiAllowHint": "Optional. Addresses or networks, separated by commas, if the panel reaches nodes from an IP other than its public one (NAT, a second address). The node takes the panel's IP and the address it connects from by itself. Up to 16.",
+    "apiAllowMany": "16 addresses at most",
+    "apiLockFailed": "The node closes the port itself, but its server's firewall has no rule: {error}"
   },
   "telegram": {
     "subtitle": "A bot for subscription owners and a Mini App with the subscription page",

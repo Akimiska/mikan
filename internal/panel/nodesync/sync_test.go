@@ -573,3 +573,18 @@ func TestSNIRouterRoutes(t *testing.T) {
 		t.Fatal("a router with nothing behind it")
 	}
 }
+
+// A switch of a node's own (the 301 on port 80, the sums by site, the SNI router) is a
+// change of state the node must get, even with nothing else changed.
+func TestStateKeyHoldsTheNodeSwitches(t *testing.T) {
+	base := nodeapi.DesiredState{}
+	for name, st := range map[string]nodeapi.DesiredState{
+		"redirect": {HTTPRedirect: true},
+		"detail":   {Detail: true},
+		"router":   {Router: &nodeapi.SNIRouter{Routes: []nodeapi.SNIRoute{{Inbound: "a", Names: []string{"x"}}}}},
+	} {
+		if stateKey(st) == stateKey(base) {
+			t.Errorf("%s does not change the state's key", name)
+		}
+	}
+}

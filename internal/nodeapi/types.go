@@ -52,7 +52,19 @@ type DesiredState struct {
 	// (SNIRouter); nil: none. Nodes older than it ignore it, and their routed inbounds stay
 	// on their own ports.
 	Router *SNIRouter `json:"sni_router,omitempty"`
+	// APIAllow: the node's API answers only these networks ("203.0.113.5/32"), loopback and
+	// the addresses the panel has reached it from; nil: anyone (the panel's certificate
+	// still guards it). Empty but not nil is on too, with the panel's addresses alone. The
+	// node refuses the others in its own listener and asks its server's firewall for the
+	// same rule; both lift by themselves after APILockStale without the panel. Nodes older
+	// than it ignore it.
+	APIAllow []string `json:"api_allow,omitzero"`
 }
+
+// APILockStale is how long the panel may stay away before a node with APIAllow opens its
+// API to everyone again: a panel that moved to an address the rule does not know gets in
+// within this time, and the rule comes back with its new address.
+const APILockStale = 15 * time.Minute
 
 // SNIRouter: the node listens on Listen (":443" when empty) and hands each connection to
 // the inbound whose Names hold the ClientHello's SNI, with a PROXY v2 header; any other
@@ -236,10 +248,15 @@ type Health struct {
 	Redirect *PortStatus `json:"http_redirect,omitempty"`
 	// Router is how DesiredState.Router went; nil while there is none or the node is older.
 	Router *PortStatus `json:"sni_router,omitempty"`
+	// APILock is how DesiredState.APIAllow went on the node's server: Error says why its
+	// firewall has no rule (nft missing, an installer too old to know it); the node refuses
+	// strangers in its own listener either way. nil while it is off or the node is older.
+	APILock *PortStatus `json:"api_lock,omitempty"`
 }
 
 // PortStatus is how a port the node holds for a feature of its own went (the 301 on port
-// 80, the SNI router on 443): Error says why it is not held (another program has it).
+// 80, the SNI router on 443, the firewall rule on the API port): Error says why it is not
+// held (another program has it, the host could not put the rule in).
 type PortStatus struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`

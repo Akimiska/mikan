@@ -422,6 +422,7 @@ pub fn uninstall() -> Result<bool> {
     addon::down();
     addon::drop_network();
     host::remove_units();
+    crate::apilock::remove();
     if fs::remove_file(host::SYSCTL).is_ok() {
         let _ = system::succeeds("sysctl", &["--system"]);
     }

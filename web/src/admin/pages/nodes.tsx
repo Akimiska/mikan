@@ -675,13 +675,13 @@ function KeyDrawer({ joined, onClose, actions }: { joined: Joined | null; onClos
 function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false, sni_router: false });
+  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false, sni_router: false, api_lockdown: false, api_allow: "" });
   const balance = useBalance();
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     if (node) {
       setForm({ name: node.name, public_name: node.public_name, host: node.host, domain: node.domain, enabled: node.enabled, fair_share: node.fair_share, channel: node.channel_mbps != null ? String(node.channel_mbps) : "",
-        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect, sni_router: node.sni_router });
+        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect, sni_router: node.sni_router, api_lockdown: node.api_lockdown, api_allow: node.api_allow.join(", ") });
       setErrors({});
     }
   }, [node]);
@@ -722,6 +722,14 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
       body.host = form.host.trim();
       body.domain = form.domain.trim();
       body.http_redirect = form.http_redirect;
+      // The addresses are checked by the panel; here only how many there are.
+      const allow = form.api_allow.split(/[\s,;]+/).filter(Boolean);
+      if (allow.length > 16) {
+        setErrors({ api_allow: t("nodes.apiAllowMany") });
+        return;
+      }
+      body.api_lockdown = form.api_lockdown;
+      body.api_allow = allow;
     }
     body.sni_router = form.sni_router;
     const group = form.group.trim();
@@ -834,6 +842,39 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
             </p>
           ) : null}
         </div>
+        {node && !node.local ? (
+          <div className="dr-sec">
+            <div className="switch-row pt-0">
+              <div>
+                <div className="switch-row-title">{t("nodes.apiLockdown")}</div>
+                <div className="switch-row-sub">{t("nodes.apiLockdownHint")}</div>
+              </div>
+              <Switch checked={form.api_lockdown} onChange={(v) => setForm((f) => ({ ...f, api_lockdown: v }))} label={t("nodes.apiLockdown")} />
+            </div>
+            {form.api_lockdown ? (
+              <Field label={t("nodes.apiAllow")} htmlFor="e-api-allow" hint={t("nodes.apiAllowHint")} error={errors.api_allow}>
+                <input
+                  id="e-api-allow"
+                  className="input mono"
+                  value={form.api_allow}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, api_allow: e.target.value }));
+                    setErrors(({ api_allow: _, ...rest }) => rest);
+                  }}
+                  placeholder="203.0.113.5, 198.51.100.0/24"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-invalid={!!errors.api_allow}
+                />
+              </Field>
+            ) : null}
+            {node.api_lockdown && node.api_lock_error ? (
+              <p className="text-xs text-[var(--berry-600)]" role="alert">
+                {t("nodes.apiLockFailed", { error: node.api_lock_error })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <BalanceFields
           group={form.group}
           capacity={form.capacity}

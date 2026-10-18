@@ -113,7 +113,8 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		go serve(tls.NewListener(tcp, cfg))
+		// With the panel's API lock on, strangers are closed before the TLS handshake.
+		go serve(tls.NewListener(eng.APIListener(tcp), cfg))
 		log.Info("node api for the panel", "port", key.Port)
 		go helloLoop(ctx, key, dataDir, log)
 	}
@@ -126,6 +127,7 @@ func run() error {
 			if err := eng.PersistCounters(); err != nil {
 				log.Error("persist counters", "err", err)
 			}
+			eng.TickAPILock()
 		case <-ctx.Done():
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

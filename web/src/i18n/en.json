@@ -550,7 +550,9 @@
       "xhttp_get_placement": "With GET the data go in a header or a cookie: pick one under “where the data go”",
       "sub_domain_invalid": "Subscription domain: a domain name, not an IP address",
       "sub_domain_panel": "This is the panel's domain: enter another one, sub.your-domain for example",
-      "sub_domain_unset": "Save the subscription domain first"
+      "sub_domain_unset": "Save the subscription domain first",
+      "extra_devices_unlimited": "Extra devices need a tariff with a device limit",
+      "extra_devices_price": "Enter the device price in Stars or rubles"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -1049,7 +1051,15 @@
     "applyPoolsTitle": "Apply the pool limits of “{name}” to subscriptions given out?",
     "applyPoolsText": "Every client of this tariff gets its pool limits ({limits}), as on a renewal: their own pool limits are replaced, the traffic they used stays. Then the traffic packages of these pools are offered to them.",
     "applyPoolsConfirm": "Apply",
-    "applyPoolsDone": "Pool limits updated for {n, plural, one {# client} other {# clients}}"
+    "applyPoolsDone": "Pool limits updated for {n, plural, one {# client} other {# clients}}",
+    "extraDevices": {
+      "title": "Extra devices",
+      "sub": "A client buys one more device in the bot and the Mini App without renewing. 0: none.",
+      "max": "How many may be bought",
+      "stars": "Device price, Stars",
+      "rub": "Device price, ₽",
+      "errMax": "From 0 to 50"
+    }
   },
   "presets": {
     "vless_reality_xhttp": "Main one for Russia: looks like plain HTTPS and keeps few connections",
@@ -2104,7 +2114,7 @@
     "devicesNote": "Each device takes one place. An unbound device is disconnected at once.",
     "sharedPlace": "Apps without a device ID",
     "pageTitle": "Subscription",
-    "device": "Device",
+    "device": "One more device",
     "used": "Used",
     "of": "of {total}",
     "unlimited": "unlimited",
@@ -2238,7 +2248,9 @@
     "reissueFailed": "The link was not changed. Reload the page and try again.",
     "reissueOff": "Only the administrator can change the link: write to support.",
     "reissueAfter": "You can issue a new link again on {date} at {time}.",
-    "reissueLimit": "At most {n, plural, one {# time} other {# times}} per {period}."
+    "reissueLimit": "At most {n, plural, one {# time} other {# times}} per {period}.",
+    "devicePick": "Buy one more device for the subscription",
+    "deviceNotForSale": "One more device cannot be bought now."
   },
   "nodes": {
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",
@@ -2744,7 +2756,10 @@
     "addonMethods": "Other payment methods",
     "addonMethodsSub": "YooKassa, CryptoBot and more install and are set up as addons.",
     "addonMethodsNone": "None installed yet.",
-    "openAddons": "Open Addons"
+    "openAddons": "Open Addons",
+    "kindDevice": "Device",
+    "extraDevicesKeep": "Bought devices stay with renewals",
+    "extraDevicesKeepSub": "A renewal costs the price of the bought devices more. Off: a device lasts until the paid term ends."
   },
   "addonApp": {
     "sub": "The page of the addon “{id}”. It runs in a sandbox: without your session or cookies, its data goes through the panel.",

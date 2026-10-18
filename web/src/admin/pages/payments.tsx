@@ -252,7 +252,7 @@ function PaymentRow({ p, provider, onRefund, onByHand }: { p: Payment; provider:
           <Pill tone={STATUS_TONE[p.status]}>{t(`payments.statuses.${p.status}`)}</Pill>
         </div>
         <div className="mt-1 text-xs text-[var(--ink-500)]">
-          {dateShort(p.created_at)} {time(p.created_at)} · {provider} · {p.kind === "new" ? t("payments.kindNew") : p.kind === "package" ? t("payments.kindPackage") : p.kind === "trial" ? t("payments.kindTrial") : t("payments.kindRenew")} · {buyer}
+          {dateShort(p.created_at)} {time(p.created_at)} · {provider} · {p.kind === "new" ? t("payments.kindNew") : p.kind === "package" ? t("payments.kindPackage") : p.kind === "trial" ? t("payments.kindTrial") : p.kind === "device" ? t("payments.kindDevice") : t("payments.kindRenew")} · {buyer}
           {p.user_id != null ? (
             <>
               {" → "}
@@ -355,6 +355,7 @@ function RulesCard({ s }: { s: Settings }) {
   const { draft: form, setDraft: setForm, dirty, reset } = useDraft({
     allowNew: s.allow_new,
     resetTraffic: s.renew_resets_traffic,
+    keepDevices: s.extra_devices_keep,
     trial: s.trial_tariff_id ?? 0,
     trialStars: s.trial_stars ? String(s.trial_stars) : "",
     trialRub: s.trial_rub ? String(s.trial_rub / 100) : "",
@@ -375,6 +376,7 @@ function RulesCard({ s }: { s: Settings }) {
     save.mutate({
       allow_new: form.allowNew,
       renew_resets_traffic: form.resetTraffic,
+      extra_devices_keep: form.keepDevices,
       trial_tariff_id: form.trial,
       // No trial, no price: a price left in the hidden fields does not come back later.
       trial_stars: form.trial && form.trialStars.trim() ? starsN : 0,
@@ -401,6 +403,12 @@ function RulesCard({ s }: { s: Settings }) {
             sub={form.resetTraffic ? t("payments.resetTrafficOn") : t("payments.resetTrafficOff")}
             checked={form.resetTraffic}
             onChange={(v) => setForm((f) => ({ ...f, resetTraffic: v }))}
+          />
+          <SwitchRow
+            label={t("payments.extraDevicesKeep")}
+            sub={t("payments.extraDevicesKeepSub")}
+            checked={form.keepDevices}
+            onChange={(v) => setForm((f) => ({ ...f, keepDevices: v }))}
           />
           <div className="pt-4">
             <Field label={t("payments.trial")} htmlFor="pay-trial" hint={`${form.trialStars.trim() || form.trialRub.trim() ? t("payments.trialSubPaid") : t("payments.trialSub")}${s.trials ? ` ${t("payments.trialsGiven", { n: s.trials })}` : ""}`}>

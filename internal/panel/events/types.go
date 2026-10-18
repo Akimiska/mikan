@@ -48,7 +48,7 @@ const (
 // gave to (0 on a refund when it is gone), tg_id the buyer.
 type Payment struct {
 	PaymentID  int64  `json:"payment_id"`
-	Kind       string `json:"kind"`     // new | renew | package | trial
+	Kind       string `json:"kind"`     // new | renew | package | trial | device
 	Provider   string `json:"provider"` // stars | addon:<id> | ...
 	Amount     int64  `json:"amount"`   // minor units
 	Currency   string `json:"currency"`

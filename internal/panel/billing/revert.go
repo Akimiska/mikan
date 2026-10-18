@@ -98,6 +98,17 @@ func (s *Service) takeBack(ctx context.Context, q *db.Queries, p db.Payment) (rv
 	} else if err != nil {
 		return rv, u, err
 	}
+	if p.Kind == KindDevice {
+		// The place goes back; a subscription that has no bought place left keeps its own.
+		taken, err := q.TakeUserExtraDevice(ctx, db.TakeUserExtraDeviceParams{UpdatedAt: s.d.Now().Unix(), ID: u.ID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return rv, u, nil
+		}
+		if err == nil {
+			rv.Action, u = "device", taken
+		}
+		return rv, u, err
+	}
 	if p.Kind == KindPackage {
 		// The grant goes whole: what was used of it is already counted as used.
 		n, err := q.DeleteGrantByPayment(ctx, sql.NullInt64{Int64: p.ID, Valid: true})

@@ -18,6 +18,8 @@ export type ShopData = {
   addons?: { provider: `addon:${string}`; name: string }[];
   offers: Offer[];
   packages?: Offer[];
+  /** One more device for the subscription on screen. */
+  device?: Offer;
   /** The priced trial the account may buy now: once, before any plan. */
   trial?: Offer;
   /** The free plan the account may take now; channel is the one it asks the account to join. */
@@ -65,7 +67,7 @@ export function Shop({
 }: {
   data: ShopData;
   offers: Offer[];
-  field?: "tariff_id" | "package_id" | "trial";
+  field?: "tariff_id" | "package_id" | "trial" | "device";
   pick?: string;
   subRoot: string;
   initData: string;
@@ -96,8 +98,9 @@ export function Shop({
   // A single term the providers take now is named too: it may not be the plan's first,
   // which a request without days is for.
   const sold = term ?? offer?.terms?.[0];
-  const order = field === "trial" ? { trial: true } : { [field]: offer?.id, ...(sold ? { term_days: sold.days } : {}) };
-  const failText = (code: string) => (field === "package_id" && code === "not_for_sale" ? t("sub.packageNotForSale") : t(FAIL[code] ?? "sub.shopFail"));
+  const order = field === "trial" ? { trial: true } : field === "device" ? { device: true } : { [field]: offer?.id, ...(sold ? { term_days: sold.days } : {}) };
+  const failText = (code: string) =>
+    field === "package_id" && code === "not_for_sale" ? t("sub.packageNotForSale") : field === "device" && code === "not_for_sale" ? t("sub.deviceNotForSale") : t(FAIL[code] ?? "sub.shopFail");
 
   const pay = async (provider: Provider) => {
     if (!offer) return;

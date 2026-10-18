@@ -231,6 +231,9 @@ type PurchaseInput struct {
 	// ResetTraffic: a renewal also starts a new traffic period (the payment buys a full
 	// quota); off, the counter keeps running.
 	ResetTraffic bool
+	// KeepExtraDevices: devices bought on top of the tariff stay with a renewal of the same
+	// tariff; off, or another tariff, they go with the term they were bought for.
+	KeepExtraDevices bool
 }
 
 // Purchase applies a paid tariff on q's transaction, so the payment and its effect commit
@@ -265,9 +268,21 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, in PurchaseInput) (
 	if !billingDay.Valid {
 		billingDay = u.BillingDay
 	}
+	devices, extra := t.DeviceLimit, int64(0)
+	if in.KeepExtraDevices && u.TariffID.Valid && u.TariffID.Int64 == t.ID && u.ExtraDevices > 0 {
+		extra = u.ExtraDevices
+		if devices.Valid {
+			devices.Int64 += extra
+		}
+	}
+	if extra != u.ExtraDevices || u.ExtraDevicesUntil.Valid {
+		if err := q.SetUserExtraDevices(ctx, db.SetUserExtraDevicesParams{ExtraDevices: extra, ID: u.ID}); err != nil {
+			return u, false, err
+		}
+	}
 	u, err = q.UpdateUser(ctx, db.UpdateUserParams{
 		Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: "active", TariffID: sql.NullInt64{Int64: t.ID, Valid: true},
-		TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit, SpeedLimit: t.SpeedLimit, ResetStrategy: t.ResetStrategy, PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart,
+		TrafficLimit: t.TrafficLimit, DeviceLimit: devices, SpeedLimit: t.SpeedLimit, ResetStrategy: t.ResetStrategy, PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart,
 		ExpiresAt: tariffExpiry(base, durationTariff{termDays(t, in.Term), billingDay}), Inbounds: u.Inbounds, BillingDay: billingDay,
 		UpdatedAt: now.Unix(), ID: u.ID,
 	})

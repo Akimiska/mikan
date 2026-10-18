@@ -28,6 +28,7 @@ type PaymentSettingsView struct {
 	FreeTariffID       *int64 `json:"free_tariff_id" doc:"Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже"`
 	FreeCondition      string `json:"free_condition" enum:"none,channel" doc:"Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)"`
 	FreePlans          int64  `json:"free_plans" doc:"Сколько бесплатных подписок выдано"`
+	ExtraDevicesKeep   bool   `json:"extra_devices_keep" doc:"Докупленные устройства остаются при продлении, и продление стоит дороже на их цену; иначе они действуют до конца срока"`
 	Available          struct {
 		Stars  bool     `json:"stars"`
 		Addons []string `json:"addons" doc:"Адаптеры маркетплейса, которые принимают оплату прямо сейчас"`
@@ -50,15 +51,16 @@ type patchPaymentSettingsInput struct {
 		TrialRub   *int64 `json:"trial_rub,omitempty" minimum:"0" maximum:"100000000" doc:"Цена пробного периода в копейках, от 100 (1 ₽); 0 — не за рубли. Обе 0 — пробный период бесплатный"`
 		// The free plan: its tariff needs a term, as the trial's does, and the channel
 		// condition a channel set up in the bot.
-		FreeTariffID  *int64  `json:"free_tariff_id,omitempty" minimum:"0" doc:"Тариф бесплатного тарифа, нужен срок; 0: выключить"`
-		FreeCondition *string `json:"free_condition,omitempty" enum:"none,channel" doc:"none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram"`
+		FreeTariffID     *int64  `json:"free_tariff_id,omitempty" minimum:"0" doc:"Тариф бесплатного тарифа, нужен срок; 0: выключить"`
+		FreeCondition    *string `json:"free_condition,omitempty" enum:"none,channel" doc:"none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram"`
+		ExtraDevicesKeep *bool   `json:"extra_devices_keep,omitempty" doc:"Докупленные устройства остаются при продлении (true) или до конца срока (false)"`
 	}
 }
 
 type PaymentView struct {
 	ID         int64      `json:"id"`
 	Provider   string     `json:"provider" doc:"stars или addon:<id> — адаптер маркетплейса"`
-	Kind       string     `json:"kind" enum:"new,renew,package,trial" doc:"package — пакет трафика: tariff_name — название пакета; trial — платный пробный период"`
+	Kind       string     `json:"kind" enum:"new,renew,package,trial,device" doc:"package — пакет трафика: tariff_name — название пакета; trial — платный пробный период; device — докупленное устройство"`
 	Status     string     `json:"status" enum:"pending,paid,applied,expired,failed,refunded"`
 	TgID       int64      `json:"tg_id"`
 	TgUsername string     `json:"tg_username,omitempty"`
@@ -127,6 +129,7 @@ func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, er
 		v.FreeTariffID = &t.ID
 	}
 	v.FreeCondition = freeConditionView(c.FreeCondition)
+	v.ExtraDevicesKeep = c.ExtraDevicesKeep
 	if v.FreePlans, err = h.d.Store.Q.CountFreePlans(ctx); err != nil {
 		return v, err
 	}
@@ -207,7 +210,8 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 		if c, err = billing.LoadConfig(ctx, set); err != nil {
 			return err
 		}
-		for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic} {
+		for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic,
+			&c.ExtraDevicesKeep: b.ExtraDevicesKeep} {
 			if v != nil {
 				*dst = *v
 			}
@@ -241,7 +245,8 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "payments.settings", "", "", map[string]any{"enabled": c.Enabled, "stars": c.Stars,
 		"allow_new": c.AllowNew, "renew_resets_traffic": c.RenewResetsTraffic, "trial_tariff_id": c.TrialTariffID,
-		"trial_stars": c.TrialStars, "trial_rub": c.TrialRub, "free_tariff_id": c.FreeTariffID, "free_condition": freeConditionView(c.FreeCondition)})
+		"trial_stars": c.TrialStars, "trial_rub": c.TrialRub, "free_tariff_id": c.FreeTariffID, "free_condition": freeConditionView(c.FreeCondition),
+		"extra_devices_keep": c.ExtraDevicesKeep})
 	v, err := h.paymentSettings(ctx)
 	if err != nil {
 		return nil, err

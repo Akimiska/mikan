@@ -94,6 +94,9 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if offers := b.packageOffers(ctx, u.ID); len(offers) > 0 {
 			rows = append(rows, []tgate.Button{{Text: w.buyTraffic, CallbackData: "x"}})
 		}
+		if _, _, ok := b.deviceOffer(ctx, u.ID); ok {
+			rows = append(rows, []tgate.Button{{Text: w.buyDevice, CallbackData: "e"}})
+		}
 		if newLink != nil {
 			rows = append(rows, []tgate.Button{*newLink})
 		}
@@ -113,6 +116,8 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return withNotice(text), kb
 	case "x", "xk", "xp":
 		return b.trafficShop(ctx, w, chat, u, cmd, arg, notice)
+	case "e", "ep":
+		return b.extraDevice(ctx, w, chat, u, cmd, arg, notice)
 	case "d", "dc":
 		id, _ := strconv.ParseInt(arg, 10, 64)
 		return b.devices(ctx, w, u, cmd, id, notice, now)

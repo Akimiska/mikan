@@ -17,23 +17,32 @@ import (
 )
 
 type TariffView struct {
-	ID            int64       `json:"id"`
-	Name          string      `json:"name"`
-	TrafficLimit  *int64      `json:"traffic_limit" doc:"Байты; null — без лимита"`
-	DurationDays  int64       `json:"duration_days" doc:"0 — бессрочно"`
-	DeviceLimit   *int64      `json:"device_limit"`
-	DeviceMode    string      `json:"device_mode" enum:"bound,online" doc:"Как считается лимит устройств: bound: привязанные устройства (места), online: любое число устройств, считаются только одновременно онлайн"`
-	SpeedLimit    *int64      `json:"speed_limit" doc:"Мбит/с в каждую сторону; null — без ограничения"`
-	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period"`
-	BillingDay    *int64      `json:"billing_day" doc:"День месяца, в который заканчивается срок; null — срок в днях"`
-	PriceLabel    string      `json:"price_label"`
-	Description   string      `json:"description" doc:"Текст для покупателей: чем тариф отличается, когда лимиты этого не показывают; до 300 символов, до 5 строк, пустой — только строка из лимитов"`
-	PriceStars    *int64      `json:"price_stars" doc:"Цена в Telegram Stars; null — не продаётся за Stars"`
-	PriceRub      *int64      `json:"price_rub" doc:"Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли"`
-	OnSale        bool        `json:"on_sale" doc:"Продаётся в боте и Mini App"`
-	Terms         []TermView  `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub"`
-	Pools         []PoolLimit `json:"pools" doc:"Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается"`
-	Sort          int64       `json:"sort"`
+	ID            int64        `json:"id"`
+	Name          string       `json:"name"`
+	TrafficLimit  *int64       `json:"traffic_limit" doc:"Байты; null — без лимита"`
+	DurationDays  int64        `json:"duration_days" doc:"0 — бессрочно"`
+	DeviceLimit   *int64       `json:"device_limit"`
+	DeviceMode    string       `json:"device_mode" enum:"bound,online" doc:"Как считается лимит устройств: bound: привязанные устройства (места), online: любое число устройств, считаются только одновременно онлайн"`
+	SpeedLimit    *int64       `json:"speed_limit" doc:"Мбит/с в каждую сторону; null — без ограничения"`
+	ResetStrategy string       `json:"reset_strategy" enum:"none,month_start,period"`
+	BillingDay    *int64       `json:"billing_day" doc:"День месяца, в который заканчивается срок; null — срок в днях"`
+	PriceLabel    string       `json:"price_label"`
+	Description   string       `json:"description" doc:"Текст для покупателей: чем тариф отличается, когда лимиты этого не показывают; до 300 символов, до 5 строк, пустой — только строка из лимитов"`
+	PriceStars    *int64       `json:"price_stars" doc:"Цена в Telegram Stars; null — не продаётся за Stars"`
+	PriceRub      *int64       `json:"price_rub" doc:"Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли"`
+	OnSale        bool         `json:"on_sale" doc:"Продаётся в боте и Mini App"`
+	Terms         []TermView   `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub"`
+	ExtraDevices  ExtraDevices `json:"extra_devices" doc:"Докупка устройств в боте и Mini App: цена одного и сколько можно докупить"`
+	Pools         []PoolLimit  `json:"pools" doc:"Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается"`
+	Sort          int64        `json:"sort"`
+}
+
+// ExtraDevices is one more device on top of the tariff: its price and how many a
+// subscription may buy (0: none).
+type ExtraDevices struct {
+	PriceStars *int64 `json:"price_stars" minimum:"1" maximum:"10000" doc:"Цена одного устройства в Stars; null — не за Stars"`
+	PriceRub   *int64 `json:"price_rub" minimum:"100" maximum:"100000000" doc:"Цена одного устройства в копейках; null — не за рубли"`
+	Max        int64  `json:"max" minimum:"0" maximum:"50" doc:"Сколько устройств подписка может докупить; 0 — докупки нет"`
 }
 
 // TermView is one term a tariff is sold for.
@@ -47,7 +56,8 @@ func viewTariff(t db.Tariff, terms []db.TariffTerm) TariffView {
 	v := TariffView{ID: t.ID, Name: t.Name, TrafficLimit: store.Int64Ptr(t.TrafficLimit),
 		DurationDays: t.DurationDays, DeviceLimit: store.Int64Ptr(t.DeviceLimit), DeviceMode: t.DeviceMode,
 		SpeedLimit: store.Int64Ptr(t.SpeedLimit), ResetStrategy: t.ResetStrategy, BillingDay: store.Int64Ptr(t.BillingDay), PriceLabel: t.PriceLabel, Description: t.Description, Sort: t.Sort,
-		PriceStars: store.Int64Ptr(t.PriceStars), PriceRub: store.Int64Ptr(t.PriceRub), OnSale: t.OnSale != 0}
+		PriceStars: store.Int64Ptr(t.PriceStars), PriceRub: store.Int64Ptr(t.PriceRub), OnSale: t.OnSale != 0,
+		ExtraDevices: ExtraDevices{PriceStars: store.Int64Ptr(t.DevicePriceStars), PriceRub: store.Int64Ptr(t.DevicePriceRub), Max: t.DeviceExtraMax}}
 	for _, term := range domain.TariffTerms(t, terms) {
 		v.Terms = append(v.Terms, TermView{Days: term.Days, PriceStars: store.Int64Ptr(term.PriceStars), PriceRub: store.Int64Ptr(term.PriceRub)})
 	}
@@ -66,22 +76,39 @@ func (b termBody) term() domain.Term {
 
 // A tariff is sold for at most 12 terms: the maxItems tag of terms is the limit.
 type tariffBody struct {
-	Name          string      `json:"name" minLength:"1" maxLength:"60"`
-	TrafficLimit  *int64      `json:"traffic_limit,omitempty" minimum:"1"`
-	DurationDays  int64       `json:"duration_days" minimum:"0" maximum:"3650"`
-	DeviceLimit   *int64      `json:"device_limit,omitempty" minimum:"1" maximum:"100"`
-	DeviceMode    string      `json:"device_mode,omitempty" enum:"bound,online" doc:"bound: лимит это число привязанных устройств; online: привязывать можно любое число, считаются устройства, одновременно подключённые к серверам. Не передан: у нового тарифа bound, у существующего без изменений"`
-	SpeedLimit    *int64      `json:"speed_limit,omitempty" minimum:"1" maximum:"100000" doc:"Скорость, Мбит/с в каждую сторону; не передана — без ограничения"`
-	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period" default:"none"`
-	BillingDay    *int64      `json:"billing_day,omitempty" minimum:"1" maximum:"31" doc:"Срок до этого числа месяца: месяц = от дня оплаты до дня оплаты"`
-	PriceLabel    string      `json:"price_label,omitempty" maxLength:"40"`
-	Description   string      `json:"description,omitempty" doc:"Текст для покупателей, виден в боте и Mini App рядом со строкой из лимитов: чем тариф отличается, когда лимиты этого не показывают («с белыми списками»). Простой текст до 300 символов и до 5 строк; не передан или пустой — только строка из лимитов"`
-	PriceStars    *int64      `json:"price_stars,omitempty" minimum:"1" maximum:"10000" doc:"Цена в Telegram Stars"`
-	PriceRub      *int64      `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 19900 — 199 ₽"`
-	OnSale        bool        `json:"on_sale,omitempty" doc:"Продавать в боте и Mini App; нужна хотя бы одна цена"`
-	Terms         []termBody  `json:"terms,omitempty" maxItems:"12" doc:"Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений"`
-	Pools         []PoolLimit `json:"pools,omitempty" maxItems:"100" doc:"Лимиты пулов трафика; не передан — без изменений"`
-	Sort          int64       `json:"sort,omitempty"`
+	Name          string        `json:"name" minLength:"1" maxLength:"60"`
+	TrafficLimit  *int64        `json:"traffic_limit,omitempty" minimum:"1"`
+	DurationDays  int64         `json:"duration_days" minimum:"0" maximum:"3650"`
+	DeviceLimit   *int64        `json:"device_limit,omitempty" minimum:"1" maximum:"100"`
+	DeviceMode    string        `json:"device_mode,omitempty" enum:"bound,online" doc:"bound: лимит это число привязанных устройств; online: привязывать можно любое число, считаются устройства, одновременно подключённые к серверам. Не передан: у нового тарифа bound, у существующего без изменений"`
+	SpeedLimit    *int64        `json:"speed_limit,omitempty" minimum:"1" maximum:"100000" doc:"Скорость, Мбит/с в каждую сторону; не передана — без ограничения"`
+	ResetStrategy string        `json:"reset_strategy" enum:"none,month_start,period" default:"none"`
+	BillingDay    *int64        `json:"billing_day,omitempty" minimum:"1" maximum:"31" doc:"Срок до этого числа месяца: месяц = от дня оплаты до дня оплаты"`
+	PriceLabel    string        `json:"price_label,omitempty" maxLength:"40"`
+	Description   string        `json:"description,omitempty" doc:"Текст для покупателей, виден в боте и Mini App рядом со строкой из лимитов: чем тариф отличается, когда лимиты этого не показывают («с белыми списками»). Простой текст до 300 символов и до 5 строк; не передан или пустой — только строка из лимитов"`
+	PriceStars    *int64        `json:"price_stars,omitempty" minimum:"1" maximum:"10000" doc:"Цена в Telegram Stars"`
+	PriceRub      *int64        `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 19900 — 199 ₽"`
+	OnSale        bool          `json:"on_sale,omitempty" doc:"Продавать в боте и Mini App; нужна хотя бы одна цена"`
+	Terms         []termBody    `json:"terms,omitempty" maxItems:"12" doc:"Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений"`
+	Pools         []PoolLimit   `json:"pools,omitempty" maxItems:"100" doc:"Лимиты пулов трафика; не передан — без изменений"`
+	ExtraDevices  *ExtraDevices `json:"extra_devices,omitempty" doc:"Докупка устройств; не передана — без изменений (у нового тарифа — нет). Нужен лимит устройств"`
+	Sort          int64         `json:"sort,omitempty"`
+}
+
+// setExtraDevices writes the tariff's price of one more device; nil keeps it as it is.
+func setExtraDevices(ctx context.Context, q *db.Queries, t *db.Tariff, e *ExtraDevices) error {
+	if e == nil {
+		return nil
+	}
+	if e.Max > 0 && !t.DeviceLimit.Valid {
+		return fieldErr("body.extra_devices.max", "extra_devices_unlimited")
+	}
+	if e.Max > 0 && e.PriceStars == nil && e.PriceRub == nil {
+		return fieldErr("body.extra_devices.price_rub", "extra_devices_price")
+	}
+	t.DevicePriceStars, t.DevicePriceRub, t.DeviceExtraMax = domain.NullInt(e.PriceStars), domain.NullInt(e.PriceRub), e.Max
+	return q.SetTariffExtraDevices(ctx, db.SetTariffExtraDevicesParams{DevicePriceStars: t.DevicePriceStars, DevicePriceRub: t.DevicePriceRub,
+		DeviceExtraMax: e.Max, ID: t.ID})
 }
 
 type tariffInput struct{ Body tariffBody }
@@ -150,6 +177,9 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 		if err := setTariffMode(ctx, q, &t, b.DeviceMode); err != nil {
 			return err
 		}
+		if err := setExtraDevices(ctx, q, &t, b.ExtraDevices); err != nil {
+			return err
+		}
 		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil || b.Pools == nil {
 			return err
 		}
@@ -194,6 +224,9 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 			return err
 		}
 		if err := setTariffMode(ctx, q, &t, b.DeviceMode); err != nil {
+			return err
+		}
+		if err := setExtraDevices(ctx, q, &t, b.ExtraDevices); err != nil {
 			return err
 		}
 		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil || b.Pools == nil {

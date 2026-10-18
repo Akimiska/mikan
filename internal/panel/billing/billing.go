@@ -71,6 +71,9 @@ type Config struct {
 	// FreeCondition is what the free plan asks of an account: FreeNoCondition, or
 	// FreeChannel, a subscription to the bot's channel.
 	FreeCondition string `json:"free_condition,omitempty"`
+	// ExtraDevicesKeep: devices bought on top of the tariff stay with renewals, which are
+	// then priced with them; off, they last until the term ends.
+	ExtraDevicesKeep bool `json:"extra_devices_keep,omitempty"`
 }
 
 // TrialPaid: the trial has a price and is bought, not taken.
@@ -360,9 +363,16 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 			return db.Payment{}, ErrNotForSale
 		}
 	}
-	amount, currency, ok := s.Available(ctx).price(req.Provider, term.PriceStars, term.PriceRub)
+	av := s.Available(ctx)
+	amount, currency, ok := av.price(req.Provider, term.PriceStars, term.PriceRub)
 	if !ok {
 		return db.Payment{}, ErrProviderOff
+	}
+	// Devices bought that stay with renewals are paid for with each of them.
+	if req.UserID != 0 {
+		if u, err := q.GetUser(ctx, req.UserID); err == nil {
+			amount += renewalExtra(s.Config(ctx), u, t, av, req.Provider)
+		}
 	}
 	termDays := sql.NullInt64{Int64: term.Days, Valid: true}
 	kind := "renew"
@@ -731,6 +741,9 @@ func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency
 	if p.Kind == KindPackage {
 		return s.packageOnSale(ctx, p)
 	}
+	if p.Kind == KindDevice {
+		return s.deviceOnSale(ctx, p)
+	}
 	if p.Kind == KindTrial {
 		// The trial's tariff is seldom on sale itself: the price is the trial's. What has
 		// to hold is the offer, as at the invoice: a priced trial on this very tariff,
@@ -888,6 +901,12 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			}
 			return markApplied(ctx, q, id, u.ID, s.d.Now())
 		}
+		if pay.Kind == KindDevice {
+			if u, err = s.applyDevice(ctx, q, pay); err != nil {
+				return err
+			}
+			return markApplied(ctx, q, id, u.ID, s.d.Now())
+		}
 		if pay.Kind == KindTrial {
 			if u, err = s.applyTrial(ctx, q, pay); err != nil {
 				return err
@@ -912,7 +931,7 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			}
 		}
 		if u, created, err = s.d.Users.Purchase(ctx, q, domain.PurchaseInput{UserID: userID, TariffID: pay.TariffID.Int64,
-			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), TgID: pay.TgID, ResetTraffic: reset}); err != nil {
+			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), TgID: pay.TgID, ResetTraffic: reset, KeepExtraDevices: cfg.ExtraDevicesKeep}); err != nil {
 			return err
 		}
 		if created {

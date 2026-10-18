@@ -246,6 +246,10 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   const [rub, setRub] = useState("");
   // The terms after the first: days, or months with a billing day, and their prices.
   const [more, setMore] = useState<ExtraTerm[]>([]);
+  // One more device bought in the bot: its price and how many a subscription may buy.
+  const [devMax, setDevMax] = useState("0");
+  const [devStars, setDevStars] = useState("");
+  const [devRub, setDevRub] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -271,6 +275,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setPoolClosed(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, !!p.excluded])));
     setStars(tr?.price_stars != null ? String(tr.price_stars) : "");
     setRub(tr?.price_rub != null ? String(tr.price_rub / 100) : "");
+    setDevMax(String(tr?.extra_devices.max ?? 0));
+    setDevStars(tr?.extra_devices.price_stars != null ? String(tr.extra_devices.price_stars) : "");
+    setDevRub(tr?.extra_devices.price_rub != null ? String(tr.extra_devices.price_rub / 100) : "");
     setMore(
       (tr?.terms ?? []).slice(1).map((x) => ({
         key: nextKey++,
@@ -326,6 +333,13 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     if (stars.trim() && !isStars(starsN)) errs.price_stars = t("tariffs.errStars");
     if (rub.trim() && !isKopecks(rubN)) errs.price_rub = t("tariffs.errRub");
     if (onSale && !stars.trim() && !rub.trim()) errs.on_sale = t("errors.api.on_sale_no_price");
+    const devMaxN = Number(devMax || "0");
+    const devStarsN = Number(devStars);
+    const devRubN = rubKopecks(devRub);
+    if (!Number.isInteger(devMaxN) || devMaxN < 0 || devMaxN > 50) errs["extra_devices.max"] = t("tariffs.extraDevices.errMax");
+    if (devStars.trim() && !isStars(devStarsN)) errs["extra_devices.price_stars"] = t("tariffs.errStars");
+    if (devRub.trim() && !isKopecks(devRubN)) errs["extra_devices.price_rub"] = t("tariffs.errRub");
+    if (devMaxN > 0 && !devStars.trim() && !devRub.trim()) errs["extra_devices.price_rub"] = t("errors.api.extra_devices_price");
     const firstDays = toDay ? monN * 30 : durN;
     const seen = new Set([firstDays]);
     const terms: Schemas["TermBody"][] = [{ days: firstDays, price_stars: stars.trim() ? starsN : undefined, price_rub: rub.trim() ? rubN : undefined }];
@@ -363,6 +377,9 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       terms,
       on_sale: onSale,
       pools: poolLimits,
+      extra_devices: devicesUnlimited
+        ? { max: 0, price_stars: null, price_rub: null }
+        : { max: devMaxN, price_stars: devStars.trim() ? devStarsN : null, price_rub: devRub.trim() ? devRubN : null },
       // PUT replaces the tariff: keep its place in the list.
       sort: tariff && tariff !== "new" ? tariff.sort : undefined,
     });
@@ -516,6 +533,29 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
                 </Field>
               </div>
               <MoreTerms value={more} onChange={setMore} toDay={term === "day"} errors={errors} />
+              {devicesUnlimited ? null : (
+                <div className="mb-4" role="group" aria-label={t("tariffs.extraDevices.title")}>
+                  <div className="text-[13px] font-semibold">{t("tariffs.extraDevices.title")}</div>
+                  <div className="mb-2 text-xs text-[var(--ink-500)]">{t("tariffs.extraDevices.sub")}</div>
+                  <div className="grid gap-x-3 sm:grid-cols-3">
+                    <Field label={t("tariffs.extraDevices.max")} htmlFor="t-dev-max" error={errors["extra_devices.max"]}>
+                      <input id="t-dev-max" className="input max-w-[100px]" inputMode="numeric" value={devMax} onChange={(e) => setDevMax(e.target.value)} aria-invalid={!!errors["extra_devices.max"]} />
+                    </Field>
+                    <Field label={t("tariffs.extraDevices.stars")} htmlFor="t-dev-stars" error={errors["extra_devices.price_stars"]}>
+                      <div className="flex items-center gap-2">
+                        <input id="t-dev-stars" className="input max-w-[120px]" inputMode="numeric" value={devStars} onChange={(e) => setDevStars(e.target.value)} placeholder="40" aria-invalid={!!errors["extra_devices.price_stars"]} />
+                        <span className="text-[var(--ink-500)]">⭐</span>
+                      </div>
+                    </Field>
+                    <Field label={t("tariffs.extraDevices.rub")} htmlFor="t-dev-rub" error={errors["extra_devices.price_rub"]}>
+                      <div className="flex items-center gap-2">
+                        <input id="t-dev-rub" className="input max-w-[120px]" inputMode="decimal" value={devRub} onChange={(e) => setDevRub(e.target.value)} placeholder="49" aria-invalid={!!errors["extra_devices.price_rub"]} />
+                        <span className="text-[var(--ink-500)]">₽</span>
+                      </div>
+                    </Field>
+                  </div>
+                </div>
+              )}
             </>
           ) : null}
           <Field label={t("tariffs.price")} htmlFor="t-price" hint={t("tariffs.priceHint")}>

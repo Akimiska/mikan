@@ -52,6 +52,9 @@ type words struct {
 	// Traffic packages.
 	buyTraffic, trafficTitle, payPackage, packageGone, paidPackage, plusPackages string
 
+	// One more device.
+	buyDevice, deviceTitle, deviceNow, deviceKeep, deviceUntil, deviceLeft, payDevice, deviceGone, paidDevice, refundedDevice string
+
 	// A refund takes back what the payment gave.
 	refundedNew, refundedRenew, refundedPackage, refundedGone string
 }
@@ -150,6 +153,17 @@ var ru = words{
 	packageGone:  "Этот пакет больше не продаётся.",
 	paidPackage:  "✅ Оплата получена — пакет «%s» начислен на подписку «%s».",
 	plusPackages: "%s + пакеты %s",
+
+	buyDevice:      "📱 Докупить устройство",
+	deviceTitle:    "Ещё одно устройство для подписки «%s»",
+	deviceNow:      "Сейчас устройств: %d, станет %d.",
+	deviceKeep:     "Устройство останется и при продлении: продление будет дороже на его цену.",
+	deviceUntil:    "Устройство действует до конца срока: %s.",
+	deviceLeft:     "Можно докупить ещё: %d.",
+	payDevice:      "устройство добавится",
+	deviceGone:     "Докупить устройство сейчас нельзя.",
+	paidDevice:     "✅ Оплата получена — к подписке «%s» добавлено устройство, теперь их %d.",
+	refundedDevice: "↩️ Платёж за устройство возвращён. Подписка «%s»: устройств %d.",
 
 	refundedNew:     "↩️ Платёж за тариф «%s» возвращён. Подписка «%s» отключена.",
 	refundedRenew:   "↩️ Платёж за продление «%s» возвращён. Срок подписки «%s» уменьшен. Окончание: %s.",
@@ -251,6 +265,17 @@ var en = words{
 	packageGone:  "This package is no longer sold.",
 	paidPackage:  "✅ Payment received — package “%s” is added to subscription “%s”.",
 	plusPackages: "%s + packages %s",
+
+	buyDevice:      "📱 Buy one more device",
+	deviceTitle:    "One more device for subscription “%s”",
+	deviceNow:      "Devices now: %d, then %d.",
+	deviceKeep:     "The device stays with renewals: they cost its price more.",
+	deviceUntil:    "The device lasts until the term ends: %s.",
+	deviceLeft:     "You can buy %d more.",
+	payDevice:      "the device is added",
+	deviceGone:     "One more device cannot be bought now.",
+	paidDevice:     "✅ Payment received — a device is added to subscription “%s”, %d in all now.",
+	refundedDevice: "↩️ The payment for a device is refunded. Subscription “%s”: %d devices.",
 
 	refundedNew:     "↩️ The payment for plan “%s” is refunded. Subscription “%s” is turned off.",
 	refundedRenew:   "↩️ The payment for the renewal “%s” is refunded. The term of subscription “%s” is shortened. Ends: %s.",

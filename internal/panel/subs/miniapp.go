@@ -155,7 +155,8 @@ type shopRequest struct {
 	TariffID  int64  `json:"tariff_id"`
 	TermDays  *int64 `json:"term_days"` // the tariff's term; absent: its first
 	PackageID int64  `json:"package_id"`
-	Trial     bool   `json:"trial"` // the priced trial, for an account without a subscription
+	Device    bool   `json:"device"` // one more device for the subscription
+	Trial     bool   `json:"trial"`  // the priced trial, for an account without a subscription
 	Provider  string `json:"provider"`
 	Token     string `json:"token"`
 	PromoCode string `json:"promo_code"`
@@ -194,6 +195,8 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	var err error
 	if in.Trial {
 		p, err = h.shop.TrialInvoice(ctx, tgID, billing.AdapterOf(in.Provider))
+	} else if in.Device {
+		p, err = h.shop.DeviceInvoice(ctx, billing.DeviceRequest{TgID: tgID, UserID: userID, Provider: billing.AdapterOf(in.Provider)})
 	} else if in.PackageID != 0 {
 		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
 	} else {
@@ -263,6 +266,8 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		Trial *offer `json:"trial,omitempty"`
 		// Free is the free plan this account may take now, if any.
 		Free *freeOffer `json:"free,omitempty"`
+		// Device is one more device for the subscription on screen, if it may buy one.
+		Device *offer `json:"device,omitempty"`
 	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 		Providers: map[string]bool{billing.Stars: av.Stars}}
 	if fo, ok := h.shop.FreeOffer(ctx, tgID); ok {
@@ -270,6 +275,11 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 	}
 	if to, _, ok := h.shop.TrialOffer(ctx, tgID); ok {
 		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Note: to.Tariff.Description, Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
+	}
+	if userID != 0 {
+		if do, _, ok, _ := h.shop.DeviceOfferFor(ctx, userID); ok {
+			out.Device = &offer{ID: userID, Name: billing.DescribeDevice(cfg.Lang), Description: billing.DescribeDeviceOffer(do, cfg.Lang), Stars: do.Stars, Rub: do.Rub, Terms: []term{}}
+		}
 	}
 	for _, id := range av.Addons {
 		out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})

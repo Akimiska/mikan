@@ -274,6 +274,25 @@ function SubPage() {
       />
     ) : null;
 
+  // One more device, for the subscription on screen.
+  const deviceShop =
+    packages && packages.data.device && packages.token === token ? (
+      <Shop
+        key={"device-" + token}
+        data={packages.data}
+        offers={[packages.data.device]}
+        field="device"
+        pick={t("sub.devicePick")}
+        subRoot={subRoot}
+        initData={initData}
+        token={token}
+        title={t("sub.device")}
+        openInvoice={(slug) => tgEvent("web_app_open_invoice", { slug })}
+        openLink={openOutside}
+        onRefresh={refresh}
+      />
+    ) : null;
+
   // The priced trial comes first for an account without a subscription; plans after it.
   const trialShop = shop?.trial ? (
     <Shop
@@ -406,6 +425,7 @@ function SubPage() {
             <>
               {shopFor(token, titleOf(config, "shop") || t("sub.shop"))}
               {packagesShop}
+              {deviceShop}
               {freePlan}
             </>
           ) : null

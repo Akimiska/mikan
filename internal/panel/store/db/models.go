@@ -459,23 +459,26 @@ type SupportGrant struct {
 }
 
 type Tariff struct {
-	ID            int64
-	Name          string
-	TrafficLimit  sql.NullInt64
-	DurationDays  int64
-	DeviceLimit   sql.NullInt64
-	ResetStrategy string
-	PriceLabel    string
-	Sort          int64
-	Archived      int64
-	CreatedAt     int64
-	BillingDay    sql.NullInt64
-	PriceStars    sql.NullInt64
-	PriceRub      sql.NullInt64
-	OnSale        int64
-	SpeedLimit    sql.NullInt64
-	Description   string
-	DeviceMode    string
+	ID               int64
+	Name             string
+	TrafficLimit     sql.NullInt64
+	DurationDays     int64
+	DeviceLimit      sql.NullInt64
+	ResetStrategy    string
+	PriceLabel       string
+	Sort             int64
+	Archived         int64
+	CreatedAt        int64
+	BillingDay       sql.NullInt64
+	PriceStars       sql.NullInt64
+	PriceRub         sql.NullInt64
+	OnSale           int64
+	SpeedLimit       sql.NullInt64
+	Description      string
+	DeviceMode       string
+	DevicePriceStars sql.NullInt64
+	DevicePriceRub   sql.NullInt64
+	DeviceExtraMax   int64
 }
 
 type TariffPool struct {
@@ -591,35 +594,37 @@ type Trial struct {
 }
 
 type User struct {
-	ID            int64
-	Name          string
-	Contact       string
-	Note          string
-	Tags          string
-	Status        string
-	TariffID      sql.NullInt64
-	TrafficLimit  sql.NullInt64
-	DeviceLimit   sql.NullInt64
-	ResetStrategy string
-	PeriodDays    int64
-	PeriodStart   int64
-	UsedUp        int64
-	UsedDown      int64
-	TotalUp       int64
-	TotalDown     int64
-	ExpiresAt     sql.NullInt64
-	Inbounds      sql.NullString
-	SubToken      string
-	SlotID        sql.NullInt64
-	OnlineAt      sql.NullInt64
-	CreatedAt     int64
-	UpdatedAt     int64
-	BillingDay    sql.NullInt64
-	Source        string
-	Hidden        int64
-	FolderID      sql.NullInt64
-	SpeedLimit    sql.NullInt64
-	DeviceMode    string
+	ID                int64
+	Name              string
+	Contact           string
+	Note              string
+	Tags              string
+	Status            string
+	TariffID          sql.NullInt64
+	TrafficLimit      sql.NullInt64
+	DeviceLimit       sql.NullInt64
+	ResetStrategy     string
+	PeriodDays        int64
+	PeriodStart       int64
+	UsedUp            int64
+	UsedDown          int64
+	TotalUp           int64
+	TotalDown         int64
+	ExpiresAt         sql.NullInt64
+	Inbounds          sql.NullString
+	SubToken          string
+	SlotID            sql.NullInt64
+	OnlineAt          sql.NullInt64
+	CreatedAt         int64
+	UpdatedAt         int64
+	BillingDay        sql.NullInt64
+	Source            string
+	Hidden            int64
+	FolderID          sql.NullInt64
+	SpeedLimit        sql.NullInt64
+	DeviceMode        string
+	ExtraDevices      int64
+	ExtraDevicesUntil sql.NullInt64
 }
 
 type UserFolder struct {

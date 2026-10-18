@@ -111,6 +111,8 @@ type Shop interface {
 	Invoice(ctx context.Context, req billing.InvoiceRequest) (db.Payment, error)
 	PackageOffers(ctx context.Context, userID int64) ([]billing.PackageOffer, billing.Available, error)
 	PackageInvoice(ctx context.Context, req billing.PackageRequest) (db.Payment, error)
+	DeviceOfferFor(ctx context.Context, userID int64) (billing.DeviceOffer, billing.Available, bool, error)
+	DeviceInvoice(ctx context.Context, req billing.DeviceRequest) (db.Payment, error)
 	TrialTariff(ctx context.Context) (db.Tariff, bool)
 	TrialOpen(ctx context.Context, tgID int64) bool
 	TrialAllowed(ctx context.Context, tgID int64) bool

@@ -2300,6 +2300,44 @@
         },
         "type": "object"
       },
+      "ExtraDevices": {
+        "additionalProperties": false,
+        "properties": {
+          "max": {
+            "description": "Сколько устройств подписка может докупить; 0 — докупки нет",
+            "format": "int64",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "price_rub": {
+            "description": "Цена одного устройства в копейках; null — не за рубли",
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 100,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "price_stars": {
+            "description": "Цена одного устройства в Stars; null — не за Stars",
+            "format": "int64",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "price_stars",
+          "price_rub",
+          "max"
+        ],
+        "type": "object"
+      },
       "FiltersView": {
         "additionalProperties": false,
         "properties": {
@@ -5228,6 +5266,10 @@
           "enabled": {
             "type": "boolean"
           },
+          "extra_devices_keep": {
+            "description": "Докупленные устройства остаются при продлении (true) или до конца срока (false)",
+            "type": "boolean"
+          },
           "free_condition": {
             "description": "none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram",
             "enum": [
@@ -5638,6 +5680,10 @@
             "description": "Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются",
             "type": "boolean"
           },
+          "extra_devices_keep": {
+            "description": "Докупленные устройства остаются при продлении, и продление стоит дороже на их цену; иначе они действуют до конца срока",
+            "type": "boolean"
+          },
           "free_condition": {
             "description": "Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)",
             "enum": [
@@ -5708,6 +5754,7 @@
           "free_tariff_id",
           "free_condition",
           "free_plans",
+          "extra_devices_keep",
           "available",
           "on_sale"
         ],
@@ -5795,12 +5842,13 @@
             "type": "integer"
           },
           "kind": {
-            "description": "package — пакет трафика: tariff_name — название пакета; trial — платный пробный период",
+            "description": "package — пакет трафика: tariff_name — название пакета; trial — платный пробный период; device — докупленное устройство",
             "enum": [
               "new",
               "renew",
               "package",
-              "trial"
+              "trial",
+              "device"
             ],
             "type": "string"
           },
@@ -8139,6 +8187,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "extra_devices": {
+            "$ref": "#/components/schemas/ExtraDevices",
+            "description": "Докупка устройств; не передана — без изменений (у нового тарифа — нет). Нужен лимит устройств"
+          },
           "name": {
             "maxLength": 60,
             "minLength": 1,
@@ -8250,6 +8302,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "extra_devices": {
+            "$ref": "#/components/schemas/ExtraDevices",
+            "description": "Докупка устройств в боте и Mini App: цена одного и сколько можно докупить"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -8339,6 +8395,7 @@
           "price_rub",
           "on_sale",
           "terms",
+          "extra_devices",
           "pools",
           "sort"
         ],

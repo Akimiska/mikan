@@ -260,6 +260,8 @@ func (b *Bot) paid(ctx context.Context, chat int64, p events.Payment, u db.User)
 	switch {
 	case p.Kind == billing.KindPackage:
 		text = fmt.Sprintf(w.paidPackage, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+	case p.Kind == billing.KindDevice:
+		text = fmt.Sprintf(w.paidDevice, html.EscapeString(u.Name), u.DeviceLimit.Int64)
 	case p.Created:
 		text = fmt.Sprintf(w.paidNew, html.EscapeString(u.Name), html.EscapeString(p.TariffName), html.EscapeString(b.subURL(ctx, u)))
 	default:
@@ -287,6 +289,8 @@ func (b *Bot) refunded(ctx context.Context, chat int64, p events.Payment, u db.U
 		text = fmt.Sprintf(w.refundedGone, html.EscapeString(p.TariffName))
 	case p.Kind == billing.KindPackage:
 		text = fmt.Sprintf(w.refundedPackage, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+	case p.Kind == billing.KindDevice:
+		text = fmt.Sprintf(w.refundedDevice, html.EscapeString(u.Name), u.DeviceLimit.Int64)
 	case p.Disabled:
 		text = fmt.Sprintf(w.refundedNew, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
 	default:

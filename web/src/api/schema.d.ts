@@ -3307,6 +3307,23 @@ export interface components {
              */
             months?: number;
         };
+        ExtraDevices: {
+            /**
+             * Format: int64
+             * @description Сколько устройств подписка может докупить; 0 — докупки нет
+             */
+            max: number;
+            /**
+             * Format: int64
+             * @description Цена одного устройства в копейках; null — не за рубли
+             */
+            price_rub: number | null;
+            /**
+             * Format: int64
+             * @description Цена одного устройства в Stars; null — не за Stars
+             */
+            price_stars: number | null;
+        };
         FiltersView: {
             egress: components["schemas"]["EgressFilter"];
             ingress: components["schemas"]["IngressFilter"];
@@ -4365,6 +4382,8 @@ export interface components {
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
             enabled?: boolean;
+            /** @description Докупленные устройства остаются при продлении (true) или до конца срока (false) */
+            extra_devices_keep?: boolean;
             /**
              * @description none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram
              * @enum {string}
@@ -4533,6 +4552,8 @@ export interface components {
             available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
             /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
             enabled: boolean;
+            /** @description Докупленные устройства остаются при продлении, и продление стоит дороже на их цену; иначе они действуют до конца срока */
+            extra_devices_keep: boolean;
             /**
              * @description Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)
              * @enum {string}
@@ -4610,10 +4631,10 @@ export interface components {
             /** Format: int64 */
             id: number;
             /**
-             * @description package — пакет трафика: tariff_name — название пакета; trial — платный пробный период
+             * @description package — пакет трафика: tariff_name — название пакета; trial — платный пробный период; device — докупленное устройство
              * @enum {string}
              */
-            kind: "new" | "renew" | "package" | "trial";
+            kind: "new" | "renew" | "package" | "trial" | "device";
             /** Format: date-time */
             paid_at?: string;
             /** @description stars или addon:<id> — адаптер маркетплейса */
@@ -5439,6 +5460,8 @@ export interface components {
             device_mode?: "bound" | "online";
             /** Format: int64 */
             duration_days: number;
+            /** @description Докупка устройств; не передана — без изменений (у нового тарифа — нет). Нужен лимит устройств */
+            extra_devices?: components["schemas"]["ExtraDevices"];
             name: string;
             /** @description Продавать в боте и Mini App; нужна хотя бы одна цена */
             on_sale?: boolean;
@@ -5492,6 +5515,8 @@ export interface components {
              * @description 0 — бессрочно
              */
             duration_days: number;
+            /** @description Докупка устройств в боте и Mini App: цена одного и сколько можно докупить */
+            extra_devices: components["schemas"]["ExtraDevices"];
             /** Format: int64 */
             id: number;
             name: string;

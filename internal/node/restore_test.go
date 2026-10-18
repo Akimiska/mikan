@@ -320,7 +320,4 @@ func TestBrokenInboundIsRejectedAlone(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil || len(cfg.Listeners) != 1 || cfg.Listeners[0]["name"] != "hysteria2" {
 		t.Fatalf("the good inbound runs on: %s %v", raw, err)
 	}
-	if got := withoutRejected([]string{"mystery", "hysteria2"}, rejected); len(got) != 1 || got[0] != "hysteria2" {
-		t.Fatalf("a rejected inbound is not 'recreated': %v", got)
-	}
 }

@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/metacubex/mihomo/component/eventbus"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/hub/executor"
 	"github.com/metacubex/mihomo/listener"
@@ -87,10 +87,6 @@ type Engine struct {
 	// waits on mu, which a long Apply (or a big SetPolicies) holds, and the panel, which
 	// asks every few seconds with a short timeout, does not take the node for down.
 	shown atomic.Pointer[shownState]
-
-	errsMu sync.Mutex
-	errs   map[string]string // listener name → last listen error
-	marker chan string
 
 	sys  *sysSampler
 	host hostPortsCache
@@ -201,7 +197,7 @@ func Start(o Options) (*Engine, error) {
 	e := &Engine{
 		dataDir: dataDir, home: home, log: log, version: version, started: time.Now(), allowPrivate: o.AllowPrivate, logs: o.Logs,
 		listeners: map[string]nodeapi.ListenerStatus{},
-		errs:      map[string]string{}, marker: make(chan string, 8), sys: newSysSampler(),
+		sys:       newSysSampler(),
 		Challenge: acmechallenge.New(cmp.Or(o.ACMEListen, acmechallenge.DefaultListen)),
 	}
 	go e.pumpLogs()
@@ -322,36 +318,33 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	}
 	e.Reg.SetPools(pools)
 
-	recreated := withoutRejected(changedInbounds(e.applied, st), rejected)
-	e.errsMu.Lock()
-	for name := range cfg.Listeners {
-		delete(e.errs, name)
-	}
-	e.errsMu.Unlock()
-	listener.PatchInboundListeners(cfg.Listeners, e.tun, true)
-	e.syncLogs()
-
-	e.errsMu.Lock()
-	failed := map[string]C.InboundListener{}
+	// The core gives a listener whose users alone changed the new users in place, so the
+	// connections of everyone else stay; only what it started anew counts as recreated.
+	failed, started := e.patchListeners(cfg.Listeners)
+	listening := map[string]C.InboundListener{}
 	statuses := make([]nodeapi.ListenerStatus, 0, len(cfg.Listeners))
 	for name, l := range cfg.Listeners {
 		ls := nodeapi.ListenerStatus{Name: name, OK: true}
-		if msg, bad := e.errs[name]; bad {
+		if msg, bad := failed[name]; bad {
 			ls = listenFailed(name, msg)
 		} else {
-			failed[name] = l
+			listening[name] = l
 		}
 		statuses = append(statuses, ls)
 	}
-	hasFailures := len(failed) != len(cfg.Listeners)
-	e.errsMu.Unlock()
 	statuses = append(statuses, rejected...)
-	// A listener that failed to bind stays registered under its old instance in mihomo
-	// and would be skipped as "unchanged" next time; re-patching without it forgets it.
-	if hasFailures {
-		listener.PatchInboundListeners(failed, e.tun, true)
+	// A listener that failed to bind stays registered under its old, closed instance in
+	// the core and would be skipped as "unchanged" next time; re-patching without it
+	// forgets it.
+	if len(listening) != len(cfg.Listeners) {
+		listener.PatchInboundListeners(listening, e.tun, true)
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
+	recreated := make([]string, 0, len(started))
+	for name := range started {
+		recreated = append(recreated, name)
+	}
+	sort.Strings(recreated)
 
 	e.applied = st
 	e.listeners = map[string]nodeapi.ListenerStatus{}
@@ -449,7 +442,7 @@ func (e *Engine) Health() nodeapi.Health {
 		ls, rev = append(ls, sh.listeners...), sh.revision
 	}
 	return nodeapi.Health{
-		Version: e.version, Core: "mihomo " + mihomoVersion(), Revision: rev, StartedAt: e.started,
+		Version: e.version, Core: coreVersion(), Revision: rev, StartedAt: e.started,
 		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(), Update: e.UpdateStatus(), Host: e.host.get(), Time: time.Now(),
 	}
 }
@@ -482,54 +475,61 @@ func (e *Engine) saveState(st nodeapi.DesiredState) error {
 	return nil
 }
 
-// pumpLogs forwards mihomo's log stream: warnings and errors go to our logger,
-// listener bind errors are remembered for the listener status.
+// pumpLogs forwards the core's warnings and errors to our logger.
 func (e *Engine) pumpLogs() {
 	sub := mlog.Subscribe()
 	for ev := range sub {
 		msg := ev.Payload
-		if strings.HasPrefix(msg, markerPrefix) {
-			select {
-			case e.marker <- msg:
-			default:
-			}
-			continue
-		}
 		if ev.LogLevel < mlog.WARNING || connLine(msg) {
 			continue
 		}
-		if name, rest, ok := parseListenErr(msg); ok {
-			e.errsMu.Lock()
-			e.errs[name] = rest
-			e.errsMu.Unlock()
-		}
 		if ev.LogLevel >= mlog.ERROR {
-			e.log.Error("mihomo", "msg", msg)
+			e.log.Error("core", "msg", msg)
 		} else {
-			e.log.Warn("mihomo", "msg", msg)
+			e.log.Warn("core", "msg", msg)
 		}
 	}
 }
 
-const markerPrefix = "mikan-sync "
+// inboundStates is the mask of the core's listener events.
+var inboundStates = func() eventbus.Mask {
+	m, err := eventbus.ParseTypes(eventbus.TypeInboundState)
+	if err != nil {
+		panic(err)
+	}
+	return m
+}()
 
-// syncLogs waits until every log event emitted before this call has been processed:
-// mihomo delivers events in order, so seeing our own marker is a barrier.
-func (e *Engine) syncLogs() {
-	id := make([]byte, 8)
-	_, _ = rand.Read(id)
-	want := markerPrefix + hex.EncodeToString(id)
-	mlog.Warnln("%s", want)
-	timeout := time.After(2 * time.Second)
+// patchListeners puts ls in place of the running listeners and reports what the core did:
+// the listeners that failed to listen, with the error, and those it started anew (not the
+// ones that kept running, users updated in place). The core publishes the events of a
+// patch while it runs, so all of them are in the subscription once it returns.
+func (e *Engine) patchListeners(ls map[string]C.InboundListener) (failed map[string]string, started map[string]bool) {
+	// Each listener gives at most a stop and a start or failure; old ones dropped, a stop.
+	sub := eventbus.Subscribe(inboundStates, 4*len(ls)+64)
+	defer sub.Close()
+	listener.PatchInboundListeners(ls, e.tun, true)
+	failed, started = map[string]string{}, map[string]bool{}
 	for {
 		select {
-		case got := <-e.marker:
-			if got == want {
-				return
+		case ev := <-sub.C():
+			st, ok := ev.Data.(eventbus.InboundState)
+			if !ok {
+				continue
 			}
-		case <-timeout:
-			e.log.Warn("log barrier timed out; listener errors may be missing")
-			return
+			switch st.State {
+			case eventbus.InboundFailed:
+				failed[st.Inbound] = st.Error
+				delete(started, st.Inbound)
+			case eventbus.InboundStarted:
+				started[st.Inbound] = true
+				delete(failed, st.Inbound)
+			}
+		default:
+			if n := sub.TakeDropped(); n > 0 {
+				e.log.Warn("listener events lost; listener errors may be missing", "dropped", n)
+			}
+			return failed, started
 		}
 	}
 }
@@ -538,16 +538,6 @@ func (e *Engine) syncLogs() {
 // carry user IPs and destinations, so they never reach our logs, even as warnings.
 func connLine(msg string) bool {
 	return strings.HasPrefix(msg, "[TCP] ") || strings.HasPrefix(msg, "[UDP] ")
-}
-
-func parseListenErr(msg string) (name, reason string, ok bool) {
-	const p = "Listener "
-	const mid = " listen err: "
-	if !strings.HasPrefix(msg, p) {
-		return "", "", false
-	}
-	name, reason, ok = strings.Cut(msg[len(p):], mid)
-	return name, reason, ok
 }
 
 // listenFailed is the status of a listener that could not bind. A port another program
@@ -560,55 +550,29 @@ func listenFailed(name, msg string) nodeapi.ListenerStatus {
 	return ls
 }
 
-func withoutRejected(names []string, rejected []nodeapi.ListenerStatus) []string {
-	if len(rejected) == 0 {
-		return names
-	}
-	bad := make(map[string]bool, len(rejected))
-	for _, r := range rejected {
-		bad[r.Name] = true
-	}
-	return slices.DeleteFunc(names, func(n string) bool { return bad[n] })
-}
-
-func changedInbounds(prev, next nodeapi.DesiredState) []string {
-	old := map[string]string{}
-	for _, in := range prev.Inbounds {
-		raw, _ := json.Marshal(in)
-		old[in.Name] = string(raw)
-	}
-	slotsChanged := !sameSlots(prev.Slots, next.Slots)
-	var out []string
-	for _, in := range next.Inbounds {
-		raw, _ := json.Marshal(in)
-		if o, ok := old[in.Name]; !ok || o != string(raw) || slotsChanged {
-			out = append(out, in.Name)
-		}
-	}
-	return out
-}
-
-func sameSlots(a, b []nodeapi.Slot) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func mihomoVersion() string {
+// coreVersion names the network core the node is built with: Citrus, which go.mod puts in
+// place of mihomo, by its release tag or, for a commit of its dev branch, the commit.
+func coreVersion() string {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, m := range bi.Deps {
 			if m.Path == "github.com/metacubex/mihomo" {
-				return m.Version
+				return coreName(m)
 			}
 		}
 	}
 	return "unknown"
+}
+
+func coreName(m *debug.Module) string {
+	if m.Replace == nil {
+		return "mihomo " + m.Version
+	}
+	v := m.Replace.Version
+	// A pseudo-version (v1.19.33-0.20261018104129-2cae038ea2a8) says nothing but its commit.
+	if parts := strings.Split(v, "-"); len(parts) >= 3 && len(parts[len(parts)-1]) == 12 {
+		v = parts[len(parts)-1][:7]
+	}
+	return "citrus " + v
 }
 
 // loadCounters reads the counters file. A missing or broken one starts a new counter

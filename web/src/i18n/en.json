@@ -64,7 +64,7 @@
     "unfold": "Unfold the menu",
     "logout": "Sign out",
     "more": "More",
-    "forkVersion": "Aoi · mikan {v}"
+    "forkVersion": "AoiVPN · mikan fork {v}"
   },
   "states": {
     "active": "active",
@@ -1480,7 +1480,7 @@
     "updatesGoalsSub": "Show here which features money is being collected for.",
     "updatesNodes": "Update the other servers too",
     "updatesNodesSub": "One at a time, after the panel. If one fails to update, you get an alert.",
-    "forkVersion": "Aoi · mikan {v}",
+    "forkVersion": "AoiVPN · mikan fork {v}",
     "lang": "Default language",
     "langSub": "For visitors who have not picked a language yet",
     "langAuto": "Browser language",

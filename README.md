@@ -1,9 +1,107 @@
-> **⚙️ AoiVPN fork of [Miroshka000/mikan](https://github.com/Miroshka000/mikan).**
-> Internal fork used by the AoiVPN service. Upstream is the canonical project and gets all the credit (GPL-3.0 — see [LICENSE](LICENSE)).
-> What differs here: a lean image-only CI (`.github/workflows/aoi-image.yml` → `ghcr.io/akimiska/mikan`, amd64) so we deploy our own build via `docker compose` with `MIKAN_IMAGE` pinned to a tag. Routing/rules are customized through mikan's own `sub_rules` setting — **no source changes**. Deploy by setting `MIKAN_IMAGE`, **not** via the upstream `install.sh`.
-> Everything below is upstream's documentation and describes the original one-command install flow.
+# AoiVPN
+
+**AoiVPN** — VPN-панель сервиса [AoiVPN](https://aoimusic.ru), форк
+[Miroshka000/mikan](https://github.com/Miroshka000/mikan) (GPL-3.0, см.
+[LICENSE](LICENSE)). Апстрим — канонический проект, всё признание ему; форк живёт
+под собственным именем **AoiVPN** (имя и логотип mikan не входят в GPL-лицензию —
+[TRADEMARK.md](TRADEMARK.md) апстрима это прямо требует).
+
+Код — GPL-3.0 с дополнительными условиями [NOTICE.md](NOTICE.md); атрибуция
+апстриму сохранена. Встроенный логотип/название апстрима в UI заменены на бренд
+AoiVPN (сайдбар, экран входа, favicon, `<title>`), технические идентификаторы
+(`mikan` в CLI-командах, конфигах и localStorage) не переименовывались.
 
 ---
+
+## Что изменено относительно апстрима
+
+### Подписка (главное)
+
+Контракт с клиентами AoiVPN — **ровно две select-группы**, всегда:
+
+```yaml
+proxy-groups:
+  - name: AoiVPN            # только прокси нод (плоский список) + последним членом ссылка на bypass-группу
+    type: select
+  - name: "🇷🇺 Обход БС"     # select из внешних bypass-прокси (sub_bypass); нет, если bypass пуст
+```
+
+- В главной группе **нет bypass-прокси поимённо** — только ноды + одна ссылка на
+  «🇷🇺 Обход БС» (их сотни, они тонули бы среди нод). Сами bypass-прокси лежат в
+  общем `proxies` и в своей группе. Fix в 0.5.1.2: до этого обход-прокси попадали
+  в главную группу поимённо.
+- Никаких url-test «Авто», групп по странам, скрытого алиаса `PROXY` или
+  per-service групп — что бы ни стояло в настройках роутинга (контролы скрыты в UI).
+- DNS DoH-серверы идут с суффиксом **реального имени главной группы**
+  (`#AoiVPN`), а не константы `PROXY` — иначе DNS резолвится с устройства и
+  утекает регион.
+- Внешние bypass-прокси задаются настройкой `sub_bypass` (JSON `{group, proxies[]}`),
+  панелью не трекаются; имя/иконка главной группы — `sub_group_main`/`sub_group_icon`;
+  порядок нод/протоколов — `sub_sort`.
+- DNS-тюнинг клиента: `respect-rules` + `prefer-h3` вместо sniffer,
+  `fake-ip-filter` (Roblox и приложения вне туннеля), `find-process-mode: always`
+  (PROCESS-NAME,DIRECT для игр).
+- hysteria2: в клиентский конфиг эмитятся `up`/`down`.
+- Content-Disposition inline, filename = имя группы.
+
+### Протоколы
+
+- В клиентские reality-ссылки добавляется `support-x25519mlkem768: true`
+  (xray ≥ 26.9.8 требует post-quantum keyshare; подлежит переносу из ветки
+  `aoi-0.5.0.4`).
+- hysteria2 `up/down` в клиентском конфиге (mihomo без них гоняет BBR-автопробинг).
+
+### Панель
+
+- Брендинг AoiVPN: логотип, favicon, `<title>`, текст в сайдбаре/логине; версия
+  форка в сайдбаре («AoiVPN · mikan fork X» — упоминание апстрима разрешено
+  TRADEMARK.md).
+- В списке People — Telegram-identity и состояние `no_subscription`
+  (`NULL expires_at` = «без подписки»).
+- Скрытые блоки UI («Выбор сервера» на странице роутинга).
+
+### Инфраструктура
+
+- `.github/workflows/aoi-image.yml` — единственный CI форка: lean amd64-образ →
+  `ghcr.io/akimiska/mikan:{latest,VERSION,sha}`. Версия форка — `FORK_VERSION`
+  в этом workflow.
+- Апстримный `ci.yml` на push в main не бегает — тесты гоняются локально.
+
+## Деплой
+
+**Только вручную, docker compose, образ пиннится тегом:**
+
+```bash
+cd /opt/mikan && MIKAN_IMAGE=ghcr.io/akimiska/mikan:<tag> docker compose pull && docker compose up -d
+```
+
+> [!CAUTION]
+> **Не обновляйте этот форк кнопкой «Обновить» в панели и не включайте автообновление.**
+> Host-updater тянет подписанный индекс **апстрима** (`installer/src/release.rs`:
+> REPO и PUBLIC_KEY захардкожены) — обновление заменит форк чистым mikan.
+> В проде: `policy.json {"auto": false}`, `nodes_follow_panel=false`.
+
+## Тесты и сборка
+
+Как в апстриме (см. апстримный README ниже по языковым ссылкам), плюс:
+`CGO_ENABLED=0 go test ./internal/panel/subs/` — golden-тесты раскладки подписки
+(`internal/panel/subs/testdata/golden/`). Правила работы агентов с форком —
+[AGENT.md](AGENT.md).
+
+## License
+
+[GNU GPL v3](LICENSE) с дополнительными условиями [NOTICE.md](NOTICE.md).
+Имя «mikan», логотип и маскот апстриму не принадлежат по GPL — см.
+[TRADEMARK.md](TRADEMARK.md), поэтому этот форк называется AoiVPN. Встроенный
+mihomo — GPL-3.0.
+
+---
+
+## Upstream documentation
+
+Everything below is upstream's README. The original one-command install flow, the
+installer and the signed release manifests belong to upstream and are **not** how this
+fork is built or deployed.
 
 <div align="center">
 
@@ -20,9 +118,7 @@
 [![Release](https://img.shields.io/github/v/release/Miroshka000/mikan?color=f07a2e&label=release&style=flat-square)](https://github.com/Miroshka000/mikan/releases)
 [![Image](https://img.shields.io/badge/ghcr.io-miroshka000%2Fmikan-2b8c9e?style=flat-square&logo=docker&logoColor=white)](https://github.com/Miroshka000/mikan/pkgs/container/mikan)
 [![License](https://img.shields.io/badge/license-GPL--3.0-2f9e6b?style=flat-square)](LICENSE)
-[![mihomo](https://img.shields.io/badge/core-mihomo%201.19.32-9e8eff?style=flat-square)](https://github.com/MetaCubeX/mihomo)
 [![Telegram](https://img.shields.io/badge/Telegram-channel-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/mikanvpn)
-[![Telegram](https://img.shields.io/badge/Telegram-forum-26a5e4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+I2JFR7DbPow1ZmQy)
 
 **English** · [Русский](README.ru.md) · [简体中文](README.zh-CN.md) · [فارسی](README.fa.md) · [Türkçe](README.tr.md) · [Español](README.es.md)
 
@@ -30,7 +126,7 @@
 
 ---
 
-## Install
+### Install
 
 On a fresh Ubuntu 22.04+ or Debian 12+ server (amd64 or arm64):
 
@@ -48,7 +144,7 @@ curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install
 
 Without questions, for scripts: `… | sudo bash -s -- --yes --lang en --domain vpn.example.com --email you@example.com` (all flags: `mikan install --help`).
 
-## Why mikan
+### Why mikan
 
 <table>
 <tr>
@@ -109,20 +205,7 @@ A REST API documented right in the panel, with read-only or full-access keys for
 </tr>
 </table>
 
-## Promo codes
-
-Admins can create discount codes and codes for bonus days or traffic. Subscribers apply
-codes in the Telegram Mini App, which also shows their redemption history. Bonus traffic
-can go to the main balance or a selected pool. Discounted invoices are available only
-through payment methods that support refunds: Telegram Stars and adapters that advertise
-refund support. Mikan can then return a payment if its promo reservation expires before
-the provider confirms it.
-
-## Support access
-
-When you need help, you open a temporary access yourself: Settings → Support, for 2, 6 or 24 hours, at the "view", "change" or "terminal" level. Without that button nobody, mikan's developers included, gets into the panel: the project has no standing access to your servers, and the panel connects nowhere by itself. Every operator action goes into the audit log, access is revoked with one button, and the terminal needs your password and 2FA and is recorded. To turn the feature off for good, use the switch on the same card or run `mikan support-access off` on the server. Paid support rules: [on the website](https://miroshka000.github.io/mikan/support/paid/).
-
-## Screenshots
+### Screenshots
 
 <table>
 <tr>
@@ -135,53 +218,7 @@ When you need help, you open a temporary access yourself: Settings → Support, 
 </tr>
 </table>
 
-<p align="center">
-<img src=".github/assets/screens/en/phone-subscription.webp" alt="Subscription page" width="260">
-&nbsp;&nbsp;
-<img src=".github/assets/screens/en/phone-dashboard.webp" alt="Overview on a phone" width="260">
-</p>
-
-## Protocols
-
-Seventeen protocols, each a preset with keys generated for you. The subscription gives every app only what it runs:
-
-| Protocol | Clash apps<br><sub>mihomo core</sub> | Xray apps<br><sub>Happ, v2RayTun</sub> | sing-box apps<br><sub>Hiddify, Karing</sub> |
-|---|:---:|:---:|:---:|
-| VLESS · REALITY · Vision | ✅ | ✅ | ✅ |
-| VLESS · REALITY · XHTTP | ✅ | ✅ | — |
-| VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
-| VLESS PQ (post-quantum encryption) | ✅ | ✅ | — |
-| Trojan · REALITY | ✅ | ✅ | ✅ |
-| VLESS · TLS · XHTTP | ✅ | ✅ | — |
-| VLESS · TLS · Vision | ✅ | ✅ | ✅ |
-| Hysteria2 | ✅ | ✅ | ✅ |
-| TUIC v5 | ✅ | — | ✅ |
-| AnyTLS | ✅ | — | ✅ |
-| TrustTunnel | ✅ | — | — |
-| ShadowQUIC | ✅ | — | — |
-| Mieru | ✅ | — | — |
-| Shadowsocks-2022 ¹ | ✅ | ✅ | ✅ |
-| Sudoku ¹ | ✅ | — | — |
-| Snell ¹ | ✅ | — | — |
-| VMess (custom config) | ✅ | ✅ | ✅ |
-
-<sub>¹ One key for all users in mihomo: no per-user accounting or limits on these. Newer protocols are sent to Clash apps only when their core is new enough.</sub>
-
-## How it works
-
-```mermaid
-flowchart LR
-    A[Browser] -- HTTPS, secret link --> P[mikan panel<br>users · plans · subscriptions]
-    P -- unix socket / pinned TLS --> N1[mikan node<br>mihomo inside]
-    P -- pinned TLS --> N2[remote node]
-    C[VPN apps] -- REALITY · QUIC · … --> N1
-    C --> N2
-    C -. subscription .-> P
-```
-
-The panel and the node are two processes from one image. Update or restart the panel — VPN keeps running. Add remote nodes with a join key from the **Nodes** page.
-
-## Managing the server
+### Managing the server
 
 Run `mikan` for the menu, or use the commands directly:
 
@@ -202,42 +239,6 @@ Run `mikan` for the menu, or use the commands directly:
 | `mikan support-access on\|off` | allow or forbid support access on this server |
 | `mikan uninstall` | stop and remove the command, keep the data |
 
-## Updates
-
-The panel checks for a new release once a day and shows what changed. Turn on **auto-update** in settings, or press **Update**: the host updater pulls the image from GitHub Packages, backs up, migrates the database, restarts and rolls back if the new version does not come up healthy. Every release manifest is signed.
-
-On 0.4.4 or older, update to 0.4.5 first; the move to 0.5 and PostgreSQL then comes through the Update button too. If you skipped 0.4.5, the install command above updates an existing server.
-
-## Building from source
-
-```bash
-docker buildx build -t mikan:dev .            # panel + node image
-cd web && pnpm install && pnpm dev            # admin UI with hot reload
-MIKAN_TEST_DATABASE_URL=postgres://… go test ./...   # Go 1.27, a test PostgreSQL 18 and pg_dump
-cd installer && cargo test                    # the installer (Rust)
-```
-
-Development happens on the `dev` branch; pull requests into `main` are built and tested, releases are published from tags.
-
-## ⛔ Forks and third-party builds
-
-> [!CAUTION]
-> **The official mikan lives only here:** the repository `Miroshka000/mikan`, the image `ghcr.io/miroshka000/mikan` and releases signed with the mikan key. Official addons come only from the `getmikan/marketplace` catalog; the community registry `getmikan/marketplace-community` lists third-party addons that mikan does not review and is not responsible for. Anything else is not mikan, whatever it calls itself.
->
-> **The mikan project considers every fork and every build from other sources potentially unsafe.**
->
-> **Official builds can be checked.** Every release is built automatically from the open code of this repository and signed, and the panel and the installer take updates only with that signature. What someone else's build is made of, only its author knows.
->
-> **A fork does not get our updates.** It cannot sign releases with the mikan key, so fixes of bugs and vulnerabilities do not reach it until its author carries them over, if ever.
->
-> **We do not support forks.** We do not review them and are not responsible for bugs, vulnerabilities or lost data in them. Questions about someone else's build are not handled in the chat or in issues.
->
-> **The name is not part of the license.** GPL v3 covers the code, not the name mikan or its logo (GPL v3 section 7, see [NOTICE.md](NOTICE.md) and [TRADEMARK.md](TRADEMARK.md)). A fork must use another name and must not pass itself off as mikan.
-
-## License
+### License (upstream)
 
 mikan is free software under the [GNU GPL v3](LICENSE) with the additional terms in [NOTICE.md](NOTICE.md): keep the attribution, do not pass a modified version off as the original, no rights to the name and the logo. Copyright (C) 2026 Miroshka and Mikan. It embeds [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0) and adapts parts of [3x-ui](https://github.com/MHSanaei/3x-ui) (GPL-3.0). Fonts: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
-
-<div align="center">
-<sub>Made with 🍊</sub>
-</div>

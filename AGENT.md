@@ -67,7 +67,7 @@ Golden-тесты (`internal/panel/subs/testdata/golden/`) перегенери�
 
 Мержи здесь большие (merge rc.6 = 824 файла, +131k строк), git при этом молча берёт
 апстримную сторону там, где обе стороны меняли одно место. Поэтому: после каждого
-merge — обязательный чек-лист из §5.
+merge — обязательный чек-лист из §6.
 
 ---
 
@@ -109,17 +109,42 @@ merge — обязательный чек-лист из §5.
 ### 3.4 Панель/Люди
 
 - Telegram-identity в списке People + состояние `no_subscription` (`NULL expires_at` = «без подписки», не «active»): `2350e33`, `3284450`, `379d11f`, `371e95c` (openapi) — ✅ в main.
-- Версия форка в сайдбаре («Aoi · mikan X»), ручная проверка ядер протоколов нод: `23e1963`.
+- Версия форка в сайдбаре («AoiVPN · форк mikan X»), ручная проверка ядер протоколов нод: `23e1963`.
 - Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` (сейчас 0.5.1.2) → тег образа + версия в сайдбаре.
+- Брендинг AoiVPN (логотип/название/favicon вместо mikan) — см. §4.
 
-### 3.5 Только на ветке `origin/aoi-0.5.0.4` (в main НЕТ; см. §3.2–3.3 и §6)
+### 3.5 Только на ветке `origin/aoi-0.5.0.4` (в main НЕТ; см. §3.2–3.3 и §7)
 
 - `5f63d8b` DNS через реальную главную группу — восстановлен в main вручную (0929914);
 - `ea9a6da`: control-домены `sub/panel/vpn.aoimusic.ru` → через туннель ДО RU-правил (чинило «Failed host lookup: sub.aoimusic.ru»), shadowsocks снят с раздачи;
 - `82f5f1c`, `1a73a98`, `43fe0b2`, `f941a07`, `77e62c9` — см. таблицу выше; incy-RU-direct (`f941a07`, `43fe0b2`) в main нет, но upstream покрыл часть (`happroute.go` + `happ/geosite.txt` содержит `category-ru`).
+
 ---
 
-## 4. CI/деплой форка
+## 4. Брендинг (правила с 18.10.2026)
+
+По TRADEMARK.md апстрима имя «mikan», логотип и маскот НЕ входят в GPL-лицензию —
+форк не должен называться mikan и использовать его брендинг. Поэтому:
+
+- **Пользователь-видимое = AoiVPN:** `<title>` в `web/index.html`, `brand-name` в
+  `web/src/admin/shell.tsx`, экран логина `web/src/admin/pages/login.tsx`,
+  ассеты `web/src/assets/logo.webp` + `web/public/favicon.png` +
+  `web/public/apple-touch-icon.png`, i18n `shell.forkVersion` («AoiVPN · форк mikan {v}» —
+  атрибуция «форк mikan» текстом разрешена). README.md описывает форк как AoiVPN.
+- **НЕ переименовывать** (технические идентификаторы, не бренд): CLI-команды
+  бинарника (`mikan status`, `mikan reset-password`, … — на них ссылаются тексты
+  подсказок), Go-модуль `mikan`, ключи localStorage (`mikan.sidebar`, `mikan-theme`),
+  имя палитры `mikan` в `theme.tsx`/`theme-boot.js` (это имя цветовой темы, не
+  продукта), конфиг-ключи `mikan.tls`/`mikan.client` в шаблонах, маркер
+  `<!-- mikan:base -->` в `web/index.html`, образ `ghcr.io/akimiska/mikan`,
+  `LICENSE`/`NOTICE.md`/`TRADEMARK.md` апстрима.
+- При мерже апстрима: любые новые пользователь-видимые строки с «mikan» (экраны,
+  письма, `<title>`) — проверить и при необходимости заменить на AoiVPN; технические
+  ключи не трогать.
+
+---
+
+## 5. CI/деплой форка
 
 - `.github/workflows/aoi-image.yml` — единственный CI форка: lean amd64-образ → `ghcr.io/akimiska/mikan:{latest,sha,VERSION}`. `FORK_VERSION` в env — бампать при каждом fork-релизе. Апстримный `ci.yml` (go test) на push в main НЕ бегает (только PR) — **тесты локально обязательны**.
 - **Обновление панели — НЕ через кнопку «Обновить» и НЕ авто:** host-updater тянет подписанный индекс **upstream** (`installer/src/release.rs`: REPO + PUBLIC_KEY захардкожены) → заменит форк чистым апстримом. Деплой только руками: на SE `cd /opt/mikan && MIKAN_IMAGE=ghcr.io/akimiska/mikan:<tag> docker compose pull && docker compose up -d`. `nodes_follow_panel=false` в БД (дефолт апстрима ON!). Подробнее: policy.json `{"auto":false}`, не включать автообновление.
@@ -127,7 +152,7 @@ merge — обязательный чек-лист из §5.
 
 ---
 
-## 5. Чек-лист обновления панели/ноды (merge или апдейт) — ОБЯЗАТЕЛЬНЫЙ
+## 6. Чек-лист обновления панели/ноды (merge или апдейт) — ОБЯЗАТЕЛЬНЫЙ
 
 **Принцип: fork-правки восстанавливаются ВСЕГДА. Апстрим-фичи принимаются, но не в ущерб пункту 1.**
 
@@ -152,7 +177,7 @@ merge — обязательный чек-лист из §5.
 6. **Версия**: бампнуть `FORK_VERSION` в `.github/workflows/aoi-image.yml`, задеплоить образ (`cd /opt/mikan && MIKAN_IMAGE=... docker compose up -d`), образы старых версий остаются локально для отката. Держать `FORK_VERSION` ≥ последнего upstream-релиза, `auto=false`, `nodes_follow_panel=false`.
 7. **Не жать «Обновить» в панели** и не включать auto-update: updater тянет upstream-релизы (installer/src/release.rs: REPO + PUBLIC_KEY upstream), обновление затрёт форк.
 
-## 6. Если раскладка всё же разъехалась
+## 7. Если раскладка всё же разъехалась
 
 - Быстрый откат образа: сменить `MIKAN_IMAGE` на предыдущий тег (`0.5.0.x` лежат на SE) + `docker compose up -d`.
 - Код: сравнить с `dc04222` (оригинал плоской раскладки) и `0929914` (восстановление после rc.6): `git log --oneline -- internal/panel/subs/render.go`.

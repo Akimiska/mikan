@@ -64,7 +64,7 @@
     "unfold": "Развернуть меню",
     "logout": "Выйти",
     "more": "Ещё",
-    "forkVersion": "Aoi · mikan {v}"
+    "forkVersion": "AoiVPN · форк mikan {v}"
   },
   "states": {
     "active": "активен",
@@ -1480,7 +1480,7 @@
     "updatesGoalsSub": "Показывать здесь, на какие функции идёт сбор денег.",
     "updatesNodes": "Обновлять и остальные серверы",
     "updatesNodesSub": "По очереди, после панели. Если один не обновится, придёт оповещение.",
-    "forkVersion": "Aoi · mikan {v}",
+    "forkVersion": "AoiVPN · форк mikan {v}",
     "lang": "Язык по умолчанию",
     "langSub": "Для тех, кто ещё не выбрал язык сам",
     "langAuto": "Как в браузере",

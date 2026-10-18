@@ -82,7 +82,7 @@ export function LoginPage() {
         <div className="mb-8 flex items-center gap-3">
           <Logo size={40} />
           <div>
-            <div className="font-display text-[22px] leading-7 font-semibold tracking-tight">mikan</div>
+            <div className="font-display text-[22px] leading-7 font-semibold tracking-tight">AoiVPN</div>
             <div className="text-[13px] text-[var(--ink-500)]">{t("login.subtitle")}</div>
           </div>
         </div>

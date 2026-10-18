@@ -132,6 +132,18 @@ func sharedListeners(st nodeapi.DesiredState) []string {
 	return out
 }
 
+// userListeners are the inbounds whose users are slots, each with whether the core knows
+// them by UUID (TUIC) rather than by name; the ones with one key for everyone are not.
+func userListeners(st nodeapi.DesiredState) map[string]bool {
+	out := map[string]bool{}
+	for _, in := range st.Inbounds {
+		if t, err := template(in); err == nil && !proto.Shared(t.Type()) {
+			out[in.Name] = t.Type() == "tuic"
+		}
+	}
+	return out
+}
+
 // template reads the inbound's listener template; states saved by mikan ≤ 0.1.2 carry
 // a preset with its settings instead.
 func template(in nodeapi.Inbound) (proto.Template, error) {

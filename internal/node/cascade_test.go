@@ -109,7 +109,7 @@ func (r *recordingTunnel) NatTable() C.NatTable                       { return n
 // turned away.
 func TestRelayBypassesAccounting(t *testing.T) {
 	inner := &recordingTunnel{}
-	tun := &Tunnel{inner: inner, reg: NewRegistry("e", 0, time.Minute, time.Now)}
+	tun := &Tunnel{inner: inner, reg: NewRegistry("e", 0, time.Minute, time.Now, &fakeCore{})}
 	a, b := net.Pipe()
 	defer b.Close()
 	tun.HandleTCPConn(a, &C.Metadata{Type: C.VLESS, InName: nodeapi.RelayListener, InUser: "relay-2", SrcIP: mustAddr("198.51.100.20")})

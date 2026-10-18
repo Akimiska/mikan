@@ -2,14 +2,16 @@ package node
 
 import (
 	"bytes"
-	"encoding/binary"
+
+	"github.com/metacubex/mihomo/component/sniffer"
 
 	"mikan/internal/nodeapi"
 )
 
 // The torrent blocker's patterns. Each is a fixed shape BitTorrent itself defines, so
 // other traffic does not match by chance: a false catch bans a paying user. Encrypted
-// BitTorrent (MSE/PE) is noise to these and goes through.
+// BitTorrent (MSE/PE) is noise to these and goes through. The core's BitTorrent sniffer
+// recognises the peer wire handshake and the UDP side; the HTTP tracker is the node's.
 
 var (
 	btProtocol = []byte("\x13BitTorrent protocol") // BEP 3: the peer wire handshake
@@ -22,7 +24,7 @@ const udpTrackerMagic = 0x41727101980
 
 // torrentTCP says what BitTorrent the first bytes of a TCP stream are, "" when none.
 func torrentTCP(b []byte) string {
-	if bytes.HasPrefix(b, btProtocol) {
+	if sniffer.SniffBitTorrentHandshake(b) == nil {
 		return nodeapi.TorrentHandshake
 	}
 	if httpTracker(b) {
@@ -48,35 +50,16 @@ func httpTracker(b []byte) bool {
 		bytes.Contains(line, []byte("peer_id="))
 }
 
-// torrentUDP says what BitTorrent a UDP packet is, "" when none.
+// torrentUDP says what BitTorrent a UDP packet is, "" when none: the core's sniffer knows
+// the DHT, the UDP tracker's connect request and the packet that opens a uTP connection.
 func torrentUDP(b []byte) string {
 	switch {
-	case bytes.HasPrefix(b, dhtQuery), bytes.HasPrefix(b, dhtReply):
+	case sniffer.SniffDHT(b) == nil:
 		return nodeapi.TorrentDHT
-	case len(b) >= 16 && binary.BigEndian.Uint64(b) == udpTrackerMagic && binary.BigEndian.Uint32(b[8:]) == 0:
+	case sniffer.SniffUDPTracker(b) == nil:
 		return nodeapi.TorrentTracker
-	case utpSyn(b):
+	case sniffer.SniffUTP(b) == nil:
 		return nodeapi.TorrentUTP
 	}
 	return ""
-}
-
-// utpSyn: the packet that opens a uTP connection (BEP 29). Only the SYN is looked at: its
-// type and version byte, the zero timestamp difference and an extension chain that ends
-// exactly at the end of the packet, which carries no data. A QUIC packet whose first
-// byte happens to be the same does not get past the rest.
-func utpSyn(b []byte) bool {
-	const header = 20
-	if len(b) < header || b[0] != 0x41 || binary.BigEndian.Uint32(b[8:]) != 0 {
-		return false
-	}
-	next, pos := b[1], header
-	for next != 0 {
-		if next > 4 || pos+2 > len(b) {
-			return false
-		}
-		next = b[pos]
-		pos += 2 + int(b[pos+1])
-	}
-	return pos == len(b)
 }

@@ -74,7 +74,7 @@ func TestFairShareAloneAndFloor(t *testing.T) {
 // fair share nothing is shaped, so Vision may still splice.
 func TestPolicyCapsAndGroups(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	r := NewRegistry("e1", 0, time.Minute, func() time.Time { return now })
+	r := NewRegistry("e1", 0, time.Minute, func() time.Time { return now }, &fakeCore{})
 	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}, {Name: "s2", UUID: "u2"}, {Name: "s3", UUID: "u3"}})
 	r.SetPolicies("e1", []nodeapi.Policy{
 		{Slot: "s1", Allowed: true, QuotaRemaining: -1, SpeedMbps: 50, Group: "7"},
@@ -103,32 +103,30 @@ func TestPolicyCapsAndGroups(t *testing.T) {
 	}
 }
 
-// A cap that comes in closes the connections opened around the limiter: the app opens
-// them again, held this time. Shaped ones stay.
+// A cap that comes in closes the slot's connections, opened around the limiter: the app
+// opens them again, held this time. Once shaped, a new policy push closes nothing.
 func TestCapClosesUnshapedConnections(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	r := NewRegistry("e1", 0, time.Minute, func() time.Time { return now })
+	core := &fakeCore{}
+	r := NewRegistry("e1", 0, time.Minute, func() time.Time { return now }, core)
 	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
+	r.SetInbounds(map[string]bool{"vless": false, "tuic": true})
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, Group: "7"}})
-	s := r.lookup("s1")
-	plain, plainPeer := net.Pipe()
-	defer plainPeer.Close()
-	held, heldPeer := net.Pipe()
-	defer heldPeer.Close()
-	c1 := &countingConn{Conn: plain, slot: s, now: r.now}
-	c2 := &countingConn{Conn: held, slot: s, now: r.now, shaped: true}
-	s.addConn(c1)
-	s.addConn(c2)
-
-	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, Group: "7", SpeedMbps: 10}})
-	if _, err := plainPeer.Write([]byte("x")); err == nil {
-		t.Fatal("the unshaped connection must be closed")
+	if len(core.closed) != 0 {
+		t.Fatalf("nothing is shaped yet: %v", core.closed)
 	}
-	s.mu.Lock()
-	_, kept := s.conns[c2]
-	s.mu.Unlock()
-	if !kept {
-		t.Fatal("the shaped connection must stay")
+	capped := []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, Group: "7", SpeedMbps: 10}}
+	r.SetPolicies("e1", capped)
+	got := map[userKey]bool{}
+	for _, k := range core.closed {
+		got[k] = true
+	}
+	if len(core.closed) != 2 || !got[userKey{"vless", "s1"}] || !got[userKey{"tuic", "u1"}] {
+		t.Fatalf("the cap closes the slot on every inbound: %v", core.closed)
+	}
+	r.SetPolicies("e1", capped)
+	if len(core.closed) != 2 {
+		t.Fatalf("already shaped: %v", core.closed)
 	}
 }
 

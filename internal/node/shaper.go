@@ -17,9 +17,10 @@ import (
 //
 // A user's slots (one per bound device) form a group with one limiter each way, so the cap
 // is the user's on this node, whatever the devices and connections. Without a cap and
-// without the fair share a group is unlimited and its connections are plain countingConns,
-// which XTLS Vision may splice in the kernel; a shaped connection gives that up, as
-// spliced bytes cannot be held back.
+// without the fair share a group is unlimited and its connections go to the core as they
+// are, where XTLS Vision may splice them in the kernel; a shaped connection gives that up,
+// as spliced bytes cannot be held back. The bytes a group moved come from the core's
+// counters (Registry.drain).
 //
 // The fair share splits the channel max-min every second: a group that moved less than an
 // even share keeps an even share as its ceiling, what it leaves goes to the groups that
@@ -206,26 +207,12 @@ func fairShares(active []used, channel float64) map[*group]float64 {
 	return out
 }
 
-// run works the fair share out every second until ctx ends.
-func (sh *shaper) run(ctx context.Context) {
-	t := time.NewTicker(shareEvery)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			sh.share()
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
 // shapedConn holds a connection to its group's ceilings: what the client sends is taken
 // after it is read, what it gets before it is written. It has no Unwrap methods, so the
 // copy loop goes through Read and Write and cannot splice past the limiter.
 type shapedConn struct {
-	net.Conn // the countingConn
-	g        *group
+	net.Conn
+	g *group
 }
 
 func (c *shapedConn) Read(b []byte) (int, error) {

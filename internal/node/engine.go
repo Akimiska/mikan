@@ -28,6 +28,7 @@ import (
 	"github.com/metacubex/mihomo/listener"
 	mlog "github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel"
+	"github.com/metacubex/mihomo/tunnel/statistic"
 
 	"mikan/internal/acmechallenge"
 	"mikan/internal/fsutil"
@@ -206,21 +207,15 @@ func Start(o Options) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.Reg = NewRegistry(cs.Epoch, cs.Seq, o.DeviceRelease, time.Now)
+	// The core lists an address of a user this long after its last connection closed: a
+	// device keeps its place as long.
+	statistic.DefaultManager.Users().IPRelease = o.DeviceRelease
+	e.Reg = NewRegistry(cs.Epoch, cs.Seq, o.DeviceRelease, time.Now, citrus{})
 	e.tun = &Tunnel{inner: tunnel.Tunnel, reg: e.Reg}
 
-	base, _, err := buildConfig(nodeapi.DesiredState{}, proto.Cert{}, o.AllowPrivate)
-	if err != nil {
+	if err := applyBase(); err != nil {
 		return nil, err
 	}
-	cfg, err := executor.ParseWithBytes(base)
-	if err != nil {
-		return nil, fmt.Errorf("base config: %w", err)
-	}
-	// ApplyConfig patches listeners with the stock tunnel and drops any others, so it
-	// runs exactly once, with no listeners; ours are patched separately in Apply.
-	cfg.Listeners = map[string]C.InboundListener{}
-	executor.ApplyConfig(cfg, true)
 	e.exitDNS = exitDNSKey(nil)
 
 	st, ok, err := loadState(filepath.Join(dataDir, stateFile), log)
@@ -234,8 +229,34 @@ func Start(o Options) (*Engine, error) {
 	}
 	e.restoreCounters(cs)
 	go e.sys.run()
-	go e.Reg.RunShaper(context.Background())
+	go e.Reg.Run(context.Background())
 	return e, nil
+}
+
+var (
+	baseOnce sync.Once
+	baseErr  error
+)
+
+// applyBase gives the core its general settings, once per process: ApplyConfig patches
+// listeners with the stock tunnel and drops any others, so it runs with no listeners and
+// ours are patched separately in Apply; the way out and the DNS come with every Apply.
+func applyBase() error {
+	baseOnce.Do(func() {
+		base, _, err := buildConfig(nodeapi.DesiredState{}, proto.Cert{}, false)
+		if err != nil {
+			baseErr = err
+			return
+		}
+		cfg, err := executor.ParseWithBytes(base)
+		if err != nil {
+			baseErr = fmt.Errorf("base config: %w", err)
+			return
+		}
+		cfg.Listeners = map[string]C.InboundListener{}
+		executor.ApplyConfig(cfg, true)
+	})
+	return baseErr
 }
 
 // restoreCounters brings back what the slots had counted before the restart. Apply ran
@@ -317,6 +338,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		}
 	}
 	e.Reg.SetPools(pools)
+	e.Reg.SetInbounds(userListeners(st))
 
 	// The core gives a listener whose users alone changed the new users in place, so the
 	// connections of everyone else stay; only what it started anew counts as recreated.

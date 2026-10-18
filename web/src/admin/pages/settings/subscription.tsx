@@ -153,7 +153,7 @@ export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
 }
 
 // The variables the title and the announcement take (subs.titleValues fills them).
-const TITLE_VARS = ["brand", "name", "date", "days", "used", "left", "total", "devices"] as const;
+const TITLE_VARS = ["brand", "name", "tariff", "date", "days", "used", "left", "total", "devices"] as const;
 
 // The {words} of a text that are no variable: they stay as text in the apps, so this only
 // warns (same case-sensitive match as the panel's substitution).
@@ -163,6 +163,59 @@ function unknownVars(text: string): string[] {
     if (!(TITLE_VARS as readonly string[]).includes(m[1] ?? "")) found.add(m[0]);
   }
   return [...found];
+}
+
+// A subscription that cannot connect (its term or traffic over, turned off) gets one notice
+// in place of its servers: the built-in words by what happened, or the admin's own.
+export function InactiveCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const { draft: text, setDraft: setText, dirty, reset } = useDraft(s.sub_inactive_text);
+  const errors = fieldErrors(save.error);
+  const unknown = unknownVars(text);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    save.mutate({ sub_inactive_text: text.trim() });
+  };
+  return (
+    <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
+      <form onSubmit={submit} noValidate>
+        <div className="card-head">
+          <div>
+            <h2 className="card-title">{t("settings.inactive.title")}</h2>
+            <div className="card-sub">{t("settings.inactive.sub")}</div>
+          </div>
+        </div>
+        <SwitchRow
+          label={t("settings.inactive.on")}
+          sub={s.sub_inactive_server ? t("settings.inactive.onSub") : t("settings.inactive.offSub")}
+          checked={s.sub_inactive_server}
+          disabled={save.isPending}
+          onChange={(v) => save.mutate({ sub_inactive_server: v })}
+        />
+        {s.sub_inactive_server ? (
+          <>
+            <Field
+              label={t("settings.inactive.text")}
+              htmlFor="s-inactive-text"
+              hint={unknown.length ? `${t("settings.inactive.textHint")} ${t("settings.unknownVars", { vars: unknown.join(" ") })}` : t("settings.inactive.textHint")}
+              error={errors.sub_inactive_text}
+            >
+              <input id="s-inactive-text" className="input" value={text} onChange={(e) => setText(e.target.value)} maxLength={120} placeholder={t("settings.inactive.placeholder")} aria-invalid={!!errors.sub_inactive_text} />
+            </Field>
+            <div className="-mt-1 mb-3 flex flex-wrap items-center gap-2" role="group" aria-label={t("settings.titleVars")}>
+              <span className="text-xs text-[var(--ink-500)]">{t("settings.titleVars")}</span>
+              {TITLE_VARS.map((v) => (
+                <button key={v} type="button" className="chip-btn" title={t(`settings.titleVar.${v}`)} onClick={() => setText((x) => (x ? x.replace(/\s*$/, " ") : "") + `{${v}}`)}>
+                  <span className="mono">{`{${v}}`}</span>
+                </button>
+              ))}
+            </div>
+            <FormActions dirty={dirty} saving={save.isPending && save.variables?.sub_inactive_text !== undefined} onReset={reset} />
+          </>
+        ) : null}
+      </form>
+    </section>
+  );
 }
 
 // What the apps show besides the servers: an announcement for every app that reads one,

@@ -264,6 +264,7 @@ func (s *Syncer) desiredPin(ctx context.Context) (st nodeapi.DesiredState, pin s
 	st.Torrent = snap.torrent.Block()
 	st.Filters = snap.filters.State()
 	st.DNS = snap.exitDNS.State()
+	st.HTTPRedirect = n.HttpRedirect != 0 && n.Address != ""
 	if n.FairShare != 0 && n.ChannelMbps.Valid {
 		st.Shaping = &nodeapi.Shaping{ChannelMbps: int(n.ChannelMbps.Int64)}
 	}

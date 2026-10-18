@@ -49,7 +49,7 @@ export type AddonKind = (typeof ADDON_KINDS)[number];
 export type AddonsSearch = { tab?: (typeof ADDON_TABS)[number]; q?: string; kind?: AddonKind };
 
 /** Diagnostics: the logs, the server check with the restart, and (for support) the terminal. */
-export const DIAG_TABS = ["logs", "check", "reach", "terminal"] as const;
+export const DIAG_TABS = ["logs", "check", "reach", "geo", "terminal"] as const;
 export type DiagSearch = { tab?: (typeof DIAG_TABS)[number]; source?: string };
 
 /** The operator's entry page: `ended` after a link that stopped working under them. */

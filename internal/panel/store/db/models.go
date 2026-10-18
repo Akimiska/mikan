@@ -250,6 +250,7 @@ type Node struct {
 	ChannelMbps  sql.NullInt64
 	Capacity     sql.NullInt64
 	BalanceGroup string
+	HttpRedirect int64
 }
 
 type NodeAssignment struct {

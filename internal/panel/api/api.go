@@ -27,6 +27,7 @@ import (
 	"mikan/internal/panel/certcheck"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/ipgeo"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
@@ -142,6 +143,8 @@ type Deps struct {
 	DNS *dnscheck.Checker
 	// Reach checks ports of a node or any server from Russia (Globalping); nil: not offered.
 	Reach *reach.Client
+	// Geo asks public geo bases which country an address is in; nil: not offered.
+	Geo *ipgeo.Client
 	// DataDir is the panel's data directory, whose disk "Check server" looks at; "": none.
 	DataDir string
 	// Support keeps the support grants (internal/panel/support); nil in tests that do not
@@ -305,6 +308,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerUpdates()
 	h.registerNodes()
 	h.registerNodeChecks()
+	h.registerGeo()
 	h.registerTorrent()
 	h.registerFilters()
 	h.registerExitDNS()

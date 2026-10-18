@@ -31,7 +31,10 @@ var msk = time.FixedZone("MSK", 3*60*60)
 func titleValues(u db.User, grants int64, bound int64, cfg Config, now time.Time) map[string]string {
 	en := cfg.Lang == "en"
 	v := map[string]string{"brand": cfg.Brand, "name": u.Name, "date": "∞", "days": "∞",
-		"used": sizeText(u.UsedUp+u.UsedDown, en), "left": "∞", "total": "∞", "devices": devicesText(u, bound, en)}
+		"used": sizeText(u.UsedUp+u.UsedDown, en), "left": "∞", "total": "∞", "devices": devicesText(u, bound, en), "tariff": ""}
+	if u.TariffID.Valid {
+		v["tariff"] = cfg.Tariffs[u.TariffID.Int64]
+	}
 	if u.ExpiresAt.Valid {
 		exp := store.Time(u.ExpiresAt.Int64)
 		v["date"] = exp.In(msk).Format("02.01.2006")

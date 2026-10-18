@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -70,8 +69,12 @@ type NodeInfo struct {
 	FairShare bool `json:"fair_share" doc:"Канал ноды делится поровну между теми, кто сейчас качает"`
 	// BalanceGroup and Capacity: the node shares its group's clients out (domain.Balancer).
 	BalanceGroup string `json:"balance_group" doc:"Группа балансировки; пусто — вне групп"`
-	Capacity     *int64 `json:"capacity" doc:"Мест для клиентов в группе; null — без ограничения"`
-	ChannelMbps  *int64 `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
+	// HTTPRedirect: plain HTTP on port 80 gets 301 to https; RedirectError says why the
+	// node could not (another program holds the port).
+	HTTPRedirect  bool   `json:"http_redirect" doc:"HTTP на порту 80 получает 301 на https"`
+	RedirectError string `json:"redirect_error,omitempty" doc:"Почему нода не смогла занять порт 80"`
+	Capacity      *int64 `json:"capacity" doc:"Мест для клиентов в группе; null — без ограничения"`
+	ChannelMbps   *int64 `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
 }
 
 type nodesOutput struct{ Body []NodeInfo }
@@ -104,7 +107,8 @@ type patchNodeInput struct {
 		Enabled    *bool   `json:"enabled,omitempty"`
 		FairShare  *bool   `json:"fair_share,omitempty" doc:"Делить канал ноды поровну между теми, кто сейчас качает; нужен channel_mbps"`
 		// The node's channel each way, which the fair share splits.
-		ChannelMbps *int64 `json:"channel_mbps,omitempty" minimum:"1" maximum:"100000" doc:"Ширина канала ноды, Мбит/с в каждую сторону"`
+		ChannelMbps  *int64 `json:"channel_mbps,omitempty" minimum:"1" maximum:"100000" doc:"Ширина канала ноды, Мбит/с в каждую сторону"`
+		HTTPRedirect *bool  `json:"http_redirect,omitempty" doc:"Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели"`
 	}
 }
 
@@ -169,7 +173,8 @@ func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct
 func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {
 	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
 		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown",
-		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps), BalanceGroup: n.BalanceGroup, Capacity: store.Int64Ptr(n.Capacity)}
+		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps), BalanceGroup: n.BalanceGroup, Capacity: store.Int64Ptr(n.Capacity),
+		HTTPRedirect: n.HttpRedirect != 0}
 	if v.Local {
 		// The panel's own node is reached at the panel's address.
 		ep, _ := h.d.Settings.Endpoint(ctx)
@@ -216,6 +221,9 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 		if l.OK {
 			v.ListenersOK++
 		}
+	}
+	if r := hv.Health.Redirect; v.HTTPRedirect && r != nil && !r.OK {
+		v.RedirectError = r.Error
 	}
 	h.nodeUpdateView(ctx, &v, nodeupdate.Reported(hv.Health.Update))
 	return v
@@ -297,14 +305,14 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 		return nil, err
 	}
 	n, err := domain.UpdateNode(ctx, h.d.Store, in.ID, domain.NodePatch{Name: b.Name, PublicName: b.PublicName, Host: b.Host, Domain: b.Domain,
-		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, Rules: rules}, h.d.Now())
+		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, HTTPRedirect: b.HTTPRedirect, Rules: rules}, h.d.Now())
 	if err != nil {
 		return nil, h.nodeErr(err)
 	}
 	h.nodesChanged()
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "public_name": n.PublicName, "enabled": n.Enabled != 0,
-		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64})
+		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64, "http_redirect": n.HttpRedirect != 0})
 	return h.nodeInfo(ctx, n.ID)
 }
 
@@ -401,59 +409,15 @@ func (h *handlers) rekeyNode(ctx context.Context, in *nodeIDInput) (*nodeKeyOutp
 	return out, nil
 }
 
-// nodeUnused refuses to delete a node something still goes through: a cascade would
-// quietly go straight out, the bot would lose its way to Telegram. The details list
-// what to switch first.
+// nodeUnused refuses to delete the node the bot goes to Telegram through: it would lose
+// its way there. What else leaves through the node moves on first (domain.MoveExits).
 func (h *handlers) nodeUnused(ctx context.Context, q *db.Queries, id int64) error {
-	uses, err := domain.ExitUsesOf(ctx, q, id)
+	route, _, err := settings.Get[tgate.Route](ctx, settings.New(q), tgate.KeyRoute)
 	if err != nil {
 		return err
-	}
-	set := settings.New(q)
-	route, _, err := settings.Get[tgate.Route](ctx, set, tgate.KeyRoute)
-	if err != nil {
-		return err
-	}
-	panelHost, err := set.String(ctx, settings.KeyPublicHost)
-	if err != nil {
-		return err
-	}
-	nodes, err := q.ListNodes(ctx)
-	if err != nil {
-		return err
-	}
-	// A node shows by its name, else by its address: the panel's own node by the panel's.
-	labels := map[int64]string{}
-	for _, n := range nodes {
-		switch {
-		case n.Name != "":
-			labels[n.ID] = n.Name
-		case n.PublicHost != "":
-			labels[n.ID] = n.PublicHost
-		default:
-			labels[n.ID] = panelHost
-		}
-	}
-	var details []error
-	if len(uses.Inbounds) > 0 {
-		var list []string
-		for _, in := range uses.Inbounds {
-			list = append(list, in.Name+" ("+labels[in.NodeID]+")")
-		}
-		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_inbounds", Value: strings.Join(list, ", ")})
-	}
-	if len(uses.Relays) > 0 {
-		var list []string
-		for _, src := range uses.Relays {
-			list = append(list, labels[src])
-		}
-		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_relays", Value: strings.Join(list, ", ")})
 	}
 	if route.Mode == tgate.RouteNode && route.NodeID == id {
-		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_telegram"})
-	}
-	if len(details) > 0 {
-		return huma.Error409Conflict("node_in_use", details...)
+		return huma.Error409Conflict("node_in_use", &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_telegram"})
 	}
 	return nil
 }
@@ -466,7 +430,14 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 	if n.Address == "" {
 		return nil, huma.Error409Conflict("local_node")
 	}
+	var moved []domain.MovedExit
 	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		// What went out through the node goes through another one, or straight out: the
+		// cascade does not keep the node from going.
+		var err error
+		if moved, err = domain.MoveExits(ctx, q, n.ID, h.d.Now(), h.hostOf); err != nil {
+			return err
+		}
 		if err := h.nodeUnused(ctx, q, n.ID); err != nil {
 			return err
 		}
@@ -500,7 +471,7 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 	// that gets this id later (see forgetNode) inherits them.
 	h.forgetNode(n.ID)
 	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "node.delete", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name})
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.delete", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "exits_moved": moved})
 	return nil, nil
 }
 

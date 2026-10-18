@@ -315,9 +315,7 @@
       "exit_off": "That node is off",
       "exit_not_found": "Pick the exit node",
       "relay_no_port": "The exit node has no free port for the relay",
-      "node_in_use": "Traffic still goes through this node. Switch these first:",
-      "node_in_use_inbounds": "the protocols {value}",
-      "node_in_use_relays": "the cascade of the nodes {value}",
+      "node_in_use": "The node cannot go yet. Switch this first:",
       "node_in_use_telegram": "the bot's route to Telegram (the Telegram tab)",
       "bad_color": "That colour is not in the palette",
       "bad_folder": "The folder in the filter is not valid",
@@ -555,7 +553,10 @@
       "extra_devices_price": "Enter the device price in Stars or rubles",
       "campaign_code": "Tag: Latin letters, digits, _ and -, up to 32",
       "campaign_taken": "This tag is taken",
-      "balance_group": "Group: letters, digits, space, _ . -, up to 40"
+      "balance_group": "Group: letters, digits, space, _ . -, up to 40",
+      "geo_host": "A public IP or domain is needed",
+      "geo_dns": "The domain is not found in DNS",
+      "geo_unavailable": "The geo check is not available"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -1334,6 +1335,19 @@
       "noteOther": "The address for clients, the CDN and the path are copied as they are: if the other node has its own, fix them in the copy's settings.",
       "submit": "Copy",
       "done": "Copy “{name}” created on port {port}"
+    },
+    "exitBulk": {
+      "label": "Exit for the chosen protocols",
+      "selected": "{n} chosen",
+      "all": "Choose all",
+      "pick": "Choose “{name}”",
+      "clear": "Clear the choice",
+      "warp": "Through its node's WARP",
+      "doneNode": "{n, plural, one {# protocol goes} other {# protocols go}} out through {node}",
+      "done": {
+        "direct": "{n, plural, one {# protocol goes} other {# protocols go}} out directly",
+        "warp": "{n, plural, one {# protocol goes} other {# protocols go}} out through WARP"
+      }
     }
   },
   "settings": {
@@ -1771,7 +1785,8 @@
       "used": "Traffic used",
       "left": "Traffic left; ∞ without a limit",
       "total": "The traffic limit with packages; ∞ without one",
-      "devices": "Bound devices: 2/3; 2 without a limit; up to 3 at once for a limit counted online; ∞ when binding is off"
+      "devices": "Bound devices: 2/3; 2 without a limit; up to 3 at once for a limit counted online; ∞ when binding is off",
+      "tariff": "the tariff's name"
     },
     "page": {
       "tab": {
@@ -2070,6 +2085,32 @@
       "drawerTitle": "Own certificate for subscriptions",
       "drawerLead": "A certificate and key for {domain}, from certbot for example (fullchain.pem and privkey.pem). The panel serves it only to those who come to the subscription domain.",
       "clearText": "The subscription domain gets its certificate automatically again. Until it is issued, clients get yours."
+    },
+    "inactive": {
+      "title": "When a subscription does not work",
+      "sub": "What a client sees in the app once the term or traffic is over or the subscription is turned off",
+      "on": "Show a notice in place of the servers",
+      "onSub": "The client sees one entry that explains it in the app, not a list of servers that do not connect.",
+      "offSub": "Now the client sees every server but cannot connect to any.",
+      "text": "Own text",
+      "textHint": "Empty: the words by the reason: the term is over, the traffic is used up or the subscription is off. Variables work, up to 120 characters.",
+      "placeholder": "⛔ The subscription has ended — renew in @your_bot"
+    },
+    "site": {
+      "title": "Front page",
+      "sub": "What a stranger sees at the panel's address. A bare 404 gives the server away; an ordinary page makes it look like a site.",
+      "own": "data/panel/www holds files of your own: they are shown, the chosen template does not apply.",
+      "option": {
+        "none": "Empty (404)",
+        "maintenance": "Maintenance",
+        "cats": "Cat clicker"
+      },
+      "hint": {
+        "none": "A 404 without a page, as before.",
+        "maintenance": "A “Scheduled maintenance” page: the site is down for upkeep and back soon.",
+        "cats": "A small game: pet the cat and collect treats. Progress stays in the visitor's browser."
+      },
+      "open": "Open the front page"
     }
   },
   "deviceMode": {
@@ -2303,7 +2344,7 @@
     "rekeyText": "The old key stops working at once, and the server is disconnected until the mikan join command runs on it with the new key.",
     "rekeyConfirm": "Change key",
     "deleteTitle": "Delete node «{name}»?",
-    "deleteText": "The node stops serving clients and its protocols leave the subscriptions. To clean up the server itself, run mikan uninstall on it.",
+    "deleteText": "The node stops serving clients and its protocols leave the subscriptions. Protocols and cascades that went out through it move to another enabled node (not the panel's), or go direct when there is none. To clean up the server itself, run mikan uninstall on it.",
     "deleted": "Node deleted",
     "saved": "Node saved",
     "newTitle": "New node",
@@ -2343,7 +2384,10 @@
     "nameLocalHint": "Name your own node with a flag, e.g. «🇳🇱 Netherlands»: that is its group in the subscription, and the flag prefixes its protocols.",
     "cert": "Certificate",
     "certOwn": "own, until {until}",
-    "certButton": "Certificate"
+    "certButton": "Certificate",
+    "httpRedirect": "HTTP → HTTPS",
+    "httpRedirectHint": "The node takes port 80 and answers plain HTTP with a 301 to https, as a real site does. HTTP-01 certificates keep working. Leave it off if another web server needs port 80.",
+    "httpRedirectBusy": "Port 80 cannot be taken: {error}"
   },
   "telegram": {
     "subtitle": "A bot for subscription owners and a Mini App with the subscription page",
@@ -3013,7 +3057,13 @@
       "kv": "Storage",
       "kvText": "keeps its own data in the panel (256 MB by default)",
       "ui": "Pages",
-      "uiText": "adds its own pages to the admin panel"
+      "uiText": "adds its own pages to the admin panel",
+      "nodesRead": "Nodes: read",
+      "nodesReadText": "sees the nodes: name, whether on and working, version and connections; no addresses or keys",
+      "inboundsRead": "Protocols: read",
+      "inboundsReadText": "sees the nodes' protocols: type, port, SNI, whether on and working; no keys or secrets",
+      "inboundsWrite": "Protocols: change",
+      "inboundsWriteText": "may turn protocols on and off and change their port and SNI; each change goes to the audit log with the addon's name"
     },
     "approveTitle": "Install {name}?",
     "approveUpdateTitle": "Update {name}?",
@@ -3912,7 +3962,8 @@
       "logs": "Logs",
       "check": "Check",
       "terminal": "Terminal",
-      "reach": "Reachability"
+      "reach": "Reachability",
+      "geo": "Geo bases"
     },
     "server": "Server",
     "serverPanel": "Panel server",
@@ -4079,5 +4130,24 @@
     "capacity": "Places",
     "capacityHint": "How many clients the node takes; empty: no limit",
     "capacityErr": "Places: a whole number from 1"
+  },
+  "geo": {
+    "title": "Country in the geo bases",
+    "lead": "Sites and apps tell a client's country by geo bases, and the bases often disagree. A base that puts the IP in another country makes a service show the wrong region or refuse.",
+    "caveat": "The server's address goes to 10 public geo bases (MaxMind, ipinfo.io, IP2Location and others). How services such as YouTube or Netflix see the IP is not shown.",
+    "button": "Check the geo bases",
+    "running": "Asking the geo bases, up to 10 seconds…",
+    "agree": "All {n} bases put the address in {country}",
+    "disagree": "The bases disagree: {country} in {n} of {total}. The marked bases see another country",
+    "none": "No base answered. Try again later",
+    "error": {
+      "timeout": "timed out",
+      "limited": "rate limited",
+      "failed": "no answer"
+    },
+    "checkedAt": "Checked {ago}",
+    "cached": "a recent result is shown",
+    "emptyTitle": "No checks yet",
+    "emptyText": "Enter the server's IP or domain and press “Check the geo bases”."
   }
 }

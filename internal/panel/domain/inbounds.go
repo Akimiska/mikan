@@ -659,3 +659,48 @@ func FreeName(existing []db.Inbound, base string) string {
 	}
 	return name
 }
+
+// ExitConflictError is an inbound a bulk exit change cannot take, and why (a cascade
+// refusal, as with UseExit).
+type ExitConflictError struct {
+	Inbound string
+	Err     error
+}
+
+func (e *ExitConflictError) Error() string { return e.Inbound + ": " + e.Err.Error() }
+func (e *ExitConflictError) Unwrap() error { return e.Err }
+
+// SetExits sends the inbounds ids out the same way: straight out, through their node's
+// WARP or through node exit, all of them or none. An inbound on exit itself, or one whose
+// chain would come back, refuses the whole change by its name.
+func (s *Inbounds) SetExits(ctx context.Context, ids []int64, outbound string, exit int64) ([]db.Inbound, error) {
+	var rows []db.Inbound
+	err := s.st.Tx(ctx, func(q *db.Queries) error {
+		rows = rows[:0]
+		for _, id := range ids {
+			in, err := q.GetInbound(ctx, id)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrUnknownInbound
+			}
+			if err != nil {
+				return err
+			}
+			p := db.SetInboundExitParams{Outbound: outbound, ID: id}
+			if outbound == "node" {
+				if err := UseExit(ctx, q, in.NodeID, exit, s.now(), s.host); err != nil {
+					return &ExitConflictError{Inbound: in.Name, Err: err}
+				}
+				p.Outbound, p.ExitNodeID = "direct", sql.NullInt64{Int64: exit, Valid: true}
+			}
+			if err := q.SetInboundExit(ctx, p); err != nil {
+				return err
+			}
+			if in, err = q.GetInbound(ctx, id); err != nil {
+				return err
+			}
+			rows = append(rows, in)
+		}
+		return nil
+	})
+	return rows, err
+}

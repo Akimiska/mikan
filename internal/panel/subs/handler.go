@@ -65,6 +65,12 @@ type Config struct {
 	// Lang is the panel's default language, "" when unset: default group names and the
 	// notices in place of servers are in it.
 	Lang string
+	// InactiveServer: a subscription that cannot connect gets one notice in place of its
+	// servers (inactive.go), InactiveText its words ("": the built-in ones by state).
+	InactiveServer bool
+	InactiveText   string
+	// Tariffs names the tariffs, for {tariff} in the title and the notices.
+	Tariffs map[int64]string
 }
 
 // Binder hands devices their keys (domain.Devices).
@@ -268,7 +274,7 @@ func (h *Handler) serveProfile(w http.ResponseWriter, r *http.Request, u db.User
 	}
 	// The values are worked out only when a title or an announcement can use them.
 	var vars map[string]string
-	if cfg.Title != "" || cfg.Announce != "" {
+	if cfg.Title != "" || cfg.Announce != "" || cfg.InactiveServer && cfg.InactiveText != "" {
 		vars = titleValues(u, grants.Main(u.ID), h.boundFor(r.Context(), u, cfg), cfg, h.now())
 		if cfg.Announce != "" {
 			cfg.Announce = fillAppAnnounce(cfg.Announce, vars, r.UserAgent())
@@ -303,6 +309,10 @@ func (h *Handler) serveProfile(w http.ResponseWriter, r *http.Request, u db.User
 		return
 	case err != nil:
 		internalError(w)
+		return
+	}
+	if notice := inactiveNotice(cfg, domain.State(u, grants.Main(u.ID), h.now()), vars); notice != nil {
+		h.stub(w, u, cfg, format, notice)
 		return
 	}
 	prof, err := h.profile(r.Context(), u, cfg, slot, grants)
@@ -764,6 +774,10 @@ func (h *Handler) stub(w http.ResponseWriter, u db.User, cfg Config, format stri
 		if en {
 			name = "⛔ There are no servers this app can use — open the subscription link in a browser"
 		}
+	case errors.As(reason, new(*inactiveError)):
+		var ie *inactiveError
+		errors.As(reason, &ie)
+		name = ie.text
 	case errors.Is(reason, domain.ErrDeviceBanned):
 		name = "⛔ Устройство заблокировано"
 		if en {

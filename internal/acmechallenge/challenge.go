@@ -2,7 +2,8 @@
 // /.well-known/acme-challenge/<token>, on port 80 (or MIKAN_ACME_LISTEN). The port is taken
 // only while a challenge is pending and given back after it, so a web server of the admin's
 // may use it the rest of the time. The panel answers its own challenges with it; a node
-// answers the ones the panel orders for the node's address.
+// answers the ones the panel orders for the node's address. A node told to redirect plain
+// HTTP (SetRedirect) holds the port all the time and sends every other request to https.
 package acmechallenge
 
 import (
@@ -124,11 +125,12 @@ type Server struct {
 	// holder names the program on a port, "" when it cannot be told.
 	holder func(port int) string
 
-	mu     sync.Mutex
-	tokens map[string]entry
-	srv    *http.Server
-	ln     net.Listener
-	timer  *time.Timer
+	mu       sync.Mutex
+	tokens   map[string]entry
+	redirect bool // hold the port and answer 301 to https
+	srv      *http.Server
+	ln       net.Listener
+	timer    *time.Timer
 }
 
 // New answers challenges on addr (see ParseListen).
@@ -187,7 +189,35 @@ func (s *Server) Bound() string {
 	return s.ln.Addr().String()
 }
 
-// expire drops the tokens past their time and stops the server without any. Under s.mu.
+// SetRedirect holds the port for good and answers what is not a challenge with 301 to the
+// same host and path over https; off, the port is held only for challenges again. A
+// *BusyError when another program holds the port: the redirect is then off.
+func (s *Server) SetRedirect(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if on == s.redirect && (!on || s.srv != nil) {
+		return nil
+	}
+	s.redirect = on
+	if on && s.srv == nil {
+		if err := s.start(); err != nil {
+			s.redirect = false
+			return err
+		}
+	}
+	s.expire()
+	return nil
+}
+
+// Redirecting says whether plain HTTP is sent to https now.
+func (s *Server) Redirecting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.redirect && s.srv != nil
+}
+
+// expire drops the tokens past their time and stops the server without any (and without
+// the redirect). Under s.mu.
 func (s *Server) expire() {
 	now := s.now()
 	for t, e := range s.tokens {
@@ -195,7 +225,7 @@ func (s *Server) expire() {
 			delete(s.tokens, t)
 		}
 	}
-	if len(s.tokens) == 0 && s.srv != nil {
+	if len(s.tokens) == 0 && !s.redirect && s.srv != nil {
 		srv := s.srv
 		s.srv, s.ln = nil, nil
 		if s.timer != nil {
@@ -254,14 +284,19 @@ func (s *Server) start() error {
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	token, ok := strings.CutPrefix(r.URL.Path, Prefix)
+	s.mu.Lock()
+	e, found := s.tokens[token]
+	live := ok && found && s.now().Before(e.expires)
+	redirect := s.redirect
+	s.mu.Unlock()
+	if !live && redirect {
+		toHTTPS(w, r)
+		return
+	}
 	if !ok || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
 		http.NotFound(w, r)
 		return
 	}
-	s.mu.Lock()
-	e, found := s.tokens[token]
-	live := found && s.now().Before(e.expires)
-	s.mu.Unlock()
 	if !live {
 		http.NotFound(w, r)
 		return
@@ -270,11 +305,51 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(e.keyAuth))
 }
 
-// Close gives the port back and forgets every token.
+// toHTTPS answers 301 to the same host (without its port: https is 443) and path. The
+// host is the request's own: a name or an address, nothing that could lead elsewhere.
+func toHTTPS(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if !plainHost(host) || r.URL.Path == "" || r.URL.Path[0] != '/' || strings.HasPrefix(r.URL.Path, "//") {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	to := "https://" + host + r.URL.EscapedPath()
+	if r.URL.RawQuery != "" {
+		to += "?" + r.URL.RawQuery
+	}
+	w.Header().Set("Location", to)
+	w.WriteHeader(http.StatusMovedPermanently)
+}
+
+// plainHost: a DNS name or an IP address, nothing else.
+func plainHost(h string) bool {
+	h = strings.Trim(h, "[]")
+	if net.ParseIP(h) != nil {
+		return true
+	}
+	if h == "" || len(h) > 253 {
+		return false
+	}
+	for _, c := range []byte(h) {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// Close gives the port back and forgets every token and the redirect.
 func (s *Server) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	clear(s.tokens)
+	s.redirect = false
 	s.expire()
 }
 

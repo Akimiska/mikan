@@ -675,13 +675,13 @@ function KeyDrawer({ joined, onClose, actions }: { joined: Joined | null; onClos
 function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "" });
+  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false });
   const balance = useBalance();
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     if (node) {
       setForm({ name: node.name, public_name: node.public_name, host: node.host, domain: node.domain, enabled: node.enabled, fair_share: node.fair_share, channel: node.channel_mbps != null ? String(node.channel_mbps) : "",
-        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "" });
+        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect });
       setErrors({});
     }
   }, [node]);
@@ -721,6 +721,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
     if (!node.local) {
       body.host = form.host.trim();
       body.domain = form.domain.trim();
+      body.http_redirect = form.http_redirect;
     }
     const group = form.group.trim();
     const capacity = group && form.capacity.trim() ? Number(form.capacity) : undefined;
@@ -802,6 +803,22 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
           </Field>
           {form.fair_share && !node?.fair_share ? <p className="text-xs text-[var(--honey-600)]">{t("nodes.fairShareReconnect")}</p> : null}
         </div>
+        {node && !node.local ? (
+          <div className="dr-sec">
+            <div className="switch-row pt-0">
+              <div>
+                <div className="switch-row-title">{t("nodes.httpRedirect")}</div>
+                <div className="switch-row-sub">{t("nodes.httpRedirectHint")}</div>
+              </div>
+              <Switch checked={form.http_redirect} onChange={(v) => setForm((f) => ({ ...f, http_redirect: v }))} label={t("nodes.httpRedirect")} />
+            </div>
+            {node.http_redirect && node.redirect_error ? (
+              <p className="text-xs text-[var(--berry-600)]" role="alert">
+                {t("nodes.httpRedirectBusy", { error: node.redirect_error })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <BalanceFields
           group={form.group}
           capacity={form.capacity}

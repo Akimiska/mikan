@@ -157,6 +157,8 @@ func (h *handlers) registerInbounds() {
 	huma.Register(h.api, huma.Operation{OperationID: "validate-inbound", Method: http.MethodPost, Path: "/api/v1/inbounds/validate", Summary: "Проверить шаблон листенера без сохранения", Tags: []string{"inbounds"}}, h.validateInbound)
 	huma.Register(h.api, huma.Operation{OperationID: "copy-inbound", Method: http.MethodPost, Path: "/api/v1/inbounds/{id}/copy", Summary: "Скопировать подключение: те же настройки с новыми ключами, на ту же или другую ноду",
 		Tags: []string{"inbounds"}, DefaultStatus: http.StatusCreated}, h.copyInbound)
+	huma.Register(h.api, huma.Operation{OperationID: "set-inbound-exits", Method: http.MethodPost, Path: "/api/v1/inbounds/exit", Summary: "Выход в интернет для нескольких подключений разом: напрямую, через WARP или через ноду",
+		Tags: []string{"inbounds"}}, h.setInboundExits)
 	huma.Register(h.api, huma.Operation{OperationID: "update-inbound", Method: http.MethodPatch, Path: "/api/v1/inbounds/{id}", Summary: "Изменить подключение", Tags: []string{"inbounds"}}, h.updateInbound)
 	huma.Register(h.api, huma.Operation{OperationID: "delete-inbound", Method: http.MethodDelete, Path: "/api/v1/inbounds/{id}", Summary: "Удалить подключение", Tags: []string{"inbounds"}, DefaultStatus: http.StatusNoContent}, h.deleteInbound)
 }
@@ -305,6 +307,49 @@ type copyInboundInput struct {
 		Dest       string `json:"dest,omitempty" maxLength:"255" doc:"REALITY: другой сайт маскировки, host:port; пусто — тот же"`
 		ServerName string `json:"server_name,omitempty" maxLength:"253" doc:"SNI для dest, если это IP"`
 	}
+}
+
+type setExitsInput struct {
+	Body struct {
+		IDs        []int64 `json:"ids" minItems:"1" maxItems:"500" uniqueItems:"true" doc:"Подключения"`
+		Outbound   string  `json:"outbound" enum:"direct,warp,node" doc:"Выход в интернет: напрямую, через WARP своей ноды или через другую ноду"`
+		ExitNodeID int64   `json:"exit_node_id,omitempty" minimum:"1" doc:"Для outbound=node: через какую ноду"`
+	}
+}
+
+// setInboundExits sends several inbounds out the same way at once; one that cannot (it is
+// on the exit node itself, its chain would loop) stops all of them and is named.
+func (h *handlers) setInboundExits(ctx context.Context, in *setExitsInput) (*inboundsOutput, error) {
+	b := in.Body
+	if b.Outbound == "node" && b.ExitNodeID == 0 {
+		return nil, cascadeError(domain.ErrNotFound, "exit_node_id")
+	}
+	rows, err := h.d.Inbounds.SetExits(ctx, b.IDs, b.Outbound, b.ExitNodeID)
+	var conflict *domain.ExitConflictError
+	switch {
+	case errors.As(err, &conflict):
+		e := cascadeError(conflict.Err, "exit_node_id")
+		var se *huma.ErrorModel
+		if errors.As(e, &se) && len(se.Errors) > 0 {
+			se.Errors[0].Value = conflict.Inbound
+		}
+		return nil, e
+	case err != nil:
+		return nil, inboundError(err, false)
+	}
+	last, err := h.lastAuto(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &inboundsOutput{Body: make([]InboundView, 0, len(rows))}
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out.Body = append(out.Body, h.viewInbound(row, last))
+		names = append(names, row.Name)
+	}
+	h.d.Changes.SlotsChanged()
+	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.outbound_bulk", "inbound", "", map[string]any{"inbounds": names, "outbound": b.Outbound, "exit_node_id": b.ExitNodeID})
+	return out, nil
 }
 
 // copyInbound makes a new inbound from a set-up one: the same settings with keys of its own.

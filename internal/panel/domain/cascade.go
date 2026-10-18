@@ -199,3 +199,63 @@ func RelayUser(ctx context.Context, q *db.Queries, exit, src int64) (string, err
 
 // RelayUserName is how a source node shows in the relay's users.
 func RelayUserName(src int64) string { return "relay-" + strconv.FormatInt(src, 10) }
+
+// MovedExit is an inbound or a relay that went out through a node being deleted, and where
+// it goes now: another node (To), or straight out (To 0) when none is left.
+type MovedExit struct {
+	Inbound string `json:"inbound,omitempty"` // the inbound's name; "" for a relay
+	Node    int64  `json:"node"`              // the node the inbound or the relay is on
+	To      int64  `json:"to"`
+}
+
+// MoveExits sends what went out through node from out through another node instead: the
+// first remote node on, other than from, that the chain allows (CheckExit). The panel's own
+// node is never picked: it is the one the traffic came to leave. With none, straight out.
+// The new exit gets its relay and key as with UseExit.
+func MoveExits(ctx context.Context, q *db.Queries, from int64, now time.Time, host HostLookup) ([]MovedExit, error) {
+	uses, err := ExitUsesOf(ctx, q, from)
+	if err != nil || len(uses.Inbounds) == 0 && len(uses.Relays) == 0 {
+		return nil, err
+	}
+	nodes, err := q.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pick := func(src int64) (int64, error) {
+		for _, n := range nodes {
+			if n.ID == from || n.ID == src || n.Address == "" || n.Enabled == 0 {
+				continue
+			}
+			switch err := CheckExit(ctx, q, src, n.ID); {
+			case err == nil:
+				return n.ID, UseExit(ctx, q, src, n.ID, now, host)
+			case errors.Is(err, ErrExitCycle), errors.Is(err, ErrExitLong), errors.Is(err, ErrExitOff), errors.Is(err, ErrExitSelf):
+			default:
+				return 0, err
+			}
+		}
+		return 0, nil
+	}
+	var out []MovedExit
+	for _, in := range uses.Inbounds {
+		to, err := pick(in.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		if err := q.SetInboundExit(ctx, db.SetInboundExitParams{ExitNodeID: sql.NullInt64{Int64: to, Valid: to != 0}, Outbound: "direct", ID: in.ID}); err != nil {
+			return nil, err
+		}
+		out = append(out, MovedExit{Inbound: in.Name, Node: in.NodeID, To: to})
+	}
+	for _, src := range uses.Relays {
+		to, err := pick(src)
+		if err != nil {
+			return nil, err
+		}
+		if err := q.SetNodeRelayRoute(ctx, db.SetNodeRelayRouteParams{Outbound: "direct", ExitNodeID: sql.NullInt64{Int64: to, Valid: to != 0}, NodeID: src}); err != nil {
+			return nil, err
+		}
+		out = append(out, MovedExit{Node: src, To: to})
+	}
+	return out, nil
+}

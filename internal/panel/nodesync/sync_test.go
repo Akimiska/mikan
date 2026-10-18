@@ -304,6 +304,22 @@ func TestEachNodeGetsItsOwnInbounds(t *testing.T) {
 		t.Fatalf("all nodes get the same slots: %d and %d", len(a.Slots), len(b.Slots))
 	}
 
+	// The 301 on port 80 goes to a remote node that has it on; never to the panel's own,
+	// whose port 80 the panel's certificates use.
+	if a.HTTPRedirect || b.HTTPRedirect {
+		t.Fatal("the redirect is off by default")
+	}
+	for _, id := range []int64{local.id, remote.id} {
+		if err := st.Q.SetNodeHTTPRedirect(ctx, db.SetNodeHTTPRedirectParams{HttpRedirect: 1, ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, _ = local.desired(ctx)
+	b, _ = remote.desired(ctx)
+	if a.HTTPRedirect || !b.HTTPRedirect {
+		t.Fatalf("redirect: local %v, remote %v", a.HTTPRedirect, b.HTTPRedirect)
+	}
+
 	// A disabled node keeps its syncer but serves nothing.
 	n, _ := st.Q.GetNode(ctx, remote.id)
 	if _, err := st.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, PublicName: n.PublicName, Enabled: 0, ID: n.ID}); err != nil {

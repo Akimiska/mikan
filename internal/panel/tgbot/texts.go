@@ -37,13 +37,13 @@ type words struct {
 	menuApp string
 
 	// The shop.
-	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew string
-	notForSale, payUnavailable, tooManyInvoices, paidNew, paidRenew                                                 string
-	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                     string
-	trialPaid, trialTitle                                                                                           string // the priced trial: its button with the price, its title over the ways to pay
-	trialNotGiven                                                                                                   string // a paid trial not given, its money back by hand
-	pickTerm, priceFrom                                                                                             string
-	poolOut                                                                                                         string // a traffic pool used up
+	buy, buyAnother, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew string
+	notForSale, payUnavailable, tooManyInvoices, paidNew, paidRenew                                                             string
+	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                                 string
+	trialPaid, trialTitle                                                                                                       string // the priced trial: its button with the price, its title over the ways to pay
+	trialNotGiven                                                                                                               string // a paid trial not given, its money back by hand
+	pickTerm, priceFrom                                                                                                         string
+	poolOut                                                                                                                     string // a traffic pool used up
 
 	// The channel a subscriber must join, and the free plan.
 	channelJoin, channelCheck, channelNotYet             string
@@ -115,7 +115,7 @@ var ru = words{
 	commands: "Главное меню",
 	menuApp:  "Подписка",
 
-	buy: "🛒 Купить подписку", buyTitle: "Выберите тариф", renewTitle: "Продление подписки «%s»: выберите тариф",
+	buy: "🛒 Купить подписку", buyAnother: "➕ Ещё одна подписка", buyTitle: "Выберите тариф", renewTitle: "Продление подписки «%s»: выберите тариф",
 	payHow: "Как оплатить?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Картой или СБП — %s", payCrypto: "🪙 Криптовалютой — %s", payAddon: "💳 %s — %s", payButton: "Оплатить %s",
 	invoice:         "Счёт: «%s» — %s.\n\nОплатите по кнопке ниже: %s сразу после оплаты, бот пришлёт сообщение.",
 	payNew:          "подписка будет готова",
@@ -227,7 +227,7 @@ var en = words{
 	commands: "Main menu",
 	menuApp:  "Subscription",
 
-	buy: "🛒 Buy a subscription", buyTitle: "Pick a plan", renewTitle: "Renew subscription “%s”: pick a plan",
+	buy: "🛒 Buy a subscription", buyAnother: "➕ Another subscription", buyTitle: "Pick a plan", renewTitle: "Renew subscription “%s”: pick a plan",
 	payHow: "How would you like to pay?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Card or SBP — %s", payCrypto: "🪙 Crypto — %s", payAddon: "💳 %s — %s", payButton: "Pay %s",
 	invoice:         "Invoice: “%s” — %s.\n\nPay with the button below: the %s as soon as it is paid, and the bot will message you.",
 	payNew:          "subscription is ready",

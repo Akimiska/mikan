@@ -16,8 +16,9 @@ import { ImportCard, LegacyLinksCard } from "./import";
 import { ROUTING_PARTS, RoutingSection, type RoutingPart } from "./routing";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
 import { SupportCard } from "./support";
-import { AppsCard, DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
+import { AppsCard, DevicesCard, InactiveCard, SubPortCard, SubscriptionCard } from "./subscription";
 import { SubDomainCard } from "./sub-domain";
+import { SiteCard } from "./site";
 import { HappCard } from "./happ";
 import { SubPageSettings, type SubPagePart } from "./sub-page";
 
@@ -92,6 +93,7 @@ export function SettingsPage() {
                   <AppsCard s={s} />
                   <HappCard s={s} />
                   <SubscriptionCard s={s} />
+                  <InactiveCard s={s} />
                   <SubDomainCard s={s} />
                   <SubPortCard s={s} />
                 </>
@@ -109,6 +111,7 @@ export function SettingsPage() {
                     <TwoFactorCard />
                     <SessionsCard />
                     <AccessCard s={s} />
+                    <SiteCard s={s} />
                     <CertificateCard s={s} />
                     <ApiCard />
                   </>

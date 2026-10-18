@@ -232,3 +232,60 @@ func TestServerNameFromItsAnswer(t *testing.T) {
 
 // Listening says whether the port is held now.
 func (s *Server) Listening() bool { return s.Bound() != "" }
+
+// A node told to redirect holds port 80 for good: a challenge is still answered, the rest
+// goes to the same host and path over https, and off gives the port back.
+func TestRedirect(t *testing.T) {
+	s := New("127.0.0.1:0")
+	var addr string
+	s.listen = func(network, a string) (net.Listener, error) {
+		ln, err := net.Listen(network, a)
+		if err == nil {
+			addr = ln.Addr().String()
+		}
+		return ln, err
+	}
+	if err := s.SetRedirect(true); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Redirecting() {
+		t.Fatal("not redirecting")
+	}
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	ask := func(host, path string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+path, nil)
+		req.Host = host
+		resp, err := noFollow.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode, resp.Header.Get("Location")
+	}
+	if code, to := ask("node.example.com", "/a/b?x=1"); code != http.StatusMovedPermanently || to != "https://node.example.com/a/b?x=1" {
+		t.Fatalf("redirect: %d %q", code, to)
+	}
+	if code, to := ask("203.0.113.5:80", "/"); code != http.StatusMovedPermanently || to != "https://203.0.113.5/" {
+		t.Fatalf("by address: %d %q", code, to)
+	}
+	if code, _ := ask("evil.com/x", "/"); code != http.StatusBadRequest {
+		t.Fatalf("a host that is no host: %d", code)
+	}
+	if err := s.Present(token, keyAuth); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := get(t, addr, Prefix+token); code != 200 || body != keyAuth {
+		t.Fatalf("token while redirecting: %d %q", code, body)
+	}
+	s.CleanUp(token)
+	if !s.Listening() {
+		t.Fatal("the redirect lost the port with the last token")
+	}
+	if err := s.SetRedirect(false); err != nil {
+		t.Fatal(err)
+	}
+	if s.Listening() || s.Redirecting() {
+		t.Fatal("still holds the port")
+	}
+}

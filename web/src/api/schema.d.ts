@@ -660,6 +660,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/inbounds/exit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Выход в интернет для нескольких подключений разом: напрямую, через WARP или через ноду */
+        post: operations["set-inbound-exits"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/inbounds/scan-targets": {
         parameters: {
             query?: never;
@@ -1042,6 +1059,26 @@ export interface paths {
          * @description То же для сервера удалённой ноды; для своей ноды панели это сервер панели. Оператору поддержки с доступом «просмотр» разрешён.
          */
         post: operations["doctor-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{id}/geo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Страна IP ноды по геобазам
+         * @description Адрес ноды уходит в публичные геобазы (MaxMind, ipinfo.io, IP2Location и другие); каждая отвечает, в какой стране он для неё.
+         */
+        post: operations["check-node-geo"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1932,6 +1969,26 @@ export interface paths {
          * @description Хост запускает mikan doctor и отдаёт отчёт (Docker, контейнеры, порты, файрвол, часы, DNS, GitHub, диск, память); ждём до минуты. Нужна команда mikan 0.5.1.1 или новее на сервере: mikan update. Оператору поддержки с доступом «просмотр» разрешён: отчёт ничего не меняет.
          */
         post: operations["doctor-server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/geo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Страна IP любого сервера по геобазам
+         * @description Адрес сервера уходит в публичные геобазы.
+         */
+        post: operations["check-geo"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3490,6 +3547,28 @@ export interface components {
              */
             users: number;
         };
+        GeoAnswer: {
+            /** @description ISO 3166-1 alpha-2 */
+            country?: string;
+            /** @enum {string} */
+            error?: "timeout" | "limited" | "failed";
+            service: string;
+        };
+        GeoCheck: {
+            /** @description Все ответившие базы согласны */
+            agree: boolean;
+            answers: components["schemas"]["GeoAnswer"][];
+            /** Format: date-time */
+            at: string;
+            cached: boolean;
+            /** @description Что говорит большинство баз */
+            country?: string;
+            ip?: string;
+        };
+        GeoInputBody: {
+            /** @description IP или домен сервера */
+            host: string;
+        };
         Goal: {
             about?: {
                 [key: string]: string;
@@ -4071,6 +4150,8 @@ export interface components {
             hello?: components["schemas"]["NodeHello"];
             /** @description Адрес для клиентов */
             host: string;
+            /** @description HTTP на порту 80 получает 301 на https */
+            http_redirect: boolean;
             /** Format: int64 */
             id: number;
             /** Format: int64 */
@@ -4099,6 +4180,8 @@ export interface components {
             proc_cpu_percent?: number;
             /** @description Публичное имя для канала состояния; пустое — нода скрыта из списка */
             public_name: string;
+            /** @description Почему нода не смогла занять порт 80 */
+            redirect_error?: string;
             /** @enum {string} */
             status: "ok" | "error" | "unknown";
             tls?: components["schemas"]["NodeTLSView"];
@@ -4532,6 +4615,8 @@ export interface components {
             /** @description Делить канал ноды поровну между теми, кто сейчас качает; нужен channel_mbps */
             fair_share?: boolean;
             host?: string;
+            /** @description Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели */
+            http_redirect?: boolean;
             name?: string;
             /** @description Публичное имя ноды; пустое — не публиковать её в канале */
             public_name?: string;
@@ -4606,6 +4691,8 @@ export interface components {
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
+            /** @enum {string} */
+            site_template?: "" | "maintenance" | "cats";
             /** @description До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов */
             sub_announce?: string;
             /** @description https://… или tg://… */
@@ -4614,6 +4701,8 @@ export interface components {
             sub_domain?: string;
             sub_group_auto?: string;
             sub_group_main?: string;
+            sub_inactive_server?: boolean;
+            sub_inactive_text?: string;
             /**
              * Format: int64
              * @description Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать
@@ -5271,6 +5360,20 @@ export interface components {
             last_seen_at: string;
             user_agent: string;
         };
+        SetExitsInputBody: {
+            /**
+             * Format: int64
+             * @description Для outbound=node: через какую ноду
+             */
+            exit_node_id?: number;
+            /** @description Подключения */
+            ids: number[];
+            /**
+             * @description Выход в интернет: напрямую, через WARP своей ноды или через другую ноду
+             * @enum {string}
+             */
+            outbound: "direct" | "warp" | "node";
+        };
         SetNodeBalanceInputBody: {
             /**
              * Format: int64
@@ -5344,6 +5447,13 @@ export interface components {
             quiet_hour_utc: number;
             /** @description Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы */
             rule_targets: string[];
+            /** @description В data/panel/www есть своя страница: шаблон не действует */
+            site_own: boolean;
+            /**
+             * @description Первая страница по адресу панели для посторонних: пусто — ответ 404, maintenance — технические работы, cats — котики-кликер
+             * @enum {string}
+             */
+            site_template: "" | "maintenance" | "cats";
             /** @description Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title */
             sub_announce: string;
             /** @description Куда ведёт нажатие на объявление */
@@ -5357,6 +5467,10 @@ export interface components {
             sub_group_auto: string;
             /** @description Главная группа в Clash-приложениях */
             sub_group_main: string;
+            /** @description Подписка, которая не может подключиться (кончился срок или трафик, отключена), получает вместо серверов одну запись с объяснением */
+            sub_inactive_server: boolean;
+            /** @description Свой текст этой записи; пусто — свой по причине. Переменные как в названии подписки */
+            sub_inactive_text: string;
             /**
              * Format: int64
              * @description Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае
@@ -7835,6 +7949,39 @@ export interface operations {
             };
         };
     };
+    "set-inbound-exits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetExitsInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundView"][];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "scan-targets": {
         parameters: {
             query?: {
@@ -8685,6 +8832,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostReport"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "check-node-geo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCheck"];
                 };
             };
             /** @description Error */
@@ -10788,6 +10966,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HostReport"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "check-geo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeoInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeoCheck"];
                 };
             };
             /** @description Error */

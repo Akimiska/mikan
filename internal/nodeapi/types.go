@@ -42,6 +42,9 @@ type DesiredState struct {
 	// DNS is how the node names the sites users reach (ExitDNS); nil: as before it, the
 	// address the user's device sent and the host's resolver. Nodes older than it ignore it.
 	DNS *ExitDNS `json:"dns,omitempty"`
+	// HTTPRedirect: the node holds port 80 (or MIKAN_ACME_LISTEN) for good and answers plain
+	// HTTP with 301 to https, the ACME challenges as before. Nodes older than it ignore it.
+	HTTPRedirect bool `json:"http_redirect,omitempty"`
 }
 
 // Shaping is the fair share of a node: ChannelMbps (each way) is split evenly between the
@@ -188,6 +191,16 @@ type Health struct {
 	// Time is the node's clock as it answered: the panel holds it against its own and warns
 	// of a skew. Older nodes send none.
 	Time time.Time `json:"time,omitzero"`
+	// Redirect is how DesiredState.HTTPRedirect went; nil while it is off or the node is
+	// older than it.
+	Redirect *RedirectStatus `json:"http_redirect,omitempty"`
+}
+
+// RedirectStatus is the node's 301 on port 80: Error says why it is not on (another program
+// holds the port).
+type RedirectStatus struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
 }
 
 // HostPorts are the ports something listens on at the node's server: TCP sockets in the

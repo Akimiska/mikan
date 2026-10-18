@@ -92,6 +92,13 @@ const (
 	KeyAnnounceURL = "sub_announce_url"
 	// KeySubTitle is the profile's name in the apps (subs.Config.Title); empty: the brand.
 	KeySubTitle = "sub_title"
+	// A subscription that cannot connect gets one notice in place of its servers
+	// (subs.Config.InactiveServer), with the admin's words or the built-in ones.
+	KeyInactiveServer = "sub_inactive_server"
+	// KeySiteTemplate is the built-in front page a stranger sees at the panel's address
+	// (server.Templates); "" for none.
+	KeySiteTemplate = "site_template"
+	KeyInactiveText = "sub_inactive_text"
 	// App branding: the brand, logo and accent colour go to the apps that read operator
 	// headers (subs.OperatorHeaders); off by default.
 	KeyAppBranding = "app_branding"
@@ -128,18 +135,19 @@ type Switch struct {
 
 // The panel's switches.
 var (
-	AutoPort      = Switch{KeyAutoPort, true}
-	AutoSNI       = Switch{KeyAutoSNI, true}
-	AnyPort       = Switch{KeyAnyPort, false}
-	WideScan      = Switch{KeyWideScan, false}
-	DeviceBinding = Switch{KeyDeviceBinding, true}
-	RequireHWID   = Switch{KeyRequireHWID, false}
-	AutoUpdate    = Switch{KeyAutoUpdate, false}
-	NodesFollow   = Switch{KeyNodesFollow, true}
-	ShowGoals     = Switch{KeyShowGoals, true}
-	AppBranding   = Switch{KeyAppBranding, false}
-	HappHide      = Switch{KeyHappHide, false}
-	SupportAccess = Switch{KeySupportAccess, true}
+	AutoPort       = Switch{KeyAutoPort, true}
+	AutoSNI        = Switch{KeyAutoSNI, true}
+	AnyPort        = Switch{KeyAnyPort, false}
+	WideScan       = Switch{KeyWideScan, false}
+	DeviceBinding  = Switch{KeyDeviceBinding, true}
+	RequireHWID    = Switch{KeyRequireHWID, false}
+	AutoUpdate     = Switch{KeyAutoUpdate, false}
+	NodesFollow    = Switch{KeyNodesFollow, true}
+	ShowGoals      = Switch{KeyShowGoals, true}
+	AppBranding    = Switch{KeyAppBranding, false}
+	HappHide       = Switch{KeyHappHide, false}
+	InactiveServer = Switch{KeyInactiveServer, false}
+	SupportAccess  = Switch{KeySupportAccess, true}
 )
 
 // ValidLang says whether s is a language of the panel.

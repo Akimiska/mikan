@@ -280,6 +280,7 @@
   .utable tbody tr { cursor: pointer; transition: background-color 0.15s; }
   .utable tbody tr:hover td { background: var(--surface-soft); }
   .utable tbody tr.sel td { background: var(--mikan-50); }
+  .card.sel { box-shadow: 0 0 0 2px var(--mikan-500); }
   .utable tbody tr:has(.row-link:focus-visible) td { background: var(--surface-soft); }
   .cv-auto { content-visibility: auto; contain-intrinsic-size: auto 128px; }
   .row-link { color: inherit; }

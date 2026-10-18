@@ -77,6 +77,7 @@ type Engine struct {
 	// Challenge answers the ACME challenges the panel orders for the node's address, on
 	// port 80 while one is pending.
 	Challenge *acmechallenge.Server
+	redirect  atomic.Pointer[nodeapi.RedirectStatus] // the 301 on port 80; nil: off
 
 	mu         sync.Mutex // serializes Apply
 	savedShape string     // policyShape of the policies in the state file
@@ -331,6 +332,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	e.Reg.SetShared(sharedListeners(st))
 	e.Reg.SetTorrent(st.Torrent)
 	e.Reg.SetIngress(st.Filters)
+	e.setRedirect(st.HTTPRedirect)
 	pools := map[string]string{}
 	for _, in := range st.Inbounds {
 		if in.Pool != "" {
@@ -466,7 +468,24 @@ func (e *Engine) Health() nodeapi.Health {
 	return nodeapi.Health{
 		Version: e.version, Core: coreVersion(), Revision: rev, StartedAt: e.started,
 		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(), Update: e.UpdateStatus(), Host: e.host.get(), Time: time.Now(),
+		Redirect: e.redirect.Load(),
 	}
+}
+
+// setRedirect turns the 301 on port 80 on or off and keeps how it went for Health. A port
+// another program holds is tried again at the next Apply.
+func (e *Engine) setRedirect(on bool) {
+	if !on {
+		_ = e.Challenge.SetRedirect(false)
+		e.redirect.Store(nil)
+		return
+	}
+	st := &nodeapi.RedirectStatus{OK: true}
+	if err := e.Challenge.SetRedirect(true); err != nil {
+		st = &nodeapi.RedirectStatus{Error: err.Error()}
+		e.log.Warn("http redirect", "err", err)
+	}
+	e.redirect.Store(st)
 }
 
 // shownState is the last Apply as Health reports it: the listeners sorted by name.

@@ -12,7 +12,7 @@ import (
 
 // titleVars are the variables the profile title and the announcement may hold, the same way
 // the bot's texts do: {brand} · {name} · until {date}. Any other {word} stays as text.
-var titleVars = []string{"brand", "name", "date", "days", "used", "left", "total", "devices"}
+var titleVars = []string{"brand", "name", "tariff", "date", "days", "used", "left", "total", "devices"}
 
 func TestTitleValuesHoldTitleVars(t *testing.T) {
 	vars := titleValues(db.User{}, 0, -1, Config{}, time.Now())

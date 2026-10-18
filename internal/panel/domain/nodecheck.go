@@ -139,7 +139,10 @@ type NodePatch struct {
 	Enabled     *bool
 	FairShare   *bool
 	ChannelMbps *int64
-	Rules       NodeRules
+	// HTTPRedirect: plain HTTP on port 80 gets 301 to https. Not on the panel's own node,
+	// whose port 80 the panel's certificates use.
+	HTTPRedirect *bool
+	Rules        NodeRules
 }
 
 // UpdateNode changes the fields p names and returns the node. Errors: ErrUnknownNode,
@@ -169,7 +172,7 @@ func UpdateNode(ctx context.Context, st *store.Store, id int64, p NodePatch, now
 			return db.Node{}, err
 		}
 	}
-	if cur.Address == "" && (p.Host != nil || p.Domain != nil) {
+	if cur.Address == "" && (p.Host != nil || p.Domain != nil || p.HTTPRedirect != nil && *p.HTTPRedirect) {
 		return db.Node{}, ErrLocalNode
 	}
 	if p.Host != nil {
@@ -228,6 +231,11 @@ func UpdateNode(ctx context.Context, st *store.Store, id int64, p NodePatch, now
 		}
 		if p.FairShare != nil {
 			cur.FairShare = Flag(*p.FairShare)
+		}
+		if p.HTTPRedirect != nil {
+			if err := q.SetNodeHTTPRedirect(ctx, db.SetNodeHTTPRedirectParams{HttpRedirect: Flag(*p.HTTPRedirect), UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
+				return err
+			}
 		}
 		if p.FairShare != nil || p.ChannelMbps != nil {
 			if cur.FairShare != 0 && !cur.ChannelMbps.Valid {

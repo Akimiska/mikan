@@ -157,6 +157,9 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			}
 			rows = append(rows, []tgate.Button{{Text: mark + s.Name, CallbackData: "u:" + strconv.FormatInt(s.ID, 10)}})
 		}
+		if len(list) < tgate.MaxLinks && b.canBuyNew(ctx) {
+			rows = append(rows, []tgate.Button{{Text: w.buyAnother, CallbackData: "b"}})
+		}
 		return w.switchTitle, &tgate.Keyboard{InlineKeyboard: append(rows, back)}
 	}
 	return withNotice(render(pick(cfg.Texts.Main, w.main), vars)), b.menu(ctx, cfg, w, chat, len(list))
@@ -239,7 +242,9 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, chat int64, subs i
 	if url := b.miniAppURL(ctx, cfg); url != "" && cfg.PromoButton {
 		rows = append(rows, []tgate.Button{{Text: w.promo, WebApp: &tgate.WebApp{URL: url + "#promocodes"}}})
 	}
-	if subs > 1 {
+	// The list of subscriptions is where another one is bought too: it shows with one
+	// subscription as soon as a second may be bought.
+	if subs > 1 || subs == 1 && subs < tgate.MaxLinks && b.canBuyNew(ctx) {
 		rows = append(rows, []tgate.Button{{Text: fmt.Sprintf("%s (%d)", w.subscriptions, subs), CallbackData: "w"}})
 	}
 	return &tgate.Keyboard{InlineKeyboard: rows}

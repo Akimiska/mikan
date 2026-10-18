@@ -30,6 +30,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
 	"mikan/internal/panel/infraalerts"
+	"mikan/internal/panel/ipgeo"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
@@ -143,6 +144,8 @@ type Options struct {
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// Reach checks ports from Russia (Globalping); nil: the check is not offered (tests).
 	Reach *reach.Client
+	// Geo asks the geo bases where an address is; nil: the check is not offered (tests).
+	Geo *ipgeo.Client
 	// Logs holds the last lines of the panel's log for the Diagnostics page; nil: none.
 	Logs *logbuf.Buffer
 }
@@ -272,7 +275,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	addonPages := addonpages.New(addonpages.Deps{Addons: p.Addons, Store: st.Q, Log: o.Log, Now: o.Now})
 	deps.Pages = addonPages
 	deps.DNS = o.DNS
-	deps.Reach = o.Reach
+	deps.Reach, deps.Geo = o.Reach, o.Geo
 	deps.DataDir = o.DataDir
 	deps.Logs, deps.Host = o.Logs, hostchan.New(o.DataDir)
 	promos := promo.New(st, o.Now)
@@ -424,6 +427,20 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if cfg.Happ.HideSettings, err = set.On(ctx, settings.HappHide); err != nil {
 			return subs.Config{}, err
 		}
+		if cfg.InactiveServer, err = set.On(ctx, settings.InactiveServer); err != nil {
+			return subs.Config{}, err
+		}
+		if cfg.InactiveText, err = set.String(ctx, settings.KeyInactiveText); err != nil {
+			return subs.Config{}, err
+		}
+		tariffs, err := st.Q.ListTariffs(ctx)
+		if err != nil {
+			return subs.Config{}, err
+		}
+		cfg.Tariffs = make(map[int64]string, len(tariffs))
+		for _, t := range tariffs {
+			cfg.Tariffs[t.ID] = t.Name
+		}
 		for key, dst := range map[string]*string{settings.KeySubTitle: &cfg.Title, settings.KeyAnnounce: &cfg.Announce, settings.KeyAnnounceURL: &cfg.AnnounceURL,
 			settings.KeyBrandAccent: &cfg.App.Accent, settings.KeyBrandLogo: &cfg.App.LogoURL,
 			settings.KeyHappRouting: &cfg.Happ.Routing, settings.KeyHappProvider: &cfg.Happ.ProviderID, settings.KeyHappCrypt: &cfg.Happ.Crypt} {
@@ -501,7 +518,10 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.server = server.New(adminMux, subHandler)
 	p.server.SetLegacy(subHandler.Legacy())
 	if o.DataDir != "" {
-		p.server.SetSite(server.OwnSite(filepath.Join(o.DataDir, "www")))
+		set := settings.New(st.Q)
+		p.server.SetSite(server.OwnSite(filepath.Join(o.DataDir, "www"), settingsCached(func(ctx context.Context) (string, error) {
+			return set.String(ctx, settings.KeySiteTemplate)
+		})))
 	}
 	p.server.SetHSTS(o.HSTS)
 	if p.Nodes != nil && o.PanelCert != nil {
@@ -665,5 +685,29 @@ func every(ctx context.Context, d time.Duration, fn func()) {
 		case <-t.C:
 			fn()
 		}
+	}
+}
+
+// settingsCached is a setting read again only once this process changed a setting
+// (settings.Generation) or a minute went by (another process, the CLI): it is asked on
+// every request a stranger makes.
+func settingsCached(read func(context.Context) (string, error)) func() string {
+	var (
+		mu   sync.Mutex
+		gen  uint64
+		at   time.Time
+		have bool
+		v    string
+	)
+	return func() string {
+		g := settings.Generation()
+		mu.Lock()
+		defer mu.Unlock()
+		if !have || g != gen || time.Since(at) > time.Minute {
+			if s, err := read(context.Background()); err == nil {
+				v, gen, at, have = s, g, time.Now(), true
+			}
+		}
+		return v
 	}
 }

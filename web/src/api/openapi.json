@@ -2541,6 +2541,80 @@
         ],
         "type": "object"
       },
+      "GeoAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "description": "ISO 3166-1 alpha-2",
+            "type": "string"
+          },
+          "error": {
+            "enum": [
+              "timeout",
+              "limited",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "type": "object"
+      },
+      "GeoCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "agree": {
+            "description": "Все ответившие базы согласны",
+            "type": "boolean"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/GeoAnswer"
+            },
+            "type": "array"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cached": {
+            "type": "boolean"
+          },
+          "country": {
+            "description": "Что говорит большинство баз",
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "cached",
+          "answers",
+          "agree"
+        ],
+        "type": "object"
+      },
+      "GeoInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "description": "IP или домен сервера",
+            "maxLength": 253,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "type": "object"
+      },
       "Goal": {
         "additionalProperties": false,
         "properties": {
@@ -4112,6 +4186,10 @@
             "description": "Адрес для клиентов",
             "type": "string"
           },
+          "http_redirect": {
+            "description": "HTTP на порту 80 получает 301 на https",
+            "type": "boolean"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -4160,6 +4238,10 @@
             "description": "Публичное имя для канала состояния; пустое — нода скрыта из списка",
             "type": "string"
           },
+          "redirect_error": {
+            "description": "Почему нода не смогла занять порт 80",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "ok",
@@ -4206,6 +4288,7 @@
           "can_update",
           "fair_share",
           "balance_group",
+          "http_redirect",
           "capacity",
           "channel_mbps"
         ],
@@ -5409,6 +5492,10 @@
             "maxLength": 253,
             "type": "string"
           },
+          "http_redirect": {
+            "description": "Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели",
+            "type": "boolean"
+          },
           "name": {
             "maxLength": 200,
             "type": "string"
@@ -5587,6 +5674,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "site_template": {
+            "enum": [
+              "",
+              "maintenance",
+              "cats"
+            ],
+            "type": "string"
+          },
           "sub_announce": {
             "description": "До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов",
             "maxLength": 1000,
@@ -5608,6 +5703,13 @@
           },
           "sub_group_main": {
             "maxLength": 200,
+            "type": "string"
+          },
+          "sub_inactive_server": {
+            "type": "boolean"
+          },
+          "sub_inactive_text": {
+            "maxLength": 120,
             "type": "string"
           },
           "sub_port": {
@@ -7445,6 +7547,42 @@
         ],
         "type": "object"
       },
+      "SetExitsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "exit_node_id": {
+            "description": "Для outbound=node: через какую ноду",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "ids": {
+            "description": "Подключения",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "outbound": {
+            "description": "Выход в интернет: напрямую, через WARP своей ноды или через другую ноду",
+            "enum": [
+              "direct",
+              "warp",
+              "node"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ids",
+          "outbound"
+        ],
+        "type": "object"
+      },
       "SetNodeBalanceInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -7595,6 +7733,19 @@
             },
             "type": "array"
           },
+          "site_own": {
+            "description": "В data/panel/www есть своя страница: шаблон не действует",
+            "type": "boolean"
+          },
+          "site_template": {
+            "description": "Первая страница по адресу панели для посторонних: пусто — ответ 404, maintenance — технические работы, cats — котики-кликер",
+            "enum": [
+              "",
+              "maintenance",
+              "cats"
+            ],
+            "type": "string"
+          },
           "sub_announce": {
             "description": "Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title",
             "type": "string"
@@ -7620,6 +7771,14 @@
           },
           "sub_group_main": {
             "description": "Главная группа в Clash-приложениях",
+            "type": "string"
+          },
+          "sub_inactive_server": {
+            "description": "Подписка, которая не может подключиться (кончился срок или трафик, отключена), получает вместо серверов одну запись с объяснением",
+            "type": "boolean"
+          },
+          "sub_inactive_text": {
+            "description": "Свой текст этой записи; пусто — свой по причине. Переменные как в названии подписки",
             "type": "string"
           },
           "sub_port": {
@@ -7675,6 +7834,10 @@
           "sub_announce",
           "sub_announce_url",
           "app_branding",
+          "sub_inactive_server",
+          "sub_inactive_text",
+          "site_template",
+          "site_own",
           "brand_accent",
           "brand_logo_url",
           "public_host",
@@ -12014,6 +12177,50 @@
         ]
       }
     },
+    "/api/v1/inbounds/exit": {
+      "post": {
+        "operationId": "set-inbound-exits",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetExitsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InboundView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Выход в интернет для нескольких подключений разом: напрямую, через WARP или через ноду",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
     "/api/v1/inbounds/scan-targets": {
       "post": {
         "operationId": "scan-targets",
@@ -13187,6 +13394,50 @@
           }
         },
         "summary": "mikan doctor на сервере ноды",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/nodes/{id}/geo": {
+      "post": {
+        "description": "Адрес ноды уходит в публичные геобазы (MaxMind, ipinfo.io, IP2Location и другие); каждая отвечает, в какой стране он для неё.",
+        "operationId": "check-node-geo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoCheck"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Страна IP ноды по геобазам",
         "tags": [
           "node"
         ]
@@ -15996,6 +16247,48 @@
           }
         },
         "summary": "mikan doctor на сервере панели",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/system/geo": {
+      "post": {
+        "description": "Адрес сервера уходит в публичные геобазы.",
+        "operationId": "check-geo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeoInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoCheck"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Страна IP любого сервера по геобазам",
         "tags": [
           "settings"
         ]

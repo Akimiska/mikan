@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // Protocols of mihomo's newer cores; only Clash apps (mihomo) and a few others speak them.
@@ -208,19 +209,24 @@ func (c *clientBuilder) finishExtra() (Client, bool) {
 // Needs is what a client app must support to use an inbound.
 type Needs struct {
 	Type       string // listener type
-	Transport  string // vless, vmess, trojan: tcp, xhttp, grpc or ws
+	Transport  string // vless, trojan: tcp, xhttp, grpc or ws
 	Encryption bool   // VLESS Encryption (post-quantum)
 	Gecko      bool   // Hysteria2 with Gecko obfuscation
+	GetUplink  bool   // XHTTP uploading with GET (for CDNs that drop POST)
 }
 
 // NeedsOf describes a template for choosing which apps get it.
 func NeedsOf(t Template) Needs {
 	n := Needs{Type: t.Type()}
 	switch n.Type {
-	case "vless", "vmess", "trojan":
+	case "vless", "trojan":
 		n.Transport = transport(t)
 	}
 	n.Encryption = n.Type == "vless" && t.hasEncryption()
 	n.Gecko = n.Type == "hysteria2" && t.str("obfs") == ObfsGecko
+	if x := t.section("xhttp-config"); x != nil {
+		m, _ := x["uplink-http-method"].(string)
+		n.GetUplink = strings.EqualFold(m, "GET")
+	}
 	return n
 }

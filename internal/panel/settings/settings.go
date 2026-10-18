@@ -23,8 +23,12 @@ const (
 	KeyPanelPort  = "panel_port"
 	// KeySubPort is a port of its own for subscriptions; 0 or unset: the panel's port.
 	// The panel's port keeps serving subscriptions either way, for links handed out.
-	KeySubPort   = "sub_port"
-	KeyDomain    = "domain"
+	KeySubPort = "sub_port"
+	KeyDomain  = "domain"
+	// KeySubDomain is a domain of its own for subscription links, apart from the panel's:
+	// its own certificate (acme.NewSub), the panel's address keeps serving the links handed
+	// out before. Empty: the links are on the panel's address.
+	KeySubDomain = "sub_domain"
 	KeyACMEEmail = "acme_email"
 	// KeyACMECA is the certificate authority of the panel and its nodes (acme.ValidCA);
 	// unset: Let's Encrypt. KeyACMEEABKID and KeyACMEEABHMAC are Google Trust Services'
@@ -340,11 +344,17 @@ func (e Endpoint) URL() string {
 	return "https://" + net.JoinHostPort(e.Host, strconv.Itoa(e.Port))
 }
 
-// SubEndpoint is where subscription links point: the subscription port when one is set.
+// SubEndpoint is where subscription links point: the subscription domain and port when
+// they are set.
 func (s *Settings) SubEndpoint(ctx context.Context) (Endpoint, error) {
 	ep, err := s.Endpoint(ctx)
 	if err != nil {
 		return ep, err
+	}
+	if d, err := s.String(ctx, KeySubDomain); err != nil {
+		return ep, err
+	} else if d != "" {
+		ep.Host = d
 	}
 	if p, _, err := Get[int](ctx, s, KeySubPort); err != nil {
 		return ep, err

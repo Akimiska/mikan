@@ -99,7 +99,7 @@ type InboundPatch struct {
 	Fingerprint *string
 	Obfs        *string
 	XHTTP       *proto.XHTTPTuning // the whole XHTTP tuning, as the form shows it
-	Client      *ClientEndpoint    // replaces all three
+	Client      *ClientEndpoint    // replaces all of it, the CDN included
 	DisplayName *string
 	// What only the node uses.
 	Listen     *string
@@ -131,6 +131,8 @@ type ClientEndpoint struct {
 	Server string
 	Port   int
 	SNI    string
+	Host   string     // HTTP Host of WebSocket and XHTTP
+	CDN    *proto.CDN // the apps reach the node through a CDN; nil: not
 }
 
 // Create adds an inbound: a preset's with fresh keys, or a custom template.
@@ -422,7 +424,14 @@ func editTemplate(config string, p InboundPatch) (string, error) {
 	}
 	if c := p.Client; c != nil {
 		edits = append(edits, templateEdit{"client", func(t proto.Template) error {
-			return proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI))
+			if err := proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI), strings.TrimSpace(c.Host)); err != nil {
+				return err
+			}
+			if c.CDN != nil && strings.TrimSpace(c.Server) == "" {
+				// The apps connect to the CDN's domain: without it they would go to the node.
+				return &proto.Error{Code: "cdn_server_needed", Field: "mikan.client.server"}
+			}
+			return proto.SetCDN(t, c.CDN)
 		}})
 	}
 	for _, e := range edits {

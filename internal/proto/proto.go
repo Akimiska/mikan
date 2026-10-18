@@ -24,6 +24,7 @@ type Ext struct {
 	Flow   string          `json:"flow,omitempty" yaml:"flow,omitempty"` // vless: xtls-rprx-vision
 	TLS    string          `json:"tls,omitempty" yaml:"tls,omitempty"`   // "node": use the node certificate
 	Client ClientOverrides `json:"client,omitzero" yaml:"client,omitempty"`
+	CDN    *CDN            `json:"cdn,omitempty" yaml:"cdn,omitempty"` // apps reach it through a CDN (cdn.go)
 }
 
 // ClientOverrides change what clients get without touching the server side, e.g. a CDN
@@ -32,6 +33,7 @@ type ClientOverrides struct {
 	Server      string `json:"server,omitempty" yaml:"server,omitempty"`
 	Port        int    `json:"port,omitempty" yaml:"port,omitempty"`
 	SNI         string `json:"sni,omitempty" yaml:"sni,omitempty"`
+	Host        string `json:"host,omitempty" yaml:"host,omitempty"`               // HTTP Host of WebSocket and XHTTP; the server's when empty
 	Fingerprint string `json:"fingerprint,omitempty" yaml:"fingerprint,omitempty"` // uTLS profile (Fingerprints); the panel's default when empty
 }
 
@@ -68,7 +70,6 @@ type rule struct {
 // limits per user. The shared ones are the exception the admin opts into.
 var rules = map[string]rule{
 	"vless":  {keys: []string{"ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option", "decryption"}, network: "tcp", secured: true},
-	"vmess":  {keys: []string{"ws-path", "grpc-service-name", "reality-config", "mux-option"}, network: "tcp", secured: true},
 	"trojan": {keys: []string{"ws-path", "grpc-service-name", "reality-config", "mux-option"}, network: "tcp", secured: true},
 	"hysteria2": {keys: []string{"obfs", "obfs-password", "obfs-min-packet-size", "obfs-max-packet-size", "max-idle-time", "alpn", "up", "down",
 		"ignore-client-bandwidth", "masquerade", "cwnd", "bbr-profile", "udp-mtu", "initial-stream-receive-window", "max-stream-receive-window",
@@ -229,7 +230,7 @@ func Validate(t Template, o Options) error {
 			return fail("config_key", extKey)
 		}
 		for k := range m {
-			if k != "flow" && k != "tls" && k != "client" {
+			if k != "flow" && k != "tls" && k != "client" && k != "cdn" {
 				return fail("config_key", extKey+"."+k)
 			}
 		}
@@ -299,6 +300,11 @@ func Validate(t Template, o Options) error {
 	}
 	if o := ext.Client; o.Port < 0 || o.Port > 65535 {
 		return fail("config_key", extKey+".client.port")
+	}
+	if ext.CDN != nil {
+		if err := ext.CDN.check(t); err != nil {
+			return err
+		}
 	}
 	return validateExtra(t, o)
 }

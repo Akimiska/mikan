@@ -101,10 +101,20 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	set := settings.New(st.Q)
 	var (
 		certs     *acme.Manager
+		subCerts  *acme.Manager
 		nodesACME *acme.Nodes
 	)
+	// The subscription domain gets its own certificate; clients that name another get the
+	// panel's.
+	names := &tlscert.BySNI{Panel: holder, Sub: &tlscert.Holder{}}
+	if d, err := set.String(ctx, settings.KeySubDomain); err == nil {
+		names.SetName(d)
+	}
 	if !cfg.Dev {
 		certs = acme.New(cfg.DataDir, holder, self, set, logger, time.Now)
+		subCerts = acme.NewSub(cfg.DataDir, names.Sub, set, certs.Challenge(), logger, time.Now)
+		subCerts.Load(ctx)
+		opts.SubCerts = subCerts
 		// The certificate already on disk is served before the nodes are first synced: links
 		// drop the pin once it is public, so the local node must start with it too.
 		certs.Load(ctx)
@@ -148,7 +158,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	}
 	var panelTLS *tls.Config
 	if !cfg.Dev {
-		panelTLS = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: holder.Get, NextProtos: []string{"h2", "http/1.1"}}
+		panelTLS = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: names.Get, NextProtos: []string{"h2", "http/1.1"}}
 	}
 	listenHost, _, err := net.SplitHostPort(cfg.Listen)
 	if err != nil {
@@ -157,6 +167,12 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	subPort := NewSubPort(listenHost, panelTLS, logger)
 	defer subPort.Close()
 	opts.SubPort, opts.SubPortError = subPort.Set, subPort.Error
+	opts.SubDomain = func(name string) {
+		names.SetName(name)
+		if subCerts != nil {
+			subCerts.Renew()
+		}
+	}
 	p, err := NewPanel(st, opts)
 	if err != nil {
 		return err
@@ -200,6 +216,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	running.Go(func() { p.Run(workers) })
 	if certs != nil {
 		running.Go(func() { certs.Run(workers) })
+		running.Go(func() { subCerts.Run(workers) })
 		running.Go(func() { nodesACME.Run(workers) })
 		// kill -HUP (an external tool's renewal hook) serves a new custom certificate now.
 		hup := make(chan os.Signal, 1)
@@ -212,12 +229,13 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 					return
 				case <-hup:
 					certs.Renew()
+					subCerts.Renew()
 				}
 			}
 		})
 	}
 
-	httpSrv := httpServer(p.Handler)
+	httpSrv := httpServer(subDomainRouter{names: names, sub: p.SubOnly(), all: p.Handler})
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err

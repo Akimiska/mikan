@@ -211,17 +211,12 @@ func TestSelfSignedLinksCarryThePin(t *testing.T) {
 		"type: anytls\n":                                 "pcs=ab12",
 		"type: vless\nws-path: /v\nmikan: {tls: node}\n": "pcs=ab12",
 		"type: hysteria2\n":                              "pinSHA256=ab12",
-		"type: vmess\nws-path: /m\nmikan: {tls: node}\n": `"pcs":"ab12"`,
 	} {
 		c, err := ClientConfig(mustParse(t, src), in)
 		if err != nil {
 			t.Fatalf("%s: %v", src, err)
 		}
 		link := c.URI
-		if strings.HasPrefix(link, "vmess://") {
-			raw, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, "vmess://"))
-			link = string(raw)
-		}
 		if !strings.Contains(link, want) || c.Mihomo["fingerprint"] != "ab12" {
 			t.Errorf("%s: %s lacks %s (mihomo %v)", src, link, want, c.Mihomo["fingerprint"])
 		}
@@ -255,23 +250,24 @@ func TestValidateRefusesDangerousTemplates(t *testing.T) {
 	priv, _ := realityKey(t)
 	reality := "reality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
 	cases := map[string]struct{ src, code string }{
-		"managed users":         {"type: vless\n" + reality + "users: []\n", "config_managed"},
-		"cert path":             {"type: hysteria2\ncertificate: /etc/shadow\n", "config_managed"},
-		"routing bypass":        {"type: vless\n" + reality + "proxy: DIRECT\n", "config_key"},
-		"plain vless":           {"type: vless\nws-path: /ws\n", "config_insecure"},
-		"reality and tls":       {"type: vless\n" + reality + "mikan: {tls: node}\n", "config_both_tls"},
-		"private dest":          {strings.Replace("type: vless\n"+reality, "www.microsoft.com:443", "169.254.169.254:80", 1), "reality_dest_private"},
-		"reality proxy":         {"type: vless\n" + reality + "  proxy: DIRECT\n", "config_key"},
-		"file masquerade":       {"type: hysteria2\nmasquerade: file:///etc\n", "config_masquerade"},
-		"private masquerade":    {"type: hysteria2\nmasquerade: https://10.0.0.1/\n", "config_masquerade"},
-		"realm":                 {"type: hysteria2\nrealm-opts: {enable: true}\n", "config_key"},
-		"vision over xhttp":     {"type: vless\n" + reality + "xhttp-config: {path: /x}\nmikan: {flow: xtls-rprx-vision}\n", "config_flow"},
-		"xhttp auto":            {"type: vless\n" + reality + "xhttp-config: {path: /x, mode: auto}\n", "config_xhttp_mode"},
-		"shadowsocks pre-2022":  {"type: shadowsocks\npassword: x\n", "ss_cipher"},
-		"unencrypted socks":     {"type: socks\n", "config_type"},
-		"unknown mikan key":     {"type: tuic\nmikan: {evil: 1}\n", "config_key"},
-		"bad short id":          {strings.Replace("type: vless\n"+reality, "[a1b2]", "[xyz]", 1), "reality_sid"},
-		"obfs without password": {"type: hysteria2\nobfs: salamander\n", "config_obfs"},
+		"managed users":             {"type: vless\n" + reality + "users: []\n", "config_managed"},
+		"cert path":                 {"type: hysteria2\ncertificate: /etc/shadow\n", "config_managed"},
+		"routing bypass":            {"type: vless\n" + reality + "proxy: DIRECT\n", "config_key"},
+		"plain vless":               {"type: vless\nws-path: /ws\n", "config_insecure"},
+		"reality and tls":           {"type: vless\n" + reality + "mikan: {tls: node}\n", "config_both_tls"},
+		"private dest":              {strings.Replace("type: vless\n"+reality, "www.microsoft.com:443", "169.254.169.254:80", 1), "reality_dest_private"},
+		"reality proxy":             {"type: vless\n" + reality + "  proxy: DIRECT\n", "config_key"},
+		"file masquerade":           {"type: hysteria2\nmasquerade: file:///etc\n", "config_masquerade"},
+		"private masquerade":        {"type: hysteria2\nmasquerade: https://10.0.0.1/\n", "config_masquerade"},
+		"realm":                     {"type: hysteria2\nrealm-opts: {enable: true}\n", "config_key"},
+		"vision over xhttp":         {"type: vless\n" + reality + "xhttp-config: {path: /x}\nmikan: {flow: xtls-rprx-vision}\n", "config_flow"},
+		"xhttp auto":                {"type: vless\n" + reality + "xhttp-config: {path: /x, mode: auto}\n", "config_xhttp_mode"},
+		"shadowsocks pre-2022":      {"type: shadowsocks\npassword: x\n", "ss_cipher"},
+		"unencrypted socks":         {"type: socks\n", "config_type"},
+		"vmess, gone from the core": {"type: vmess\nws-path: /m\nmikan: {tls: node}\n", "config_type"},
+		"unknown mikan key":         {"type: tuic\nmikan: {evil: 1}\n", "config_key"},
+		"bad short id":              {strings.Replace("type: vless\n"+reality, "[a1b2]", "[xyz]", 1), "reality_sid"},
+		"obfs without password":     {"type: hysteria2\nobfs: salamander\n", "config_obfs"},
 	}
 	for name, c := range cases {
 		tpl, err := Parse(c.src)
@@ -321,9 +317,9 @@ func TestNewTypes(t *testing.T) {
 				t.Errorf("anytls: %s %v", c.URI, c.Mihomo)
 			}
 		},
-		"type: vmess\nws-path: /v\nmikan: {tls: node, client: {server: cdn.example.com, port: 443}}\n": func(c Client, l map[string]any) {
-			if c.Mihomo["server"] != "cdn.example.com" || c.Mihomo["port"] != 443 || !strings.HasPrefix(c.URI, "vmess://") {
-				t.Errorf("vmess override: %s %v", c.URI, c.Mihomo)
+		"type: vless\nws-path: /v\nmikan: {tls: node, client: {server: cdn.example.com, port: 443}}\n": func(c Client, l map[string]any) {
+			if c.Mihomo["server"] != "cdn.example.com" || c.Mihomo["port"] != 443 || !strings.HasPrefix(c.URI, "vless://") {
+				t.Errorf("vless override: %s %v", c.URI, c.Mihomo)
 			}
 		},
 	}

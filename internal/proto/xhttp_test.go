@@ -108,7 +108,7 @@ func TestXHTTPSessionSettingsCheck(t *testing.T) {
 		"data without a key":        {XHTTPTuning{Mode: "packet-up", UplinkDataPlacement: "cookie"}, "xhttp_key_needed", "xhttp-config.uplink-data-key"},
 		"same header":               {XHTTPTuning{SessionPlacement: "header", SessionKey: "X-Id", SeqPlacement: "header", SeqKey: "X-Id"}, "xhttp_same_key", "xhttp-config.seq-key"},
 		"same named query":          {XHTTPTuning{SessionPlacement: "query", SessionKey: "id", SeqPlacement: "query", SeqKey: "id"}, "xhttp_same_key", "xhttp-config.seq-key"},
-		"no GET upload":             {XHTTPTuning{Mode: "packet-up", UplinkMethod: "GET", UplinkDataPlacement: "header", UplinkDataKey: "X-D"}, "xhttp_value", "xhttp-config.uplink-http-method"},
+		"GET outside packet-up":     {XHTTPTuning{Mode: "stream-up", UplinkMethod: "GET"}, "xhttp_get_mode", "xhttp-config.uplink-http-method"},
 		"buffered range":            {XHTTPTuning{MaxBufferedPosts: "10-30"}, "xhttp_count", "xhttp-config.sc-max-buffered-posts"},
 		"buffered zero":             {XHTTPTuning{MaxBufferedPosts: "0"}, "xhttp_count", "xhttp-config.sc-max-buffered-posts"},
 		"buffered huge":             {XHTTPTuning{MaxBufferedPosts: "100000"}, "xhttp_count", "xhttp-config.sc-max-buffered-posts"},

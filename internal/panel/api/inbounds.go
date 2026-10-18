@@ -53,6 +53,8 @@ type InboundView struct {
 	PoolID      *int64         `json:"pool_id,omitempty" doc:"Пул трафика, в который считается подключение; нет — основной трафик"`
 	Client      ClientEndpoint `json:"client" doc:"Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне)"`
 	ClientSNI   bool           `json:"client_sni" doc:"Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки"`
+	ClientHost  bool           `json:"client_host" doc:"Можно ли задать клиентам свой HTTP Host: VLESS и Trojan по WebSocket и XHTTP"`
+	CDNPossible bool           `json:"cdn_possible" doc:"Можно ли поставить подключение за CDN: VLESS или Trojan на сертификате ноды по XHTTP, WebSocket или gRPC"`
 
 	// XHTTP is the tuning the form shows; absent for other transports.
 	XHTTP *proto.XHTTPTuning `json:"xhttp,omitempty" doc:"Тонкая настройка XHTTP; у других транспортов поля нет"`
@@ -61,9 +63,17 @@ type InboundView struct {
 // ClientEndpoint is where clients connect when a TCP proxy or a CDN stands in front of
 // the node. Empty values (port 0) keep the node's address, the inbound's port and SNI.
 type ClientEndpoint struct {
-	Server string `json:"server" maxLength:"253" doc:"Адрес для клиентов; пусто — адрес ноды"`
-	Port   int    `json:"port" minimum:"0" maximum:"65535" doc:"Порт для клиентов; 0 — порт подключения"`
-	SNI    string `json:"sni" maxLength:"253" doc:"SNI для клиентов; пусто — как обычно"`
+	Server string     `json:"server" maxLength:"253" doc:"Адрес для клиентов; пусто — адрес ноды"`
+	Port   int        `json:"port" minimum:"0" maximum:"65535" doc:"Порт для клиентов; 0 — порт подключения"`
+	SNI    string     `json:"sni" maxLength:"253" doc:"SNI для клиентов; пусто — как обычно"`
+	Host   string     `json:"host,omitempty" maxLength:"253" doc:"HTTP Host у клиентов (WebSocket, XHTTP); пусто — как на сервере"`
+	CDN    *ClientCDN `json:"cdn,omitempty" doc:"Клиенты ходят через CDN; нет — напрямую или через TCP-прокси"`
+}
+
+// ClientCDN is what a CDN in front of the node changes (proto.CDN).
+type ClientCDN struct {
+	Header  string   `json:"header,omitempty" maxLength:"64" doc:"Заголовок с настоящим адресом клиента: CF-Connecting-IP, X-Forwarded-For, X-Real-IP; пусто — нода видит адреса CDN"`
+	Trusted []string `json:"trusted,omitempty" maxItems:"64" doc:"Сети CDN, чьему заголовку нода верит: CIDR, адреса, cloudflare, private, loopback"`
 }
 
 // AutoView is what the automatic moves see and last did for an inbound.
@@ -92,7 +102,7 @@ type inboundOutput struct{ Body InboundView }
 
 type createInboundInput struct {
 	Body struct {
-		Preset string `json:"preset" enum:"vless_reality_xhttp,hysteria2,hysteria2_gecko,tuic_v5,vless_reality_vision,vless_reality_grpc,trojan_reality,vless_tls_xhttp,vless_tls_vision,vless_tls_ws,anytls,vless_reality_xhttp_pq,trusttunnel,shadowquic,mieru,shadowsocks_2022,sudoku,snell,custom"`
+		Preset string `json:"preset" enum:"vless_reality_xhttp,hysteria2,hysteria2_gecko,tuic_v5,vless_reality_vision,vless_reality_grpc,trojan_reality,vless_tls_xhttp,vless_tls_vision,vless_tls_ws,vless_cdn_xhttp,vless_cdn_xhttp_get,anytls,vless_reality_xhttp_pq,trusttunnel,shadowquic,mieru,shadowsocks_2022,sudoku,snell,custom"`
 		NodeID int64  `json:"node_id,omitempty" minimum:"1" doc:"Нода; по умолчанию — своя нода панели"`
 		Port   string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$"`
 		Dest   string `json:"dest,omitempty" maxLength:"255" doc:"host:port для REALITY"`
@@ -112,7 +122,7 @@ type patchInboundInput struct {
 		DisplayName *string         `json:"display_name,omitempty" maxLength:"200" doc:"Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию"`
 		Config      *string         `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
 		Listen      *string         `json:"listen,omitempty" maxLength:"64" doc:"Адрес, на котором нода слушает: пусто — все адреса, иначе один IP (127.0.0.1 — за nginx или HAProxy на том же сервере). Свой адрес выключает перенос порта"`
-		Client      *ClientEndpoint `json:"client,omitempty" doc:"Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три"`
+		Client      *ClientEndpoint `json:"client,omitempty" doc:"Куда подключаются клиенты: адрес, порт, SNI и Host прокси или CDN перед нодой; заменяет всё сразу"`
 		AutoPort    *bool           `json:"auto_port,omitempty" doc:"Нельзя включить, пока у подключения свой адрес (listen)"`
 		AutoSNI     *bool           `json:"auto_sni,omitempty" doc:"Нельзя включить, пока у подключения свой адрес (listen)"`
 		Outbound    *string         `json:"outbound,omitempty" enum:"direct,warp,node" doc:"Выход в интернет: напрямую, через WARP ноды или через другую ноду"`
@@ -145,6 +155,8 @@ func (h *handlers) registerInbounds() {
 	huma.Register(h.api, huma.Operation{OperationID: "list-inbounds", Method: http.MethodGet, Path: "/api/v1/inbounds", Summary: "Подключения", Tags: []string{"inbounds"}}, h.listInbounds)
 	huma.Register(h.api, huma.Operation{OperationID: "create-inbound", Method: http.MethodPost, Path: "/api/v1/inbounds", Summary: "Добавить подключение", Tags: []string{"inbounds"}, DefaultStatus: http.StatusCreated}, h.createInbound)
 	huma.Register(h.api, huma.Operation{OperationID: "validate-inbound", Method: http.MethodPost, Path: "/api/v1/inbounds/validate", Summary: "Проверить шаблон листенера без сохранения", Tags: []string{"inbounds"}}, h.validateInbound)
+	huma.Register(h.api, huma.Operation{OperationID: "copy-inbound", Method: http.MethodPost, Path: "/api/v1/inbounds/{id}/copy", Summary: "Скопировать подключение: те же настройки с новыми ключами, на ту же или другую ноду",
+		Tags: []string{"inbounds"}, DefaultStatus: http.StatusCreated}, h.copyInbound)
 	huma.Register(h.api, huma.Operation{OperationID: "update-inbound", Method: http.MethodPatch, Path: "/api/v1/inbounds/{id}", Summary: "Изменить подключение", Tags: []string{"inbounds"}}, h.updateInbound)
 	huma.Register(h.api, huma.Operation{OperationID: "delete-inbound", Method: http.MethodDelete, Path: "/api/v1/inbounds/{id}", Summary: "Удалить подключение", Tags: []string{"inbounds"}, DefaultStatus: http.StatusNoContent}, h.deleteInbound)
 }
@@ -205,7 +217,11 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 		}
 		v.Dest, v.ServerNames = presets.Dest(t)
 		c := t.Ext().Client
-		v.Client, v.ClientSNI = ClientEndpoint{Server: c.Server, Port: c.Port, SNI: c.SNI}, proto.ClientSNI(t)
+		v.Client, v.ClientSNI, v.ClientHost = ClientEndpoint{Server: c.Server, Port: c.Port, SNI: c.SNI, Host: c.Host}, proto.ClientSNI(t), proto.ClientHost(t)
+		if cdn := proto.CDNOf(t); cdn != nil {
+			v.Client.CDN = &ClientCDN{Header: cdn.Header, Trusted: cdn.Trusted}
+		}
+		v.CDNPossible = proto.CanCDN(t)
 		if proto.UsesFingerprint(t) {
 			fp := c.Fingerprint
 			v.Fingerprint = &fp
@@ -281,6 +297,32 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	return &inboundOutput{Body: v}, nil
 }
 
+type copyInboundInput struct {
+	ID   int64 `path:"id" minimum:"1"`
+	Body struct {
+		NodeID     int64  `json:"node_id,omitempty" minimum:"1" doc:"Нода копии; по умолчанию — та же"`
+		Port       string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$" doc:"Порт копии; пусто — тот же, а если он занят — первый свободный"`
+		Dest       string `json:"dest,omitempty" maxLength:"255" doc:"REALITY: другой сайт маскировки, host:port; пусто — тот же"`
+		ServerName string `json:"server_name,omitempty" maxLength:"253" doc:"SNI для dest, если это IP"`
+	}
+}
+
+// copyInbound makes a new inbound from a set-up one: the same settings with keys of its own.
+func (h *handlers) copyInbound(ctx context.Context, in *copyInboundInput) (*inboundOutput, error) {
+	b := in.Body
+	row, err := h.d.Inbounds.Copy(ctx, in.ID, domain.CopyInbound{NodeID: b.NodeID, Port: b.Port, Dest: b.Dest, ServerName: b.ServerName})
+	if err != nil {
+		return nil, inboundError(err, b.Dest != "")
+	}
+	v := h.viewInbound(row, nil)
+	h.d.Changes.SlotsChanged()
+	if row.PoolID.Valid {
+		h.d.Changes.PoliciesChanged()
+	}
+	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.copy", "inbound", row.Name, map[string]any{"from": in.ID, "node_id": row.NodeID, "port": row.Port})
+	return &inboundOutput{Body: v}, nil
+}
+
 func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*inboundOutput, error) {
 	b := in.Body
 	// How a name may look is the subscription's rule; that it is free, the domain's.
@@ -298,7 +340,10 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 		if err := requireSession(ctx, "client"); err != nil {
 			return nil, err
 		}
-		p.Client = &domain.ClientEndpoint{Server: c.Server, Port: c.Port, SNI: c.SNI}
+		p.Client = &domain.ClientEndpoint{Server: c.Server, Port: c.Port, SNI: c.SNI, Host: c.Host}
+		if c.CDN != nil {
+			p.Client.CDN = &proto.CDN{Header: c.CDN.Header, Trusted: c.CDN.Trusted}
+		}
 	}
 	prev, row, err := h.d.Inbounds.Update(ctx, in.ID, p)
 	if err != nil {
@@ -364,6 +409,10 @@ func inboundError(err error, dest bool) error {
 		location := "body." + edit.Field
 		if part, ok := strings.CutPrefix(edit.Err.Field, "mikan.client."); ok && edit.Field == "client" {
 			location += "." + part
+		}
+		// And the CDN behind it: body.client.cdn.trusted.
+		if part, ok := strings.CutPrefix(edit.Err.Field, "mikan.cdn"); ok && edit.Field == "client" {
+			location += ".cdn" + part
 		}
 		// The XHTTP form names the setting: one location holds all of them.
 		var value any

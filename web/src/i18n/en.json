@@ -175,7 +175,7 @@
       "unknown_preset": "No such protocol",
       "config_yaml": "YAML error: {value}",
       "config_empty": "The config is empty",
-      "config_type": "Type “{value}” is not supported. Supported: vless, vmess, trojan, hysteria2, tuic, anytls, trusttunnel, shadowquic, mieru, shadowsocks, sudoku, snell",
+      "config_type": "Type “{value}” is not supported. Supported: vless, trojan, hysteria2, tuic, anytls, trusttunnel, shadowquic, mieru, shadowsocks, sudoku, snell",
       "config_key": "Field «{value}» is not supported for this type",
       "config_managed": "mikan fills in «{value}» itself, remove it",
       "config_insecure": "Unencrypted is not allowed: add reality-config or mikan.tls: node",
@@ -538,7 +538,19 @@
       "source_limit": "The sources are at their limit: remove one to add another.",
       "source_in_use": "An addon from this source is installed. Remove it first.",
       "source_unknown": "No such source.",
-      "support_disabled": "Support access is turned off: turn it on on the Support access card or with mikan support-access on on the server"
+      "support_disabled": "Support access is turned off: turn it on on the Support access card or with mikan support-access on on the server",
+      "cdn_type": "Only VLESS and Trojan on the node certificate work behind a CDN: REALITY does not get through one",
+      "cdn_transport": "A CDN carries only XHTTP, WebSocket and gRPC: Vision and bare TLS do not get through",
+      "cdn_header": "A header name: Latin letters, digits and hyphens",
+      "cdn_trusted_needed": "Enter the CDN's networks: without them the node must not believe the header",
+      "cdn_trusted": "A CDN network: a CIDR, an address or cloudflare",
+      "cdn_server_needed": "Enter the CDN domain",
+      "config_client_host": "Host: a domain name; only WebSocket and XHTTP have one",
+      "xhttp_get_mode": "GET works in packet-up mode only",
+      "xhttp_get_placement": "With GET the data go in a header or a cookie: pick one under “where the data go”",
+      "sub_domain_invalid": "Subscription domain: a domain name, not an IP address",
+      "sub_domain_panel": "This is the panel's domain: enter another one, sub.your-domain for example",
+      "sub_domain_unset": "Save the subscription domain first"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -1049,7 +1061,7 @@
     "trojan_reality": "Another protocol under the same camouflage, a fallback",
     "vless_tls_xhttp": "Plain TLS on the real certificate of the panel's domain, like a website: answers strangers as a web server, keeps few connections",
     "vless_tls_vision": "Classic VLESS Vision on the real certificate of the panel's domain: works in almost every app. Gets frozen quickly on 443 in Russia",
-    "vless_tls_ws": "WebSocket on a real certificate: gets through on operators where only WS works, and through a CDN (Cloudflare, Yandex). For a CDN, put its address in the \"behind a proxy\" block",
+    "vless_tls_ws": "WebSocket on a real certificate: gets through on operators where only WS works, and through a CDN (Cloudflare, Yandex). For a CDN, fill in the “Behind a CDN” block",
     "anytls": "TLS with padding against packet-size analysis. Needs a mihomo or sing-box app",
     "vless_reality_xhttp_pq": "XHTTP with post-quantum encryption: traffic recorded today stays sealed in the future too. Needs a recent mihomo or Xray, sing-box will not connect",
     "trusttunnel": "AdGuard's protocol: HTTP/2 on the node's real certificate. It answers a request without a key with 407, like a proxy, so an active scanner can tell it: keep it off a node whose IP you need to keep clean",
@@ -1058,7 +1070,9 @@
     "shadowsocks_2022": "The classic: fast and understood by every app. One key for all clients",
     "sudoku": "Hides traffic as HTTP and text. One key for all clients",
     "snell": "The Surge app's protocol. One key for all clients",
-    "custom": "Your own mihomo protocol settings in the editor: any supported type and parameters"
+    "custom": "Your own mihomo protocol settings in the editor: any supported type and parameters",
+    "vless_cdn_xhttp": "Through a CDN (Cloudflare, Yandex, VK and others): clients connect to the CDN's domain, the CDN to the node. Set the CDN address and real client IPs in the “Behind a CDN” block",
+    "vless_cdn_xhttp_get": "For CDNs that do not pass POST to the server: uploads by GET requests, the data in a header. Clients need mihomo 1.19.32+ or a recent Xray"
   },
   "inbounds": {
     "subtitle": "Protocols clients use to reach the server. Keys and passwords are generated automatically.",
@@ -1116,7 +1130,7 @@
     "revert": "Revert to saved",
     "portRequired": "Enter a port",
     "portHintCustom": "A free port: TCP or UDP depends on the type in the config.",
-    "customSkeleton": "# mihomo protocol settings. mikan fills in name, port, listen,\n# users and the certificate. Types: vless, vmess, trojan, hysteria2, tuic, anytls.\ntype: trojan\nws-path: /ws\nmikan:\n  tls: node   # the node certificate, like Hysteria2 and TUIC\n",
+    "customSkeleton": "# mihomo protocol settings. mikan fills in name, port, listen,\n# users and the certificate. Types: vless, trojan, hysteria2, tuic, anytls.\ntype: trojan\nws-path: /ws\nmikan:\n  tls: node   # the node certificate, like Hysteria2 and TUIC\n",
     "targetCheck": "Check",
     "targetScan": "Find near the server",
     "targetScanning": "Looking for sites in the server's network, up to 30 seconds…",
@@ -1225,7 +1239,8 @@
       "bufferedPosts": "Queued uploads (packet-up)",
       "bufferedPostsHint": "From 1; by default 30. How many requests may wait for their turn.",
       "noSse": "No event-stream header",
-      "noSseHint": "Do not mark answers as text/event-stream. Some proxies buffer such streams; without the mark they may not."
+      "noSseHint": "Do not mark answers as text/event-stream. Some proxies buffer such streams; without the mark they may not.",
+      "getHint": "For CDNs that cut POST: packet-up mode, the data in a header. mihomo 1.19.32+ and Xray apps get the inbound."
     },
     "cutOff": "Devices that cannot reach it: {n}",
     "cutOffOf": "Devices that cannot reach it: {n} of {total}",
@@ -1271,7 +1286,42 @@
     "obfs": "Obfuscation",
     "obfsHint": "Every app with Hysteria2 knows Salamander. Gecko also hides QUIC from blocking by packet size.",
     "obfsGeckoHint": "Gecko works on mihomo 1.19.26+ (Koala Clash 1.4+, ClashFest 1.2+, SlothClash 0.9.4+). Other apps will not get it, so keep a plain Hysteria2 next to it.",
-    "portHopHint": "A range such as 20000-30000 works too: clients switch ports on the go, so one port cannot be blocked. Open the range over UDP in the server firewall."
+    "portHopHint": "A range such as 20000-30000 works too: clients switch ports on the go, so one port cannot be blocked. Open the range over UDP in the server firewall.",
+    "cdn": {
+      "title": "Behind a CDN",
+      "sub": "Cloudflare, Yandex, VK, Selectel",
+      "on": "Clients connect through a CDN",
+      "onSub": "Apps go to the CDN's domain, and the CDN to this node on its own domain and certificate. Clients get no pin of a self-signed certificate: they see the CDN's.",
+      "domain": "CDN domain",
+      "domainHint": "The address apps get in the subscription, and the TLS name. It must differ from the node's domain the CDN fetches from.",
+      "domainRequired": "Enter the CDN domain",
+      "port": "CDN port",
+      "host": "Host",
+      "hostHint": "The Host header of the requests. Usually the CDN domain.",
+      "hostDefault": "the CDN domain",
+      "realIP": "Real client addresses",
+      "realIPOn": "The node takes the client's address from the CDN's header, from the CDN's networks only. Device limits and the ingress filter see real addresses.",
+      "realIPOff": "The node sees the CDN's servers: device limits and the ingress filter count them, not the clients.",
+      "header": "Address header",
+      "headerHint": "Cloudflare: CF-Connecting-IP. Other CDNs mostly: X-Forwarded-For.",
+      "trusted": "CDN networks",
+      "trustedHint": "The node believes the header from these addresses only: otherwise anyone could claim another address. One network a line.",
+      "cloudflare": "Cloudflare's networks (built-in list)",
+      "note": "Cloudflare reaches the origin only on ports 443, 2053, 2083, 2087, 2096 and 8443 and drops an idle connection after 100 seconds. gRPC is a switch in the Cloudflare domain settings.",
+      "proxyNote": "The address for clients is set in the “Behind a CDN” block."
+    },
+    "copy": {
+      "button": "Copy",
+      "title": "Copy of “{name}”",
+      "lead": "The same settings as this protocol, with keys of its own: clients get the copy as one more connection.",
+      "node": "To which node",
+      "portHint": "Empty: the same port {port}, or the first free one when it is taken.",
+      "destHint": "The REALITY masking site: keep it or pick another.",
+      "noteSame": "A copy on the same node listens on another port.",
+      "noteOther": "The address for clients, the CDN and the path are copied as they are: if the other node has its own, fix them in the copy's settings.",
+      "submit": "Copy",
+      "done": "Copy “{name}” created on port {port}"
+    }
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
@@ -1993,7 +2043,21 @@
     "routesSearch": "Find a service",
     "routesSearchEmpty": "Nothing found",
     "routesSearchEmptyText": "Try another name.",
-    "routesListsEmpty": "No own lists yet."
+    "routesListsEmpty": "No own lists yet.",
+    "subDomain": {
+      "title": "A domain of its own for subscriptions",
+      "sub": "Subscription links on a domain or subdomain of their own, not on the panel's address",
+      "field": "Domain for links",
+      "hint": "Point its A record at this server. It must differ from the panel's domain ({domain}).",
+      "note": "Links handed out before keep working. This domain opens subscriptions only; the admin panel stays on the panel's address. When the panel moves, move the domain: clients keep their links.",
+      "off": "Remove the domain",
+      "cert": "Certificate for subscriptions",
+      "certNone": "The subscription domain has no certificate yet: clients get the panel's for now.",
+      "certPending": "No certificate",
+      "drawerTitle": "Own certificate for subscriptions",
+      "drawerLead": "A certificate and key for {domain}, from certbot for example (fullchain.pem and privkey.pem). The panel serves it only to those who come to the subscription domain.",
+      "clearText": "The subscription domain gets its certificate automatically again. Until it is issued, clients get yours."
+    }
   },
   "deviceMode": {
     "label": "How to count:",

@@ -133,8 +133,6 @@ func singboxOutbound(m map[string]any) (map[string]any, bool) {
 		if m["encryption"] != nil && str(m["encryption"]) != "none" {
 			return nil, false
 		}
-	case "vmess":
-		o["type"], o["uuid"], o["security"], o["alter_id"] = "vmess", str(m["uuid"]), "auto", 0
 	case "trojan":
 		o["type"], o["password"] = "trojan", str(m["password"])
 	case "hysteria2":

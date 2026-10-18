@@ -112,6 +112,10 @@ type Deps struct {
 	// why the saved one is not served. nil: the panel runs no server (tests).
 	SubPort      func(port int) error
 	SubPortError func() string
+	// SubDomain serves a new subscription domain ("" none): its requests, its certificate.
+	// SubCerts is that certificate. nil in development and tests.
+	SubDomain func(name string)
+	SubCerts  SubCerts
 	// SetCert installs the admin's own certificate for the panel, ClearCert goes back to
 	// Let's Encrypt; nil in development.
 	SetCert   func(ctx context.Context, certPEM, keyPEM []byte) error
@@ -292,6 +296,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerSubPage()
 	h.registerRoutes()
 	h.registerCerts()
+	h.registerSubDomain()
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()

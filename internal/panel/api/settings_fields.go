@@ -50,6 +50,7 @@ var settingFields = []settingField{
 	// Where clients are sent, and what they are told to trust.
 	text("public_host", settings.KeyPublicHost, true, func(b *patchSettingsBody) *string { return b.PublicHost }),
 	text("domain", settings.KeyDomain, true, func(b *patchSettingsBody) *string { return b.Domain }),
+	text("sub_domain", settings.KeySubDomain, true, func(b *patchSettingsBody) *string { return b.SubDomain }),
 	value("sub_port", settings.KeySubPort, true, func(b *patchSettingsBody) *int { return b.SubPort }),
 	custom("sub_rules", true, func(b *patchSettingsBody) *string { return b.SubRules }, func(ctx context.Context, set *settings.Settings, v string) error {
 		return settings.Set(ctx, set, settings.KeyRules, strings.TrimRight(v, " \n\r\t"))

@@ -1415,9 +1415,37 @@
         ],
         "type": "object"
       },
+      "ClientCDN": {
+        "additionalProperties": false,
+        "properties": {
+          "header": {
+            "description": "Заголовок с настоящим адресом клиента: CF-Connecting-IP, X-Forwarded-For, X-Real-IP; пусто — нода видит адреса CDN",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "trusted": {
+            "description": "Сети CDN, чьему заголовку нода верит: CIDR, адреса, cloudflare, private, loopback",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "ClientEndpoint": {
         "additionalProperties": false,
         "properties": {
+          "cdn": {
+            "$ref": "#/components/schemas/ClientCDN",
+            "description": "Клиенты ходят через CDN; нет — напрямую или через TCP-прокси"
+          },
+          "host": {
+            "description": "HTTP Host у клиентов (WebSocket, XHTTP); пусто — как на сервере",
+            "maxLength": 253,
+            "type": "string"
+          },
           "port": {
             "description": "Порт для клиентов; 0 — порт подключения",
             "format": "int64",
@@ -1498,6 +1526,33 @@
           "promo_button",
           "channel"
         ],
+        "type": "object"
+      },
+      "CopyInboundInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "dest": {
+            "description": "REALITY: другой сайт маскировки, host:port; пусто — тот же",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Нода копии; по умолчанию — та же",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "port": {
+            "description": "Порт копии; пусто — тот же, а если он занят — первый свободный",
+            "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+            "type": "string"
+          },
+          "server_name": {
+            "description": "SNI для dest, если это IP",
+            "maxLength": 253,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "CreateAPIKeyInputBody": {
@@ -1661,6 +1716,8 @@
               "vless_tls_xhttp",
               "vless_tls_vision",
               "vless_tls_ws",
+              "vless_cdn_xhttp",
+              "vless_cdn_xhttp_get",
               "anytls",
               "vless_reality_xhttp_pq",
               "trusttunnel",
@@ -2707,9 +2764,17 @@
             "description": "Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)",
             "type": "boolean"
           },
+          "cdn_possible": {
+            "description": "Можно ли поставить подключение за CDN: VLESS или Trojan на сертификате ноды по XHTTP, WebSocket или gRPC",
+            "type": "boolean"
+          },
           "client": {
             "$ref": "#/components/schemas/ClientEndpoint",
             "description": "Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне)"
+          },
+          "client_host": {
+            "description": "Можно ли задать клиентам свой HTTP Host: VLESS и Trojan по WebSocket и XHTTP",
+            "type": "boolean"
           },
           "client_sni": {
             "description": "Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки",
@@ -2848,7 +2913,9 @@
           "auto",
           "outbound",
           "client",
-          "client_sni"
+          "client_sni",
+          "client_host",
+          "cdn_possible"
         ],
         "type": "object"
       },
@@ -5017,7 +5084,7 @@
           },
           "client": {
             "$ref": "#/components/schemas/ClientEndpoint",
-            "description": "Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три"
+            "description": "Куда подключаются клиенты: адрес, порт, SNI и Host прокси или CDN перед нодой; заменяет всё сразу"
           },
           "config": {
             "description": "Шаблон листенера (YAML)",
@@ -5322,6 +5389,11 @@
           "sub_announce_url": {
             "description": "https://… или tg://…",
             "maxLength": 200,
+            "type": "string"
+          },
+          "sub_domain": {
+            "description": "Домен для ссылок подписки, отдельный от домена панели; пусто — убрать. Старые ссылки продолжают работать",
+            "maxLength": 253,
             "type": "string"
           },
           "sub_group_auto": {
@@ -7287,6 +7359,14 @@
           "sub_base_url": {
             "type": "string"
           },
+          "sub_certificate": {
+            "$ref": "#/components/schemas/Status",
+            "description": "Сертификат домена подписки: kind off — домен не задан"
+          },
+          "sub_domain": {
+            "description": "Свой домен для ссылок подписки; пусто — адрес панели",
+            "type": "string"
+          },
           "sub_group_auto": {
             "description": "Группа автовыбора самого быстрого подключения",
             "type": "string"
@@ -7352,6 +7432,7 @@
           "brand_logo_url",
           "public_host",
           "domain",
+          "sub_domain",
           "panel_port",
           "sub_port",
           "quiet_hour_utc",
@@ -7599,11 +7680,12 @@
             "type": "string"
           },
           "kind": {
-            "description": "acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный",
+            "description": "acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный, off — домен подписки не задан",
             "enum": [
               "self-signed",
               "acme",
-              "custom"
+              "custom",
+              "off"
             ],
             "type": "string"
           },
@@ -9657,11 +9739,13 @@
             "type": "string"
           },
           "uplink_http_method": {
+            "description": "Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up, данные в заголовке или cookie",
             "enum": [
               "",
               "POST",
               "PUT",
-              "PATCH"
+              "PATCH",
+              "GET"
             ],
             "type": "string"
           },
@@ -11592,6 +11676,59 @@
           }
         },
         "summary": "Изменить подключение",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/inbounds/{id}/copy": {
+      "post": {
+        "operationId": "copy-inbound",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyInboundInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Скопировать подключение: те же настройки с новыми ключами, на ту же или другую ноду",
         "tags": [
           "inbounds"
         ]
@@ -14256,6 +14393,102 @@
           }
         },
         "summary": "Профиль Clash с этой маршрутизацией, без сохранения",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/sub-certificate": {
+      "delete": {
+        "operationId": "clear-sub-certificate",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Убрать свой сертификат домена подписки: вернётся автоматический",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "put": {
+        "operationId": "set-sub-certificate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Поставить свой сертификат домену подписки",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/settings/sub-certificate/renew": {
+      "post": {
+        "operationId": "renew-sub-certificate",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Получить сертификат домена подписки сейчас: ждёт до 90 с и отвечает тем, что вышло",
         "tags": [
           "settings"
         ]

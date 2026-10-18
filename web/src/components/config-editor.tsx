@@ -14,7 +14,6 @@ import { FINGERPRINTS } from "../lib/fingerprints";
 // saves typing.
 const TOP: Record<string, string[]> = {
   vless: ["ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option", "decryption"],
-  vmess: ["ws-path", "grpc-service-name", "reality-config", "mux-option"],
   trojan: ["ws-path", "grpc-service-name", "reality-config", "mux-option"],
   hysteria2: ["obfs", "obfs-password", "obfs-min-packet-size", "obfs-max-packet-size", "alpn", "up", "down", "ignore-client-bandwidth", "masquerade", "max-idle-time", "cwnd", "udp-mtu", "bbr-profile"],
   tuic: ["congestion-controller", "alpn", "max-idle-time", "authentication-timeout", "max-udp-relay-packet-size", "cwnd", "bbr-profile"],

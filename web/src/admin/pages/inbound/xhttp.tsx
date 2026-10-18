@@ -197,11 +197,31 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
 
       <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.upload")}</h3>
       <div className="grid gap-x-3 sm:grid-cols-3">
-        <Field label={t("inbounds.xhttp.uplinkMethod")} htmlFor="x-uplink">
-          <select id="x-uplink" className="input" value={value.uplink_http_method} onChange={set("uplink_http_method")}>
+        <Field label={t("inbounds.xhttp.uplinkMethod")} htmlFor="x-uplink" hint={value.uplink_http_method === "GET" ? t("inbounds.xhttp.getHint") : undefined}>
+          <select
+            id="x-uplink"
+            className="input"
+            value={value.uplink_http_method}
+            onChange={(e) => {
+              const m = e.target.value as XHTTP["uplink_http_method"];
+              // GET carries no body a CDN passes on: packet-up with the data in a header.
+              onChange(
+                m === "GET"
+                  ? {
+                      ...value,
+                      uplink_http_method: m,
+                      mode: "packet-up",
+                      uplink_data_placement: value.uplink_data_placement === "cookie" ? "cookie" : "header",
+                      uplink_data_key: value.uplink_data_key || "X-Data",
+                    }
+                  : { ...value, uplink_http_method: m },
+              );
+            }}
+          >
             <option value="">POST</option>
             <option value="PUT">PUT</option>
             <option value="PATCH">PATCH</option>
+            <option value="GET">GET</option>
           </select>
         </Field>
         {input("uplink_chunk_size", "", t("inbounds.xhttp.chunk"))}

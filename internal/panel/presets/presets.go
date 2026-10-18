@@ -58,6 +58,11 @@ const (
 	// through when nothing else passes, and the one a CDN (Cloudflare, Yandex) carries to
 	// the node. Behind a CDN its client address is the CDN's (inbound "behind a proxy").
 	PresetTLSWS = "vless_tls_ws"
+	// PresetCDNXHTTP is XHTTP in packet-up for a CDN in front of the node: plain requests a
+	// CDN passes on and caches nothing of. PresetCDNGet uploads with GET, for CDNs that
+	// refuse POST to the origin (Yandex Cloud CDN and others): the data go in a header.
+	PresetCDNXHTTP = "vless_cdn_xhttp"
+	PresetCDNGet   = "vless_cdn_xhttp_get"
 )
 
 // Order is display and fallback order. Since 2026 the RU DPI freezes a server's 443/tcp
@@ -73,7 +78,9 @@ var All = []Info{
 	{ID: "trojan_reality", Title: "Trojan · REALITY", Summary: "Другой протокол под той же маскировкой — запасной вариант", Type: "trojan", Network: "tcp", Port: "2087", Name: "trojan", SubName: "Trojan"},
 	{ID: PresetTLSXHTTP, Title: "VLESS · TLS · XHTTP", Summary: "Обычный TLS на настоящем сертификате домена панели, как у сайта: на чужие запросы отвечает как веб-сервер, держит мало соединений", Type: "vless", Network: "tcp", Port: "2443", Name: "vless-tls-xhttp", SubName: "VLESS TLS XHTTP", DomainCert: true},
 	{ID: PresetTLSVision, Title: "VLESS · TLS · Vision", Summary: "Классический VLESS Vision на настоящем сертификате домена панели: работает почти во всех приложениях. На 443 в РФ быстро замораживается", Type: "vless", Network: "tcp", Port: "3443", Name: "vless-tls-vision", SubName: "VLESS TLS Vision", DomainCert: true},
-	{ID: PresetTLSWS, Title: "VLESS · TLS · WebSocket", Summary: "WebSocket на настоящем сертификате: проходит у операторов, где работает только WS, и через CDN (Cloudflare, Яндекс). Для CDN укажите его адрес в блоке «За прокси»", Type: "vless", Network: "tcp", Port: "2053", Name: "vless-tls-ws", SubName: "VLESS WS", DomainCert: true},
+	{ID: PresetTLSWS, Title: "VLESS · TLS · WebSocket", Summary: "WebSocket на настоящем сертификате: проходит у операторов, где работает только WS, и через CDN (Cloudflare, Яндекс). Для CDN заполните блок «За CDN»", Type: "vless", Network: "tcp", Port: "2053", Name: "vless-tls-ws", SubName: "VLESS WS", DomainCert: true},
+	{ID: PresetCDNXHTTP, Title: "CDN · VLESS · XHTTP", Summary: "Через CDN (Cloudflare, Яндекс, VK и другие): клиенты подключаются к домену CDN, CDN — к ноде. Адрес CDN и настоящий IP клиентов задаются в блоке «За CDN»", Type: "vless", Network: "tcp", Port: "2083", Name: "vless-cdn", SubName: "VLESS CDN", DomainCert: true},
+	{ID: PresetCDNGet, Title: "CDN · VLESS · XHTTP · GET", Summary: "Для CDN, которые не пропускают POST к серверу: отправка запросами GET, данные в заголовке. Нужен mihomo 1.19.32+ или свежий Xray у клиентов", Type: "vless", Network: "tcp", Port: "2087", Name: "vless-cdn-get", SubName: "VLESS CDN GET", DomainCert: true},
 	{ID: "anytls", Title: "AnyTLS", Summary: "TLS с паддингом против анализа размеров пакетов; нужен клиент на mihomo или sing-box", Type: "anytls", Network: "tcp", Port: "2083", Name: "anytls", SubName: "AnyTLS"},
 	{ID: PresetPQ, Title: "VLESS · REALITY · XHTTP · PQ", Summary: "XHTTP с постквантовым шифрованием VLESS: записанный сейчас трафик не расшифровать и в будущем. Нужен свежий клиент на mihomo или Xray; приложения на sing-box не подключатся", Type: "vless", Network: "tcp", Port: "2096", Name: "vless-pq", SubName: "VLESS PQ"},
 	{ID: "trusttunnel", Title: "TrustTunnel", Summary: "Протокол AdGuard: HTTP/2 на настоящем сертификате ноды. На запрос без ключа отвечает 407, как прокси, и активный сканер его узнаёт: не ставьте его на ноду, IP которой важно сберечь", Type: "trusttunnel", Network: "tcp", Port: "4443", Name: "trusttunnel", SubName: "TrustTunnel", Apps: "mihomo"},
@@ -132,6 +139,13 @@ func NewConfig(id, dest string) (string, error) {
 		return proto.Marshal(proto.Template{"type": "vless", "mikan": map[string]any{"flow": "xtls-rprx-vision", "tls": "node"}}), nil
 	case PresetTLSWS:
 		return proto.Marshal(proto.Template{"type": "vless", "ws-path": randomPath(), "mikan": map[string]any{"tls": "node"}}), nil
+	case PresetCDNXHTTP:
+		return proto.Marshal(proto.Template{"type": "vless", "xhttp-config": map[string]any{"path": randomPath(), "mode": "packet-up"},
+			"mikan": map[string]any{"tls": "node"}}), nil
+	case PresetCDNGet:
+		return proto.Marshal(proto.Template{"type": "vless", "xhttp-config": map[string]any{"path": randomPath(), "mode": "packet-up",
+			"uplink-http-method": "GET", "uplink-data-placement": "header", "uplink-data-key": "X-Data"},
+			"mikan": map[string]any{"tls": "node"}}), nil
 	case "hysteria2":
 		return proto.Marshal(proto.Template{"type": "hysteria2", "alpn": []any{"h3"}, "obfs": proto.ObfsSalamander, "obfs-password": secure.Token(24)}), nil
 	case PresetGecko:
@@ -243,4 +257,52 @@ func Dest(t proto.Template) (dest string, serverNames []string) {
 		}
 	}
 	return dest, serverNames
+}
+
+// Rekey gives a copy of an inbound keys of its own, so the copy and the original never
+// share a secret: a fresh REALITY key and short id (the target stays), a new Hysteria2
+// obfuscation password, VLESS Encryption key, Shadowsocks password, Sudoku key or Snell
+// PSK. Paths and the rest of the settings stay as they were.
+func Rekey(t proto.Template) error {
+	if r, ok := t["reality-config"].(map[string]any); ok {
+		fresh, err := NewReality(DefaultDest)
+		if err != nil {
+			return err
+		}
+		r["private-key"], r["short-id"] = fresh["private-key"], fresh["short-id"]
+	}
+	if d, ok := t["decryption"].(string); ok && strings.HasPrefix(d, proto.VLESSEncMethod+".") {
+		key, err := newX25519()
+		if err != nil {
+			return err
+		}
+		if i := strings.LastIndexByte(d, '.'); i > 0 {
+			t["decryption"] = d[:i+1] + key
+		}
+	}
+	switch t.Type() {
+	case "hysteria2":
+		if _, ok := t["obfs-password"]; ok {
+			t["obfs-password"] = secure.Token(24)
+		}
+	case "shadowsocks":
+		key := make([]byte, 16)
+		if old, err := base64.StdEncoding.DecodeString(str(t["password"])); err == nil && len(old) > 0 {
+			key = make([]byte, len(old)) // 2022 ciphers take a key of their own length
+		}
+		if _, err := rand.Read(key); err != nil {
+			return err
+		}
+		t["password"] = base64.StdEncoding.EncodeToString(key)
+	case "sudoku":
+		t["key"] = secure.Token(32)
+	case "snell":
+		t["psk"] = secure.Token(32)
+	}
+	return nil
+}
+
+func str(v any) string {
+	s, _ := v.(string)
+	return s
 }

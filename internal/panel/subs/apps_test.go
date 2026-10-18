@@ -151,3 +151,22 @@ func TestGeckoOnlyForNewMihomo(t *testing.T) {
 		t.Errorf("apps for Gecko: %v", fams)
 	}
 }
+
+// XHTTP that uploads with GET goes to apps that send GET: mihomo from 1.19.32 and the Xray
+// apps; an older core would send POST, which the CDN in front drops.
+func TestGetUplinkOnlyForAppsThatSendIt(t *testing.T) {
+	n := proto.Needs{Type: "vless", Transport: "xhttp", GetUplink: true}
+	for ua, want := range map[string]bool{
+		"mihomo/1.19.32":      true,
+		"clash.meta/v1.19.33": true,
+		"mihomo/1.19.31":      false,
+		"clash-verge/v2.4.0":  false, // the core is not named
+		"Happ/3.4.1":          true,
+		"Stash/3.0":           false,
+		"Hiddify/2.5.7":       false,
+	} {
+		if got := DetectApp(ua).Supports(n); got != want {
+			t.Errorf("%s: %v, want %v", ua, got, want)
+		}
+	}
+}

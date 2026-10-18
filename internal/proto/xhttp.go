@@ -20,7 +20,7 @@ type XHTTPTuning struct {
 	PaddingKey       string `json:"x_padding_key" required:"false"`
 	PaddingHeader    string `json:"x_padding_header" required:"false"`
 	PaddingMethod    string `json:"x_padding_method" required:"false" enum:",repeat-x,tokenish"`
-	UplinkMethod     string `json:"uplink_http_method" required:"false" enum:",POST,PUT,PATCH"`
+	UplinkMethod     string `json:"uplink_http_method" required:"false" enum:",POST,PUT,PATCH,GET" doc:"Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up, данные в заголовке или cookie"`
 	UplinkChunkSize  string `json:"uplink_chunk_size" required:"false" doc:"Размер куска отправки, байт: число или диапазон"`
 	MaxEachPostBytes string `json:"sc_max_each_post_bytes" required:"false" doc:"Наибольший запрос отправки (packet-up), байт: число или диапазон"`
 	// Where the session id, the request number and the upload data travel: both ends must
@@ -243,9 +243,7 @@ func (x XHTTPTuning) check() error {
 	}{
 		{x.PaddingPlacement, "xhttp-config.x-padding-placement", []string{"queryInHeader", "header", "cookie", "query"}},
 		{x.PaddingMethod, "xhttp-config.x-padding-method", []string{"repeat-x", "tokenish"}},
-		// GET is not here: mihomo's server answers an upload only to a method other than
-		// GET (Xray's takes GET in packet-up with the data outside the body).
-		{x.UplinkMethod, "xhttp-config.uplink-http-method", []string{"POST", "PUT", "PATCH"}},
+		{x.UplinkMethod, "xhttp-config.uplink-http-method", []string{"POST", "PUT", "PATCH", "GET"}},
 		{x.SessionPlacement, "xhttp-config.session-placement", []string{"path", "query", "header", "cookie"}},
 		{x.SeqPlacement, "xhttp-config.seq-placement", []string{"path", "query", "header", "cookie"}},
 		// No "query" for the data: mihomo sends nothing in that case.
@@ -344,6 +342,18 @@ var sessionTableChars = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
 // checkSession is what depends on several of the new settings at once, and the client's
 // id table.
 func (x XHTTPTuning) checkSession() error {
+	// A GET carries no body a CDN passes on: the core takes it as an upload in packet-up,
+	// with the data in a header or a cookie.
+	if strings.TrimSpace(x.UplinkMethod) == "GET" {
+		if strings.TrimSpace(x.Mode) != "packet-up" {
+			return fail("xhttp_get_mode", "xhttp-config.uplink-http-method")
+		}
+		switch strings.TrimSpace(x.UplinkDataPlacement) {
+		case "header", "cookie":
+		default:
+			return fail("xhttp_get_placement", "xhttp-config.uplink-data-placement")
+		}
+	}
 	switch strings.TrimSpace(x.UplinkDataPlacement) {
 	case "header", "cookie":
 		// Xray refuses these in other modes; without a key mihomo uses an empty name where

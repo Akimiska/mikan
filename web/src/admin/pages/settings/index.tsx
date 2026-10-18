@@ -17,6 +17,7 @@ import { ROUTING_PARTS, RoutingSection, type RoutingPart } from "./routing";
 import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
 import { SupportCard } from "./support";
 import { AppsCard, DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
+import { SubDomainCard } from "./sub-domain";
 import { HappCard } from "./happ";
 import { SubPageSettings, type SubPagePart } from "./sub-page";
 
@@ -91,6 +92,7 @@ export function SettingsPage() {
                   <AppsCard s={s} />
                   <HappCard s={s} />
                   <SubscriptionCard s={s} />
+                  <SubDomainCard s={s} />
                   <SubPortCard s={s} />
                 </>
               ) : tab === "routing" ? (

@@ -116,6 +116,10 @@ type Options struct {
 	// one is not served; nil where the panel runs no server (tests, the CLI).
 	SubPort      func(port int) error
 	SubPortError func() string
+	// SubDomain serves a new subscription domain; SubCerts is its certificate. nil where
+	// the panel runs no server, and in development.
+	SubDomain func(name string)
+	SubCerts  *acme.Manager
 	// DataDir is where the host updater and the panel meet (update/); "" turns that off.
 	DataDir string
 	// Releases finds the release to update to; nil never checks.
@@ -199,6 +203,10 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	deps.PanelCert = o.PanelCert
 	deps.SubPort, deps.SubPortError = o.SubPort, o.SubPortError
+	deps.SubDomain = o.SubDomain
+	if o.SubCerts != nil {
+		deps.SubCerts = o.SubCerts
+	}
 	deps.Changes = changes
 	deps.Users = domain.NewUsers(st, pool, changes, o.Now)
 	deps.Users.SetEvents(hub)
@@ -377,16 +385,16 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		if err != nil {
 			return subs.Config{}, err
 		}
-		var domainName, publicHost, routing, fingerprint, rules string
+		var domainName, subDomain, publicHost, routing, fingerprint, rules string
 		var groups subs.Groups
-		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto,
+		for key, dst := range map[string]*string{settings.KeyDomain: &domainName, settings.KeySubDomain: &subDomain, settings.KeyPublicHost: &publicHost, settings.KeyGroupMain: &groups.Main, settings.KeyGroupAuto: &groups.Auto,
 			settings.KeyRouting: &routing, settings.KeyFingerprint: &fingerprint, settings.KeyRules: &rules} {
 			if *dst, err = set.String(ctx, key); err != nil {
 				return subs.Config{}, err
 			}
 		}
 		cfg := subs.Config{Brand: brand, SupportURL: support, Groups: groups, Routing: subs.ParseRouting(routing), Fingerprint: fingerprint,
-			Direct: []string{publicHost, domainName}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang))}
+			Direct: []string{publicHost, domainName, subDomain}, Lang: lang, Rules: subs.ServedRules(rules, groups.WithDefaults(lang))}
 		if cfg.Routes, _, err = settings.Get[subs.Routes](ctx, set, settings.KeyRoutes); err != nil {
 			return subs.Config{}, err
 		}

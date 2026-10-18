@@ -138,6 +138,9 @@ var mihomoNewTypes = map[string]bool{"mieru": true, "sudoku": true, "trusttunnel
 // their core get a Gecko inbound.
 var geckoSince = Version{1, 19, 26}
 
+// getUplinkSince is the first mihomo client that uploads over XHTTP with GET.
+var getUplinkSince = Version{1, 19, 32}
+
 // Supports says whether the app can use an inbound.
 func (a App) Supports(n proto.Needs) bool {
 	switch a.Family {
@@ -156,13 +159,18 @@ func (a App) Supports(n proto.Needs) bool {
 		if n.Gecko && !(known && a.Core.AtLeast(geckoSince)) {
 			return false
 		}
+		// Uploading with GET came in 1.19.32; an older client sends POST and the CDN
+		// in front, the reason for GET, drops it.
+		if n.GetUplink && !(known && a.Core.AtLeast(getUplinkSince)) {
+			return false
+		}
 		return true
 	case FamilyXray: // no TUIC, AnyTLS or the mihomo-only types in Xray
 		if n.Gecko {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "shadowsocks":
+		case "vless", "trojan", "hysteria2", "shadowsocks":
 			return true
 		}
 	case FamilySingBox: // no XHTTP, VLESS Encryption or Gecko in sing-box
@@ -170,17 +178,17 @@ func (a App) Supports(n proto.Needs) bool {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "tuic", "shadowsocks":
+		case "vless", "trojan", "hysteria2", "tuic", "shadowsocks":
 			return true
 		case "anytls":
 			return !a.Legacy
 		}
 	case FamilyStash:
-		if n.Gecko {
+		if n.Gecko || n.GetUplink {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks", "snell":
+		case "vless", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks", "snell":
 			return true
 		}
 	default: // what a share link can carry
@@ -188,7 +196,7 @@ func (a App) Supports(n proto.Needs) bool {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks":
+		case "vless", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks":
 			return true
 		}
 	}

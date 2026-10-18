@@ -642,6 +642,23 @@ export interface paths {
         patch: operations["update-inbound"];
         trace?: never;
     };
+    "/api/v1/inbounds/{id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Скопировать подключение: те же настройки с новыми ключами, на ту же или другую ноду */
+        post: operations["copy-inbound"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/logs": {
         parameters: {
             query?: never;
@@ -1471,6 +1488,41 @@ export interface paths {
         put?: never;
         /** Профиль Clash с этой маршрутизацией, без сохранения */
         post: operations["routes-preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/sub-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Поставить свой сертификат домену подписки */
+        put: operations["set-sub-certificate"];
+        post?: never;
+        /** Убрать свой сертификат домена подписки: вернётся автоматический */
+        delete: operations["clear-sub-certificate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/sub-certificate/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Получить сертификат домена подписки сейчас: ждёт до 90 с и отвечает тем, что вышло */
+        post: operations["renew-sub-certificate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2943,7 +2995,17 @@ export interface components {
             /** @description Отчёт для чата: адреса, домены, порт API и ключи скрыты */
             report: string;
         };
+        ClientCDN: {
+            /** @description Заголовок с настоящим адресом клиента: CF-Connecting-IP, X-Forwarded-For, X-Real-IP; пусто — нода видит адреса CDN */
+            header?: string;
+            /** @description Сети CDN, чьему заголовку нода верит: CIDR, адреса, cloudflare, private, loopback */
+            trusted?: string[];
+        };
         ClientEndpoint: {
+            /** @description Клиенты ходят через CDN; нет — напрямую или через TCP-прокси */
+            cdn?: components["schemas"]["ClientCDN"];
+            /** @description HTTP Host у клиентов (WebSocket, XHTTP); пусто — как на сервере */
+            host?: string;
             /**
              * Format: int64
              * @description Порт для клиентов; 0 — порт подключения
@@ -2973,6 +3035,19 @@ export interface components {
             /** @description Уведомления с 22:00 до 9:00 МСК приходят без звука */
             quiet_night: boolean;
             texts: components["schemas"]["Texts"];
+        };
+        CopyInboundInputBody: {
+            /** @description REALITY: другой сайт маскировки, host:port; пусто — тот же */
+            dest?: string;
+            /**
+             * Format: int64
+             * @description Нода копии; по умолчанию — та же
+             */
+            node_id?: number;
+            /** @description Порт копии; пусто — тот же, а если он занят — первый свободный */
+            port?: string;
+            /** @description SNI для dest, если это IP */
+            server_name?: string;
         };
         CreateAPIKeyInputBody: {
             /**
@@ -3030,7 +3105,7 @@ export interface components {
             node_id?: number;
             port?: string;
             /** @enum {string} */
-            preset: "vless_reality_xhttp" | "hysteria2" | "hysteria2_gecko" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "vless_tls_xhttp" | "vless_tls_vision" | "vless_tls_ws" | "anytls" | "vless_reality_xhttp_pq" | "trusttunnel" | "shadowquic" | "mieru" | "shadowsocks_2022" | "sudoku" | "snell" | "custom";
+            preset: "vless_reality_xhttp" | "hysteria2" | "hysteria2_gecko" | "tuic_v5" | "vless_reality_vision" | "vless_reality_grpc" | "trojan_reality" | "vless_tls_xhttp" | "vless_tls_vision" | "vless_tls_ws" | "vless_cdn_xhttp" | "vless_cdn_xhttp_get" | "anytls" | "vless_reality_xhttp_pq" | "trusttunnel" | "shadowquic" | "mieru" | "shadowsocks_2022" | "sudoku" | "snell" | "custom";
         };
         CreateNodeInputBody: {
             /**
@@ -3382,8 +3457,12 @@ export interface components {
             auto_port: boolean;
             /** @description Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках) */
             auto_sni: boolean;
+            /** @description Можно ли поставить подключение за CDN: VLESS или Trojan на сертификате ноды по XHTTP, WebSocket или gRPC */
+            cdn_possible: boolean;
             /** @description Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне) */
             client: components["schemas"]["ClientEndpoint"];
+            /** @description Можно ли задать клиентам свой HTTP Host: VLESS и Trojan по WebSocket и XHTTP */
+            client_host: boolean;
             /** @description Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки */
             client_sni: boolean;
             /** @description Шаблон листенера (YAML) */
@@ -4223,7 +4302,7 @@ export interface components {
             auto_port?: boolean;
             /** @description Нельзя включить, пока у подключения свой адрес (listen) */
             auto_sni?: boolean;
-            /** @description Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три */
+            /** @description Куда подключаются клиенты: адрес, порт, SNI и Host прокси или CDN перед нодой; заменяет всё сразу */
             client?: components["schemas"]["ClientEndpoint"];
             /** @description Шаблон листенера (YAML) */
             config?: string;
@@ -4355,6 +4434,8 @@ export interface components {
             sub_announce?: string;
             /** @description https://… или tg://… */
             sub_announce_url?: string;
+            /** @description Домен для ссылок подписки, отдельный от домена панели; пусто — убрать. Старые ссылки продолжают работать */
+            sub_domain?: string;
             sub_group_auto?: string;
             sub_group_main?: string;
             /**
@@ -5074,6 +5155,10 @@ export interface components {
             /** @description Куда ведёт нажатие на объявление */
             sub_announce_url: string;
             sub_base_url: string;
+            /** @description Сертификат домена подписки: kind off — домен не задан */
+            sub_certificate?: components["schemas"]["Status"];
+            /** @description Свой домен для ссылок подписки; пусто — адрес панели */
+            sub_domain: string;
             /** @description Группа автовыбора самого быстрого подключения */
             sub_group_auto: string;
             /** @description Главная группа в Clash-приложениях */
@@ -5199,10 +5284,10 @@ export interface components {
             identifier: string;
             issuer?: string;
             /**
-             * @description acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный
+             * @description acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный, off — домен подписки не задан
              * @enum {string}
              */
-            kind: "self-signed" | "acme" | "custom";
+            kind: "self-signed" | "acme" | "custom" | "off";
             names?: string[];
             /** Format: date-time */
             not_after: string;
@@ -5986,8 +6071,11 @@ export interface components {
              * @enum {string}
              */
             uplink_data_placement?: "" | "body" | "header" | "cookie" | "auto";
-            /** @enum {string} */
-            uplink_http_method?: "" | "POST" | "PUT" | "PATCH";
+            /**
+             * @description Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up, данные в заголовке или cookie
+             * @enum {string}
+             */
+            uplink_http_method?: "" | "POST" | "PUT" | "PATCH" | "GET";
             /** @description Размер паддинга, байт: число или диапазон «100-1000» */
             x_padding_bytes?: string;
             x_padding_header?: string;
@@ -7471,6 +7559,41 @@ export interface operations {
         responses: {
             /** @description OK */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "copy-inbound": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CopyInboundInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9435,6 +9558,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutesPreviewOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "set-sub-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "clear-sub-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "renew-sub-certificate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Status"];
                 };
             };
             /** @description Error */

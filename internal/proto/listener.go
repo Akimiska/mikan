@@ -52,6 +52,7 @@ func Listener(t Template, name, listen, port string, slots []Slot, cert Cert, o 
 		l["users"] = users(t.Type(), slots, ext)
 	}
 	listenerExtra(t, l)
+	cdnListener(t, l)
 	if t.NodeCert() {
 		if cert.CertPath == "" {
 			return nil, errors.New("no node certificate for " + t.Type())
@@ -74,12 +75,6 @@ func users(typ string, slots []Slot, ext Ext) any {
 				u["flow"] = ext.Flow
 			}
 			out = append(out, u)
-		}
-		return out
-	case "vmess":
-		out := make([]map[string]any, 0, len(slots))
-		for _, s := range slots {
-			out = append(out, map[string]any{"username": s.Name, "uuid": s.UUID, "alterId": 0})
 		}
 		return out
 	case "trojan", "trusttunnel", "shadowquic":

@@ -299,6 +299,10 @@ pub fn logs(service: Option<&str>) -> Result<()> {
 pub fn restart() -> Result<()> {
     let install = Install::load()?;
     let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
+    // compose.yaml carries config.json's values: a setting changed by hand reaches the
+    // containers only through a fresh one, and `up` recreates the services it changed.
+    docker::ensure_compose(Path::new(DIR), &install.config)?;
+    docker::compose_run(&["up", "-d"])?;
     docker::compose_run(&["restart"])?;
     setup::wait_ready(install.node_port(), Duration::from_secs(90))?;
     crate::out("Restarted.");
@@ -316,7 +320,7 @@ pub fn support_access(on: bool) -> Result<()> {
     } else {
         install.config.set("MIKAN_SUPPORT_ACCESS", "off")?;
     }
-    install.config.save()?;
+    docker::ensure_compose(Path::new(DIR), &install.config)?;
     if Path::new("/run/systemd/system").exists() {
         host::install_units(!install.node)?;
     }
@@ -392,7 +396,7 @@ pub fn join(key: &str, panel_ip: Option<IpAddr>) -> Result<()> {
     let port = setup::node_port(&image, key.trim())?;
     install.config.set("MIKAN_NODE_JOIN", key.trim())?;
     install.config.set("NODE_API_PORT", &port.to_string())?;
-    install.config.save()?;
+    docker::ensure_compose(Path::new(DIR), &install.config)?;
     if install.ufw() && system::ufw_active() {
         match panel_ip {
             Some(ip) => host::allow_from(ip, port)?,
@@ -400,7 +404,8 @@ pub fn join(key: &str, panel_ip: Option<IpAddr>) -> Result<()> {
         }
     }
     let since = SystemTime::now();
-    docker::compose_run(&["up", "-d"])?;
+    // The key is a secrets file, replaced by a rename: only a new container mounts the new one.
+    docker::compose_run(&["up", "-d", "--force-recreate"])?;
     setup::wait_ready(Some(port), Duration::from_secs(90))?;
     crate::out(&format!("The node runs with the new key and waits for its panel on port {port}."));
     // What the panel found is told, never made an error: the key is in place either way.

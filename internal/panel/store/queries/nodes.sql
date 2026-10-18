@@ -22,6 +22,9 @@ UPDATE nodes SET fair_share = $1, channel_mbps = $2, updated_at = $3 WHERE id = 
 -- name: SetNodeHTTPRedirect :exec
 UPDATE nodes SET http_redirect = $1, updated_at = $2 WHERE id = $3;
 
+-- name: SetNodeSNIRouter :exec
+UPDATE nodes SET sni_router = $1, updated_at = $2 WHERE id = $3;
+
 -- name: SetNodeCert :exec
 UPDATE nodes SET cert_sha256 = $1, updated_at = $2 WHERE id = $3;
 

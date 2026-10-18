@@ -22,6 +22,9 @@ type Endpoint struct {
 	Host      string // IP or domain the client connects to
 	SNI       string // TLS server name for Hysteria2/TUIC; empty for IP-only nodes
 	PinSHA256 string // hex SHA-256 of the node's self-signed Hysteria2/TUIC certificate
+	// SNIRouter: the node shares its 443 between the inbounds marked for it, which clients
+	// reach on 443.
+	SNIRouter bool
 }
 
 // Node is one server in the subscription.
@@ -184,6 +187,10 @@ func build(p Profile) ([]proxy, error) {
 				p.skip(in, err)
 				continue
 			}
+			spec := in.Port
+			if n.Endpoint.SNIRouter && proto.SNI443(t) {
+				port, spec = 443, "443"
+			}
 			base := domain.ProxyName(in)
 			// A name the admin typed is used as is; preset names get the node's flag.
 			if prefix := NodePrefix(n.Name); multi && in.DisplayName == "" && prefix != "" {
@@ -194,7 +201,7 @@ func build(p Profile) ([]proxy, error) {
 			for i := 2; used[name]; i++ {
 				name = base + " " + strconv.Itoa(i)
 			}
-			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: in.Port,
+			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: spec,
 				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot})
 			if err != nil {
 				p.skip(in, err)

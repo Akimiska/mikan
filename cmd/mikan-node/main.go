@@ -96,7 +96,11 @@ func run() error {
 	go serve(ln)
 	log.Info("node started", "version", version, "socket", sock)
 	// A remote node also serves the Node API over TCP to its panel (see nodetls).
-	if raw := os.Getenv("MIKAN_NODE_JOIN"); raw != "" {
+	raw, err := config.Secret("MIKAN_NODE_JOIN")
+	if err != nil {
+		return err
+	}
+	if raw != "" {
 		key, err := nodetls.DecodeKey(raw)
 		if err != nil {
 			return fmt.Errorf("MIKAN_NODE_JOIN: %w", err)

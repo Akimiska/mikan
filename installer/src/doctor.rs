@@ -222,7 +222,7 @@ fn gather(install: &Install, report: &mut Report) {
         report.add(containers(docker::services().map_err(|e| format!("{e:#}"))));
     }
     report.add(ports(install, engine.is_some()));
-    report.add([port80_item(system::port_owner(80, Proto::Tcp).as_deref(), install.env.get("MIKAN_ACME_LISTEN"))]);
+    report.add([port80_item(system::port_owner(80, Proto::Tcp).as_deref(), install.config.get("MIKAN_ACME_LISTEN"))]);
     report.add(firewall(install));
 
     let github = answer(&github, deadline);
@@ -284,12 +284,14 @@ fn ports(install: &Install, engine: bool) -> Vec<Item> {
                     "mikan logs node; mikan restart",
                 ),
             },
-            None => {
-                Item::error("API port", "NODE_API_PORT is not set in /opt/mikan/.env", "mikan join <new key from the panel's Nodes page>")
-            }
+            None => Item::error(
+                "API port",
+                "NODE_API_PORT is not set in /opt/mikan/config.json",
+                "mikan join <new key from the panel's Nodes page>",
+            ),
         }];
     }
-    let port: Option<u16> = install.env.get("PANEL_PORT").and_then(|p| p.parse().ok());
+    let port: Option<u16> = install.config.get("PANEL_PORT").and_then(|p| p.parse().ok());
     if !engine {
         return Vec::new();
     }
@@ -564,7 +566,7 @@ fn firewall(install: &Install) -> Vec<Item> {
         .flatten()
         .and_then(|d| d.read("node-state.json", 16 << 20).ok().flatten())
         .and_then(|raw| serde_json::from_slice(&raw).ok());
-    let panel = (!install.node).then(|| install.env.get("PANEL_PORT").and_then(|p| p.parse().ok())).flatten();
+    let panel = (!install.node).then(|| install.config.get("PANEL_PORT").and_then(|p| p.parse().ok())).flatten();
     let mut items = firewall_items(&status, &wants(install.node_port(), panel, state.as_ref()));
     if !install.node {
         let bridge = addon::load_state().map(|s| s.panel_api_bridge).unwrap_or_default();
@@ -933,7 +935,7 @@ Anywhere                   ALLOW       10.0.0.0/8
     }
 
     fn install(node: bool) -> Install {
-        Install { env: crate::envfile::EnvFile::from_text("/nonexistent/.env", "MIKAN_VERSION=0.5.1.1\n"), node }
+        Install { config: crate::config::Config::from_env_text("/nonexistent", "MIKAN_VERSION=0.5.1.1\n"), node }
     }
 
     fn report(items: Vec<Item>) -> Report {
@@ -966,7 +968,7 @@ Anywhere                   ALLOW       10.0.0.0/8
         assert_eq!(items[0], serde_json::json!({"level": "ok", "label": "Docker", "detail": "engine 28.0.1"}));
         assert_eq!(items[2]["fix"], "free space");
         assert!(items[3].get("fix").is_none(), "a fine line has no fix");
-        assert_eq!(install(true).env.get("MIKAN_VERSION"), Some("0.5.1.1"));
+        assert_eq!(install(true).config.get("MIKAN_VERSION"), Some("0.5.1.1"));
         assert_eq!(r.json(&install(true), "").kind, "node");
     }
 

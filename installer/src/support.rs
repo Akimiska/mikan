@@ -90,7 +90,7 @@ fn gather(install: &Install, code: &str) -> Payload {
         status.push(format!("status is not available: {e:#}"));
     }
     let logs = docker::recent_logs(LOG_LINES);
-    assemble(code, install.node, &install.version(), doctor, &status, logs, &install.env.secret_values())
+    assemble(code, install.node, &install.version(), doctor, &status, logs, &install.config.secret_values())
 }
 
 /// The report from its parts: every text is cut of secrets (and of the words only this

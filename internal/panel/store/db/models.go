@@ -269,6 +269,7 @@ type Node struct {
 	Capacity     sql.NullInt64
 	BalanceGroup string
 	HttpRedirect int64
+	SniRouter    int64
 }
 
 type NodeAssignment struct {

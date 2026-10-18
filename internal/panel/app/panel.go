@@ -473,6 +473,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 				sn.Endpoint = subs.Endpoint{Host: domain.NodeHost(n), SNI: n.Domain}
 				cfg.Direct = append(cfg.Direct, n.PublicHost, n.Domain)
 			}
+			sn.Endpoint.SNIRouter = n.SniRouter != 0
 			if o.TLS != nil {
 				if c, err := o.TLS.Pick(n); err == nil {
 					sn.Endpoint.PinSHA256 = c.Pin

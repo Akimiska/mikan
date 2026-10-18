@@ -9,7 +9,6 @@ import (
 	"hash/fnv"
 	"io/fs"
 	"math/rand/v2"
-	"os"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -20,6 +19,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 
+	"mikan/internal/panel/config"
 	"mikan/internal/panel/store/db"
 )
 
@@ -47,9 +47,13 @@ type Store struct {
 // since the store opened.
 func (s *Store) Conflicts() uint64 { return s.conflicts.Load() }
 
-// DatabaseURL is MIKAN_DATABASE_URL, the panel's PostgreSQL.
+// DatabaseURL is MIKAN_DATABASE_URL, the panel's PostgreSQL: the variable, or the file
+// MIKAN_DATABASE_URL_FILE names (the installer's secret, config.Secret).
 func DatabaseURL() (string, error) {
-	dsn := os.Getenv("MIKAN_DATABASE_URL")
+	dsn, err := config.Secret("MIKAN_DATABASE_URL")
+	if err != nil {
+		return "", err
+	}
 	if dsn == "" {
 		return "", errNoDatabaseURL
 	}

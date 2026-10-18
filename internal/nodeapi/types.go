@@ -48,6 +48,40 @@ type DesiredState struct {
 	// Detail: the node sums each slot's bytes by site (Counters.Sites). Off by default;
 	// nodes older than it ignore it.
 	Detail bool `json:"detail,omitempty"`
+	// Router shares the node's TCP 443 between inbounds by the TLS name the client asks for
+	// (SNIRouter); nil: none. Nodes older than it ignore it, and their routed inbounds stay
+	// on their own ports.
+	Router *SNIRouter `json:"sni_router,omitempty"`
+}
+
+// SNIRouter: the node listens on Listen (":443" when empty) and hands each connection to
+// the inbound whose Names hold the ClientHello's SNI, with a PROXY v2 header; any other
+// name to Default ("": closed). The routed inbounds listen on loopback with PROXY protocol.
+type SNIRouter struct {
+	Listen  string     `json:"listen,omitempty"`
+	Routes  []SNIRoute `json:"routes"`
+	Default string     `json:"default,omitempty"`
+}
+
+type SNIRoute struct {
+	Inbound string   `json:"inbound"`
+	Names   []string `json:"names"`
+}
+
+// Routed says whether inbound name runs behind the router.
+func (r *SNIRouter) Routed(name string) bool {
+	if r == nil {
+		return false
+	}
+	if r.Default == name {
+		return true
+	}
+	for _, x := range r.Routes {
+		if x.Inbound == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Shaping is the fair share of a node: ChannelMbps (each way) is split evenly between the
@@ -199,12 +233,14 @@ type Health struct {
 	Time time.Time `json:"time,omitzero"`
 	// Redirect is how DesiredState.HTTPRedirect went; nil while it is off or the node is
 	// older than it.
-	Redirect *RedirectStatus `json:"http_redirect,omitempty"`
+	Redirect *PortStatus `json:"http_redirect,omitempty"`
+	// Router is how DesiredState.Router went; nil while there is none or the node is older.
+	Router *PortStatus `json:"sni_router,omitempty"`
 }
 
-// RedirectStatus is the node's 301 on port 80: Error says why it is not on (another program
-// holds the port).
-type RedirectStatus struct {
+// PortStatus is how a port the node holds for a feature of its own went (the 301 on port
+// 80, the SNI router on 443): Error says why it is not held (another program has it).
+type PortStatus struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 }

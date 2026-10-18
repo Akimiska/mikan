@@ -11,29 +11,29 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::envfile::EnvFile;
+use crate::config::Config;
 use crate::setup;
 use crate::{DIR, acme, addon, docker, hello, host, lock, release, system};
 
 pub struct Install {
-    pub env: EnvFile,
+    pub config: Config,
     pub node: bool,
 }
 
 impl Install {
     pub fn load() -> Result<Self> {
-        let env = EnvFile::load(Path::new(DIR).join(".env")).map_err(|e| {
+        let config = Config::load(DIR).map_err(|e| {
             let missing = e.root_cause().downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound);
-            // Only a missing file means "not installed": a .env that cannot be read says why.
+            // Only missing settings mean "not installed": settings that cannot be read say why.
             if missing { anyhow!("mikan is not installed here: run `mikan install`") } else { e }
         })?;
-        let node = env.get("MIKAN_MODE") == Some("node");
-        Ok(Self { env, node })
+        let node = config.get("MIKAN_MODE") == Some("node");
+        Ok(Self { config, node })
     }
 
-    /// The version installed: .env knows it since 0.3.9, the image before that.
+    /// The version installed: the settings know it since 0.3.9, the image before that.
     pub fn version(&self) -> String {
-        if let Some(v) = self.env.get("MIKAN_VERSION") {
+        if let Some(v) = self.config.get("MIKAN_VERSION") {
             return v.to_owned();
         }
         let service = if self.node { "node" } else { "panel" };
@@ -53,7 +53,7 @@ impl Install {
         if !self.node {
             return None;
         }
-        self.env.get("NODE_API_PORT").and_then(|p| p.parse().ok())
+        self.config.get("NODE_API_PORT").and_then(|p| p.parse().ok())
     }
 
     pub fn panel_only(&self) -> Result<()> {
@@ -64,7 +64,7 @@ impl Install {
     }
 
     pub fn ufw(&self) -> bool {
-        self.env.get("MIKAN_UFW") != Some("0")
+        self.config.get("MIKAN_UFW") != Some("0")
     }
 }
 
@@ -99,7 +99,7 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
     // panel still on SQLite moves there only through `mikan update`. Asked only where
     // something is about to change.
     let movable = |install: &Install| -> Result<()> {
-        if !install.node && install.env.get("MIKAN_DATABASE_URL").is_none() {
+        if !install.node && install.config.get("MIKAN_DATABASE_URL").is_none() {
             bail!("this panel still keeps its data in SQLite (mikan 0.4): run `mikan update` first, then this command");
         }
         Ok(())
@@ -107,21 +107,21 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
     let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
     let what = if install.node { "node" } else { "panel" };
     let owner = system::port_owner(80, system::Proto::Tcp);
-    match acme::port80(owner.as_deref(), install.env.get("MIKAN_ACME_LISTEN"), acme::free_port) {
+    match acme::port80(owner.as_deref(), install.config.get("MIKAN_ACME_LISTEN"), acme::free_port) {
         acme::Port80::Own { drop: false } => {
             crate::out(&format!("Port 80 is free: the {what} answers Let's Encrypt there by itself, nothing to change."));
             Ok(())
         }
         acme::Port80::Own { drop: true } => {
             movable(&install)?;
-            install.env.remove("MIKAN_ACME_LISTEN");
-            install.env.save()?;
-            recreate(&install)?;
+            install.config.remove("MIKAN_ACME_LISTEN");
+            install.config.save()?;
+            recreate(&mut install)?;
             crate::out(&format!("Port 80 is free now: the {what} answers Let's Encrypt there by itself again."));
             Ok(())
         }
         acme::Port80::Other(who) => bail!(
-            "port 80 is held by {who}, which mikan cannot configure. Free port 80, or make {who} pass /.well-known/acme-challenge/ to 127.0.0.1:{port}, set MIKAN_ACME_LISTEN=127.0.0.1:{port} in {DIR}/.env and run: mikan restart",
+            "port 80 is held by {who}, which mikan cannot configure. Free port 80, or make {who} pass /.well-known/acme-challenge/ to 127.0.0.1:{port}, set \"MIKAN_ACME_LISTEN\": \"127.0.0.1:{port}\" in {DIR}/config.json and run: mikan restart",
             port = acme::free_port()
         ),
         acme::Port80::Front(front, port) => {
@@ -141,9 +141,9 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
             }
             let report = acme::setup(front, &domain, port, true);
             // The rule may be in, or left for the admin: mikan answers behind it either way.
-            install.env.set("MIKAN_ACME_LISTEN", &acme::listen(port))?;
-            install.env.save()?;
-            recreate(&install)?;
+            install.config.set("MIKAN_ACME_LISTEN", &acme::listen(port))?;
+            install.config.save()?;
+            recreate(&mut install)?;
             crate::out(&report.note());
             match report.text() {
                 Some(t) => crate::out(&t),
@@ -157,12 +157,16 @@ pub fn cert_proxy(domain: &str, yes: bool) -> Result<()> {
     }
 }
 
-/// Starts the containers again with what .env says now, through this release's compose
+/// Starts the containers again with what config.json says now, through this release's compose
 /// file: one written by an older mikan may not pass MIKAN_ACME_LISTEN on.
-fn recreate(install: &Install) -> Result<()> {
-    docker::ensure_compose(Path::new(DIR), install.node)?;
+fn recreate(install: &mut Install) -> Result<()> {
+    if !install.node && install.config.get("MIKAN_DATABASE_URL").is_none() {
+        bail!("this SQLite installation needs mikan update first");
+    }
+    docker::ensure_compose(Path::new(DIR), &install.config)?;
     docker::compose_run(&["up", "-d"])?;
-    setup::wait_ready(install.node_port(), Duration::from_secs(90))
+    setup::wait_ready(install.node_port(), Duration::from_secs(90))?;
+    install.config.retire_legacy()
 }
 
 pub fn cert_set(cert: &Path, key: &Path, node: Option<u32>) -> Result<()> {
@@ -301,18 +305,18 @@ pub fn restart() -> Result<()> {
     Ok(())
 }
 
-/// `mikan support-access on|off`: MIKAN_SUPPORT_ACCESS in .env, the support terminal's units
+/// `mikan support-access on|off`: MIKAN_SUPPORT_ACCESS in config.json, the support terminal's units
 /// (host.rs keeps them away while it is off) and, on a panel, its container, which reads the
 /// variable when it is created.
 pub fn support_access(on: bool) -> Result<()> {
     let mut install = Install::load()?;
     let _lock = lock::acquire(lock::Wait::Block, &mut crate::out)?;
     if on {
-        install.env.remove("MIKAN_SUPPORT_ACCESS");
+        install.config.remove("MIKAN_SUPPORT_ACCESS");
     } else {
-        install.env.set("MIKAN_SUPPORT_ACCESS", "off")?;
+        install.config.set("MIKAN_SUPPORT_ACCESS", "off")?;
     }
-    install.env.save()?;
+    install.config.save()?;
     if Path::new("/run/systemd/system").exists() {
         host::install_units(!install.node)?;
     }
@@ -384,11 +388,11 @@ pub fn join(key: &str, panel_ip: Option<IpAddr>) -> Result<()> {
     if !install.node {
         bail!("join is for a node: this server runs a panel");
     }
-    let image = install.env.get("MIKAN_IMAGE").context("no MIKAN_IMAGE in .env")?.to_owned();
+    let image = install.config.get("MIKAN_IMAGE").context("no MIKAN_IMAGE in config.json")?.to_owned();
     let port = setup::node_port(&image, key.trim())?;
-    install.env.set("MIKAN_NODE_JOIN", key.trim())?;
-    install.env.set("NODE_API_PORT", &port.to_string())?;
-    install.env.save()?;
+    install.config.set("MIKAN_NODE_JOIN", key.trim())?;
+    install.config.set("NODE_API_PORT", &port.to_string())?;
+    install.config.save()?;
     if install.ufw() && system::ufw_active() {
         match panel_ip {
             Some(ip) => host::allow_from(ip, port)?,

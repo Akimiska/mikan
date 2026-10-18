@@ -25,6 +25,8 @@ type Ext struct {
 	TLS    string          `json:"tls,omitempty" yaml:"tls,omitempty"`   // "node": use the node certificate
 	Client ClientOverrides `json:"client,omitzero" yaml:"client,omitempty"`
 	CDN    *CDN            `json:"cdn,omitempty" yaml:"cdn,omitempty"` // apps reach it through a CDN (cdn.go)
+	// SNI443: behind the node's SNI router on 443 (sni443.go).
+	SNI443 bool `json:"sni443,omitempty" yaml:"sni443,omitempty"`
 }
 
 // ClientOverrides change what clients get without touching the server side, e.g. a CDN
@@ -230,7 +232,7 @@ func Validate(t Template, o Options) error {
 			return fail("config_key", extKey)
 		}
 		for k := range m {
-			if k != "flow" && k != "tls" && k != "client" && k != "cdn" {
+			if k != "flow" && k != "tls" && k != "client" && k != "cdn" && k != "sni443" {
 				return fail("config_key", extKey+"."+k)
 			}
 		}
@@ -238,6 +240,9 @@ func Validate(t Template, o Options) error {
 	ext := t.Ext()
 	if ext.TLS != "" && ext.TLS != "node" {
 		return fail("config_tls", extKey+".tls")
+	}
+	if ext.SNI443 && !CanSNI443(t) {
+		return fail("sni443_type", extKey+".sni443")
 	}
 	reality := t.section("reality-config")
 	if r.secured {

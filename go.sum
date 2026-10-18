@@ -58,8 +58,8 @@ github.com/fxamacker/cbor/v2 v2.9.2 h1:X4Ksno9+x3cz0TZv69ec1hxP/+tymuR8PXQJyDwfh
 github.com/fxamacker/cbor/v2 v2.9.2/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/gaukas/godicttls v0.0.4 h1:NlRaXb3J6hAnTmWdsEKb9bcSBD6BvcIjdGdeb0zfXbk=
 github.com/gaukas/godicttls v0.0.4/go.mod h1:l6EenT4TLWgTdwslVb4sEMOCf7Bv0JAK67deKr9/NCI=
-github.com/getmikan/Citrus v1.0.0-beta.2 h1:LdtOAi6fX6Adno16VPwXm4NLziQxx7d6nU8suXG4TFc=
-github.com/getmikan/Citrus v1.0.0-beta.2/go.mod h1:yHRAUAPoKz1tw1XuXXb9Ez1lCxLTckOusxYH/wIA038=
+github.com/getmikan/Citrus v1.19.33-0.20261018163217-c429c08d2562 h1:IohGMFzqmZXqzjj5+b/ATDN2cflwUJmHprSlv+9wkOk=
+github.com/getmikan/Citrus v1.19.33-0.20261018163217-c429c08d2562/go.mod h1:yHRAUAPoKz1tw1XuXXb9Ez1lCxLTckOusxYH/wIA038=
 github.com/getmikan/http v0.1.8-citrus.2 h1:eBNDiHT/4KQMIhEZ+T81w4MrMo00gwMPm7jaY8GJYuc=
 github.com/getmikan/http v0.1.8-citrus.2/go.mod h1:Nxx0zZAo2AhRfanyL+fmmK6ACMtVsfpwIl1aFAik2Eg=
 github.com/getmikan/smux v0.0.0-20261017193300-1d830d820876 h1:K+AdGZRxqkfrP+P8Guo32VNfvm7zfNMFCLd3GvxNt7I=

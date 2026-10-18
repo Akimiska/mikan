@@ -77,7 +77,12 @@ type Engine struct {
 	// Challenge answers the ACME challenges the panel orders for the node's address, on
 	// port 80 while one is pending.
 	Challenge *acmechallenge.Server
-	redirect  atomic.Pointer[nodeapi.RedirectStatus] // the 301 on port 80; nil: off
+	redirect  atomic.Pointer[nodeapi.PortStatus] // the 301 on port 80; nil: off
+	// The SNI router on 443 (sni.go) and how its port went; nil: none.
+	routerMu     sync.Mutex
+	router       *sniRouter
+	routerAddr   string
+	routerStatus atomic.Pointer[nodeapi.PortStatus]
 
 	mu         sync.Mutex // serializes Apply
 	savedShape string     // policyShape of the policies in the state file
@@ -365,6 +370,11 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		listener.PatchInboundListeners(listening, e.tun, true)
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
+	ports := make(map[string]string, len(st.Inbounds))
+	for _, in := range st.Inbounds {
+		ports[in.Name] = in.Port
+	}
+	e.setRouter(st.Router, ports)
 	recreated := make([]string, 0, len(started))
 	for name := range started {
 		recreated = append(recreated, name)
@@ -469,7 +479,7 @@ func (e *Engine) Health() nodeapi.Health {
 	return nodeapi.Health{
 		Version: e.version, Core: coreVersion(), Revision: rev, StartedAt: e.started,
 		Listeners: ls, Conns: e.Reg.ConnCount(), System: e.sys.last(), Update: e.UpdateStatus(), Host: e.host.get(), Time: time.Now(),
-		Redirect: e.redirect.Load(),
+		Redirect: e.redirect.Load(), Router: e.routerStatus.Load(),
 	}
 }
 
@@ -481,9 +491,9 @@ func (e *Engine) setRedirect(on bool) {
 		e.redirect.Store(nil)
 		return
 	}
-	st := &nodeapi.RedirectStatus{OK: true}
+	st := &nodeapi.PortStatus{OK: true}
 	if err := e.Challenge.SetRedirect(true); err != nil {
-		st = &nodeapi.RedirectStatus{Error: err.Error()}
+		st = &nodeapi.PortStatus{Error: err.Error()}
 		e.log.Warn("http redirect", "err", err)
 	}
 	e.redirect.Store(st)

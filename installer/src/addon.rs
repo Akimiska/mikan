@@ -591,7 +591,7 @@ fn up(state: &mut State, say: &mut dyn FnMut(&str)) -> Result<()> {
             fs::remove_file(dir.join("compose.yml"))?;
         }
     } else {
-        crate::envfile::write_private(
+        crate::config::write_private(
             &dir.join("compose.yml"),
             compose_yaml(&running, &by_id, &state.panel_api, &state.panel_api_bridge).as_bytes(),
         )?;

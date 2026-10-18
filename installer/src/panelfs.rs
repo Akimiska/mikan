@@ -298,7 +298,7 @@ pub fn write_root(path: &Path, data: &[u8]) -> Result<()> {
         fs::create_dir_all(dir)?;
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
     }
-    crate::envfile::write_private(path, data)
+    crate::config::write_private(path, data)
 }
 
 #[cfg(test)]

@@ -359,13 +359,13 @@ pub fn units_current(panel: bool) -> bool {
     units_current_in(Path::new("/etc/systemd/system"), panel, terminal_off())
 }
 
-/// The support terminal's units, which a server with MIKAN_SUPPORT_ACCESS=off in its .env
+/// The support terminal's units, which a server with MIKAN_SUPPORT_ACCESS=off in its settings
 /// does not have: nothing there can start a shell for an operator.
 const TERMINAL_UNITS: [&str; 2] = ["mikan-terminal-request.service", "mikan-terminal-request.path"];
 
-/// Whether the server's .env turns support access off (MIKAN_SUPPORT_ACCESS=off).
+/// Whether the server's settings turn support access off (MIKAN_SUPPORT_ACCESS=off).
 fn terminal_off() -> bool {
-    crate::envfile::EnvFile::load(Path::new(crate::DIR).join(".env")).is_ok_and(|e| e.get("MIKAN_SUPPORT_ACCESS") == Some("off"))
+    crate::config::Config::load(crate::DIR).is_ok_and(|e| e.get("MIKAN_SUPPORT_ACCESS") == Some("off"))
 }
 
 /// The units a server should have: all of them, or all but the terminal's (terminal_off).

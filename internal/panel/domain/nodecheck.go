@@ -142,7 +142,9 @@ type NodePatch struct {
 	// HTTPRedirect: plain HTTP on port 80 gets 301 to https. Not on the panel's own node,
 	// whose port 80 the panel's certificates use.
 	HTTPRedirect *bool
-	Rules        NodeRules
+	// SNIRouter shares the node's TCP 443 between the inbounds marked for it.
+	SNIRouter *bool
+	Rules     NodeRules
 }
 
 // UpdateNode changes the fields p names and returns the node. Errors: ErrUnknownNode,
@@ -231,6 +233,11 @@ func UpdateNode(ctx context.Context, st *store.Store, id int64, p NodePatch, now
 		}
 		if p.FairShare != nil {
 			cur.FairShare = Flag(*p.FairShare)
+		}
+		if p.SNIRouter != nil {
+			if err := q.SetNodeSNIRouter(ctx, db.SetNodeSNIRouterParams{SniRouter: Flag(*p.SNIRouter), UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
+				return err
+			}
 		}
 		if p.HTTPRedirect != nil {
 			if err := q.SetNodeHTTPRedirect(ctx, db.SetNodeHTTPRedirectParams{HttpRedirect: Flag(*p.HTTPRedirect), UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {

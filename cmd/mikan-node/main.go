@@ -95,6 +95,8 @@ func run() error {
 	}
 	go serve(ln)
 	log.Info("node started", "version", version, "socket", sock)
+	// The state from before the restart comes back behind the API, which answers already.
+	go eng.Restore()
 	// A remote node also serves the Node API over TCP to its panel (see nodetls).
 	raw, err := config.Secret("MIKAN_NODE_JOIN")
 	if err != nil {

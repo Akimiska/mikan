@@ -109,3 +109,43 @@ func freePort(t *testing.T) string {
 	defer l.Close()
 	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 }
+
+// The saved state comes back only through Restore, after the start (the API answers
+// first), and never over a state the panel sent in the meantime.
+func TestRestoreAfterStart(t *testing.T) {
+	dir := t.TempDir()
+	quietLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	first, err := Start(Options{DataDir: dir, Version: "test", Log: quietLog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Restore()
+	if _, err := first.Apply(nodeapi.DesiredState{Revision: 7}); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := Start(Options{DataDir: dir, Version: "test", Log: quietLog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := again.Health(); h.Revision != 0 {
+		t.Fatalf("the saved state is not applied by Start: revision %d", h.Revision)
+	}
+	again.Restore()
+	if h := again.Health(); h.Revision != 7 {
+		t.Fatalf("Restore brings the saved state back: revision %d", h.Revision)
+	}
+
+	panel, err := Start(Options{DataDir: dir, Version: "test", Log: quietLog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := panel.Apply(nodeapi.DesiredState{Revision: 9}); err != nil {
+		t.Fatal(err)
+	}
+	panel.Restore()
+	panel.Restore()
+	if h := panel.Health(); h.Revision != 9 {
+		t.Fatalf("the panel's state stays over the saved one: revision %d", h.Revision)
+	}
+}

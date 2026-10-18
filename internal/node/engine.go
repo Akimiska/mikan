@@ -91,6 +91,10 @@ type Engine struct {
 	savedShape string     // policyShape of the policies in the state file
 	savedAt    time.Time  // when the state file was written
 	applied    nodeapi.DesiredState
+	// saved is the state from before the restart until Restore takes it; appliedAny says a
+	// state was applied since the start (the panel's, or that one).
+	saved      *savedState
+	appliedAny bool
 	cert       proto.Cert // node certificate files written by the last Apply
 	listeners  map[string]nodeapi.ListenerStatus
 	// shown is what Health reports of the last Apply, published at its end: Health never
@@ -231,12 +235,7 @@ func Start(o Options) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	if ok {
-		if _, err := e.Apply(st); err != nil {
-			log.Error("restore saved state", "err", err)
-		}
-	}
-	e.restoreCounters(cs)
+	e.saved = &savedState{state: st, ok: ok, counters: cs}
 	go e.sys.run()
 	go e.Reg.Run(context.Background())
 	return e, nil
@@ -268,6 +267,33 @@ func applyBase() error {
 	return baseErr
 }
 
+// savedState is what the node had before its restart, brought back by Restore.
+type savedState struct {
+	state    nodeapi.DesiredState
+	ok       bool
+	counters counterState
+}
+
+// Restore brings back the state and the counters saved before the restart. It runs once
+// the API is up: listeners that take long to start (a port to free, a WARP endpoint to
+// resolve) must not keep the panel out for half a minute, and a state the panel sent in
+// the meantime is newer than the saved one, which is then left out. Only the first call
+// does anything.
+func (e *Engine) Restore() {
+	e.mu.Lock()
+	saved := e.saved
+	e.saved = nil
+	if saved != nil && saved.ok && !e.appliedAny {
+		if _, err := e.apply(saved.state); err != nil {
+			e.log.Error("restore saved state", "err", err)
+		}
+	}
+	e.mu.Unlock()
+	if saved != nil {
+		e.restoreCounters(saved.counters)
+	}
+}
+
 // restoreCounters brings back what the slots had counted before the restart. Apply ran
 // first, so the quotas it set leave that out: they are set again with the counters in
 // place, or users close to their limit would get the traffic counted since the last push
@@ -284,6 +310,11 @@ func (e *Engine) restoreCounters(cs counterState) {
 func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.apply(st)
+}
+
+// apply is Apply with e.mu held.
+func (e *Engine) apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	var cert proto.Cert
 	if st.TLS != nil && st.TLS.CertPEM != "" {
 		cert = proto.Cert{CertPath: filepath.Join(e.home, "tls", "node.crt"), KeyPath: filepath.Join(e.home, "tls", "node.key")}
@@ -385,7 +416,7 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	}
 	sort.Strings(recreated)
 
-	e.applied = st
+	e.applied, e.appliedAny = st, true
 	e.listeners = map[string]nodeapi.ListenerStatus{}
 	for _, s := range statuses {
 		e.listeners[s.Name] = s

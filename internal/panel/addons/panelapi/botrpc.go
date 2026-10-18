@@ -72,6 +72,13 @@ var botRPC = map[string]rpcRule{
 	"Shop.TrialInvoice":   rule("billing:invoice", []int{0}, nil),
 	"Shop.Trial":          rule("billing:invoice", []int{0}, nil),
 	"Shop.FreePlan":       rule("billing:invoice", []int{0}, nil),
+	"Shop.BalanceOf":      rule("users:read", []int{0}, nil),
+	"Shop.BalanceHistory": rule("users:read", []int{0}, nil),
+	"Shop.TopupDraft":     rule("users:read", []int{0}, nil),
+	"Shop.StartTopup":     rule("billing:invoice", []int{0}, nil),
+	"Shop.SetTopupAmount": rule("billing:invoice", []int{0}, nil),
+	"Shop.CancelTopup":    rule("billing:invoice", []int{0}, nil),
+	"Shop.SubmitTopup":    rule("billing:invoice", []int{0}, nil),
 }
 
 // talkWindow: how long an account counts as talking to the bot after its last message.

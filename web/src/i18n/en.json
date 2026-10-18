@@ -556,7 +556,13 @@
       "balance_group": "Group: letters, digits, space, _ . -, up to 40",
       "geo_host": "A public IP or domain is needed",
       "geo_dns": "The domain is not found in DNS",
-      "geo_unavailable": "The geo check is not available"
+      "geo_unavailable": "The geo check is not available",
+      "topup_decided": "The request is decided already",
+      "balance_low": "The balance does not hold that much",
+      "balance_bounds": "The upper bound is below the lower one",
+      "balance_details": "Say how to transfer the money",
+      "not_a_picture": "Telegram gave something that is not a picture",
+      "telegram_unavailable": "Telegram did not give the file, try again later"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -966,7 +972,19 @@
     "unbanned": "“{name}” is unbanned",
     "pausedUntil": "Unbound by the client · returns {when} at {time}",
     "unpauseTitle": "Let “{name}” back earlier?",
-    "pausedForever": "Unbound by the client · stays out until you let it"
+    "pausedForever": "Unbound by the client · stays out until you let it",
+    "sites": {
+      "title": "Where it goes",
+      "off": "the detail is off",
+      "period": "Period",
+      "days": "{n, plural, one {# day} other {# days}}",
+      "none": "No data for this period.",
+      "other": "other sites",
+      "block": "Block {site} for everyone",
+      "blocked": "{site} is in the filters: the nodes let nobody there",
+      "isBlocked": "In the filters already",
+      "hint": "Traffic by site, with no times or addresses. Kept for {n, plural, one {# day} other {# days}}; turned on in Settings → Routing."
+    }
   },
   "tariffs": {
     "subtitle": "Templates for granting access in one click. Changing a plan does not touch subscriptions already issued.",
@@ -2111,6 +2129,14 @@
         "cats": "A small game: pet the cat and collect treats. Progress stays in the visitor's browser."
       },
       "open": "Open the front page"
+    },
+    "detail": {
+      "title": "Where clients go",
+      "sub": "The nodes count each subscription's traffic by site (the registrable domain or the address), with no times, client addresses or single connections. Shown on the client's card, where a site can be blocked too.",
+      "on": "Count traffic by site",
+      "onSub": "The node works a little harder: the connections go through a counter.",
+      "keep": "Keep, days",
+      "keepHint": "Older is removed once a day, 1 to 90."
     }
   },
   "deviceMode": {
@@ -2728,7 +2754,8 @@
       "history": "Payments",
       "methods": "Payment methods",
       "rules": "Sales rules",
-      "campaigns": "Campaigns"
+      "campaigns": "Campaigns",
+      "topups": "Top-ups"
     },
     "history": "History",
     "total": "{n} for {sum}",
@@ -2746,7 +2773,8 @@
       "refunded": "Refunded"
     },
     "providers": {
-      "stars": "Telegram Stars"
+      "stars": "Telegram Stars",
+      "balance": "Balance"
     },
     "kindNew": "new subscription",
     "kindRenew": "renewal",
@@ -2807,7 +2835,35 @@
     "openAddons": "Open Addons",
     "kindDevice": "Device",
     "extraDevicesKeep": "Bought devices stay with renewals",
-    "extraDevicesKeepSub": "A renewal costs the price of the bought devices more. Off: a device lasts until the paid term ends."
+    "extraDevicesKeepSub": "A renewal costs the price of the bought devices more. Off: a device lasts until the paid term ends.",
+    "balance": {
+      "title": "Clients' balance",
+      "sub": "A client tops up the balance by a transfer and sends a screenshot to the bot; you check it on the Top-ups tab. The balance pays for a subscription, a renewal, packages and devices at the tariffs' ruble prices.",
+      "notReady": "Say how to transfer the money, and the rate",
+      "currency": "Balance currency",
+      "currencies": {
+        "RUB": "Rubles (₽)",
+        "USD": "Dollars ($)",
+        "EUR": "Euros (€)",
+        "UAH": "Hryvnias (₴)",
+        "BYN": "Belarusian rubles (Br)",
+        "KZT": "Tenge (₸)",
+        "UZS": "Soums (сўм)",
+        "USDT": "USDT"
+      },
+      "rate": "Rate: 1 {currency} =",
+      "rateHint": "The tariff's ruble price is converted to the balance's currency by it, rounded up.",
+      "rateErr": "The rate is above zero, up to 1,000,000",
+      "min": "Top-up from",
+      "max": "Top-up up to",
+      "boundHint": "Empty: no bound",
+      "sumErr": "A number, up to two decimals",
+      "boundsErr": "The upper bound is below the lower one",
+      "details": "How to transfer the money",
+      "detailsHint": "The client sees this text before sending the screenshot: the card, the wallet, the bank, the transfer note.",
+      "detailsPlaceholder": "Card 2200 0000 0000 0000, John D.",
+      "detailsErr": "Without this text the client has nowhere to transfer to"
+    }
   },
   "addonApp": {
     "sub": "The page of the addon “{id}”. It runs in a sandbox: without your session or cookies, its data goes through the panel.",
@@ -4149,5 +4205,32 @@
     "cached": "a recent result is shown",
     "emptyTitle": "No checks yet",
     "emptyText": "Enter the server's IP or domain and press “Check the geo bases”."
+  },
+  "topups": {
+    "title": "Balance top-ups",
+    "sub": "Clients' requests with screenshots of their transfers. Check the transfer at the bank and approve: the money is on the balance at once and the client is told.",
+    "filter": "Show",
+    "all": "All",
+    "status": {
+      "pending": "Waiting",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "emptyPending": "No new requests",
+    "empty": "No requests",
+    "emptyText": "Once a client sends a screenshot of a transfer to the bot, the request appears here and the admin chat is told.",
+    "openPhoto": "Open the screenshot",
+    "photoAlt": "Transfer screenshot from {who}",
+    "noPhoto": "The screenshot did not load",
+    "balanceNow": "On the balance now: {amount}",
+    "approve": "Approve",
+    "reject": "Decline",
+    "approved": "Topped up with {amount}",
+    "rejected": "The request is declined",
+    "rejectTitle": "Decline the top-up of {amount}?",
+    "rejectText": "Nothing goes on the balance; the client gets a message with the reason.",
+    "reason": "Reason",
+    "reasonHint": "The client sees it in the bot. May stay empty.",
+    "reasonPlaceholder": "The transfer is not found"
   }
 }

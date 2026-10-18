@@ -74,6 +74,8 @@ type Config struct {
 	// ExtraDevicesKeep: devices bought on top of the tariff stay with renewals, which are
 	// then priced with them; off, they last until the term ends.
 	ExtraDevicesKeep bool `json:"extra_devices_keep,omitempty"`
+	// Balance is the accounts' internal balance (balance.go).
+	Balance BalanceConfig `json:"balance"`
 }
 
 // TrialPaid: the trial has a price and is bought, not taken.
@@ -115,11 +117,14 @@ type Notifier interface {
 }
 
 type Deps struct {
-	Store    *store.Store
-	Settings *settings.Settings
-	Users    *domain.Users
-	Log      *slog.Logger
-	Now      func() time.Time
+	// TopupWaiting tells the admin a top-up waits for them (its screenshot came); nil: nobody
+	// is told, the Payments page shows it anyway.
+	TopupWaiting func(ctx context.Context, t db.Topup)
+	Store        *store.Store
+	Settings     *settings.Settings
+	Users        *domain.Users
+	Log          *slog.Logger
+	Now          func() time.Time
 	// TrustProxy reads the client's IP from X-Forwarded-For: adapters check where a
 	// webhook came from (YooKassa's addresses).
 	TrustProxy bool
@@ -233,16 +238,21 @@ type Available struct {
 	Stars bool
 	// Addons are the adapters that take rubles now, by id.
 	Addons []string
+	// Balance pays at the ruble prices, in its own currency; zero while it is off.
+	Balance BalanceConfig
 }
 
 func (a Available) Any() bool { return a.Stars || a.Rub() }
 
-// Rub: some provider takes rubles.
-func (a Available) Rub() bool { return len(a.Addons) > 0 }
+// Rub: some provider takes rubles (the balance counts: it pays the ruble prices).
+func (a Available) Rub() bool { return len(a.Addons) > 0 || a.Balance.On() }
 
 func (a Available) has(provider string) bool {
-	if provider == Stars {
+	switch provider {
+	case Stars:
 		return a.Stars
+	case Balance:
+		return a.Balance.On()
 	}
 	id := AddonID(provider)
 	return id != "" && slices.Contains(a.Addons, id)
@@ -254,10 +264,14 @@ func (s *Service) Available(ctx context.Context) Available {
 		return Available{}
 	}
 	tg := s.telegram()
-	return Available{
+	av := Available{
 		Stars:  c.Stars && tg != nil && tg.BotURL(ctx) != "",
 		Addons: s.availableAddons(ctx),
 	}
+	if c.Balance.On() {
+		av.Balance = c.Balance
+	}
+	return av
 }
 
 // Offer is a tariff on sale with the terms a buyer can pay for now. Stars and Rub are
@@ -600,6 +614,8 @@ func (av Available) price(provider string, stars, rub sql.NullInt64) (amount int
 	switch {
 	case provider == Stars && av.Stars && stars.Valid:
 		return stars.Int64, "XTR", true
+	case provider == Balance && av.has(provider) && rub.Valid:
+		return av.Balance.FromRub(rub.Int64), av.Balance.Currency, true
 	case provider != Stars && av.has(provider) && rub.Valid:
 		return rub.Int64, "RUB", true
 	}
@@ -610,6 +626,22 @@ func (av Available) price(provider string, stars, rub sql.NullInt64) (amount int
 // URL to pay at; a provider that fails marks the payment failed.
 func (s *Service) openPayment(ctx context.Context, p db.Payment, title, desc string) (db.Payment, error) {
 	q := s.d.Store.Q
+	// The balance has no invoice: it pays at once, or the payment fails for want of money.
+	if p.Provider == Balance {
+		switch err := s.chargeBalance(ctx, p); {
+		case errors.Is(err, ErrBalanceLow):
+			_, _ = q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: PaymentFailed, ID: p.ID, OldStatus: PaymentPending})
+			if s.d.Promo != nil {
+				_ = s.d.Promo.ReleasePayment(ctx, p.ID)
+			}
+			_ = q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: ErrBalanceLow.Error(), ID: p.ID})
+			return db.Payment{}, ErrBalanceLow
+		case err != nil:
+			// Paid but not applied: Reconcile applies it, the buyer sees it paid.
+			s.d.Log.Warn("billing: apply a balance payment", "payment", p.ID, "err", err)
+		}
+		return q.GetPayment(ctx, p.ID)
+	}
 	ext, url, err := s.openInvoice(ctx, p, title, desc)
 	if err != nil {
 		_, _ = q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: PaymentFailed, ID: p.ID, OldStatus: PaymentPending})
@@ -1042,8 +1074,12 @@ func (s *Service) Refund(ctx context.Context, id int64) (Reverted, error) {
 	if err != nil {
 		return Reverted{}, err
 	}
-	if p.Provider != Stars || p.Status != PaymentApplied && p.Status != PaymentPaid || !p.ExternalID.Valid {
+	if p.Provider != Stars && p.Provider != Balance || p.Status != PaymentApplied && p.Status != PaymentPaid || !p.ExternalID.Valid {
 		return Reverted{}, ErrNotRefunable
+	}
+	if p.Provider == Balance {
+		// The money goes back on the balance, on the transaction of the refund (refunded).
+		return s.refunded(ctx, id)
 	}
 	tg := s.telegram()
 	if tg == nil {

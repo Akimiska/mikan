@@ -308,3 +308,48 @@ func (s remoteShop) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 	err := s.r.call(ctx, "Shop.FreePlan", []any{tgID}, &u)
 	return u, err
 }
+
+func (s remoteShop) BalanceOf(ctx context.Context, tgID int64) (int64, error) {
+	var n int64
+	err := s.r.call(ctx, "Shop.BalanceOf", []any{tgID}, &n)
+	return n, err
+}
+
+func (s remoteShop) BalanceHistory(ctx context.Context, tgID int64, n int32) ([]db.BalanceOp, error) {
+	var ops []db.BalanceOp
+	err := s.r.call(ctx, "Shop.BalanceHistory", []any{tgID, n}, &ops)
+	return ops, err
+}
+
+func (s remoteShop) StartTopup(ctx context.Context, tgID, amount int64) (db.Topup, error) {
+	var t db.Topup
+	err := s.r.call(ctx, "Shop.StartTopup", []any{tgID, amount}, &t)
+	return t, err
+}
+
+func (s remoteShop) SetTopupAmount(ctx context.Context, tgID, amount int64) (db.Topup, error) {
+	var t db.Topup
+	err := s.r.call(ctx, "Shop.SetTopupAmount", []any{tgID, amount}, &t)
+	return t, err
+}
+
+func (s remoteShop) TopupDraft(ctx context.Context, tgID int64) (db.Topup, bool) {
+	var (
+		t  db.Topup
+		ok bool
+	)
+	if err := s.r.call(ctx, "Shop.TopupDraft", []any{tgID}, &t, &ok); err != nil {
+		return db.Topup{}, false
+	}
+	return t, ok
+}
+
+func (s remoteShop) CancelTopup(ctx context.Context, tgID int64) error {
+	return s.r.call(ctx, "Shop.CancelTopup", []any{tgID})
+}
+
+func (s remoteShop) SubmitTopup(ctx context.Context, tgID int64, photo string) (db.Topup, error) {
+	var t db.Topup
+	err := s.r.call(ctx, "Shop.SubmitTopup", []any{tgID, photo}, &t)
+	return t, err
+}

@@ -415,6 +415,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/balances/{tg_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Баланс Telegram-аккаунта и история */
+        get: operations["get-balance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/balances/{tg_id}/adjust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Изменить баланс вручную */
+        post: operations["adjust-balance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns": {
         parameters: {
             query?: never;
@@ -2214,6 +2248,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/topups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Заявки на пополнение баланса */
+        get: operations["list-topups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/topups/{id}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Одобрить или отклонить пополнение */
+        post: operations["decide-topup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/topups/{id}/photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Скриншот перевода */
+        get: operations["get-topup-photo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/torrent": {
         parameters: {
             query?: never;
@@ -2811,6 +2896,15 @@ export interface components {
             /** @description Панель видит каталог данных сервера; иначе ставить адаптеры нельзя */
             supported: boolean;
         };
+        AdjustBalanceInputBody: {
+            /**
+             * Format: int64
+             * @description На сколько изменить, в копейках (сотых) валюты; минус — списать
+             */
+            delta: number;
+            /** @description За что: видит клиент в истории баланса */
+            note: string;
+        };
         AdminView: {
             /** Format: int64 */
             id: number;
@@ -2964,6 +3058,64 @@ export interface components {
             full: boolean;
             /** Format: int64 */
             node_id: number;
+        };
+        BalanceOpView: {
+            /**
+             * Format: int64
+             * @description + пришло, − ушло
+             */
+            amount: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            kind: "topup" | "spend" | "refund" | "adjust";
+            note?: string;
+            /** Format: int64 */
+            payment_id?: number;
+        };
+        BalanceSettings: {
+            /** @enum {string} */
+            currency: "RUB" | "USD" | "EUR" | "UAH" | "BYN" | "KZT" | "UZS" | "USDT";
+            /** @description Как перевести деньги: показывается клиенту перед скриншотом */
+            details: string;
+            enabled: boolean;
+            /**
+             * Format: int64
+             * @description Наибольшее пополнение в копейках (сотых); 0 — без границы
+             */
+            max: number;
+            /**
+             * Format: int64
+             * @description Наименьшее пополнение в копейках (сотых); 0 — без границы
+             */
+            min: number;
+            /**
+             * Format: double
+             * @description Сколько рублей стоит единица валюты баланса; для RUB — 1
+             */
+            rate: number;
+        };
+        BalanceSettingsBody: {
+            /** @enum {string} */
+            currency?: "RUB" | "USD" | "EUR" | "UAH" | "BYN" | "KZT" | "UZS" | "USDT";
+            details?: string;
+            enabled?: boolean;
+            /** Format: int64 */
+            max?: number;
+            /** Format: int64 */
+            min?: number;
+            /** Format: double */
+            rate?: number;
+        };
+        BalanceView: {
+            /** Format: int64 */
+            balance: number;
+            currency: string;
+            ops: components["schemas"]["BalanceOpView"][];
+            /** Format: int64 */
+            tg_id: number;
         };
         BotSlotInputBody: {
             /** @description id аддона с правом bot или пусто */
@@ -3369,6 +3521,11 @@ export interface components {
         DNSPolicy: {
             match: string;
             servers: string[];
+        };
+        DecideTopupInputBody: {
+            approve: boolean;
+            /** @description Почему отклонено: увидит клиент */
+            reason?: string;
         };
         DeviceBanView: {
             /** @description Кто заблокировал; пусто — ключ API или удалённый админ */
@@ -4623,6 +4780,7 @@ export interface components {
         };
         PatchPaymentSettingsInputBody: {
             allow_new?: boolean;
+            balance?: components["schemas"]["BalanceSettingsBody"];
             enabled?: boolean;
             /** @description Докупленные устройства остаются при продлении (true) или до конца срока (false) */
             extra_devices_keep?: boolean;
@@ -4796,6 +4954,8 @@ export interface components {
             allow_new: boolean;
             /** @description Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен */
             available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
+            /** @description Внутренний баланс клиентов с пополнением по скриншоту */
+            balance: components["schemas"]["BalanceSettings"];
             /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
             enabled: boolean;
             /** @description Докупленные устройства остаются при продлении, и продление стоит дороже на их цену; иначе они действуют до конца срока */
@@ -4848,28 +5008,29 @@ export interface components {
         PaymentSettingsViewAvailableStruct: {
             /** @description Адаптеры маркетплейса, которые принимают оплату прямо сейчас */
             addons: string[];
+            /** @description Баланс включён и настроен */
+            balance: boolean;
             stars: boolean;
         };
         PaymentTotal: {
             /** Format: int64 */
             count: number;
-            /** @enum {string} */
-            currency: "XTR" | "RUB";
+            currency: string;
             /** Format: int64 */
             total: number;
         };
         PaymentView: {
             /**
              * Format: int64
-             * @description Stars или копейки
+             * @description Stars или копейки (сотые) валюты
              */
             amount: number;
             /** Format: date-time */
             applied_at?: string;
             /** Format: date-time */
             created_at: string;
-            /** @enum {string} */
-            currency: "XTR" | "RUB";
+            /** @description XTR, RUB или валюта баланса */
+            currency: string;
             /** @description Почему оплаченный платёж ещё не применён */
             error?: string;
             /** @description Номер платежа у провайдера */
@@ -4883,7 +5044,7 @@ export interface components {
             kind: "new" | "renew" | "package" | "trial" | "device";
             /** Format: date-time */
             paid_at?: string;
-            /** @description stars или addon:<id> — адаптер маркетплейса */
+            /** @description stars, balance (с баланса клиента) или addon:<id> — адаптер маркетплейса */
             provider: string;
             /** Format: date-time */
             refunded_at?: string;
@@ -5987,6 +6148,38 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+        };
+        TopupView: {
+            /**
+             * Format: int64
+             * @description В копейках (сотых) валюты
+             */
+            amount: number;
+            /**
+             * Format: int64
+             * @description Баланс аккаунта сейчас
+             */
+            balance: number;
+            /** Format: date-time */
+            created_at: string;
+            currency: string;
+            /** Format: date-time */
+            decided_at?: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Есть скриншот: GET /api/v1/topups/{id}/photo */
+            photo: boolean;
+            reason?: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "rejected";
+            /** Format: int64 */
+            tg_id: number;
+            tg_username?: string;
+        };
+        TopupsOutputBody: {
+            items: components["schemas"]["TopupView"][];
+            /** Format: int64 */
+            pending: number;
         };
         TorrentHitView: {
             /** Format: date-time */
@@ -7247,6 +7440,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RedistributeOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tg_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "adjust-balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tg_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdjustBalanceInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceView"];
                 };
             };
             /** @description Error */
@@ -11555,6 +11814,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TelegramPreviewOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-topups": {
+        parameters: {
+            query?: {
+                status?: "pending" | "approved" | "rejected" | "";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopupsOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "decide-topup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecideTopupInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-topup-photo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Картинка */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "Content-Type"?: string;
+                    "X-Content-Type-Options"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": unknown;
                 };
             };
             /** @description Error */

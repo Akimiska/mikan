@@ -282,7 +282,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
 		MaxLinks: tgate.MaxLinks,
-		Addons:   deps.Addons, SubBase: subBase, Promo: promos, Events: hub})
+		Addons:   deps.Addons, SubBase: subBase, Promo: promos, Events: hub,
+		TopupWaiting: func(ctx context.Context, t db.Topup) { p.tellAdminOfTopup(ctx, t) }})
 	deps.Billing, deps.SubBase = p.Billing, subBase
 	// The bot may reach Telegram through a node when the panel's server cannot.
 	var tunnel func(ctx context.Context, nodeID int64, addr string) (net.Conn, error)

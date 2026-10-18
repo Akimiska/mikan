@@ -289,6 +289,9 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 				return err
 			}
 			done = true
+			if err := refundToBalance(ctx, q, p, at.Int64); err != nil {
+				return err
+			}
 			if rv, u, err = s.takeBack(ctx, q, p); err != nil {
 				return err
 			}
@@ -298,6 +301,9 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 			n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: at, ID: id})
 			open = n == 1
 			if err != nil || !open {
+				return err
+			}
+			if err := refundToBalance(ctx, q, p, at.Int64); err != nil {
 				return err
 			}
 			// Still a refund the addons count: told once, in the transaction of the change.

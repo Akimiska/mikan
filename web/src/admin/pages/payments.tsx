@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { HandCoins, History as HistoryIcon, ListChecks, Megaphone, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
+import { Coins, HandCoins, History as HistoryIcon, ListChecks, Megaphone, Ticket, TriangleAlert, Undo2, Wallet } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api, apiCodeText, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useAddons, usePaymentSettings, useTariffs, useTelegram } from "../../api/hooks";
@@ -19,6 +19,7 @@ import { PAYMENT_TABS, type PaymentsSearch } from "../search";
 import { addonName } from "./payment-addons";
 import { PromoSection } from "./promocodes";
 import { CampaignsSection } from "./campaigns";
+import { TopupsSection } from "./topups";
 
 type Settings = Schemas["PaymentSettingsView"];
 type Payment = Schemas["PaymentView"];
@@ -36,7 +37,7 @@ const STATUS_TONE: Record<Status, "ok" | "warn" | "bad" | "off"> = {
 };
 const STATUSES: Status[] = ["applied", "paid", "pending", "failed", "expired", "refunded"];
 const BUILT_IN: Provider[] = ["stars"];
-const TAB_ICONS = { history: HistoryIcon, methods: Wallet, rules: ListChecks, promocodes: Ticket, campaigns: Megaphone } as const;
+const TAB_ICONS = { history: HistoryIcon, topups: Coins, methods: Wallet, rules: ListChecks, promocodes: Ticket, campaigns: Megaphone } as const;
 type PaymentTab = NonNullable<PaymentsSearch["tab"]>;
 
 /** A payment's provider as the admin knows it; adapters by their own name. */
@@ -50,7 +51,7 @@ export function PaymentsPage() {
   const navigate = useNavigate({ from: "/payments" });
   const s = settings.data;
   // Until a way to take payments is on, setting one up is what the page is for.
-  const ready = !!s && s.enabled && (s.available.stars || s.available.addons.length > 0);
+  const ready = !!s && s.enabled && (s.available.stars || s.available.addons.length > 0 || s.available.balance);
   const shown: PaymentTab = tab ?? (s && !ready ? "methods" : "history");
   return (
     <>
@@ -78,6 +79,8 @@ export function PaymentsPage() {
       >
         {shown === "history" ? (
           <History />
+        ) : shown === "topups" ? (
+          <TopupsSection />
         ) : shown === "campaigns" ? (
           <CampaignsSection />
         ) : shown === "promocodes" ? (
@@ -90,6 +93,7 @@ export function PaymentsPage() {
                 <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2 lg:items-start">
                   <StarsCard s={v} />
                   <AddonMethodsCard />
+                  <BalanceCard s={v} />
                 </div>
               ) : (
                 <div className="flex max-w-[960px] flex-col gap-4">
@@ -494,5 +498,101 @@ function Provider({ title, sub, on, onChange, live, selling, offline, error, chi
       </div>
       {on ? children : null}
     </div>
+  );
+}
+
+const BALANCE_CURRENCIES = ["RUB", "USD", "EUR", "UAH", "BYN", "KZT", "UZS", "USDT"] as const;
+type BalanceCurrency = (typeof BALANCE_CURRENCIES)[number];
+
+/** Hundredths as the admin types them ("750", "750,50"); null when it is not a sum. */
+function hundredths(text: string): number | null {
+  const s = text.trim().replace(/\s/g, "").replace(",", ".");
+  if (s === "") return 0;
+  if (!/^\d{1,9}(\.\d{1,2})?$/.test(s)) return null;
+  return Math.round(Number(s) * 100);
+}
+
+const units = (n: number) => (n ? String(n / 100).replace(".", ",") : "");
+
+/**
+ * The accounts' balance: topped up by a transfer and a screenshot the admin checks, then it
+ * pays like any method at the tariffs' ruble prices, in its own currency at the admin's rate.
+ */
+function BalanceCard({ s }: { s: Settings }) {
+  const save = useSavePayments();
+  const b = s.balance;
+  const { draft: form, setDraft: setForm, dirty, reset } = useDraft({
+    enabled: b.enabled,
+    currency: b.currency as BalanceCurrency,
+    rate: String(b.rate || 1).replace(".", ","),
+    details: b.details,
+    min: units(b.min),
+    max: units(b.max),
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    setErrors(({ [k]: _, ...rest }) => rest);
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const next: Record<string, string> = {};
+    const rate = Number(form.rate.replace(",", "."));
+    const min = hundredths(form.min);
+    const max = hundredths(form.max);
+    if (form.currency !== "RUB" && !(rate > 0 && rate <= 1_000_000)) next.rate = t("payments.balance.rateErr");
+    if (min === null) next.min = t("payments.balance.sumErr");
+    if (max === null) next.max = t("payments.balance.sumErr");
+    if (min !== null && max !== null && max > 0 && min > max) next.max = t("payments.balance.boundsErr");
+    if (form.enabled && !form.details.trim()) next.details = t("payments.balance.detailsErr");
+    setErrors(next);
+    if (Object.keys(next).length) return;
+    save.mutate({ balance: { enabled: form.enabled, currency: form.currency, rate: form.currency === "RUB" ? 1 : rate, details: form.details.trim(), min: min ?? 0, max: max ?? 0 } });
+  };
+  return (
+    <section className="card glass reveal lg:col-span-2">
+      <form onSubmit={submit} noValidate>
+        {save.error ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        <Provider
+          title={t("payments.balance.title")}
+          sub={t("payments.balance.sub")}
+          on={form.enabled}
+          onChange={(v) => set("enabled", v)}
+          live={s.available.balance}
+          selling={s.enabled}
+          offline={s.enabled && form.enabled && !s.available.balance ? t("payments.balance.notReady") : ""}
+        >
+          <div className="grid gap-x-4 md:grid-cols-2">
+            <Field label={t("payments.balance.currency")} htmlFor="bal-currency">
+              <select id="bal-currency" className="input" value={form.currency} onChange={(e) => set("currency", e.target.value as BalanceCurrency)}>
+                {BALANCE_CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {t(`payments.balance.currencies.${c}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {form.currency !== "RUB" ? (
+              <Field label={t("payments.balance.rate", { currency: form.currency })} htmlFor="bal-rate" hint={t("payments.balance.rateHint")} error={errors.rate}>
+                <label className="input-unit">
+                  <input id="bal-rate" className="input" inputMode="decimal" value={form.rate} onChange={(e) => set("rate", e.target.value)} aria-invalid={!!errors.rate} />
+                  <span>₽</span>
+                </label>
+              </Field>
+            ) : null}
+            <Field label={t("payments.balance.min")} htmlFor="bal-min" hint={t("payments.balance.boundHint")} error={errors.min}>
+              <input id="bal-min" className="input" inputMode="decimal" value={form.min} onChange={(e) => set("min", e.target.value)} aria-invalid={!!errors.min} />
+            </Field>
+            <Field label={t("payments.balance.max")} htmlFor="bal-max" hint={t("payments.balance.boundHint")} error={errors.max}>
+              <input id="bal-max" className="input" inputMode="decimal" value={form.max} onChange={(e) => set("max", e.target.value)} aria-invalid={!!errors.max} />
+            </Field>
+          </div>
+          <Field label={t("payments.balance.details")} htmlFor="bal-details" hint={t("payments.balance.detailsHint")} error={errors.details}>
+            <textarea id="bal-details" className="input min-h-[96px]" value={form.details} maxLength={1000} onChange={(e) => set("details", e.target.value)} placeholder={t("payments.balance.detailsPlaceholder")} aria-invalid={!!errors.details} />
+          </Field>
+        </Provider>
+        <FormActions dirty={dirty} saving={save.isPending} onReset={reset} />
+      </form>
+    </section>
   );
 }

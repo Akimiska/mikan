@@ -83,7 +83,7 @@ func TestEveryTypeIsDocumented(t *testing.T) {
 	// Every constant of the feed is in the list but the deprecated bot.* ones.
 	for _, typ := range []string{events.PaymentPaid, events.PaymentRefunded, events.UserCreated, events.UserExpiring, events.UserExpired,
 		events.UserGranted, events.Traffic90, events.Traffic100, events.TrialStarted, events.TrialNotGiven, events.DeviceBound, events.DeviceUnbound,
-		events.NodeDown, events.NodeUp} {
+		events.NodeDown, events.NodeUp, events.BalanceTopup} {
 		if !seen[typ] {
 			t.Errorf("%s is not documented", typ)
 		}
@@ -96,7 +96,7 @@ func TestEveryTypeIsDocumented(t *testing.T) {
 			t.Errorf("%s would not be held back from other addons", typ)
 		}
 	}
-	if len(events.Docs) != 14 {
+	if len(events.Docs) != 15 {
 		t.Errorf("%d types documented", len(events.Docs))
 	}
 }

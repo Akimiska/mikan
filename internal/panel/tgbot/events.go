@@ -64,7 +64,7 @@ func (n Notifications) TrialNotGiven(ctx context.Context, p db.Payment) {
 
 // EventTypes are the events HandleEvent acts on.
 var EventTypes = []string{events.PaymentPaid, events.PaymentRefunded, events.TrialNotGiven,
-	events.UserExpiring, events.UserExpired, events.Traffic90, events.Traffic100}
+	events.UserExpiring, events.UserExpired, events.Traffic90, events.Traffic100, events.BalanceTopup}
 
 // gone: the subscription of a payment is not there for the bot any more: deleted, or moved to
 // an account that is not talking to it. Retrying would not change that.
@@ -99,6 +99,12 @@ func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
 		} else {
 			b.refunded(ctx, e.TgID, p, u)
 		}
+	case events.BalanceTopup:
+		var t events.Topup
+		if err := json.Unmarshal(e.Data, &t); err != nil || e.TgID == 0 {
+			return nil
+		}
+		b.topupDecided(ctx, e.TgID, t)
 	case events.TrialNotGiven:
 		var n events.NotGiven
 		if err := json.Unmarshal(e.Data, &n); err != nil || e.TgID == 0 {

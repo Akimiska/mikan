@@ -116,6 +116,24 @@ type AuditLog struct {
 	Details    sql.NullString
 }
 
+type Balance struct {
+	TgID      int64
+	Amount    int64
+	UpdatedAt int64
+}
+
+type BalanceOp struct {
+	ID        int64
+	TgID      int64
+	Amount    int64
+	Kind      string
+	PaymentID sql.NullInt64
+	TopupID   sql.NullInt64
+	AdminID   sql.NullInt64
+	Note      string
+	CreatedAt int64
+}
+
 type BoundDevice struct {
 	ID        int64
 	UserID    int64
@@ -539,6 +557,19 @@ type TgNotice struct {
 	Kind   string
 	Period int64
 	SentAt int64
+}
+
+type Topup struct {
+	ID        int64
+	TgID      int64
+	Amount    int64
+	Currency  string
+	Photo     string
+	Status    string
+	CreatedAt int64
+	DecidedAt sql.NullInt64
+	AdminID   sql.NullInt64
+	Reason    string
 }
 
 type TorrentHit struct {

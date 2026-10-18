@@ -162,9 +162,18 @@ export function rubles(kopecks: number): string {
   return `${f.format(kopecks / 100)} ₽`;
 }
 
-/** A payment's sum: Stars or kopecks. */
+/** How a balance's currency shows; another shows by its code. */
+const CURRENCY_SIGNS: Record<string, string> = { USD: "$", EUR: "€", UAH: "₴", BYN: "Br", KZT: "₸", UZS: "сўм", USDT: "USDT" };
+
+/** A payment's sum: Stars, kopecks, or hundredths of a balance's currency. */
 export function money(amount: number, currency: string): string {
-  return currency === "XTR" ? `⭐ ${num(amount)}` : rubles(amount);
+  if (currency === "XTR") return `⭐ ${num(amount)}`;
+  if (currency === "RUB" || !currency) return rubles(amount);
+  const min = amount % 100 ? 2 : 0;
+  const key = `c${getLocale()}${min}`;
+  let f = cache.get(key) as Intl.NumberFormat | undefined;
+  if (!f) cache.set(key, (f = new Intl.NumberFormat(getLocale(), { minimumFractionDigits: min, maximumFractionDigits: 2 })));
+  return `${f.format(amount / 100)} ${CURRENCY_SIGNS[currency] ?? currency}`;
 }
 
 /**

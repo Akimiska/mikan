@@ -304,6 +304,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerSubDomain()
 	h.registerCampaigns()
 	h.registerBalance()
+	h.registerWallet()
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()

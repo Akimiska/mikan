@@ -30,6 +30,8 @@ const (
 
 	NodeDown = "node.down"
 	NodeUp   = "node.up"
+
+	BalanceTopup = "balance.topup"
 )
 
 // The bot's own messages (deprecated), written after the commit by tgbot.Notifications and
@@ -146,6 +148,17 @@ type Node struct {
 	DownAt int64  `json:"down_since,omitempty"` // NodeUp: unix seconds, when it went down
 }
 
+// Topup is the data of BalanceTopup: the admin approved or rejected a top-up of an account's
+// balance (the envelope's tg_id). Amount and Balance are in minor units of Currency.
+type Topup struct {
+	TopupID  int64  `json:"topup_id"`
+	Status   string `json:"status"` // approved | rejected
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency"`
+	Balance  int64  `json:"balance"`          // the balance after it
+	Reason   string `json:"reason,omitempty"` // rejected: the admin's words
+}
+
 // Doc describes one event type for the protocol's documentation: Data is an example of its
 // data as it goes on the wire.
 type Doc struct {
@@ -176,4 +189,5 @@ var Docs = []Doc{
 	{DeviceUnbound, "A device lost its place on a subscription.", Device{DeviceID: 41, Label: "iPhone 15", By: UnboundBySubscriber}},
 	{NodeDown, "A node stopped answering the panel's health checks.", Node{NodeID: 2, Name: "de-1", Code: "timeout", Since: 1_800_000_000}},
 	{NodeUp, "A node that was down answers again.", Node{NodeID: 2, Name: "de-1", DownAt: 1_800_000_000}},
+	{BalanceTopup, "The admin approved or rejected a top-up of an account's balance.", Topup{TopupID: 5, Status: "approved", Amount: 50000, Currency: "RUB", Balance: 65000}},
 }

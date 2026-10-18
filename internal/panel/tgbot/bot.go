@@ -98,6 +98,13 @@ func (b *Bot) onMessage(ctx context.Context, m *tgate.Message) {
 	}
 	var notice string
 	text := strings.TrimSpace(m.Text)
+	// An open top-up takes its amount or its screenshot first.
+	if n, ok := b.topupMessage(ctx, w, m); ok {
+		if n != "" {
+			b.freshScreen(chat, "bl", n)
+		}
+		return
+	}
 	switch {
 	case strings.HasPrefix(text, "/start "+domain.CampaignPrefix):
 		// An ad's link: the account counts to the campaign, the menu greets it as usual.

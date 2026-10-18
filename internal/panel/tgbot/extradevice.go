@@ -68,5 +68,8 @@ func (b *Bot) deviceInvoice(ctx context.Context, w *words, chat, userID int64, c
 		return html.EscapeString(msg), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
 	text := fmt.Sprintf(w.invoice, html.EscapeString(p.TariffName), html.EscapeString(w.price(p.Amount, p.Currency)), w.payDevice)
+	if p.Provider == billing.Balance {
+		return w.balancePaidScreen(p.Amount, p.Currency)
+	}
 	return text, &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
 }

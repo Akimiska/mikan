@@ -85,7 +85,8 @@ curl -fsSL https://github.com/Miroshka000/mikan/releases/latest/download/install
 
 | Путь | Что там |
 |---|---|
-| `/opt/mikan/.env`, `compose.yaml` | настройки запуска и контейнеры |
+| `/opt/mikan/config.json`, `compose.yaml` | настройки запуска и контейнеры (на сервере, поставленном до беты 0.5.1.1, вместо `config.json` файл `.env`) |
+| `/opt/mikan/secrets/` | секреты, каждый файлом: пароль и адрес базы, ключ подключения ноды (папка 0700, файлы 0400), см. [Команда mikan](/mikan/operations/cli/#файлы-настроек) |
 | `/opt/mikan/data/panel`, `data/node` | данные панели и ноды |
 | `/opt/mikan/backups` | бэкапы |
 | `/opt/mikan/data/panel/www` | свой сайт: файлы отдаются по путям, которые панель не занимает, `404.html` служит страницей ошибки |

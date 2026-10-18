@@ -1,0 +1,84 @@
+---
+title: Clients' balance
+description: 'An internal balance of a Telegram account: top-ups by transfer and screenshot, approving requests, paying from the balance, refunds and manual corrections.'
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+:::note[In beta 0.5.1.1]
+The balance is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+The balance is an account of a Telegram account inside the panel. A client tops it up by a transfer to your details and sends a screenshot to the bot, you check the transfer against your bank and approve the request. After that the balance pays for subscriptions, renewals, traffic packages and extra devices: the money is taken at once, with no payment system to wait for. All of one account's money sits on one balance, even if it holds several subscriptions.
+
+The panel charges no cards and takes no payments for the balance itself: the transfer goes straight to you, and you confirm it by hand.
+
+## Set it up
+
+<Steps>
+
+1. Open **Payments → Payment methods** and find the **Clients' balance** card.
+
+2. **Balance currency**: rubles, dollars, euros, hryvnias, Belarusian rubles, tenge, sums or USDT. The client sees the balance and tops it up in this currency.
+
+3. **Rate**: how many rubles one unit of the currency is worth. Rubles need no rate. The plans' prices in the panel are in rubles, and the rate converts them into the balance's currency, rounded up. The rate is above zero and up to 1,000,000.
+
+4. **How to transfer the money**: the text the client sees before sending a screenshot. A card number, a wallet, a bank, a comment for the transfer. Without this text the client has nowhere to transfer to, and the balance does not turn on.
+
+5. **Top-up from** and **Top-up to**: the bounds of one request in the balance's currency. An empty field means no limit.
+
+6. Turn on the card's switch and save.
+
+</Steps>
+
+If something is missing (no details text or no rate), the card says so: "Say how to transfer the money, and the rate". Until the balance is ready, the bot does not show it.
+
+:::caution[Plan prices stay in rubles]
+A balance in dollars does not create prices of its own: a plan of 300 ₽ at a rate of 1 $ = 100 ₽ takes 3 $ from the balance. Change the rate and the prices for the balance change too. Invoices issued earlier stay as they were.
+:::
+
+## How a client tops up
+
+The bot's main menu gets a **💰 Balance: amount** button. In it:
+
+1. **➕ Top up**. The bot offers amounts as buttons or waits for an amount in a message. The bounds from the settings are shown beside, an amount outside them is refused.
+2. The bot shows "Transfer N" and your details text.
+3. The client transfers the money and sends a screenshot of the transfer as one picture to the same chat.
+4. The bot answers that the request was sent. Until you check it, the balance does not change. One account can have at most three requests waiting at once.
+
+Until the screenshot comes, the top-up can be cancelled with the "Cancel" button. The balance screen shows the last five operations.
+
+## Requests: Payments → Top-ups
+
+The **Top-ups** tab collects the requests with their screenshots. A filter: "Waiting", "Approved", "Rejected", "All". A request shows the account, the amount, the time, how much the client has on the balance now and an "Open screenshot" button.
+
+- **Approve**: the money goes to the balance at once, the client gets a message "Balance topped up by …".
+- **Decline**: no money goes to the balance, the client gets a message. You can write a reason and the client sees it in the bot; an empty one is fine too.
+
+A decided request cannot be decided twice: if another administrator handled it already, the panel answers "The request is already decided". Every decision goes into the audit log as `balance.topup`.
+
+### A notice in the chat
+
+A new request also comes to the administrator's alerts chat with its screenshot: "Top-up waits", the account and the amount. The decision is still made in the panel. The chat is connected in **Telegram → Alerts to me → Private alerts**, see [Notifications](/mikan/en/operations/alerts/). Without the bot or the chat there is no notice, the request simply waits on the tab.
+
+## Paying from the balance
+
+When the balance is on and ready, the payment methods in the bot get a **💰 From the balance** line. It is there wherever a ruble price is paid: a new subscription, a renewal, a [traffic package](/mikan/en/billing/pools/), an [extra device](/mikan/en/billing/plans/#extra-devices). If the balance is short, the bot says so and sends the client to top it up.
+
+In the [payment history](/mikan/en/billing/payments/#history-and-refunds) such a payment is marked with the "Balance" method.
+
+## Refunds
+
+The **Refund** button in the payment history works for balance payments too. The money goes back to the client's balance, and what the payment gave is taken back as with a Stars refund: a new subscription is turned off, a renewal loses its term, a package is deleted. One payment returns to the balance only once.
+
+## Correcting a balance by hand
+
+The panel has no button for it, a correction goes through the API: `POST /api/v1/balances/{tg_id}/adjust` with the fields `delta` and `note`. The `delta` is in hundredths of the balance's currency (150 ₽ is `15000`), a minus takes money off. The `note` is required, the client sees it in the balance history. You cannot take more than the balance holds. The method works only from an administrator's session, an API key does not fit. A correction goes into the audit log as `balance.adjust`.
+
+`GET /api/v1/balances/{tg_id}` reads the balance and its history: the current amount, the currency and the last 50 operations (`topup`, `spend`, `refund`, `adjust`). `GET /api/v1/topups/{id}/photo` returns a request's screenshot. More on the API: [API](/mikan/en/api/).
+
+## Good to know
+
+- The balance is shared by the account, and the currency is one for the whole panel. If you change the currency, the panel does not convert the money on old balances: the numbers stay the same. Change the currency while the balances are empty.
+- The panel does not check the transfers themselves. Check the amount and the recipient in your bank before you approve.
+- The screenshot is kept by Telegram, the panel fetches it with the bot's token. If the bot is off, you see the request but not the picture.

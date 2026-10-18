@@ -1,0 +1,48 @@
+---
+title: Filters and "Where clients go"
+description: Traffic filters on the nodes, per-subscription stats by site (off by default) and blocking a site for everyone with one tap.
+---
+
+Traffic filters are a built-in tool: **Addons → Built in → Traffic filters**. A node applies them itself, within seconds of saving. A node older than the panel skips them: update it on the **Nodes** page.
+
+## Outgoing traffic
+
+The **Outgoing traffic** card: the nodes refuse users' traffic to what is listed here. The node's own private networks and port 25 are always closed, even without this filter.
+
+- **Close the mail ports**: a VPN address that sends mail is on blacklists within hours.
+- **Ports**: one per line, ranges too, for example `6881-6889`.
+- **Networks and addresses**: one per line, for example `203.0.113.0/24` or `2001:db8::/32`.
+- **Domains**: one per line, with their subdomains: `example.com` also closes `mail.example.com`.
+
+## Incoming connections
+
+The **Incoming connections** card: the nodes check where connections come from. The list of networks works in two modes: "Deny these networks" or "Allow only these networks". In the second one every other user loses access, so be careful. The panel's other nodes (cascade) are always let in. With a CDN or a TCP proxy in front of a node, the node sees its address, not the user's: list its networks or leave the check off. For a protocol [behind a CDN](/mikan/en/protocols/cdn/) the node takes the real client address from a header.
+
+## Where clients go
+
+:::note[In beta 0.5.1.1]
+Stats by site are new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+The nodes can count each subscription's traffic by site: by the registrable domain or by the address. It helps to see what exactly a client who takes the whole channel downloads or watches, and to block what you do not want.
+
+### What is kept and how to turn it on
+
+The **Where clients go** card on the filters page, **off** by default.
+
+- **Count traffic by site**: turns the counting on the nodes on. The node works a little harder, because connections go through a counter.
+- **Keep, days**: from 1 to 90. Older data is removed once a day.
+
+Only totals are kept: how many bytes per site for each subscription per day. **No times, client addresses or single connections.** A node older than the panel does not count sites.
+
+### Where it shows
+
+The client's card has a **Where it goes** block: sites by falling traffic with a bar. The period: 1, 7 or 30 days. Small sites are gathered into an "other sites" row. While counting is off, the block is hidden if there is no data.
+
+### Block a site for everyone
+
+Each domain in the list has a "Block the site for everyone" button. It adds the domain to the **Domains** of the outgoing traffic filter and turns that filter on if it was off: the nodes let nobody there, subdomains included. An already blocked domain has a tick in place of the button. Addresses have no button: add them to "Networks and addresses" by hand.
+
+### API
+
+`GET /api/v1/traffic-detail` and `PUT /api/v1/traffic-detail` (turn on or off, days kept), `GET /api/v1/users/{id}/sites?days=7` (a subscription's sites).

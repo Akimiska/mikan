@@ -193,6 +193,7 @@ Run `mikan` for the menu, or use the commands directly:
 | `mikan doctor` | check the server: Docker, ports, firewall, clock, DNS, disk |
 | `mikan support CODE` | send diagnostics to a support ticket when the panel is down |
 | `mikan support-access on\|off` | allow or forbid support access on this server |
+| `mikan api-lockdown [status\|off]` | on a node: the state of the "node API from the panel's IP only" rule, or lift it at once |
 | `mikan uninstall` | stop and remove the command, keep the data |
 
 ## Updates

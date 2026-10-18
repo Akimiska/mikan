@@ -14,6 +14,7 @@ Running `mikan` with no arguments opens a menu in the terminal: status, updates,
 | `mikan support <code> [--dry-run]` | send support the check, the status and the last log lines (secrets cut out) with the code from your ticket, see below |
 | `mikan logs [panel\|node]` | live logs, <kbd>Ctrl</kbd>+<kbd>C</kbd> stops |
 | `mikan restart` | restart the containers |
+| `mikan api-lockdown [status\|off]` | on a node's server: the state of the firewall rule "Node API from the panel's IP only", or lift it at once, see [Hardening a node](/mikan/en/nodes/hardening/) |
 | `mikan support-access on\|off` | allow or forbid [support access](/mikan/en/operations/support-access/) on this server; `off` holds whatever the panel says |
 | `mikan update [--check]` | update now, a backup first, rollback on failure. `--check` only checks |
 | `mikan install [flags]` | install; on an installed server it opens the menu |
@@ -23,7 +24,32 @@ Running `mikan` with no arguments opens a menu in the terminal: status, updates,
 
 The panel runs `mikan doctor` and `mikan restart` on its own server, and on a node's server over the node API, without SSH: it writes a request file into its data directory and a systemd unit (`mikan-doctor-request.path`, `mikan-restart-request.path`, installed by the installer and by `mikan update`) runs the command and returns the report. A server installed before 0.5.1.1 needs one `mikan update` for that. The logs of the panel and of the nodes are shown in the panel as well, with tokens, keys, passwords and subscription links cut out. All of it is on the [Diagnostics](/mikan/en/operations/diagnostics/) page.
 
-`mikan support <code>` is for the case when the panel is down or the node is out of the panel's reach. Take the code from your support ticket, run the command as root: it collects the same report as `mikan doctor --json`, `mikan status` and the last 300 lines of the containers' logs, cuts the secrets out and sends one JSON document to the support desk (`MIKAN_SUPPORT_URL` points it elsewhere). `.env`, keys and certificates are not read and not sent. `--dry-run` prints what would be sent and sends nothing.
+`mikan support <code>` is for the case when the panel is down or the node is out of the panel's reach. Take the code from your support ticket, run the command as root: it collects the same report as `mikan doctor --json`, `mikan status` and the last 300 lines of the containers' logs, cuts the secrets out and sends one JSON document to the support desk (`MIKAN_SUPPORT_URL` points it elsewhere). The settings files (`config.json`, `secrets/`, and `.env` on older servers), keys and certificates are not read and not sent. `--dry-run` prints what would be sent and sends nothing.
+
+## Settings files
+
+:::note[Secrets out of .env: beta 0.5.1.1]
+All of the server's settings used to be in `/opt/mikan/.env`. In beta 0.5.1.1 they are split, and nothing secret is in a container's environment any more: `docker inspect` and `/proc/<pid>/environ` show only the paths of files.
+:::
+
+| Path | What is there | Permissions |
+|---|---|---|
+| `/opt/mikan/config.json` | the plain settings: the image, the version, the mode, `MIKAN_ACME_LISTEN`, `MIKAN_AUTO_UPDATE` and others. A JSON object of strings | root only |
+| `/opt/mikan/secrets/` | the secrets, each a file of its own: `postgres_password` and `database_url` (the database's password and address on a panel's server), `node_join` (the join key on a node's server) | the folder 0700, each file 0400 and readable only by the container that needs it |
+
+Docker Compose mounts the files of `secrets/` into the containers as secrets (`/run/secrets/<name>`). The panel and the node read the password, the database address and the node key from there. A backup holds both `config.json` and `secrets/`, and old archives with `.env` restore as before.
+
+**The next `mikan update` moves an existing `.env` by itself**: it creates the new files first and removes `.env` once mikan already runs on them. A copy stays in the update's backup. A rollback to an older mikan version puts `.env` back. You do not need to do anything by hand.
+
+To change a plain setting by hand, edit `config.json` and run `mikan restart`. For example, to let nginx or Caddy on port 80 pass certificate checks to mikan, add a line to `config.json`:
+
+```json
+{
+  "MIKAN_ACME_LISTEN": "127.0.0.1:18080"
+}
+```
+
+(together with the file's other lines, separated by commas). The values go into `compose.yaml` as they are, so they cannot hold `$`, quotes, spaces or `#`. Secrets are changed only through the panel and mikan's commands: `mikan join KEY` on a node changes `node_join`. The `mikan cert proxy <domain>` command sets `MIKAN_ACME_LISTEN` and restarts the node itself.
 
 ## Access
 

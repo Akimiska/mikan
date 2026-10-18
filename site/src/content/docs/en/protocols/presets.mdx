@@ -17,6 +17,8 @@ The **Protocols** section holds the protocols clients use to reach your nodes. A
 | VLESS · TLS · XHTTP | 2443/tcp | plain TLS on a real certificate, answers strangers as a web server |
 | VLESS · TLS · Vision | 3443/tcp | works in almost every app |
 | VLESS · TLS · WebSocket | 2053/tcp | gets through on operators where only WS works, and through a CDN, see [behind a proxy](/mikan/en/protocols/behind-proxy/#through-a-cdn) |
+| CDN · VLESS · XHTTP | 2083/tcp | through a CDN (Cloudflare, Yandex and others), in beta 0.5.1.1, see [Behind a CDN](/mikan/en/protocols/cdn/) |
+| CDN · VLESS · XHTTP · GET | 2087/tcp | for CDNs that do not pass POST to the origin: data in a header, in beta 0.5.1.1 |
 | Hysteria2 | 443/udp | QUIC, a port range can be set |
 | Hysteria2 · Gecko | 2443/udp | Hysteria2 with Gecko obfuscation, Clash apps only |
 | TUIC v5 | 8443/udp | |
@@ -45,6 +47,7 @@ The subscription detects the app and sends it only what it can run. The connecti
 | VLESS PQ | yes | yes | |
 | Trojan · REALITY | yes | yes | yes |
 | VLESS · TLS · WebSocket | yes | yes | yes |
+| CDN · VLESS · XHTTP (and GET) | yes | yes | |
 | Hysteria2 | yes | yes | yes |
 | TUIC v5 | yes | | yes |
 | AnyTLS | yes | | Karing |
@@ -66,11 +69,45 @@ The **Configure** button opens the tabs "Main", "Masking" (XHTTP only) and "Conf
 - **Way out to the internet**: direct, [WARP](/mikan/en/nodes/warp/) or [via a node](/mikan/en/nodes/cascades/).
 - **Traffic pool**: if you have pools, a protocol can count against a separate limit, see [Pools and packages](/mikan/en/billing/pools/).
 - **Behind a proxy (nginx, HAProxy)**: see [Behind a proxy](/mikan/en/protocols/behind-proxy/).
+- **Behind a CDN** (beta 0.5.1.1): the CDN's address for clients and the client's real IP from a header, only for VLESS and Trojan on the node's certificate over XHTTP, WebSocket and gRPC, see [Behind a CDN](/mikan/en/protocols/cdn/).
+- **Through shared 443** (beta 0.5.1.1): the protocol shares the node's port 443 with others by TLS name, see [Shared port 443](/mikan/en/nodes/shared-443/).
 - **Automatic fixes**: switches for moving the port and changing the site, see [Automatic fixes](/mikan/en/protocols/autotune/).
+
+## Copying a protocol
+
+:::note[In beta 0.5.1.1]
+Copying is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+The **Copy** button in a protocol's row makes one more like it: the same settings with keys of its own, and clients get the copy as one more connection. In the window pick:
+
+- **To which node**: the same one or another. A copy on the same node listens on another port.
+- **Port**: empty means the same port, or the first free one if it is taken.
+- **Camouflage site**, for REALITY: keep it or pick another.
+
+The address for clients, the CDN and the path are copied as they are. If the other node has its own, fix them in the copy's settings.
+
+## Exit for several protocols at once
+
+:::note[In beta 0.5.1.1]
+The group exit is new in beta 0.5.1.1.
+:::
+
+Tick several protocols in the list (or "Choose all") and a **Way out to the internet** button appears above the list. It sets the exit for everything ticked at once:
+
+- **Direct**: sites see the server's IP;
+- **Through its node's WARP**: the node must have [WARP](/mikan/en/nodes/warp/) set up;
+- **Via a node**: pick another node, see [Cascades](/mikan/en/nodes/cascades/).
+
+It is the same "Way out to the internet" field from a protocol's settings, only for many protocols at once.
 
 ## Own config
 
-The "Own config" preset opens a YAML editor with a mihomo listener of type vless, vmess, trojan, hysteria2, tuic or anytls. mikan fills in the name, port, address, users and certificate itself. The "Check" button validates the config before saving.
+The "Own config" preset opens a YAML editor with a mihomo listener of type vless, trojan, hysteria2, tuic or anytls. mikan fills in the name, port, address, users and certificate itself. The "Check" button validates the config before saving.
+
+:::note[VMess is gone]
+In beta 0.5.1.1 the nodes run the Citrus core, and it has no VMess. VMess connections from before become VLESS on the same transport with the same users when you update. Clients get the new keys with their next subscription update.
+:::
 
 ## From the command line
 

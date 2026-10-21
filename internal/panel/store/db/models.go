@@ -340,6 +340,11 @@ type NodeWarp struct {
 	UpdatedAt     int64
 }
 
+type PackageTariff struct {
+	PackageID int64
+	TariffID  int64
+}
+
 type Payment struct {
 	ID         int64
 	Provider   string
@@ -520,11 +525,16 @@ type Tariff struct {
 	DeviceExtraMax   int64
 }
 
+type TariffGift struct {
+	TariffID  int64
+	PackageID int64
+}
+
 type TariffPool struct {
 	TariffID     int64
 	PoolID       int64
-	TrafficLimit int64
-	Excluded     bool
+	TrafficLimit sql.NullInt64
+	Mode         string
 }
 
 type TariffTerm struct {
@@ -696,7 +706,7 @@ type UserPool struct {
 	TrafficLimit sql.NullInt64
 	UsedUp       int64
 	UsedDown     int64
-	Excluded     bool
+	Mode         string
 }
 
 type UserSite struct {

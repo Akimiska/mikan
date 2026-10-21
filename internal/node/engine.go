@@ -225,6 +225,11 @@ func Start(o Options) (*Engine, error) {
 	statistic.DefaultManager.Users().IPRelease = o.DeviceRelease
 	e.Reg = NewRegistry(cs.Epoch, cs.Seq, o.DeviceRelease, time.Now, citrus{})
 	e.tun = &Tunnel{inner: tunnel.Tunnel, reg: e.Reg}
+	reg := e.Reg
+	statistic.DefaultManager.SetOnLeave(func(c statistic.Tracker) {
+		i := c.Info()
+		reg.left(i.Metadata, i.UploadTotal.Load(), i.DownloadTotal.Load())
+	})
 
 	if err := applyBase(); err != nil {
 		return nil, err

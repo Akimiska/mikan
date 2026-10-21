@@ -26,7 +26,10 @@ const TOP: Record<string, string[]> = {
   snell: ["psk", "version", "obfs-opts"],
 };
 const NESTED: Record<string, string[]> = {
-  "reality-config": ["dest", "private-key", "short-id", "server-names", "max-time-difference", "limit-fallback-upload", "limit-fallback-download"],
+  "reality-config": [
+    "dest", "private-key", "short-id", "server-names", "max-time-difference", "limit-fallback-upload", "limit-fallback-download",
+    "mldsa65-seed", "require-x25519mlkem768", "min-client-ver", "max-client-ver",
+  ],
   "xhttp-config": ["path", "mode", "host", "x-padding-bytes"],
   mikan: ["flow", "tls", "client"],
   client: ["server", "port", "sni", "fingerprint"],

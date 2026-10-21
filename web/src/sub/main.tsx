@@ -274,6 +274,17 @@ function SubPage() {
       />
     ) : null;
 
+  // The packages on sale for this subscription, for the traffic block's "buy more": the main
+  // traffic's and each group's; it scrolls to them.
+  const onSale = packages && packages.token === token ? (packages.data.packages ?? []) : [];
+  const buy = tgMode && onSale.length
+    ? {
+        main: onSale.some((o) => !o.pool),
+        pools: new Set(onSale.flatMap((o) => (o.pool ? [o.pool] : []))),
+        go: () => document.getElementById("sub-packages")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }),
+      }
+    : undefined;
+
   // One more device, for the subscription on screen.
   const deviceShop =
     packages && packages.data.device && packages.token === token ? (
@@ -419,12 +430,13 @@ function SubPage() {
         tgMode={tgMode}
         docs={page.docs}
         selling={tgMode && !!shop?.offers.length}
+        buy={buy}
         promo={tgMode ? <PromoSection token={subURL} activeCode={promoCode} onApplied={(c) => setPromoCode(c)} onBonusApplied={refresh} title={titleOf(config, "promo")} /> : null}
         shop={
           tgMode ? (
             <>
               {shopFor(token, titleOf(config, "shop") || t("sub.shop"))}
-              {packagesShop}
+              {packagesShop ? <div id="sub-packages" className="scroll-mt-4">{packagesShop}</div> : null}
               {deviceShop}
               {freePlan}
             </>

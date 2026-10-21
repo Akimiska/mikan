@@ -8,26 +8,74 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	"github.com/lib/pq"
 )
 
+const addPackageTariff = `-- name: AddPackageTariff :exec
+INSERT INTO package_tariffs (package_id, tariff_id) VALUES ($1, $2)
+`
+
+type AddPackageTariffParams struct {
+	PackageID int64
+	TariffID  int64
+}
+
+func (q *Queries) AddPackageTariff(ctx context.Context, arg AddPackageTariffParams) error {
+	_, err := q.db.ExecContext(ctx, addPackageTariff, arg.PackageID, arg.TariffID)
+	return err
+}
+
+const addTariffGift = `-- name: AddTariffGift :exec
+INSERT INTO tariff_gifts (tariff_id, package_id) VALUES ($1, $2)
+`
+
+type AddTariffGiftParams struct {
+	TariffID  int64
+	PackageID int64
+}
+
+func (q *Queries) AddTariffGift(ctx context.Context, arg AddTariffGiftParams) error {
+	_, err := q.db.ExecContext(ctx, addTariffGift, arg.TariffID, arg.PackageID)
+	return err
+}
+
 const addTariffPool = `-- name: AddTariffPool :exec
-INSERT INTO tariff_pools (tariff_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4)
+INSERT INTO tariff_pools (tariff_id, pool_id, mode, traffic_limit) VALUES ($1, $2, $3, $4)
 `
 
 type AddTariffPoolParams struct {
 	TariffID     int64
 	PoolID       int64
-	TrafficLimit int64
-	Excluded     bool
+	Mode         string
+	TrafficLimit sql.NullInt64
 }
 
 func (q *Queries) AddTariffPool(ctx context.Context, arg AddTariffPoolParams) error {
 	_, err := q.db.ExecContext(ctx, addTariffPool,
 		arg.TariffID,
 		arg.PoolID,
+		arg.Mode,
 		arg.TrafficLimit,
-		arg.Excluded,
 	)
+	return err
+}
+
+const clearPackageTariffs = `-- name: ClearPackageTariffs :exec
+DELETE FROM package_tariffs WHERE package_id = $1
+`
+
+func (q *Queries) ClearPackageTariffs(ctx context.Context, packageID int64) error {
+	_, err := q.db.ExecContext(ctx, clearPackageTariffs, packageID)
+	return err
+}
+
+const clearTariffGifts = `-- name: ClearTariffGifts :exec
+DELETE FROM tariff_gifts WHERE tariff_id = $1
+`
+
+func (q *Queries) ClearTariffGifts(ctx context.Context, tariffID int64) error {
+	_, err := q.db.ExecContext(ctx, clearTariffGifts, tariffID)
 	return err
 }
 
@@ -40,13 +88,37 @@ func (q *Queries) ClearTariffPools(ctx context.Context, tariffID int64) error {
 	return err
 }
 
-const clearUserPoolLimits = `-- name: ClearUserPoolLimits :exec
-UPDATE user_pools SET traffic_limit = NULL, excluded = false WHERE user_id = $1
+const countUsersByTariff = `-- name: CountUsersByTariff :many
+SELECT CAST(tariff_id AS BIGINT) AS tariff_id, COUNT(*) AS users FROM users WHERE tariff_id IS NOT NULL GROUP BY tariff_id
 `
 
-func (q *Queries) ClearUserPoolLimits(ctx context.Context, userID int64) error {
-	_, err := q.db.ExecContext(ctx, clearUserPoolLimits, userID)
-	return err
+type CountUsersByTariffRow struct {
+	TariffID int64
+	Users    int64
+}
+
+// How many subscriptions each tariff was given to.
+func (q *Queries) CountUsersByTariff(ctx context.Context) ([]CountUsersByTariffRow, error) {
+	rows, err := q.db.QueryContext(ctx, countUsersByTariff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountUsersByTariffRow{}
+	for rows.Next() {
+		var i CountUsersByTariffRow
+		if err := rows.Scan(&i.TariffID, &i.Users); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createTrafficPool = `-- name: CreateTrafficPool :one
@@ -77,6 +149,16 @@ func (q *Queries) DeleteTrafficPool(ctx context.Context, id int64) (int64, error
 	return result.RowsAffected()
 }
 
+const dropPackageGifts = `-- name: DropPackageGifts :exec
+DELETE FROM tariff_gifts WHERE package_id = $1
+`
+
+// A package taken off the catalog is no tariff's gift any more.
+func (q *Queries) DropPackageGifts(ctx context.Context, packageID int64) error {
+	_, err := q.db.ExecContext(ctx, dropPackageGifts, packageID)
+	return err
+}
+
 const getTrafficPool = `-- name: GetTrafficPool :one
 SELECT id, name, created_at FROM traffic_pools WHERE id = $1
 `
@@ -88,8 +170,35 @@ func (q *Queries) GetTrafficPool(ctx context.Context, id int64) (TrafficPool, er
 	return i, err
 }
 
+const listAllTariffGifts = `-- name: ListAllTariffGifts :many
+SELECT tariff_id, package_id FROM tariff_gifts ORDER BY tariff_id, package_id
+`
+
+func (q *Queries) ListAllTariffGifts(ctx context.Context) ([]TariffGift, error) {
+	rows, err := q.db.QueryContext(ctx, listAllTariffGifts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TariffGift{}
+	for rows.Next() {
+		var i TariffGift
+		if err := rows.Scan(&i.TariffID, &i.PackageID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllTariffPools = `-- name: ListAllTariffPools :many
-SELECT tariff_id, pool_id, traffic_limit, excluded FROM tariff_pools ORDER BY tariff_id, pool_id
+SELECT tariff_id, pool_id, traffic_limit, mode FROM tariff_pools ORDER BY tariff_id, pool_id
 `
 
 func (q *Queries) ListAllTariffPools(ctx context.Context) ([]TariffPool, error) {
@@ -105,7 +214,7 @@ func (q *Queries) ListAllTariffPools(ctx context.Context) ([]TariffPool, error) 
 			&i.TariffID,
 			&i.PoolID,
 			&i.TrafficLimit,
-			&i.Excluded,
+			&i.Mode,
 		); err != nil {
 			return nil, err
 		}
@@ -121,7 +230,7 @@ func (q *Queries) ListAllTariffPools(ctx context.Context) ([]TariffPool, error) 
 }
 
 const listAllUserPools = `-- name: ListAllUserPools :many
-SELECT user_id, pool_id, traffic_limit, used_up, used_down, excluded FROM user_pools ORDER BY user_id, pool_id
+SELECT user_id, pool_id, traffic_limit, used_up, used_down, mode FROM user_pools ORDER BY user_id, pool_id
 `
 
 func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
@@ -139,7 +248,7 @@ func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
 			&i.TrafficLimit,
 			&i.UsedUp,
 			&i.UsedDown,
-			&i.Excluded,
+			&i.Mode,
 		); err != nil {
 			return nil, err
 		}
@@ -154,8 +263,63 @@ func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
 	return items, nil
 }
 
+const listPackageTariffs = `-- name: ListPackageTariffs :many
+SELECT package_id, tariff_id FROM package_tariffs ORDER BY package_id, tariff_id
+`
+
+// The tariffs each package is sold to; a package without rows goes to every tariff.
+func (q *Queries) ListPackageTariffs(ctx context.Context) ([]PackageTariff, error) {
+	rows, err := q.db.QueryContext(ctx, listPackageTariffs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PackageTariff{}
+	for rows.Next() {
+		var i PackageTariff
+		if err := rows.Scan(&i.PackageID, &i.TariffID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTariffGifts = `-- name: ListTariffGifts :many
+SELECT tariff_id, package_id FROM tariff_gifts WHERE tariff_id = $1 ORDER BY package_id
+`
+
+func (q *Queries) ListTariffGifts(ctx context.Context, tariffID int64) ([]TariffGift, error) {
+	rows, err := q.db.QueryContext(ctx, listTariffGifts, tariffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TariffGift{}
+	for rows.Next() {
+		var i TariffGift
+		if err := rows.Scan(&i.TariffID, &i.PackageID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTariffPools = `-- name: ListTariffPools :many
-SELECT tariff_id, pool_id, traffic_limit, excluded FROM tariff_pools WHERE tariff_id = $1 ORDER BY pool_id
+SELECT tariff_id, pool_id, traffic_limit, mode FROM tariff_pools WHERE tariff_id = $1 ORDER BY pool_id
 `
 
 func (q *Queries) ListTariffPools(ctx context.Context, tariffID int64) ([]TariffPool, error) {
@@ -171,7 +335,7 @@ func (q *Queries) ListTariffPools(ctx context.Context, tariffID int64) ([]Tariff
 			&i.TariffID,
 			&i.PoolID,
 			&i.TrafficLimit,
-			&i.Excluded,
+			&i.Mode,
 		); err != nil {
 			return nil, err
 		}
@@ -187,9 +351,12 @@ func (q *Queries) ListTariffPools(ctx context.Context, tariffID int64) ([]Tariff
 }
 
 const listTrafficPools = `-- name: ListTrafficPools :many
+
 SELECT id, name, created_at FROM traffic_pools ORDER BY name
 `
 
+// Server groups (traffic_pools): a group of inbounds that a tariff and a subscription hold
+// in one mode each (0044_server_groups.sql): main, own, unlimited or closed.
 func (q *Queries) ListTrafficPools(ctx context.Context) ([]TrafficPool, error) {
 	rows, err := q.db.QueryContext(ctx, listTrafficPools)
 	if err != nil {
@@ -217,7 +384,7 @@ const listUserIDsOfTariff = `-- name: ListUserIDsOfTariff :many
 SELECT id FROM users WHERE tariff_id = $1 ORDER BY id
 `
 
-// The users a tariff was given to, for bringing them up to the tariff's pool limits.
+// The users a tariff was given to, for bringing them up to the tariff.
 func (q *Queries) ListUserIDsOfTariff(ctx context.Context, tariffID sql.NullInt64) ([]int64, error) {
 	rows, err := q.db.QueryContext(ctx, listUserIDsOfTariff, tariffID)
 	if err != nil {
@@ -242,7 +409,7 @@ func (q *Queries) ListUserIDsOfTariff(ctx context.Context, tariffID sql.NullInt6
 }
 
 const listUserPools = `-- name: ListUserPools :many
-SELECT user_id, pool_id, traffic_limit, used_up, used_down, excluded FROM user_pools WHERE user_id = $1 ORDER BY pool_id
+SELECT user_id, pool_id, traffic_limit, used_up, used_down, mode FROM user_pools WHERE user_id = $1 ORDER BY pool_id
 `
 
 func (q *Queries) ListUserPools(ctx context.Context, userID int64) ([]UserPool, error) {
@@ -260,7 +427,7 @@ func (q *Queries) ListUserPools(ctx context.Context, userID int64) ([]UserPool, 
 			&i.TrafficLimit,
 			&i.UsedUp,
 			&i.UsedDown,
-			&i.Excluded,
+			&i.Mode,
 		); err != nil {
 			return nil, err
 		}
@@ -322,6 +489,17 @@ func (q *Queries) RenameTrafficPool(ctx context.Context, arg RenameTrafficPoolPa
 	return result.RowsAffected()
 }
 
+const resetUserPoolModes = `-- name: ResetUserPoolModes :exec
+UPDATE user_pools SET mode = 'main', traffic_limit = NULL WHERE user_id = $1
+`
+
+// Every group of the user back in the main traffic, before a tariff's modes are written:
+// what the user used stays.
+func (q *Queries) ResetUserPoolModes(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, resetUserPoolModes, userID)
+	return err
+}
+
 const resetUserPools = `-- name: ResetUserPools :exec
 UPDATE user_pools SET used_up = 0, used_down = 0 WHERE user_id = $1
 `
@@ -330,6 +508,26 @@ UPDATE user_pools SET used_up = 0, used_down = 0 WHERE user_id = $1
 func (q *Queries) ResetUserPools(ctx context.Context, userID int64) error {
 	_, err := q.db.ExecContext(ctx, resetUserPools, userID)
 	return err
+}
+
+const setGroupInbounds = `-- name: SetGroupInbounds :execrows
+UPDATE inbounds SET pool_id = CASE WHEN id = ANY($1::bigint[]) THEN $2::BIGINT ELSE NULL END
+WHERE id = ANY($1::bigint[]) OR pool_id = $2::BIGINT
+`
+
+type SetGroupInboundsParams struct {
+	Ids    []int64
+	PoolID int64
+}
+
+// The group's inbounds become exactly these: the ones listed join it (leaving the group
+// they were in), the ones it had and the list leaves out go back to the main servers.
+func (q *Queries) SetGroupInbounds(ctx context.Context, arg SetGroupInboundsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setGroupInbounds, pq.Array(arg.Ids), arg.PoolID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setInboundPool = `-- name: SetInboundPool :exec
@@ -347,50 +545,91 @@ func (q *Queries) SetInboundPool(ctx context.Context, arg SetInboundPoolParams) 
 }
 
 const setTariffUsersPool = `-- name: SetTariffUsersPool :exec
-INSERT INTO user_pools (user_id, pool_id, traffic_limit, excluded)
-SELECT u.id, $1::BIGINT, $2::BIGINT, $3::BOOLEAN
+INSERT INTO user_pools (user_id, pool_id, mode, traffic_limit)
+SELECT u.id, $1::BIGINT, $2::TEXT, $3::BIGINT
 FROM users u WHERE u.tariff_id = $4::BIGINT
-ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit, excluded = excluded.excluded
+ON CONFLICT (user_id, pool_id) DO UPDATE SET mode = excluded.mode, traffic_limit = excluded.traffic_limit
 `
 
 type SetTariffUsersPoolParams struct {
 	PoolID       int64
+	Mode         string
 	TrafficLimit sql.NullInt64
-	Excluded     bool
 	TariffID     int64
 }
 
-// The users of a tariff follow a pool it closed or opened again at once; the limit of a
-// pool opened again is the tariff's (NULL: none).
+// The users of a tariff follow a group it closed or opened again at once, in the mode the
+// tariff has for it now.
 func (q *Queries) SetTariffUsersPool(ctx context.Context, arg SetTariffUsersPoolParams) error {
 	_, err := q.db.ExecContext(ctx, setTariffUsersPool,
 		arg.PoolID,
+		arg.Mode,
 		arg.TrafficLimit,
-		arg.Excluded,
 		arg.TariffID,
 	)
 	return err
 }
 
-const setUserPoolLimit = `-- name: SetUserPoolLimit :exec
-INSERT INTO user_pools (user_id, pool_id, traffic_limit, excluded) VALUES ($1, $2, $3, $4)
-ON CONFLICT (user_id, pool_id) DO UPDATE SET traffic_limit = excluded.traffic_limit, excluded = excluded.excluded
+const setUserPool = `-- name: SetUserPool :exec
+INSERT INTO user_pools (user_id, pool_id, mode, traffic_limit) VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id, pool_id) DO UPDATE SET mode = excluded.mode, traffic_limit = excluded.traffic_limit
 `
 
-type SetUserPoolLimitParams struct {
+type SetUserPoolParams struct {
 	UserID       int64
 	PoolID       int64
+	Mode         string
 	TrafficLimit sql.NullInt64
-	Excluded     bool
 }
 
-// An excluded pool has no limit: nothing of it is sold or shown, the user cannot use it.
-func (q *Queries) SetUserPoolLimit(ctx context.Context, arg SetUserPoolLimitParams) error {
-	_, err := q.db.ExecContext(ctx, setUserPoolLimit,
+// How a group is in the subscription; traffic_limit only with the mode own.
+func (q *Queries) SetUserPool(ctx context.Context, arg SetUserPoolParams) error {
+	_, err := q.db.ExecContext(ctx, setUserPool,
 		arg.UserID,
 		arg.PoolID,
+		arg.Mode,
 		arg.TrafficLimit,
-		arg.Excluded,
 	)
 	return err
+}
+
+const userPoolModes = `-- name: UserPoolModes :many
+SELECT user_id, pool_id, mode FROM user_pools
+WHERE user_id = ANY($1::bigint[]) AND pool_id = ANY($2::bigint[])
+`
+
+type UserPoolModesParams struct {
+	UserIds []int64
+	PoolIds []int64
+}
+
+type UserPoolModesRow struct {
+	UserID int64
+	PoolID int64
+	Mode   string
+}
+
+// The modes of these users' groups, for a traffic batch: a group without a row is in the
+// main traffic.
+func (q *Queries) UserPoolModes(ctx context.Context, arg UserPoolModesParams) ([]UserPoolModesRow, error) {
+	rows, err := q.db.QueryContext(ctx, userPoolModes, pq.Array(arg.UserIds), pq.Array(arg.PoolIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UserPoolModesRow{}
+	for rows.Next() {
+		var i UserPoolModesRow
+		if err := rows.Scan(&i.UserID, &i.PoolID, &i.Mode); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -373,7 +373,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
               {pools.data?.length ? (
                 <Field label={t("pools.inbound")} htmlFor="ed-pool" hint={t("pools.inboundHint")}>
                   <select id="ed-pool" className="input max-w-[320px]" value={poolId} onChange={(e) => setPoolId(Number(e.target.value))}>
-                    <option value={0}>{t("pools.mainTraffic")}</option>
+                    <option value={0}>{t("pools.mainServers")}</option>
                     {pools.data.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}

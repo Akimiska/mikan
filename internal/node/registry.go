@@ -51,11 +51,15 @@ type Registry struct {
 // coreLimit is what the core holds a user of an inbound to: kept out, and a traffic budget
 // (0: none) the core cuts the user at by itself, to the byte. The budget is what was left
 // of the quota the inbound counts to when the panel last sent it (gen); the registry, which
-// adds the inbounds up once a second, keeps the slot out once their sum runs it out.
+// adds the inbounds up once a second, keeps the slot out once their sum runs it out. The
+// speed (bytes/s each way, 0: none) is the ceiling of the user's group, shared through the
+// core's speed group by all its slots (shaper.go).
 type coreLimit struct {
-	out    bool
-	budget int64
-	gen    int64
+	out      bool
+	budget   int64
+	gen      int64
+	group    string
+	up, down int64
 }
 
 type userKey struct{ inbound, user string }
@@ -89,7 +93,7 @@ type slot struct {
 	seen       map[seenKey]time.Time // last admitted connection per device and inbound
 	seenPruned time.Time
 	pools      map[string]*bucket   // traffic pools of the slot, made on first use
-	shaped     bool                 // its connections go through the limiter
+	mainPools  map[string]bool      // pools that count to the main quota for this slot
 	sites      map[string]*[2]int64 // bytes by site since the last batch, while detail is on
 
 	group atomic.Pointer[group] // the user's speed group; nil before the first policy
@@ -238,13 +242,22 @@ func (r *Registry) SetPolicies(epoch string, list []nodeapi.Policy) {
 				s.budget = max(rem, 0)
 			}
 		}
-		// Pools: a pool the policy does not name has no limit here.
+		// Pools: a pool the policy does not name has no limit here, one it names Main counts
+		// to the main quota.
 		for _, b := range s.pools {
 			b.quotaOn.Store(false)
 			b.exhausted.Store(false)
 		}
+		s.mainPools = nil
 		if ok {
 			for _, pq := range p.Pools {
+				if pq.Main {
+					if s.mainPools == nil {
+						s.mainPools = map[string]bool{}
+					}
+					s.mainPools[pq.Pool] = true
+					continue
+				}
 				if pq.Remaining < 0 {
 					continue
 				}
@@ -266,13 +279,12 @@ func (r *Registry) SetPolicies(epoch string, list []nodeapi.Policy) {
 	r.shaper.keep(groups)
 	r.shaper.share()
 	r.reconcile()
-	r.reshape()
 }
 
 // SetShaping turns the node's fair share on or off.
 func (r *Registry) SetShaping(s *nodeapi.Shaping) {
 	r.shaper.setChannel(s)
-	r.reshape()
+	r.reconcile()
 }
 
 // Run takes in the core's counters, keeps the core's list of whom to turn away up to date
@@ -284,41 +296,10 @@ func (r *Registry) Run(ctx context.Context) {
 		select {
 		case <-t.C:
 			r.drain()
-			r.reconcile()
 			r.shaper.share()
+			r.reconcile()
 		case <-ctx.Done():
 			return
-		}
-	}
-}
-
-// shapedGroup is the group whose ceilings hold the slot's new connections, nil when
-// nothing holds them back (no cap, no fair share): they may then be spliced.
-func (r *Registry) shapedGroup(s *slot) *group {
-	g := s.group.Load()
-	if g == nil || s.shared || (g.own.Load() == 0 && !r.shaper.on()) {
-		return nil
-	}
-	return g
-}
-
-// reshape closes a slot's connections when a cap or the fair share comes in for it: they
-// were opened around the limiter, and the apps open them again at once, held this time.
-func (r *Registry) reshape() {
-	r.mu.RLock()
-	slots := values(r.byName)
-	inbounds := r.inbounds
-	r.mu.RUnlock()
-	for _, s := range slots {
-		shaped := r.shapedGroup(s) != nil
-		s.mu.Lock()
-		was := s.shaped
-		s.shaped = shaped
-		s.mu.Unlock()
-		if shaped && !was {
-			for in, byUUID := range inbounds {
-				r.core.closeUser(in, coreUser(s, byUUID))
-			}
 		}
 	}
 }
@@ -405,6 +386,7 @@ func (r *Registry) admitIn(user, inName, ip string) *slot {
 // counts to has run out. An exhausted pool keeps the slot out of its own inbounds only,
 // and so does the main quota.
 func (s *slot) deniedLocked(inName, pool string, now time.Time) bool {
+	pool = s.quotaOfLocked(pool)
 	switch {
 	case !s.allowed, s.banned(now), s.inbounds != nil && !s.inbounds[inName]:
 		return true
@@ -416,17 +398,22 @@ func (s *slot) deniedLocked(inName, pool string, now time.Time) bool {
 }
 
 // reconcile tells the core what to hold each slot to on each inbound: kept out where it is
-// denied (the core closes its open connections and turns new ones away), and the budget
-// of the quota the inbound counts to.
+// denied (the core closes its open connections and turns new ones away), the budget of the
+// quota the inbound counts to, and the speed of the user's group.
 func (r *Registry) reconcile() {
 	now := r.now()
 	want := map[userKey]coreLimit{}
 	r.mu.RLock()
 	for _, s := range r.byName {
+		var group string
+		var up, down int64
+		if g := s.group.Load(); g != nil && !s.shared {
+			group, up, down = g.speedGroup(), g.up.Load(), g.down.Load()
+		}
 		s.mu.Lock()
 		for in, byUUID := range r.inbounds {
-			pool := r.poolOf[in]
-			l := coreLimit{out: s.deniedLocked(in, pool, now), gen: s.budgetGen}
+			pool := s.quotaOfLocked(r.poolOf[in])
+			l := coreLimit{out: s.deniedLocked(in, pool, now), gen: s.budgetGen, group: group, up: up, down: down}
 			switch {
 			case pool == "" && s.quotaOn.Load():
 				l.budget = s.budget
@@ -435,7 +422,7 @@ func (r *Registry) reconcile() {
 					l.budget = b.budget
 				}
 			}
-			if l.out || l.budget > 0 {
+			if l.out || l.budget > 0 || l.up > 0 || l.down > 0 {
 				want[userKey{in, coreUser(s, byUUID)}] = l
 			}
 		}
@@ -444,19 +431,33 @@ func (r *Registry) reconcile() {
 	r.mu.RUnlock()
 	r.limitMu.Lock()
 	defer r.limitMu.Unlock()
+	var remove, fresh []userKey
+	set := map[userKey]coreLimit{}
 	for k := range r.limits {
 		if _, ok := want[k]; !ok {
-			r.core.limit(k.inbound, k.user, false, 0, false)
+			remove = append(remove, k)
 		}
 	}
 	for k, l := range want {
 		old, had := r.limits[k]
-		if had && old.out == l.out && (l.budget == 0 || old.budget == l.budget && old.gen == l.gen) {
-			continue
+		sameBudget := l.budget == 0 || old.budget == l.budget && old.gen == l.gen
+		if had && old.group == l.group && sameSpeed(old.up, l.up) && sameSpeed(old.down, l.down) {
+			// A speed a little off what the core holds stays as it is.
+			l.up, l.down = old.up, old.down
+			if old.out == l.out && sameBudget {
+				want[k] = l
+				continue
+			}
 		}
+		want[k] = l
+		set[k] = l
 		// A budget the panel sent anew counts from now; one kept counts on.
-		fresh := l.budget > 0 && (!had || old.gen != l.gen || old.budget != l.budget)
-		r.core.limit(k.inbound, k.user, l.out, l.budget, fresh)
+		if l.budget > 0 && (!had || old.gen != l.gen || old.budget != l.budget) {
+			fresh = append(fresh, k)
+		}
+	}
+	if len(set) > 0 || len(remove) > 0 {
+		r.core.limits(set, remove, fresh)
 	}
 	r.limits = want
 }
@@ -842,8 +843,18 @@ func (r *Registry) poolOfListener(inName string) string {
 	return r.poolOf[inName]
 }
 
+// quotaOfLocked is the quota a listener of traffic pool pool counts to for the slot: the
+// pool's own, or the main quota ("") when the pool is in the slot's main traffic; s.mu is
+// held.
+func (s *slot) quotaOfLocked(pool string) string {
+	if pool != "" && s.mainPools[pool] {
+		return ""
+	}
+	return pool
+}
+
 // countIn counts bytes to the slot's traffic pool ("": the main quota) and marks the
-// quota run out when it does.
+// quota run out when it does. A pool in the slot's main traffic counts to the main quota.
 func (s *slot) countIn(pool string, up, down int64) {
 	if s.shared {
 		return
@@ -851,13 +862,18 @@ func (s *slot) countIn(pool string, up, down int64) {
 	if g := s.group.Load(); g != nil {
 		g.moved(up, down)
 	}
-	if pool == "" {
+	var b *bucket
+	if pool != "" {
+		s.mu.Lock()
+		if pool = s.quotaOfLocked(pool); pool != "" {
+			b = s.poolLocked(pool)
+		}
+		s.mu.Unlock()
+	}
+	if b == nil {
 		s.count(up, down)
 		return
 	}
-	s.mu.Lock()
-	b := s.poolLocked(pool)
-	s.mu.Unlock()
 	if up != 0 {
 		b.up.Add(up)
 	}

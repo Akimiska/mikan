@@ -1,14 +1,14 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, errorText, unwrap, type User } from "../../../api/client";
-import { qk, userActions, useTariffs, useUserMutation, useUserTraffic } from "../../../api/hooks";
+import { api, errorText, unwrap, type Schemas, type User } from "../../../api/client";
+import { qk, userActions, usePools, useTariffs, useUserMutation, useUserTraffic } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
 import { Bar, Button, Ring } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { bytes, dateShort } from "../../../lib/format";
-import { PoolLimitsField } from "../pools";
+import { draftOf, GroupModesField, modeShort, settingsOf, type GroupDraft } from "../pools";
 import { tariffSummary } from "../tariffs";
 import { LimitPicker } from "./limit-picker";
 import { Section, Stat } from "./section";
@@ -141,46 +141,21 @@ export function TrafficSection({ u }: { u: User }) {
   );
 }
 
-/** Traffic pools of the user: what each one used this period and its limit. */
+/** The server groups of the user: how the subscription has each one, what it used this
+ * period and, with a limit of its own, how much of it is left. */
 export function PoolsSection({ u }: { u: User }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const groups = usePools();
   const pools = useQuery({ queryKey: qk.userPools(u.id), queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/pools", { params: { path: { id: u.id } }, signal })) });
-  const [edit, setEdit] = useState<Record<number, string> | null>(null);
-  const [closed, setClosed] = useState<Record<number, boolean>>({});
   const tariffs = useTariffs();
-  // Access turned back on: the limit of the user's tariff for that pool comes back with it
-  // (empty, unlimited, when the tariff has none), not an open pool without a limit.
-  const reopen = (next: Record<number, boolean>) => {
-    const tariffPools = tariffs.data?.find((x) => x.id === u.tariff_id)?.pools ?? [];
-    const back = Object.keys(next).map(Number).filter((id) => closed[id] && !next[id]);
-    if (back.length) {
-      setEdit((cur) => {
-        if (!cur) return cur;
-        const filled = { ...cur };
-        for (const id of back) {
-          const limit = tariffPools.find((p) => p.pool_id === id && !p.excluded)?.traffic_limit;
-          if (limit != null && (filled[id] ?? "").trim() === "") filled[id] = String(+(limit / 2 ** 30).toFixed(2));
-        }
-        return filled;
-      });
-    }
-    setClosed(next);
-  };
+  const [edit, setEdit] = useState<Record<number, GroupDraft> | null>(null);
+  const [error, setError] = useState("");
+  // The tariff's own setting of each group, which the editor tells the client's apart from.
+  const tariff = tariffs.data?.find((x) => x.id === u.tariff_id);
+  const base = tariff ? Object.fromEntries(tariff.pools.map((p) => [p.pool_id, draftOf(p)])) : undefined;
   const save = useMutation({
-    mutationFn: (limits: Record<number, string>) =>
-      unwrap(
-        api.PUT("/api/v1/users/{id}/pools", {
-          params: { path: { id: u.id } },
-          body: {
-            pools: Object.entries(limits).map(([id, gb]) => {
-              if (closed[Number(id)]) return { pool_id: Number(id), traffic_limit: null, excluded: true };
-              const v = gb.trim().replace(",", ".");
-              return { pool_id: Number(id), traffic_limit: v ? Math.round(Number(v) * 2 ** 30) : null };
-            }),
-          },
-        }),
-      ),
+    mutationFn: (settings: Schemas["PoolSetting"][]) => unwrap(api.PUT("/api/v1/users/{id}/pools", { params: { path: { id: u.id } }, body: { pools: settings } })),
     onSuccess: (v) => {
       qc.setQueryData(qk.userPools(u.id), v);
       setEdit(null);
@@ -189,7 +164,12 @@ export function PoolsSection({ u }: { u: User }) {
     onError: (e) => toast.error(errorText(e)),
   });
   if (!pools.data?.length) return null;
-  const bad = edit && Object.entries(edit).some(([id, v]) => !closed[Number(id)] && v.trim() !== "" && !(Number(v.replace(",", ".")) > 0));
+  const submit = () => {
+    if (!edit) return;
+    const { settings, error } = settingsOf(groups.data ?? pools.data.map((p) => ({ id: p.pool_id, name: p.name, inbounds: [], inbound_ids: [] })), edit);
+    setError(error ?? "");
+    if (!error) save.mutate(settings);
+  };
   return (
     <Section
       title={t("pools.title")}
@@ -199,8 +179,8 @@ export function PoolsSection({ u }: { u: User }) {
             type="button"
             className="link-btn text-xs"
             onClick={() => {
-              setEdit(Object.fromEntries(pools.data.map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / 2 ** 30).toFixed(2)) : ""])));
-              setClosed(Object.fromEntries(pools.data.map((p) => [p.pool_id, p.excluded])));
+              setEdit(Object.fromEntries(pools.data.map((p) => [p.pool_id, draftOf(p)])));
+              setError("");
             }}
           >
             {t("pools.editLimits")}
@@ -210,14 +190,15 @@ export function PoolsSection({ u }: { u: User }) {
     >
       {edit ? (
         <>
-          <PoolLimitsField pools={pools.data.map((p) => ({ id: p.pool_id, name: p.name, inbounds: [] }))} value={edit} onChange={setEdit} closed={closed} onClosed={reopen} />
-          {bad ? (
+          <p className="mb-2 text-xs text-[var(--ink-500)]">{t("pools.userHint")}</p>
+          <GroupModesField groups={groups.data ?? []} value={edit} onChange={setEdit} base={base} disabled={save.isPending} />
+          {error ? (
             <p className="mt-2 text-xs text-[var(--berry-600)]" role="alert">
-              {t("pools.errLimit")}
+              {error}
             </p>
           ) : null}
           <div className="mt-3 flex gap-2">
-            <Button size="sm" variant="primary" loading={save.isPending} disabled={!!bad} onClick={() => save.mutate(edit)}>
+            <Button size="sm" variant="primary" loading={save.isPending} onClick={submit}>
               {t("common.save")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>
@@ -234,14 +215,14 @@ export function PoolsSection({ u }: { u: User }) {
                 <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
                   <span className="font-medium">{p.name}</span>
                   <span className="num text-xs text-[var(--ink-600)]">
-                    {p.excluded
-                      ? t("pools.closed")
-                      : p.traffic_limit != null
-                      ? `${bytes(used)} ${t("users.of", { total: p.extra > 0 ? t("grants.plusPackages", { limit: bytes(p.traffic_limit), extra: bytes(p.extra) }) : bytes(p.traffic_limit) })}`
-                      : `${bytes(used)} · ${t("users.unlimited")}`}
+                    {p.mode === "own" && p.traffic_limit != null
+                      ? t("pools.usedOf", { used: bytes(used), limit: p.extra > 0 ? t("grants.plusPackages", { limit: bytes(p.traffic_limit), extra: bytes(p.extra) }) : bytes(p.traffic_limit) })
+                      : p.mode === "unlimited"
+                        ? t("pools.usedUnlimited", { used: bytes(used) })
+                        : modeShort(p.mode)}
                   </span>
                 </div>
-                {p.traffic_limit != null && !p.excluded ? <Bar pct={Math.min(100, (used / p.traffic_limit) * 100)} /> : null}
+                {p.mode === "own" && p.traffic_limit != null ? <Bar pct={Math.min(100, (used / (p.traffic_limit + p.extra)) * 100)} /> : null}
                 {p.exhausted ? <div className="mt-1 text-xs text-[var(--berry-600)]">{t("pools.exhausted")}</div> : null}
               </li>
             );

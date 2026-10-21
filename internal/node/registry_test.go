@@ -216,22 +216,22 @@ func TestQuotaBudgetsInTheCore(t *testing.T) {
 	r.SetPools(map[string]string{"wl": "7"})
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: 1000, Pools: []nodeapi.PoolQuota{{Pool: "7", Remaining: 100}}}})
 	want := map[userKey]fakeLimit{{"vless", "s1"}: {budget: 1000}, {"tuic", "u1"}: {budget: 1000}, {"wl", "s1"}: {budget: 100}}
-	if !reflect.DeepEqual(core.limits, want) || core.fresh != 3 {
-		t.Fatalf("budgets %v (fresh %d), want %v", core.limits, core.fresh, want)
+	if !reflect.DeepEqual(core.held, want) || core.fresh != 3 {
+		t.Fatalf("budgets %v (fresh %d), want %v", core.held, core.fresh, want)
 	}
 	core.moved("vless", "s1", 300, 0)
 	r.Counters()
 	r.Counters()
-	if !reflect.DeepEqual(core.limits, want) || core.fresh != 3 {
-		t.Fatalf("a drain re-set the budgets: %v (fresh %d)", core.limits, core.fresh)
+	if !reflect.DeepEqual(core.held, want) || core.fresh != 3 {
+		t.Fatalf("a drain re-set the budgets: %v (fresh %d)", core.held, core.fresh)
 	}
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: 700, BaseSeq: 1}})
 	want = map[userKey]fakeLimit{{"vless", "s1"}: {budget: 700}, {"tuic", "u1"}: {budget: 700}}
-	if !reflect.DeepEqual(core.limits, want) || core.fresh != 5 {
-		t.Fatalf("a new quota is a fresh budget, a pool without one has none: %v (fresh %d)", core.limits, core.fresh)
+	if !reflect.DeepEqual(core.held, want) || core.fresh != 5 {
+		t.Fatalf("a new quota is a fresh budget, a pool without one has none: %v (fresh %d)", core.held, core.fresh)
 	}
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
-	if len(core.limits) != 0 {
-		t.Fatalf("no quota, no limit: %v", core.limits)
+	if len(core.held) != 0 {
+		t.Fatalf("no quota, no limit: %v", core.held)
 	}
 }

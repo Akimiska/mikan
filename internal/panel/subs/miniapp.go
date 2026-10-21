@@ -250,6 +250,10 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		Stars int64  `json:"stars,omitempty"`
 		Rub   int64  `json:"rub,omitempty"`
 		Terms []term `json:"terms"`
+		// Groups and Gifts say what the tariff is made of: its server groups as it has them,
+		// and the packages it gives with every payment.
+		Groups []offerGroup `json:"groups,omitempty"`
+		Gifts  []string     `json:"gifts,omitempty"`
 	}
 	// Marketplace adapters take rubles; the buyer sees each by its own name.
 	type addon struct {
@@ -286,6 +290,12 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 	}
 	for _, o := range offers {
 		v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.DescribeOffer(o, cfg.Lang), Note: o.Tariff.Description, Stars: o.Stars, Rub: o.Rub}
+		for _, g := range o.Groups {
+			v.Groups = append(v.Groups, offerGroup{Name: g.Name, Mode: g.Mode, Limit: g.Limit})
+		}
+		for _, g := range o.Gifts {
+			v.Gifts = append(v.Gifts, billing.DescribePackage(g.Package, g.Pool, cfg.Lang))
+		}
 		for _, t := range o.Terms {
 			v.Terms = append(v.Terms, term{Days: t.Days, Label: billing.TermLabel(o.Tariff, t.Days, cfg.Lang),
 				Description: billing.Describe(o.Tariff, t.Days, cfg.Lang), Stars: t.Stars, Rub: t.Rub})
@@ -293,6 +303,14 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		out.Offers = append(out.Offers, v)
 	}
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// offerGroup is a server group of a tariff on sale, as the Mini App lists it: its mode
+// (main, own, unlimited, closed) and, with own, its limit in bytes.
+type offerGroup struct {
+	Name  string `json:"name"`
+	Mode  string `json:"mode"`
+	Limit int64  `json:"limit,omitempty"`
 }
 
 // freeOffer is the free plan in "shop": what it gives, and the channel it asks the account

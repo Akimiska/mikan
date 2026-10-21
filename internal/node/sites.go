@@ -4,8 +4,8 @@ import (
 	"net"
 	"net/netip"
 	"strings"
-	"sync/atomic"
 
+	C "github.com/metacubex/mihomo/constant"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -13,6 +13,8 @@ import (
 // bytes of each slot by site, the registrable domain of the name the connection was for
 // (SNI, Host, the sniffer's) or the address when there is none. Nothing else is kept: no
 // times, no source addresses, no single connection. The sums go with the counters' batch.
+// The core reports every connection and UDP session of a user as it ends, with the name
+// and both ways' bytes (left); nothing wraps the connections, so they may still be spliced.
 
 // maxSites is how many sites one slot keeps between two batches; the rest add up under
 // otherSite, so a user who walks the whole internet costs the node no more than this.
@@ -79,20 +81,19 @@ func (r *Registry) SetDetail(on bool) {
 	}
 }
 
-// siteConn counts what a connection carries for its site, once it is over.
-type siteConn struct {
-	net.Conn
-	up, down atomic.Int64
-}
-
-func (c *siteConn) Read(b []byte) (int, error) {
-	n, err := c.Conn.Read(b)
-	c.up.Add(int64(n))
-	return n, err
-}
-
-func (c *siteConn) Write(b []byte) (int, error) {
-	n, err := c.Conn.Write(b)
-	c.down.Add(int64(n))
-	return n, err
+// left counts a connection or UDP session the core is done with to its slot's site, when
+// detail is on (statistic.Manager.SetOnLeave). With no user it is a listener's one key for
+// everyone; a REALITY handshake to its dest or another node's relay has no slot.
+func (r *Registry) left(m *C.Metadata, up, down int64) {
+	if !r.detail.Load() || m == nil {
+		return
+	}
+	s := r.lookup(m.InUser)
+	if m.InUser == "" {
+		s = r.sharedSlot(m.InName)
+	}
+	if s == nil {
+		return
+	}
+	r.countSite(s, siteOf(m.RuleHost(), m.DstIP), up, down)
 }

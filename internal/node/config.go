@@ -130,7 +130,7 @@ func listenerFor(in nodeapi.Inbound, slots []nodeapi.Slot, cert proto.Cert, o pr
 func sharedListeners(st nodeapi.DesiredState) []string {
 	var out []string
 	for _, in := range st.Inbounds {
-		if t, err := template(in); err == nil && proto.Shared(t.Type()) {
+		if t, err := template(in); err == nil && proto.Shared(t) {
 			out = append(out, in.Name)
 		}
 	}
@@ -142,7 +142,7 @@ func sharedListeners(st nodeapi.DesiredState) []string {
 func userListeners(st nodeapi.DesiredState) map[string]bool {
 	out := map[string]bool{}
 	for _, in := range st.Inbounds {
-		if t, err := template(in); err == nil && !proto.Shared(t.Type()) {
+		if t, err := template(in); err == nil && !proto.Shared(t) {
 			out[in.Name] = t.Type() == "tuic"
 		}
 	}

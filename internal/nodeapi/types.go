@@ -155,8 +155,9 @@ type Policy struct {
 	// OtherIPs are the slot's devices on the panel's other nodes: they count against
 	// DeviceLimit here too, and may connect here without taking another device.
 	OtherIPs []string `json:"other_ips,omitempty"`
-	// Pools are the slot's quotas in traffic pools; a pool not listed has no limit.
-	// QuotaRemaining is then the quota of the inbounds outside every pool.
+	// Pools are the slot's quotas in traffic pools (server groups); a pool not listed has
+	// no limit, one listed with Main counts to QuotaRemaining like the inbounds outside every
+	// pool, which QuotaRemaining is the quota of.
 	Pools []PoolQuota `json:"pools,omitempty"`
 	// TorrentExempt: the torrent blocker leaves the slot alone.
 	TorrentExempt bool `json:"torrent_exempt,omitempty"`
@@ -488,10 +489,14 @@ func ExitName(id int64) string { return "NODE-" + strconv.FormatInt(id, 10) }
 // ProbeResult is the internet as seen through one outbound of the node.
 type ProbeResult = WarpStatus
 
-// PoolQuota is what is left of one traffic pool for a slot, as of the policy's BaseSeq.
+// PoolQuota is what is left of one traffic pool (a server group) for a slot, as of the
+// policy's BaseSeq. With Main the group counts to the slot's main quota instead: the
+// node counts its traffic there and turns the slot away from it when the main quota is
+// out; Remaining then repeats QuotaRemaining for nodes that do not know Main.
 type PoolQuota struct {
 	Pool      string `json:"pool"`
 	Remaining int64  `json:"remaining"` // bytes; -1 = unlimited
+	Main      bool   `json:"main,omitempty"`
 }
 
 // TorrentBlock is the torrent blocker: the node looks at the first bytes a user sends

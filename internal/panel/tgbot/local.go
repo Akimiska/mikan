@@ -226,8 +226,8 @@ func (l *Local) Pools(ctx context.Context, userID int64, now time.Time) ([]Pool,
 	}
 	var out []Pool
 	for _, r := range rows {
-		if !r.TrafficLimit.Valid {
-			continue
+		if r.Mode != domain.PoolOwn {
+			continue // a group in the main traffic, without a limit or closed: nothing to count down
 		}
 		extra := grants.Pool(userID, r.PoolID)
 		out = append(out, Pool{Name: names[r.PoolID], Used: r.UsedUp + r.UsedDown, Limit: r.TrafficLimit.Int64, Extra: extra,

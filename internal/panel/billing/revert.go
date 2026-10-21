@@ -117,6 +117,10 @@ func (s *Service) takeBack(ctx context.Context, q *db.Queries, p db.Payment) (rv
 		}
 		return rv, u, err
 	}
+	// The tariff's gifts go with the payment that gave them, whole like a package.
+	if _, err := q.DeleteGrantByPayment(ctx, sql.NullInt64{Int64: p.ID, Valid: true}); err != nil {
+		return rv, u, err
+	}
 	return s.takeBackTariff(ctx, q, p, u, rv)
 }
 
@@ -179,7 +183,7 @@ func (s *Service) takeBackTariff(ctx context.Context, q *db.Queries, p db.Paymen
 	case restoreTariff != 0:
 		err = domain.ApplyTariffPools(ctx, q, u.ID, restoreTariff)
 	default:
-		err = q.ClearUserPoolLimits(ctx, u.ID)
+		err = q.ResetUserPoolModes(ctx, u.ID)
 	}
 	return rv, u, err
 }

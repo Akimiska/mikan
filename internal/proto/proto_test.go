@@ -87,7 +87,7 @@ func TestPresetsConvertAndRender(t *testing.T) {
 				t.Fatalf("vision client: %s %v", c.URI, c.Mihomo)
 			}
 		case "vless_reality_xhttp":
-			if q.Get("type") != "xhttp" || q.Get("path") != "/x7k2" || q.Get("mode") != "stream-one" || q.Get("flow") != "" || c.Mihomo["udp"] != false {
+			if q.Get("type") != "xhttp" || q.Get("path") != "/x7k2" || q.Get("mode") != "stream-one" || q.Get("flow") != "" || c.Mihomo["udp"] != true {
 				t.Fatalf("xhttp client: %s %v", c.URI, c.Mihomo)
 			}
 			if opts := c.Mihomo["xhttp-opts"].(map[string]any); opts["reuse-settings"] == nil {
@@ -124,10 +124,10 @@ func TestRealityReplayWindow(t *testing.T) {
 		}
 		return fmt.Sprintf("%.0f", toFloat(l["reality-config"].(map[string]any)["max-time-difference"]))
 	}
-	if got := window(src); got != "7200000000" {
-		t.Fatalf("default window: %s (mihomo reads microseconds: 2 h = 7200000000)", got)
+	if got := window(src); got != "7200000" {
+		t.Fatalf("default window: %s (the Citrus core reads milliseconds: 2 h = 7200000)", got)
 	}
-	if got := window(src + "  max-time-difference: 60000000\n"); got != "60000000" {
+	if got := window(src + "  max-time-difference: 60000\n"); got != "60000" {
 		t.Fatalf("the template's own window: %s", got)
 	}
 	// The template itself stays as the admin wrote it.
@@ -350,5 +350,22 @@ func TestParseErrorsAreCodes(t *testing.T) {
 	}
 	if _, err := Parse("# only a comment\n"); code(err) != "config_empty" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// A REALITY server that requires X25519MLKEM768 gets clients that offer it; the others
+// leave it to the app.
+func TestRealityRequiredPostQuantum(t *testing.T) {
+	priv, _ := realityKey(t)
+	src := "type: vless\nreality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
+	in := ClientInput{Name: "X", Host: "vpn.example.com", Port: 443, Slot: slots[0]}
+	for extra, want := range map[string]any{"": nil, "  require-x25519mlkem768: true\n": true} {
+		c, err := ClientConfig(mustParse(t, src+extra), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Mihomo["reality-opts"].(map[string]any)["support-x25519mlkem768"]; got != want {
+			t.Fatalf("%q: support-x25519mlkem768 %v, want %v", extra, got, want)
+		}
 	}
 }

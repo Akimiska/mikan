@@ -458,10 +458,10 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 			}
 		}
 	}
-	// The inbounds here each user's tariff leaves out, through the pools they are in.
+	// The inbounds here each user's tariff leaves out, through the server groups they are in.
 	shut := map[int64]map[int64]bool{}
 	for _, up := range snap.pools {
-		if !up.Excluded {
+		if up.Mode != domain.PoolClosed {
 			continue
 		}
 		for _, id := range inPool[up.PoolID] {
@@ -474,13 +474,21 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 	others := s.m.otherIPs(s.id, slotUser)
 	now := s.m.now()
 	grants := snap.grants
-	pools := userPoolQuotas(snap.pools, grants)
+	groupsHere := make([]int64, 0, len(inPool))
+	for id := range inPool {
+		groupsHere = append(groupsHere, id)
+	}
+	slices.Sort(groupsHere)
+	rows := map[int64][]db.UserPool{}
+	for _, up := range snap.pools {
+		rows[up.UserID] = append(rows[up.UserID], up)
+	}
 	for _, u := range snap.users {
 		names := slotsOf[u.ID]
 		sort.Strings(names)
 		for _, name := range names {
 			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, shut[u.ID], others[name])
-			p.Pools = pools[u.ID]
+			p.Pools = userPoolQuotas(u.ID, rows[u.ID], groupsHere, p.QuotaRemaining, grants)
 			p.TorrentExempt = snap.torrent.IsExempt(u.ID)
 			if !p.TorrentExempt {
 				// A user added to the exemptions after a catch is let in at once.
@@ -1000,6 +1008,11 @@ func (s *Syncer) exitTo(ctx context.Context, src, id int64) (nodeapi.Exit, error
 	if err != nil {
 		return nodeapi.Exit{}, err
 	}
+	// Node to node is Citrus on both ends: the key exchange is post-quantum, said here
+	// rather than left to the core's default (mihomo's was the other way).
+	if ro, ok := c.Mihomo["reality-opts"].(map[string]any); ok {
+		ro["support-x25519mlkem768"] = true
+	}
 	raw, _ := json.Marshal(c.Mihomo)
 	return nodeapi.Exit{Name: nodeapi.ExitName(id), Proxy: raw}, nil
 }
@@ -1043,24 +1056,36 @@ func (m *Manager) Tunnel(ctx context.Context, id int64, addr string) (net.Conn, 
 	return c.Tunnel(ctx, addr)
 }
 
-// userPoolQuotas are the users' pool quotas with a limit: what is left of each, with the
-// pool's grants.
-func userPoolQuotas(rows []db.UserPool, grants domain.GrantsLeft) map[int64][]nodeapi.PoolQuota {
-	out := map[int64][]nodeapi.PoolQuota{}
-	for _, p := range rows {
-		if !p.TrafficLimit.Valid {
-			continue
+// userPoolQuotas are a user's quotas in the server groups that have inbounds on this node
+// (here): a group with a limit of its own gets what is left of it, with the group's
+// grants; a group in the main traffic is said to count there (Main), with what is left of
+// the main traffic for nodes that do not know Main. A group without a limit or closed is
+// not listed: it has no quota (a closed one is out of the slot's inbounds already).
+func userPoolQuotas(userID int64, rows []db.UserPool, here []int64, mainLeft int64, grants domain.GrantsLeft) []nodeapi.PoolQuota {
+	var out []nodeapi.PoolQuota
+	for _, id := range here {
+		p, mode := domain.UserPoolOf(rows, id)
+		pool := strconv.FormatInt(id, 10)
+		switch mode {
+		case domain.PoolOwn:
+			left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(userID, id))
+			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: left})
+		case domain.PoolMain:
+			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: mainLeft, Main: true})
 		}
-		left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(p.UserID, p.PoolID))
-		out[p.UserID] = append(out[p.UserID], nodeapi.PoolQuota{Pool: strconv.FormatInt(p.PoolID, 10), Remaining: left})
 	}
 	return out
 }
 
-// poolKey: which pools have a quota, not how much is left (the node counts that down).
+// poolKey: which groups have a quota and which count to the main traffic, not how much
+// is left (the node counts that down).
 func poolKey(ps []nodeapi.PoolQuota) []string {
 	out := make([]string, 0, len(ps))
 	for _, p := range ps {
+		if p.Main {
+			out = append(out, p.Pool+":main")
+			continue
+		}
 		out = append(out, p.Pool)
 	}
 	return out

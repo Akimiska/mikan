@@ -107,13 +107,23 @@ func (b *Bot) shopList(ctx context.Context, w *words, title, prefix, notice stri
 	rows := [][]tgate.Button{}
 	for _, o := range offers {
 		desc := billing.DescribeOffer(o, lang)
-		lines = append(lines, "• <b>"+html.EscapeString(o.Tariff.Name)+"</b> — "+html.EscapeString(desc)+noteOf(o.Tariff.Description))
+		lines = append(lines, "• <b>"+html.EscapeString(o.Tariff.Name)+"</b> — "+html.EscapeString(desc)+contentsOf(o, lang)+noteOf(o.Tariff.Description))
 		rows = append(rows, []tgate.Button{{Text: o.Tariff.Name + " · " + w.cheapest(o), CallbackData: prefix + ":" + strconv.FormatInt(o.Tariff.ID, 10)}})
 	}
 	if len(offers) == 0 {
 		lines = append(lines, html.EscapeString(w.payUnavailable))
 	}
 	return strings.Join(lines, "\n"), &tgate.Keyboard{InlineKeyboard: append(rows, back)}
+}
+
+// contentsOf is what a tariff is made of besides its limits (billing.DescribeContents), a
+// line each after the line of its limits; empty for a tariff without groups or gifts.
+func contentsOf(o billing.Offer, lang string) string {
+	var b strings.Builder
+	for _, l := range billing.DescribeContents(o, lang) {
+		b.WriteString("\n   " + html.EscapeString(l))
+	}
+	return b.String()
 }
 
 // noteOf is the admin's description of a tariff to follow the line built from its limits:
@@ -189,7 +199,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 				label := billing.TermLabel(o.Tariff, t.Days, lang) + " · " + w.cheapest(billing.Offer{Stars: t.Stars, Rub: t.Rub})
 				rows = append(rows, []tgate.Button{{Text: label, CallbackData: prefix + ":" + ref + "." + strconv.FormatInt(t.Days, 10)}})
 			}
-			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + noteOf(o.Tariff.Description) + "\n\n" + w.pickTerm, &tgate.Keyboard{InlineKeyboard: append(rows, back)}
+			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + contentsOf(o, lang) + noteOf(o.Tariff.Description) + "\n\n" + w.pickTerm, &tgate.Keyboard{InlineKeyboard: append(rows, back)}
 		}
 		t, ok := o.Term(days)
 		if !ok {
@@ -198,7 +208,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 		if days != nil {
 			ref += "." + strconv.FormatInt(t.Days, 10)
 		}
-		text := name + html.EscapeString(billing.Describe(o.Tariff, t.Days, lang)) + noteOf(o.Tariff.Description) + "\n\n" + w.payHow
+		text := name + html.EscapeString(billing.Describe(o.Tariff, t.Days, lang)) + contentsOf(o, lang) + noteOf(o.Tariff.Description) + "\n\n" + w.payHow
 		rows := w.payButtons(pay+":"+ref+":", t.Stars, t.Rub, av, b.addonName(ctx))
 		return text, &tgate.Keyboard{InlineKeyboard: append(rows, back)}
 	}

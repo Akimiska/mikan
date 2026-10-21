@@ -1,26 +1,22 @@
 package node
 
 import (
-	"context"
 	"math"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/time/rate"
 
 	"mikan/internal/nodeapi"
 )
 
 // Speed caps and the fair share of a node's channel.
 //
-// A user's slots (one per bound device) form a group with one limiter each way, so the cap
-// is the user's on this node, whatever the devices and connections. Without a cap and
-// without the fair share a group is unlimited and its connections go to the core as they
-// are, where XTLS Vision may splice them in the kernel; a shaped connection gives that up,
-// as spliced bytes cannot be held back. The bytes a group moved come from the core's
-// counters (Registry.drain).
+// A user's slots (one per bound device) form a group with one ceiling each way, so the cap
+// is the user's on this node, whatever the devices, inbounds and connections. The core
+// holds the traffic to it: every slot of the group gets the group's ceiling as its speed on
+// every inbound, with the group as its speed group (Citrus speed-group), so they all take
+// from one pair of buckets, TCP and UDP alike (reconcile). The node only works the ceilings
+// out; the bytes a group moved come from the core's counters (Registry.drain).
 //
 // The fair share splits the channel max-min every second: a group that moved less than an
 // even share keeps an even share as its ceiling, what it leaves goes to the groups that
@@ -40,33 +36,19 @@ const (
 	hungryAt = 0.85
 )
 
-// group is a user's traffic on this node: its cap and its limiters each way.
+// group is a user's traffic on this node: its cap and its ceilings each way.
 type group struct {
+	key        string       // the policy's group, or the slot's name
 	own        atomic.Int64 // its own cap, bytes/s each way; 0: none
-	up, down   *rate.Limiter
+	up, down   atomic.Int64 // the ceilings the core holds it to, bytes/s; 0: none
 	upN, downN atomic.Int64 // bytes since the last share
 	lastActive atomic.Int64 // unix nanoseconds
 }
 
-func newGroup() *group {
-	return &group{up: rate.NewLimiter(rate.Inf, 0), down: rate.NewLimiter(rate.Inf, 0)}
-}
+func newGroup(key string) *group { return &group{key: key} }
 
-// set gives the group a ceiling each way; 0 or less: none.
-func setLimit(l *rate.Limiter, bps float64) {
-	if bps <= 0 {
-		if l.Limit() != rate.Inf {
-			l.SetLimit(rate.Inf)
-		}
-		return
-	}
-	// A tenth of a second's worth, so a short burst passes and the average holds.
-	burst := int(math.Max(bps/10, 64<<10))
-	if l.Limit() != rate.Limit(bps) || l.Burst() != burst {
-		l.SetBurst(burst)
-		l.SetLimit(rate.Limit(bps))
-	}
-}
+// speedGroup is the name the core shares the group's buckets under.
+func (g *group) speedGroup() string { return "mikan/" + g.key }
 
 // moved counts bytes the group moved; share turns them into its rate and its activity.
 func (g *group) moved(up, down int64) {
@@ -96,7 +78,7 @@ func (sh *shaper) group(key string) *group {
 	defer sh.mu.Unlock()
 	g := sh.groups[key]
 	if g == nil {
-		g = newGroup()
+		g = newGroup(key)
 		sh.groups[key] = g
 	}
 	return g
@@ -112,9 +94,6 @@ func (sh *shaper) keep(keys map[string]bool) {
 		}
 	}
 }
-
-// on says whether the node shares its channel.
-func (sh *shaper) on() bool { return sh.channel.Load() > 0 }
 
 // setChannel turns the fair share on (the channel in Mbit/s) or off (nil).
 func (sh *shaper) setChannel(s *nodeapi.Shaping) {
@@ -146,23 +125,24 @@ func (sh *shaper) share() {
 			g.lastActive.Store(now.UnixNano())
 		}
 		if channel > 0 && now.Sub(time.Unix(0, g.lastActive.Load())) < activeFor {
-			ups = append(ups, used{g, up, g.up})
-			downs = append(downs, used{g, down, g.down})
+			ups = append(ups, used{g, up, float64(g.up.Load())})
+			downs = append(downs, used{g, down, float64(g.down.Load())})
 		}
 	}
 	upShare, downShare := fairShares(ups, channel), fairShares(downs, channel)
 	for _, g := range gs {
 		own := float64(g.own.Load())
-		setLimit(g.up, lower(own, upShare[g]))
-		setLimit(g.down, lower(own, downShare[g]))
+		g.up.Store(int64(lower(own, upShare[g])))
+		g.down.Store(int64(lower(own, downShare[g])))
 	}
 }
 
-// used is what a group moved one way in the last period (bytes/s) and its limiter that way.
+// used is what a group moved one way in the last period (bytes/s) and its ceiling that
+// way (0: none).
 type used struct {
-	g    *group
-	rate float64
-	l    *rate.Limiter
+	g       *group
+	rate    float64
+	ceiling float64
 }
 
 // lower is the lower of two ceilings, where 0 is none.
@@ -189,7 +169,7 @@ func fairShares(active []used, channel float64) map[*group]float64 {
 	var hungry []*group
 	for _, u := range active {
 		own := float64(u.g.own.Load())
-		atCeiling := u.l.Limit() == rate.Inf || u.rate >= hungryAt*float64(u.l.Limit())
+		atCeiling := u.ceiling <= 0 || u.rate >= hungryAt*u.ceiling
 		heldByOwn := own > 0 && u.rate >= hungryAt*own
 		if atCeiling && !heldByOwn && u.rate >= hungryAt*even {
 			hungry = append(hungry, u.g)
@@ -207,49 +187,15 @@ func fairShares(active []used, channel float64) map[*group]float64 {
 	return out
 }
 
-// shapedConn holds a connection to its group's ceilings: what the client sends is taken
-// after it is read, what it gets before it is written. It has no Unwrap methods, so the
-// copy loop goes through Read and Write and cannot splice past the limiter.
-type shapedConn struct {
-	net.Conn
-	g *group
-}
-
-func (c *shapedConn) Read(b []byte) (int, error) {
-	n, err := c.Conn.Read(b)
-	if n > 0 {
-		wait(c.g.up, n)
+// sameSpeed says whether a ceiling the core holds is close enough to a new one to be left
+// as it is: the fair share moves a little every second, and each change is a pass of the
+// core over its users.
+func sameSpeed(held, want int64) bool {
+	if held == want {
+		return true
 	}
-	return n, err
-}
-
-func (c *shapedConn) Write(b []byte) (int, error) {
-	// No ceiling yet (a new group before its first share, or the fair share leaves it
-	// free): written whole. Cut by a burst of 0, it would go out a byte at a time.
-	if c.g.down.Limit() == rate.Inf {
-		return c.Conn.Write(b)
+	if held <= 0 || want <= 0 {
+		return false
 	}
-	written := 0
-	for written < len(b) {
-		chunk := min(len(b)-written, max(c.g.down.Burst(), 1))
-		wait(c.g.down, chunk)
-		n, err := c.Conn.Write(b[written : written+chunk])
-		written += n
-		if err != nil {
-			return written, err
-		}
-	}
-	return written, nil
-}
-
-// wait takes n bytes from l, in pieces no larger than its burst.
-func wait(l *rate.Limiter, n int) {
-	for n > 0 {
-		if l.Limit() == rate.Inf {
-			return
-		}
-		take := min(n, max(l.Burst(), 1))
-		_ = l.WaitN(context.Background(), take)
-		n -= take
-	}
+	return math.Abs(float64(held-want)) <= 0.02*float64(want)
 }

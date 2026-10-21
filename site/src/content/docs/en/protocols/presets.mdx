@@ -24,13 +24,15 @@ The **Protocols** section holds the protocols clients use to reach your nodes. A
 | TrustTunnel | 4443/tcp | Clash apps only; answers a request without a key with 407, so a scanner can tell it is a proxy |
 | ShadowQUIC | 4443/udp | Clash apps only |
 | Mieru | 5443/tcp | Clash apps only |
-| Shadowsocks-2022 | 6443/tcp | one key for everyone |
+| Shadowsocks-2022 | 6443/tcp | a key per client (AES methods), UDP inside TCP |
 | Sudoku | 7443/tcp | one key for everyone, Clash apps only |
 | Snell | 9443/tcp | one key for everyone, Clash apps only |
 | Own config | | a mihomo listener template in YAML |
 
 :::caution[One-key protocols]
-In mihomo, Shadowsocks-2022, Sudoku and Snell work with a single key for everyone. The node cannot tell users apart, so these protocols have no traffic accounting, limits, device binding or automatic fixes. A disabled or expired user keeps access until the key changes, and the only way to change it is to delete the connection and add it again.
+Sudoku, Snell and Shadowsocks-2022 with the ChaCha20 method work with a single key for everyone. The node cannot tell users apart, so these protocols have no traffic accounting, limits, device binding or automatic fixes. A disabled or expired user keeps access until the key changes, and the only way to change it is to delete the connection and add it again.
+
+Shadowsocks-2022 with the AES methods (`2022-blake3-aes-128-gcm` by default) gives every client a key of its own, and all of this works on it as on VLESS.
 :::
 
 ## Who gets what

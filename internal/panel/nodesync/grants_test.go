@@ -24,6 +24,11 @@ func TestTrafficGrantsOnThePanel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The node is told the quotas of the groups it has inbounds of.
+	ins, _ := q.ListInbounds(ctx)
+	if err := q.SetInboundPool(ctx, db.SetInboundPoolParams{PoolID: sql.NullInt64{Int64: pool.ID, Valid: true}, ID: ins[0].ID}); err != nil {
+		t.Fatal(err)
+	}
 	tariffs, _ := q.ListTariffs(ctx)
 	u, err := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
 	if err != nil {
@@ -33,7 +38,7 @@ func TestTrafficGrantsOnThePanel(t *testing.T) {
 	if u, err = users.Update(ctx, u.ID, domain.Patch{TrafficLimit: &limit}); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.SetUserPoolLimit(ctx, db.SetUserPoolLimitParams{UserID: u.ID, PoolID: pool.ID, TrafficLimit: sql.NullInt64{Int64: domain.GiB, Valid: true}}); err != nil {
+	if err := q.SetUserPool(ctx, db.SetUserPoolParams{UserID: u.ID, PoolID: pool.ID, Mode: domain.PoolOwn, TrafficLimit: sql.NullInt64{Int64: domain.GiB, Valid: true}}); err != nil {
 		t.Fatal(err)
 	}
 	slot, _ := q.GetSlot(ctx, u.SlotID.Int64)

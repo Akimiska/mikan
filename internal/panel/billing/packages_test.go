@@ -183,36 +183,37 @@ func TestPackageClosedPoolIsNotSold(t *testing.T) {
 	wl, err := q.CreateTrafficPackage(ctx, db.CreateTrafficPackageParams{Name: "wl", Bytes: domain.GiB, PoolID: sql.NullInt64{Int64: pool.ID, Valid: true},
 		Lifetime: domain.LifetimeUsed, PriceStars: sql.NullInt64{Int64: 5, Valid: true}, OnSale: 1, CreatedAt: 1})
 	must(t, err)
-	setPool := func(limit sql.NullInt64, closed bool) {
+	setPool := func(mode string, limit sql.NullInt64) {
 		t.Helper()
-		must(t, q.SetUserPoolLimit(ctx, db.SetUserPoolLimitParams{UserID: u.ID, PoolID: pool.ID, TrafficLimit: limit, Excluded: closed}))
+		must(t, q.SetUserPool(ctx, db.SetUserPoolParams{UserID: u.ID, PoolID: pool.ID, Mode: mode, TrafficLimit: limit}))
 	}
 	buy := func() (db.Payment, error) {
 		return e.s.PackageInvoice(ctx, PackageRequest{TgID: 555, UserID: u.ID, PackageID: wl.ID, Provider: Stars})
 	}
 	limit := sql.NullInt64{Int64: 10 * domain.GiB, Valid: true}
 
-	setPool(limit, false)
+	setPool(domain.PoolOwn, limit)
 	p, err := buy()
 	must(t, err)
 	must(t, e.s.PreCheckout(ctx, 555, p.Payload, "XTR", 5))
 
 	// Closed after the invoice: Telegram's pre-checkout refuses, a new invoice is refused.
-	setPool(sql.NullInt64{}, true)
+	setPool(domain.PoolClosed, sql.NullInt64{})
 	if err := e.s.PreCheckout(ctx, 555, p.Payload, "XTR", 5); !errors.Is(err, ErrNotForSale) {
 		t.Fatalf("pre-checkout for a closed pool: %v", err)
 	}
 	if _, err := buy(); !errors.Is(err, ErrNotForSale) {
 		t.Fatalf("invoice for a closed pool: %v", err)
 	}
-	// A limit row left on a closed pool does not make it sellable.
-	setPool(limit, true)
-	if _, err := buy(); !errors.Is(err, ErrNotForSale) {
-		t.Fatalf("invoice for a closed pool with a limit row: %v", err)
-	}
-	if ups, _ := q.ListUserPools(ctx, u.ID); domain.PackageFits(u, ups, wl) {
+	if ups, _ := q.ListUserPools(ctx, u.ID); domain.PackageFits(u, ups, wl, nil) {
 		t.Fatal("PackageFits must refuse a closed pool")
 	}
+	// A group in the main traffic takes the main traffic's packages, not its own.
+	setPool(domain.PoolMain, sql.NullInt64{})
+	if _, err := buy(); !errors.Is(err, ErrNotForSale) {
+		t.Fatalf("invoice for a group in the main traffic: %v", err)
+	}
+	setPool(domain.PoolClosed, sql.NullInt64{})
 	if offers, _, err := e.s.PackageOffers(ctx, u.ID); err != nil {
 		t.Fatal(err)
 	} else {
@@ -233,7 +234,7 @@ func TestPackageClosedPoolIsNotSold(t *testing.T) {
 	}
 
 	// Opened again: sellable.
-	setPool(limit, false)
+	setPool(domain.PoolOwn, limit)
 	if _, err := buy(); err != nil {
 		t.Fatalf("an open pool sells: %v", err)
 	}

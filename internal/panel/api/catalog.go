@@ -17,24 +17,26 @@ import (
 )
 
 type TariffView struct {
-	ID            int64        `json:"id"`
-	Name          string       `json:"name"`
-	TrafficLimit  *int64       `json:"traffic_limit" doc:"Байты; null — без лимита"`
-	DurationDays  int64        `json:"duration_days" doc:"0 — бессрочно"`
-	DeviceLimit   *int64       `json:"device_limit"`
-	DeviceMode    string       `json:"device_mode" enum:"bound,online" doc:"Как считается лимит устройств: bound: привязанные устройства (места), online: любое число устройств, считаются только одновременно онлайн"`
-	SpeedLimit    *int64       `json:"speed_limit" doc:"Мбит/с в каждую сторону; null — без ограничения"`
-	ResetStrategy string       `json:"reset_strategy" enum:"none,month_start,period"`
-	BillingDay    *int64       `json:"billing_day" doc:"День месяца, в который заканчивается срок; null — срок в днях"`
-	PriceLabel    string       `json:"price_label"`
-	Description   string       `json:"description" doc:"Текст для покупателей: чем тариф отличается, когда лимиты этого не показывают; до 300 символов, до 5 строк, пустой — только строка из лимитов"`
-	PriceStars    *int64       `json:"price_stars" doc:"Цена в Telegram Stars; null — не продаётся за Stars"`
-	PriceRub      *int64       `json:"price_rub" doc:"Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли"`
-	OnSale        bool         `json:"on_sale" doc:"Продаётся в боте и Mini App"`
-	Terms         []TermView   `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub"`
-	ExtraDevices  ExtraDevices `json:"extra_devices" doc:"Докупка устройств в боте и Mini App: цена одного и сколько можно докупить"`
-	Pools         []PoolLimit  `json:"pools" doc:"Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается"`
-	Sort          int64        `json:"sort"`
+	ID            int64         `json:"id"`
+	Name          string        `json:"name"`
+	TrafficLimit  *int64        `json:"traffic_limit" doc:"Байты; null — без лимита"`
+	DurationDays  int64         `json:"duration_days" doc:"0 — бессрочно"`
+	DeviceLimit   *int64        `json:"device_limit"`
+	DeviceMode    string        `json:"device_mode" enum:"bound,online" doc:"Как считается лимит устройств: bound: привязанные устройства (места), online: любое число устройств, считаются только одновременно онлайн"`
+	SpeedLimit    *int64        `json:"speed_limit" doc:"Мбит/с в каждую сторону; null — без ограничения"`
+	ResetStrategy string        `json:"reset_strategy" enum:"none,month_start,period"`
+	BillingDay    *int64        `json:"billing_day" doc:"День месяца, в который заканчивается срок; null — срок в днях"`
+	PriceLabel    string        `json:"price_label"`
+	Description   string        `json:"description" doc:"Текст для покупателей: чем тариф отличается, когда лимиты этого не показывают; до 300 символов, до 5 строк, пустой — только строка из лимитов"`
+	PriceStars    *int64        `json:"price_stars" doc:"Цена в Telegram Stars; null — не продаётся за Stars"`
+	PriceRub      *int64        `json:"price_rub" doc:"Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли"`
+	OnSale        bool          `json:"on_sale" doc:"Продаётся в боте и Mini App"`
+	Terms         []TermView    `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub"`
+	ExtraDevices  ExtraDevices  `json:"extra_devices" doc:"Докупка устройств в боте и Mini App: цена одного и сколько можно докупить"`
+	Pools         []PoolSetting `json:"pools" doc:"Как тариф держит каждую группу серверов; группа без настройки тарифа — в основном трафике. Режим и лимит действуют на новых клиентов, при продлении, смене тарифа и по «Применить к выданным подпискам»; закрытие и открытие группы действует сразу на всех клиентов тарифа"`
+	Gifts         []int64       `json:"gifts" doc:"Пакеты трафика в подарок при каждой оплате тарифа: покупке и продлении"`
+	Subscribers   int64         `json:"subscribers" doc:"Сколько подписок выдано на этом тарифе"`
+	Sort          int64         `json:"sort"`
 }
 
 // ExtraDevices is one more device on top of the tariff: its price and how many a
@@ -90,7 +92,8 @@ type tariffBody struct {
 	PriceRub      *int64        `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 19900 — 199 ₽"`
 	OnSale        bool          `json:"on_sale,omitempty" doc:"Продавать в боте и Mini App; нужна хотя бы одна цена"`
 	Terms         []termBody    `json:"terms,omitempty" maxItems:"12" doc:"Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений"`
-	Pools         []PoolLimit   `json:"pools,omitempty" maxItems:"100" doc:"Лимиты пулов трафика; не передан — без изменений"`
+	Pools         []PoolSetting `json:"pools,omitempty" maxItems:"100" doc:"Как тариф держит группы серверов; не названная группа — в основном трафике. Не передан — без изменений"`
+	Gifts         []int64       `json:"gifts,omitempty" maxItems:"20" doc:"Пакеты трафика в подарок при каждой оплате тарифа; каждый должен добавлять к квоте, которую тариф даёт: к основному трафику с лимитом или к группе со своим лимитом. Не передан — без изменений"`
 	ExtraDevices  *ExtraDevices `json:"extra_devices,omitempty" doc:"Докупка устройств; не передана — без изменений (у нового тарифа — нет). Нужен лимит устройств"`
 	Sort          int64         `json:"sort,omitempty"`
 }
@@ -124,7 +127,7 @@ func (h *handlers) registerCatalog() {
 	huma.Register(h.api, huma.Operation{OperationID: "create-tariff", Method: http.MethodPost, Path: "/api/v1/tariffs", Summary: "Создать тариф", Tags: []string{"tariffs"}, DefaultStatus: http.StatusCreated}, h.createTariff)
 	huma.Register(h.api, huma.Operation{OperationID: "update-tariff", Method: http.MethodPut, Path: "/api/v1/tariffs/{id}", Summary: "Изменить тариф", Tags: []string{"tariffs"}}, h.updateTariff)
 	huma.Register(h.api, huma.Operation{OperationID: "archive-tariff", Method: http.MethodDelete, Path: "/api/v1/tariffs/{id}", Summary: "Убрать тариф в архив", Tags: []string{"tariffs"}, DefaultStatus: http.StatusNoContent}, h.archiveTariff)
-	huma.Register(h.api, huma.Operation{OperationID: "apply-tariff-pools", Method: http.MethodPost, Path: "/api/v1/tariffs/{id}/apply-pools", Summary: "Применить лимиты пулов тарифа к уже выданным подпискам: свои лимиты пулов у клиентов заменятся, израсходованное останется", Tags: []string{"tariffs"}}, h.applyTariffPools)
+	huma.Register(h.api, huma.Operation{OperationID: "apply-tariff", Method: http.MethodPost, Path: "/api/v1/tariffs/{id}/apply", Summary: "Применить тариф к уже выданным подпискам: выбранные части тарифа заменят свои значения клиентов, срок и израсходованное останутся", Tags: []string{"tariffs"}}, h.applyTariff)
 }
 
 func (h *handlers) listTariffs(ctx context.Context, _ *struct{}) (*tariffsOutput, error) {
@@ -140,10 +143,14 @@ func (h *handlers) listTariffs(ctx context.Context, _ *struct{}) (*tariffsOutput
 	if err != nil {
 		return nil, err
 	}
+	c, err := h.catalogExtras(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := &tariffsOutput{Body: make([]TariffView, 0, len(rows))}
 	for _, t := range rows {
 		v := viewTariff(t, terms)
-		v.Pools = tariffPoolsOf(pools, t.ID)
+		c.fill(&v, pools)
 		out.Body = append(out.Body, v)
 	}
 	return out, nil
@@ -180,10 +187,10 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 		if err := setExtraDevices(ctx, q, &t, b.ExtraDevices); err != nil {
 			return err
 		}
-		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil || b.Pools == nil {
+		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil {
 			return err
 		}
-		return setTariffPools(ctx, q, t.ID, b.Pools)
+		return setTariffContents(ctx, q, t, b)
 	})
 	if err != nil {
 		return nil, err
@@ -229,10 +236,10 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 		if err := setExtraDevices(ctx, q, &t, b.ExtraDevices); err != nil {
 			return err
 		}
-		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil || b.Pools == nil {
+		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil {
 			return err
 		}
-		return setTariffPools(ctx, q, t.ID, b.Pools)
+		return setTariffContents(ctx, q, t, b)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, huma.Error404NotFound("not_found")
@@ -241,7 +248,7 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 		return nil, err
 	}
 	if in.Body.Pools != nil {
-		h.d.Changes.PoliciesChanged() // a pool closed or opened for the tariff's users
+		h.d.Changes.PoliciesChanged() // a group closed or opened for the tariff's users
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.update", "tariff", strconv.FormatInt(t.ID, 10), nil)
 	return h.tariffOut(ctx, t)
@@ -275,21 +282,102 @@ func (h *handlers) archiveTariff(ctx context.Context, in *userIDInput) (*struct{
 	return nil, nil
 }
 
-type applyPoolsOutput struct {
+type applyTariffInput struct {
+	ID   int64 `path:"id" minimum:"1"`
 	Body struct {
-		Applied int `json:"applied" doc:"У скольких клиентов тарифа обновлены лимиты пулов"`
+		Traffic bool `json:"traffic,omitempty" doc:"Трафик за период и когда он обнуляется"`
+		Devices bool `json:"devices,omitempty" doc:"Лимит устройств (докупленные остаются сверху) и как он считается"`
+		Speed   bool `json:"speed,omitempty" doc:"Скорость"`
+		Groups  bool `json:"groups,omitempty" doc:"Группы серверов: режимы и лимиты"`
 	}
 }
 
-func (h *handlers) applyTariffPools(ctx context.Context, in *userIDInput) (*applyPoolsOutput, error) {
-	n, err := h.d.Users.ApplyTariffPoolsToAll(ctx, in.ID)
+type applyTariffOutput struct {
+	Body struct {
+		Applied int `json:"applied" doc:"Скольким подпискам тарифа применены его части"`
+	}
+}
+
+func (h *handlers) applyTariff(ctx context.Context, in *applyTariffInput) (*applyTariffOutput, error) {
+	parts := domain.TariffParts{Traffic: in.Body.Traffic, Devices: in.Body.Devices, Speed: in.Body.Speed, Groups: in.Body.Groups}
+	if !parts.Any() {
+		return nil, fieldErr("body", "apply_nothing")
+	}
+	n, err := h.d.Users.ApplyTariffToAll(ctx, in.ID, parts)
 	if err != nil {
 		return nil, mapDomainErr(err)
 	}
-	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.apply_pools", "tariff", strconv.FormatInt(in.ID, 10), map[string]any{"users": n})
-	out := &applyPoolsOutput{}
+	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.apply", "tariff", strconv.FormatInt(in.ID, 10),
+		map[string]any{"users": n, "traffic": parts.Traffic, "devices": parts.Devices, "speed": parts.Speed, "groups": parts.Groups})
+	out := &applyTariffOutput{}
 	out.Body.Applied = n
 	return out, nil
+}
+
+// setTariffContents writes the tariff's groups and gifts from the body on q's transaction.
+// The gifts are checked against the groups as they are now: a body that leaves the gifts
+// out still has the tariff's own checked, since a change of a group or of the main traffic
+// may leave a gift adding to no quota.
+func setTariffContents(ctx context.Context, q *db.Queries, t db.Tariff, b tariffBody) error {
+	if b.Pools != nil {
+		if err := setTariffPools(ctx, q, t.ID, b.Pools); err != nil {
+			return err
+		}
+	}
+	gifts := b.Gifts
+	if gifts == nil {
+		rows, err := q.ListTariffGifts(ctx, t.ID)
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			gifts = append(gifts, r.PackageID)
+		}
+	}
+	if err := domain.SetTariffGifts(ctx, q, t, gifts); err != nil {
+		return mapDomainErr(err)
+	}
+	return nil
+}
+
+// catalogExtras is what the tariffs' views take besides their rows: the groups, the gifts
+// and how many subscriptions each one was given to.
+type catalogExtras struct {
+	groups []db.TrafficPool
+	gifts  map[int64][]int64
+	users  map[int64]int64
+}
+
+func (h *handlers) catalogExtras(ctx context.Context) (catalogExtras, error) {
+	q := h.d.Store.Q
+	var c catalogExtras
+	var err error
+	if c.groups, err = q.ListTrafficPools(ctx); err != nil {
+		return c, err
+	}
+	if c.gifts, err = domain.TariffGifts(ctx, q); err != nil {
+		return c, err
+	}
+	counts, err := q.CountUsersByTariff(ctx)
+	if err != nil {
+		return c, err
+	}
+	c.users = make(map[int64]int64, len(counts))
+	for _, r := range counts {
+		c.users[r.TariffID] = r.Users
+	}
+	return c, nil
+}
+
+// fill puts the tariff's groups (from rows, the tariffs' settings of groups), gifts and
+// subscriptions in v.
+func (c catalogExtras) fill(v *TariffView, rows []db.TariffPool) {
+	v.Pools = tariffPoolsOf(rows, c.groups, v.ID)
+	v.Gifts = c.gifts[v.ID]
+	if v.Gifts == nil {
+		v.Gifts = []int64{}
+	}
+	v.Subscribers = c.users[v.ID]
 }
 
 // cleanDescription is the tariff's description as stored; a text that is too long or has
@@ -360,7 +448,11 @@ func (h *handlers) tariffOut(ctx context.Context, t db.Tariff) (*tariffOutput, e
 	if err != nil {
 		return nil, err
 	}
+	c, err := h.catalogExtras(ctx)
+	if err != nil {
+		return nil, err
+	}
 	v := viewTariff(t, terms)
-	v.Pools = tariffPoolsOf(pools, t.ID)
+	c.fill(&v, pools)
 	return &tariffOutput{Body: v}, nil
 }

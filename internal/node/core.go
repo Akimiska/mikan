@@ -17,10 +17,11 @@ type core interface {
 	// drain returns the traffic of each user of each inbound since the last drain, and
 	// who is online now.
 	drain() []userStat
-	// limit holds the user of an inbound to these: kept out (its open connections are
-	// closed), and a traffic budget the core cuts it at (0: none), counted from now when
-	// fresh, else from when it was set. Neither: no limit.
-	limit(inbound, user string, out bool, budget int64, fresh bool)
+	// limits holds the users of inbounds in set to their limits, drops the limits of those
+	// in remove, and starts the budgets of those in fresh over (counted from now, not from
+	// when they were set): one pass of the core for all the changes the registry makes at
+	// once.
+	limits(set map[userKey]coreLimit, remove, fresh []userKey)
 	// closeUser closes the user's open connections on an inbound.
 	closeUser(inbound, user string)
 }
@@ -57,25 +58,37 @@ func (citrus) drain() []userStat {
 	return out
 }
 
-// limit keeps a user out with an expiry in the past: the core closes its connections and
+// limits keeps a user out with an expiry in the past: the core closes its connections and
 // refuses new ones on every kind of inbound, whether or not it can change its users on the
-// fly (Hysteria2 and Mieru cannot). A fresh budget drops the limit first, which forgets
-// what the core counted against the last one, so the new budget never trips on old bytes.
-func (citrus) limit(inbound, user string, out bool, budget int64, fresh bool) {
+// fly (Hysteria2, Mieru and ShadowQUIC cannot). A speed goes with the user's speed group, so
+// the user's slots take from one pair of buckets on every inbound. A fresh budget forgets
+// what the core counted against the last one first, so it never trips on old bytes.
+func (citrus) limits(set map[userKey]coreLimit, remove, fresh []userKey) {
 	users := statistic.DefaultManager.Users()
-	key := statistic.UserKey{Inbound: inbound, User: user}
-	if !out && budget <= 0 {
-		users.DeleteLimit(key)
-		return
+	if len(fresh) > 0 {
+		anew := make(map[statistic.UserKey]bool, len(fresh))
+		for _, k := range fresh {
+			anew[statistic.UserKey{Inbound: k.inbound, User: k.user}] = true
+		}
+		users.ResetQuota(func(k statistic.UserKey) bool { return anew[k] })
 	}
-	l := statistic.UserLimit{Inbound: inbound, User: user, Quota: max(budget, 0)}
-	if out {
-		l.ExpireAt = 1
+	ls := make([]statistic.UserLimit, 0, len(set))
+	for k, l := range set {
+		ul := statistic.UserLimit{Inbound: k.inbound, User: k.user, Quota: max(l.budget, 0), SpeedUp: l.up, SpeedDown: l.down}
+		if l.up > 0 || l.down > 0 {
+			ul.SpeedGroup = l.group
+		}
+		if l.out {
+			ul.ExpireAt = 1
+		}
+		ls = append(ls, ul)
 	}
-	if fresh {
-		users.DeleteLimit(key)
+	rm := make([]statistic.UserKey, 0, len(remove))
+	for _, k := range remove {
+		rm = append(rm, statistic.UserKey{Inbound: k.inbound, User: k.user})
 	}
-	_ = users.SetLimit(l)
+	// The core refuses only negative numbers and empty names; the registry makes neither.
+	_ = users.SetLimits(ls, rm)
 }
 
 func (citrus) closeUser(inbound, user string) {

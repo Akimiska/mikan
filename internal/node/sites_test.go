@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	C "github.com/metacubex/mihomo/constant"
+
 	"mikan/internal/nodeapi"
 )
 
@@ -64,5 +66,24 @@ func TestSitesInTheBatch(t *testing.T) {
 	r.SetDetail(false)
 	if c := r.Counters(); len(c.Sites) != 0 {
 		t.Fatalf("kept after off: %+v", c.Sites)
+	}
+}
+
+// A connection or UDP session the core is done with counts to its slot's site both ways,
+// by the user's name or TUIC's UUID; one with no slot (a REALITY handshake, a relay) is
+// not counted.
+func TestLeftCountsToTheSite(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	r := NewRegistry("e1", 0, time.Minute, func() time.Time { return now }, &fakeCore{})
+	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
+	r.SetDetail(true)
+	r.left(&C.Metadata{InName: "vless", InUser: "s1", Host: "www.example.com"}, 10, 20)
+	r.left(&C.Metadata{NetWork: C.UDP, InName: "tuic", InUser: "u1", DstIP: netip.MustParseAddr("203.0.113.9")}, 3, 4)
+	r.left(&C.Metadata{Type: C.INNER, Host: "www.microsoft.com"}, 100, 100)
+	r.left(&C.Metadata{InName: "relay", InUser: "relay-13", Host: "example.org"}, 100, 100)
+	r.left(nil, 1, 1)
+	got := r.Counters().Sites["s1"]
+	if len(got) != 2 || got["example.com"] != (nodeapi.Traffic{Up: 10, Down: 20}) || got["203.0.113.9"] != (nodeapi.Traffic{Up: 3, Down: 4}) {
+		t.Fatalf("sites: %+v", got)
 	}
 }

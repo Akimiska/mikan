@@ -28,20 +28,20 @@ func TestExcludedPoolOnTheNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	tariffs, _ := q.ListTariffs(ctx)
-	if err := q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: tariffs[1].ID, PoolID: pool.ID, Excluded: true}); err != nil {
+	if err := q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: tariffs[1].ID, PoolID: pool.ID, Mode: domain.PoolClosed}); err != nil {
 		t.Fatal(err)
 	}
 	cheap, _ := users.Create(ctx, domain.CreateInput{Name: "cheap", TariffID: tariffs[1].ID})
 	rich, _ := users.Create(ctx, domain.CreateInput{Name: "rich", TariffID: tariffs[2].ID})
 
 	ups, _ := q.ListUserPools(ctx, cheap.ID)
-	if len(ups) != 1 || !ups[0].Excluded || ups[0].TrafficLimit.Valid {
+	if len(ups) != 1 || ups[0].Mode != domain.PoolClosed || ups[0].TrafficLimit.Valid {
 		t.Fatalf("closed by the tariff, without a limit: %+v", ups)
 	}
 	if shut, _ := domain.ExhaustedPools(ctx, q, cheap.ID, mustLeft(t, ctx, q, cheap.ID, *now)); !shut[pool.ID] {
 		t.Fatal("a closed pool does not serve: the subscription leaves it out")
 	}
-	if domain.PackageFits(cheap, ups, db.TrafficPackage{PoolID: sql.NullInt64{Int64: pool.ID, Valid: true}}) {
+	if domain.PackageFits(cheap, ups, db.TrafficPackage{PoolID: sql.NullInt64{Int64: pool.ID, Valid: true}}, nil) {
 		t.Fatal("nothing of a closed pool is sold")
 	}
 

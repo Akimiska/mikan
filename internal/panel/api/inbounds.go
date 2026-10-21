@@ -216,7 +216,7 @@ func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) In
 	v.Apps = []string{}
 	if t, err := proto.Parse(in.Config); err == nil {
 		v.Type, v.Network = t.Type(), t.Network()
-		v.Shared = proto.Shared(t.Type())
+		v.Shared = proto.Shared(t)
 		v.NodeCert = t.NodeCert()
 		for _, f := range subs.AppsFor(proto.NeedsOf(t)) {
 			v.Apps = append(v.Apps, string(f))

@@ -1,16 +1,19 @@
 // The Mini App's shop: the plans on sale and a way to pay for them. Stars open Telegram's
 // own payment sheet; the marketplace's adapters (YooKassa, CryptoBot…) open their pages. The subscription itself is
 // issued or renewed by the panel once the provider confirms the payment.
-import { Check, RefreshCw } from "lucide-react";
+import { Check, Gift, RefreshCw, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui";
 import { t, type Key } from "../i18n";
-import { money, rubles } from "../lib/format";
+import { bytes, money, rubles } from "../lib/format";
 import { okData, postJSON } from "./net";
 
 /** A term of a plan sold for several: its own price; label is "30 days", "3 months". */
 type Term = { days: number; label: string; description: string; stars?: number; rub?: number };
-type Offer = { id: number; name: string; description: string; note?: string; stars?: number; rub?: number; terms?: Term[] };
+/** A server group as a tariff on sale has it: in on the main traffic, with a limit of its own (bytes), without one, or not included. */
+type OfferGroup = { name: string; mode: "main" | "own" | "unlimited" | "closed"; limit?: number };
+/** A plan, a package (pool: its group's name, none for the main traffic), the trial or a device; a plan says what it is made of in groups and gifts. */
+type Offer = { id: number; name: string; description: string; note?: string; stars?: number; rub?: number; terms?: Term[]; pool?: string; groups?: OfferGroup[]; gifts?: string[] };
 export type ShopData = {
   allow_new: boolean;
   providers: { stars: boolean };
@@ -167,6 +170,22 @@ export function Shop({
               <span className="num text-[13px] text-[var(--ink-700)]">{listPrice(o)}</span>
             </span>
             <span className="text-xs text-[var(--ink-500)]">{o.description}</span>
+            {o.groups?.length || o.gifts?.length ? (
+              <span className="flex flex-col gap-0.5 text-xs text-[var(--ink-600)]">
+                {o.groups?.map((g) => (
+                  <span key={g.name} className="flex items-center gap-1.5">
+                    {g.mode === "closed" ? <X size={13} className="shrink-0 text-[var(--ink-400)]" aria-hidden /> : <Check size={13} className="shrink-0 text-[var(--leaf-500)]" aria-hidden />}
+                    {g.name}: {groupText(g)}
+                  </span>
+                ))}
+                {o.gifts?.map((what) => (
+                  <span key={what} className="flex items-center gap-1.5">
+                    <Gift size={13} className="shrink-0 text-[var(--mikan-600)]" aria-hidden />
+                    {t("sub.shopGift", { what })}
+                  </span>
+                ))}
+              </span>
+            ) : null}
             {o.note ? <span className="whitespace-pre-line text-xs text-[var(--ink-700)]">{o.note}</span> : null}
           </button>
         ))}
@@ -297,6 +316,20 @@ export function FreePlan({
 
 /** The price a list shows: rubles when sold for them, else Stars; "from" the cheapest term
  * of a plan sold for several. */
+/** How a plan has a group, in words: "included", "50 GB of its own", "unlimited", "not included". */
+function groupText(g: OfferGroup): string {
+  switch (g.mode) {
+    case "own":
+      return t("sub.groupOwn", { gb: bytes(g.limit ?? 0) });
+    case "unlimited":
+      return t("sub.groupUnlimited");
+    case "closed":
+      return t("sub.groupClosed");
+    default:
+      return t("sub.groupIn");
+  }
+}
+
 function listPrice(o: Offer): string {
   const terms = o.terms && o.terms.length > 1 ? o.terms : [o];
   const rub = Math.min(...terms.map((x) => x.rub || Infinity));

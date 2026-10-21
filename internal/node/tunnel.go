@@ -12,8 +12,8 @@ import (
 
 // Tunnel sits between the core's listeners and its tunnel. The core counts, limits and
 // closes users by itself (core.go); what passes through here is what spans the inbounds
-// of a slot: the device limit, the torrent blocker and the user's speed, plus the ingress
-// filter.
+// of a slot: the device limit and the torrent blocker, plus the ingress filter. The
+// user's speed is the core's too, worked out by the registry (shaper.go).
 type Tunnel struct {
 	inner C.Tunnel
 	reg   *Registry
@@ -58,18 +58,8 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 			return
 		}
 	}
-	// A cap or the fair share holds the connection: it goes through the limiter, and then
-	// is never spliced (shaper.go).
-	if g := t.reg.shapedGroup(s); g != nil {
-		conn = &shapedConn{Conn: conn, g: g}
-	}
-	// The core handles the connection to its end, the sniffed name set on m by then.
-	if t.reg.detail.Load() {
-		sc := &siteConn{Conn: conn}
-		t.inner.HandleTCPConn(sc, m)
-		t.reg.countSite(s, siteOf(m.RuleHost(), m.DstIP), sc.up.Load(), sc.down.Load())
-		return
-	}
+	// The core holds the connection to the user's speed (shaper.go) and counts it to its
+	// site as it ends (sites.go).
 	t.inner.HandleTCPConn(conn, m)
 }
 
@@ -112,33 +102,9 @@ func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
 			return
 		}
 	}
-	// UDP is held back by dropping what goes over the ceiling, as a router would.
-	if g := t.reg.shapedGroup(s); g != nil {
-		if !g.up.AllowN(t.reg.now(), len(p.Data())) {
-			p.Drop()
-			return
-		}
-		p = &shapedPacket{UDPPacket: p, g: g}
-	}
-	// A packet counts to the name its client sent, else to its address: the sniffer has not
-	// looked at it yet. Answers are not counted here.
-	if t.reg.detail.Load() {
-		t.reg.countSite(s, siteOf(m.Host, m.DstIP), int64(len(p.Data())), 0)
-	}
+	// The core holds the session to the user's speed, both ways, and counts it to its site
+	// as it ends, like a TCP connection.
 	t.inner.HandleUDPPacket(p, m)
 }
 
 func (t *Tunnel) NatTable() C.NatTable { return t.inner.NatTable() }
-
-// shapedPacket drops an answer that would go over the user's ceiling.
-type shapedPacket struct {
-	C.UDPPacket
-	g *group
-}
-
-func (p *shapedPacket) WriteBack(b []byte, addr net.Addr) (int, error) {
-	if !p.g.down.AllowN(time.Now(), len(b)) {
-		return len(b), nil
-	}
-	return p.UDPPacket.WriteBack(b, addr)
-}

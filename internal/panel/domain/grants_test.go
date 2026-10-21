@@ -183,7 +183,7 @@ func TestGrantsPoolAndMainApart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.st.Q.SetUserPoolLimit(e.ctx, db.SetUserPoolLimitParams{UserID: e.u.ID, PoolID: p.ID, TrafficLimit: sql.NullInt64{Int64: 10, Valid: true}}); err != nil {
+	if err := e.st.Q.SetUserPool(e.ctx, db.SetUserPoolParams{UserID: e.u.ID, PoolID: p.ID, Mode: PoolOwn, TrafficLimit: sql.NullInt64{Int64: 10, Valid: true}}); err != nil {
 		t.Fatal(err)
 	}
 	main := e.grant(0, 50, LifetimeUsed, 0)
@@ -205,7 +205,7 @@ func TestGrantsPoolAndMainApart(t *testing.T) {
 		t.Fatal("a pool past its base is exhausted only without grants")
 	}
 	// A pool without a limit never touches its grants.
-	if err := e.st.Q.SetUserPoolLimit(e.ctx, db.SetUserPoolLimitParams{UserID: e.u.ID, PoolID: p.ID}); err != nil {
+	if err := e.st.Q.SetUserPool(e.ctx, db.SetUserPoolParams{UserID: e.u.ID, PoolID: p.ID, Mode: PoolUnlimited}); err != nil {
 		t.Fatal(err)
 	}
 	e.countPool(p.ID, 1000)

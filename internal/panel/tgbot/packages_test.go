@@ -42,7 +42,7 @@ func TestBuyTraffic(t *testing.T) {
 	must(err)
 	other, err := q.CreateTrafficPool(e.ctx, db.CreateTrafficPoolParams{Name: "Other", CreatedAt: 1})
 	must(err)
-	must(q.SetUserPoolLimit(e.ctx, db.SetUserPoolLimitParams{UserID: e.user.ID, PoolID: wl.ID, TrafficLimit: sql.NullInt64{Int64: 100 << 30, Valid: true}}))
+	must(q.SetUserPool(e.ctx, db.SetUserPoolParams{UserID: e.user.ID, PoolID: wl.ID, Mode: domain.PoolOwn, TrafficLimit: sql.NullInt64{Int64: 100 << 30, Valid: true}}))
 	catalog := domain.NewPackages(e.st, e.clock)
 	mk := func(name string, gb, pool, stars int64) db.TrafficPackage {
 		t.Helper()

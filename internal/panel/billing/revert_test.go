@@ -374,7 +374,7 @@ func TestRefundRestoresThePoolsOfThePriorTariff(t *testing.T) {
 	ts, _ := e.st.Q.ListTariffs(ctx)
 	pool, err := e.st.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})
 	must(t, err)
-	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: ts[0].ID, PoolID: pool.ID, TrafficLimit: 7 << 30}))
+	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: ts[0].ID, PoolID: pool.ID, Mode: domain.PoolOwn, TrafficLimit: sql.NullInt64{Int64: 7 << 30, Valid: true}}))
 	prior := e.subscriber(10 * 24 * time.Hour)
 	limit := func() sql.NullInt64 {
 		up, err := e.st.Q.GetUserPool(ctx, db.GetUserPoolParams{UserID: prior.ID, PoolID: pool.ID})

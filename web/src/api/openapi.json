@@ -605,11 +605,33 @@
         },
         "type": "object"
       },
-      "ApplyPoolsOutputBody": {
+      "ApplyTariffInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "description": "Лимит устройств (докупленные остаются сверху) и как он считается",
+            "type": "boolean"
+          },
+          "groups": {
+            "description": "Группы серверов: режимы и лимиты",
+            "type": "boolean"
+          },
+          "speed": {
+            "description": "Скорость",
+            "type": "boolean"
+          },
+          "traffic": {
+            "description": "Трафик за период и когда он обнуляется",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ApplyTariffOutputBody": {
         "additionalProperties": false,
         "properties": {
           "applied": {
-            "description": "У скольких клиентов тарифа обновлены лимиты пулов",
+            "description": "Скольким подпискам тарифа применены его части",
             "format": "int64",
             "type": "integer"
           }
@@ -2898,7 +2920,7 @@
             "type": "string"
           },
           "pool_id": {
-            "description": "Пул трафика; не передан — основной трафик",
+            "description": "Группа серверов; не передана — основной трафик",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -2971,9 +2993,11 @@
             "type": "integer"
           },
           "source": {
+            "description": "purchase — куплен, admin — начислен вручную, gift — подарок тарифа к оплате",
             "enum": [
               "purchase",
-              "admin"
+              "admin",
+              "gift"
             ],
             "type": "string"
           }
@@ -2991,6 +3015,71 @@
           "package_name",
           "note",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "GroupInTariff": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "main",
+              "own",
+              "unlimited",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "tariff_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "description": "Байты за период; только с mode=own",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tariff_id",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "GroupInboundsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "inbound_ids": {
+            "description": "Все подключения группы: перечисленные переходят в неё из других групп, остальные её подключения возвращаются к основным серверам",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "inbound_ids"
+        ],
+        "type": "object"
+      },
+      "GroupTariffsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "tariffs": {
+            "description": "Тарифы, в которых группа меняется; остальные тарифы держат её как раньше. Закрытие и открытие группы действует сразу на клиентов тарифа",
+            "items": {
+              "$ref": "#/components/schemas/GroupInTariff"
+            },
+            "maxItems": 200,
+            "type": "array"
+          }
+        },
+        "required": [
+          "tariffs"
         ],
         "type": "object"
       },
@@ -4967,7 +5056,7 @@
             "type": "boolean"
           },
           "pool_id": {
-            "description": "Пул трафика; не передан — основной трафик",
+            "description": "Группа серверов; не передана — основной трафик",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -4988,6 +5077,15 @@
           "sort": {
             "format": "int64",
             "type": "integer"
+          },
+          "tariffs": {
+            "description": "Тарифы, которым продаётся пакет; не переданы или пусто — всем, к квоте которых он подходит",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "type": "array"
           }
         },
         "required": [
@@ -5029,7 +5127,7 @@
             "type": "boolean"
           },
           "pool_id": {
-            "description": "Пул трафика; null — основной трафик",
+            "description": "Группа серверов; null — основной трафик",
             "format": "int64",
             "type": [
               "integer",
@@ -5055,6 +5153,14 @@
           "sort": {
             "format": "int64",
             "type": "integer"
+          },
+          "tariffs": {
+            "description": "Тарифы, которым продаётся пакет; пусто — всем, к квоте которых он подходит",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -5067,7 +5173,8 @@
           "price_stars",
           "price_rub",
           "on_sale",
-          "sort"
+          "sort",
+          "tariffs"
         ],
         "type": "object"
       },
@@ -6480,34 +6587,6 @@
         ],
         "type": "object"
       },
-      "PoolLimit": {
-        "additionalProperties": false,
-        "properties": {
-          "excluded": {
-            "description": "Пул закрыт: его подключений нет в подписке, ноды их не пускают, пакеты трафика пула не продаются; traffic_limit тогда не важен",
-            "type": "boolean"
-          },
-          "pool_id": {
-            "format": "int64",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "traffic_limit": {
-            "description": "Байты; null — без лимита",
-            "format": "int64",
-            "minimum": 1,
-            "type": [
-              "integer",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "pool_id",
-          "traffic_limit"
-        ],
-        "type": "object"
-      },
       "PoolPatchInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -6522,6 +6601,37 @@
         ],
         "type": "object"
       },
+      "PoolSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "description": "main — входит, трафик считается в основной; own — входит со своим лимитом traffic_limit; unlimited — входит без лимита, отдельно от основного; closed — не входит: подключений группы нет в подписке, ноды их не пускают, пакеты группы не продаются",
+            "enum": [
+              "main",
+              "own",
+              "unlimited",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "pool_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "description": "Байты за период; только с mode=own",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pool_id",
+          "mode"
+        ],
+        "type": "object"
+      },
       "PoolView": {
         "additionalProperties": false,
         "properties": {
@@ -6529,8 +6639,16 @@
             "format": "int64",
             "type": "integer"
           },
+          "inbound_ids": {
+            "description": "Подключения группы",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "inbounds": {
-            "description": "Подключения, которые считаются в этот пул",
+            "description": "Имена подключений группы",
             "items": {
               "type": "string"
             },
@@ -6543,7 +6661,8 @@
         "required": [
           "id",
           "name",
-          "inbounds"
+          "inbounds",
+          "inbound_ids"
         ],
         "type": "object"
       },
@@ -8935,6 +9054,15 @@
             "$ref": "#/components/schemas/ExtraDevices",
             "description": "Докупка устройств; не передана — без изменений (у нового тарифа — нет). Нужен лимит устройств"
           },
+          "gifts": {
+            "description": "Пакеты трафика в подарок при каждой оплате тарифа; каждый должен добавлять к квоте, которую тариф даёт: к основному трафику с лимитом или к группе со своим лимитом. Не передан — без изменений",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "name": {
             "maxLength": 60,
             "minLength": 1,
@@ -8945,9 +9073,9 @@
             "type": "boolean"
           },
           "pools": {
-            "description": "Лимиты пулов трафика; не передан — без изменений",
+            "description": "Как тариф держит группы серверов; не названная группа — в основном трафике. Не передан — без изменений",
             "items": {
-              "$ref": "#/components/schemas/PoolLimit"
+              "$ref": "#/components/schemas/PoolSetting"
             },
             "maxItems": 100,
             "type": "array"
@@ -9050,6 +9178,14 @@
             "$ref": "#/components/schemas/ExtraDevices",
             "description": "Докупка устройств в боте и Mini App: цена одного и сколько можно докупить"
           },
+          "gifts": {
+            "description": "Пакеты трафика в подарок при каждой оплате тарифа: покупке и продлении",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -9062,9 +9198,9 @@
             "type": "boolean"
           },
           "pools": {
-            "description": "Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается",
+            "description": "Как тариф держит каждую группу серверов; группа без настройки тарифа — в основном трафике. Режим и лимит действуют на новых клиентов, при продлении, смене тарифа и по «Применить к выданным подпискам»; закрытие и открытие группы действует сразу на всех клиентов тарифа",
             "items": {
-              "$ref": "#/components/schemas/PoolLimit"
+              "$ref": "#/components/schemas/PoolSetting"
             },
             "type": "array"
           },
@@ -9107,6 +9243,11 @@
               "null"
             ]
           },
+          "subscribers": {
+            "description": "Сколько подписок выдано на этом тарифе",
+            "format": "int64",
+            "type": "integer"
+          },
           "terms": {
             "description": "Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub",
             "items": {
@@ -9141,6 +9282,8 @@
           "terms",
           "extra_devices",
           "pools",
+          "gifts",
+          "subscribers",
           "sort"
         ],
         "type": "object"
@@ -10069,18 +10212,23 @@
       "UserPoolView": {
         "additionalProperties": false,
         "properties": {
-          "excluded": {
-            "description": "Пул закрыт для пользователя: его подключений нет в подписке, ноды их не пускают",
-            "type": "boolean"
-          },
           "exhausted": {
-            "description": "Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса",
+            "description": "Свой лимит группы и её пакеты исчерпаны: подключения группы не работают до сброса",
             "type": "boolean"
           },
           "extra": {
-            "description": "Байты, оставшиеся в пакетах трафика пула: тратятся после лимита",
+            "description": "Байты, оставшиеся в пакетах трафика группы: тратятся после лимита",
             "format": "int64",
             "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "main",
+              "own",
+              "unlimited",
+              "closed"
+            ],
+            "type": "string"
           },
           "name": {
             "type": "string"
@@ -10090,7 +10238,7 @@
             "type": "integer"
           },
           "traffic_limit": {
-            "description": "Байты за период; null — без лимита",
+            "description": "Байты за период с mode=own; иначе null",
             "format": "int64",
             "type": [
               "integer",
@@ -10109,12 +10257,12 @@
         "required": [
           "pool_id",
           "name",
+          "mode",
           "traffic_limit",
           "used_up",
           "used_down",
           "extra",
-          "exhausted",
-          "excluded"
+          "exhausted"
         ],
         "type": "object"
       },
@@ -10122,8 +10270,9 @@
         "additionalProperties": false,
         "properties": {
           "pools": {
+            "description": "Группы, которые меняются; остальные остаются как есть",
             "items": {
-              "$ref": "#/components/schemas/PoolLimit"
+              "$ref": "#/components/schemas/PoolSetting"
             },
             "maxItems": 100,
             "type": "array"
@@ -15101,7 +15250,7 @@
             "description": "Error"
           }
         },
-        "summary": "Пулы трафика",
+        "summary": "Группы серверов",
         "tags": [
           "inbounds"
         ]
@@ -15140,7 +15289,7 @@
             "description": "Error"
           }
         },
-        "summary": "Создать пул трафика",
+        "summary": "Создать группу серверов",
         "tags": [
           "inbounds"
         ]
@@ -15176,7 +15325,7 @@
             "description": "Error"
           }
         },
-        "summary": "Удалить пул: его подключения вернутся в основной трафик; пока в нём есть оплаченный трафик, пул остаётся",
+        "summary": "Удалить группу серверов: её подключения вернутся к основным серверам; пока в ней есть оплаченный трафик, группа остаётся",
         "tags": [
           "inbounds"
         ]
@@ -15227,7 +15376,113 @@
             "description": "Error"
           }
         },
-        "summary": "Переименовать пул",
+        "summary": "Переименовать группу серверов",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/pools/{id}/inbounds": {
+      "put": {
+        "operationId": "set-pool-inbounds",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupInboundsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Подключения группы серверов",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/pools/{id}/tariffs": {
+      "put": {
+        "operationId": "set-pool-tariffs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupTariffsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Как тарифы держат группу серверов",
         "tags": [
           "inbounds"
         ]
@@ -17207,9 +17462,9 @@
         ]
       }
     },
-    "/api/v1/tariffs/{id}/apply-pools": {
+    "/api/v1/tariffs/{id}/apply": {
       "post": {
-        "operationId": "apply-tariff-pools",
+        "operationId": "apply-tariff",
         "parameters": [
           {
             "in": "path",
@@ -17222,12 +17477,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyTariffInputBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplyPoolsOutputBody"
+                  "$ref": "#/components/schemas/ApplyTariffOutputBody"
                 }
               }
             },
@@ -17244,7 +17509,7 @@
             "description": "Error"
           }
         },
-        "summary": "Применить лимиты пулов тарифа к уже выданным подпискам: свои лимиты пулов у клиентов заменятся, израсходованное останется",
+        "summary": "Применить тариф к уже выданным подпискам: выбранные части тарифа заменят свои значения клиентов, срок и израсходованное останутся",
         "tags": [
           "tariffs"
         ]
@@ -19070,7 +19335,7 @@
             "description": "Error"
           }
         },
-        "summary": "Пулы трафика пользователя",
+        "summary": "Группы серверов пользователя",
         "tags": [
           "users"
         ]
@@ -19124,7 +19389,7 @@
             "description": "Error"
           }
         },
-        "summary": "Лимиты пулов пользователя",
+        "summary": "Как подписка пользователя держит группы серверов",
         "tags": [
           "users"
         ]

@@ -370,10 +370,10 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 			"sniff": map[string]any{"HTTP": map[string]any{"ports": []any{80, "8080-8880"}}, "TLS": map[string]any{"ports": []any{443, 8443}},
 				"QUIC": map[string]any{"ports": []any{443, 8443}}}}
 	}
-	// mihomo skips a rule whose group can't carry UDP (XHTTP picked by hand or by url-test)
-	// and sends what falls through to DIRECT: past the tunnel, from the real address. REJECT
-	// makes such apps fall back to TCP instead. In the "blocked" mode the rest goes direct
-	// by design; its tunnel rules get their own REJECT twins (blockedRules).
+	// mihomo skips a rule whose group can't carry UDP (a proxy with udp off, picked by hand
+	// or by url-test) and sends what falls through to DIRECT: past the tunnel, from the real
+	// address. REJECT makes such apps fall back to TCP instead. In the "blocked" mode the
+	// rest goes direct by design; its tunnel rules get their own REJECT twins (blockedRules).
 	last := []string{"MATCH," + g.Main, "MATCH,REJECT"}
 	if r == RoutingBlocked {
 		last = []string{"MATCH,DIRECT"}

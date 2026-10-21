@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"net"
 	"net/url"
@@ -13,9 +14,11 @@ import (
 //   - ShadowQUIC: QUIC that answers anyone without a key as a real site does (JLS).
 //   - Mieru: its own encryption with random-looking traffic.
 //
-// These three check every user. Shadowsocks-2022, Sudoku and Snell have one key for
-// everyone ("shared"): the node cannot tell users apart, so there is no per-user
-// accounting, limit, device binding or cut-off, and a leaked key works until it changes.
+// These three check every user, and so does Shadowsocks-2022 with an AES method: the
+// server's key and one of each user's (EIH). Sudoku, Snell and Shadowsocks-2022 with
+// ChaCha20, which has no identity header, have one key for everyone ("shared"): the node
+// cannot tell users apart, so there is no per-user accounting, limit, device binding or
+// cut-off, and a leaked key works until it changes.
 
 // ssCiphers are the Shadowsocks-2022 methods and their key sizes; older methods have no
 // replay protection and are refused.
@@ -25,8 +28,25 @@ var ssCiphers = map[string]int{"2022-blake3-aes-128-gcm": 16, "2022-blake3-aes-2
 // listener would default to v4 and the client to v1, so both get it explicitly.
 const snellVersion = 3
 
-// Shared reports whether a listener type has one key for all users.
-func Shared(typ string) bool { return rules[typ].shared }
+// Shared reports whether a listener has one key for all users.
+func Shared(t Template) bool {
+	if t.Type() == "shadowsocks" {
+		return !ssMultiUser(t)
+	}
+	return rules[t.Type()].shared
+}
+
+// ssMultiUser says whether a Shadowsocks-2022 listener has a key per user: the AES methods
+// carry the user's identity (EIH), ChaCha20 does not.
+func ssMultiUser(t Template) bool { return strings.HasPrefix(t.str("cipher"), "2022-blake3-aes-") }
+
+// ssUserKey is a user's own Shadowsocks-2022 key (uPSK) for the cipher, made from the slot's
+// secret: the panel gives it to the user's apps and the node to its listener, and neither
+// stores it.
+func ssUserKey(cipher, secret string) string {
+	sum := sha256.Sum256([]byte("mikan/ss2022/" + secret))
+	return base64.StdEncoding.EncodeToString(sum[:ssCiphers[cipher]])
+}
 
 func validateExtra(t Template, o Options) error {
 	switch t.Type() {
@@ -116,7 +136,9 @@ func listenerExtra(t Template, l map[string]any) {
 	case "mieru":
 		l["transport"] = "TCP"
 	case "snell":
-		l["version"] = snellVersionOf(t)
+		// UDP goes inside the Snell stream (v3 on): no UDP port.
+		v := snellVersionOf(t)
+		l["version"], l["udp"] = v, v >= 3
 	}
 }
 
@@ -165,12 +187,17 @@ func (c *clientBuilder) finishExtra() (Client, bool) {
 		c.y["username"], c.y["password"], c.y["sni"], c.y["alpn"], c.y["udp"] = s.Name, s.Secret, sni, alpn, true
 		return Client{Mihomo: c.y}, true
 	case "mieru":
-		// mihomo 1.19.31 does not tell the node who sends UDP over Mieru: TCP only.
-		c.y["transport"], c.y["username"], c.y["password"], c.y["udp"] = "TCP", s.Name, s.Secret, false
+		// The Citrus server knows who sends UDP over Mieru (mihomo's did not).
+		c.y["transport"], c.y["username"], c.y["password"], c.y["udp"] = "TCP", s.Name, s.Secret, true
 		return Client{Mihomo: c.y}, true
 	case "shadowsocks":
 		cipher, key := c.t.str("cipher"), c.t.str("password")
-		c.y["type"], c.y["cipher"], c.y["password"], c.y["udp"] = "ss", cipher, key, false
+		if ssMultiUser(c.t) {
+			key += ":" + ssUserKey(cipher, s.Secret)
+		}
+		// UDP goes inside the TCP stream (UDP over TCP, v2): the listener has no UDP port.
+		c.y["type"], c.y["cipher"], c.y["password"], c.y["udp"] = "ss", cipher, key, true
+		c.y["udp-over-tcp"], c.y["udp-over-tcp-version"] = true, 2
 		// SIP002 for 2022 methods: "method:key" percent-encoded, not base64.
 		return Client{Mihomo: c.y, URI: "ss://" + url.UserPassword(cipher, key).String() + "@" + c.addr() + "#" + url.PathEscape(c.in.Name)}, true
 	case "sudoku":
@@ -194,10 +221,12 @@ func (c *clientBuilder) finishExtra() (Client, bool) {
 		if h := c.t.section("httpmask"); h != nil {
 			c.y["httpmask"] = clone(h)
 		}
-		c.y["udp"] = false
+		c.y["udp"] = true
 		return Client{Mihomo: c.y}, true
 	case "snell":
-		c.y["psk"], c.y["version"], c.y["udp"] = c.t.str("psk"), snellVersionOf(c.t), false
+		// Snell carries UDP from v3 on.
+		v := snellVersionOf(c.t)
+		c.y["psk"], c.y["version"], c.y["udp"] = c.t.str("psk"), v, v >= 3
 		if o := c.t.section("obfs-opts"); o != nil {
 			c.y["obfs-opts"] = clone(o)
 		}

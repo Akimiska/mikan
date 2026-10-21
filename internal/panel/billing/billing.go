@@ -282,6 +282,23 @@ type Offer struct {
 	First  int64       // days of the tariff's first term, which Terms may not hold
 	Stars  int64       // 0: not for Stars
 	Rub    int64       // kopecks; 0: not for rubles
+	// Groups are the server groups with servers in them, as the tariff has each; Gifts the
+	// packages it gives with every payment. Both say what the tariff is made of.
+	Groups []OfferGroup
+	Gifts  []OfferGift
+}
+
+// OfferGroup is a server group as a tariff on sale has it.
+type OfferGroup struct {
+	Name  string
+	Mode  string // domain.PoolMain, PoolOwn, PoolUnlimited, PoolClosed
+	Limit int64  // bytes, with PoolOwn
+}
+
+// OfferGift is a traffic package a tariff on sale gives with every payment.
+type OfferGift struct {
+	Package db.TrafficPackage
+	Pool    string // the group's name; "" for the main traffic
 }
 
 // OfferTerm is a term of a tariff on sale with the prices the available providers take.
@@ -306,9 +323,13 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 	if err != nil {
 		return nil, av, err
 	}
+	groups, gifts, err := s.contents(ctx)
+	if err != nil {
+		return nil, av, err
+	}
 	var out []Offer
 	for _, t := range ts {
-		o := Offer{Tariff: t}
+		o := Offer{Tariff: t, Groups: groups(t.ID), Gifts: gifts[t.ID]}
 		terms := domain.TariffTerms(t, rows)
 		o.First = terms[0].Days
 		for _, term := range terms {
@@ -324,6 +345,65 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 		}
 	}
 	return out, av, nil
+}
+
+// contents reads what the tariffs are made of: the groups of each tariff (only groups with
+// servers in them say anything to a buyer) and its gifts, by tariff id.
+func (s *Service) contents(ctx context.Context) (func(int64) []OfferGroup, map[int64][]OfferGift, error) {
+	q := s.d.Store.Q
+	pools, err := q.ListTrafficPools(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	ins, err := q.ListInbounds(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	serving := map[int64]bool{}
+	for _, in := range ins {
+		if in.Enabled != 0 && in.PoolID.Valid {
+			serving[in.PoolID.Int64] = true
+		}
+	}
+	tps, err := q.ListAllTariffPools(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	byTariff := map[int64][]db.TariffPool{}
+	for _, r := range tps {
+		byTariff[r.TariffID] = append(byTariff[r.TariffID], r)
+	}
+	names := map[int64]string{}
+	for _, p := range pools {
+		names[p.ID] = p.Name
+	}
+	groups := func(tariffID int64) []OfferGroup {
+		var out []OfferGroup
+		for _, p := range pools {
+			if !serving[p.ID] {
+				continue
+			}
+			mode, limit := domain.TariffPoolMode(byTariff[tariffID], p.ID)
+			out = append(out, OfferGroup{Name: p.Name, Mode: mode, Limit: limit.Int64})
+		}
+		return out
+	}
+	giftRows, err := q.ListAllTariffGifts(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	gifts := map[int64][]OfferGift{}
+	for _, g := range giftRows {
+		p, err := q.GetTrafficPackage(ctx, g.PackageID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if p.Archived != 0 {
+			continue
+		}
+		gifts[g.TariffID] = append(gifts[g.TariffID], OfferGift{Package: p, Pool: names[p.PoolID.Int64]})
+	}
+	return groups, gifts, nil
 }
 
 // Term is the offer's term of so many days; nil days: the tariff's first term, the one an
@@ -759,6 +839,37 @@ func DescribeLimits(t db.Tariff, lang string) string {
 	return strings.Join(parts, " · ")
 }
 
+// DescribeContents is what offer o is made of besides its limits, a line each, in lang
+// ("en", else Russian): its server groups ("WL: 50 GB of its own", "Premium: not
+// included") and its gifts ("Gift: 50 GB · WL · until used up"). None for a tariff without
+// groups or gifts.
+func DescribeContents(o Offer, lang string) []string {
+	en := lang == "en"
+	pick := func(ru, en_ string) string {
+		if en {
+			return en_
+		}
+		return ru
+	}
+	var out []string
+	for _, g := range o.Groups {
+		switch g.Mode {
+		case domain.PoolMain:
+			out = append(out, g.Name+pick(": входит", ": included"))
+		case domain.PoolOwn:
+			out = append(out, fmt.Sprintf(pick("%s: %s ГБ отдельно", "%s: %s GB of its own"), g.Name, gigabytes(g.Limit, en)))
+		case domain.PoolUnlimited:
+			out = append(out, g.Name+pick(": без лимита", ": unlimited"))
+		case domain.PoolClosed:
+			out = append(out, g.Name+pick(": не входит", ": not included"))
+		}
+	}
+	for _, g := range o.Gifts {
+		out = append(out, pick("В подарок: ", "Gift: ")+DescribePackage(g.Package, g.Pool, lang))
+	}
+	return out
+}
+
 // PreCheckout is Telegram asking whether a Stars payment may go ahead.
 func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency string, amount int64) error {
 	p, err := s.d.Store.Q.GetPaymentByPayload(ctx, payload)
@@ -964,6 +1075,11 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 		}
 		if u, created, err = s.d.Users.Purchase(ctx, q, domain.PurchaseInput{UserID: userID, TariffID: pay.TariffID.Int64,
 			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), TgID: pay.TgID, ResetTraffic: reset, KeepExtraDevices: cfg.ExtraDevicesKeep}); err != nil {
+			return err
+		}
+		// The tariff's gifts come with every payment for it, on its transaction: a refund
+		// takes them back with it (takeBack).
+		if _, err := domain.GrantGifts(ctx, q, u, pay.TariffID.Int64, pay.ID, s.d.Now()); err != nil {
 			return err
 		}
 		if created {

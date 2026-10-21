@@ -53,7 +53,8 @@ export function GrantsSection({ u }: { u: User }) {
 
 function GrantRow({ g, pools }: { g: Grant; pools: Schemas["PoolView"][] | undefined }) {
   const expired = !g.active && g.remaining > 0;
-  const source = g.source === "purchase" ? t("grants.bought", { name: g.package_name || t("grants.package") }) : t("grants.byAdmin");
+  const name = g.package_name || t("grants.package");
+  const source = g.source === "purchase" ? t("grants.bought", { name }) : g.source === "gift" ? t("grants.gift", { name }) : t("grants.byAdmin");
   return (
     <li className="py-2">
       <div className="flex items-center justify-between gap-2 text-[13px]">

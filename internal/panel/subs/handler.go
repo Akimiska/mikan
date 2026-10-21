@@ -395,7 +395,7 @@ func forApp(ins []db.Inbound, app App, state string) []db.Inbound {
 	out := make([]db.Inbound, 0, len(ins))
 	for _, in := range ins {
 		t, err := parseTemplate(in.Config)
-		if err != nil || !app.Supports(proto.NeedsOf(t)) || proto.Shared(t.Type()) && !active {
+		if err != nil || !app.Supports(proto.NeedsOf(t)) || proto.Shared(t) && !active {
 			continue
 		}
 		out = append(out, in)
@@ -884,7 +884,9 @@ type PoolInfo struct {
 	Extra int64  `json:"extra,omitempty"` // bytes left in the pool's traffic packages
 }
 
-// poolInfo lists the user's pools worth showing: those with a limit or some traffic.
+// poolInfo lists the user's server groups worth showing apart from the main traffic: those
+// with a limit of their own, and those without a limit that carried some traffic. A group
+// in the main traffic is part of it; a closed one is not the user's.
 func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.GrantsLeft) ([]PoolInfo, error) {
 	rows, err := h.st.Q.ListUserPools(ctx, userID)
 	if err != nil || len(rows) == 0 {
@@ -901,7 +903,7 @@ func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.Gran
 	var out []PoolInfo
 	for _, r := range rows {
 		used := r.UsedUp + r.UsedDown
-		if r.Excluded || !r.TrafficLimit.Valid && used == 0 {
+		if r.Mode != domain.PoolOwn && (r.Mode != domain.PoolUnlimited || used == 0) {
 			continue
 		}
 		pi := PoolInfo{Name: names[r.PoolID], Used: used}

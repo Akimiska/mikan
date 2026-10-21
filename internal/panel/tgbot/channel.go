@@ -78,7 +78,7 @@ func (b *Bot) takeFree(ctx context.Context, cfg Config, w *words, chat int64) (s
 		b.d.Log.Warn("telegram: free plan", "tg", chat, "err", err)
 		return html.EscapeString(w.freeFail), home
 	}
-	what := u.Name
+	what := subName(u)
 	if t, err := b.d.Backend.Tariff(ctx, u.TariffID.Int64); err == nil {
 		what = model.Describe(t, t.DurationDays, cfg.Lang)
 	}

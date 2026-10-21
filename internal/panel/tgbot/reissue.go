@@ -104,7 +104,7 @@ func (b *Bot) reissueConfirm(ctx context.Context, w *words, u model.User) (strin
 	case !st.Next.IsZero():
 		return fmt.Sprintf(lw.wait, b.in(w, st.Next)), nil, false
 	}
-	return html.EscapeString(fmt.Sprintf(lw.confirm, u.Name)), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{
+	return html.EscapeString(fmt.Sprintf(lw.confirm, subName(u))), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{
 		{{Text: lw.yes, CallbackData: "rn:" + strconv.FormatInt(u.ID, 10)}, {Text: w.cancel, CallbackData: "s"}}}}, true
 }
 

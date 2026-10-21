@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"strconv"
+	"strings"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/tgapi"
 )
 
@@ -65,4 +68,27 @@ func (b *Bot) referralScreen(ctx context.Context, w *words, chat int64, notice s
 	}
 	share := "https://t.me/share/url?url=" + url.QueryEscape(st.Link) + "&text=" + url.QueryEscape(rw.shareText)
 	return text, &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: rw.share, URL: share}}, back}}
+}
+
+// subName (AoiVPN fork) is a subscription's name as the subscriber reads it: the panel names
+// them "<who> (<telegram id>)" for the admin, the id is noise in the bot.
+func subName(u model.User) string {
+	n := strings.TrimSpace(u.Name)
+	if i := strings.LastIndex(n, " ("); i > 0 && strings.HasSuffix(n, ")") {
+		if _, err := strconv.ParseInt(n[i+2:len(n)-1], 10, 64); err == nil {
+			n = n[:i]
+		}
+	}
+	return n
+}
+
+// aoiDownloadRows (AoiVPN fork) are the AoiVPN app's downloads, always the latest release
+// (the Aoi backend redirects to the file).
+func aoiDownloadRows(w *words) [][]tgapi.Button {
+	android, windows := "📥 AoiVPN для Android", "📥 AoiVPN для Windows"
+	if w == &en {
+		android, windows = "📥 AoiVPN for Android", "📥 AoiVPN for Windows"
+	}
+	const base = "https://api.aoimusic.ru/api/version/download?platform=aoivpn"
+	return [][]tgapi.Button{{{Text: android, URL: base}, {Text: windows, URL: base + "&os=windows"}}}
 }

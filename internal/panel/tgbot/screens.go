@@ -81,7 +81,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		id, _, _ := strings.Cut(arg, ":")
 		return b.shopInvoice(ctx, w, chat, u.ID, arg, []tgapi.Button{{Text: w.back, CallbackData: "t:" + id}})
 	case "s":
-		lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.subTitle, u.Name)) + "</b>", html.EscapeString(vars["state"]), "",
+		lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.subTitle, subName(u))) + "</b>", html.EscapeString(vars["state"]), "",
 			"📅 " + html.EscapeString(vars["term"]), "📦 " + html.EscapeString(vars["traffic"])}
 		for _, p := range b.poolLines(ctx, w, u.ID) {
 			lines = append(lines, "📦 "+html.EscapeString(p))
@@ -109,7 +109,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	case "rm":
 		// The id goes with the button: a tap after switching subscriptions removes the
 		// one that was asked about, not the one shown now.
-		return withNotice(html.EscapeString(fmt.Sprintf(w.confirmRemove, u.Name))), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{
+		return withNotice(html.EscapeString(fmt.Sprintf(w.confirmRemove, subName(u)))), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{
 			{{Text: w.yesRemove, CallbackData: "rd:" + strconv.FormatInt(u.ID, 10)}, {Text: w.cancel, CallbackData: "s"}}}}
 	case "rl":
 		text, kb, ok := b.reissueConfirm(ctx, w, u)
@@ -127,14 +127,14 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return b.devices(ctx, w, u, cmd, id, notice, now)
 	case "c":
 		text := "<b>" + w.connectTitle + "</b>\n\n" + fmt.Sprintf(w.connectText, html.EscapeString(b.subURL(ctx, u)))
-		rows := [][]tgapi.Button{}
+		rows := aoiDownloadRows(w) // AoiVPN fork: the app's own downloads first
 		if btn, ok := b.pageButton(ctx, cfg, w, w.openPage); ok {
 			rows = append(rows, []tgapi.Button{btn})
 		}
 		return withNotice(text), &tgapi.Keyboard{InlineKeyboard: append(rows, back)}
 	case "r":
 		if offers, _ := b.offers(ctx); len(offers) > 0 {
-			text, kb := b.shopList(ctx, w, fmt.Sprintf(w.renewTitle, u.Name), "t", notice, nil)
+			text, kb := b.shopList(ctx, w, fmt.Sprintf(w.renewTitle, subName(u)), "t", notice, nil)
 			if sup := b.supportURL(ctx); sup != "" {
 				kb.InlineKeyboard = append(kb.InlineKeyboard, []tgapi.Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
 			}
@@ -256,7 +256,9 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, chat int64, subs i
 	}
 	// The list of subscriptions is where another one is bought too: it shows with one
 	// subscription as soon as a second may be bought.
-	if subs > 1 || subs == 1 && subs < model.MaxLinks && b.canBuyNew(ctx) {
+	// AoiVPN fork: only with several subscriptions; a second one is bought from the welcome
+	// screen or the subscription page, the list is noise to the many with one.
+	if subs > 1 {
 		rows = append(rows, []tgapi.Button{{Text: fmt.Sprintf("%s (%d)", w.subscriptions, subs), CallbackData: "w"}})
 	}
 	return &tgapi.Keyboard{InlineKeyboard: rows}
@@ -471,7 +473,7 @@ func (b *Bot) vars(ctx context.Context, w *words, u model.User, now time.Time) m
 	}
 	extra := grants.Main
 	state := model.State(u, extra, now)
-	v := map[string]string{"name": u.Name, "brand": b.brand(ctx), "until": w.forever, "days": "—", "term": w.forever, "reset": ""}
+	v := map[string]string{"name": subName(u), "brand": b.brand(ctx), "until": w.forever, "days": "—", "term": w.forever, "reset": ""}
 	switch state {
 	case model.StateActive:
 		v["state"] = w.stateActive

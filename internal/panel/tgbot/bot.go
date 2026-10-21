@@ -219,13 +219,13 @@ func (b *Bot) link(ctx context.Context, w *words, chat int64, name string, userI
 	case err != nil:
 		return w.linkInvalid
 	case res.Status == LinkAlready:
-		return fmt.Sprintf(w.alreadyLinked, res.User.Name)
+		return fmt.Sprintf(w.alreadyLinked, subName(res.User))
 	case res.Status == LinkLimit:
 		return fmt.Sprintf(w.linkLimit, model.MaxLinks)
 	case res.Status == LinkTaken:
 		return b.askOwner(ctx, w, chat, name, res.User, res.Owner)
 	}
-	return fmt.Sprintf(w.linked, res.User.Name)
+	return fmt.Sprintf(w.linked, subName(res.User))
 }
 
 // who is how a Telegram account is named to the owner of a subscription it asks for.
@@ -279,7 +279,7 @@ func (b *Bot) askOwner(ctx context.Context, w *words, chat int64, name string, u
 	}
 	b.transfers[u.ID] = transfer{to: chat, until: now.Add(transferTTL)}
 	b.mu.Unlock()
-	text := html.EscapeString(fmt.Sprintf(w.transferAsk, u.Name, name))
+	text := html.EscapeString(fmt.Sprintf(w.transferAsk, subName(u), name))
 	data := strconv.FormatInt(u.ID, 10) + ":" + strconv.FormatInt(chat, 10)
 	kb := &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: w.transferAllow, CallbackData: "ta:" + data}, {Text: w.transferDeny, CallbackData: "tx:" + data}}}}
 	b.d.Outbox.Notice(owner, func(ctx context.Context, c *tgapi.Client) error {
@@ -344,7 +344,7 @@ func (b *Bot) onTransfer(ctx context.Context, q *tgapi.CallbackQuery) {
 		return
 	}
 	if cmd == "tx" {
-		say(fmt.Sprintf(w.transferDenied, u.Name))
+		say(fmt.Sprintf(w.transferDenied, subName(u)))
 		tell(to, w.transferDeniedNew)
 		return
 	}
@@ -357,8 +357,8 @@ func (b *Bot) onTransfer(ctx context.Context, q *tgapi.CallbackQuery) {
 		say(w.transferStale)
 		return
 	}
-	say(fmt.Sprintf(w.transferDone, u.Name))
-	b.freshMenu(to, fmt.Sprintf(w.transferNotice, u.Name))
+	say(fmt.Sprintf(w.transferDone, subName(u)))
+	b.freshMenu(to, fmt.Sprintf(w.transferNotice, subName(u)))
 }
 
 // subs are the chat's subscriptions and the one it shows.

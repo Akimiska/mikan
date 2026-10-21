@@ -32,7 +32,7 @@ func (b *Bot) extraDevice(ctx context.Context, w *words, chat int64, u model.Use
 	if !ok {
 		return html.EscapeString(w.deviceGone), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{back}}
 	}
-	lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.deviceTitle, u.Name)) + "</b>", "",
+	lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.deviceTitle, subName(u))) + "</b>", "",
 		html.EscapeString(fmt.Sprintf(w.deviceNow, o.Limit, o.Limit+1))}
 	switch {
 	case o.Keep:

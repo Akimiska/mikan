@@ -354,17 +354,17 @@ func (b *Bot) paid(ctx context.Context, chat int64, p events.Payment, u model.Us
 	var text string
 	switch {
 	case p.Kind == model.KindPackage:
-		text = fmt.Sprintf(w.paidPackage, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+		text = fmt.Sprintf(w.paidPackage, html.EscapeString(p.TariffName), html.EscapeString(subName(u)))
 	case p.Kind == model.KindDevice:
-		text = fmt.Sprintf(w.paidDevice, html.EscapeString(u.Name), u.DeviceLimit.Int64)
+		text = fmt.Sprintf(w.paidDevice, html.EscapeString(subName(u)), u.DeviceLimit.Int64)
 	case p.Created:
-		text = fmt.Sprintf(w.paidNew, html.EscapeString(u.Name), html.EscapeString(p.TariffName), html.EscapeString(b.subURL(ctx, u)))
+		text = fmt.Sprintf(w.paidNew, html.EscapeString(subName(u)), html.EscapeString(p.TariffName), html.EscapeString(b.subURL(ctx, u)))
 	default:
 		until := w.forever
 		if u.ExpiresAt.Valid {
 			until = w.date(model.Time(u.ExpiresAt.Int64))
 		}
-		text = fmt.Sprintf(w.paidRenew, html.EscapeString(u.Name), html.EscapeString(until))
+		text = fmt.Sprintf(w.paidRenew, html.EscapeString(subName(u)), html.EscapeString(until))
 	}
 	_ = b.d.Backend.SetCurrent(ctx, chat, u.ID)
 	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgapi.Client) error {
@@ -383,17 +383,17 @@ func (b *Bot) refunded(ctx context.Context, chat int64, p events.Payment, u mode
 	case u.ID == 0:
 		text = fmt.Sprintf(w.refundedGone, html.EscapeString(p.TariffName))
 	case p.Kind == model.KindPackage:
-		text = fmt.Sprintf(w.refundedPackage, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+		text = fmt.Sprintf(w.refundedPackage, html.EscapeString(p.TariffName), html.EscapeString(subName(u)))
 	case p.Kind == model.KindDevice:
-		text = fmt.Sprintf(w.refundedDevice, html.EscapeString(u.Name), u.DeviceLimit.Int64)
+		text = fmt.Sprintf(w.refundedDevice, html.EscapeString(subName(u)), u.DeviceLimit.Int64)
 	case p.Disabled:
-		text = fmt.Sprintf(w.refundedNew, html.EscapeString(p.TariffName), html.EscapeString(u.Name))
+		text = fmt.Sprintf(w.refundedNew, html.EscapeString(p.TariffName), html.EscapeString(subName(u)))
 	default:
 		until := w.forever
 		if u.ExpiresAt.Valid {
 			until = w.date(model.Time(u.ExpiresAt.Int64))
 		}
-		text = fmt.Sprintf(w.refundedRenew, html.EscapeString(p.TariffName), html.EscapeString(u.Name), html.EscapeString(until))
+		text = fmt.Sprintf(w.refundedRenew, html.EscapeString(p.TariffName), html.EscapeString(subName(u)), html.EscapeString(until))
 	}
 	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgapi.Client) error {
 		_, err := c.Send(ctx, chat, text, nil, false)
@@ -420,7 +420,7 @@ func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *tga
 		b.d.Log.Warn("telegram: trial", "tg", chat, "err", err)
 		return html.EscapeString(w.trialFail), home
 	}
-	what := u.Name
+	what := subName(u)
 	if t, err := b.d.Backend.Tariff(ctx, u.TariffID.Int64); err == nil {
 		what = model.Describe(t, t.DurationDays, b.lang(ctx))
 	}

@@ -37,7 +37,7 @@ func (b *Bot) trafficShop(ctx context.Context, w *words, chat int64, u model.Use
 		id, _, _ := strings.Cut(arg, ":")
 		return b.trafficInvoice(ctx, w, chat, u.ID, arg, []tgapi.Button{{Text: w.back, CallbackData: "xk:" + id}})
 	}
-	lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.trafficTitle, u.Name)) + "</b>", ""}
+	lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.trafficTitle, subName(u))) + "</b>", ""}
 	if notice != "" {
 		lines = append([]string{html.EscapeString(notice), ""}, lines...)
 	}

@@ -44,9 +44,12 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		home := []tgapi.Button{{Text: w.back, CallbackData: "m"}}
 		switch cmd {
 		case "b":
+			if one, ok := b.aoiSingle(ctx); ok { // AoiVPN fork: one tariff — its terms at once
+				return b.shopTariff(ctx, w, one, "tn", "pn", nil, home)
+			}
 			return b.shopList(ctx, w, w.buyTitle, "tn", notice, home)
 		case "tn":
-			return b.shopTariff(ctx, w, arg, "tn", "pn", nil, shopBack(w, "tn", arg, "b"))
+			return b.shopTariff(ctx, w, arg, "tn", "pn", nil, b.aoiBack(ctx, w, arg, shopBack(w, "tn", arg, "b")))
 		case "pn":
 			id, _, _ := strings.Cut(arg, ":")
 			return b.shopInvoice(ctx, w, chat, 0, arg, []tgapi.Button{{Text: w.back, CallbackData: "tn:" + id}})
@@ -76,7 +79,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	}
 	switch cmd {
 	case "t":
-		return b.shopTariff(ctx, w, arg, "t", "py", &u, shopBack(w, "t", arg, "r"))
+		return b.shopTariff(ctx, w, arg, "t", "py", &u, b.aoiBack(ctx, w, arg, shopBack(w, "t", arg, "r")))
 	case "py":
 		id, _, _ := strings.Cut(arg, ":")
 		return b.shopInvoice(ctx, w, chat, u.ID, arg, []tgapi.Button{{Text: w.back, CallbackData: "t:" + id}})
@@ -133,6 +136,10 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		}
 		return withNotice(text), &tgapi.Keyboard{InlineKeyboard: append(rows, back)}
 	case "r":
+		if one, ok := b.aoiSingle(ctx); ok { // AoiVPN fork: one tariff — its terms at once
+			text, kb := b.shopTariff(ctx, w, one, "t", "py", &u, back)
+			return withNotice(text), kb
+		}
 		if offers, _ := b.offers(ctx); len(offers) > 0 {
 			text, kb := b.shopList(ctx, w, fmt.Sprintf(w.renewTitle, subName(u)), "t", notice, nil)
 			if sup := b.supportURL(ctx); sup != "" {
@@ -149,7 +156,8 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	case "p":
 		for _, btn := range cfg.Buttons {
 			if btn.Action == "page" && btn.ID == arg {
-				return withNotice(render(btn.Text, vars)), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{back}}
+				rows := aoiPageRows(btn.ID, w, b.supportURL(ctx)) // AoiVPN fork: «О сервисе» links
+				return withNotice(render(btn.Text, vars)), &tgapi.Keyboard{InlineKeyboard: append(rows, back)}
 			}
 		}
 	case "w":

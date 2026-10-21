@@ -246,7 +246,13 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 			rows := [][]tgapi.Button{}
 			for _, t := range o.Terms {
 				label := model.TermLabel(o.Tariff, t.Days, lang) + " · " + w.cheapest(model.Offer{Stars: t.Stars, Rub: t.Rub})
+				if l, ok := aoiTermLabel(o, t, w); ok { // AoiVPN fork: months, the discount
+					label = l
+				}
 				rows = append(rows, []tgapi.Button{{Text: label, CallbackData: prefix + ":" + ref + "." + strconv.FormatInt(t.Days, 10)}})
+			}
+			if text, ok := b.aoiPickText(ctx, w, o, renewing); ok { // AoiVPN fork
+				return text, &tgapi.Keyboard{InlineKeyboard: append(rows, back)}
 			}
 			return name + html.EscapeString(model.DescribeLimits(o.Tariff, lang)) + contentsOf(o, lang) + noteOf(o.Tariff.Description) + "\n\n" + w.pickTerm, &tgapi.Keyboard{InlineKeyboard: append(rows, back)}
 		}
@@ -258,6 +264,9 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 			ref += "." + strconv.FormatInt(t.Days, 10)
 		}
 		text := name + html.EscapeString(model.Describe(o.Tariff, t.Days, lang)) + contentsOf(o, lang) + noteOf(o.Tariff.Description) + "\n\n" + w.payHow
+		if head, ok := b.aoiTermText(ctx, w, o, t, renewing); ok { // AoiVPN fork
+			text = head + "\n\n" + w.payHow
+		}
 		stars, rub := t.Stars, t.Rub
 		if renewing != nil {
 			if renewing.TariffID.Valid && renewing.TariffID.Int64 != o.Tariff.ID {

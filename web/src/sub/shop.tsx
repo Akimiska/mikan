@@ -4,7 +4,7 @@
 import { Check, Gift, RefreshCw, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui";
-import { t, type Key } from "../i18n";
+import { getLocale, t, type Key } from "../i18n";
 import { bytes, money, rubles } from "../lib/format";
 import { okData, postJSON } from "./net";
 
@@ -192,12 +192,18 @@ export function Shop({
       </div>
       {terms ? (
         <div className="mt-3 flex flex-wrap gap-2" role="radiogroup" aria-label={t("sub.shopPickTerm")}>
-          {terms.map((x) => (
-            <button key={x.days} type="button" role="radio" aria-checked={term?.days === x.days} className="opt flex-1" style={{ minWidth: 96 }} onClick={() => setTermDays(x.days)}>
-              <span className="font-semibold">{x.label}</span>
-              <span className="num text-xs text-[var(--ink-600)]">{x.rub ? rubles(x.rub) : `⭐ ${x.stars}`}</span>
-            </button>
-          ))}
+          {terms.map((x) => {
+            const off = aoiDiscount(terms, x);
+            return (
+              <button key={x.days} type="button" role="radio" aria-checked={term?.days === x.days} className="opt flex-1" style={{ minWidth: 96 }} onClick={() => setTermDays(x.days)}>
+                <span className="font-semibold">{aoiTermLabel(x)}</span>
+                <span className="num text-xs text-[var(--ink-600)]">
+                  {x.rub ? rubles(x.rub) : `⭐ ${x.stars}`}
+                  {off > 0 ? <span className="ml-1 font-semibold text-[var(--leaf-600)]">−{off}%</span> : null}
+                </span>
+              </button>
+            );
+          })}
         </div>
       ) : null}
       {offer ? (
@@ -335,4 +341,21 @@ function listPrice(o: Offer): string {
   const rub = Math.min(...terms.map((x) => x.rub || Infinity));
   const price = Number.isFinite(rub) ? rubles(rub) : `⭐ ${Math.min(...terms.map((x) => x.stars || Infinity))}`;
   return terms.length > 1 ? t("sub.shopFrom", { price }) : price;
+}
+
+// AoiVPN fork: a term of whole months is named in months ("3 месяца", not "90 дн."), and the
+// longer ones show how much cheaper they are than as many months bought one by one.
+function aoiTermLabel(x: Term): string {
+  if (x.days <= 0 || x.days % 30 !== 0) return x.label;
+  const n = x.days / 30;
+  if (getLocale() === "en") return n === 1 ? "1 month" : `${n} months`;
+  const d = n % 10, h = n % 100;
+  return `${n} ${d === 1 && h !== 11 ? "месяц" : d >= 2 && d <= 4 && (h < 12 || h > 14) ? "месяца" : "месяцев"}`;
+}
+
+function aoiDiscount(terms: Term[], x: Term): number {
+  const monthly = terms.find((y) => y.days === 30)?.rub;
+  if (!monthly || !x.rub || x.days % 30 !== 0) return 0;
+  const full = monthly * (x.days / 30);
+  return full > x.rub ? Math.round(((full - x.rub) * 100) / full) : 0;
 }

@@ -4,8 +4,9 @@
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ScrollText } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { api, unwrap, type Schemas } from "../../../api/client";
+import { Drawer } from "../../../components/overlay";
 import { QueryBoundary } from "../../../components/query";
 import { Button, EmptyState, Skeleton } from "../../../components/ui";
 import { t, tMaybe } from "../../../i18n";
@@ -16,6 +17,9 @@ import { CardHead } from "../../../components/layout";
 type Entry = Schemas["AuditEntry"];
 
 const PAGE = 50;
+
+/** The card holds the newest few; the whole log opens beside it, so the page keeps its length. */
+const PREVIEW = 5;
 
 /** The action in words: its own text, else its kind's ("Clients"), else the code. */
 function actionText(action: string): string {
@@ -51,6 +55,7 @@ function target(e: Entry): ReactNode {
 }
 
 export function AuditCard() {
+  const [all, setAll] = useState(false);
   const list = useInfiniteQuery({
     queryKey: ["audit"],
     initialPageParam: 0,
@@ -78,15 +83,27 @@ export function AuditCard() {
           ) : (
             <>
               <ul className="row-list">
-                {items.map((e) => (
+                {items.slice(0, PREVIEW).map((e) => (
                   <AuditRow key={e.id} e={e} />
                 ))}
               </ul>
-              {list.hasNextPage ? (
-                <Button className="mt-3" size="sm" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
-                  {t("payments.more")}
+              {items.length > PREVIEW || list.hasNextPage ? (
+                <Button className="mt-3" size="sm" onClick={() => setAll(true)}>
+                  <ScrollText size={16} aria-hidden /> {t("audit.all")}
                 </Button>
               ) : null}
+              <Drawer open={all} onOpenChange={setAll} title={t("audit.title")} meta={t("audit.meta")} wide>
+                <ul className="row-list">
+                  {items.map((e) => (
+                    <AuditRow key={e.id} e={e} />
+                  ))}
+                </ul>
+                {list.hasNextPage ? (
+                  <Button className="mt-3" size="sm" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                    {t("payments.more")}
+                  </Button>
+                ) : null}
+              </Drawer>
             </>
           );
         }}

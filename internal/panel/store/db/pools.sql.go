@@ -363,6 +363,35 @@ func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
 	return items, nil
 }
 
+const listChosenServerTariffs = `-- name: ListChosenServerTariffs :many
+SELECT id FROM tariffs WHERE chosen_servers = 1 ORDER BY id
+`
+
+// The tariffs that include only chosen servers, archived ones too: their subscribers keep
+// the tariff until their term ends.
+func (q *Queries) ListChosenServerTariffs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listChosenServerTariffs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPackageTariffs = `-- name: ListPackageTariffs :many
 SELECT package_id, tariff_id FROM package_tariffs ORDER BY package_id, tariff_id
 `

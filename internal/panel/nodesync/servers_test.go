@@ -74,6 +74,14 @@ func TestTariffServersOnTheNode(t *testing.T) {
 	if p := policies()[a.ID]; p.Allowed {
 		t.Fatalf("a tariff with nothing here: the node turns its clients away: %+v", p)
 	}
+	// An archived tariff keeps its subscribers to the end of their term, and its servers with them.
+	if _, err := q.ArchiveTariff(ctx, cheap.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.m.PoliciesChanged()
+	if p := policies()[a.ID]; p.Allowed {
+		t.Fatalf("an archived tariff lets its clients in everywhere: %+v", p)
+	}
 
 	raw := "[" + strconv.FormatInt(ins[0].ID, 10) + "]"
 	if _, err := st.DB.ExecContext(ctx, "UPDATE users SET inbounds = $1 WHERE id = $2", raw, a.ID); err != nil {

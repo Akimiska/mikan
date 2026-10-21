@@ -1,8 +1,8 @@
 import { Copy, ExternalLink, RefreshCw, Send } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, errorText, unwrap, type User } from "../../../api/client";
-import { useInbounds, useNodes, userActions, useTariffs, useUserMutation } from "../../../api/hooks";
+import { api, errorText, unwrap, type Inbound, type User } from "../../../api/client";
+import { qk, useInbounds, useNodes, userActions, useTariffs, useUserMutation } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
 import { Button, QR } from "../../../components/ui";
@@ -163,16 +163,22 @@ export function TelegramSection({ u }: { u: User }) {
 }
 
 /** The protocols the client may use: the tariff's servers, or a list of the card's own
- * that stays over them until it is reset. */
+ * that stays over them until it is reset. A protocol of a server group the client has
+ * closed ("not included") is off whatever the list says: the group's mode decides. */
 export function ProtocolsSection({ u }: { u: User }) {
   const inbounds = useInbounds();
   const tariffs = useTariffs();
   const nodes = useNodes();
+  // The same query as the card's server groups: it is read once for both.
+  const groups = useQuery({ queryKey: qk.userPools(u.id), queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/pools", { params: { path: { id: u.id } }, signal })) });
   const update = useUserMutation(userActions.update);
   const toast = useToast();
   const all = (inbounds.data ?? []).filter((i) => i.enabled);
   const tariff = tariffs.data?.find((tr) => tr.id === u.tariff_id);
   const base = new Set(all.filter((i) => !tariff || serversHas(tariff.servers, i)).map((i) => i.id));
+  const closed = new Map((groups.data ?? []).filter((g) => g.mode === "closed").map((g) => [g.pool_id, g.name]));
+  const closedBy = (i: Inbound) => (i.pool_id != null ? closed.get(i.pool_id) : undefined);
+  const shut = new Set(all.filter((i) => closedBy(i) !== undefined).map((i) => i.id));
   const own = u.inbounds.length > 0;
   const allowed = own ? new Set(u.inbounds) : base;
   const send = (ids: number[]) => update.mutate({ id: u.id, body: { inbounds: ids } }, { onError: (e) => toast.error(errorText(e)) });
@@ -180,7 +186,7 @@ export function ProtocolsSection({ u }: { u: User }) {
     const next = new Set(allowed);
     if (on) next.add(id);
     else next.delete(id);
-    if (next.size === 0) {
+    if (![...next].some((x) => !shut.has(x))) {
       toast.error(t("userDrawer.needOneProtocol"));
       return;
     }
@@ -206,18 +212,26 @@ export function ProtocolsSection({ u }: { u: User }) {
         return (
           <div key={nodeId}>
             {tree.length > 1 ? <div className="pt-2 text-xs font-semibold text-[var(--ink-500)]">{node ? nodeLabel(node) : String(nodeId)}</div> : null}
-            {list.map((i) => (
-              <div key={i.id} className="flex items-center justify-between gap-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-[13px] font-medium">{i.sub_name}</div>
-                  <div className="text-xs text-[var(--ink-500)]">
-                    {i.title} · {i.port}/{i.network}
-                    {own || base.has(i.id) ? "" : ` · ${t("servers.notInTariff")}`}
+            {list.map((i) => {
+              const group = closedBy(i);
+              return (
+                <div key={i.id} className="flex items-center justify-between gap-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-medium">{i.sub_name}</div>
+                    <div className="text-xs text-[var(--ink-500)]">
+                      {i.title} · {i.port}/{i.network}
+                      {group !== undefined ? ` · ${t("servers.groupClosed", { name: group })}` : own || base.has(i.id) ? "" : ` · ${t("servers.notInTariff")}`}
+                    </div>
                   </div>
+                  <Switch
+                    checked={allowed.has(i.id) && group === undefined}
+                    onChange={(v) => toggle(i.id, v)}
+                    label={i.sub_name}
+                    disabled={update.isPending || group !== undefined}
+                  />
                 </div>
-                <Switch checked={allowed.has(i.id)} onChange={(v) => toggle(i.id, v)} label={i.sub_name} disabled={update.isPending} />
-              </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}

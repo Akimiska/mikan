@@ -4413,6 +4413,7 @@
     "off": "off",
     "asTariff": "As in the plan",
     "notAsTariff": "A list of their own, not as in the plan: changes of the plan do not reach it.",
-    "notInTariff": "not in the plan"
+    "notInTariff": "not in the plan",
+    "groupClosed": "group \"{name}\" not included"
   }
 }

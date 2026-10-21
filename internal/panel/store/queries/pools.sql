@@ -120,6 +120,11 @@ DELETE FROM tariff_gifts WHERE package_id = $1;
 -- 1: the tariff includes only its chosen nodes and protocols; 0: every server.
 UPDATE tariffs SET chosen_servers = $2 WHERE id = $1;
 
+-- name: ListChosenServerTariffs :many
+-- The tariffs that include only chosen servers, archived ones too: their subscribers keep
+-- the tariff until their term ends.
+SELECT id FROM tariffs WHERE chosen_servers = 1 ORDER BY id;
+
 -- name: ListTariffNodes :many
 SELECT node_id FROM tariff_nodes WHERE tariff_id = $1 ORDER BY node_id;
 

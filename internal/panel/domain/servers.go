@@ -53,18 +53,17 @@ func TariffServers(ctx context.Context, q *db.Queries, id sql.NullInt64) (Server
 	return s, nil
 }
 
-// AllTariffServers are the servers of every tariff that includes only chosen ones, by
-// tariff id; a tariff missing from it includes every server (ServersOf).
+// AllTariffServers are the servers of every tariff that includes only chosen ones, archived
+// ones too (their subscribers keep them to the end of their term), by tariff id; a tariff
+// missing from it includes every server (ServersOf).
 func AllTariffServers(ctx context.Context, q *db.Queries) (map[int64]Servers, error) {
-	tariffs, err := q.ListTariffs(ctx)
+	ids, err := q.ListChosenServerTariffs(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := map[int64]Servers{}
-	for _, t := range tariffs {
-		if t.ChosenServers != 0 {
-			out[t.ID] = Servers{Nodes: map[int64]bool{}, Inbounds: map[int64]bool{}}
-		}
+	for _, id := range ids {
+		out[id] = Servers{Nodes: map[int64]bool{}, Inbounds: map[int64]bool{}}
 	}
 	if len(out) == 0 {
 		return out, nil

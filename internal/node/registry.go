@@ -440,7 +440,8 @@ func (r *Registry) reconcile() {
 	}
 	for k, l := range want {
 		old, had := r.limits[k]
-		sameBudget := l.budget == 0 || old.budget == l.budget && old.gen == l.gen
+		// A budget taken off (0 after one) is a change too: the core drops the quota it holds.
+		sameBudget := old.budget == l.budget && (l.budget == 0 || old.gen == l.gen)
 		if had && old.group == l.group && sameSpeed(old.up, l.up) && sameSpeed(old.down, l.down) {
 			// A speed a little off what the core holds stays as it is.
 			l.up, l.down = old.up, old.down

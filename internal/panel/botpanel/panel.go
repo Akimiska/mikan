@@ -85,7 +85,9 @@ func due(u db.User, grants int64, now time.Time, n tgbot.Notify) []notice {
 			out = append(out, notice{kind: "expired", period: u.ExpiresAt.Int64})
 		case left > 0 && left <= 24*time.Hour && n.Expire1d:
 			out = append(out, notice{kind: "expire_1d", period: u.ExpiresAt.Int64})
-		case left > 24*time.Hour && left <= 3*24*time.Hour && n.Expire3d:
+		// AoiVPN fork: a subscription whose whole term is three days or less (the trial)
+		// would hear "three days left" the moment it starts: it gets the last day's only.
+		case left > 24*time.Hour && left <= 3*24*time.Hour && n.Expire3d && u.ExpiresAt.Int64-u.CreatedAt > 3*24*3600+3600:
 			out = append(out, notice{kind: "expire_3d", period: u.ExpiresAt.Int64})
 		}
 	}

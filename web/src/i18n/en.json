@@ -2278,8 +2278,10 @@
     "unbindFailed": "Couldn't unbind. Reload the page and try again.",
     "connect": "Connect a device",
     "platform": "Platform",
+    "download": "Download",
     "recommended": "Recommended",
     "notes": {
+      "official": "Our own app: every protocol, payment and renewal inside",
       "easiest": "Easiest: one button",
       "free": "Free, no ads",
       "stable": "Light and stable",

@@ -295,14 +295,21 @@ function Apps({ block: b, config, subURL, brand, happ, tgMode, platform }: { blo
                 {t(`sub.notes.${a.note}`)}
               </div>
             </div>
-            <a
-              className={i === 0 ? "btn btn-primary btn-sm" : "btn btn-glass btn-sm"}
-              href={a.link(subURL, brand, happ)}
-              title={tgMode ? t("sub.tgBrowser") : undefined}
-              {...outside(subURL + "#open=" + enc(a.name))}
-            >
-              {t("common.add")}
-            </a>
+            <div className="flex gap-1.5">
+              {a.download ? (
+                <a className="btn btn-glass btn-sm" href={a.download} target="_blank" rel="noopener noreferrer">
+                  {t("sub.download")}
+                </a>
+              ) : null}
+              <a
+                className={i === 0 ? "btn btn-primary btn-sm" : "btn btn-glass btn-sm"}
+                href={a.link(subURL, brand, happ)}
+                title={tgMode ? t("sub.tgBrowser") : undefined}
+                {...outside(subURL + "#open=" + enc(a.name))}
+              >
+                {t("common.add")}
+              </a>
+            </div>
           </div>
         ))}
       </div>

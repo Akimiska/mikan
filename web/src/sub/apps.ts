@@ -1,9 +1,15 @@
 export type Platform = "ios" | "android" | "windows" | "macos" | "linux";
 
-type App = { name: string; note: "easiest" | "free" | "stable" | "openSource" | "modern" | "bestWindows" | "tun" | "oneButton" | "allProtocols"; link: (url: string, brand: string, happ?: string) => string };
+// download (AoiVPN fork): where the app itself is downloaded, for an app not in the stores.
+type App = { name: string; note: "easiest" | "free" | "stable" | "openSource" | "modern" | "bestWindows" | "tun" | "oneButton" | "allProtocols" | "official"; link: (url: string, brand: string, happ?: string) => string; download?: string };
 export const enc = encodeURIComponent;
 const clash = (url: string, brand: string) => `clash://install-config?url=${enc(url)}&name=${enc(brand)}`;
 const slothClash = (url: string, brand: string) => `slothclash://install-config?url=${enc(url)}&name=${enc(brand)}`;
+
+// AoiVPN (the fork's own app, a FlClashX build): flclashx:// is registered on Android and
+// Windows alike; the download link always leads to the latest release.
+const aoivpn = (url: string, brand: string) => `flclashx://install-config?url=${enc(url)}&name=${enc(brand)}`;
+const aoivpnDownload = "https://api.aoimusic.ru/api/version/download?platform=aoivpn";
 
 // Happ opens the crypt link when the panel gives one: the address stays hidden.
 const happ = (u: string, _brand: string, crypt?: string) => crypt || `happ://add/${u}`;
@@ -15,6 +21,7 @@ export const APPS: Record<Platform, App[]> = {
     { name: "v2RayTun", note: "stable", link: (u) => `v2raytun://import/${u}` },
   ],
   android: [
+    { name: "AoiVPN", note: "official", link: aoivpn, download: aoivpnDownload },
     { name: "Happ", note: "easiest", link: happ },
     { name: "ClashFest", note: "allProtocols", link: (u, b) => `clashfest://install-config?url=${enc(u)}&name=${enc(b)}` },
     { name: "INCY", note: "modern", link: (u) => `incy://add/${u}` },
@@ -22,6 +29,7 @@ export const APPS: Record<Platform, App[]> = {
     { name: "Hiddify", note: "openSource", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },
   ],
   windows: [
+    { name: "AoiVPN", note: "official", link: aoivpn, download: aoivpnDownload + "&os=windows" },
     { name: "Koala Clash", note: "bestWindows", link: (u, b) => `koala-clash://install-config?url=${enc(u)}&name=${enc(b)}` },
     { name: "SlothClash", note: "tun", link: slothClash },
     { name: "Hiddify", note: "easiest", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },

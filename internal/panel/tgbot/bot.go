@@ -134,8 +134,11 @@ func (b *Bot) freshMenu(chat int64, notice string) {
 }
 
 func (b *Bot) sendMenu(ctx context.Context, c *tgapi.Client, chat int64, notice string) error {
+	t0 := time.Now() // AoiVPN fork: how long the menu takes
 	text, kb := b.screen(ctx, b.config(ctx), chat, "m", notice)
+	tScreen := time.Now()
 	sent, err := c.Send(ctx, chat, text, kb, false)
+	b.d.Log.Info("menu", "screen_ms", tScreen.Sub(t0).Milliseconds(), "send_ms", time.Since(tScreen).Milliseconds())
 	if err != nil {
 		return err
 	}
@@ -157,11 +160,16 @@ func (b *Bot) answer(ctx context.Context, id string) {
 // and a newer tap on the same menu replaces a screen not yet drawn.
 func (b *Bot) onPress(ctx context.Context, q *tgapi.CallbackQuery) {
 	chat, msg := q.Message.Chat.ID, q.Message.MessageID
+	t0 := time.Now() // AoiVPN fork: how long a tap takes (aoiTiming)
 	b.answer(ctx, q.ID)
 	// What a tap changes happens now, only its screen may wait.
 	data, notice := b.act(ctx, chat, q.Data)
+	tAct := time.Now()
 	b.d.Outbox.Reply(chat, "edit:"+strconv.FormatInt(chat, 10)+":"+strconv.FormatInt(msg, 10), 1, func(ctx context.Context, c *tgapi.Client) error {
+		tQueue := time.Now()
 		text, kb := b.screen(ctx, b.config(ctx), chat, data, notice)
+		tScreen := time.Now()
+		defer func() { b.aoiTiming(q.Data, t0, tAct, tQueue, tScreen) }()
 		if err := c.Edit(ctx, chat, msg, text, kb); err != nil {
 			var ae *tgapi.APIError
 			if errors.As(err, &ae) && ae.Code == 429 {

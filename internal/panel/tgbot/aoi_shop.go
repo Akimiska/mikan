@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"mikan/internal/panel/model"
 	"mikan/internal/tgapi"
@@ -171,4 +172,12 @@ func aoiPageRows(id string, w *words, support string) [][]tgapi.Button {
 		rows = append(rows, []tgapi.Button{{Text: l[4], URL: support}})
 	}
 	return rows
+}
+
+// aoiTiming (AoiVPN fork) logs where a tap's time went: the action, the wait in the outbox,
+// the screen (the panel's calls) and the edit (Telegram, through the panel).
+func (b *Bot) aoiTiming(data string, t0, act, queue, screen time.Time) {
+	now := time.Now()
+	b.d.Log.Info("tap", "data", data, "total_ms", now.Sub(t0).Milliseconds(), "act_ms", act.Sub(t0).Milliseconds(),
+		"queue_ms", queue.Sub(act).Milliseconds(), "screen_ms", screen.Sub(queue).Milliseconds(), "edit_ms", now.Sub(screen).Milliseconds())
 }

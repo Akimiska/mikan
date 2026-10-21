@@ -128,9 +128,9 @@ func aoiVars(v map[string]string, w *words, u model.User, now time.Time) {
 	v["until_full"] = w.date(t) + ", " + t.Format("15:04") + " " + zone
 	switch {
 	case !now.Before(exp) && en:
-		v["term_line"] = "📅 Ended on " + w.date(t) + " — renew with «💳 Renew»"
+		v["term_line"] = "📅 Ended on " + w.date(t)
 	case !now.Before(exp):
-		v["term_line"] = "📅 Закончилась " + w.date(t) + " — продлите в «💳 Продлить»"
+		v["term_line"] = "📅 Закончилась " + w.date(t)
 	case en:
 		v["term_line"] = "📅 Valid until " + v["until_full"] + " (" + v["days"] + " left)"
 	default:

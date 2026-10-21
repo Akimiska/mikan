@@ -16,3 +16,15 @@ func returnURL(ctx context.Context) string {
 	u, _ := ctx.Value(returnURLKey{}).(string)
 	return u
 }
+
+// aoiAddonName (AoiVPN fork) is what a payment adapter is called in the shop: the way to pay
+// the buyer knows ("Картой, СБП или SberPay"), not the processor's brand.
+func aoiAddonName(id, lang string) string {
+	if id != "platega" {
+		return ""
+	}
+	if lang == "en" {
+		return "Card, SBP or SberPay"
+	}
+	return "Картой, СБП или SberPay"
+}

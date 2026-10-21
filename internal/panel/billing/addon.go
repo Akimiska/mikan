@@ -287,6 +287,9 @@ func (s *Service) validatePromoProvider(ctx context.Context, provider string) er
 
 // AddonName is the adapter's own name for buyers in lang; its id while it does not answer.
 func (s *Service) AddonName(ctx context.Context, id, lang string) string {
+	if n := aoiAddonName(id, lang); n != "" { // AoiVPN fork: how the buyer pays, not who processes it
+		return n
+	}
 	if s.d.Addons != nil {
 		if info, err := s.d.Addons.Info(ctx, id); err == nil {
 			if n := info.Name.In(lang); n != "" {

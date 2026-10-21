@@ -51,7 +51,7 @@ export function PageShell({ config, brand, logo, right, children }: { config: Pa
         {b.subtitle ? (
           <span className="flex min-w-0 flex-col">
             <span className="font-display truncate text-[15px] leading-5 font-semibold tracking-tight">{brand}</span>
-            <span className="truncate text-xs text-[var(--ink-500)]">{b.subtitle}</span>
+            <span className="text-xs leading-4 break-words text-[var(--ink-500)]">{b.subtitle}</span>
           </span>
         ) : (
           <span className="font-display text-[15px] font-semibold tracking-tight">{brand}</span>
@@ -285,9 +285,13 @@ function Apps({ block: b, config, subURL, brand, happ, tgMode, platform }: { blo
       <div className="row-list">
         {lists[tab].map((a, i) => (
           <div key={a.name} className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 py-2">
-            <span className="font-display grid h-10 w-10 place-items-center rounded-xl border border-[var(--hairline)] bg-[var(--surface-solid)] text-sm font-semibold text-[var(--ink-700)]" aria-hidden>
-              {a.name[0]}
-            </span>
+            {a.icon ? (
+              <img src={a.icon} alt="" width={40} height={40} className="h-10 w-10 rounded-xl object-cover" decoding="async" />
+            ) : (
+              <span className="font-display grid h-10 w-10 place-items-center rounded-xl border border-[var(--hairline)] bg-[var(--surface-solid)] text-sm font-semibold text-[var(--ink-700)]" aria-hidden>
+                {a.name[0]}
+              </span>
+            )}
             <div className="min-w-0">
               <div className="text-sm font-semibold">{a.name}</div>
               <div className="text-xs text-[var(--ink-500)]">

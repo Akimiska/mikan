@@ -1,7 +1,10 @@
 export type Platform = "ios" | "android" | "windows" | "macos" | "linux";
 
-// download (AoiVPN fork): where the app itself is downloaded, for an app not in the stores.
-type App = { name: string; note: "easiest" | "free" | "stable" | "openSource" | "modern" | "bestWindows" | "tun" | "oneButton" | "allProtocols" | "official"; link: (url: string, brand: string, happ?: string) => string; download?: string };
+import aoivpnIcon from "./aoivpn.png";
+
+// download and icon (AoiVPN fork): where the app itself is downloaded, for an app not in the
+// stores, and its own icon instead of the first letter.
+type App = { name: string; note: "easiest" | "free" | "stable" | "openSource" | "modern" | "bestWindows" | "tun" | "oneButton" | "allProtocols" | "official"; link: (url: string, brand: string, happ?: string) => string; download?: string; icon?: string };
 export const enc = encodeURIComponent;
 const clash = (url: string, brand: string) => `clash://install-config?url=${enc(url)}&name=${enc(brand)}`;
 const slothClash = (url: string, brand: string) => `slothclash://install-config?url=${enc(url)}&name=${enc(brand)}`;
@@ -17,11 +20,12 @@ const happ = (u: string, _brand: string, crypt?: string) => crypt || `happ://add
 export const APPS: Record<Platform, App[]> = {
   ios: [
     { name: "Happ", note: "easiest", link: happ },
+    { name: "INCY", note: "modern", link: (u) => `incy://add/${u}` },
     { name: "Streisand", note: "free", link: (u, b) => `streisand://import/${u}#${enc(b)}` },
     { name: "v2RayTun", note: "stable", link: (u) => `v2raytun://import/${u}` },
   ],
   android: [
-    { name: "AoiVPN", note: "official", link: aoivpn, download: aoivpnDownload },
+    { name: "AoiVPN", note: "official", link: aoivpn, download: aoivpnDownload, icon: aoivpnIcon },
     { name: "Happ", note: "easiest", link: happ },
     { name: "ClashFest", note: "allProtocols", link: (u, b) => `clashfest://install-config?url=${enc(u)}&name=${enc(b)}` },
     { name: "INCY", note: "modern", link: (u) => `incy://add/${u}` },
@@ -29,7 +33,7 @@ export const APPS: Record<Platform, App[]> = {
     { name: "Hiddify", note: "openSource", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },
   ],
   windows: [
-    { name: "AoiVPN", note: "official", link: aoivpn, download: aoivpnDownload + "&os=windows" },
+    { name: "AoiVPN", note: "official", link: aoivpn, download: aoivpnDownload + "&os=windows", icon: aoivpnIcon },
     { name: "Koala Clash", note: "bestWindows", link: (u, b) => `koala-clash://install-config?url=${enc(u)}&name=${enc(b)}` },
     { name: "SlothClash", note: "tun", link: slothClash },
     { name: "Hiddify", note: "easiest", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },

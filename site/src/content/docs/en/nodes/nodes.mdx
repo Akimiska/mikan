@@ -143,6 +143,15 @@ Every second the node looks at who is downloading now and splits the channel eve
 
 Once it is on, the node's clients reconnect once; the apps do it themselves. While sharing is on, Vision runs without the kernel's splice: a bit more CPU.
 
+## Front page for strangers
+
+In **Edit node** → **Front page for strangers**: "Maintenance" or "Cats clicker", the same pages as the panel's first page. A stranger who opens the server in a browser sees it instead of a bare 404:
+
+- VLESS and Trojan on XHTTP, WebSocket or gRPC give it to any request that is not theirs, on any domain of theirs;
+- with the **shared port 443**, the node's own domain and a request with no name (by IP) get it too: on the node's real certificate, TLS 1.2 or later, with HSTS. A domain a protocol on the shared 443 takes stays with the protocol.
+
+Protocols without HTTP (REALITY, Vision, Trojan over TCP, Hysteria2 and the others) give no page, and REALITY still sends strangers on to its masking site.
+
 ## Speed check
 
 The **Speed** button on the card measures the node's own connection to the internet: latency, jitter and loss over 20 DNS queries to 1.1.1.1, then download and upload speed through speed.cloudflare.com. Results are saved in the history.

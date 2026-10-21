@@ -1,14 +1,15 @@
 import { useState, type FormEvent } from "react";
 import type { Schemas } from "../../../api/client";
 import { useInbounds, useNodes } from "../../../api/hooks";
-import { Disclosure, FormActions } from "../../../components/layout";
+import { CardHead, Disclosure, FormActions } from "../../../components/layout";
 import { Button, Field, Pill } from "../../../components/ui";
 import { SwitchRow } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { fieldErrors } from "../../../lib/fields";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
-import { ReissueRules } from "./reissue-rules";
+import { period } from "../../../lib/format";
+import { ReissueRules, TimesPerPeriod } from "./reissue-rules";
 import { useSaveSettings } from "./shared";
 import { LimitPicker } from "../user/limit-picker";
 
@@ -39,13 +40,7 @@ export function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.subPort")}</h2>
-            <div className="card-sub">{t("settings.subPortSub")}</div>
-          </div>
-          {s.sub_port ? <Pill tone={s.sub_port_error ? "bad" : "ok"}>{s.sub_port_error ? t("settings.subPortDown") : t("settings.subPortOn", { port: s.sub_port })}</Pill> : null}
-        </div>
+        <CardHead title={t("settings.subPort")} sub={t("settings.subPortSub")} aside={s.sub_port ? <Pill tone={s.sub_port_error ? "bad" : "ok"}>{s.sub_port_error ? t("settings.subPortDown") : t("settings.subPortOn", { port: s.sub_port })}</Pill> : null} />
         {s.sub_port_error ? (
           <div className="banner err mb-4" role="alert">
             {t("settings.subPortBusy", { port: s.sub_port, panel: s.panel_port })}
@@ -141,28 +136,27 @@ export function SubPublicBaseCard({ s }: { s: Schemas["SettingsView"] }) {
   );
 }
 
+// A card's form as the settings hold it. A save puts the draft back to what the server
+// keeps (the text trimmed): else the typed spaces would leave the card unsaved after it.
+const profileForm = (s: Schemas["SettingsView"]) => ({ sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, client_fingerprint: s.client_fingerprint });
+const appsForm = (s: Schemas["SettingsView"]) => ({ sub_title: s.sub_title, sub_announce: s.sub_announce, sub_announce_url: s.sub_announce_url, brand_accent: s.brand_accent, brand_logo_url: s.brand_logo_url });
 
 export function SubscriptionCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   const inbounds = useInbounds();
-  const { draft: form, setDraft: setForm, dirty, reset } = useDraft({ sub_group_main: s.sub_group_main, sub_group_auto: s.sub_group_auto, client_fingerprint: s.client_fingerprint });
+  const { draft: form, setDraft: setForm, dirty, reset } = useDraft(profileForm(s));
   const [fpOk, setFpOk] = useState(true);
   const errors = fieldErrors(save.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate({ sub_group_main: form.sub_group_main.trim(), sub_group_auto: form.sub_group_auto.trim(), client_fingerprint: form.client_fingerprint });
+    save.mutate({ sub_group_main: form.sub_group_main.trim(), sub_group_auto: form.sub_group_auto.trim(), client_fingerprint: form.client_fingerprint }, { onSuccess: (v) => setForm(profileForm(v)) });
   };
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const proxies = (inbounds.data ?? []).filter((i) => i.enabled).map((i) => i.sub_name);
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.profile")}</h2>
-            <div className="card-sub">{t("settings.subscriptionSub")}</div>
-          </div>
-        </div>
+        <CardHead title={t("settings.profile")} sub={t("settings.subscriptionSub")} />
         <div className="grid gap-x-3 sm:grid-cols-2">
           <Field label={t("settings.groupMain")} htmlFor="s-gmain" hint={t("settings.groupMainHint")} error={errors.sub_group_main}>
             <input id="s-gmain" className="input" value={form.sub_group_main} onChange={set("sub_group_main")} maxLength={48} aria-invalid={!!errors.sub_group_main} autoComplete="off" />
@@ -216,17 +210,12 @@ export function InactiveCard({ s }: { s: Schemas["SettingsView"] }) {
   const unknown = unknownVars(text);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate({ sub_inactive_text: text.trim() });
+    save.mutate({ sub_inactive_text: text.trim() }, { onSuccess: (v) => setText(v.sub_inactive_text) });
   };
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.inactive.title")}</h2>
-            <div className="card-sub">{t("settings.inactive.sub")}</div>
-          </div>
-        </div>
+        <CardHead title={t("settings.inactive.title")} sub={t("settings.inactive.sub")} />
         <SwitchRow
           label={t("settings.inactive.on")}
           sub={s.sub_inactive_server ? t("settings.inactive.onSub") : t("settings.inactive.offSub")}
@@ -264,11 +253,14 @@ export function InactiveCard({ s }: { s: Schemas["SettingsView"] }) {
 // and the brand for the apps that read operator headers (ClashFest, SlothClash).
 export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
-  const { draft: form, setDraft: setForm, dirty, reset } = useDraft({ sub_title: s.sub_title, sub_announce: s.sub_announce, sub_announce_url: s.sub_announce_url, brand_accent: s.brand_accent, brand_logo_url: s.brand_logo_url });
+  const { draft: form, setDraft: setForm, dirty, reset } = useDraft(appsForm(s));
   const errors = fieldErrors(save.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate({ sub_title: form.sub_title.trim(), sub_announce: form.sub_announce.trim(), sub_announce_url: form.sub_announce_url.trim(), brand_accent: form.brand_accent.trim(), brand_logo_url: form.brand_logo_url.trim() });
+    save.mutate(
+      { sub_title: form.sub_title.trim(), sub_announce: form.sub_announce.trim(), sub_announce_url: form.sub_announce_url.trim(), brand_accent: form.brand_accent.trim(), brand_logo_url: form.brand_logo_url.trim() },
+      { onSuccess: (v) => setForm(appsForm(v)) },
+    );
   };
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   // A variable chip goes into the field last typed in: the title until the announcement is.
@@ -288,12 +280,7 @@ export function AppsCard({ s }: { s: Schemas["SettingsView"] }) {
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.apps")}</h2>
-            <div className="card-sub">{t("settings.appsSub")}</div>
-          </div>
-        </div>
+        <CardHead title={t("settings.apps")} sub={t("settings.appsSub")} />
         <Field label={t("settings.subTitle")} htmlFor="s-sub-title" hint={withUnknown(t("settings.subTitleHint"), unknownTitle)} error={errors.sub_title}>
           <input
             id="s-sub-title"
@@ -353,12 +340,7 @@ export function DevicesCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   return (
     <section className="card glass reveal" style={{ "--i": 4 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.devices")}</h2>
-          <div className="card-sub">{t("settings.devicesSub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("settings.devices")} sub={t("settings.devicesSub")} />
       <ul className="row-list">
         <li>
           <SwitchRow label={t("settings.binding")} sub={t("settings.bindingSub")} checked={s.device_binding} disabled={save.isPending} onChange={(v) => save.mutate({ device_binding: v })} />
@@ -372,14 +354,6 @@ export function DevicesCard({ s }: { s: Schemas["SettingsView"] }) {
       <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.devicesNote")}</p>
     </section>
   );
-}
-
-/** A period of days in words: "a day", "a week", "30 days". */
-function periodLabel(days: number): string {
-  if (days === 1) return t("settings.unbindDay");
-  if (days === 7) return t("settings.unbindWeek");
-  if (days === 30) return t("settings.unbindMonth");
-  return t("settings.unbindDays", { n: days });
 }
 
 /** A pause in hours: "at once", "6 h", whole days as days, "never" (-1: until the admin lets it). */
@@ -403,7 +377,7 @@ function UnbindRules({ s }: { s: Schemas["SettingsView"] }) {
     ? t("settings.unbindSummaryOff")
     : r.limit === 0
       ? t("settings.unbindSummaryFree")
-      : t("settings.unbindSummary", { n: r.limit, period: periodLabel(r.days).toLowerCase() });
+      : t("settings.unbindSummary", { n: r.limit, period: period(r.days) });
   const pause =
     r.return_hours < 0
       ? t("settings.unbindSummaryNever")
@@ -415,43 +389,20 @@ function UnbindRules({ s }: { s: Schemas["SettingsView"] }) {
       <h3 className="text-[14px] font-medium">{t("settings.unbindTitle")}</h3>
       <p className="mt-1 mb-3 text-xs text-[var(--ink-500)]">{t("settings.unbindSub")}</p>
       <div className="flex flex-col gap-3">
-        <LimitPicker
-          label={t("settings.unbindLimit")}
-          value={off ? -1 : r.limit === 0 ? null : r.limit}
-          presets={[-1, 1, 2, 3, 5]}
-          format={(n) => (n < 0 ? t("settings.unbindOff") : String(n))}
-          min={1}
-          max={100}
-          busy={save.isPending}
-          onChange={(n, done) => set(n === -1 ? { off: true } : { off: false, limit: n ?? 0 }, done)}
-        />
-        {!off && r.limit > 0 ? (
-          <LimitPicker
-            label={t("settings.unbindPeriod")}
-            value={r.days}
-            presets={[1, 7, 30]}
-            min={1}
-            max={365}
-            unlimited={false}
-            format={periodLabel}
-            fieldUnit={t("settings.unbindDaysUnit")}
-            busy={save.isPending}
-            onChange={(n, done) => set({ days: n ?? 1 }, done)}
-          />
-        ) : null}
+        <TimesPerPeriod label={t("settings.unbindLimit")} value={r} busy={save.isPending} onChange={set} />
         {off ? null : (
-        <LimitPicker
-          label={t("settings.unbindReturn")}
-          value={r.return_hours}
-          presets={[0, 6, 24, 72, -1]}
-          min={0}
-          max={720}
-          unlimited={false}
-          format={pauseLabel}
-          fieldUnit={t("settings.unbindHoursUnit")}
-          busy={save.isPending}
-          onChange={(n, done) => set({ return_hours: n ?? 0 }, done)}
-        />
+          <LimitPicker
+            label={t("settings.unbindReturn")}
+            value={r.return_hours}
+            presets={[0, 6, 24, 72, -1]}
+            min={0}
+            max={720}
+            unlimited={false}
+            format={pauseLabel}
+            fieldUnit={t("settings.unbindHoursUnit")}
+            busy={save.isPending}
+            onChange={(n, done) => set({ return_hours: n ?? 0 }, done)}
+          />
         )}
       </div>
       <p className="mt-3 text-xs text-[var(--ink-600)]" role="status">

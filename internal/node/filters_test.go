@@ -70,7 +70,7 @@ func TestFiltersConfigParses(t *testing.T) {
 	} {
 		st := cascadeState(t)
 		st.Filters = f
-		raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false)
+		raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false, "")
 		if err != nil {
 			t.Fatal(err)
 		}

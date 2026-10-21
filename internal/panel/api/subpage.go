@@ -167,7 +167,7 @@ func (h *handlers) getSubPage(ctx context.Context, _ *struct{}) (*subPageOutput,
 func problems(prefix string, ps []subpage.Problem) []error {
 	out := make([]error, 0, len(ps))
 	for _, p := range ps {
-		out = append(out, &huma.ErrorDetail{Location: prefix + p.Field, Message: p.Code, Value: p.Value})
+		out = append(out, fieldDetail(prefix+p.Field, p.Code, p.Value))
 	}
 	return out
 }
@@ -179,7 +179,7 @@ func (h *handlers) putSubPage(ctx context.Context, in *putSubPageInput) (*subPag
 	if in.Body.BrandAccent != nil {
 		accent = strings.ToUpper(strings.TrimSpace(*in.Body.BrandAccent))
 		if accent != "" && !subs.ValidAccent(accent) {
-			details = append(details, &huma.ErrorDetail{Location: "body.brand_accent", Message: "color_invalid"})
+			details = append(details, fieldDetail("body.brand_accent", "color_invalid", nil))
 		}
 	} else {
 		saved, err := h.d.Settings.String(ctx, settings.KeyBrandAccent)
@@ -189,10 +189,10 @@ func (h *handlers) putSubPage(ctx context.Context, in *putSubPageInput) (*subPag
 		accent = saved
 	}
 	if c.Look.Accent == "brand" && accent == "" {
-		details = append(details, &huma.ErrorDetail{Location: "body.brand_accent", Message: "color_required"})
+		details = append(details, fieldDetail("body.brand_accent", "color_required", nil))
 	}
 	if in.Body.Brand != nil && (strings.ContainsAny(*in.Body.Brand, "\r\n") || subpage.HasControl(*in.Body.Brand)) {
-		details = append(details, &huma.ErrorDetail{Location: "body.brand", Message: "one_line"})
+		details = append(details, fieldDetail("body.brand", "one_line", nil))
 	}
 	assets, err := h.subPages().Assets(ctx)
 	if err != nil {
@@ -203,10 +203,10 @@ func (h *handlers) putSubPage(ctx context.Context, in *putSubPageInput) (*subPag
 		if c.Brand.Logo != "image" {
 			field = "body.config.og.image"
 		}
-		details = append(details, &huma.ErrorDetail{Location: field, Message: "logo_missing"})
+		details = append(details, fieldDetail(field, "logo_missing", nil))
 	}
 	if _, ok := assets[subpage.AssetBackground]; !ok && c.Look.Background.Kind == "image" {
-		details = append(details, &huma.ErrorDetail{Location: "body.config.look.background.kind", Message: "background_missing"})
+		details = append(details, fieldDetail("body.config.look.background.kind", "background_missing", nil))
 	}
 	if len(details) > 0 {
 		return nil, fieldErrs(details...)

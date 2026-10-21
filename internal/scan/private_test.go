@@ -20,7 +20,7 @@ func resolver(m map[string][]string) func(context.Context, string) ([]netip.Addr
 }
 
 // A name that leads to this host or its network is not dialed, whatever its text looks
-// like: the syntax check of the host (proto.PublicHost) lets every DNS name through.
+// like: the syntax check of the host (netaddr.PublicHost) lets every DNS name through.
 func TestCheckRefusesNamesThatLeadInside(t *testing.T) {
 	dial := make(chan string, 4)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

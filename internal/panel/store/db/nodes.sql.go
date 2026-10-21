@@ -15,7 +15,7 @@ import (
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, sort)
 VALUES ($1, $2, $3, $4, $5, 1, $6, $7, (SELECT COALESCE(MAX(sort), 0) + 1 FROM nodes))
-RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow
+RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow, front_page
 `
 
 type CreateNodeParams struct {
@@ -62,6 +62,7 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.SniRouter,
 		&i.ApiLockdown,
 		pq.Array(&i.ApiAllow),
+		&i.FrontPage,
 	)
 	return i, err
 }
@@ -76,7 +77,7 @@ func (q *Queries) DeleteNode(ctx context.Context, id int64) error {
 }
 
 const getNode = `-- name: GetNode :one
-SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow FROM nodes WHERE id = $1
+SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow, front_page FROM nodes WHERE id = $1
 `
 
 func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
@@ -104,12 +105,13 @@ func (q *Queries) GetNode(ctx context.Context, id int64) (Node, error) {
 		&i.SniRouter,
 		&i.ApiLockdown,
 		pq.Array(&i.ApiAllow),
+		&i.FrontPage,
 	)
 	return i, err
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow FROM nodes ORDER BY sort, id
+SELECT id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow, front_page FROM nodes ORDER BY sort, id
 `
 
 func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
@@ -143,6 +145,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 			&i.SniRouter,
 			&i.ApiLockdown,
 			pq.Array(&i.ApiAllow),
+			&i.FrontPage,
 		); err != nil {
 			return nil, err
 		}
@@ -190,6 +193,21 @@ type SetNodeCertParams struct {
 
 func (q *Queries) SetNodeCert(ctx context.Context, arg SetNodeCertParams) error {
 	_, err := q.db.ExecContext(ctx, setNodeCert, arg.CertSha256, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const setNodeFrontPage = `-- name: SetNodeFrontPage :exec
+UPDATE nodes SET front_page = $1, updated_at = $2 WHERE id = $3
+`
+
+type SetNodeFrontPageParams struct {
+	FrontPage string
+	UpdatedAt int64
+	ID        int64
+}
+
+func (q *Queries) SetNodeFrontPage(ctx context.Context, arg SetNodeFrontPageParams) error {
+	_, err := q.db.ExecContext(ctx, setNodeFrontPage, arg.FrontPage, arg.UpdatedAt, arg.ID)
 	return err
 }
 
@@ -259,7 +277,7 @@ func (q *Queries) SetNodeSort(ctx context.Context, arg SetNodeSortParams) error 
 }
 
 const updateNode = `-- name: UpdateNode :one
-UPDATE nodes SET name = $1, address = $2, public_host = $3, domain = $4, public_name = $5, enabled = $6, updated_at = $7 WHERE id = $8 RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow
+UPDATE nodes SET name = $1, address = $2, public_host = $3, domain = $4, public_name = $5, enabled = $6, updated_at = $7 WHERE id = $8 RETURNING id, name, address, public_host, domain, cert_sha256, enabled, created_at, updated_at, public_name, sort, total_up, total_down, fair_share, channel_mbps, capacity, balance_group, http_redirect, sni_router, api_lockdown, api_allow, front_page
 `
 
 type UpdateNodeParams struct {
@@ -307,6 +325,7 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		&i.SniRouter,
 		&i.ApiLockdown,
 		pq.Array(&i.ApiAllow),
+		&i.FrontPage,
 	)
 	return i, err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -63,15 +64,33 @@ func (b *Balancer) Nodes(ctx context.Context, userID int64, on map[int64]bool) (
 	if len(groups) == 0 {
 		return on, nil
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	held, err := b.st.Q.ListUserAssignments(ctx, userID)
+	assigned := func() (map[string]int64, error) {
+		held, err := b.st.Q.ListUserAssignments(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		mine := map[string]int64{}
+		for _, a := range held {
+			mine[a.BalanceGroup] = a.NodeID
+		}
+		return mine, nil
+	}
+	mine, err := assigned()
 	if err != nil {
 		return on, err
 	}
-	mine := map[string]int64{}
-	for _, a := range held {
-		mine[a.BalanceGroup] = a.NodeID
+	// A client placed in every group is served without the lock: only a placement waits for
+	// the others, and reads again what they placed meanwhile.
+	placed := true
+	for group, members := range groups {
+		placed = placed && slices.ContainsFunc(members, func(n db.Node) bool { return n.ID == mine[group] })
+	}
+	if !placed {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if mine, err = assigned(); err != nil {
+			return on, err
+		}
 	}
 	var loads map[int64]int64
 	out := map[int64]bool{}

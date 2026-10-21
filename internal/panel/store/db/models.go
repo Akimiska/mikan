@@ -195,7 +195,6 @@ type Inbound struct {
 	Preset      string
 	Port        string
 	Enabled     int64
-	Settings    string
 	CreatedAt   int64
 	UpdatedAt   int64
 	DisplayName string
@@ -272,6 +271,7 @@ type Node struct {
 	SniRouter    int64
 	ApiLockdown  int64
 	ApiAllow     []string
+	FrontPage    string
 }
 
 type NodeAssignment struct {
@@ -500,6 +500,7 @@ type SupportGrant struct {
 	LastIp          string
 	RevokedAt       sql.NullInt64
 	EndedNotedAt    sql.NullInt64
+	Extended        bool
 }
 
 type Tariff struct {
@@ -523,11 +524,22 @@ type Tariff struct {
 	DevicePriceStars sql.NullInt64
 	DevicePriceRub   sql.NullInt64
 	DeviceExtraMax   int64
+	ChosenServers    int64
 }
 
 type TariffGift struct {
 	TariffID  int64
 	PackageID int64
+}
+
+type TariffInbound struct {
+	TariffID  int64
+	InboundID int64
+}
+
+type TariffNode struct {
+	TariffID int64
+	NodeID   int64
 }
 
 type TariffPool struct {
@@ -557,6 +569,11 @@ type TgChat struct {
 	UpdatedAt  int64
 	CampaignID sql.NullInt64
 	CampaignAt sql.NullInt64
+}
+
+type TgClient struct {
+	TgID  int64
+	Since int64
 }
 
 type TgLink struct {

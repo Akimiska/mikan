@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/netip"
 	"strconv"
@@ -22,6 +23,10 @@ func testResolve(_ context.Context, host string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("10.0.0.7")}, nil
 	case "metadata.attacker.example":
 		return []netip.Addr{netip.MustParseAddr("169.254.169.254")}, nil
+	case "v6.attacker.example":
+		return []netip.Addr{netip.MustParseAddr("198.51.100.9"), netip.MustParseAddr("fd00:ec2::254")}, nil
+	case "node-only.attacker.example":
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
 	}
 	return []netip.Addr{netip.MustParseAddr("198.51.100.50")}, nil
 }
@@ -52,6 +57,14 @@ func TestNamesThatLeadInsideAreNotTargets(t *testing.T) {
 	}
 	before, _ := h.st.Q.GetInbound(ctx, xhttp)
 
+	// One address of the name inside is enough, of either family; a name the panel cannot
+	// look up may be one that resolves only where the node is.
+	for dest, code := range map[string]string{"v6.attacker.example:443": "reality_dest_private", "node-only.attacker.example:443": "dest_unresolved"} {
+		resp, body := h.do(http.MethodPatch, api+"/inbounds/"+strconv.FormatInt(xhttp, 10), map[string]any{"dest": dest}, csrf)
+		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), code) {
+			t.Errorf("PATCH dest %s: %d %s, want %s", dest, resp.StatusCode, body, code)
+		}
+	}
 	for _, dest := range []string{"127.0.0.1.nip.io:8080", "internal.attacker.example:443", "metadata.attacker.example:80"} {
 		// Saved: refused, nothing changes.
 		resp, body := h.do(http.MethodPatch, api+"/inbounds/"+strconv.FormatInt(xhttp, 10), map[string]any{"dest": dest}, csrf)

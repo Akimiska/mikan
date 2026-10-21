@@ -100,16 +100,21 @@ function SpeedRow({ u }: { u: User }) {
 export function TrafficSection({ u }: { u: User }) {
   const traffic = useUserTraffic(u.id);
   const used = u.used_up + u.used_down;
-  const pct = u.traffic_limit ? (used / u.traffic_limit) * 100 : 0;
+  // The packages are spent after the tariff's traffic: the ring is a share of both, as in the
+  // list of clients and on the subscription page. A client past the limit on a package is not
+  // red while the package lasts.
+  const cap = u.traffic_limit != null ? Math.max(u.traffic_limit, used) + u.traffic_extra : 0;
+  const pct = u.traffic_limit == null ? 0 : cap > 0 ? (used / cap) * 100 : 100;
   const pts = traffic.data?.points ?? [];
   const max = Math.max(1, ...pts.map((p) => p.up + p.down));
   return (
     <Section title={t("users.colTraffic")} aside={u.resets_at ? t("userDrawer.resetsOn", { date: dateShort(u.resets_at) }) : t("userDrawer.noReset")}>
       <div className="grid grid-cols-1 items-center gap-5 sm:grid-cols-[112px_minmax(0,1fr)]">
         <Ring
-          pct={u.traffic_limit != null ? pct : 100}
+          pct={pct}
+          unlimited={u.traffic_limit == null}
           label={u.traffic_limit != null ? `${Math.min(999, Math.round(pct))}%` : "∞"}
-          sub={u.traffic_limit != null ? t("users.of", { total: bytes(u.traffic_limit) }) : t("users.unlimited")}
+          sub={u.traffic_limit != null ? t("users.of", { total: bytes(cap) }) : t("users.unlimited")}
         />
         <div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs text-[var(--ink-500)]">

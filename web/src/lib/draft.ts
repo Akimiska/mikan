@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type SetStateAction } from "react";
 
 /** Structural comparison for form values (plain objects, arrays and primitives). */
 export function same(a: unknown, b: unknown): boolean {
@@ -37,4 +37,24 @@ export function useDraft<T>(source: T) {
     /** Throws the edits away. */
     reset: () => setDraft(source),
   };
+}
+
+/** The setters of a form's fields, each taking a value or an updater of the field's own. */
+export type FieldSetters<T> = { [K in keyof T]-?: (v: SetStateAction<T[K]>) => void };
+
+/**
+ * A form of many fields in one state, instead of a useState a field: set.name(v) changes one
+ * of them, replace(next) all of them at once (the form opened on another record). The fields
+ * are the keys init gives.
+ */
+export function useFields<T extends object>(init: () => T) {
+  const [form, replace] = useState(init);
+  const [set] = useState(() => {
+    const out = {} as FieldSetters<T>;
+    for (const k of Object.keys(init()) as (keyof T)[]) {
+      out[k] = (v) => replace((f) => ({ ...f, [k]: typeof v === "function" ? (v as (cur: T[typeof k]) => T[typeof k])(f[k]) : v }));
+    }
+    return out;
+  });
+  return [form, set, replace] as const;
 }

@@ -50,7 +50,7 @@ type InboundView struct {
 	Auto        AutoView       `json:"auto"`
 	Outbound    string         `json:"outbound" enum:"direct,warp,node" doc:"Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)"`
 	ExitNodeID  *int64         `json:"exit_node_id,omitempty" doc:"Нода, через которую выходит трафик, если outbound=node"`
-	PoolID      *int64         `json:"pool_id,omitempty" doc:"Пул трафика, в который считается подключение; нет — основной трафик"`
+	PoolID      *int64         `json:"pool_id,omitempty" doc:"Группа серверов подключения: какой трафик оно тратит; нет — основной трафик"`
 	Client      ClientEndpoint `json:"client" doc:"Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне)"`
 	ClientSNI   bool           `json:"client_sni" doc:"Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки"`
 	ClientHost  bool           `json:"client_host" doc:"Можно ли задать клиентам свой HTTP Host: VLESS и Trojan по WebSocket и XHTTP"`
@@ -130,7 +130,7 @@ type patchInboundInput struct {
 		AutoSNI     *bool           `json:"auto_sni,omitempty" doc:"Нельзя включить, пока у подключения свой адрес (listen)"`
 		Outbound    *string         `json:"outbound,omitempty" enum:"direct,warp,node" doc:"Выход в интернет: напрямую, через WARP ноды или через другую ноду"`
 		ExitNodeID  *int64          `json:"exit_node_id,omitempty" minimum:"1" doc:"Для outbound=node: через какую ноду"`
-		PoolID      *int64          `json:"pool_id,omitempty" minimum:"0" doc:"Пул трафика; 0 — основной трафик"`
+		PoolID      *int64          `json:"pool_id,omitempty" minimum:"0" doc:"Группа серверов; 0 — без группы, основной трафик"`
 
 		XHTTP  *proto.XHTTPTuning `json:"xhttp,omitempty" doc:"Тонкая настройка XHTTP целиком: пустое поле — значение ядра по умолчанию"`
 		SNI443 *bool              `json:"sni443,omitempty" doc:"Поставить за SNI-роутер ноды на 443 (true) или вернуть на свой порт (false)"`
@@ -139,9 +139,10 @@ type patchInboundInput struct {
 
 type validateInboundInput struct {
 	Body struct {
-		NodeID int64  `json:"node_id,omitempty" minimum:"1"`
-		Config string `json:"config" maxLength:"65536"`
-		Port   string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$"`
+		NodeID    int64  `json:"node_id,omitempty" minimum:"1"`
+		InboundID int64  `json:"inbound_id,omitempty" minimum:"1" doc:"Подключение, чей шаблон проверяется: скрытые от читателя секреты (<hidden>) берутся из него"`
+		Config    string `json:"config" maxLength:"65536"`
+		Port      string `json:"port,omitempty" pattern:"^[0-9]{1,5}(-[0-9]{1,5})?$"`
 	}
 }
 
@@ -184,10 +185,18 @@ func (h *handlers) lastAuto(ctx context.Context) (map[int64]db.InboundEvent, err
 	return out, nil
 }
 
-func (h *handlers) viewInbound(in db.Inbound, last map[int64]db.InboundEvent) InboundView {
+// viewInbound is an inbound as the API shows it. A reader that may not see the panel's
+// secrets (hidesSecrets) gets the template with them as proto.Hidden: REALITY's and VLESS
+// Encryption's server keys would let it stand in for the server, the one key of a shared
+// protocol would let it in for free. What it saves back gets them again (updateInbound).
+func (h *handlers) viewInbound(ctx context.Context, in db.Inbound, last map[int64]db.InboundEvent) InboundView {
 	info, _ := presets.Get(in.Preset)
+	config := in.Config
+	if hidesSecrets(ctx) {
+		config = proto.Redact(config)
+	}
 	v := InboundView{ID: in.ID, NodeID: in.NodeID, Name: in.Name, Preset: in.Preset, Title: info.Title, Port: in.Port, Enabled: in.Enabled != 0,
-		DisplayName: in.DisplayName, SubName: domain.ProxyName(in), Config: in.Config, Status: "unknown", UpdatedAt: store.Time(in.UpdatedAt),
+		DisplayName: in.DisplayName, SubName: domain.ProxyName(in), Config: config, Status: "unknown", UpdatedAt: store.Time(in.UpdatedAt),
 		AutoPort: in.AutoPort != 0, AutoSNI: in.AutoSni != 0, Outbound: in.Outbound, Listen: in.Listen}
 	if in.PoolID.Valid {
 		id := in.PoolID.Int64
@@ -269,9 +278,25 @@ func (h *handlers) listInbounds(ctx context.Context, _ *struct{}) (*inboundsOutp
 	}
 	out := &inboundsOutput{Body: make([]InboundView, 0, len(rows))}
 	for _, in := range rows {
-		out.Body = append(out.Body, h.viewInbound(in, last))
+		out.Body = append(out.Body, h.viewInbound(ctx, in, last))
 	}
 	return out, nil
+}
+
+// restoreSecrets is a template that comes back to be saved or checked with the saved
+// secrets of the inbound id where its reader got proto.Hidden (viewInbound).
+func (h *handlers) restoreSecrets(ctx context.Context, id int64, config string) (string, error) {
+	if id == 0 || !strings.Contains(config, proto.Hidden) {
+		return config, nil
+	}
+	cur, err := h.d.Store.Q.GetInbound(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", huma.Error404NotFound("not_found")
+	}
+	if err != nil {
+		return "", err
+	}
+	return proto.Restore(config, cur.Config), nil
 }
 
 func (h *handlers) validateInbound(ctx context.Context, in *validateInboundInput) (*validateInboundOutput, error) {
@@ -283,7 +308,11 @@ func (h *handlers) validateInbound(ctx context.Context, in *validateInboundInput
 	if err != nil {
 		return nil, err
 	}
-	t, err := h.d.Inbounds.CheckTemplate(ctx, node, in.Body.Config, port)
+	config, err := h.restoreSecrets(ctx, in.Body.InboundID, in.Body.Config)
+	if err != nil {
+		return nil, err
+	}
+	t, err := h.d.Inbounds.CheckTemplate(ctx, node, config, port)
 	if err != nil {
 		return nil, configError(err)
 	}
@@ -298,7 +327,7 @@ func (h *handlers) createInbound(ctx context.Context, in *createInboundInput) (*
 	if err != nil {
 		return nil, inboundError(err, false)
 	}
-	v := h.viewInbound(row, nil)
+	v := h.viewInbound(ctx, row, nil)
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "inbound.create", "inbound", row.Name, map[string]any{"preset": row.Preset, "type": v.Type, "port": row.Port})
 	return &inboundOutput{Body: v}, nil
@@ -349,7 +378,7 @@ func (h *handlers) setInboundExits(ctx context.Context, in *setExitsInput) (*inb
 	out := &inboundsOutput{Body: make([]InboundView, 0, len(rows))}
 	names := make([]string, 0, len(rows))
 	for _, row := range rows {
-		out.Body = append(out.Body, h.viewInbound(row, last))
+		out.Body = append(out.Body, h.viewInbound(ctx, row, last))
 		names = append(names, row.Name)
 	}
 	h.d.Changes.SlotsChanged()
@@ -364,7 +393,7 @@ func (h *handlers) copyInbound(ctx context.Context, in *copyInboundInput) (*inbo
 	if err != nil {
 		return nil, inboundError(err, b.Dest != "")
 	}
-	v := h.viewInbound(row, nil)
+	v := h.viewInbound(ctx, row, nil)
 	h.d.Changes.SlotsChanged()
 	if row.PoolID.Valid {
 		h.d.Changes.PoliciesChanged()
@@ -375,6 +404,13 @@ func (h *handlers) copyInbound(ctx context.Context, in *copyInboundInput) (*inbo
 
 func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*inboundOutput, error) {
 	b := in.Body
+	if b.Config != nil {
+		config, err := h.restoreSecrets(ctx, in.ID, *b.Config)
+		if err != nil {
+			return nil, err
+		}
+		b.Config = &config
+	}
 	// How a name may look is the subscription's rule; that it is free, the domain's.
 	if b.DisplayName != nil {
 		if name := strings.TrimSpace(*b.DisplayName); name != "" {
@@ -423,7 +459,7 @@ func (h *handlers) updateInbound(ctx context.Context, in *patchInboundInput) (*i
 	if err != nil {
 		return nil, err
 	}
-	return &inboundOutput{Body: h.viewInbound(row, last)}, nil
+	return &inboundOutput{Body: h.viewInbound(ctx, row, last)}, nil
 }
 
 // inboundError maps the domain's refusals of an inbound change to the API's codes. dest:
@@ -438,17 +474,17 @@ func inboundError(err error, dest bool) error {
 	case errors.Is(err, domain.ErrUnknownInbound):
 		return huma.Error404NotFound("not_found")
 	case errors.Is(err, domain.ErrUnknownPreset):
-		return huma.Error422UnprocessableEntity("unknown_preset")
+		return refusal("unknown_preset")
 	case errors.Is(err, domain.ErrUnknownNode):
-		return huma.Error422UnprocessableEntity("unknown_node", &huma.ErrorDetail{Location: "body.node_id", Message: "unknown_node"})
+		return fieldErr("body.node_id", "unknown_node")
 	case errors.Is(err, domain.ErrBadPort):
-		return huma.Error422UnprocessableEntity("bad_port", &huma.ErrorDetail{Location: "body.port", Message: "bad_port"})
+		return fieldErr("body.port", "bad_port")
 	case errors.Is(err, domain.ErrBadListen):
-		return huma.Error422UnprocessableEntity("bad_listen", &huma.ErrorDetail{Location: "body.listen", Message: "bad_listen"})
+		return fieldErr("body.listen", "bad_listen")
 	case errors.Is(err, domain.ErrAutoPortListen):
-		return huma.Error422UnprocessableEntity("auto_port_listen", &huma.ErrorDetail{Location: "body.auto_port", Message: "auto_port_listen"})
+		return fieldErr("body.auto_port", "auto_port_listen")
 	case errors.Is(err, domain.ErrAutoSNIListen):
-		return huma.Error422UnprocessableEntity("auto_sni_listen", &huma.ErrorDetail{Location: "body.auto_sni", Message: "auto_sni_listen"})
+		return fieldErr("body.auto_sni", "auto_sni_listen")
 	case errors.Is(err, domain.ErrInboundChanged):
 		return huma.Error409Conflict("inbound_changed")
 	case errors.Is(err, domain.ErrUnknownPool):
@@ -529,7 +565,12 @@ func (h *handlers) deleteInbound(ctx context.Context, in *userIDInput) (*struct{
 	if err != nil {
 		return nil, err
 	}
-	if err := h.d.Store.Q.DeleteInbound(ctx, in.ID); err != nil {
+	if err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		if err := serversLeft(ctx, q, 0, in.ID); err != nil {
+			return err
+		}
+		return q.DeleteInbound(ctx, in.ID)
+	}); err != nil {
 		return nil, err
 	}
 	h.d.Changes.SlotsChanged()
@@ -544,7 +585,7 @@ func (h *handlers) nodeOf(ctx context.Context, id int64) (db.Node, error) {
 	}
 	n, err := h.d.Store.Q.GetNode(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return n, huma.Error422UnprocessableEntity("unknown_node", &huma.ErrorDetail{Location: "body.node_id", Message: "unknown_node"})
+		return n, fieldErr("body.node_id", "unknown_node")
 	}
 	return n, err
 }

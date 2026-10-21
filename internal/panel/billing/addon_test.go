@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/store/db"
 )
@@ -355,8 +356,8 @@ func TestAddonPayment(t *testing.T) {
 			t.Fatalf("webhook: %d", code)
 		}
 	}
-	if e.payment(p.ID).Status != "applied" || e.users() != before+1 || e.tg.told() != 1 {
-		t.Fatalf("applied: %s users %d→%d told %d", e.payment(p.ID).Status, before, e.users(), e.tg.told())
+	if paid := e.told(events.PaymentPaid); e.payment(p.ID).Status != "applied" || e.users() != before+1 || len(paid) != 1 {
+		t.Fatalf("applied: %s users %d→%d told %d", e.payment(p.ID).Status, before, e.users(), len(paid))
 	}
 	if code := e.hook("addon/fake", e.token, "203.0.113.9", []byte(`{"id":"fk-999"}`), ok); code != http.StatusOK {
 		t.Fatalf("unknown invoice: %d", code)

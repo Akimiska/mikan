@@ -51,7 +51,7 @@ type userSitesOutput struct {
 
 func (h *handlers) registerSites() {
 	huma.Register(h.api, huma.Operation{OperationID: "get-traffic-detail", Method: http.MethodGet, Path: "/api/v1/traffic-detail", Summary: "Детализация трафика по сайтам", Tags: []string{"filters"}}, h.getTrafficDetail)
-	huma.Register(h.api, huma.Operation{OperationID: "put-traffic-detail", Method: http.MethodPut, Path: "/api/v1/traffic-detail", Summary: "Включить или выключить детализацию по сайтам",
+	huma.Register(h.api, huma.Operation{OperationID: "put-traffic-detail", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPut, Path: "/api/v1/traffic-detail", Summary: "Включить или выключить детализацию по сайтам",
 		Description: "Ноды получают её со своим состоянием; ноды старше неё не считают.", Tags: []string{"filters"}}, h.putTrafficDetail)
 	huma.Register(h.api, huma.Operation{OperationID: "user-sites", Method: http.MethodGet, Path: "/api/v1/users/{id}/sites", Summary: "Куда ходит подписка: трафик по сайтам", Tags: []string{"users"}}, h.userSites)
 }

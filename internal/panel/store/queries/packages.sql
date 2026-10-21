@@ -55,9 +55,11 @@ VALUES ($1, $2, $3, 'package', $4, $5, $6, $7, $8, 'pending', $9)
 RETURNING *;
 
 -- name: FindOpenPackagePayments :many
+-- As FindOpenPayments: the open invoices, and the balance payments of just now.
 SELECT * FROM payments
 WHERE tg_id = sqlc.arg(tg_id) AND package_id = sqlc.arg(package_id) AND provider = sqlc.arg(provider) AND kind = 'package' AND user_id = sqlc.arg(user_id)
-  AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
+  AND (status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
+    OR provider = 'balance' AND status IN ('paid', 'applied') AND created_at > sqlc.arg(repeat_since))
 ORDER BY id DESC;
 
 -- name: DeleteGrantByPayment :execrows
@@ -69,3 +71,17 @@ SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remain
 FROM traffic_grants
 WHERE user_id = ANY(sqlc.arg(ids)::bigint[]) AND remaining > 0 AND (expires_at IS NULL OR expires_at > CAST(sqlc.arg(now) AS BIGINT))
 GROUP BY user_id, COALESCE(pool_id, 0);
+
+-- name: MoveGroupGrantsToMain :exec
+-- The traffic bought for a server group that is no longer the user's own limit (the group is
+-- in the main traffic, without a limit, or closed) goes to the main traffic: it is paid for,
+-- and a group that does not count it would leave it unspent and unseen.
+UPDATE traffic_grants g SET pool_id = NULL
+WHERE g.user_id = ANY(sqlc.arg(user_ids)::bigint[]) AND g.pool_id IS NOT NULL AND g.remaining > 0
+  AND NOT EXISTS (SELECT 1 FROM user_pools up WHERE up.user_id = g.user_id AND up.pool_id = g.pool_id AND up.mode = 'own');
+
+-- name: MoveTariffGroupGrantsToMain :exec
+-- MoveGroupGrantsToMain for every user of a tariff.
+UPDATE traffic_grants g SET pool_id = NULL
+WHERE g.user_id IN (SELECT u.id FROM users u WHERE u.tariff_id = sqlc.arg(tariff_id)) AND g.pool_id IS NOT NULL AND g.remaining > 0
+  AND NOT EXISTS (SELECT 1 FROM user_pools up WHERE up.user_id = g.user_id AND up.pool_id = g.pool_id AND up.mode = 'own');

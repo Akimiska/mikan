@@ -1,0 +1,1 @@
+{"ID":41,"TgID":555,"Amount":50000,"Currency":"RUB","Photo":"file-1","Status":"pending","CreatedAt":1800000000,"DecidedAt":{"Int64":1800000100,"Valid":true},"AdminID":{"Int64":1,"Valid":true},"Reason":"blurry"}

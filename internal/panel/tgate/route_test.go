@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"mikan/internal/panel/settings"
+	"mikan/internal/tgapi"
 )
 
 func TestParseProxy(t *testing.T) {
@@ -167,10 +168,10 @@ func TestCheckRouteThroughNode(t *testing.T) {
 	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 7}, ""); err != nil {
 		t.Fatalf("through the node without a token: %v", err)
 	}
-	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 8}, "123:s3cret"); !errors.Is(err, ErrUnreachable) {
+	if err := e.gate.CheckRoute(e.ctx, Route{Mode: RouteNode, NodeID: 8}, "123:s3cret"); !errors.Is(err, tgapi.ErrUnreachable) {
 		t.Fatalf("through a node that is down: %v", err)
 	}
-	if _, err := e.gate.CheckTokenVia(e.ctx, "123:s3cret", Route{Mode: RouteNode, NodeID: 8}); !errors.Is(err, ErrUnreachable) {
+	if _, err := e.gate.CheckTokenVia(e.ctx, "123:s3cret", Route{Mode: RouteNode, NodeID: 8}); !errors.Is(err, tgapi.ErrUnreachable) {
 		t.Fatalf("token through a node that is down: %v", err)
 	}
 	if got := logs.String(); strings.Count(got, "node unavailable") != 2 || strings.Contains(got, "s3cret") {

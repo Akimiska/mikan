@@ -208,6 +208,7 @@ export default function ConfigEditor({ value, onChange, label, invalid, kind = "
     view.current = v;
     return () => v.destroy();
     // The editor owns the text after mount; outside resets go through the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

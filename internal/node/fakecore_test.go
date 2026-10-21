@@ -14,7 +14,6 @@ type fakeCore struct {
 	held   map[userKey]fakeLimit
 	fresh  int // budgets set to count from now
 	passes int // calls of limits
-	closed []userKey
 }
 
 type fakeLimit struct {
@@ -97,12 +96,6 @@ func (f *fakeCore) limits(set map[userKey]coreLimit, remove, fresh []userKey) {
 		}
 		f.held[k] = fl
 	}
-}
-
-func (f *fakeCore) closeUser(inbound, user string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.closed = append(f.closed, userKey{inbound, user})
 }
 
 // keptOut lists the users the core keeps out, as "inbound/user", sorted.

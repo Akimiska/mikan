@@ -39,6 +39,11 @@ func (p *Panel) maintain(ctx context.Context) {
 	} else if n > 0 {
 		p.log.Info("forgot idle devices", "count", n)
 	}
+	if n, err := p.devices.ExpireExtra(ctx); err != nil {
+		p.log.Error("expire bought device places", "err", err)
+	} else if n > 0 {
+		p.log.Info("bought device places ended with their term", "subscriptions", n)
+	}
 	if err := p.devices.Prune(ctx); err != nil {
 		p.log.Error("prune device pauses and unbinds", "err", err)
 	}

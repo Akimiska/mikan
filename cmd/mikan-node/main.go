@@ -1,6 +1,6 @@
-// mikan-node runs the VPN data plane: mihomo embedded as a library, controlled by the
-// panel over a unix socket, or over pinned TLS when the node runs on another server.
-// It links mihomo and is therefore distributed under GPL-3.0.
+// mikan-node runs the VPN data plane: the Citrus core (a fork of mihomo) embedded as a
+// library, controlled by the panel over a unix socket, or over pinned TLS when the node runs
+// on another server. It links the core and is therefore distributed under GPL-3.0.
 package main
 
 import (

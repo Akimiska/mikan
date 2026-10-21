@@ -49,9 +49,3 @@ export function useSupportGrants(enabled = true) {
 export function isLive(g: SupportGrant | null | undefined): g is SupportGrant {
   return !!g && g.status === "active" && new Date(g.expires_at).getTime() > Date.now();
 }
-
-/** A server of the terminal or the recordings: "panel" or "node:<id>". */
-export function targetNode(target: string): number | null {
-  const m = /^node:(\d+)$/.exec(target);
-  return m ? Number(m[1]) : null;
-}

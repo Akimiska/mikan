@@ -167,9 +167,9 @@ func (q *Queries) CountTariffs(ctx context.Context) (int64, error) {
 }
 
 const createInbound = `-- name: CreateInbound :one
-INSERT INTO inbounds (node_id, name, preset, port, enabled, settings, config, created_at, updated_at)
-VALUES ($1, $2, $3, $4, 1, '{}', $5, $6, $7)
-RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen
+INSERT INTO inbounds (node_id, name, preset, port, enabled, config, created_at, updated_at)
+VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
+RETURNING id, node_id, name, preset, port, enabled, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen
 `
 
 type CreateInboundParams struct {
@@ -200,7 +200,6 @@ func (q *Queries) CreateInbound(ctx context.Context, arg CreateInboundParams) (I
 		&i.Preset,
 		&i.Port,
 		&i.Enabled,
-		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DisplayName,
@@ -218,7 +217,7 @@ func (q *Queries) CreateInbound(ctx context.Context, arg CreateInboundParams) (I
 const createTariff = `-- name: CreateTariff :one
 INSERT INTO tariffs (name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max
+RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max, chosen_servers
 `
 
 type CreateTariffParams struct {
@@ -277,6 +276,7 @@ func (q *Queries) CreateTariff(ctx context.Context, arg CreateTariffParams) (Tar
 		&i.DevicePriceStars,
 		&i.DevicePriceRub,
 		&i.DeviceExtraMax,
+		&i.ChosenServers,
 	)
 	return i, err
 }
@@ -405,7 +405,7 @@ func (q *Queries) DeleteTariffTerms(ctx context.Context, tariffID int64) error {
 }
 
 const getInbound = `-- name: GetInbound :one
-SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen FROM inbounds WHERE id = $1
+SELECT id, node_id, name, preset, port, enabled, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen FROM inbounds WHERE id = $1
 `
 
 func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
@@ -418,7 +418,6 @@ func (q *Queries) GetInbound(ctx context.Context, id int64) (Inbound, error) {
 		&i.Preset,
 		&i.Port,
 		&i.Enabled,
-		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DisplayName,
@@ -464,7 +463,7 @@ func (q *Queries) GetSlot(ctx context.Context, id int64) (Slot, error) {
 }
 
 const getTariff = `-- name: GetTariff :one
-SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max FROM tariffs WHERE id = $1
+SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max, chosen_servers FROM tariffs WHERE id = $1
 `
 
 func (q *Queries) GetTariff(ctx context.Context, id int64) (Tariff, error) {
@@ -491,6 +490,7 @@ func (q *Queries) GetTariff(ctx context.Context, id int64) (Tariff, error) {
 		&i.DevicePriceStars,
 		&i.DevicePriceRub,
 		&i.DeviceExtraMax,
+		&i.ChosenServers,
 	)
 	return i, err
 }
@@ -670,7 +670,7 @@ func (q *Queries) ListBoundDeviceSlots(ctx context.Context, userID int64) ([]Lis
 }
 
 const listInbounds = `-- name: ListInbounds :many
-SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen FROM inbounds ORDER BY id
+SELECT id, node_id, name, preset, port, enabled, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen FROM inbounds ORDER BY id
 `
 
 func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
@@ -689,7 +689,6 @@ func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
 			&i.Preset,
 			&i.Port,
 			&i.Enabled,
-			&i.Settings,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DisplayName,
@@ -715,7 +714,7 @@ func (q *Queries) ListInbounds(ctx context.Context) ([]Inbound, error) {
 }
 
 const listNodeInbounds = `-- name: ListNodeInbounds :many
-SELECT id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen FROM inbounds WHERE node_id = $1 ORDER BY id
+SELECT id, node_id, name, preset, port, enabled, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen FROM inbounds WHERE node_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListNodeInbounds(ctx context.Context, nodeID int64) ([]Inbound, error) {
@@ -734,7 +733,6 @@ func (q *Queries) ListNodeInbounds(ctx context.Context, nodeID int64) ([]Inbound
 			&i.Preset,
 			&i.Port,
 			&i.Enabled,
-			&i.Settings,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DisplayName,
@@ -864,7 +862,7 @@ func (q *Queries) ListTariffTerms(ctx context.Context, tariffID int64) ([]Tariff
 }
 
 const listTariffs = `-- name: ListTariffs :many
-SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max FROM tariffs WHERE archived = 0 ORDER BY sort, id
+SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max, chosen_servers FROM tariffs WHERE archived = 0 ORDER BY sort, id
 `
 
 func (q *Queries) ListTariffs(ctx context.Context) ([]Tariff, error) {
@@ -897,6 +895,7 @@ func (q *Queries) ListTariffs(ctx context.Context) ([]Tariff, error) {
 			&i.DevicePriceStars,
 			&i.DevicePriceRub,
 			&i.DeviceExtraMax,
+			&i.ChosenServers,
 		); err != nil {
 			return nil, err
 		}
@@ -1257,20 +1256,6 @@ func (q *Queries) ResetUserTraffic(ctx context.Context, arg ResetUserTrafficPara
 	return err
 }
 
-const setInboundConfig = `-- name: SetInboundConfig :exec
-UPDATE inbounds SET config = $1 WHERE id = $2
-`
-
-type SetInboundConfigParams struct {
-	Config string
-	ID     int64
-}
-
-func (q *Queries) SetInboundConfig(ctx context.Context, arg SetInboundConfigParams) error {
-	_, err := q.db.ExecContext(ctx, setInboundConfig, arg.Config, arg.ID)
-	return err
-}
-
 const setNodeState = `-- name: SetNodeState :exec
 INSERT INTO node_state (key, value) VALUES ($1, $2)
 ON CONFLICT (key) DO UPDATE SET value = excluded.value
@@ -1480,7 +1465,7 @@ func (q *Queries) TotalTrafficHourly(ctx context.Context, hour int64) ([]TotalTr
 }
 
 const updateInbound = `-- name: UpdateInbound :one
-UPDATE inbounds SET port = $1, enabled = $2, config = $3, display_name = $4, updated_at = $5 WHERE id = $6 RETURNING id, node_id, name, preset, port, enabled, settings, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen
+UPDATE inbounds SET port = $1, enabled = $2, config = $3, display_name = $4, updated_at = $5 WHERE id = $6 RETURNING id, node_id, name, preset, port, enabled, created_at, updated_at, display_name, config, auto_port, auto_sni, outbound, exit_node_id, pool_id, listen
 `
 
 type UpdateInboundParams struct {
@@ -1509,7 +1494,6 @@ func (q *Queries) UpdateInbound(ctx context.Context, arg UpdateInboundParams) (I
 		&i.Preset,
 		&i.Port,
 		&i.Enabled,
-		&i.Settings,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DisplayName,
@@ -1529,7 +1513,7 @@ UPDATE tariffs
 SET name = $1, traffic_limit = $2, duration_days = $3, device_limit = $4, reset_strategy = $5, price_label = $6, sort = $7, billing_day = $8,
     price_stars = $9, price_rub = $10, on_sale = $11, speed_limit = $13, description = $14
 WHERE id = $12
-RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max
+RETURNING id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max, chosen_servers
 `
 
 type UpdateTariffParams struct {
@@ -1588,6 +1572,7 @@ func (q *Queries) UpdateTariff(ctx context.Context, arg UpdateTariffParams) (Tar
 		&i.DevicePriceStars,
 		&i.DevicePriceRub,
 		&i.DeviceExtraMax,
+		&i.ChosenServers,
 	)
 	return i, err
 }

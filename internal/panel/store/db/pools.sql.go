@@ -40,6 +40,34 @@ func (q *Queries) AddTariffGift(ctx context.Context, arg AddTariffGiftParams) er
 	return err
 }
 
+const addTariffInbound = `-- name: AddTariffInbound :exec
+INSERT INTO tariff_inbounds (tariff_id, inbound_id) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+type AddTariffInboundParams struct {
+	TariffID  int64
+	InboundID int64
+}
+
+func (q *Queries) AddTariffInbound(ctx context.Context, arg AddTariffInboundParams) error {
+	_, err := q.db.ExecContext(ctx, addTariffInbound, arg.TariffID, arg.InboundID)
+	return err
+}
+
+const addTariffNode = `-- name: AddTariffNode :exec
+INSERT INTO tariff_nodes (tariff_id, node_id) VALUES ($1, $2) ON CONFLICT DO NOTHING
+`
+
+type AddTariffNodeParams struct {
+	TariffID int64
+	NodeID   int64
+}
+
+func (q *Queries) AddTariffNode(ctx context.Context, arg AddTariffNodeParams) error {
+	_, err := q.db.ExecContext(ctx, addTariffNode, arg.TariffID, arg.NodeID)
+	return err
+}
+
 const addTariffPool = `-- name: AddTariffPool :exec
 INSERT INTO tariff_pools (tariff_id, pool_id, mode, traffic_limit) VALUES ($1, $2, $3, $4)
 `
@@ -61,6 +89,61 @@ func (q *Queries) AddTariffPool(ctx context.Context, arg AddTariffPoolParams) er
 	return err
 }
 
+const applyTariffLimits = `-- name: ApplyTariffLimits :exec
+UPDATE users u SET
+  traffic_limit  = CASE WHEN $1::BOOLEAN THEN t.traffic_limit ELSE u.traffic_limit END,
+  reset_strategy = CASE WHEN $1::BOOLEAN THEN t.reset_strategy ELSE u.reset_strategy END,
+  device_limit   = CASE WHEN $2::BOOLEAN THEN t.device_limit + u.extra_devices ELSE u.device_limit END,
+  device_mode    = CASE WHEN $2::BOOLEAN THEN t.device_mode ELSE u.device_mode END,
+  speed_limit    = CASE WHEN $3::BOOLEAN THEN t.speed_limit ELSE u.speed_limit END,
+  updated_at     = $4::BIGINT
+FROM tariffs t
+WHERE t.id = $5::BIGINT AND u.tariff_id = t.id
+`
+
+type ApplyTariffLimitsParams struct {
+	Traffic  bool
+	Devices  bool
+	Speed    bool
+	Now      int64
+	TariffID int64
+}
+
+// The users of a tariff take its values of the chosen parts now (ApplyTariffToAll), each
+// only the columns of its part: the traffic per period and its reset, the device limit (with
+// the devices bought on top, an unlimited one staying unlimited) and how it counts, the
+// speed. What they used and their terms stay.
+func (q *Queries) ApplyTariffLimits(ctx context.Context, arg ApplyTariffLimitsParams) error {
+	_, err := q.db.ExecContext(ctx, applyTariffLimits,
+		arg.Traffic,
+		arg.Devices,
+		arg.Speed,
+		arg.Now,
+		arg.TariffID,
+	)
+	return err
+}
+
+const applyTariffUsersPools = `-- name: ApplyTariffUsersPools :exec
+WITH reset AS (
+  UPDATE user_pools up SET mode = 'main', traffic_limit = NULL
+  FROM users u WHERE up.user_id = u.id AND u.tariff_id = $1::BIGINT
+  RETURNING up.user_id
+)
+INSERT INTO user_pools (user_id, pool_id, mode, traffic_limit)
+SELECT u.id, tp.pool_id, tp.mode, tp.traffic_limit
+FROM users u JOIN tariff_pools tp ON tp.tariff_id = u.tariff_id
+WHERE u.tariff_id = $1::BIGINT AND tp.mode <> 'main'
+ON CONFLICT (user_id, pool_id) DO UPDATE SET mode = excluded.mode, traffic_limit = excluded.traffic_limit
+`
+
+// The users of a tariff take the modes of its groups (ApplyTariffPools for all of them):
+// every group back in the main traffic first, then the tariff's rows that are not.
+func (q *Queries) ApplyTariffUsersPools(ctx context.Context, tariffID int64) error {
+	_, err := q.db.ExecContext(ctx, applyTariffUsersPools, tariffID)
+	return err
+}
+
 const clearPackageTariffs = `-- name: ClearPackageTariffs :exec
 DELETE FROM package_tariffs WHERE package_id = $1
 `
@@ -76,6 +159,24 @@ DELETE FROM tariff_gifts WHERE tariff_id = $1
 
 func (q *Queries) ClearTariffGifts(ctx context.Context, tariffID int64) error {
 	_, err := q.db.ExecContext(ctx, clearTariffGifts, tariffID)
+	return err
+}
+
+const clearTariffInbounds = `-- name: ClearTariffInbounds :exec
+DELETE FROM tariff_inbounds WHERE tariff_id = $1
+`
+
+func (q *Queries) ClearTariffInbounds(ctx context.Context, tariffID int64) error {
+	_, err := q.db.ExecContext(ctx, clearTariffInbounds, tariffID)
+	return err
+}
+
+const clearTariffNodes = `-- name: ClearTariffNodes :exec
+DELETE FROM tariff_nodes WHERE tariff_id = $1
+`
+
+func (q *Queries) ClearTariffNodes(ctx context.Context, tariffID int64) error {
+	_, err := q.db.ExecContext(ctx, clearTariffNodes, tariffID)
 	return err
 }
 
@@ -197,6 +298,60 @@ func (q *Queries) ListAllTariffGifts(ctx context.Context) ([]TariffGift, error) 
 	return items, nil
 }
 
+const listAllTariffInbounds = `-- name: ListAllTariffInbounds :many
+SELECT tariff_id, inbound_id FROM tariff_inbounds ORDER BY tariff_id, inbound_id
+`
+
+func (q *Queries) ListAllTariffInbounds(ctx context.Context) ([]TariffInbound, error) {
+	rows, err := q.db.QueryContext(ctx, listAllTariffInbounds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TariffInbound{}
+	for rows.Next() {
+		var i TariffInbound
+		if err := rows.Scan(&i.TariffID, &i.InboundID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllTariffNodes = `-- name: ListAllTariffNodes :many
+SELECT tariff_id, node_id FROM tariff_nodes ORDER BY tariff_id, node_id
+`
+
+func (q *Queries) ListAllTariffNodes(ctx context.Context) ([]TariffNode, error) {
+	rows, err := q.db.QueryContext(ctx, listAllTariffNodes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TariffNode{}
+	for rows.Next() {
+		var i TariffNode
+		if err := rows.Scan(&i.TariffID, &i.NodeID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllTariffPools = `-- name: ListAllTariffPools :many
 SELECT tariff_id, pool_id, traffic_limit, mode FROM tariff_pools ORDER BY tariff_id, pool_id
 `
@@ -263,6 +418,35 @@ func (q *Queries) ListAllUserPools(ctx context.Context) ([]UserPool, error) {
 	return items, nil
 }
 
+const listChosenServerTariffs = `-- name: ListChosenServerTariffs :many
+SELECT id FROM tariffs WHERE chosen_servers = 1 ORDER BY id
+`
+
+// The tariffs that include only chosen servers, archived ones too: their subscribers keep
+// the tariff until their term ends.
+func (q *Queries) ListChosenServerTariffs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listChosenServerTariffs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPackageTariffs = `-- name: ListPackageTariffs :many
 SELECT package_id, tariff_id FROM package_tariffs ORDER BY package_id, tariff_id
 `
@@ -308,6 +492,60 @@ func (q *Queries) ListTariffGifts(ctx context.Context, tariffID int64) ([]Tariff
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTariffInbounds = `-- name: ListTariffInbounds :many
+SELECT inbound_id FROM tariff_inbounds WHERE tariff_id = $1 ORDER BY inbound_id
+`
+
+func (q *Queries) ListTariffInbounds(ctx context.Context, tariffID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listTariffInbounds, tariffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var inbound_id int64
+		if err := rows.Scan(&inbound_id); err != nil {
+			return nil, err
+		}
+		items = append(items, inbound_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTariffNodes = `-- name: ListTariffNodes :many
+SELECT node_id FROM tariff_nodes WHERE tariff_id = $1 ORDER BY node_id
+`
+
+func (q *Queries) ListTariffNodes(ctx context.Context, tariffID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listTariffNodes, tariffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var node_id int64
+		if err := rows.Scan(&node_id); err != nil {
+			return nil, err
+		}
+		items = append(items, node_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -544,6 +782,21 @@ func (q *Queries) SetInboundPool(ctx context.Context, arg SetInboundPoolParams) 
 	return err
 }
 
+const setTariffChosenServers = `-- name: SetTariffChosenServers :exec
+UPDATE tariffs SET chosen_servers = $2 WHERE id = $1
+`
+
+type SetTariffChosenServersParams struct {
+	ID            int64
+	ChosenServers int64
+}
+
+// 1: the tariff includes only its chosen nodes and protocols; 0: every server.
+func (q *Queries) SetTariffChosenServers(ctx context.Context, arg SetTariffChosenServersParams) error {
+	_, err := q.db.ExecContext(ctx, setTariffChosenServers, arg.ID, arg.ChosenServers)
+	return err
+}
+
 const setTariffUsersPool = `-- name: SetTariffUsersPool :exec
 INSERT INTO user_pools (user_id, pool_id, mode, traffic_limit)
 SELECT u.id, $1::BIGINT, $2::TEXT, $3::BIGINT
@@ -591,6 +844,51 @@ func (q *Queries) SetUserPool(ctx context.Context, arg SetUserPoolParams) error 
 		arg.TrafficLimit,
 	)
 	return err
+}
+
+const tariffsLeftWithoutServers = `-- name: TariffsLeftWithoutServers :many
+SELECT t.id, t.name FROM tariffs t
+WHERE t.chosen_servers = 1
+  AND NOT EXISTS (SELECT 1 FROM tariff_nodes tn WHERE tn.tariff_id = t.id AND tn.node_id <> $1::BIGINT)
+  AND NOT EXISTS (SELECT 1 FROM tariff_inbounds ti JOIN inbounds i ON i.id = ti.inbound_id
+                  WHERE ti.tariff_id = t.id AND i.id <> $2::BIGINT AND i.node_id <> $1::BIGINT)
+ORDER BY t.id
+`
+
+type TariffsLeftWithoutServersParams struct {
+	NodeID    int64
+	InboundID int64
+}
+
+type TariffsLeftWithoutServersRow struct {
+	ID   int64
+	Name string
+}
+
+// The tariffs that choose their servers and would have none left without node node_id, or
+// without inbound inbound_id (0: none of either): what a deletion must not do to them, since
+// their users would be left with no server and no word of it.
+func (q *Queries) TariffsLeftWithoutServers(ctx context.Context, arg TariffsLeftWithoutServersParams) ([]TariffsLeftWithoutServersRow, error) {
+	rows, err := q.db.QueryContext(ctx, tariffsLeftWithoutServers, arg.NodeID, arg.InboundID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TariffsLeftWithoutServersRow{}
+	for rows.Next() {
+		var i TariffsLeftWithoutServersRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const userPoolModes = `-- name: UserPoolModes :many

@@ -9,6 +9,8 @@ Community addons are written and published by third-party authors. mikan **does 
 
 The official addons are on **Addons → Catalog**: mikan builds and signs them. **Addons → Community** shows the registry [getmikan/marketplace-community](https://github.com/getmikan/marketplace-community): links to third-party authors' repositories and a snapshot of their latest release (version, image by digest, permissions).
 
+Next to an addon are the stars of its repository and how many times its image was pulled. The pulls come from the package's page on GitHub, to two significant digits; panels report nothing anywhere. An image outside GitHub (ghcr.io) shows no pulls.
+
 ## How the panel protects you
 
 - **The panel never goes to the authors.** A mikan workflow reads the authors' releases every hour and publishes one signed `index.json`. The panel reads only that, from GitHub, with the same key as the catalog. Third-party servers never see your panels' addresses.

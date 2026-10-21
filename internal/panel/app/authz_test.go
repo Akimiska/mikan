@@ -18,6 +18,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 )
 
 // keyHarness is a harness logged in, with a "read" key and a "full" key made the way an
@@ -201,6 +202,27 @@ func TestReadKeyDoesNotGetSecrets(t *testing.T) {
 				t.Errorf("%s as %s: %d, the %s is missing: %s", name, who.name, resp.StatusCode, c.secretField, body)
 			}
 		}
+	}
+
+	// A protocol's server key would let the reader stand in for the server: the list of
+	// protocols gives it as hidden, and a full key, which may edit them, as it is.
+	var config string
+	if err := k.st.DB.QueryRow("SELECT config FROM inbounds WHERE config LIKE '%private-key%' ORDER BY id LIMIT 1").Scan(&config); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := proto.Parse(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := parsed["reality-config"].(map[string]any)["private-key"].(string)
+	if key == "" {
+		t.Fatalf("no REALITY key in %s", config)
+	}
+	if _, body := k.asKey(k.read, http.MethodGet, "/inbounds", nil); strings.Contains(string(body), key) || !strings.Contains(string(body), proto.Hidden) {
+		t.Errorf("a read key sees a protocol's server key: %s", body)
+	}
+	if _, body := k.asKey(k.full, http.MethodGet, "/inbounds", nil); !strings.Contains(string(body), key) {
+		t.Errorf("a full key misses a protocol's server key: %s", body)
 	}
 
 	// An own Clash profile may hold the admin's own proxies and secrets.

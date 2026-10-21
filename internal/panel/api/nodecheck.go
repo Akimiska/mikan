@@ -327,12 +327,12 @@ func (h *handlers) tcpPorts(ctx context.Context, id int64) []tcpPort {
 		if in.Enabled == 0 || domain.InboundNetwork(in) != "tcp" {
 			continue
 		}
-		if p := firstPort(in.Port); p > 0 {
+		if p := domain.FirstPort(in.Port); p > 0 {
 			out = append(out, tcpPort{in.Name, p})
 		}
 	}
 	if r, err := h.d.Store.Q.GetNodeRelay(ctx, id); err == nil {
-		if p := firstPort(r.Port); p > 0 {
+		if p := domain.FirstPort(r.Port); p > 0 {
 			out = append(out, tcpPort{"relay", p})
 		}
 	}
@@ -340,15 +340,6 @@ func (h *handlers) tcpPorts(ctx context.Context, id int64) []tcpPort {
 		out = out[:maxPortChecks]
 	}
 	return out
-}
-
-func firstPort(s string) int {
-	first, _, _ := strings.Cut(s, "-")
-	p, err := strconv.Atoi(strings.TrimSpace(first))
-	if err != nil || p < 1 || p > 65535 {
-		return 0
-	}
-	return p
 }
 
 // portItems dial each TCP port of a remote node from the panel: a port closed by a

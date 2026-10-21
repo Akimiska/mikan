@@ -13,6 +13,7 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 )
@@ -145,7 +146,7 @@ func (p *pushed) emit(t *testing.T, typ string, user int64) {
 	t.Helper()
 	ctx := context.Background()
 	err := p.s.d.Store.Tx(ctx, func(q *db.Queries) error {
-		return events.Emit(ctx, q, time.Unix(1_800_000_000, 0), typ, user, 555, map[string]int64{"user": user}, "")
+		return feed.Emit(ctx, q, time.Unix(1_800_000_000, 0), typ, user, 555, map[string]int64{"user": user}, "")
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +198,7 @@ func eventually(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-func (p *pushed) pull(t *testing.T, h *hook, path string) (int, string, feed) {
+func (p *pushed) pull(t *testing.T, h *hook, path string) (int, string, pulled) {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:41990/panel/v2/events"+path, nil)
 	r.Header.Set("Authorization", "Bearer "+h.panelToken())
@@ -205,7 +206,7 @@ func (p *pushed) pull(t *testing.T, h *hook, path string) (int, string, feed) {
 	p.s.ServeHTTP(w, r)
 	var e Error
 	_ = json.Unmarshal(w.Body.Bytes(), &e)
-	var f feed
+	var f pulled
 	_ = json.Unmarshal(w.Body.Bytes(), &f)
 	return w.Code, e.Code, f
 }
@@ -350,10 +351,10 @@ func TestPushOnlyWhereAskedAndAllowed(t *testing.T) {
 	}
 }
 
-// Pushed events are filtered as pulled ones are: the types the addon named, and the bot's
-// own messages (bot.*) only for the addon that holds the bot.
+// Pushed events are filtered as pulled ones are: the types the addon named, all of them when
+// it named none; holding the bot changes nothing of that.
 func TestPushFiltersLikePull(t *testing.T) {
-	narrow := newHook(t, "narrow", true, events.PaymentRefunded, events.BotPaid)
+	narrow := newHook(t, "narrow", true, events.PaymentRefunded)
 	holder := newHook(t, "holder", true)
 	plain := newHook(t, "plain", true)
 	p := pushWorld(t, map[string]string{"narrow": `["events"]`, "holder": `["events","bot"]`, "plain": `["events"]`}, narrow, holder, plain)
@@ -361,11 +362,11 @@ func TestPushFiltersLikePull(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.emit(t, events.PaymentPaid, 1)
-	p.emit(t, events.BotPaid, 1)
+	p.emit(t, events.UserCreated, 1)
 	p.emit(t, events.PaymentRefunded, 1)
 	p.run(t)
-	eventually(t, "the holder gets all three", func() bool { return len(holder.delivered()) == 3 })
-	eventually(t, "the others get theirs", func() bool { return len(plain.delivered()) == 2 && len(narrow.delivered()) == 1 })
+	eventually(t, "the holder and the plain addon get all three", func() bool { return len(holder.delivered()) == 3 && len(plain.delivered()) == 3 })
+	eventually(t, "the narrow one gets its type", func() bool { return len(narrow.delivered()) == 1 })
 	time.Sleep(500 * time.Millisecond)
 	types := func(h *hook) (out []string) {
 		for _, b := range h.got() {
@@ -373,18 +374,18 @@ func TestPushFiltersLikePull(t *testing.T) {
 		}
 		return out
 	}
-	if got := types(holder); !slices.Equal(got, []string{events.PaymentPaid, events.BotPaid, events.PaymentRefunded}) {
+	all := []string{events.PaymentPaid, events.UserCreated, events.PaymentRefunded}
+	if got := types(holder); !slices.Equal(got, all) {
 		t.Fatalf("the holder was sent %v", got)
 	}
-	if got := types(plain); !slices.Equal(got, []string{events.PaymentPaid, events.PaymentRefunded}) {
+	if got := types(plain); !slices.Equal(got, all) {
 		t.Fatalf("an addon that does not hold the bot was sent %v", got)
 	}
-	// It asked for bot.paid, which is not its to have: only the refund comes.
 	if got := types(narrow); !slices.Equal(got, []string{events.PaymentRefunded}) {
 		t.Fatalf("the narrow addon was sent %v", got)
 	}
 	// Each has its own cursor; the narrow one's is at what it was sent.
-	last := plain.delivered()[1]
+	last := plain.delivered()[2]
 	eventually(t, "cursors", func() bool { return p.cursor(t, "plain") == last && p.cursor(t, "narrow") == last })
 	if c := p.cursor(t, "holder"); c != last {
 		t.Fatalf("the holder's cursor %d, want %d", c, last)

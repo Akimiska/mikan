@@ -111,7 +111,7 @@ function Body({ nodeId, c, refetch, checking }: { nodeId: number; c: Cascade; re
             : t("cascade.sourcesNone")}
         </p>
         {c.relay ? <RelayListener relay={c.relay} /> : null}
-        {save.error && !Object.keys(fields).length ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        {save.error && !Object.keys(fields).length ? <div className="banner err mb-4" role="alert">{errorText(save.error)}</div> : null}
         <Field label={t("cascade.route")} hint={t(`cascade.routeHint.${route}`)} error={fields.exit_node_id}>
           <Segmented
             label={t("cascade.route")}

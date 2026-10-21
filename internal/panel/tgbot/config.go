@@ -7,7 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"mikan/internal/panel/tgate"
+	"mikan/internal/textutil"
+	"mikan/internal/tgapi"
 )
 
 // Config is what the admin sets up in the panel: the menu, the texts and which
@@ -25,8 +26,8 @@ type Config struct {
 	// It needs the Mini App. A bot saved before this option has it on.
 	PromoButton bool `json:"promo_button" doc:"Кнопка «Промокоды» в главном меню (нужен Mini App)"`
 	// Channel is the channel a subscriber must join before the bot shows its menu, and the
-	// one the free plan may ask for (billing.FreeChannel). Off by default.
-	Channel tgate.Channel `json:"channel"`
+	// one the free plan may ask for (model.FreeChannel). Off by default.
+	Channel tgapi.Channel `json:"channel"`
 }
 
 // MenuButton of the main menu. Built-in actions open screens; "url" opens a link, "page"
@@ -68,15 +69,8 @@ var builtins = []string{"sub", "devices", "connect", "renew", "support", "app", 
 
 // Default is the menu of a fresh bot in lang, "en" or else Russian.
 func Default(lang string) Config {
-	if lang != "en" {
-		lang = "ru"
-	}
-	l := func(ru, en string) string {
-		if lang == "en" {
-			return en
-		}
-		return ru
-	}
+	lang = textutil.ByLang(lang, "ru", "en")
+	l := textutil.Lang(lang).Pick
 	return Config{
 		Lang: lang,
 		Buttons: []MenuButton{
@@ -130,7 +124,7 @@ func (c *Config) Validate() error {
 		}
 		switch b.Action {
 		case "url":
-			if !tgate.SafeURL(b.URL) {
+			if !tgapi.SafeURL(b.URL) {
 				return ErrButtonURL
 			}
 		case "page":

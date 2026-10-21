@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
+	"slices"
 	"strings"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store/db"
@@ -18,7 +19,7 @@ import (
 // subscription a grant on the same transaction that marks the payment applied.
 
 // KindPackage is a payment for a traffic package.
-const KindPackage = "package"
+const KindPackage = model.KindPackage
 
 var (
 	errUserGone    = errors.New("user_gone")    // the subscription was deleted after the invoice
@@ -35,18 +36,19 @@ type PackageOffer struct {
 }
 
 // PackageOffers lists the packages the subscription's owner can pay for now: on sale,
-// for a quota the subscription has, with a price a provider takes.
+// for a quota the subscription has and can spend (domain.PackagesFor), with a price a
+// provider takes.
 func (s *Service) PackageOffers(ctx context.Context, userID int64) ([]PackageOffer, Available, error) {
 	av := s.Available(ctx)
 	if !av.Any() {
 		return nil, av, nil
 	}
 	q := s.d.Store.Q
-	ps, err := domain.PackagesFor(ctx, q, userID)
+	ps, err := domain.PackagesFor(ctx, q, userID, s.d.Now())
 	if err != nil {
 		return nil, av, err
 	}
-	names, err := poolNames(ctx, q)
+	names, err := domain.PoolNames(ctx, q)
 	if err != nil {
 		return nil, av, err
 	}
@@ -59,18 +61,6 @@ func (s *Service) PackageOffers(ctx context.Context, userID int64) ([]PackageOff
 		}
 	}
 	return out, av, nil
-}
-
-func poolNames(ctx context.Context, q *db.Queries) (map[int64]string, error) {
-	pools, err := q.ListTrafficPools(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := map[int64]string{}
-	for _, p := range pools {
-		out[p.ID] = p.Name
-	}
-	return out, nil
 }
 
 // PackageRequest: the owner of subscription UserID buys a package with Provider.
@@ -110,14 +100,6 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 	if err != nil {
 		return db.Payment{}, err
 	}
-	// Checked again on the user's own rows: a pool closed on the tariff sells nothing.
-	userPools, err := q.ListUserPools(ctx, req.UserID)
-	if err != nil {
-		return db.Payment{}, err
-	}
-	if domain.PackagePoolClosed(userPools, p) {
-		return db.Payment{}, ErrNotForSale
-	}
 	amount, currency, ok := av.price(req.Provider, p.PriceStars, p.PriceRub)
 	if !ok {
 		return db.Payment{}, ErrProviderOff
@@ -132,7 +114,8 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 	packageID := sql.NullInt64{Int64: p.ID, Valid: true}
 	pay, open, err := s.newPayment(ctx, req.TgID, now,
 		func(q *db.Queries) ([]db.Payment, error) {
-			return q.FindOpenPackagePayments(ctx, db.FindOpenPackagePaymentsParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider, UserID: userID, Since: now.Add(-invoiceReuse).Unix()})
+			return q.FindOpenPackagePayments(ctx, db.FindOpenPackagePaymentsParams{TgID: req.TgID, PackageID: packageID, Provider: req.Provider, UserID: userID,
+				Since: now.Add(-invoiceReuse).Unix(), RepeatSince: now.Add(-balanceRepeat).Unix()})
 		},
 		func(q *db.Queries, existing db.Payment) (bool, error) {
 			return s.matchesOpenPayment(ctx, q, existing, amount, req.PromoCode)
@@ -158,22 +141,24 @@ func (s *Service) PackageInvoice(ctx context.Context, req PackageRequest) (db.Pa
 		return pay, nil
 	}
 	lang, _ := s.d.Settings.Lang(ctx)
-	return s.openPayment(ctx, pay, p.Name, DescribePackage(p, offer.Pool, lang))
+	return s.openPayment(ctx, pay, p.Name, model.DescribePackage(model.TrafficPackage(p), offer.Pool, lang))
 }
 
-// packageOnSale: the package of a payment can still be bought (Telegram's pre-checkout):
-// on sale, and its pool not closed for the subscription since the invoice.
+// packageOnSale: the package of a payment can still be bought (Telegram's pre-checkout),
+// by the rule the offers were made with (domain.PackagesFor): what changed since the
+// invoice (the group's mode, the tariff, the subscription's term) is not paid for.
 func (s *Service) packageOnSale(ctx context.Context, pay db.Payment) error {
-	q := s.d.Store.Q
-	p, err := q.GetTrafficPackage(ctx, pay.PackageID.Int64)
-	if err != nil || !pay.PackageID.Valid || p.Archived != 0 || p.OnSale == 0 {
+	if !pay.PackageID.Valid || !pay.UserID.Valid {
 		return ErrNotForSale
 	}
-	pools, err := q.ListUserPools(ctx, pay.UserID.Int64)
+	ps, err := domain.PackagesFor(ctx, s.d.Store.Q, pay.UserID.Int64, s.d.Now())
+	if errors.Is(err, domain.ErrNotFound) {
+		return ErrNotForSale
+	}
 	if err != nil {
 		return err
 	}
-	if domain.PackagePoolClosed(pools, p) {
+	if !slices.ContainsFunc(ps, func(p db.TrafficPackage) bool { return p.ID == pay.PackageID.Int64 }) {
 		return ErrNotForSale
 	}
 	return nil
@@ -210,43 +195,4 @@ func (s *Service) applyPackage(ctx context.Context, q *db.Queries, pay db.Paymen
 	}
 	_, err = domain.GrantTx(ctx, q, u, domain.GrantOf(p, pay.ID), s.d.Now())
 	return u, err
-}
-
-// DescribePackage is a package in a line, "50 GB · WL · until the period ends", in lang
-// ("en", else Russian); pool is the pool's name, "" for the main traffic.
-func DescribePackage(p db.TrafficPackage, pool, lang string) string {
-	en := lang == "en"
-	pick := func(ru, en_ string) string {
-		if en {
-			return en_
-		}
-		return ru
-	}
-	size := fmt.Sprintf(pick("%s ГБ", "%s GB"), gigabytes(p.Bytes, en))
-	target := pool
-	if target == "" {
-		target = pick("основной трафик", "main traffic")
-	}
-	var term string
-	switch p.Lifetime {
-	case domain.LifetimePeriod:
-		term = pick("до конца периода", "until the period ends")
-	case domain.LifetimeDays:
-		term = fmt.Sprintf(pick("на %d дн.", "for %d days"), p.Days)
-	default:
-		term = pick("пока не израсходован", "until used up")
-	}
-	return strings.Join([]string{size, target, term}, " · ")
-}
-
-// gigabytes: "50", or "1.5" ("1,5" in Russian) for a part of a GB.
-func gigabytes(n int64, en bool) string {
-	if n%domain.GiB == 0 {
-		return fmt.Sprint(n / domain.GiB)
-	}
-	s := strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/float64(domain.GiB)), ".0")
-	if !en {
-		s = strings.Replace(s, ".", ",", 1)
-	}
-	return s
 }

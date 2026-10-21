@@ -52,6 +52,8 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec tsc -b
+          pnpm lint
+          pnpm test
           pnpm build
       # The repository key is trusted only with the fingerprint the PostgreSQL project
       # publishes (wiki.postgresql.org/wiki/Apt), and only as the one key in the file.

@@ -131,9 +131,9 @@ func (h *handlers) registerPayments() {
 	huma.Register(h.api, op("get-payment-settings", http.MethodGet, "/api/v1/payments/settings", "Настройки оплаты", 0), h.getPaymentSettings)
 	huma.Register(h.api, op("update-payment-settings", http.MethodPatch, "/api/v1/payments/settings", "Изменить настройки оплаты", 0), h.updatePaymentSettings)
 	huma.Register(h.api, huma.Operation{OperationID: "list-payments", Method: http.MethodGet, Path: "/api/v1/payments", Summary: "История платежей", Tags: tags}, h.listPayments)
-	huma.Register(h.api, op("refund-payment", http.MethodPost, "/api/v1/payments/{id}/refund", "Вернуть Stars покупателю", 0), h.refundPayment)
+	huma.Register(h.api, op("refund-payment", http.MethodPost, "/api/v1/payments/{id}/refund", "Вернуть деньги покупателю: Stars, на баланс или через способ оплаты, если он умеет", 0), h.refundPayment)
 	byHand := op("mark-payment-refunded", http.MethodPost, "/api/v1/payments/{id}/refunded-by-hand", "Отметить, что деньги возвращены вручную", 0)
-	byHand.Description = "Оплата через способ оплаты из маркетплейса, оплаченная, но не применённая (например, пробный период, который уже нельзя выдать): админ вернул деньги в кабинете платёжной системы, платёж становится возвращённым, покупателю приходит сообщение. Stars возвращаются через refund."
+	byHand.Description = "Оплата через способ оплаты из маркетплейса: админ вернул деньги в кабинете платёжной системы (или прошёл чарджбэк). Платёж становится возвращённым, выданное им снимается, покупателю приходит сообщение. Stars и баланс возвращаются через refund."
 	huma.Register(h.api, byHand, h.refundedByHand)
 }
 
@@ -275,7 +275,16 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 			if bb.Enabled != nil {
 				bc.Enabled = *bb.Enabled
 			}
-			if bb.Currency != nil {
+			if bb.Currency != nil && *bb.Currency != bc.Currency {
+				// The balances hold their sums in the currency of the config: a change would
+				// read 500 rubles as 500 dollars. It waits until no money is held in them.
+				held, err := q.BalanceMoneyHeld(ctx)
+				if err != nil {
+					return err
+				}
+				if held {
+					return fieldErr("body.balance.currency", "balance_currency_in_use")
+				}
 				bc.Currency = *bb.Currency
 			}
 			if bb.Rate != nil {

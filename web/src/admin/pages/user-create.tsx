@@ -13,6 +13,7 @@ export function CreateUserDrawer({ open, onOpenChange, onCreated }: { open: bool
   const tariffs = useTariffs();
   const toast = useToast();
   const create = useUserMutation(userActions.create);
+  const { reset: resetCreate } = create;
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [tariffId, setTariffId] = useState<number>();
@@ -23,9 +24,8 @@ export function CreateUserDrawer({ open, onOpenChange, onCreated }: { open: bool
     setName("");
     setContact("");
     setErrors({});
-    create.reset();
-    // Reset only when the drawer opens; `create` changes identity on every render.
-  }, [open]);
+    resetCreate();
+  }, [open, resetCreate]);
 
   // Preselects the second tariff: of the ones a new panel starts with (Trial, Standard,
   // Unlimited) the usual choice for a customer is Standard, not the 3-day trial. With one

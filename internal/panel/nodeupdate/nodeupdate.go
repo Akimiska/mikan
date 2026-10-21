@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/pace"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -327,18 +328,12 @@ func (s *Service) Failures(ctx context.Context) []Failure {
 // Run looks at the nodes every so often, the first time a little after the start so that
 // the nodes' health is in.
 func (s *Service) Run(ctx context.Context) {
-	t := time.NewTimer(30 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if err := s.Tick(ctx); err != nil && ctx.Err() == nil {
-				s.log.Warn("node update", "err", err)
-			}
-			t.Reset(15 * time.Second)
+	wait := 30 * time.Second
+	for pace.Sleep(ctx, wait) {
+		if err := s.Tick(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("node update", "err", err)
 		}
+		wait = 15 * time.Second
 	}
 }
 

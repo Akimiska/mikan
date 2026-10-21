@@ -14,10 +14,10 @@ import (
 	"strconv"
 	"time"
 
+	"mikan/internal/netaddr"
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/proto"
 	"mikan/internal/scan"
 )
 
@@ -100,7 +100,7 @@ func (d Deps) Check(ctx context.Context, dest, sni string) (scan.Result, error) 
 		return scan.Result{}, ErrBadDest
 	}
 	selfSteal := (host == "127.0.0.1" || host == "localhost") && port == strconv.Itoa(PanelPort(ctx, d.Settings))
-	if !selfSteal && !proto.PublicHost(host) {
+	if !selfSteal && !netaddr.PublicHost(host) {
 		return scan.Result{}, ErrPrivateDest
 	}
 	if selfSteal {

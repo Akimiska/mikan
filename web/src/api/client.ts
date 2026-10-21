@@ -29,6 +29,9 @@ export class ApiError extends Error {
   status: number;
   detail: string;
   fields: Record<string, string>;
+  /** The code the API sent for a field ("routes_servers"): what a form compares, not the text,
+   * which changes with the language and the translation. */
+  codes: Record<string, string>;
   /** The value the API sent with a field's error, such as the line of a bad rule. */
   values: Record<string, unknown>;
   /** Every detail's text in the API's order, several per field too (what a node is used by). */
@@ -42,6 +45,7 @@ export class ApiError extends Error {
     this.detail = b.detail ?? "";
     this.retryAfter = retryAfter;
     this.fields = {};
+    this.codes = {};
     this.values = {};
     this.messages = [];
     // The API sends codes ("port_in_use") with an optional value; texts live in i18n.
@@ -51,6 +55,7 @@ export class ApiError extends Error {
       if (!e.location) continue;
       const field = e.location.replace(/^body\./, "");
       this.fields[field] = text;
+      this.codes[field] = e.message ?? "";
       this.values[field] = e.value;
     }
   }

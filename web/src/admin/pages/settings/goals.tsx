@@ -3,6 +3,8 @@ import type { Schemas } from "../../../api/client";
 import { useUpdates } from "../../../api/hooks";
 import { Pill } from "../../../components/ui";
 import { getLocale, t } from "../../../i18n";
+import { safeHref } from "../../../lib/url";
+import { CardHead } from "../../../components/layout";
 
 type Goal = Schemas["Goal"];
 
@@ -24,14 +26,7 @@ export function GoalsCard() {
   const money = (n: number, currency: string) => new Intl.NumberFormat(lang, { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
   return (
     <section className="card glass reveal" aria-labelledby="goals-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="goals-title">
-            {t("goals.title")}
-          </h2>
-          <div className="card-sub">{t("goals.sub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("goals.title")} sub={t("goals.sub")} id="goals-title" />
       <ul className="row-list">
         {active.map((g: Goal) => {
           const pct = Math.min(100, Math.round((g.raised / g.target) * 100));
@@ -53,8 +48,8 @@ export function GoalsCard() {
                 <span>
                   <b className="num font-semibold text-[var(--ink-900)]">{t("goals.raised", { raised, target })}</b> · {pct}%
                 </span>
-                {g.status === "open" ? (
-                  <a className="btn btn-primary btn-sm" href={g.url || v.donate} target="_blank" rel="noopener noreferrer">
+                {g.status === "open" && safeHref(g.url || v.donate) ? (
+                  <a className="btn btn-primary btn-sm" href={safeHref(g.url || v.donate)} target="_blank" rel="noopener noreferrer">
                     {t("goals.give")}
                   </a>
                 ) : null}
@@ -67,8 +62,8 @@ export function GoalsCard() {
         <a className="link-btn form-actions-note inline-flex items-center gap-1 text-[13px]" href={goalsPage(lang)} target="_blank" rel="noopener noreferrer">
           {t("goals.all")} <ExternalLink size={14} aria-hidden />
         </a>
-        {v.donate ? (
-          <a className="btn btn-glass btn-sm" href={v.donate} target="_blank" rel="noopener noreferrer">
+        {safeHref(v.donate) ? (
+          <a className="btn btn-glass btn-sm" href={safeHref(v.donate)} target="_blank" rel="noopener noreferrer">
             {t("goals.any")}
           </a>
         ) : null}

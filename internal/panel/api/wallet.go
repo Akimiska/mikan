@@ -50,6 +50,7 @@ type BalanceView struct {
 
 type listTopupsInput struct {
 	Status string `query:"status" enum:"pending,approved,rejected,"`
+	Before int64  `query:"before" minimum:"0" doc:"Следующая страница: заявки старше этой (id последней показанной)"`
 	Limit  int32  `query:"limit" minimum:"1" maximum:"200" default:"50"`
 }
 
@@ -111,7 +112,7 @@ func (h *handlers) viewTopup(ctx context.Context, t db.Topup) TopupView {
 }
 
 func (h *handlers) listTopups(ctx context.Context, in *listTopupsInput) (*topupsOutput, error) {
-	rows, err := h.d.Store.Q.ListTopups(ctx, db.ListTopupsParams{Status: in.Status, Lim: in.Limit})
+	rows, err := h.d.Store.Q.ListTopups(ctx, db.ListTopupsParams{Status: in.Status, Before: in.Before, Lim: in.Limit})
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +134,8 @@ func (h *handlers) decideTopup(ctx context.Context, in *decideTopupInput) (*topu
 	switch {
 	case errors.Is(err, billing.ErrTopupGone):
 		return nil, huma.Error409Conflict("topup_decided")
+	case errors.Is(err, billing.ErrTopupCurrency):
+		return nil, huma.Error409Conflict("topup_currency")
 	case err != nil:
 		return nil, err
 	}
@@ -188,6 +191,10 @@ func (h *handlers) adjustBalance(ctx context.Context, in *adjustBalanceInput) (*
 
 // topupPhoto is a top-up's screenshot as Telegram keeps it.
 func (h *handlers) topupPhoto(ctx context.Context, in *topupIDInput) (*subImageBytes, error) {
+	// A transfer's screenshot names the payer and their card: no mask reads a picture.
+	if hidesPeople(ctx) {
+		return nil, huma.Error403Forbidden("support_denied")
+	}
 	t, err := h.d.Store.Q.GetTopup(ctx, in.ID)
 	if err != nil || t.Photo == "" {
 		return nil, huma.Error404NotFound("not_found")

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
 )
 
@@ -51,7 +52,7 @@ func TestDescribeContents(t *testing.T) {
 			{Name: "TG", Mode: domain.PoolUnlimited}, {Name: "Premium", Mode: domain.PoolClosed}},
 		Gifts: []OfferGift{{Package: db.TrafficPackage{Bytes: 20 * domain.GiB, Lifetime: domain.LifetimeUsed}, Pool: "WL"}},
 	}
-	got := DescribeContents(o, "ru")
+	got := model.DescribeContents(o.Model(), "ru")
 	want := []string{"EU: входит", "WL: 50 ГБ отдельно", "TG: без лимита", "Premium: не входит", "В подарок: 20 ГБ · WL · пока не израсходован"}
 	if len(got) != len(want) {
 		t.Fatalf("%q", got)
@@ -61,10 +62,10 @@ func TestDescribeContents(t *testing.T) {
 			t.Fatalf("line %d: %q, want %q", i, got[i], want[i])
 		}
 	}
-	if en := DescribeContents(o, "en"); en[1] != "WL: 50 GB of its own" || en[4] != "Gift: 20 GB · WL · until used up" {
+	if en := model.DescribeContents(o.Model(), "en"); en[1] != "WL: 50 GB of its own" || en[4] != "Gift: 20 GB · WL · until used up" {
 		t.Fatalf("en: %q", en)
 	}
-	if len(DescribeContents(Offer{}, "ru")) != 0 {
+	if len(model.DescribeContents(Offer{}.Model(), "ru")) != 0 {
 		t.Fatal("a plan without groups or gifts says nothing more")
 	}
 }

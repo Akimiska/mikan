@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -19,7 +20,7 @@ import (
 // those that renewed, and the money they paid.
 
 // CampaignPrefix starts the /start parameter of a campaign link: /start c_<code>.
-const CampaignPrefix = "c_"
+const CampaignPrefix = model.CampaignPrefix
 
 var (
 	ErrCampaignCode  = errors.New("campaign_code")  // not a code: a-z, 0-9, _ and -, up to 32

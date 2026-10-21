@@ -2,7 +2,7 @@
 // by it over a period.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, Copy, Megaphone, Plus, Trash2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
@@ -12,6 +12,7 @@ import { t } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { fieldErrors, onFormError } from "../../lib/fields";
 import { money, num } from "../../lib/format";
+import { CardHead } from "../../components/layout";
 
 type Campaign = Schemas["CampaignView"];
 const PERIODS = ["7", "30", "90", "0"] as const;
@@ -46,15 +47,13 @@ export function CampaignsSection() {
   });
   return (
     <section className="card glass reveal">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("campaigns.title")}</h2>
-          <div className="card-sub">{t("campaigns.sub")}</div>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+      <CardHead
+        title={t("campaigns.title")}
+        sub={t("campaigns.sub")}
+        aside={<Button variant="primary" size="sm" onClick={() => setCreating(true)}>
           <Plus size={16} aria-hidden /> {t("campaigns.new")}
-        </Button>
-      </div>
+        </Button>}
+      />
       <div className="mb-4">
         <Segmented
           label={t("campaigns.period")}
@@ -143,6 +142,10 @@ function CreateCampaign({ open, onClose, onCreated }: { open: boolean; onClose: 
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // What a refusal said last time is not shown again when the drawer is opened anew.
+  useEffect(() => {
+    if (open) setErrors({});
+  }, [open]);
   const create = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/campaigns", { body: { name: name.trim(), code: code.trim() || undefined } })),
     onSuccess: () => {
@@ -158,6 +161,7 @@ function CreateCampaign({ open, onClose, onCreated }: { open: boolean; onClose: 
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    setErrors({});
     if (!name.trim()) {
       setErrors({ name: t("campaigns.nameRequired") });
       return;

@@ -69,8 +69,8 @@ func TestRefundNewSubscriptionDisablesIt(t *testing.T) {
 	if link, err := e.st.Q.GetTgLink(ctx, u.ID); err != nil || link.TgID != 555 {
 		t.Fatalf("link: %+v %v", link, err)
 	}
-	notes := e.tg.refundNotes()
-	if len(notes) != 1 || !notes[0].disabled || notes[0].u.ID != u.ID || notes[0].p.Status != "refunded" {
+	notes := e.told(events.PaymentRefunded)
+	if len(notes) != 1 || !notes[0].Disabled || notes[0].UserID != u.ID || e.payment(notes[0].PaymentID).Status != "refunded" {
 		t.Fatalf("buyer told: %+v", notes)
 	}
 }
@@ -92,7 +92,7 @@ func TestRefundRenewalTakesBackTheTermAndRestoresTheTariff(t *testing.T) {
 		got.TrafficLimit != ts[0].TrafficLimit || got.DeviceLimit != ts[0].DeviceLimit || got.ResetStrategy != ts[0].ResetStrategy || got.Status != prior.Status {
 		t.Fatalf("reverted %+v\nuser %+v\nwas  %+v", rv, got, prior)
 	}
-	if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].disabled || notes[0].u.ExpiresAt != prior.ExpiresAt {
+	if notes := e.told(events.PaymentRefunded); len(notes) != 1 || notes[0].Disabled || notes[0].UserID != prior.ID {
 		t.Fatalf("buyer told: %+v", notes)
 	}
 }
@@ -216,7 +216,7 @@ func TestRefundPackageRemovesTheGrant(t *testing.T) {
 	if got := e.user(u.ID); got.Status != "active" || got.ExpiresAt != u.ExpiresAt {
 		t.Fatalf("a package refund changed the subscription: %+v", got)
 	}
-	if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].p.Kind != KindPackage {
+	if notes := e.told(events.PaymentRefunded); len(notes) != 1 || notes[0].Kind != KindPackage {
 		t.Fatalf("buyer told: %+v", notes)
 	}
 }
@@ -256,7 +256,7 @@ func TestRefundTelegramDidNotConfirmChangesNothing(t *testing.T) {
 	if _, err := e.s.Refund(ctx, p.ID); err == nil {
 		t.Fatal("a refund Telegram refused went through")
 	}
-	if got := e.payment(p.ID); got.Status != "applied" || e.user(prior.ID) != after || len(e.tg.refundNotes()) != 0 {
+	if got := e.payment(p.ID); got.Status != "applied" || e.user(prior.ID) != after || len(e.told(events.PaymentRefunded)) != 0 {
 		t.Fatalf("payment %q, user %+v (was %+v)", got.Status, e.user(prior.ID), after)
 	}
 	// Telegram back: the same refund goes through.
@@ -303,8 +303,8 @@ func TestStarsRefundedByTelegram(t *testing.T) {
 	if got := e.payment(p.ID); got.Status != "refunded" || !got.RefundedAt.Valid || u.Status != "disabled" {
 		t.Fatalf("payment %+v, user %q", got, u.Status)
 	}
-	if len(e.tg.refunds) != 0 || len(e.tg.refundNotes()) != 1 {
-		t.Fatalf("refund calls %v, buyer told %d times", e.tg.refunds, len(e.tg.refundNotes()))
+	if len(e.tg.refunds) != 0 || len(e.told(events.PaymentRefunded)) != 1 {
+		t.Fatalf("refund calls %v, buyer told %d times", e.tg.refunds, len(e.told(events.PaymentRefunded)))
 	}
 	// The admin's refund of it afterwards is not offered.
 	if _, err := e.s.Refund(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
@@ -322,13 +322,13 @@ func TestStarsRefundedBeforeItWasApplied(t *testing.T) {
 	must(t, err)
 	must(t, e.s.StarsRefunded(ctx, 555, "ch-paid"))
 	e.s.Reconcile(ctx)
-	if e.payment(p.ID).Status != "refunded" || e.users() != 0 || len(e.tg.refundNotes()) != 0 {
+	if e.payment(p.ID).Status != "refunded" || e.users() != 0 {
 		t.Fatalf("payment %q, users %d", e.payment(p.ID).Status, e.users())
 	}
-	// The addons hear of the refund once, though nothing was applied.
+	// The buyer and the addons hear of the refund once, of no subscription: nothing was applied.
 	must(t, e.s.StarsRefunded(ctx, 555, "ch-paid"))
-	if refunds := ofType(e.events(), events.PaymentRefunded); len(refunds) != 1 || refunds[0].TgID.Int64 != 555 {
-		t.Fatalf("refund events of an unapplied payment: %v", typesOf(e.events()))
+	if refunds := e.told(events.PaymentRefunded); len(refunds) != 1 || refunds[0].TgID != 555 || refunds[0].UserID != 0 || refunds[0].PaymentID != p.ID {
+		t.Fatalf("refund events of an unapplied payment: %+v", refunds)
 	}
 }
 
@@ -345,8 +345,8 @@ func TestRefundAndTelegramUpdateTogether(t *testing.T) {
 	go func() { defer wg.Done(); _, _ = e.s.Refund(ctx, p.ID) }()
 	go func() { defer wg.Done(); _ = e.s.StarsRefunded(ctx, 555, "ch-both") }()
 	wg.Wait()
-	if got := e.user(prior.ID); e.payment(p.ID).Status != "refunded" || got.ExpiresAt != prior.ExpiresAt || got.TariffID != prior.TariffID || len(e.tg.refundNotes()) != 1 {
-		t.Fatalf("payment %q, user %+v (was %+v), told %d times", e.payment(p.ID).Status, got, prior, len(e.tg.refundNotes()))
+	if got := e.user(prior.ID); e.payment(p.ID).Status != "refunded" || got.ExpiresAt != prior.ExpiresAt || got.TariffID != prior.TariffID || len(e.told(events.PaymentRefunded)) != 1 {
+		t.Fatalf("payment %q, user %+v (was %+v), told %d times", e.payment(p.ID).Status, got, prior, len(e.told(events.PaymentRefunded)))
 	}
 }
 

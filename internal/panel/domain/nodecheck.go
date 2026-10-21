@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/frontpage"
 	"mikan/internal/hostname"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/store"
@@ -144,6 +145,9 @@ type NodePatch struct {
 	HTTPRedirect *bool
 	// SNIRouter shares the node's TCP 443 between the inbounds marked for it.
 	SNIRouter *bool
+	// FrontPage is the built-in page (frontpage.Templates) strangers get on the node's own
+	// domain through the shared 443; "" none.
+	FrontPage *string
 	// APILockdown: the node's API answers only the panel; APIAllow the networks the admin
 	// adds to the panel's own addresses (NormalizeAPIAllow). Not on the panel's own node,
 	// which the panel reaches over its socket.
@@ -250,6 +254,14 @@ func UpdateNode(ctx context.Context, st *store.Store, id int64, p NodePatch, now
 		}
 		if p.SNIRouter != nil {
 			if err := q.SetNodeSNIRouter(ctx, db.SetNodeSNIRouterParams{SniRouter: Flag(*p.SNIRouter), UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
+				return err
+			}
+		}
+		if p.FrontPage != nil {
+			if *p.FrontPage != "" && frontpage.Page(*p.FrontPage) == nil {
+				return fieldErr("front_page", "bad_front_page")
+			}
+			if err := q.SetNodeFrontPage(ctx, db.SetNodeFrontPageParams{FrontPage: *p.FrontPage, UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
 				return err
 			}
 		}

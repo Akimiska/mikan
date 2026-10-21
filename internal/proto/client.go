@@ -23,6 +23,9 @@ type ClientInput struct {
 	// or unknown means DefaultFingerprint.
 	Fingerprint string
 	Slot        Slot
+	// SSOneKey: the node runs Shadowsocks-2022 with one key for everyone (older than the key
+	// per user, ssMultiUser): the link carries the server's key alone, as that node expects.
+	SSOneKey bool
 }
 
 // Fingerprints are the uTLS profiles that mihomo (component/tls/utls.go, v1.19.31), Xray

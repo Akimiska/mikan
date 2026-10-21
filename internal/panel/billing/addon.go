@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"mikan/internal/panel/addons"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -25,16 +26,7 @@ import (
 // for itself, compared with the payment it created, never a webhook alone.
 
 // AddonPrefix starts the provider name of a payment made through an adapter.
-const AddonPrefix = "addon:"
-
-// AddonID is the adapter of a provider name, "" for a built-in provider.
-func AddonID(provider string) string {
-	id, ok := strings.CutPrefix(provider, AddonPrefix)
-	if !ok || !addons.ValidID(id) {
-		return ""
-	}
-	return id
-}
+const AddonPrefix = model.AddonPrefix
 
 // AddonConfig is what the admin set for an adapter: on or off, and its settings (secrets
 // included; the API never sends those back).
@@ -279,7 +271,7 @@ func (s *Service) validatePromoProvider(ctx context.Context, provider string) er
 	if provider == Stars || provider == Balance {
 		return nil
 	}
-	id := AddonID(provider)
+	id := model.AddonID(provider)
 	if id == "" || s.d.Addons == nil {
 		return promo.ErrRefundUnsupported
 	}
@@ -316,7 +308,7 @@ func (s *Service) AddonWebhookURL(ctx context.Context, id, subBase string) strin
 }
 
 func (s *Service) openAddonInvoice(ctx context.Context, p db.Payment, description string) (sql.NullString, string, error) {
-	id := AddonID(p.Provider)
+	id := model.AddonID(p.Provider)
 	cl, cfg, err := s.addonClient(ctx, id)
 	if err != nil {
 		return sql.NullString{}, "", err
@@ -389,7 +381,7 @@ func (s *Service) checkAddon(ctx context.Context, provider, ext string) error {
 // checkAddonPayment is checkAddon for a payment already loaded.
 func (s *Service) checkAddonPayment(ctx context.Context, pay db.Payment) error {
 	provider, ext := pay.Provider, pay.ExternalID.String
-	cl, cfg, err := s.addonClient(ctx, AddonID(provider))
+	cl, cfg, err := s.addonClient(ctx, model.AddonID(provider))
 	if err != nil {
 		return err
 	}
@@ -410,11 +402,9 @@ func (s *Service) checkAddonPayment(ctx context.Context, pay db.Payment) error {
 			r, redemptionErr := s.d.Promo.GetPaymentRedemption(ctx, pay.ID)
 			late := redemptionErr == nil && promo.PaidLate(r, paymentTime(pay, s.d.Now().Unix()))
 			if late {
-				handled, err := s.refundLatePromoPayment(ctx, pay.ID, ext, func(current db.Payment) error {
-					// This invoice already contains the discounted amount. The stable key
-					// makes adapter retries idempotent.
-					return cl.Refund(ctx, cfg.Values, ext, current.Amount, "mikan-promo-late-"+strconv.FormatInt(current.ID, 10))
-				})
+				// The invoice already holds the discounted amount; the stable key makes the
+				// adapter's retries idempotent.
+				handled, err := s.refundLatePromoPayment(ctx, pay.ID, ext)
 				if err != nil {
 					return fmt.Errorf("refund expired promo payment %d: %w", pay.ID, err)
 				}
@@ -427,6 +417,13 @@ func (s *Service) checkAddonPayment(ctx context.Context, pay db.Payment) error {
 			}
 		}
 		return s.paid(ctx, pay, ext)
+	case "refunded":
+		// The money went back at the provider: what the payment gave goes with it, once.
+		if pay.Status == PaymentPaid || pay.Status == PaymentApplied {
+			_, err := s.refunded(ctx, pay.ID)
+			return err
+		}
+		return nil
 	case "canceled":
 		_, err := s.d.Store.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: PaymentFailed, ID: pay.ID, OldStatus: PaymentPending})
 		if err != nil {

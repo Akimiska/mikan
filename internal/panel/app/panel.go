@@ -22,6 +22,7 @@ import (
 	"mikan/internal/hostchan"
 	"mikan/internal/logbuf"
 	"mikan/internal/nodetls"
+	"mikan/internal/pace"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
 	addonpages "mikan/internal/panel/addons/pages"
@@ -30,11 +31,14 @@ import (
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/botpanel"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/ipgeo"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
@@ -49,10 +53,11 @@ import (
 	"mikan/internal/panel/support"
 	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbackup"
-	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
 	"mikan/internal/panel/warp"
+	"mikan/internal/release"
+	"mikan/internal/tgapi"
 )
 
 // Panel is the fully wired HTTP side of the panel, without the listener.
@@ -68,7 +73,7 @@ type Panel struct {
 	// Gateway is the panel's side of Telegram: the token, polling, Stars, the alerts' way
 	// out; Telegram is the admin's setup of the bot, its notices and broadcasts on top of it.
 	Gateway  *tgate.Gateway
-	Telegram *tgbot.Panel
+	Telegram *botpanel.Panel
 	Billing  *billing.Service
 	// Referrals is the AoiVPN fork's referral programme (aoiref).
 	Referrals *aoiref.Service
@@ -297,7 +302,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	promos := promo.New(st, o.Now)
 	promos.Changed = deps.Users.Changed
 	p.Billing = billing.New(billing.Deps{Store: st, Settings: set, Users: deps.Users, Log: o.Log, Now: o.Now, TrustProxy: o.TrustProxy,
-		MaxLinks: tgate.MaxLinks,
+		MaxLinks: model.MaxLinks,
 		Addons:   deps.Addons, SubBase: subBase, Promo: promos, Events: hub,
 		TopupWaiting: func(ctx context.Context, t db.Topup) { p.tellAdminOfTopup(ctx, t) }})
 	deps.Billing, deps.SubBase = p.Billing, subBase
@@ -307,41 +312,40 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		tunnel = p.Nodes.Tunnel
 	}
 	p.Gateway = tgate.New(tgate.Deps{Store: st, Settings: set, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing, Tunnel: tunnel})
-	// The bot's screens see the panel through a Backend: in process here, over the Panel
-	// API once they run as an addon.
+	// The bot's screens, which run as an addon, see the panel through the Panel API: Local
+	// answers their calls (botpanel.RPCHandler).
 	// AoiVPN fork: the referral programme; its rewards are told in the bot.
 	p.Referrals = aoiref.New(aoiref.Deps{Store: st, Users: deps.Users, BotURL: p.Gateway.BotURL, Now: o.Now, Log: o.Log,
 		Notify: func(_ context.Context, tg int64, text string) {
-			p.Gateway.Outbox().Reply(tg, "", 1, func(ctx context.Context, c *tgate.Client) error {
+			p.Gateway.Outbox().Reply(tg, "", 1, func(ctx context.Context, c *tgapi.Client) error {
 				_, err := c.Send(ctx, tg, text, nil, false)
 				return err
 			})
 		}})
-	backend := &tgbot.Local{Referrals: p.Referrals, Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
+	backend := &botpanel.Local{Referrals: p.Referrals, Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
 	// The panel's API for addons, with the Bot API proxy over the gateway for the addon that
 	// holds the bot.
 	p.AddonsAPI = panelapi.New(panelapi.Deps{Addons: p.Addons, Store: st, Hub: hub, Log: o.Log, Now: o.Now,
-		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend), Users: deps.Users,
+		Telegram: p.Gateway, Settings: set, SubBase: subBase, Bot: botpanel.RPCHandler(backend), Users: deps.Users,
 		Inbounds: deps.Inbounds, Changes: deps.Changes, NodeState: nodeState(p.Nodes)})
 	// What the bot says comes from the bot addon (the official one is installed by itself,
 	// botaddon.go): the panel tells it through events, and keeps the broadcasts and the
 	// previews of the admin's texts.
 	emit := func(ctx context.Context, typ string, userID, tgID int64, data any, dedupe string) error {
-		err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, o.Now(), typ, userID, tgID, data, dedupe) })
+		err := st.Tx(ctx, func(q *db.Queries) error { return feed.Emit(ctx, q, o.Now(), typ, userID, tgID, data, dedupe) })
 		if err == nil {
 			hub.Kick()
 		}
 		return err
 	}
-	p.Telegram = tgbot.NewPanel(tgbot.PanelDeps{Backend: backend, Outbox: p.Gateway.Outbox, Emit: emit, Log: o.Log, Now: o.Now})
+	p.Telegram = botpanel.New(botpanel.Deps{Backend: backend, Outbox: p.Gateway.Outbox, Emit: emit, Log: o.Log, Now: o.Now})
 	// The updates wait in the buffer for the addon that holds the bot.
 	p.Gateway.SetHandler(p.AddonsAPI.BotSlot())
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
 	p.Support.SetNotifier(p.tellAdminOfSupport)
 	p.Billing.SetTelegram(p.Gateway)
-	p.Billing.SetNotifier(tgbot.Notifications{Emit: emit, Log: o.Log})
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
 	var certStatus infraalerts.CertificateSource
@@ -527,6 +531,14 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 				cfg.Direct = append(cfg.Direct, n.PublicHost, n.Domain)
 			}
 			sn.Endpoint.SNIRouter = n.SniRouter != 0
+			// A node older than the Shadowsocks-2022 key per user runs one key for everyone: its
+			// links carry that one until it is updated. A version that is not a release (a
+			// build of the source) is taken as new.
+			if p.Nodes != nil && n.Address != "" {
+				if hv, ok := p.Nodes.Health(n.ID); ok && release.Valid(hv.Health.Version) && release.Newer(ssUsersSince, hv.Health.Version) {
+					sn.SSOneKey = true
+				}
+			}
 			if o.TLS != nil {
 				if c, err := o.TLS.Pick(n); err == nil {
 					sn.Endpoint.PinSHA256 = c.Pin
@@ -643,7 +655,7 @@ func (p *Panel) Run(ctx context.Context) {
 	}
 	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.Referrals.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
-			every(ctx, 5*time.Second, func() {
+			pace.Tick(ctx, 5*time.Second, func(ctx context.Context) {
 				if _, err := p.Apply(ctx); err != nil {
 					p.log.Error("reload settings", "err", err)
 				}
@@ -652,14 +664,14 @@ func (p *Panel) Run(ctx context.Context) {
 		// A support grant whose time ran out is written to the journal and the admin is told
 		// within the half minute, not when the next request meets it.
 		func(ctx context.Context) {
-			every(ctx, 30*time.Second, func() {
+			pace.Tick(ctx, 30*time.Second, func(ctx context.Context) {
 				if err := p.Support.Sweep(ctx); err != nil {
 					p.log.Error("support sweep", "err", err)
 				}
 			})
 		},
 		func(ctx context.Context) {
-			every(ctx, 10*time.Minute, func() {
+			pace.Tick(ctx, 10*time.Minute, func(ctx context.Context) {
 				if err := p.sessions.Cleanup(ctx); err != nil {
 					p.log.Error("session cleanup", "err", err)
 				}
@@ -683,6 +695,9 @@ func runAll(ctx context.Context, workers ...func(context.Context)) {
 
 // configCacheTTL: the longest a changed setting is not seen, when the change was made by
 // another process (the server CLI); this process's own changes drop the cache at once.
+// ssUsersSince is the first release whose nodes run Shadowsocks-2022 with a key per user.
+const ssUsersSince = "0.5.1.1-rc.11"
+
 const configCacheTTL = 10 * time.Second
 
 // configCache keeps the subscription's config between requests. Errors are not kept.
@@ -729,19 +744,6 @@ func forgetNodeFiles(o Options) func(id int64) error {
 			errs = append(errs, os.RemoveAll(filepath.Join(o.DataDir, "tls", "acme-nodes", strconv.FormatInt(id, 10))))
 		}
 		return errors.Join(errs...)
-	}
-}
-
-func every(ctx context.Context, d time.Duration, fn func()) {
-	t := time.NewTicker(d)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			fn()
-		}
 	}
 }
 

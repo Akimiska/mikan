@@ -2,13 +2,15 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/support"
@@ -78,7 +80,11 @@ func TestMaskResponses(t *testing.T) {
 
 func TestSupportGate(t *testing.T) {
 	op := func(id string, tags ...string) *huma.Operation { return &huma.Operation{OperationID: id, Tags: tags} }
+	only := func(id string, tags ...string) *huma.Operation {
+		return &huma.Operation{OperationID: id, Tags: tags, Metadata: sessionOnly}
+	}
 	view, change, terminal := db.SupportGrant{Level: support.LevelView}, db.SupportGrant{Level: support.LevelChange}, db.SupportGrant{Level: support.LevelTerminal}
+	extended, extTerminal := db.SupportGrant{Level: support.LevelChange, Extended: true}, db.SupportGrant{Level: support.LevelTerminal, Extended: true}
 	for _, c := range []struct {
 		op       *huma.Operation
 		mutating bool
@@ -105,22 +111,37 @@ func TestSupportGate(t *testing.T) {
 		{&huma.Operation{OperationID: "restart-node", Tags: []string{"node"}, Metadata: sessionOnly}, true, view, 403, "support_read_only"},
 		{&huma.Operation{OperationID: "restart-server", Tags: []string{"settings"}, Metadata: sessionOnly}, true, change, 0, ""},
 		{&huma.Operation{OperationID: "restart-node", Tags: []string{"node"}, Metadata: sessionOnly}, true, terminal, 0, ""},
+		// What outlasts the grant or moves money is the extended mode's, at every level.
+		{only("create-node", "node"), true, change, 403, "support_extended"},
+		{only("rekey-node", "node"), true, terminal, 403, "support_extended"},
+		{only("update-payment-settings", "payments"), true, change, 403, "support_extended"},
+		{only("get-telegram-whatever", "telegram"), false, view, 403, "support_extended"},
+		{only("create-node", "node"), true, extended, 0, ""},
+		{only("update-payment-settings", "payments"), true, extTerminal, 0, ""},
+		// The mode adds operations, not writes: a view grant still only reads (the panel
+		// refuses such a grant anyway).
+		{only("create-node", "node"), true, db.SupportGrant{Level: support.LevelView, Extended: true}, 403, "support_read_only"},
+		// What no operator reaches stays closed in the extended mode too.
+		{only("update-telegram", "telegram"), true, extended, 403, "support_denied"},
+		{only("reset-admin-path", "settings"), true, extTerminal, 403, "support_denied"},
+		{only("list-audit", "settings"), false, extended, 403, "support_denied"},
+		{op("me", "auth"), false, extended, 403, "support_denied"},
+		{op("create-api-key", "api-keys"), true, extended, 403, "support_denied"},
+		{only("create-support-grant", "support"), true, extTerminal, 403, "support_denied"},
 	} {
 		if status, code := supportGate(c.op, c.mutating, c.g); status != c.status || code != c.code {
-			t.Errorf("%s mutating=%v level=%s: %d %s, want %d %s", c.op.OperationID, c.mutating, c.g.Level, status, code, c.status, c.code)
+			t.Errorf("%s mutating=%v level=%s extended=%v: %d %s, want %d %s", c.op.OperationID, c.mutating, c.g.Level, c.g.Extended, status, code, c.status, c.code)
 		}
 	}
 }
 
-// The operations registered for real: the diagnostics a view operator is promised (the
-// UI, the docs and the MCP wrappers lean on it) pass the gate at the view level, the
-// restarts do not, and the bot's settings are closed at every level.
-func TestSupportGateOfTheRegisteredOperations(t *testing.T) {
-	api := humago.New(http.NewServeMux(), huma.DefaultConfig("test", "1"))
-	h := &handlers{api: api}
-	h.registerNodeChecks()
-	h.registerHostOps()
-	h.registerTelegram()
+// registeredOps are the panel's operations, by id, as the API registers them.
+func registeredOps(t *testing.T) map[string]*huma.Operation {
+	t.Helper()
+	_, api, err := New(Deps{Now: time.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ops := map[string]*huma.Operation{}
 	for _, item := range api.OpenAPI().Paths {
 		for _, op := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
@@ -129,7 +150,17 @@ func TestSupportGateOfTheRegisteredOperations(t *testing.T) {
 			}
 		}
 	}
+	return ops
+}
+
+// The operations registered for real: the diagnostics a view operator is promised (the
+// UI, the docs and the MCP wrappers lean on it) pass the gate at the view level, the
+// restarts do not; every sessionOnly operation outside supportSessionOps waits for the
+// extended mode, and what no operator reaches is closed in it too.
+func TestSupportGateOfTheRegisteredOperations(t *testing.T) {
+	ops := registeredOps(t)
 	view, change := db.SupportGrant{Level: support.LevelView}, db.SupportGrant{Level: support.LevelChange}
+	extended := db.SupportGrant{Level: support.LevelChange, Extended: true}
 	for id, want := range map[string]int{"check-node": 0, "check-node-russia": 0, "check-server": 0, "doctor-server": 0, "doctor-node": 0,
 		"restart-server": http.StatusForbidden, "restart-node": http.StatusForbidden,
 		"update-telegram": http.StatusForbidden, "telegram-infrastructure-connect": http.StatusForbidden, "telegram-infrastructure-disconnect": http.StatusForbidden} {
@@ -138,21 +169,102 @@ func TestSupportGateOfTheRegisteredOperations(t *testing.T) {
 			t.Errorf("%s is not registered", id)
 			continue
 		}
-		mutating := op.Method != http.MethodGet
-		if status, _ := supportGate(op, mutating, view); status != want {
+		if status, _ := supportGate(op, op.Method != http.MethodGet, view); status != want {
 			t.Errorf("%s at view: %d, want %d", id, status, want)
 		}
-		if strings.HasPrefix(id, "update-telegram") || strings.HasPrefix(id, "telegram-") {
-			if status, code := supportGate(op, mutating, change); status != http.StatusForbidden || code != "support_denied" {
-				t.Errorf("%s at change: %d %s, want 403 support_denied", id, status, code)
+	}
+	// The lists name operations that exist: a renamed one would drop out of them unseen.
+	for _, id := range append(slices.Clone(supportDeniedOps), supportSessionOps...) {
+		if ops[id] == nil {
+			t.Errorf("%s is named in the support lists but not registered", id)
+		}
+	}
+	for _, id := range supportSessionOps {
+		if op := ops[id]; op != nil {
+			if only, _ := op.Metadata["sessionOnly"].(bool); !only {
+				t.Errorf("%s is in supportSessionOps but not sessionOnly: the list is for those alone", id)
 			}
+		}
+	}
+	for id, op := range ops {
+		mutating := op.Method != http.MethodGet
+		closed := slices.Contains(supportDeniedOps, id) || slices.ContainsFunc(op.Tags, func(tag string) bool { return slices.Contains(supportDeniedTags, tag) })
+		only, _ := op.Metadata["sessionOnly"].(bool)
+		status, code := supportGate(op, mutating, change)
+		extStatus, extCode := supportGate(op, mutating, extended)
+		switch {
+		case closed:
+			if code != "support_denied" || extCode != "support_denied" {
+				t.Errorf("%s: %d %s, extended %d %s, want support_denied in both", id, status, code, extStatus, extCode)
+			}
+		case only && !slices.Contains(supportSessionOps, id):
+			if code != "support_extended" || extStatus != 0 {
+				t.Errorf("%s: %d %s, extended %d %s, want support_extended, then through", id, status, code, extStatus, extCode)
+			}
+		default:
+			if status != 0 || extStatus != 0 {
+				t.Errorf("%s at change: %d %s, extended %d %s, want through", id, status, code, extStatus, extCode)
+			}
+		}
+	}
+	// What hands out lasting access or moves money waits for the extended mode by name: the
+	// review that led here found every one of these open to a change grant.
+	for _, id := range []string{"create-node", "rekey-node", "import-node-warp", "set-certificate", "set-node-certificate", "set-sub-certificate",
+		"import-run", "import-preview", "update-legacy-links", "update-payment-settings", "refund-payment", "mark-payment-refunded",
+		"decide-topup", "adjust-balance", "set-bot-addon", "add-addon-source", "refresh-addon-source", "install-external-addon",
+		"update-exit-dns", "put-traffic-detail", "update-sub-page"} {
+		op := ops[id]
+		if op == nil {
+			t.Errorf("%s is not registered", id)
+			continue
+		}
+		if _, code := supportGate(op, true, change); code != "support_extended" {
+			t.Errorf("%s at change: %s, want support_extended", id, code)
+		}
+	}
+}
+
+// By field: an API key is refused, an operator unless its grant is extended; requireOwner
+// refuses the extended mode too.
+func TestRequireSessionAndOwner(t *testing.T) {
+	grant := func(g db.SupportGrant) context.Context {
+		return context.WithValue(context.Background(), keySupport, supportCtx{grant: g})
+	}
+	key := context.WithValue(context.Background(), keyAPIKey, db.ApiKey{Scope: "full"})
+	change := grant(db.SupportGrant{Level: support.LevelChange})
+	extended := grant(db.SupportGrant{Level: support.LevelChange, Extended: true})
+	code := func(err error) string {
+		if err == nil {
+			return ""
+		}
+		var se huma.StatusError
+		if !errors.As(err, &se) || se.GetStatus() != http.StatusForbidden {
+			return "not 403: " + err.Error()
+		}
+		return se.Error()
+	}
+	for _, c := range []struct {
+		name         string
+		ctx          context.Context
+		session, own string
+	}{
+		{"the admin", context.Background(), "", ""},
+		{"a key", key, "session_only", "session_only"},
+		{"an operator", change, "support_extended", "support_denied"},
+		{"an operator in the extended mode", extended, "", "support_denied"},
+	} {
+		if got := code(requireSession(c.ctx, "f")); got != c.session {
+			t.Errorf("%s: requireSession %q, want %q", c.name, got, c.session)
+		}
+		if got := code(requireOwner(c.ctx, "f")); got != c.own {
+			t.Errorf("%s: requireOwner %q, want %q", c.name, got, c.own)
 		}
 	}
 }
 
 func TestSupportTerminalAllowed(t *testing.T) {
 	grant := func(level string, targets ...string) context.Context {
-		return context.WithValue(context.Background(), keySupport, supportCtx{grant: db.SupportGrant{Level: level, TerminalTargets: targets}, via: "api"})
+		return context.WithValue(context.Background(), keySupport, supportCtx{grant: db.SupportGrant{Level: level, TerminalTargets: targets}})
 	}
 	for _, c := range []struct {
 		name   string

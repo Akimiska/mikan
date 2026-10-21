@@ -110,6 +110,12 @@ func TestCapAndBudgetTogether(t *testing.T) {
 	if got := core.held[userKey{"vless", "s1"}]; got != want {
 		t.Fatalf("%+v, want %+v", got, want)
 	}
+	// The quota taken off (unlimited traffic now) with the speed kept: the core drops it.
+	passes := core.passes
+	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, SpeedMbps: 10, Group: "7"}})
+	if got := core.held[userKey{"vless", "s1"}]; got.budget != 0 || got.down != 10*mbit || core.passes == passes {
+		t.Fatalf("the quota taken off stays in the core: %+v", got)
+	}
 }
 
 // With the fair share on, the active users' shares go to the core as their speeds, and a

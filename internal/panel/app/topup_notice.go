@@ -42,10 +42,11 @@ func (p *Panel) tellAdminOfTopup(ctx context.Context, t db.Topup) {
 			text = fmt.Sprintf("💰 <b>Заявка на пополнение</b>\n%s · %s\nРешить: Платежи, Пополнения.", html.EscapeString(who), amount)
 		}
 		// The screenshot is the bot's file: the infrastructure bot is another, so it may not
-		// be able to send it; the text goes alone then.
+		// be able to send it; the text goes alone then, through the alerts' queue, which tries
+		// again while Telegram does not answer.
 		if _, err := client.SendPhoto(ctx, chat, t.Photo, text); err != nil {
-			if _, err := client.Send(ctx, chat, text, nil, false); err != nil {
-				p.log.Warn("topup notice: not delivered", "err", err)
+			if p.Alerts != nil {
+				p.Alerts.Notify(ctx, "topup/"+strconv.FormatInt(t.ID, 10), text)
 			}
 		}
 	})

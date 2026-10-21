@@ -5,22 +5,23 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, Pencil } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { api, errorText, unwrap, type Schemas } from "../../api/client";
+import { api, errorText, unwrap, type Inbound, type Schemas } from "../../api/client";
 import { onFormError } from "../../lib/fields";
-import { qk, usePackages, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
+import { qk, useInbounds, usePackages, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
 import { Field, Pill, Segmented, Skeleton } from "../../components/ui";
-import { Switch } from "../../components/switch";
+import { SwitchRow } from "../../components/switch";
 import { t } from "../../i18n";
 import { bytes, days as daysText, GiB, rubles } from "../../lib/format";
 import { isKopecks, isLifetimeDays, isStars, isTrafficGB, LIFETIME_DAYS_PRESETS, parseDecimal, rubKopecks } from "../../lib/validate";
+import { canBuy, fitsTariff, quotasOf } from "./sale-rules";
+import { CardHead } from "../../components/layout";
 
 type Package = Schemas["PackageView"];
 type Pool = Schemas["PoolView"];
 type Tariff = Schemas["TariffView"];
-type Mode = Schemas["PoolSetting"]["mode"];
 export type Lifetime = Package["lifetime"];
 
 /** Where a package or a grant adds traffic: the main quota or a pool by name. */
@@ -29,24 +30,14 @@ export function targetName(poolId: number | null | undefined, pools: Pool[] | un
   return pools?.find((p) => p.id === poolId)?.name ?? t("packages.poolGone");
 }
 
-/** What a tariff gives, as a package fits it: a limited main traffic, and each group's mode. */
-export type TariffQuotas = { trafficLimited: boolean; groups: Record<number, { mode: Mode }> };
-
-/** The quotas a saved tariff gives. */
-export function quotasOf(tr: Tariff): TariffQuotas {
-  return { trafficLimited: tr.traffic_limit != null, groups: Object.fromEntries(tr.pools.map((p) => [p.pool_id, { mode: p.mode }])) };
+/** The names of the tariffs that give the package as a gift with every payment. */
+function giftIn(p: Package, tariffs: Tariff[] | undefined): string[] {
+  return (tariffs ?? []).filter((tr) => tr.gifts.includes(p.id)).map((tr) => tr.name);
 }
 
-/** The package adds to a quota the tariff gives (domain.PackageForTariff): the main traffic
- * with a limit, or a group with a limit of its own; whom it is sold to is not looked at. */
-export function fitsTariff(p: Package, q: TariffQuotas): boolean {
-  if (p.pool_id == null) return q.trafficLimited;
-  return q.groups[p.pool_id]?.mode === "own";
-}
-
-/** The tariffs that can buy the package now: it fits them and is sold to them. */
-function buyersOf(p: Package, tariffs: Tariff[]): Tariff[] {
-  return tariffs.filter((tr) => fitsTariff(p, quotasOf(tr)) && (p.tariffs.length === 0 || p.tariffs.includes(tr.id)));
+/** The tariffs that can buy the package now (canBuy). */
+function buyersOf(p: Package, tariffs: Tariff[], inbounds: Inbound[] | undefined): Tariff[] {
+  return tariffs.filter((tr) => canBuy(p, fitsTariff(p, quotasOf(tr, inbounds)), tr.id));
 }
 
 /** A package in a line: "50 GB · WL · until used up". */
@@ -65,6 +56,7 @@ export function PackagesCard({ creating, onCreateClose }: { creating: boolean; o
   const packages = usePackages();
   const pools = usePools();
   const tariffs = useTariffs();
+  const inbounds = useInbounds();
   const selling = usePaymentSettings().data?.enabled === true;
   const qc = useQueryClient();
   const toast = useToast();
@@ -82,12 +74,7 @@ export function PackagesCard({ creating, onCreateClose }: { creating: boolean; o
 
   return (
     <section className="card glass reveal">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("packages.title")}</h2>
-          <div className="card-sub">{t("packages.sub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("packages.title")} sub={t("packages.sub")} />
       <QueryBoundary query={packages} pending={<Skeleton style={{ height: 64 }} />}>
         {(list) =>
           list.length === 0 ? (
@@ -99,17 +86,16 @@ export function PackagesCard({ creating, onCreateClose }: { creating: boolean; o
                   <div className="min-w-0">
                     <div className="text-[13px] font-semibold">{p.name}</div>
                     <div className="text-xs text-[var(--ink-500)]">{packageLine(p, pools.data)}</div>
-                    {p.tariffs.length ? (
+                    {/* Not before the tariffs load; a tariff gone since is its number. */}
+                    {p.tariffs.length && tariffs.data ? (
                       <div className="text-xs text-[var(--ink-600)]">
-                        {t("packages.forTariffs", { names: p.tariffs.map((id) => tariffs.data?.find((x) => x.id === id)?.name ?? "?").join(", ") })}
+                        {t("packages.forTariffs", { names: p.tariffs.map((id) => tariffs.data?.find((x) => x.id === id)?.name ?? `#${id}`).join(", ") })}
                       </div>
                     ) : null}
-                    {tariffs.data?.some((tr) => tr.gifts.includes(p.id)) ? (
-                      <div className="text-xs text-[var(--ink-600)]">
-                        {t("packages.giftIn", { names: (tariffs.data ?? []).filter((tr) => tr.gifts.includes(p.id)).map((tr) => tr.name).join(", ") })}
-                      </div>
+                    {giftIn(p, tariffs.data).length ? <div className="text-xs text-[var(--ink-600)]">{t("packages.giftIn", { names: giftIn(p, tariffs.data).join(", ") })}</div> : null}
+                    {p.on_sale && tariffs.data && buyersOf(p, tariffs.data, inbounds.data).length === 0 ? (
+                      <div className="text-xs text-[var(--honey-600)]">{t("packages.buyersNone")}</div>
                     ) : null}
-                    {tariffs.data && buyersOf(p, tariffs.data).length === 0 ? <div className="text-xs text-[var(--honey-600)]">{t("packages.buyersNone")}</div> : null}
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-600)]">
                       {p.on_sale && selling ? <Pill tone="ok">{t("tariffs.onSale")}</Pill> : <Pill tone="off">{t("packages.notOnSale")}</Pill>}
                       {p.price_stars != null ? <span className="num">⭐ {p.price_stars}</span> : null}
@@ -134,6 +120,7 @@ export function PackagesCard({ creating, onCreateClose }: { creating: boolean; o
         pkg={creating ? "new" : edit}
         pools={pools.data ?? []}
         tariffs={tariffs.data ?? []}
+        inbounds={inbounds.data}
         selling={selling}
         onClose={() => {
           setEdit(null);
@@ -144,7 +131,8 @@ export function PackagesCard({ creating, onCreateClose }: { creating: boolean; o
         open={!!archive}
         onOpenChange={(v) => !v && setArchive(null)}
         title={t("packages.archiveTitle", { name: archive?.name ?? "" })}
-        text={t("packages.archiveText")}
+        // Archiving takes the package off the tariffs' gifts too (Packages.Archive): say whose.
+        text={[t("packages.archiveText"), ...(archive && giftIn(archive, tariffs.data).length ? [t("packages.archiveGifts", { names: giftIn(archive, tariffs.data).join(", ") })] : [])].join(" ")}
         confirm={t("tariffs.archiveConfirm")}
         loading={remove.isPending}
         onConfirm={() => archive && remove.mutate(archive.id)}
@@ -153,7 +141,21 @@ export function PackagesCard({ creating, onCreateClose }: { creating: boolean; o
   );
 }
 
-function PackageDrawer({ pkg, pools, tariffs, selling, onClose }: { pkg: Package | "new" | null; pools: Pool[]; tariffs: Tariff[]; selling: boolean; onClose: () => void }) {
+function PackageDrawer({
+  pkg,
+  pools,
+  tariffs,
+  inbounds,
+  selling,
+  onClose,
+}: {
+  pkg: Package | "new" | null;
+  pools: Pool[];
+  tariffs: Tariff[];
+  inbounds: Inbound[] | undefined;
+  selling: boolean;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState("");
@@ -199,8 +201,9 @@ function PackageDrawer({ pkg, pools, tariffs, selling, onClose }: { pkg: Package
   });
 
   // The tariffs the package as the form has it fits, and the ones that would buy it.
-  const draftFits = (tr: Tariff) => (pool ? quotasOf(tr).groups[pool]?.mode === "own" : tr.traffic_limit != null);
-  const buyers = tariffs.filter((tr) => draftFits(tr) && (!some || chosen.has(tr.id)));
+  const draftFits = (tr: Tariff) => fitsTariff({ pool_id: pool || null }, quotasOf(tr, inbounds));
+  const draft = { on_sale: onSale, tariffs: some ? [...chosen] : [] };
+  const buyers = tariffs.filter((tr) => canBuy(draft, draftFits(tr), tr.id));
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -307,10 +310,12 @@ function PackageDrawer({ pkg, pools, tariffs, selling, onClose }: { pkg: Package
                 <span className="text-[var(--ink-500)]">{t("packages.buyers")}: </span>
                 <span className="text-[var(--ink-700)]">{buyers.map((tr) => tr.name).join(", ")}</span>
               </p>
-            ) : (
+            ) : onSale ? (
               <p className="mt-2 text-xs text-[var(--honey-600)]" role="status">
                 {t("packages.buyersNone")}
               </p>
+            ) : (
+              <p className="mt-2 text-xs text-[var(--ink-500)]">{t("packages.buyersOff")}</p>
             )}
           </Field>
         ) : null}
@@ -337,13 +342,7 @@ function PackageDrawer({ pkg, pools, tariffs, selling, onClose }: { pkg: Package
           ) : null}
         </Field>
         <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("tariffs.sale")}>
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <div className="text-[13px] font-semibold">{t("tariffs.sale")}</div>
-              <div className="text-xs text-[var(--ink-500)]">{selling ? t("packages.saleSub") : t("packages.sellingOff")}</div>
-            </div>
-            <Switch checked={onSale} onChange={setOnSale} label={t("tariffs.onSale")} />
-          </div>
+          <SwitchRow className="mb-3 py-0" title={t("tariffs.sale")} label={t("tariffs.onSale")} sub={selling ? t("packages.saleSub") : t("packages.sellingOff")} checked={onSale} onChange={setOnSale} />
           {errors.on_sale ? (
             <p className="mb-3 text-xs text-[var(--berry-600)]" role="alert">
               {errors.on_sale}

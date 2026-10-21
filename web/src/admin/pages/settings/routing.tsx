@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useBlocker } from "@tanstack/react-router";
 import { Eye, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/client";
 import { useExitDns, useNodes } from "../../../api/hooks";
-import { SaveBar } from "../../../components/layout";
-import { Drawer } from "../../../components/overlay";
+import { Card, SaveBar } from "../../../components/layout";
+import { Confirm, Drawer } from "../../../components/overlay";
 import { SwitchRow } from "../../../components/switch";
 import { Button, EmptyState, ErrorState, Field, Pill, Segmented, Skeleton } from "../../../components/ui";
 import { t, useLocale } from "../../../i18n";
@@ -87,27 +88,15 @@ function parsePolicy(text: string): NonNullable<DNS["policy"]> {
 const policyText = (p: DNS["policy"]) => (p ?? []).map((x) => `${x.match}: ${x.servers.join(", ")}`).join("\n");
 const dnsTextOf = (dns: DNS | undefined) => ({ nameserver: (dns?.nameserver ?? []).join("\n"), proxy: (dns?.proxy_server_nameserver ?? []).join("\n"), policy: policyText(dns?.policy) });
 
-/** The part a refusal of the server names, so a save from another part shows where it went wrong. */
-function partOf(fields: Record<string, string>): RoutingPart | null {
-  if (fields.sub_rules) return "rules";
-  if (fields.sub_routes === t("errors.api.routes_servers")) return "advanced";
-  if (fields.sub_routes) return "lists";
-  return null;
-}
+/** The refusal of the server groups' settings; every other one of sub_routes is the lists'. */
+const serversRefused = (e: ApiError | null) => e?.codes.sub_routes === "routes_servers";
 
-function Card({ title, sub, aside, children, i = 1 }: { title: string; sub?: string; aside?: React.ReactNode; children: React.ReactNode; i?: number }) {
-  return (
-    <section className="card glass reveal" style={{ "--i": i } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{title}</h2>
-          {sub ? <div className="card-sub">{sub}</div> : null}
-        </div>
-        {aside}
-      </div>
-      {children}
-    </section>
-  );
+/** The part a refusal of the server names, so a save from another part shows where it went wrong. */
+function partOf(e: ApiError): RoutingPart | null {
+  if (e.fields.sub_rules) return "rules";
+  if (serversRefused(e)) return "advanced";
+  if (e.fields.sub_routes) return "lists";
+  return null;
 }
 
 /**
@@ -140,7 +129,7 @@ export function RoutingSection({ s, part, onPart }: { s: Schemas["SettingsView"]
         { sub_routing: draft.mode, sub_routes: draft.routes, sub_rules: draft.rules },
         {
           onError: (e) => {
-            const p = e instanceof ApiError ? partOf(e.fields) : null;
+            const p = e instanceof ApiError ? partOf(e) : null;
             if (p && p !== part) onPart(p);
           },
         },
@@ -154,6 +143,14 @@ export function RoutingSection({ s, part, onPart }: { s: Schemas["SettingsView"]
   const errors = apiErr?.fields ?? {};
   const starter = () => unwrap(api.POST("/api/v1/settings/routes/preview", { body: { sub_routing: draft.mode, sub_routes: draft.routes, starter: true } })).then((r) => r.profile);
   const live = s.sub_template.trim() !== "";
+  // The settings show one tab at a time: leaving the routing (or the page) drops the draft
+  // and the own profile being edited, so ask first. Its parts are one draft.
+  const unsaved = dirty || yaml !== s.sub_template;
+  const leave = useBlocker({
+    shouldBlockFn: ({ current, next }) => unsaved && (current.pathname !== next.pathname || (next.search as { tab?: string }).tab !== "routing"),
+    enableBeforeUnload: () => unsaved,
+    withResolver: true,
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -166,7 +163,7 @@ export function RoutingSection({ s, part, onPart }: { s: Schemas["SettingsView"]
       {live && part !== "yaml" ? <div className="banner info">{t("settings.routesYamlLive")}</div> : null}
 
       {part === "mode" ? <ModePart mode={draft.mode} setMode={(mode) => setDraft((d) => ({ ...d, mode }))} routes={routes} setRoutes={setRoutes} /> : null}
-      {part === "lists" ? <ListsPart routes={routes} setRoutes={setRoutes} error={errors.sub_routes === t("errors.api.routes_servers") ? undefined : errors.sub_routes} /> : null}
+      {part === "lists" ? <ListsPart routes={routes} setRoutes={setRoutes} error={serversRefused(apiErr) ? undefined : errors.sub_routes} /> : null}
       {part === "rules" ? (
         <Card title={t("settings.rules")} sub={t("settings.routingPartsSub.rules")}>
           <RulesEditor
@@ -203,7 +200,7 @@ export function RoutingSection({ s, part, onPart }: { s: Schemas["SettingsView"]
           </Card>
         </>
       ) : null}
-      {part === "advanced" ? <AdvancedPart routes={routes} setRoutes={setRoutes} error={errors.sub_routes === t("errors.api.routes_servers") ? errors.sub_routes : undefined} /> : null}
+      {part === "advanced" ? <AdvancedPart routes={routes} setRoutes={setRoutes} error={serversRefused(apiErr) ? errors.sub_routes : undefined} /> : null}
       {part === "yaml" ? <TemplateCard s={s} text={yaml} setText={setYaml} starter={starter} /> : null}
 
       {part !== "yaml" ? <p className="px-1 text-xs text-[var(--ink-500)]">{t("settings.routesNote")}</p> : null}
@@ -215,6 +212,15 @@ export function RoutingSection({ s, part, onPart }: { s: Schemas["SettingsView"]
           {preview ? <PreviewCard mode={draft.mode} routes={draft.routes} rules={part === "yaml" ? undefined : draft.rules} template={part === "yaml" ? yaml : undefined} /> : null}
         </div>
       </Drawer>
+      <Confirm
+        open={leave.status === "blocked"}
+        onOpenChange={(open) => !open && leave.reset?.()}
+        title={t("settings.page.leaveTitle")}
+        text={t("settings.routesLeaveText")}
+        confirm={t("settings.page.leaveConfirm")}
+        danger
+        onConfirm={() => leave.proceed?.()}
+      />
     </div>
   );
 }

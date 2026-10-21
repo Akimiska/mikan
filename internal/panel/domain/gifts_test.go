@@ -28,6 +28,7 @@ func TestTariffGifts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wlIn := servePool(t, ctx, q, pool.ID)
 	pk := NewPackages(st, func() time.Time { return now })
 	mainPack, err := pk.Create(ctx, PackageInput{Name: "+10", Bytes: 10 * GiB, Lifetime: LifetimeUsed})
 	if err != nil {
@@ -53,6 +54,18 @@ func TestTariffGifts(t *testing.T) {
 	if err := q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: tr.ID, PoolID: pool.ID, Mode: PoolOwn, TrafficLimit: sql.NullInt64{Int64: 20 * GiB, Valid: true}}); err != nil {
 		t.Fatal(err)
 	}
+	// A limit of its own, but no protocol of the group is on: nothing serves its traffic.
+	turn := func(on int64) {
+		t.Helper()
+		if _, err := st.DB.ExecContext(ctx, "UPDATE inbounds SET enabled = $1 WHERE id = $2", on, wlIn.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	turn(0)
+	if err := set(mainPack.ID, wlPack.ID); !errors.As(err, &fe) || fe.Code != "gift_not_fit" {
+		t.Fatalf("a gift for a group no server serves: %v", err)
+	}
+	turn(1)
 	if err := set(mainPack.ID, wlPack.ID, wlPack.ID); err != nil || gifts() != 2 {
 		t.Fatalf("gifts that fit: %v, %d", err, gifts())
 	}
@@ -122,7 +135,7 @@ func TestPackageForSomeTariffs(t *testing.T) {
 		t.Fatal(err)
 	}
 	offered := func(u db.User) bool {
-		ps, err := PackagesFor(ctx, q, u.ID)
+		ps, err := PackagesFor(ctx, q, u.ID, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

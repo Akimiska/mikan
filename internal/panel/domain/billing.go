@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 )
 
@@ -15,18 +16,12 @@ import (
 // the billing day after it — the first payment covers at least half a month.
 const MinFirstTerm = 15 * 24 * time.Hour
 
-// dayOfMonth is day d of the month at clock's time of day, or the month's last day.
-func dayOfMonth(year int, month time.Month, d int, clock time.Time) time.Time {
-	last := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
-	return time.Date(year, month, min(d, last), clock.Hour(), clock.Minute(), clock.Second(), 0, time.UTC)
-}
-
 // NextBillingDate is the first day-d moment after t, at t's time of day.
 func NextBillingDate(t time.Time, d int) time.Time {
 	t = t.UTC()
-	next := dayOfMonth(t.Year(), t.Month(), d, t)
+	next := model.DayOfMonth(t.Year(), t.Month(), d, t)
 	if !next.After(t) {
-		next = dayOfMonth(t.Year(), t.Month()+1, d, t)
+		next = model.DayOfMonth(t.Year(), t.Month()+1, d, t)
 	}
 	return next
 }
@@ -47,7 +42,7 @@ func nextTerm(base time.Time, d int) time.Time {
 func AddMonths(base time.Time, n int, billingDay sql.NullInt64) time.Time {
 	base = base.UTC()
 	if !billingDay.Valid {
-		return dayOfMonth(base.Year(), base.Month()+time.Month(n), base.Day(), base)
+		return model.DayOfMonth(base.Year(), base.Month()+time.Month(n), base.Day(), base)
 	}
 	d := int(billingDay.Int64)
 	e := nextTerm(base, d)
@@ -57,18 +52,13 @@ func AddMonths(base time.Time, n int, billingDay sql.NullInt64) time.Time {
 	return e
 }
 
-// TermMonths turns a tariff's duration into months for a billing day: 30 days is one.
-func TermMonths(days int64) int {
-	return max(1, int((days+15)/30))
-}
-
 // tariffExpiry is when a term on tariff t that starts now ends (invalid = never).
 func tariffExpiry(now time.Time, t durationTariff) sql.NullInt64 {
 	if t.days <= 0 {
 		return sql.NullInt64{}
 	}
 	if t.billingDay.Valid {
-		return sql.NullInt64{Int64: store.ClampUnix(AddMonths(now, TermMonths(t.days), t.billingDay).Unix()), Valid: true}
+		return sql.NullInt64{Int64: store.ClampUnix(AddMonths(now, model.TermMonths(t.days), t.billingDay).Unix()), Valid: true}
 	}
 	return expiry(now.Unix(), t.days)
 }
@@ -76,30 +66,6 @@ func tariffExpiry(now time.Time, t durationTariff) sql.NullInt64 {
 type durationTariff struct {
 	days       int64
 	billingDay sql.NullInt64
-}
-
-// MonthPeriodStart is when the current monthly traffic period began: the last billing
-// day (or the 1st without one) at 00:00 UTC not after now.
-func MonthPeriodStart(now time.Time, billingDay sql.NullInt64) time.Time {
-	d := 1
-	if billingDay.Valid {
-		d = int(billingDay.Int64)
-	}
-	now = now.UTC()
-	start := dayOfMonth(now.Year(), now.Month(), d, time.Time{})
-	if start.After(now) {
-		start = dayOfMonth(now.Year(), now.Month()-1, d, time.Time{})
-	}
-	return start
-}
-
-// nextMonthPeriod is when the monthly traffic period that began at start ends.
-func nextMonthPeriod(start time.Time, billingDay sql.NullInt64) time.Time {
-	d := 1
-	if billingDay.Valid {
-		d = int(billingDay.Int64)
-	}
-	return dayOfMonth(start.Year(), start.Month()+1, d, time.Time{})
 }
 
 // ValidBillingDay: 1–31.

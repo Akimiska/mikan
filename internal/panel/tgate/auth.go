@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mikan/internal/panel/model"
+	"mikan/internal/tgapi"
 )
 
 // A link code opens the bot with /start <code> from a subscription page and ties that
@@ -23,9 +26,10 @@ import (
 // LinkTTL: how long a code from the subscription page stays good.
 const LinkTTL = 30 * time.Minute
 
+// The refusals of a link code are the model's, so the bot addon tells them apart.
 var (
-	ErrLinkInvalid = errors.New("link_invalid")
-	ErrLinkExpired = errors.New("link_expired")
+	ErrLinkInvalid = model.ErrLinkInvalid
+	ErrLinkExpired = model.ErrLinkExpired
 )
 
 const macSize = 12
@@ -69,14 +73,14 @@ const InitDataTTL = time.Hour
 var ErrInitData = errors.New("init_data")
 
 // CheckInitData verifies initData and returns the Telegram user.
-func CheckInitData(token, initData string, now time.Time) (User, error) {
+func CheckInitData(token, initData string, now time.Time) (tgapi.User, error) {
 	vals, err := url.ParseQuery(initData)
 	if err != nil {
-		return User{}, ErrInitData
+		return tgapi.User{}, ErrInitData
 	}
 	hash := vals.Get("hash")
 	if hash == "" {
-		return User{}, ErrInitData
+		return tgapi.User{}, ErrInitData
 	}
 	keys := make([]string, 0, len(vals))
 	for k := range vals {
@@ -95,15 +99,15 @@ func CheckInitData(token, initData string, now time.Time) (User, error) {
 	m.Write([]byte(strings.Join(lines, "\n")))
 	want, err := hex.DecodeString(hash)
 	if err != nil || !hmac.Equal(m.Sum(nil), want) {
-		return User{}, ErrInitData
+		return tgapi.User{}, ErrInitData
 	}
 	at, err := strconv.ParseInt(vals.Get("auth_date"), 10, 64)
 	if err != nil || now.Sub(time.Unix(at, 0)) > InitDataTTL || time.Unix(at, 0).Sub(now) > time.Minute {
-		return User{}, ErrInitData
+		return tgapi.User{}, ErrInitData
 	}
-	var u User
+	var u tgapi.User
 	if err := json.Unmarshal([]byte(vals.Get("user")), &u); err != nil || u.ID == 0 {
-		return User{}, ErrInitData
+		return tgapi.User{}, ErrInitData
 	}
 	return u, nil
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/netaddr"
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/secure"
@@ -192,7 +193,7 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 // with settings.AnyPort on). With none free the preset's port stays and the usual check
 // names what holds it.
 func (s *Inbounds) defaultPort(ctx context.Context, node db.Node, port, network string) (string, error) {
-	lo, hi, ok := parsePort(port)
+	lo, hi, ok := ParsePort(port)
 	if !ok || lo != hi {
 		return port, nil
 	}
@@ -489,9 +490,9 @@ func (s *Inbounds) CheckTemplate(ctx context.Context, node db.Node, config, port
 	return t, nil
 }
 
-// SystemResolve looks a name up with the system's resolver: its IPv4 addresses.
+// SystemResolve looks a name up with the system's resolver: its IPv4 and IPv6 addresses.
 func SystemResolve(ctx context.Context, host string) ([]netip.Addr, error) {
-	return net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }
 
 // SetResolver makes a REALITY target given by name be looked up when it is saved; without
@@ -507,17 +508,31 @@ func (s *Inbounds) SetHostLookup(host HostLookup) {
 	s.host = host
 }
 
-// checkDestResolves refuses a REALITY target whose name leads to this host or its
-// network: proto.Validate reads the text, and every DNS name looks public. The node dials
-// the target for every probe of the port, past the rules that fence its users in, so such
-// a name would publish an internal service to the internet. A name that cannot be looked
-// up is let through: the node looks it up where it dials.
+// checkDestResolves refuses a REALITY target, or ShadowQUIC's site of disguise, whose name
+// leads to this host or its network: proto.Validate reads the text, and every DNS name
+// looks public. The node dials the target for every probe of the port, past the rules that
+// fence its users in, so such a name would publish an internal service to the internet.
+// Both families are looked at, and a name the panel cannot look up is refused as well: one
+// that resolves only where the node is (an internal zone, the cloud's metadata name) is
+// exactly what must not pass. The node checks again when it dials (Citrus public-dest).
 func (s *Inbounds) checkDestResolves(ctx context.Context, t proto.Template) error {
 	if s.resolve == nil {
 		return nil
 	}
 	dest, _ := presets.Dest(t)
-	host, _, err := net.SplitHostPort(dest)
+	if err := s.checkResolves(ctx, dest, "reality-config.dest", "reality_dest_private"); err != nil {
+		return err
+	}
+	if up, ok := t["jls-upstream"].(map[string]any); ok {
+		addr, _ := up["addr"].(string)
+		return s.checkResolves(ctx, addr, "jls-upstream.addr", "jls_upstream_private")
+	}
+	return nil
+}
+
+// checkResolves is checkDestResolves for one host:port; private is the code of a refusal.
+func (s *Inbounds) checkResolves(ctx context.Context, hostPort, field, private string) error {
+	host, _, err := net.SplitHostPort(hostPort)
 	if err != nil || host == "" {
 		return nil
 	}
@@ -527,12 +542,12 @@ func (s *Inbounds) checkDestResolves(ctx context.Context, t proto.Template) erro
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addrs, err := s.resolve(ctx, host)
-	if err != nil {
-		return nil
+	if err != nil || len(addrs) == 0 {
+		return &proto.Error{Code: "dest_unresolved", Field: field, Detail: host}
 	}
 	for _, a := range addrs {
-		if !proto.PublicAddr(a) {
-			return &proto.Error{Code: "reality_dest_private", Field: "reality-config.dest", Detail: host}
+		if !netaddr.IsPublic(a) {
+			return &proto.Error{Code: private, Field: field, Detail: host}
 		}
 	}
 	return nil
@@ -602,7 +617,7 @@ func (s *Inbounds) node(ctx context.Context, id int64) (db.Node, error) {
 
 // ValidPort accepts a port ("443") or a Hysteria2 hopping range ("20000-30000").
 func ValidPort(spec string) bool {
-	_, _, ok := parsePort(spec)
+	_, _, ok := ParsePort(spec)
 	return ok
 }
 

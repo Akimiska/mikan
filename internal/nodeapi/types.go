@@ -52,6 +52,11 @@ type DesiredState struct {
 	// (SNIRouter); nil: none. Nodes older than it ignore it, and their routed inbounds stay
 	// on their own ports.
 	Router *SNIRouter `json:"sni_router,omitempty"`
+	// FrontPage is the built-in page (frontpage.Templates) a stranger gets: from the inbounds
+	// on an HTTP transport for a request that is not theirs (the core's fallback-page), and
+	// on the names of Router.Stub over TLS with the node's certificate (TLS); "": none. Nodes
+	// older than it ignore it.
+	FrontPage string `json:"front_page,omitempty"`
 	// APIAllow: the node's API answers only these networks ("203.0.113.5/32"), loopback and
 	// the addresses the panel has reached it from; nil: anyone (the panel's certificate
 	// still guards it). Empty but not nil is on too, with the panel's addresses alone. The
@@ -73,6 +78,10 @@ type SNIRouter struct {
 	Listen  string     `json:"listen,omitempty"`
 	Routes  []SNIRoute `json:"routes"`
 	Default string     `json:"default,omitempty"`
+	// Stub: the names that get the node's front page (DesiredState.FrontPage) instead, ""
+	// for a ClientHello with no name; with no Default it takes any other name too. Nodes
+	// older than it ignore it.
+	Stub []string `json:"stub,omitempty"`
 }
 
 type SNIRoute struct {
@@ -128,10 +137,6 @@ type Inbound struct {
 	Listen string          `json:"listen"`
 	Port   string          `json:"port"`             // "443" or a range "20000-20100"
 	Config json.RawMessage `json:"config,omitempty"` // proto.Template as JSON
-	// Preset and Settings are the format of mikan ≤ 0.1.2; the node still reads them
-	// from a saved state, the panel no longer sends them.
-	Preset   string          `json:"preset,omitempty"`
-	Settings json.RawMessage `json:"settings,omitempty"`
 	// Pool is the traffic pool the inbound counts to ("" = the main quota): its own
 	// limit per user, separate from the rest (GitHub issue #6).
 	Pool string `json:"pool,omitempty"`
@@ -205,7 +210,7 @@ const (
 type Counters struct {
 	Epoch string                        `json:"epoch"`
 	Seq   int64                         `json:"seq"`
-	Slots map[string]Traffic            `json:"slots"`           // outside every pool
+	Slots map[string]Traffic            `json:"slots"`           // the main traffic: outside every group, and the groups in it
 	Pools map[string]map[string]Traffic `json:"pools,omitempty"` // slot → pool → traffic
 	// Sites are the slots' bytes by site (DesiredState.Detail): slot → site → traffic, a
 	// part of the batch like the rest. Nodes older than it send none.

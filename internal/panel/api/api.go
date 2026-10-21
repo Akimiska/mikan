@@ -24,6 +24,7 @@ import (
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/billing"
+	"mikan/internal/panel/botpanel"
 	"mikan/internal/panel/certcheck"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
@@ -41,7 +42,6 @@ import (
 	"mikan/internal/panel/support"
 	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbackup"
-	"mikan/internal/panel/tgbot"
 	"mikan/internal/panel/tlscert"
 	"mikan/internal/panel/updates"
 	"mikan/internal/panel/warp"
@@ -98,7 +98,7 @@ type Deps struct {
 	}
 	// Telegram is the admin's setup of the subscription owners' bot: its menu, texts and
 	// broadcasts.
-	Telegram *tgbot.Panel
+	Telegram *botpanel.Panel
 	// Gateway is the panel's side of Telegram: the token, the route, the bot's status, the
 	// admin's chat and the channel.
 	Gateway *tgate.Gateway

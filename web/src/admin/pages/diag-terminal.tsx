@@ -11,6 +11,7 @@ import { tMaybe, t } from "../../i18n";
 import { serverName } from "../../lib/node-label";
 import { timeLeft } from "../../lib/format";
 import { useNow } from "../../lib/now";
+import { CardHead } from "../../components/layout";
 
 const Term = lazy(() => import("../../components/term"));
 
@@ -119,15 +120,7 @@ export function TerminalTab({ who }: { who: SupportWhoami }) {
   const busy = state === "connecting" || state === "live";
   return (
     <section className="card glass reveal" aria-labelledby="diag-term-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="diag-term-title">
-            {t("diag.terminal.title")}
-          </h2>
-          <div className="card-sub">{t("diag.terminal.lead")}</div>
-        </div>
-        <StateMark state={state} />
-      </div>
+      <CardHead title={t("diag.terminal.title")} sub={t("diag.terminal.lead")} aside={<StateMark state={state} />} id="diag-term-title" />
       <div className="banner warn mb-4" role="note">
         <TriangleAlert size={18} className="shrink-0" aria-hidden />
         <span>{t("diag.terminal.recorded", { left: ended ? t("time.lessMinute") : timeLeft(who.expires_at, now) })}</span>

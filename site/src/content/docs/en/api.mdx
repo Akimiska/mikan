@@ -41,7 +41,7 @@ The key goes in a header:
 Authorization: Bearer mk_...
 ```
 
-Errors come in RFC 9457 format (`application/problem+json`), with the error code in the `detail` field.
+Errors come in RFC 9457 format (`application/problem+json`), with the error code in the `detail` field. When fields of the request are refused (422, `detail` is `validation`), each field has its own code in `errors[].message` and the field in `errors[].location`, such as `body.port`; `errors[].value` may hold what the code names (the busy port, the line of a rule).
 
 ## Examples
 
@@ -100,5 +100,26 @@ curl -X POST "$BASE/users/42/grants" \
 | GET | `/stats/overview` | overview figures |
 | GET | `/stats/traffic` | server traffic: `range` 24h, 7d or 30d |
 | GET | `/metrics` | Prometheus metrics |
+
+## Client balances and promo code statistics
+
+The panel has no screens for these methods: they are for scripts, for example to reconcile balances with your books or to build a report on promo codes.
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/promocodes/stats` | a summary of the promo codes: how many there are and how many are active, successful activations, bonus days and bytes given, orders with a discount and the total discount |
+| GET | `/balances/{tg_id}` | a Telegram account's balance and its last 50 operations |
+| POST | `/balances/{tg_id}/adjust` | change a balance by hand: `delta` and `note` |
+
+Both GET methods are open to any key, "Read" or "Full access":
+
+```bash
+curl -H "Authorization: Bearer $KEY" "$BASE/promocodes/stats"
+curl -H "Authorization: Bearer $KEY" "$BASE/balances/123456789"
+```
+
+The amounts of a balance and its operations come in hundredths of the currency (the `currency` of the answer): positive is money in, negative is money out. An operation's `kind` is `topup`, `spend`, `refund` or `adjust`.
+
+Changing a balance moves a client's money, so an API key cannot call it: the answer is 403 `session_only`. It is available only from the administrator's session, with a body like `{"delta": -5000, "note": "refund for the downtime"}`. `delta` is in hundredths of the currency, a negative one debits, and the balance never goes below zero (the answer is `balance_low`). `note` is required and shown to the client in the balance history. Every change goes to the audit log.
 
 For the full list with request and response bodies, see the API page in the panel.

@@ -50,7 +50,6 @@ ON CONFLICT (dedupe_key) DO NOTHING;
 SELECT * FROM addon_events
 WHERE id > sqlc.arg(after)::BIGINT
   AND (COALESCE(cardinality(sqlc.arg(types)::TEXT[]), 0) = 0 OR type = ANY(sqlc.arg(types)::TEXT[]))
-  AND (sqlc.arg(bot_too)::BOOLEAN OR type NOT LIKE 'bot.%')
 ORDER BY id LIMIT sqlc.arg(lim)::INT;
 
 -- name: GetAddonCursor :one

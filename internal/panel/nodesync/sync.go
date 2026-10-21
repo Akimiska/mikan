@@ -4,6 +4,7 @@
 package nodesync
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -22,7 +23,9 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/pace"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/warp"
@@ -159,16 +162,16 @@ func (s *Syncer) run(ctx context.Context) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		every(ctx, 2*time.Second, s.pullCounters)
+		pace.Tick(ctx, 2*time.Second, s.pullCounters)
 	}()
 	go func() {
 		defer wg.Done()
-		every(ctx, torrentPullEvery, s.pullTorrents)
+		pace.Tick(ctx, torrentPullEvery, s.pullTorrents)
 	}()
 	go func() {
 		defer wg.Done()
 		s.refreshHealth(ctx)
-		every(ctx, 5*time.Second, s.refreshHealth)
+		pace.Tick(ctx, 5*time.Second, s.refreshHealth)
 	}()
 	s.applyState(ctx)
 	for {
@@ -179,28 +182,10 @@ func (s *Syncer) run(ctx context.Context) {
 			s.applyState(ctx)
 		case <-s.policiesDirty:
 			// Coalesce bursts (bulk actions) into one push.
-			t := time.NewTimer(150 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				t.Stop()
+			if !pace.Sleep(ctx, 150*time.Millisecond) {
 				return
-			case <-t.C:
 			}
 			s.pushPolicies(ctx, true)
-		}
-	}
-}
-
-// every calls fn on a ticker until ctx ends.
-func every(ctx context.Context, d time.Duration, fn func(context.Context)) {
-	t := time.NewTicker(d)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			fn(ctx)
 		}
 	}
 }
@@ -267,8 +252,11 @@ func (s *Syncer) desiredPin(ctx context.Context) (st nodeapi.DesiredState, pin s
 	st.Detail = snap.detail
 	st.HTTPRedirect = n.HttpRedirect != 0 && n.Address != ""
 	st.APIAllow = s.apiAllow(ctx, n)
+	// The front page: what the inbounds on an HTTP transport give a stranger's request, and
+	// with the shared 443 what the node's own domain gives.
+	st.FrontPage = n.FrontPage
 	if n.SniRouter != 0 {
-		st.Router = sniRouter(st.Inbounds, n.Domain)
+		st.Router = sniRouter(st.Inbounds, n.Domain, n.FrontPage != "")
 	}
 	if n.FairShare != 0 && n.ChannelMbps.Valid {
 		st.Shaping = &nodeapi.Shaping{ChannelMbps: int(n.ChannelMbps.Int64)}
@@ -448,16 +436,17 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 		slotUser[o.SlotName] = o.UserID
 		slotsOf[o.UserID] = append(slotsOf[o.UserID], o.SlotName)
 	}
-	here := map[int64]string{}
+	var here []db.Inbound
 	inPool := map[int64][]int64{} // pool → its inbounds on this node
 	for _, in := range snap.inbounds {
 		if in.NodeID == s.id {
-			here[in.ID] = in.Name
+			here = append(here, in)
 			if in.PoolID.Valid {
 				inPool[in.PoolID.Int64] = append(inPool[in.PoolID.Int64], in.ID)
 			}
 		}
 	}
+	slices.SortFunc(here, func(a, b db.Inbound) int { return cmp.Compare(a.ID, b.ID) })
 	// The inbounds here each user's tariff leaves out, through the server groups they are in.
 	shut := map[int64]map[int64]bool{}
 	for _, up := range snap.pools {
@@ -486,8 +475,9 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 	for _, u := range snap.users {
 		names := slotsOf[u.ID]
 		sort.Strings(names)
+		access := domain.AccessOf(u, domain.ServersOf(snap.servers, u.TariffID))
 		for _, name := range names {
-			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, shut[u.ID], others[name])
+			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, access, shut[u.ID], others[name])
 			p.Pools = userPoolQuotas(u.ID, rows[u.ID], groupsHere, p.QuotaRemaining, grants)
 			p.TorrentExempt = snap.torrent.IsExempt(u.ID)
 			if !p.TorrentExempt {
@@ -501,14 +491,16 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 }
 
 // userPolicy is the user's rules for one of the user's slots; grants is what is left of
-// the user's main grants, added to the quota, and shut the inbounds here the user's tariff
-// leaves out (an excluded pool).
-func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here map[int64]string, shut map[int64]bool, otherIPs []string) nodeapi.Policy {
-	// A user whose main traffic ran out still gets in: the node turns away the inbounds
-	// outside every pool (QuotaRemaining 0) and keeps the pools that have traffic left.
+// the user's main grants, added to the quota, here the node's inbounds by id, access what
+// the user may connect to (the card's protocols or the tariff's servers) and shut the
+// inbounds here the user's tariff leaves out (a closed group).
+func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here []db.Inbound, access domain.Access, shut map[int64]bool, otherIPs []string) nodeapi.Policy {
+	// A user whose main traffic ran out still gets in: the node turns away the inbounds that
+	// count to it (outside every group, or in one in the main traffic; QuotaRemaining 0) and
+	// keeps the groups with traffic of their own left.
 	state := domain.State(u, grants, now)
 	p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(state) || state == domain.StateLimited, BaseSeq: seq, OtherIPs: otherIPs,
-		QuotaRemaining: domain.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants)}
+		QuotaRemaining: model.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants)}
 	if u.DeviceLimit.Valid {
 		p.DeviceLimit = int(u.DeviceLimit.Int64)
 	}
@@ -518,21 +510,14 @@ func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, 
 	// The user's devices are slots of their own: they share the user's speed and the
 	// node's fair share as one.
 	p.Group = strconv.FormatInt(u.ID, 10)
-	allowed := domain.DecodeInbounds(u.Inbounds)
-	if len(allowed) == 0 && len(shut) > 0 {
-		// "All" but the excluded: the list is spelled out.
-		for id := range here {
-			allowed = append(allowed, id)
-		}
-		slices.Sort(allowed)
-	}
-	if len(allowed) > 0 {
-		for _, id := range allowed {
-			if n, ok := here[id]; ok && !shut[id] {
-				p.Inbounds = append(p.Inbounds, n)
+	// No list is "all": anything less is spelled out.
+	if !access.Everything() || len(shut) > 0 {
+		for _, in := range here {
+			if access.Allows(in) && !shut[in.ID] {
+				p.Inbounds = append(p.Inbounds, in.Name)
 			}
 		}
-		// An empty list means "all": a user limited to other nodes' inbounds gets none here.
+		// A user limited to other nodes' inbounds gets none here.
 		if len(p.Inbounds) == 0 {
 			p.Allowed = false
 		}
@@ -825,39 +810,40 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 	}
 }
 
+// stateKey is what the node holds of st besides the policies: the whole state, the
+// revision, the counters' epoch and the policies left out, so a field added to the state is
+// in the key without being named here (a list of the fields forgot some before).
 func stateKey(st nodeapi.DesiredState) string {
-	raw, _ := json.Marshal(struct {
-		I []nodeapi.Inbound
-		S []nodeapi.Slot
-		T *nodeapi.TLSFiles
-		P int
-		W *nodeapi.Warp
-		R *nodeapi.Relay
-		E []nodeapi.Exit
-		B *nodeapi.TorrentBlock
-		F *nodeapi.Filters
-		H *nodeapi.Shaping
-		D *nodeapi.ExitDNS
-		A []string
-		X bool
-		V bool
-		O *nodeapi.SNIRouter
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent, st.Filters, st.Shaping, st.DNS, st.APIAllow,
-		st.HTTPRedirect, st.Detail, st.Router})
+	st.Revision, st.Epoch, st.Policies = 0, "", nil
+	raw, _ := json.Marshal(st)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
 
-// policyKey ignores QuotaRemaining/BaseSeq: they change with every byte and the node
-// tracks consumption itself between pushes.
+// policyKey is the policies whole, but for what changes with every byte, which the node
+// tracks itself between pushes: the quotas left (only whether there is one) and their base.
 func policyKey(ps []nodeapi.Policy) string {
 	h := sha256.New()
 	for _, p := range ps {
-		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, poolKey(p.Pools),
-			p.TorrentExempt, p.BannedUntil, p.SpeedMbps, p.Group})
+		p.QuotaRemaining, p.BaseSeq = limited(p.QuotaRemaining), 0
+		pools := make([]nodeapi.PoolQuota, len(p.Pools))
+		for i, q := range p.Pools {
+			q.Remaining = limited(q.Remaining)
+			pools[i] = q
+		}
+		p.Pools = pools
+		raw, _ := json.Marshal(p)
 		h.Write(raw)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// limited is what a key keeps of a quota left: -1 for none, 0 for one.
+func limited(n int64) int64 {
+	if n < 0 {
+		return -1
+	}
+	return 0
 }
 
 // warp is the node's WARP outbound, nil when it has none or it is off. Inbounds set to
@@ -894,15 +880,11 @@ func (s *Syncer) warp(ctx context.Context, n db.Node, inbounds []db.Inbound) (*n
 // Warp asks the node how it reaches the internet through WARP; force skips the node's
 // minute-old answer.
 func (m *Manager) Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error) {
-	s, ok := m.Syncer(id)
-	if !ok {
-		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
-	}
-	c, ok := s.node.(interface {
+	c, err := clientOf[interface {
 		Warp(ctx context.Context, force bool) (nodeapi.WarpStatus, error)
-	})
-	if !ok {
-		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
+	}](m, id)
+	if err != nil {
+		return nodeapi.WarpStatus{}, err
 	}
 	return c.Warp(ctx, force)
 }
@@ -1027,15 +1009,11 @@ func unreachableExit(id int64) json.RawMessage {
 
 // Probe asks the node how it reaches the internet through one of its outbounds.
 func (m *Manager) Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error) {
-	s, ok := m.Syncer(id)
-	if !ok {
-		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
-	}
-	c, ok := s.node.(interface {
+	c, err := clientOf[interface {
 		Probe(ctx context.Context, proxy string) (nodeapi.ProbeResult, error)
-	})
-	if !ok {
-		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
+	}](m, id)
+	if err != nil {
+		return nodeapi.ProbeResult{}, err
 	}
 	return c.Probe(ctx, proxy)
 }
@@ -1043,15 +1021,11 @@ func (m *Manager) Probe(ctx context.Context, id int64, proxy string) (nodeapi.Pr
 // Tunnel opens a stream to addr through node id: the bot reaches Telegram this way when
 // the panel's own server cannot. The node lets through only nodeapi.TunnelHosts.
 func (m *Manager) Tunnel(ctx context.Context, id int64, addr string) (net.Conn, error) {
-	s, ok := m.Syncer(id)
-	if !ok {
-		return nil, nodeapi.ErrUnavailable
-	}
-	c, ok := s.node.(interface {
+	c, err := clientOf[interface {
 		Tunnel(ctx context.Context, addr string) (net.Conn, error)
-	})
-	if !ok {
-		return nil, nodeapi.ErrUnavailable
+	}](m, id)
+	if err != nil {
+		return nil, err
 	}
 	return c.Tunnel(ctx, addr)
 }
@@ -1068,25 +1042,11 @@ func userPoolQuotas(userID int64, rows []db.UserPool, here []int64, mainLeft int
 		pool := strconv.FormatInt(id, 10)
 		switch mode {
 		case domain.PoolOwn:
-			left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(userID, id))
+			left := model.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(userID, id))
 			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: left})
 		case domain.PoolMain:
 			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: mainLeft, Main: true})
 		}
-	}
-	return out
-}
-
-// poolKey: which groups have a quota and which count to the main traffic, not how much
-// is left (the node counts that down).
-func poolKey(ps []nodeapi.PoolQuota) []string {
-	out := make([]string, 0, len(ps))
-	for _, p := range ps {
-		if p.Main {
-			out = append(out, p.Pool+":main")
-			continue
-		}
-		out = append(out, p.Pool)
 	}
 	return out
 }
@@ -1143,20 +1103,38 @@ func countSites(ctx context.Context, q *db.Queries, c nodeapi.Counters, owner ma
 
 // sniRouter is the node's SNI router for the inbounds marked for it: each by the names its
 // clients ask for, the first REALITY one taking any other name (it passes a stranger on to
-// its target, as on a port of its own). nil when no inbound is marked.
-func sniRouter(inbounds []nodeapi.Inbound, nodeDomain string) *nodeapi.SNIRouter {
+// its target, as on a port of its own). With front, the node's front page takes the node's
+// own domain, unless an inbound asks for it, and a ClientHello with no name. nil when no
+// inbound is marked, and with only the page when an inbound of its own holds TCP 443.
+func sniRouter(inbounds []nodeapi.Inbound, nodeDomain string, front bool) *nodeapi.SNIRouter {
 	r := &nodeapi.SNIRouter{}
+	taken := map[string]bool{}
+	busy := false // TCP 443 held by an inbound outside the router
 	for _, in := range inbounds {
 		t, err := proto.Parse(string(in.Config))
-		if err != nil || !proto.SNI443(t) || !proto.CanSNI443(t) {
+		if err != nil {
 			continue
 		}
-		r.Routes = append(r.Routes, nodeapi.SNIRoute{Inbound: in.Name, Names: proto.SNINames(t, nodeDomain)})
+		if !proto.SNI443(t) || !proto.CanSNI443(t) {
+			busy = busy || in.Port == "443" && t.Network() != "udp"
+			continue
+		}
+		names := proto.SNINames(t, nodeDomain)
+		for _, n := range names {
+			taken[strings.ToLower(strings.TrimSuffix(n, "."))] = true
+		}
+		r.Routes = append(r.Routes, nodeapi.SNIRoute{Inbound: in.Name, Names: names})
 		if r.Default == "" && proto.Reality(t) {
 			r.Default = in.Name
 		}
 	}
-	if len(r.Routes) == 0 {
+	if front {
+		if d := strings.ToLower(strings.TrimSuffix(nodeDomain, ".")); d != "" && !taken[d] {
+			r.Stub = append(r.Stub, d)
+		}
+		r.Stub = append(r.Stub, "")
+	}
+	if len(r.Routes) == 0 && (len(r.Stub) == 0 || busy) {
 		return nil
 	}
 	return r

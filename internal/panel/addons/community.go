@@ -18,7 +18,8 @@ import (
 // never the authors' hosts. An addon from it installs as an unofficial one, as an addon of a
 // source does; revoked lists what mikan took out, which a panel that has it installed shows.
 
-// CommunityURL is where the registry's signed index is published, next to its .sig.
+// CommunityURL is where the registry's signed index is published, next to its signature
+// (release.SigSuffix).
 const CommunityURL = "https://github.com/getmikan/marketplace-community/releases/latest/download/index.json"
 
 // CommunityPrior is the build of an addon the registry had before the current one.
@@ -31,10 +32,13 @@ type CommunityPrior struct {
 // from, and the author's key the release was signed with ("" unsigned).
 type CommunityAddon struct {
 	Entry
-	Repo      string          `json:"repo"`
-	RepoID    int64           `json:"repo_id"`
-	Key       string          `json:"key,omitempty"`
-	Stars     int             `json:"stars"`
+	Repo   string `json:"repo"`
+	RepoID int64  `json:"repo_id"`
+	Key    string `json:"key,omitempty"`
+	Stars  int    `json:"stars"`
+	// Downloads: the image's pulls as its GitHub package counts them, two significant digits;
+	// 0 when the registry has none.
+	Downloads int             `json:"downloads,omitempty"`
 	Previous  *CommunityPrior `json:"previous,omitempty"`
 	AddedAt   int64           `json:"added_at"`
 	UpdatedAt int64           `json:"updated_at"`
@@ -82,12 +86,13 @@ func validRepo(r string) bool {
 	return len(parts) == 3 && parts[0] == "github.com" && ghOwner.MatchString(parts[1]) && ghName.MatchString(parts[2]) && parts[2] != "." && parts[2] != ".."
 }
 
-// ParseCommunity checks the signature over the exact bytes, then each snapshot as an entry of
+// ParseCommunity checks the signature of the registry's key over the exact bytes, in the
+// registry's context (release.CommunityContext), then each snapshot as an entry of
 // a third-party source: what this panel would not install from one (a payment adapter, a tag
 // instead of a digest, a private registry, a newer panel) is left out, and so is an id listed
 // twice or revoked. A revocation keeps a short reason; the page shows it.
 func ParseCommunity(data []byte, sig string, pub ed25519.PublicKey, panelVersion string) (Community, error) {
-	if err := release.Verify(data, sig, pub); err != nil {
+	if err := release.VerifyIn(release.CommunityContext, data, sig, pub); err != nil {
 		return Community{}, fmt.Errorf("addons: the community index signature does not match: %w", err)
 	}
 	var c Community
@@ -130,42 +135,27 @@ func validKey(k string) bool {
 // SetCommunityURL points the panel at another registry (tests).
 func (m *Manager) SetCommunityURL(u string) {
 	m.mu.Lock()
-	m.communityURL, m.community = u, nil
+	m.communityURL = u
 	m.mu.Unlock()
+	m.community.reset()
 }
 
 // CommunityKnown is the index fetched last, however old; nil before the first fetch. What only
 // judges ids (sources.go) takes it rather than reach the network.
-func (m *Manager) CommunityKnown() *Community {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.community == nil {
-		return nil
-	}
-	c := *m.community
-	return &c
-}
+func (m *Manager) CommunityKnown() *Community { return m.community.known() }
 
-// Community is the registry's signed index, fetched at most every ten minutes.
+// Community is the registry's signed index, fetched at most every ten minutes, as the
+// catalog is (signeddoc.go).
 func (m *Manager) Community(ctx context.Context) (Community, error) {
 	m.mu.Lock()
-	if m.community != nil && m.now().Sub(m.communityAt) < 10*time.Minute {
-		c := *m.community
-		m.mu.Unlock()
-		return c, nil
-	}
 	u := m.communityURL
 	m.mu.Unlock()
-	var c Community
-	err := release.FetchSigned(ctx, m.get, u, 1<<20, func(data []byte, sig string) (err error) {
-		c, err = ParseCommunity(data, sig, m.pub, m.version)
-		return err
+	return m.community.get(ctx, m.now(), m.seenFile(), func(ctx context.Context) (Community, error) {
+		var c Community
+		err := release.FetchSigned(ctx, m.get, u, release.SigSuffix, 1<<20, func(data []byte, sig string) (err error) {
+			c, err = ParseCommunity(data, sig, m.communityKey, m.version)
+			return err
+		})
+		return c, err
 	})
-	if err != nil {
-		return Community{}, err
-	}
-	m.mu.Lock()
-	m.community, m.communityAt = &c, m.now()
-	m.mu.Unlock()
-	return c, nil
 }

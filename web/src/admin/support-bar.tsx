@@ -3,7 +3,7 @@
 // the mode they are in. One strip, two readings, so neither side can forget the access is live.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { EyeOff, Headset, LifeBuoy, LogOut, Pencil, TerminalSquare } from "lucide-react";
+import { EyeOff, Headset, KeyRound, LifeBuoy, LogOut, Pencil, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, errorText, unwrap } from "../api/client";
 import { isLive, supportKey, useSupportGrants, useSupportMode, type SupportGrant } from "../api/support";
@@ -29,7 +29,7 @@ function useBarHeight() {
 export function SupportBar() {
   useLocale();
   const operator = useSupportMode(true);
-  return operator ? <OperatorBar level={operator.level} until={operator.expires_at} showPeople={operator.show_people} /> : <AdminBanner />;
+  return operator ? <OperatorBar level={operator.level} until={operator.expires_at} showPeople={operator.show_people} extended={operator.extended} /> : <AdminBanner />;
 }
 
 /** The admin's side: the live grant, how long it has, whether anyone came in, and "Revoke". */
@@ -60,7 +60,7 @@ function LiveGrant({ g }: { g: SupportGrant }) {
       <Icon size={16} className="shrink-0" aria-hidden />
       <p className="min-w-0 flex-1 truncate">
         <b>{t("support.bannerTitle", { time: time(g.expires_at) })}</b>
-        <span className="support-bar-more"> · {t(`support.level.${g.level}`)} · {t("support.left", { left: timeLeft(g.expires_at, now) })}</span>
+        <span className="support-bar-more"> · {[t(`support.level.${g.level}`), g.extended ? t("support.extended") : "", t("support.left", { left: timeLeft(g.expires_at, now) })].filter(Boolean).join(" · ")}</span>
         <span className="support-bar-more"> · {seen ? t("support.operatorSeen", { ago: ago(seen, now) }) : t("support.operatorNot")}</span>
       </p>
       <Link to="/settings" search={{ tab: "support" }} className="support-bar-link">
@@ -74,7 +74,7 @@ function LiveGrant({ g }: { g: SupportGrant }) {
 }
 
 /** The operator's side: what they may do here, until when, and the way out when the work is done. */
-function OperatorBar({ level, until, showPeople }: { level: "view" | "change" | "terminal"; until: string; showPeople: boolean }) {
+function OperatorBar({ level, until, showPeople, extended }: { level: "view" | "change" | "terminal"; until: string; showPeople: boolean; extended: boolean }) {
   useBarHeight();
   const now = useNow(15_000);
   const qc = useQueryClient();
@@ -104,6 +104,11 @@ function OperatorBar({ level, until, showPeople }: { level: "view" | "change" | 
       {level === "view" ? (
         <span className="support-bar-tag" title={t("support.readOnlyHint")}>
           <Icon size={14} aria-hidden /> {t("support.readOnly")}
+        </span>
+      ) : null}
+      {extended ? (
+        <span className="support-bar-tag" title={t("support.extendedHint")}>
+          <KeyRound size={14} aria-hidden /> {t("support.extended")}
         </span>
       ) : null}
       {!showPeople ? (

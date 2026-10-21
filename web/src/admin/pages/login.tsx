@@ -122,9 +122,10 @@ export function LoginPage() {
             {error}
           </p>
         ) : null}
+        {/* Announced once: the seconds count down in a timer of their own, which a screen reader does not read out as it ticks. */}
         {wait > 0 ? (
-          <p className="mb-4 text-[13px] text-[var(--honey-600)]" role="alert">
-            {t("login.tooMany", { s: wait })}
+          <p className="mb-4 text-[13px] text-[var(--honey-600)]">
+            <span role="alert">{t("login.tooMany")}</span> <span role="timer">{t("login.tooManyWait", { s: wait })}</span>
           </p>
         ) : null}
 

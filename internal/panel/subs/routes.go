@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"mikan/internal/textutil"
 )
 
 // Routes is the admin's routing beyond the mode (Routing): where each service goes, the
@@ -458,7 +460,7 @@ func (p Profile) serviceTarget(s Service, t string, g Groups, ps []proxy, taken 
 		}
 	}
 	name := s.Icon + " " + s.Name
-	if p.Lang == "en" {
+	if textutil.Lang(p.Lang).En() {
 		name = s.Icon + " " + s.NameEN
 	}
 	// A rule is split on commas: "ChatGPT, Claude, Gemini" as a target breaks the profile.

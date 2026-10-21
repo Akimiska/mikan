@@ -8,7 +8,6 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ClipboardCopy, FileText, Globe, MapPin, Power, RefreshCw, Search, Stethoscope, TerminalSquare } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
-import { useNodes } from "../../api/hooks";
 import { useSupportMode } from "../../api/support";
 import { QueryBoundary } from "../../components/query";
 import { Confirm } from "../../components/overlay";
@@ -19,22 +18,17 @@ import { Button, EmptyState, Field, PageHeader, Segmented, Skeleton } from "../.
 import { t } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { ago, time } from "../../lib/format";
-import { nodeLabel } from "../../lib/node-label";
+import { useServers } from "../../lib/node-label";
 import { DIAG_TABS } from "../search";
 import { GeoTab } from "./geo-check";
 import { CheckSkeleton, ReachView, StatusMark } from "./node-check";
 import { ServerPicks, useServerPicks } from "./server-picks";
+import { CardHead } from "../../components/layout";
 
 const TerminalTab = lazy(() => import("./diag-terminal").then((m) => ({ default: m.TerminalTab })));
 
 type Tab = (typeof DIAG_TABS)[number];
 type Report = Schemas["HostReport"];
-
-/** The servers the page can ask: the panel's own, and each node on a server of its own. */
-function useServers() {
-  const nodes = useNodes();
-  return [{ id: "panel", label: t("diag.serverPanel") }, ...(nodes.data ?? []).filter((n) => !n.local).map((n) => ({ id: `node:${n.id}`, label: nodeLabel(n) }))];
-}
 
 export function DiagnosticsPage() {
   const { tab, source } = useSearch({ from: "/_app/diagnostics" });
@@ -121,14 +115,7 @@ function LogsTab({ servers, source, onSource }: { servers: { id: string; label: 
   }, [shown, source]);
   return (
     <section className="card glass reveal" aria-labelledby="diag-logs-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="diag-logs-title">
-            {t("diag.logs.title")}
-          </h2>
-          <div className="card-sub">{t("diag.logs.lead")}</div>
-        </div>
-      </div>
+      <CardHead title={t("diag.logs.title")} sub={t("diag.logs.lead")} id="diag-logs-title" />
       <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
         <ServerSelect servers={servers} source={source} onSource={onSource} id="logs-source" />
         <Field label={t("diag.logs.level")}>
@@ -241,14 +228,7 @@ function CheckTab({ servers, source, onSource, level }: { servers: { id: string;
   const pending = doctor.isPending && doctor.context === source;
   return (
     <section className="card glass reveal" aria-labelledby="diag-check-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="diag-check-title">
-            {t("diag.check.title")}
-          </h2>
-          <div className="card-sub">{t("diag.check.lead")}</div>
-        </div>
-      </div>
+      <CardHead title={t("diag.check.title")} sub={t("diag.check.lead")} id="diag-check-title" />
       <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
         <ServerSelect servers={servers} source={source} onSource={onSource} id="check-source" />
         <div className="mb-4 flex flex-wrap gap-2">
@@ -365,14 +345,7 @@ function ReachTab() {
   };
   return (
     <section className="card glass reveal" aria-labelledby="diag-reach-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="diag-reach-title">
-            {t("diag.reach.title")}
-          </h2>
-          <div className="card-sub">{t("diag.reach.lead")}</div>
-        </div>
-      </div>
+      <CardHead title={t("diag.reach.title")} sub={t("diag.reach.lead")} id="diag-reach-title" />
       <form className="flex flex-wrap items-start gap-x-4 gap-y-1" onSubmit={submit} noValidate>
         <Field label={t("diag.reach.host")} htmlFor="reach-host">
           <input

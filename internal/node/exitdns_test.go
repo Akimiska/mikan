@@ -35,7 +35,7 @@ func TestExitDNSConfigParses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			st := cascadeState(t)
 			st.DNS = tc.dns
-			raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false)
+			raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +72,7 @@ func TestExitDNSConfigParses(t *testing.T) {
 func TestSnifferDialsTheName(t *testing.T) {
 	st := cascadeState(t)
 	st.DNS = &nodeapi.ExitDNS{Sniff: true}
-	raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false)
+	raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestApplyExitDNS(t *testing.T) {
 		t.Helper()
 		st := cascadeState(t)
 		st.DNS = d
-		raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false)
+		raw, _, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false, "")
 		if err != nil {
 			t.Fatal(err)
 		}

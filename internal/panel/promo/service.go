@@ -153,11 +153,12 @@ func (s *Service) checkUser(ctx context.Context, q *db.Queries, p db.PromoCode, 
 		return err
 	}
 	if p.NewUsersOnly != 0 {
-		n, err := q.CountTgLinksOf(ctx, tgID)
+		// Ever a client: unlinking one's subscriptions first does not make one new.
+		was, err := q.WasClient(ctx, tgID)
 		if err != nil {
 			return err
 		}
-		if n > 0 {
+		if was {
 			return ErrNewUser
 		}
 	}
@@ -357,11 +358,9 @@ func (s *Service) RedeemBonus(ctx context.Context, tgID, userID int64, code stri
 				base = u.ExpiresAt.Int64
 			}
 			next := base + p.Value*int64(24*time.Hour/time.Second)
-			_, err = q.UpdateUser(ctx, db.UpdateUserParams{
-				Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID, TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, SpeedLimit: u.SpeedLimit,
-				ResetStrategy: u.ResetStrategy, PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart,
-				ExpiresAt: sql.NullInt64{Int64: next, Valid: true}, Inbounds: u.Inbounds, BillingDay: u.BillingDay, UpdatedAt: now.Unix(), ID: u.ID,
-			})
+			par := domain.UserParams(u, now.Unix())
+			par.ExpiresAt = sql.NullInt64{Int64: next, Valid: true}
+			_, err = q.UpdateUser(ctx, par)
 			if err != nil {
 				return err
 			}

@@ -49,6 +49,7 @@ const (
 // the API the way an admin would (the last local one as an own template from the editor),
 // then two default inbounds of the remote node, named with its flag in the subscription.
 // Shared ones have one key for everyone: they work, but no user is charged for them.
+// main_test.go keeps the table to the presets and the templates.
 var protos = []struct {
 	name, proxy string
 	shared      bool
@@ -56,11 +57,15 @@ var protos = []struct {
 	{"vision", "VLESS Vision", false}, {"xhttp", "VLESS XHTTP", false}, {"hy2", "Hysteria2", false}, {"tuic", "TUIC", false},
 	{"grpc", "VLESS gRPC", false}, {"trojan", "Trojan", false}, {"anytls", "AnyTLS", false}, {"pq", "VLESS PQ", false},
 	{"trusttunnel", "TrustTunnel", false}, {"shadowquic", "ShadowQUIC", false}, {"mieru", "Mieru", false},
-	{"ss", "Shadowsocks", true}, {"sudoku", "Sudoku", true}, {"snell", "Snell", true},
+	{"ss", "Shadowsocks", false}, {"sudoku", "Sudoku", true}, {"snell", "Snell", true},
 	{"tls-xhttp", "VLESS TLS XHTTP", false}, {"tls-vision", "VLESS TLS Vision", false},
-	{"custom-vmess", "Custom", false},
+	{"custom-ws", "Custom", false},
 	{"us-xhttp", "🇺🇸 VLESS XHTTP", false}, {"us-hy2", "🇺🇸 Hysteria2", false},
 }
+
+// customTemplate is the own template of the custom inbound: VLESS over WebSocket on the
+// node's TLS (what the core runs of the old vmess one).
+const customTemplate = "type: vless\nws-path: /vm\nmikan:\n  tls: node\n"
 
 // localProtos run on the panel's own node; a new node gets remoteInbounds defaults.
 const (
@@ -179,7 +184,7 @@ func prepare() {
 		{"preset": "snell"},
 		{"preset": "vless_tls_xhttp"},
 		{"preset": "vless_tls_vision"},
-		{"preset": "custom", "port": "2097", "config": "type: vmess\nws-path: /vm\nmikan:\n  tls: node\n"},
+		{"preset": "custom", "port": "2097", "config": customTemplate},
 	} {
 		p.call("POST", "/api/v1/inbounds", in, nil)
 	}
@@ -820,7 +825,7 @@ func pools() {
 	p.call("POST", "/api/v1/pools", map[string]any{"name": "WL"}, &pool)
 	p.call("PATCH", "/api/v1/inbounds/"+strconv.FormatInt(vision, 10), map[string]any{"pool_id": pool.ID}, nil)
 	const limit = 4 * mib
-	p.call("PUT", userPath+"/pools", map[string]any{"pools": []map[string]any{{"pool_id": pool.ID, "traffic_limit": limit}}}, nil)
+	p.call("PUT", userPath+"/pools", map[string]any{"pools": []map[string]any{{"pool_id": pool.ID, "mode": "own", "traffic_limit": limit}}}, nil)
 
 	const visionPort, xhttpPort = 11001, 11002
 	usage := func() (main, inPool int64) {

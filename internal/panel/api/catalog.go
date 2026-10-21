@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -33,10 +35,39 @@ type TariffView struct {
 	OnSale        bool          `json:"on_sale" doc:"Продаётся в боте и Mini App"`
 	Terms         []TermView    `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub"`
 	ExtraDevices  ExtraDevices  `json:"extra_devices" doc:"Докупка устройств в боте и Mini App: цена одного и сколько можно докупить"`
+	Servers       ServersView   `json:"servers" doc:"Какие серверы входят в тариф: все или выбранные. Действует сразу на всех клиентов тарифа; клиент со своим списком протоколов в карточке остаётся при нём"`
 	Pools         []PoolSetting `json:"pools" doc:"Как тариф держит каждую группу серверов; группа без настройки тарифа — в основном трафике. Режим и лимит действуют на новых клиентов, при продлении, смене тарифа и по «Применить к выданным подпискам»; закрытие и открытие группы действует сразу на всех клиентов тарифа"`
 	Gifts         []int64       `json:"gifts" doc:"Пакеты трафика в подарок при каждой оплате тарифа: покупке и продлении"`
 	Subscribers   int64         `json:"subscribers" doc:"Сколько подписок выдано на этом тарифе"`
 	Sort          int64         `json:"sort"`
+}
+
+// ServersView is what a tariff includes: every server, or only the chosen nodes and
+// protocols.
+type ServersView struct {
+	All      bool    `json:"all" doc:"Все серверы; false — только выбранные ноды и протоколы"`
+	Nodes    []int64 `json:"nodes" doc:"Ноды целиком, с протоколами, которые на них появятся потом"`
+	Inbounds []int64 `json:"inbounds" doc:"Отдельные протоколы"`
+}
+
+// serversBody is the tariff's servers as the body sets them.
+type serversBody struct {
+	All      bool    `json:"all" doc:"Все серверы; false — только выбранные, хотя бы одна нода или протокол"`
+	Nodes    []int64 `json:"nodes,omitempty" maxItems:"500" doc:"Ноды целиком, с протоколами, которые на них появятся потом"`
+	Inbounds []int64 `json:"inbounds,omitempty" maxItems:"2000" doc:"Отдельные протоколы"`
+}
+
+func viewServers(s domain.Servers) ServersView {
+	v := ServersView{All: s.All, Nodes: []int64{}, Inbounds: []int64{}}
+	for id := range s.Nodes {
+		v.Nodes = append(v.Nodes, id)
+	}
+	for id := range s.Inbounds {
+		v.Inbounds = append(v.Inbounds, id)
+	}
+	slices.Sort(v.Nodes)
+	slices.Sort(v.Inbounds)
+	return v
 }
 
 // ExtraDevices is one more device on top of the tariff: its price and how many a
@@ -92,6 +123,7 @@ type tariffBody struct {
 	PriceRub      *int64        `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 19900 — 199 ₽"`
 	OnSale        bool          `json:"on_sale,omitempty" doc:"Продавать в боте и Mini App; нужна хотя бы одна цена"`
 	Terms         []termBody    `json:"terms,omitempty" maxItems:"12" doc:"Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений"`
+	Servers       *serversBody  `json:"servers,omitempty" doc:"Какие серверы входят в тариф: все или выбранные ноды и протоколы. Не передан — без изменений (у нового тарифа — все)"`
 	Pools         []PoolSetting `json:"pools,omitempty" maxItems:"100" doc:"Как тариф держит группы серверов; не названная группа — в основном трафике. Не передан — без изменений"`
 	Gifts         []int64       `json:"gifts,omitempty" maxItems:"20" doc:"Пакеты трафика в подарок при каждой оплате тарифа; каждый должен добавлять к квоте, которую тариф даёт: к основному трафику с лимитом или к группе со своим лимитом. Не передан — без изменений"`
 	ExtraDevices  *ExtraDevices `json:"extra_devices,omitempty" doc:"Докупка устройств; не передана — без изменений (у нового тарифа — нет). Нужен лимит устройств"`
@@ -156,8 +188,8 @@ func (h *handlers) listTariffs(ctx context.Context, _ *struct{}) (*tariffsOutput
 	return out, nil
 }
 
-// createTariff and updateTariff write the tariff and its pool limits in one transaction: a
-// refused pool list leaves the tariff, and the limits it had, as they were.
+// createTariff and updateTariff write the tariff, its server groups, its servers and its gifts
+// in one transaction: a refused part leaves the tariff, and what it had, as it was.
 func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOutput, error) {
 	b := in.Body
 	terms, err := b.terms(nil)
@@ -247,8 +279,8 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 	if err != nil {
 		return nil, err
 	}
-	if in.Body.Pools != nil {
-		h.d.Changes.PoliciesChanged() // a group closed or opened for the tariff's users
+	if in.Body.Pools != nil || in.Body.Servers != nil {
+		h.d.Changes.PoliciesChanged() // a group or a server closed or opened for the tariff's users
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.update", "tariff", strconv.FormatInt(t.ID, 10), nil)
 	return h.tariffOut(ctx, t)
@@ -261,7 +293,7 @@ func setTariffMode(ctx context.Context, q *db.Queries, t *db.Tariff, mode string
 		return nil
 	}
 	if !domain.ValidDeviceMode(mode) {
-		return huma.Error422UnprocessableEntity("bad_device_mode", &huma.ErrorDetail{Location: "body.device_mode", Message: "bad_device_mode"})
+		return fieldErr("body.device_mode", "bad_device_mode")
 	}
 	if err := q.SetTariffDeviceMode(ctx, db.SetTariffDeviceModeParams{DeviceMode: mode, ID: t.ID}); err != nil {
 		return err
@@ -319,39 +351,44 @@ func (h *handlers) applyTariff(ctx context.Context, in *applyTariffInput) (*appl
 // out still has the tariff's own checked, since a change of a group or of the main traffic
 // may leave a gift adding to no quota.
 func setTariffContents(ctx context.Context, q *db.Queries, t db.Tariff, b tariffBody) error {
+	if s := b.Servers; s != nil {
+		if err := domain.SetTariffServers(ctx, q, t.ID, domain.ServersInput{All: s.All, Nodes: s.Nodes, Inbounds: s.Inbounds}); err != nil {
+			return mapDomainErr(err)
+		}
+	}
 	if b.Pools != nil {
 		if err := setTariffPools(ctx, q, t.ID, b.Pools); err != nil {
 			return err
 		}
 	}
-	gifts := b.Gifts
-	if gifts == nil {
-		rows, err := q.ListTariffGifts(ctx, t.ID)
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			gifts = append(gifts, r.PackageID)
-		}
+	var err error
+	if b.Gifts != nil {
+		err = domain.SetTariffGifts(ctx, q, t, b.Gifts)
+	} else {
+		err = domain.RecheckTariffGifts(ctx, q, t)
 	}
-	if err := domain.SetTariffGifts(ctx, q, t, gifts); err != nil {
+	if err != nil {
 		return mapDomainErr(err)
 	}
 	return nil
 }
 
-// catalogExtras is what the tariffs' views take besides their rows: the groups, the gifts
-// and how many subscriptions each one was given to.
+// catalogExtras is what the tariffs' views take besides their rows: the servers, the
+// groups, the gifts and how many subscriptions each one was given to.
 type catalogExtras struct {
-	groups []db.TrafficPool
-	gifts  map[int64][]int64
-	users  map[int64]int64
+	servers map[int64]domain.Servers
+	groups  []db.TrafficPool
+	gifts   map[int64][]int64
+	users   map[int64]int64
 }
 
 func (h *handlers) catalogExtras(ctx context.Context) (catalogExtras, error) {
 	q := h.d.Store.Q
 	var c catalogExtras
 	var err error
+	if c.servers, err = domain.AllTariffServers(ctx, q); err != nil {
+		return c, err
+	}
 	if c.groups, err = q.ListTrafficPools(ctx); err != nil {
 		return c, err
 	}
@@ -369,9 +406,10 @@ func (h *handlers) catalogExtras(ctx context.Context) (catalogExtras, error) {
 	return c, nil
 }
 
-// fill puts the tariff's groups (from rows, the tariffs' settings of groups), gifts and
-// subscriptions in v.
+// fill puts the tariff's servers, groups (from rows, the tariffs' settings of groups),
+// gifts and subscriptions in v.
 func (c catalogExtras) fill(v *TariffView, rows []db.TariffPool) {
+	v.Servers = viewServers(domain.ServersOf(c.servers, sql.NullInt64{Int64: v.ID, Valid: true}))
 	v.Pools = tariffPoolsOf(rows, c.groups, v.ID)
 	v.Gifts = c.gifts[v.ID]
 	if v.Gifts == nil {
@@ -384,9 +422,8 @@ func (c catalogExtras) fill(v *TariffView, rows []db.TariffPool) {
 // too many lines is refused under the field's name, like the other checks of the body.
 func cleanDescription(s string) (string, error) {
 	out, err := domain.CleanDescription(s)
-	var fe *domain.FieldError
-	if errors.As(err, &fe) {
-		return "", fieldErr("body."+fe.Field, fe.Code)
+	if fe, ok := fieldFromDomain(err); ok {
+		return "", fe
 	}
 	return out, err
 }
@@ -423,7 +460,7 @@ func (b tariffBody) terms(kept []domain.Term) ([]domain.Term, error) {
 	for i, t := range terms {
 		key := t.Days
 		if b.BillingDay != nil && t.Days > 0 {
-			key = int64(domain.TermMonths(t.Days))
+			key = int64(model.TermMonths(t.Days))
 		}
 		if seen[key] {
 			return nil, fieldErr(at(i, "days"), "term_days_repeat")

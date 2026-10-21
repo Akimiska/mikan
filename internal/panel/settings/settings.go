@@ -108,7 +108,7 @@ const (
 	// (subs.Config.InactiveServer), with the admin's words or the built-in ones.
 	KeyInactiveServer = "sub_inactive_server"
 	// KeySiteTemplate is the built-in front page a stranger sees at the panel's address
-	// (server.Templates); "" for none.
+	// (frontpage.Templates); "" for none.
 	KeySiteTemplate = "site_template"
 	// KeyTrafficDetail: the nodes sum each subscription's bytes by site (user_sites), kept
 	// KeyTrafficDetailDays days.

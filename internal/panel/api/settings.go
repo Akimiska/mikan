@@ -21,6 +21,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/proto"
+	"mikan/internal/textutil"
 )
 
 type SettingsView struct {
@@ -339,62 +340,62 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	}
 	var details []error
 	if b.PublicHost != nil && !hostname.Valid(*b.PublicHost) {
-		details = append(details, &huma.ErrorDetail{Location: "body.public_host", Message: "public_host_invalid"})
+		details = append(details, fieldDetail("body.public_host", "public_host_invalid", nil))
 	}
 	if b.DeviceUnbind != nil {
 		var fe *domain.FieldError
 		if err := b.DeviceUnbind.Validate(); errors.As(err, &fe) {
-			details = append(details, &huma.ErrorDetail{Location: "body.device_unbind." + fe.Field, Message: fe.Code})
+			details = append(details, fieldDetail("body.device_unbind."+fe.Field, fe.Code, nil))
 		}
 	}
 	if b.LinkReissue != nil {
 		var fe *domain.FieldError
 		if err := b.LinkReissue.Validate(); errors.As(err, &fe) {
-			details = append(details, &huma.ErrorDetail{Location: "body.link_reissue." + fe.Field, Message: fe.Code})
+			details = append(details, fieldDetail("body.link_reissue."+fe.Field, fe.Code, nil))
 		}
 	}
 	if b.Domain != nil && *b.Domain != "" && !hostname.Valid(*b.Domain) {
-		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
+		details = append(details, fieldDetail("body.domain", "domain_invalid", nil))
 	}
 	// The subscription domain is a name of its own: a CA certifies it apart from the panel's.
 	if b.SubDomain != nil {
 		if d := strings.TrimSpace(*b.SubDomain); d != "" && (!hostname.Name(d) || hostname.Reserved(d)) {
-			details = append(details, &huma.ErrorDetail{Location: "body.sub_domain", Message: "sub_domain_invalid"})
+			details = append(details, fieldDetail("body.sub_domain", "sub_domain_invalid", nil))
 		}
 	}
-	if b.SupportURL != nil && strings.TrimSpace(*b.SupportURL) != "" && !subs.ValidLink(strings.TrimSpace(*b.SupportURL), true) {
-		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
+	if b.SupportURL != nil && strings.TrimSpace(*b.SupportURL) != "" && !textutil.ValidLink(strings.TrimSpace(*b.SupportURL), subs.AppLinks) {
+		details = append(details, fieldDetail("body.support_url", "support_url_invalid", nil))
 	}
 	if b.SubPublicBase != nil {
 		base := strings.TrimSpace(*b.SubPublicBase)
 		// Either empty (back to the panel's own address) or https with a path: the
 		// subscription page is served only over TLS.
 		if base != "" && (!strings.HasPrefix(base, "https://") || len(base) <= len("https://")) {
-			details = append(details, &huma.ErrorDetail{Location: "body.sub_public_base", Message: "support_url_invalid"})
+			details = append(details, fieldDetail("body.sub_public_base", "support_url_invalid", nil))
 		}
 	}
-	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !subs.ValidLink(strings.TrimSpace(*b.AnnounceURL), true) {
-		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce_url", Message: "support_url_invalid"})
+	if b.AnnounceURL != nil && *b.AnnounceURL != "" && !textutil.ValidLink(strings.TrimSpace(*b.AnnounceURL), subs.AppLinks) {
+		details = append(details, fieldDetail("body.sub_announce_url", "support_url_invalid", nil))
 	}
 	// A {word} that is no variable stays as text: an old announcement may hold one.
 	if b.SubTitle != nil && strings.ContainsAny(*b.SubTitle, "\r\n") {
-		details = append(details, &huma.ErrorDetail{Location: "body.sub_title", Message: "one_line"})
+		details = append(details, fieldDetail("body.sub_title", "one_line", nil))
 	}
 	// The announcement keeps its lines on the page and in the Mini App, a few of them.
 	if b.Announce != nil && strings.Count(*b.Announce, "\n") >= subs.AnnounceLines {
-		details = append(details, &huma.ErrorDetail{Location: "body.sub_announce", Message: "announce_lines"})
+		details = append(details, fieldDetail("body.sub_announce", "announce_lines", nil))
 	}
 	if b.BrandAccent != nil && *b.BrandAccent != "" && !subs.ValidAccent(strings.TrimSpace(*b.BrandAccent)) {
-		details = append(details, &huma.ErrorDetail{Location: "body.brand_accent", Message: "color_invalid"})
+		details = append(details, fieldDetail("body.brand_accent", "color_invalid", nil))
 	}
-	if b.BrandLogoURL != nil && *b.BrandLogoURL != "" && !subs.ValidLink(strings.TrimSpace(*b.BrandLogoURL), false) {
-		details = append(details, &huma.ErrorDetail{Location: "body.brand_logo_url", Message: "url_invalid"})
+	if b.BrandLogoURL != nil && *b.BrandLogoURL != "" && !textutil.ValidLink(strings.TrimSpace(*b.BrandLogoURL), subs.LogoLinks) {
+		details = append(details, fieldDetail("body.brand_logo_url", "url_invalid", nil))
 	}
 	if b.HappRouting != nil && strings.TrimSpace(*b.HappRouting) != "" && !subs.ValidHappRouting(strings.TrimSpace(*b.HappRouting)) {
-		details = append(details, &huma.ErrorDetail{Location: "body.happ_routing", Message: "happ_routing"})
+		details = append(details, fieldDetail("body.happ_routing", "happ_routing", nil))
 	}
 	if b.HappProvider != nil && strings.TrimSpace(*b.HappProvider) != "" && !subs.ValidHappProviderID(strings.TrimSpace(*b.HappProvider)) {
-		details = append(details, &huma.ErrorDetail{Location: "body.happ_provider_id", Message: "happ_provider_id"})
+		details = append(details, fieldDetail("body.happ_provider_id", "happ_provider_id", nil))
 	}
 	if b.HappHide != nil && *b.HappHide {
 		provider, _, err := settings.Get[string](ctx, h.d.Settings, settings.KeyHappProvider)
@@ -405,7 +406,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			provider = strings.TrimSpace(*b.HappProvider)
 		}
 		if provider == "" {
-			details = append(details, &huma.ErrorDetail{Location: "body.happ_hide_settings", Message: "happ_needs_provider"})
+			details = append(details, fieldDetail("body.happ_hide_settings", "happ_needs_provider", nil))
 		}
 	}
 	if b.SubGroupMain != nil || b.SubGroupAuto != nil || b.SubRules != nil {
@@ -445,7 +446,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 					field = "body.sub_group_auto"
 				}
 			}
-			details = append(details, &huma.ErrorDetail{Location: field, Message: re.Code, Value: re.Line})
+			details = append(details, fieldDetail(field, re.Code, re.Line))
 		}
 	}
 	if b.SubPort != nil {
@@ -461,7 +462,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			return err == nil
 		}
 		if err := b.SubRoutes.Check(exists); err != nil {
-			details = append(details, &huma.ErrorDetail{Location: "body.sub_routes", Message: err.Error()})
+			details = append(details, fieldDetail("body.sub_routes", err.Error(), nil))
 		}
 	}
 	if b.SubTemplate != nil && strings.TrimSpace(*b.SubTemplate) != "" && h.d.CheckTemplate != nil {
@@ -469,7 +470,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		var te *subs.TemplateError
 		switch {
 		case errors.As(err, &te):
-			details = append(details, &huma.ErrorDetail{Location: "body.sub_template", Message: te.Code, Value: te.Detail})
+			details = append(details, fieldDetail("body.sub_template", te.Code, te.Detail))
 		case err != nil && !errors.Is(err, subs.ErrNoProxies):
 			return nil, err
 		}

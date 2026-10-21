@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
 	"mikan/internal/panel/hysteresis"
 	"mikan/internal/panel/store/db"
 )
@@ -113,7 +114,7 @@ func (s *Syncer) tell(ctx context.Context, key, typ, next string, data events.No
 		if err := q.SetNodeState(ctx, db.SetNodeStateParams{Key: key, Value: next}); err != nil {
 			return err
 		}
-		return events.Emit(ctx, q, s.m.now(), typ, 0, 0, data, dedupe)
+		return feed.Emit(ctx, q, s.m.now(), typ, 0, 0, data, dedupe)
 	})
 	if err != nil {
 		s.log.Warn("node health: the change is not told", "event", typ, "err", err)

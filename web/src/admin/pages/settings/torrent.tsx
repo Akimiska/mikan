@@ -9,6 +9,7 @@ import { useToast } from "../../../components/toast";
 import { Button, Pill, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { dateShort, num, time } from "../../../lib/format";
+import { CardHead } from "../../../components/layout";
 
 type Hit = Schemas["TorrentHitView"];
 
@@ -42,13 +43,7 @@ export function TorrentCard() {
   const save = useSaveTorrent();
   return (
     <section className="card glass reveal" style={{ "--i": 3 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.torrent.title")}</h2>
-          <div className="card-sub">{t("settings.torrent.sub")}</div>
-        </div>
-        {q.data ? <Switch checked={q.data.enabled} label={t("settings.torrent.enable")} disabled={save.isPending} onChange={(enabled) => save.mutate({ enabled })} /> : null}
-      </div>
+      <CardHead title={t("settings.torrent.title")} sub={t("settings.torrent.sub")} aside={q.data ? <Switch checked={q.data.enabled} label={t("settings.torrent.enable")} disabled={save.isPending} onChange={(enabled) => save.mutate({ enabled })} /> : null} />
       <QueryBoundary query={q} pending={<Skeleton style={{ height: 120 }} />}>
         {(v) => (
           <>
@@ -108,12 +103,7 @@ export function TorrentHitsCard() {
   const items = list.data?.pages.flat() ?? [];
   return (
     <section className="card glass reveal min-w-0" style={{ "--i": 4 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.torrent.hits")}</h2>
-          <div className="card-sub">{t("settings.torrent.hitsSub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("settings.torrent.hits")} sub={t("settings.torrent.hitsSub")} />
       <QueryBoundary
         query={list}
         pending={

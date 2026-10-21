@@ -317,17 +317,26 @@ func mapDomainErr(err error) error {
 	case errors.Is(err, domain.ErrNoSlots):
 		return huma.Error503ServiceUnavailable("no_free_slots")
 	case errors.Is(err, domain.ErrBadBillingDay):
-		return huma.Error422UnprocessableEntity("bad_billing_day", &huma.ErrorDetail{Location: "body.billing_day", Message: "bad_billing_day"})
+		return fieldErr("body.billing_day", "bad_billing_day")
 	case errors.Is(err, domain.ErrBadSpeedLimit):
-		return huma.Error422UnprocessableEntity("bad_speed_limit", &huma.ErrorDetail{Location: "body.speed_limit", Message: "bad_speed_limit"})
+		return fieldErr("body.speed_limit", "bad_speed_limit")
 	case errors.Is(err, domain.ErrBanShared):
-		return huma.Error422UnprocessableEntity("device_no_hwid")
+		return refusal("device_no_hwid")
 	}
-	var fe *domain.FieldError
-	if errors.As(err, &fe) {
-		return fieldErr("body."+fe.Field, fe.Code)
+	if fe, ok := fieldFromDomain(err); ok {
+		return fe
 	}
 	return err
+}
+
+// fieldFromDomain is the API's 422 of a field the domain refused (domain.FieldError), at
+// body.<field>; ok false for any other error.
+func fieldFromDomain(err error) (error, bool) {
+	var fe *domain.FieldError
+	if errors.As(err, &fe) {
+		return fieldErr("body."+fe.Field, fe.Code), true
+	}
+	return nil, false
 }
 
 // folderFilter is the list's folder parameter: any folder, none, or one folder.
@@ -551,7 +560,7 @@ func (h *handlers) userResult(ctx context.Context, u db.User, err error) (*userO
 func (h *handlers) createUser(ctx context.Context, in *createUserInput) (*userOutput, error) {
 	u, err := h.d.Users.Create(ctx, domain.CreateInput{Name: in.Body.Name, Contact: in.Body.Contact, Note: in.Body.Note, Tags: in.Body.Tags, TariffID: in.Body.TariffID, Source: domain.UserFromAdmin})
 	if errors.Is(err, domain.ErrNotFound) {
-		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "tariff_not_found"})
+		return nil, fieldErr("body.tariff_id", "tariff_not_found")
 	}
 	if err == nil {
 		h.audit(ctx, sessionOf(ctx).AdminID, "user.create", "user", strconv.FormatInt(u.ID, 10), map[string]any{"tariff_id": in.Body.TariffID})
@@ -577,7 +586,7 @@ func (h *handlers) getUser(ctx context.Context, in *userIDInput) (*userOutput, e
 func (h *handlers) updateUser(ctx context.Context, in *patchUserInput) (*userOutput, error) {
 	b := in.Body
 	if b.ExpiresAt != nil && (b.ExpiresAt.Year() < 0 || b.ExpiresAt.Year() > 9999) {
-		return nil, huma.Error422UnprocessableEntity("bad_expiry", &huma.ErrorDetail{Location: "body.expires_at", Message: "year out of range"})
+		return nil, fieldErr("body.expires_at", "bad_expiry")
 	}
 	p := domain.Patch{
 		Name: b.Name, Contact: b.Contact, Note: b.Note, Tags: b.Tags, Disabled: b.Disabled,
@@ -630,7 +639,7 @@ func (h *handlers) deleteUser(ctx context.Context, in *userIDInput) (*struct{}, 
 func (h *handlers) extendUser(ctx context.Context, in *extendInput) (*userOutput, error) {
 	b := in.Body
 	if (b.Days > 0) == (b.Months > 0) {
-		return nil, huma.Error422UnprocessableEntity("extend_amount", &huma.ErrorDetail{Location: "body", Message: "extend_amount"})
+		return nil, fieldErr("body", "extend_amount")
 	}
 	var u db.User
 	var err error

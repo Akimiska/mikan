@@ -4,8 +4,9 @@ import { useMutation } from "@tanstack/react-query";
 import { FileKey2, FileText, ShieldCheck, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { errorText } from "../api/client";
-import { getLocale, t, tMaybe } from "../i18n";
+import { t, tMaybe } from "../i18n";
 import { fieldErrors, onFormError } from "../lib/fields";
+import { dateLong } from "../lib/format";
 import { Confirm, Drawer, DrawerFooter } from "./overlay";
 import { useToast } from "./toast";
 import { Button, Field, Pill } from "./ui";
@@ -15,7 +16,7 @@ export type CertInfo = { names?: string[]; issuer?: string; not_after?: string; 
 const MAX = 64 << 10;
 
 export function certUntil(iso?: string): string {
-  return iso ? new Date(iso).toLocaleDateString(getLocale(), { day: "numeric", month: "long", year: "numeric" }) : "";
+  return iso ? dateLong(iso) : "";
 }
 
 /** Days left, negative once expired. */
@@ -52,14 +53,6 @@ export function CertDrawer({
   const [keyFile, setKeyFile] = useState("");
   const [certFile, setCertFile] = useState("");
   const [clearing, setClearing] = useState(false);
-  useEffect(() => {
-    if (open) {
-      setCert("");
-      setKey("");
-      setKeyFile("");
-      setCertFile("");
-    }
-  }, [open]);
   const put = useMutation({
     mutationFn: () => save(cert, key),
     onSuccess: () => {
@@ -70,6 +63,16 @@ export function CertDrawer({
       onFormError(e, toast);
     },
   });
+  // Empty whenever the drawer opens or shuts: the private key does not stay in state past it,
+  // and the refusal of the last attempt is not shown again.
+  const { reset: resetPut } = put;
+  useEffect(() => {
+    setCert("");
+    setKey("");
+    setKeyFile("");
+    setCertFile("");
+    resetPut();
+  }, [open, resetPut]);
   const drop = useMutation({
     mutationFn: clear,
     onSuccess: () => {

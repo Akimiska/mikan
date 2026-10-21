@@ -3,9 +3,15 @@ title: Server groups and traffic packages
 description: What a plan includes, a limit of their own for some servers, buying extra traffic and gifts with a payment.
 ---
 
+## Servers in a plan
+
+In the plan's form, under "What is included" → **"Servers"**: "All" or "Chosen". The chosen ones are ticked by server. "Whole server, new protocols too" takes a server whole, with the protocols added to it later; single protocols can be ticked too. For example, when only 2 of 20 nodes should be in a plan, tick those two: no groups are needed for it.
+
+The choice reaches all the plan's clients at once. A client with a list of protocols of their own in the card keeps it, marked "A list of their own, not as in the plan"; "As in the plan" brings the plan's servers back. Load balancing places a client only on a node their plan includes.
+
 ## Server groups
 
-A group puts servers and protocols together, such as "Whitelists" or "Premium". The protocols in no group are the main servers: they are in every plan and spend the main traffic.
+A group puts servers and protocols together, such as "Whitelists" or "Premium". The protocols in no group are the main servers: they spend the main traffic in the plans that include them.
 
 In each plan a group is in one of four ways:
 
@@ -16,17 +22,19 @@ In each plan a group is in one of four ways:
 
 For example, a cheap plan: "Premium" not included, "Whitelists" 30 GB of its own. An expensive one: "Premium" on the main traffic, "Whitelists" 100 GB of its own.
 
-1. **Plans → Server groups → Add a group**: the name and the protocols. The protocols are listed by server, and "Whole server" ticks all of them. A protocol is in one group only. You can also pick the group in the protocol's settings.
+1. **Plans → Server groups → Add a group**: the name and the protocols. The protocols are listed by server. A protocol is in one group only: the group decides which traffic it spends. So "Whole server" takes the free protocols and the group's own, and a protocol of another group moves here only when you tick it on its own ("moves here from …"). You can also pick the group in the protocol's settings.
 2. In the same form, under "In the plans", pick how the group is in each plan. The plan's own form sets the same under "What is included".
 3. For a single client, change the groups in their card: "Server groups" → "Edit". A setting that differs from the plan is marked.
 
 Under the list, the "Groups in the plans" table shows every plan at once.
 
-A new group is on the main traffic in every plan until you pick otherwise. Closing and opening a group reaches all the plan's clients at once. The mode and the limit reach new clients, payments, renewals and changes of plan, and the issued subscriptions with "Apply to the issued subscriptions" on the plan's card (see below).
+A new group is on the main traffic in every plan until you pick otherwise. Closing and opening a group in a plan reaches all the plan's clients at once and replaces what was set for that group by hand in the clients' cards; the other groups stay as they were. The mode and the limit reach new clients, payments, renewals and changes of plan, and the issued subscriptions with "Apply to the issued subscriptions" on the plan's card (see below).
+
+When a group stops being a client's own limit (its mode changes to the main traffic, unlimited or not included, in the plan or in the client's card), what is left of the traffic the client bought or was given for that group moves to their main traffic and does not wait unspent.
 
 When a group's own limit runs out, only its servers stop working and leave the subscription until the reset. Groups reset together with the main traffic. The client's card, the subscription page, the bot and the Mini App show the groups with a limit of their own.
 
-Deleting a group returns its protocols to the main servers and deletes its packages together with what is left of them.
+A group can be deleted when it has no packages in the catalog (gifts with a payment are packages too), no paid traffic that clients still have, no unsettled invoices for its packages and no active promo codes that give a bonus in it; otherwise the panel refuses and names what is in the way. Archive the packages, wait for the clients' traffic to run out or expire, and turn the promo codes off or give them another group. Deleting returns the group's protocols to the main servers and drops its settings in plans and on clients; its archived packages go with it.
 
 ## Apply a plan to issued subscriptions
 
@@ -42,7 +50,7 @@ On their own, changes to a plan reach its clients with a payment, a renewal or a
 
 The plan's traffic is spent first, then packages, the one that expires sooner going first. What is left survives a traffic reset, except for "until the period ends" packages.
 
-A package is sold only where it adds something: one for the main traffic to clients whose main traffic has a limit, one for a group to clients whose group has a limit of its own. A group on the main traffic takes the main traffic's packages. **"Sold to"** narrows the sale to the plans you choose. The package's form shows which plans would buy it now, and warns when none would.
+A package is sold only where it adds something: one for the main traffic to clients whose main traffic has a limit, one for a group to clients whose group has a limit of its own. For a group the plan's servers must also serve it: among them is at least one protocol of the group that is on. Otherwise the package is not sold to that plan and cannot be its gift. A group on the main traffic takes the main traffic's packages. **"Sold to"** narrows the sale to the plans you choose. While the package is on sale ("On sale"), its form shows which plans would buy it now, and warns when none would; for a package taken off sale it says that no one can buy it.
 
 Packages are sold in the bot ("Buy more traffic") and in the Mini App for Stars and the payment methods from the marketplace. In the Mini App the main traffic and the groups with a limit of their own have a "Buy more" button. A client or group that ran out of traffic works again right after the purchase, with no new link.
 
@@ -50,6 +58,6 @@ To add traffic by hand, use the client's card: "Add traffic", then the size, the
 
 ## Gift with a payment
 
-In the plan's form, under "What is included", tick packages in **"Gift with a payment"**: the client gets them with every payment for the plan, a purchase or a renewal. Only packages that add something to this plan fit. A refund takes back the gift of the payment refunded. An archived package is no gift any more.
+In the plan's form, under "What is included", tick packages in **"Gift with a payment"**: the client gets them with every payment for the plan, a purchase or a renewal. Only packages that add something to this plan fit; a package for a group fits when the plan's servers serve the group (among them is at least one protocol of the group that is on). A refund takes back the gift of the payment refunded. An archived package is no gift any more.
 
 The bot and the Mini App show what a plan includes: its groups with their modes and its gifts. The preview in the plan's form shows it beforehand.

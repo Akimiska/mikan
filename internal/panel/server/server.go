@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"mikan/internal/frontpage"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 )
@@ -141,10 +142,5 @@ func FrameHeaders(h http.Header) {
 	h.Set("Cross-Origin-Resource-Policy", "cross-origin")
 }
 
-func NotFound(w http.ResponseWriter) {
-	h := w.Header()
-	h.Set("Content-Type", "text/plain; charset=utf-8")
-	h.Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write([]byte("404 Not Found\n"))
-}
+// NotFound is the plain 404 (frontpage.NotFound).
+func NotFound(w http.ResponseWriter) { frontpage.NotFound(w) }

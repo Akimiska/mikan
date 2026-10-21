@@ -91,6 +91,7 @@
     "months": "{n, plural, one {# month} other {# months}}",
     "forever": "no expiry",
     "expiredAgo": "{n, plural, one {expired # day ago} other {expired # days ago}}",
+    "expiredToday": "expired today",
     "today": "today",
     "tomorrow": "tomorrow",
     "justNow": "just now",
@@ -105,7 +106,8 @@
   "chart": {
     "label": "Traffic chart: downloaded and uploaded",
     "down": "Downloaded",
-    "up": "Uploaded"
+    "up": "Uploaded",
+    "summary": "For the period {down} downloaded, {up} uploaded. The left and right arrow keys move between the points."
   },
   "errors": {
     "generic": "Something went wrong. Please try again.",
@@ -203,6 +205,7 @@
       "fingerprint_no_tls": "This protocol has no TLS fingerprint",
       "reality_dest": "dest must be host:port",
       "reality_dest_private": "dest cannot be an internal address: only a public site or the panel's own port",
+      "dest_unresolved": "The panel cannot find this name in DNS: name a site that opens from the internet",
       "reality_key": "private-key must be an X25519 key in base64",
       "reality_sni": "server-names cannot be empty",
       "reality_sid": "short-id must be hex, even length, up to 16 characters",
@@ -266,6 +269,8 @@
       "read_only_key": "The key is read-only",
       "session_only": "Only the admin panel can do this, not a key",
       "support_denied": "A support operator cannot do this",
+      "support_extended": "A support operator can do this in the extended mode only",
+      "support_extended_level": "The extended mode is for the Change and Terminal levels",
       "support_read_only": "View-only access: changes are not allowed",
       "support_only": "For a support operator only",
       "support_link_used": "This link was used already. Ask for a new one",
@@ -579,7 +584,21 @@
       "package_not_found": "No such package",
       "tariff_duplicate": "A tariff is named twice",
       "apply_nothing": "Pick what to apply",
-      "inbound_not_found": "No such protocol"
+      "inbound_not_found": "No such protocol",
+      "servers_empty": "Choose at least one server or protocol",
+      "node_not_found": "No such node",
+      "bad_front_page": "No such front page",
+      "balance_currency_in_use": "The balance currency cannot change while balances hold money, top-ups wait or balance payments may still be refunded",
+      "topup_currency": "The top-up was in another balance currency: it cannot be approved, reject it and ask the client to top up again",
+      "package_gift_not_fit": "The package is a gift of a plan that does not give this target: take it off the plan's gifts first",
+      "paid_after_close": "the payment method reported it paid after the payment was closed: nothing was given, refund it or give what was paid for by hand",
+      "tariff_servers": "These are the last servers a plan chose: choose other servers for it first, or its clients have nothing to connect to",
+      "bad_reissue_limit": "Times per period: 0 to 100, 0 for no limit",
+      "bad_reissue_days": "Period: 1 to 365 days",
+      "bad_unbind_limit": "Devices per period: 0 to 100, 0 for no limit",
+      "bad_unbind_days": "Period: 1 to 365 days",
+      "bad_return_hours": "Pause: 0 to 720 hours, or \"Never\"",
+      "required": "Fill in this field"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -614,7 +633,8 @@
     "code": "Confirmation code",
     "badCode": "The code did not match. Check the time on your phone and try again.",
     "badCredentials": "Wrong login or password.",
-    "tooMany": "Too many failed attempts. You can try again in {s} s.",
+    "tooMany": "Too many failed attempts.",
+    "tooManyWait": "You can try again in {s} s.",
     "submit": "Sign in",
     "confirm": "Confirm",
     "back": "Back to password",
@@ -1002,10 +1022,11 @@
       "blocked": "{site} is in the filters: the nodes let nobody there",
       "isBlocked": "In the filters already",
       "hint": "Traffic by site, with no times or addresses. Kept for {n, plural, one {# day} other {# days}}; turned on on the Filters page."
-    }
+    },
+    "noProtocols": "No protocols are on: turn some on or add them in Protocols."
   },
   "tariffs": {
-    "subtitle": "Templates for granting access in one click. A change reaches the issued subscriptions with a renewal, or at once with \"Apply to issued subscriptions\".",
+    "subtitle": "Templates for granting access in one click. The servers, and closing or opening a group, reach the issued subscriptions at once, the rest with a renewal or with \"Apply to the issued subscriptions\".",
     "new": "New plan",
     "archived": "Plan archived",
     "emptyTitle": "No plans yet",
@@ -1031,7 +1052,7 @@
     "errMonths": "From 0 (never expires) to 120 months",
     "errBillingDay": "A day from 1 to 31",
     "errDevices": "From 1 to 100",
-    "drawerMeta": "New clients get it at once, issued subscriptions with a renewal or with Apply",
+    "drawerMeta": "New clients get it at once. Issued subscriptions get the servers and closing or opening of a group at once, the rest with a renewal or with Apply",
     "name": "Name",
     "namePlaceholder": "Standard",
     "trafficPerPeriod": "Traffic per period",
@@ -1095,13 +1116,13 @@
       "errMax": "From 0 to 50"
     },
     "contents": "What is included",
-    "contentsSub": "The main traffic, the server groups and the gifts with a payment.",
+    "contentsSub": "The servers, the server groups and the gifts with a payment.",
     "gifts": "Gift with a payment",
-    "giftsHint": "The client gets these packages with every payment for the plan: a purchase or a renewal. Packages for a limited main traffic and for groups with a limit of their own fit.",
+    "giftsHint": "The client gets these packages with every payment for the plan: a purchase or a renewal. Packages for a limited main traffic and for groups with a limit of their own that the plan's servers serve fit.",
     "giftsNone": "No package fits. Make one in the Traffic packages tab.",
     "giftOf": "Gift {name}",
     "buyable": "Can be bought",
-    "buyableNone": "Nothing now: a package has to add to a limited main traffic or to a group with a limit of its own, be on sale and be sold to this plan.",
+    "buyableNone": "Nothing now: a package has to add to a limited main traffic or to a group with a limit of its own that the plan's servers serve, be on sale and be sold to this plan.",
     "preview": "What the buyer sees",
     "previewHint": "This is the plan in the bot and the Mini App.",
     "previewGift": "Gift: {what}",
@@ -1416,7 +1437,9 @@
       "title": "Through shared 443",
       "sub": "The protocol shares the node's port 443 with others by TLS name; clients connect to 443. Needs the SNI router in the node's settings.",
       "routerOff": "The node's SNI router is off: the protocol stays on its own port until it is on."
-    }
+    },
+    "nestedTLS": "TLS in TLS",
+    "nestedTLSNote": "The TLS of the sites a client opens goes inside this protocol's own TLS (TLS in TLS): DPI can tell a proxy by the sizes of the first packets. Keep a protocol with Vision or AnyTLS next to it: they have no such pattern."
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
@@ -2088,9 +2111,6 @@
     "unbindLimit": "Devices",
     "unbindPeriod": "Per",
     "unbindReturn": "An unbound one returns in",
-    "unbindDay": "Day",
-    "unbindWeek": "Week",
-    "unbindMonth": "Month",
     "unbindDays": "{n, plural, one {# day} other {# days}}",
     "unbindDaysUnit": "days",
     "unbindHoursUnit": "h",
@@ -2195,7 +2215,8 @@
       "onSub": "The node works a little harder: the connections go through a counter.",
       "keep": "Keep, days",
       "keepHint": "Older is removed once a day, 1 to 90."
-    }
+    },
+    "routesLeaveText": "The routing changes are not saved yet and will be lost."
   },
   "deviceMode": {
     "label": "How to count:",
@@ -2333,6 +2354,7 @@
     "plusPackages": "{limit} + packages {extra}",
     "promoTitle": "Promo codes",
     "promoHint": "Bonuses are added at once; discounts apply at checkout.",
+    "promoCode": "Promo code",
     "promoApply": "Apply",
     "promoHistory": "Redemption history",
     "promoNoHistory": "No activations yet.",
@@ -2380,6 +2402,8 @@
     "devicePick": "Buy one more device for the subscription",
     "deviceNotForSale": "One more device cannot be bought now.",
     "buyMore": "Buy more",
+    "buyMoreMain": "Buy more main traffic",
+    "buyMoreOf": "Buy more traffic: {name}",
     "poolUnlimited": "unlimited",
     "shopGift": "Gift: {what}",
     "groupIn": "included",
@@ -2495,7 +2519,13 @@
     "apiAllow": "More panel addresses",
     "apiAllowHint": "Optional. Addresses or networks, separated by commas, if the panel reaches nodes from an IP other than its public one (NAT, a second address). The node takes the panel's IP and the address it connects from by itself. Up to 16.",
     "apiAllowMany": "16 addresses at most",
-    "apiLockFailed": "The node closes the port itself, but its server's firewall has no rule: {error}"
+    "apiLockFailed": "The node closes the port itself, but its server's firewall has no rule: {error}",
+    "frontPage": "Front page for strangers",
+    "frontPageHint": "What a stranger who opens the server in a browser sees instead of a bare 404: VLESS and Trojan on XHTTP, WebSocket or gRPC give this page on any domain of theirs.",
+    "frontPageNone": "None",
+    "frontPageMaintenance": "Maintenance",
+    "frontPageCats": "Cats clicker",
+    "frontPageRouter": "With the shared port 443 the node's domain and a request with no name get it too: the node's real certificate, TLS 1.2 or later, HSTS. A domain a protocol on the shared 443 takes stays with the protocol and shows the page too if it is XHTTP, WebSocket or gRPC."
   },
   "telegram": {
     "subtitle": "A bot for subscription owners and a Mini App with the subscription page",
@@ -2867,9 +2897,11 @@
     "emptyFiltered": "Nothing matches the filter.",
     "more": "Show more",
     "refund": "Refund",
-    "refunded": "Stars refunded",
+    "refunded": "Money refunded",
     "refundTitle": "Refund {sum}?",
     "refundText": "The Stars go back to the buyer, and what this payment gave is taken back: a new subscription is turned off, a renewal loses its term, a traffic package is removed.",
+    "refundBalanceText": "The sum goes back to the buyer's balance, and what this payment gave is taken back: a new subscription is switched off, a renewal loses the term paid, a traffic package goes.",
+    "refundAddonText": "The panel asks the payment method to give the money back, and what this payment gave is taken back. If the method cannot, refund in its dashboard and press \"Refunded by hand\".",
     "settingsSub": "Who to sell subscriptions to, and how",
     "saved": "Payment settings saved",
     "live": "Accepting",
@@ -2909,6 +2941,7 @@
     "notAppliedByHand": "Not applied: {error}.",
     "byHandDone": "Marked refunded",
     "byHandText": "Mark it only once you have refunded the money in the provider's dashboard: the panel refunds nothing itself, it only closes the payment. It becomes refunded, and the buyer gets a message.",
+    "byHandAppliedText": "Mark it only if you have already refunded in the payment provider's dashboard: the panel refunds nothing itself, but takes back what this payment gave: a new subscription is switched off, a renewal loses the term paid, a traffic package goes.",
     "byHandTitle": "Has {sum} gone back to the buyer?",
     "byHand": "Refunded by hand",
     "invoiceFailed": "The invoice did not open: {error}.",
@@ -3045,7 +3078,7 @@
   "pools": {
     "title": "Server groups",
     "sub": "A group puts servers and protocols together, such as \"Whitelists\" or \"Premium\". In each plan a group is on the main traffic, has a limit of its own, has no limit, or is not included.",
-    "none": "Without groups every server is in every plan and spends the main traffic. A group gives some servers a limit of their own or keeps them out of a cheap plan.",
+    "none": "Without groups the servers spend the main traffic. A group gives some servers a limit of their own or traffic without a limit. Which servers a plan includes is chosen in the plan itself.",
     "empty": "No servers in the group yet",
     "name": "Group name",
     "placeholder": "Whitelists, for example",
@@ -3055,10 +3088,10 @@
     "rename": "Edit {name}",
     "delete": "Delete {name}",
     "deleteTitle": "Delete the group \"{name}\"?",
-    "deleteText": "Its servers become main servers and spend the main traffic. The group's settings in plans and on clients go, and its packages are deleted with what is left of them.",
+    "deleteText": "Its servers become main servers and spend the main traffic. The group's settings in plans and on clients go, and its archived packages are deleted with it. It can be deleted when the catalog has none of its packages, no client has paid traffic of it left, and there are no open invoices or active promo codes for it.",
     "hint": "A protocol is in one group. Pick the group here or in the protocol's settings.",
     "inbound": "Server group",
-    "inboundHint": "The protocol is in the plans the way they have its group. Without a group it is a main server: in every plan, on the main traffic.",
+    "inboundHint": "A protocol spends traffic the way the plans have its group. Without a group it is a main server: it spends the main traffic in the plans that include it.",
     "mainTraffic": "Main traffic",
     "tariffLimits": "Server groups",
     "tariffLimitsHint": "How each group is in the plan.",
@@ -3070,24 +3103,21 @@
     "emptyTitle": "No groups yet",
     "protocols": "Servers:",
     "limits": "In the plans:",
-    "noLimits": "on the main traffic in every plan",
     "new": "New group",
     "edit": "Server group",
     "drawerMeta": "The group's servers and how it is in the plans",
     "nameHint": "Subscribers see it in the bot, the Mini App and on the subscription page.",
-    "renamed": "Group renamed",
-    "closed": "not included",
-    "closeHint": "Closing and opening a group reaches the plan's clients at once, the rest reaches new clients, renewals, and \"Apply to the issued subscriptions\".",
+    "closeHint": "Closing and opening a group reaches the plan's clients at once and replaces the setting of this group made for clients by hand. The rest reaches new clients, renewals, and \"Apply to the issued subscriptions\".",
     "saved": "Group saved",
     "mainServers": "Main servers",
-    "mainServersSub": "Protocols in no group: in every plan, on the main traffic.",
+    "mainServersSub": "Protocols in no group: in the plans that include them, on the main traffic.",
     "servers": "Servers and protocols",
-    "serversHint": "Tick what is in the group. A protocol is in one group only: one ticked here leaves the group it was in.",
+    "serversHint": "A protocol is in one group only: the group decides which traffic it spends. \"Whole server\" takes the free protocols; tick a protocol of another group on its own and it moves here. Which servers a plan includes is chosen in the plan itself.",
     "wholeNode": "Whole server",
     "inOther": "now in \"{name}\"",
     "noInbounds": "No protocols yet: add them under Protocols.",
     "inTariffs": "In the plans",
-    "inTariffsHint": "Closing and opening the group reaches the plan's clients at once. The mode and the limit reach new clients, renewals, and \"Apply to the issued subscriptions\".",
+    "inTariffsHint": "Closing and opening the group reaches the plan's clients at once and replaces the setting of this group made for clients by hand. The mode and the limit reach new clients, renewals, and \"Apply to the issued subscriptions\".",
     "noTariffs": "No plans yet.",
     "overview": "Groups in the plans",
     "overviewSub": "How each group is in each plan. Click a group to change its servers and modes.",
@@ -3113,7 +3143,9 @@
     "asTariff": "as in the plan",
     "changed": "not as in the plan",
     "usedOf": "{used} of {limit}",
-    "usedUnlimited": "{used} · unlimited"
+    "usedUnlimited": "{used} · unlimited",
+    "moveFrom": "moves here from \"{name}\"",
+    "savedPart": "The group's name and protocols are saved, its mode in a plan is not: see the error under the plans"
   },
   "cert": {
     "panelTitle": "Own panel certificate",
@@ -3280,7 +3312,8 @@
     "revokedInstalled": "{name}: mikan took this addon out of the community registry ({reason}). Remove it in the menu of its row.",
     "repo": "Repository",
     "stars": "Stars on GitHub",
-    "sourceOf": "Source"
+    "sourceOf": "Source",
+    "downloads": "How many times the image was pulled, by its GitHub package page"
   },
   "addons": {
     "storage": {
@@ -3424,6 +3457,7 @@
     "archived": "Package archived",
     "archiveTitle": "Archive package “{name}”?",
     "archiveText": "It can no longer be bought. Traffic already bought stays with the clients.",
+    "archiveGifts": "The plans {names} will stop giving it as a gift.",
     "new": "New package",
     "edit": "Traffic package",
     "drawerMeta": "Bought traffic is added to the plan's limit",
@@ -3431,7 +3465,7 @@
     "namePlaceholder": "For example, +50 GB",
     "size": "Size",
     "target": "Adds to",
-    "targetHint": "A package for a group is bought by clients whose group has a limit of its own; one for the main traffic, by clients with a limited main traffic.",
+    "targetHint": "A package for a group is bought by clients whose group has a limit of its own and who may use a protocol of it that is on; one for the main traffic, by clients with a limited main traffic.",
     "saleSub": "Shown in the bot (“Buy more traffic”) and in the Mini App; needs at least one price.",
     "sellingOff": "Selling is off in Settings: the prices are kept until it is on.",
     "created": "Package created",
@@ -3441,8 +3475,9 @@
     "tariffsAll": "Every plan it fits",
     "tariffsSome": "The chosen ones",
     "tariffsHint": "The plans the package does not fit are grey: they have no quota it adds to.",
-    "buyers": "Bought by now",
+    "buyers": "Can be bought by",
     "buyersNone": "No one can buy it now: no plan has a quota it adds to.",
+    "buyersOff": "No one can buy it now: it is not on sale.",
     "giftIn": "Gift in: {names}",
     "notFit": "does not fit",
     "errTariffs": "Pick at least one plan",
@@ -3786,7 +3821,6 @@
       "lead": "We check the node's ports from Russia: from home and mobile internet and from data centres, and from Europe to compare.",
       "caveat": "The check does not see blocks by protocol or the whitelists of mobile operators.",
       "running": "Checking, up to 40 seconds…",
-      "checkedAt": "Checked {ago}",
       "api": "API {port}"
     },
     "join": {
@@ -3995,6 +4029,8 @@
     "readOnlyHint": "Changes are blocked: the admin opened this access for viewing only",
     "peopleHidden": "client data hidden",
     "peopleHiddenHint": "Clients' names, Telegram and subscription links are hidden from the operator",
+    "extended": "extended mode",
+    "extendedHint": "The operator may also do what is otherwise the admin's alone: node keys and addresses, payments and balances, the bot, addons from outside mikan's catalog",
     "closed": "This is closed in support mode: the password, two-factor protection, sessions, API keys and mailings stay with the owner.",
     "level": {
       "view": "View",
@@ -4037,6 +4073,7 @@
       "people": "Client data",
       "peopleShown": "visible to the operator",
       "peopleHidden": "hidden",
+      "mode": "Mode",
       "servers": "Terminal servers",
       "note": "Note",
       "operator": "Operator",
@@ -4048,18 +4085,21 @@
       "canTitle": "The operator can",
       "can1": "View settings, clients, nodes, protocols, payments and logs",
       "can2": "Run the server check and read its report",
-      "can3": "At the Change level: edit settings, nodes and addons, restart services",
+      "can3": "At the Change level: edit settings, clients, nodes, protocols and official addons, restart services",
       "can4": "At the Terminal level: work in a shell on the servers you pick, everything is recorded",
+      "can5": "In the extended mode: also issue node keys, change a node's address and domain, payments, payment details and balances, install addons from outside mikan's catalog",
       "cannotTitle": "The operator cannot",
       "cannot1": "See or change your password, two-factor protection and API keys",
       "cannot2": "Give access to anyone else or revoke yours",
       "cannot3": "Read the whole action journal or send mailings to clients",
-      "cannot4": "See clients' names, Telegram and subscription links unless you allow it"
+      "cannot4": "See clients' names, Telegram and subscription links unless you allow it",
+      "cannot5": "Without the extended mode: get a node's key, change a node's address or domain, the payment details and balances, hand over the bot or install an addon from outside mikan's catalog"
     },
     "journal": {
       "title": "Access journal ({n})",
       "lead": "What the operator did and what happened to the access, newest first.",
       "grant": "Access opened: {level}, {hours} h",
+      "grantExtended": "Access opened: {level}, extended mode, {hours} h",
       "enter": "Operator came in ({via})",
       "viaApi": "with a key",
       "viaBrowser": "in a browser",
@@ -4079,12 +4119,15 @@
       "level": "Access level",
       "levelHint": {
         "view": "The operator only looks and cannot change anything.",
-        "change": "The operator can change settings, nodes and addons and restart services.",
+        "change": "The operator can change settings, clients, nodes and addons and restart services. Node keys, payments and third-party addons take the extended mode.",
         "terminal": "Plus a shell on the servers you pick: full access to them."
       },
       "people": "Show client data",
       "peopleOff": "Names, Telegram and subscription links are hidden from the operator.",
       "peopleOn": "The operator will see your clients' names, Telegram and subscription links.",
+      "extended": "Extended mode",
+      "extendedOff": "Node keys, a node's address and domain, own certificates, payments, balances, the bot and addons from outside mikan's catalog stay yours alone.",
+      "extendedOn": "The operator can do this too: issue node keys, change a node's address and domain, set own certificates and a WireGuard exit, change payments, payment details and balances, refund payments, hand the bot to an addon and install addons from outside mikan's catalog. Through a node key or an addon, client data becomes reachable as well. Your password, API keys, support access, the journal and the bot's notices stay yours alone. Takes your password.",
       "note": "A note for yourself",
       "noteHint": "For example a ticket number. It stays in your journal.",
       "termTitle": "Terminal",
@@ -4410,5 +4453,149 @@
     "title": "Your servers:",
     "panel": "Panel",
     "sub": "Subscription"
+  },
+  "servers": {
+    "label": "Servers",
+    "hint": "Which servers the plan includes. It reaches all the plan's clients at once; a client with a list of protocols of their own in the card keeps that list.",
+    "all": "All",
+    "chosen": "Chosen",
+    "wholeNode": "Whole server, new protocols too",
+    "none": "Nothing chosen",
+    "off": "off",
+    "asTariff": "As in the plan",
+    "notAsTariff": "A list of their own, not as in the plan: changes of the plan do not reach it.",
+    "notInTariff": "not in the plan",
+    "groupClosed": "group \"{name}\" not included"
+  },
+  "audit": {
+    "title": "Activity log",
+    "sub": "What was done in the panel over the last 180 days: sign-ins, support access, changes of clients, servers and settings. Newest first.",
+    "empty": "No entries yet",
+    "emptyText": "Sign-ins to the panel and everything changed in it will show up here.",
+    "details": "Details",
+    "actor": {
+      "admin": "Admin",
+      "system": "The system or the server console",
+      "subscriber": "Subscriber",
+      "addon": "Addon {id}",
+      "support": "Support, access #{id}",
+      "apiKey": "API key {prefix}…"
+    },
+    "group": {
+      "addon": "Addons",
+      "api_key": "API keys",
+      "auth": "Sign-in",
+      "auto": "Automation",
+      "balance": "Balance",
+      "campaign": "Ad campaigns",
+      "cli": "Server console",
+      "exit_dns": "Exit DNS",
+      "filters": "Filters",
+      "folder": "Client folders",
+      "import": "Import",
+      "inbound": "Protocols",
+      "node": "Nodes",
+      "package": "Traffic packages",
+      "payment": "Payments",
+      "payments": "Payment settings",
+      "pool": "Server groups",
+      "promocode": "Promo codes",
+      "settings": "Settings",
+      "sub_doc": "Guides",
+      "sub_page": "Subscription page",
+      "support": "Support",
+      "system": "System",
+      "tariff": "Plans",
+      "telegram": "Telegram",
+      "torrent": "Torrents",
+      "traffic_detail": "Traffic by site",
+      "updates": "Updates",
+      "user": "Clients"
+    },
+    "action": {
+      "auth": {
+        "login": "Signed in",
+        "login_failed": "Failed sign-in",
+        "logout": "Signed out",
+        "password_changed": "Password changed",
+        "recovery_code_used": "Signed in with a recovery code",
+        "session_revoked": "Session ended",
+        "totp_enabled": "Two-factor sign-in on",
+        "totp_disabled": "Two-factor sign-in off"
+      },
+      "support": {
+        "grant": "Support access given",
+        "enter": "Support entered the panel",
+        "revoke": "Support access revoked",
+        "expire": "Support access expired",
+        "terminal": {
+          "start": "Support opened a terminal",
+          "end": "Support closed a terminal"
+        }
+      },
+      "api_key": {
+        "create": "API key created",
+        "delete": "API key deleted"
+      },
+      "cli": {
+        "reset_password": "Password reset in the console",
+        "reset_path": "Admin address changed in the console",
+        "bootstrap": "Panel installed"
+      },
+      "user": {
+        "create": "Client created",
+        "update": "Client changed",
+        "delete": "Client deleted",
+        "extend": "Subscription extended",
+        "reissue": "Subscription link replaced",
+        "reset_traffic": "Client traffic reset"
+      },
+      "node": {
+        "create": "Node added",
+        "update": "Node changed",
+        "delete": "Node deleted",
+        "restart": "Node restarted"
+      },
+      "settings": {
+        "update": "Settings changed"
+      },
+      "tariff": {
+        "create": "Plan created",
+        "update": "Plan changed",
+        "archive": "Plan archived"
+      },
+      "payment": {
+        "refund": "Payment refunded"
+      },
+      "balance": {
+        "topup": "Top-up decided",
+        "adjust": "Balance changed by hand"
+      }
+    },
+    "target": {
+      "user": "client #{id}",
+      "node": "node #{id}",
+      "inbound": "protocol #{id}",
+      "tariff": "plan #{id}",
+      "pool": "group #{id}",
+      "package": "package #{id}",
+      "promocode": "promo code #{id}",
+      "folder": "folder #{id}",
+      "campaign": "campaign #{id}",
+      "sub_doc": "guide #{id}",
+      "tg": "Telegram {id}",
+      "support_grant": "access #{id}",
+      "payment": "payment #{id}",
+      "admin": "admin {id}",
+      "api_key": "key {id}",
+      "addon": "addon {id}",
+      "addon_source": "addon source {id}",
+      "session": "session {id}",
+      "settings": "settings {id}",
+      "telegram": "bot {id}",
+      "certificate": "certificate {id}",
+      "users": "clients {id}",
+      "sub_page_image": "subscription page image {id}"
+    }
   }
 }

@@ -204,7 +204,9 @@ func (c *Client) CreateInvoice(ctx context.Context, r InvoiceRequest) (Invoice, 
 	return inv, nil
 }
 
-// Status of an invoice at the provider: pending, paid or canceled, with what was paid.
+// Status of an invoice at the provider: pending, paid, canceled or refunded (the money went
+// back, from the dashboard or by a chargeback: what the payment gave is taken back), with
+// what was paid.
 type Status struct {
 	Status   string `json:"status"`
 	Amount   int64  `json:"amount"`

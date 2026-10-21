@@ -9,6 +9,7 @@ import (
 
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/textutil"
 )
 
 const (
@@ -47,9 +48,9 @@ func (s *Sessions) CreateSupport(ctx context.Context, adminID, grantID, expires 
 func (s *Sessions) create(ctx context.Context, adminID int64, grant sql.NullInt64, expires int64, ip, userAgent string) (string, db.Session, error) {
 	token := secure.Token(43)
 	now := s.now().Unix()
-	if len(userAgent) > 256 {
-		userAgent = userAgent[:256]
-	}
+	// The header is the client's: a cut character or bytes that are not UTF-8 would make the
+	// row unwritable and the sign-in fail.
+	userAgent = textutil.Clip(userAgent, 256)
 	end := now + int64(MaxTTL/time.Second)
 	if expires > 0 {
 		end = min(end, expires)

@@ -2,17 +2,11 @@ import { Hourglass, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui";
 import { t } from "../i18n";
-import { dateShort, time } from "../lib/format";
+import { dateShort, period, time } from "../lib/format";
 import { initData, postJSON, subRoot, tokenOf } from "./net";
 import type { Info } from "./types";
 
 /** The reissue window in words: "сутки", "неделю", "10 дней". */
-function period(days: number): string {
-  if (days === 1) return t("sub.periodDay");
-  if (days === 7) return t("sub.periodWeek");
-  if (days === 30) return t("sub.periodMonth");
-  return t("sub.periodDays", { n: days });
-}
 
 /**
  * The subscriber's own new link (the Mini App only): the old one stops working at once and

@@ -502,12 +502,12 @@ func TestHealthCarriesAppliedPorts(t *testing.T) {
 func TestPolicyCarriesSpeedCap(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	u := db.User{ID: 42, Status: "active", SpeedLimit: sql.NullInt64{Int64: 30, Valid: true}}
-	p := userPolicy(u, 0, "s1", 1, now, nil, nil, nil)
+	p := userPolicy(u, 0, "s1", 1, now, nil, domain.AccessOf(u, domain.AllServers), nil, nil)
 	if p.SpeedMbps != 30 || p.Group != "42" {
 		t.Fatalf("cap and group: %+v", p)
 	}
 	u.SpeedLimit = sql.NullInt64{}
-	if p := userPolicy(u, 0, "s2", 1, now, nil, nil, nil); p.SpeedMbps != 0 || p.Group != "42" {
+	if p := userPolicy(u, 0, "s2", 1, now, nil, domain.AccessOf(u, domain.AllServers), nil, nil); p.SpeedMbps != 0 || p.Group != "42" {
 		t.Fatalf("no cap: %+v", p)
 	}
 	a := policyKey([]nodeapi.Policy{{Slot: "s1", SpeedMbps: 30}})
@@ -556,7 +556,7 @@ func TestSNIRouterRoutes(t *testing.T) {
 		in("reality", `{"type":"vless","reality-config":{"server-names":["www.microsoft.com","microsoft.com"]},"mikan":{"sni443":true}}`),
 		in("tls", `{"type":"trojan","mikan":{"tls":"node","sni443":true}}`),
 		in("udp", `{"type":"hysteria2","mikan":{"sni443":true}}`),
-	}, "node.example.net")
+	}, "node.example.net", false)
 	if r == nil || len(r.Routes) != 2 || r.Default != "reality" {
 		t.Fatalf("router: %+v", r)
 	}
@@ -569,8 +569,35 @@ func TestSNIRouterRoutes(t *testing.T) {
 	if !r.Routed("tls") || r.Routed("plain") {
 		t.Fatal("Routed")
 	}
-	if sniRouter([]nodeapi.Inbound{in("plain", `{"type":"vless","reality-config":{}}`)}, "") != nil {
+	if sniRouter([]nodeapi.Inbound{in("plain", `{"type":"vless","reality-config":{}}`)}, "", false) != nil {
 		t.Fatal("a router with nothing behind it")
+	}
+}
+
+// The front page takes the node's own domain and a ClientHello with no name; a domain an
+// inbound asks for stays the inbound's. With nothing marked the page alone keeps the
+// router, unless an inbound of the node's own holds TCP 443.
+func TestSNIRouterFrontPage(t *testing.T) {
+	in := func(name, port, cfg string) nodeapi.Inbound {
+		return nodeapi.Inbound{Name: name, Port: port, Config: []byte(cfg)}
+	}
+	reality := in("reality", "8443", `{"type":"vless","reality-config":{"server-names":["www.microsoft.com"]},"mikan":{"sni443":true}}`)
+	r := sniRouter([]nodeapi.Inbound{reality}, "Node.Example.net.", true)
+	if r == nil || !slices.Equal(r.Stub, []string{"node.example.net", ""}) || r.Default != "reality" {
+		t.Fatalf("page on the domain and with no name: %+v", r)
+	}
+	tls := in("tls", "8443", `{"type":"trojan","mikan":{"tls":"node","sni443":true}}`)
+	if r := sniRouter([]nodeapi.Inbound{reality, tls}, "node.example.net", true); r == nil || !slices.Equal(r.Stub, []string{""}) {
+		t.Fatalf("a domain an inbound asks for stays the inbound's: %+v", r)
+	}
+	if r := sniRouter(nil, "node.example.net", true); r == nil || len(r.Routes) != 0 || len(r.Stub) != 2 {
+		t.Fatalf("the page alone: %+v", r)
+	}
+	if r := sniRouter([]nodeapi.Inbound{in("own", "443", `{"type":"vless","reality-config":{}}`)}, "node.example.net", true); r != nil {
+		t.Fatalf("an inbound of its own on 443 leaves the page no port: %+v", r)
+	}
+	if r := sniRouter([]nodeapi.Inbound{in("hy", "443", `{"type":"hysteria2"}`)}, "node.example.net", true); r == nil {
+		t.Fatal("443 over UDP leaves TCP 443 free")
 	}
 }
 
@@ -582,6 +609,7 @@ func TestStateKeyHoldsTheNodeSwitches(t *testing.T) {
 		"redirect": {HTTPRedirect: true},
 		"detail":   {Detail: true},
 		"router":   {Router: &nodeapi.SNIRouter{Routes: []nodeapi.SNIRoute{{Inbound: "a", Names: []string{"x"}}}}},
+		"front":    {FrontPage: "cats"},
 	} {
 		if stateKey(st) == stateKey(base) {
 			t.Errorf("%s does not change the state's key", name)

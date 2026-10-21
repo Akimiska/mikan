@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
 )
 
@@ -40,17 +41,17 @@ func TestBillingDates(t *testing.T) {
 		{"no billing day: same day next month", AddMonths(at("2026-10-15 09:00"), 1, sql.NullInt64{}), "2026-11-15 09:00"},
 		{"no billing day: the 31st to a shorter month", AddMonths(at("2027-01-31 09:00"), 1, sql.NullInt64{}), "2027-02-28 09:00"},
 
-		{"monthly period began on the last billing day", MonthPeriodStart(at("2026-09-29 13:45"), bday(10)), "2026-09-10 00:00"},
-		{"before this month's billing day: last month's", MonthPeriodStart(at("2026-09-05 13:45"), bday(10)), "2026-08-10 00:00"},
-		{"without a billing day: the 1st", MonthPeriodStart(at("2026-09-29 13:45"), sql.NullInt64{}), "2026-09-01 00:00"},
-		{"the 31st in February", MonthPeriodStart(at("2027-03-10 00:00"), bday(31)), "2027-02-28 00:00"},
+		{"monthly period began on the last billing day", model.MonthPeriodStart(at("2026-09-29 13:45"), bday(10)), "2026-09-10 00:00"},
+		{"before this month's billing day: last month's", model.MonthPeriodStart(at("2026-09-05 13:45"), bday(10)), "2026-08-10 00:00"},
+		{"without a billing day: the 1st", model.MonthPeriodStart(at("2026-09-29 13:45"), sql.NullInt64{}), "2026-09-01 00:00"},
+		{"the 31st in February", model.MonthPeriodStart(at("2027-03-10 00:00"), bday(31)), "2027-02-28 00:00"},
 	} {
 		if got := c.got.Format("2006-01-02 15:04"); got != c.want {
 			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
 		}
 	}
 	for days, months := range map[int64]int{30: 1, 31: 1, 90: 3, 180: 6, 365: 12, 7: 1} {
-		if got := TermMonths(days); got != months {
+		if got := model.TermMonths(days); got != months {
 			t.Errorf("%d days: %d months, want %d", days, got, months)
 		}
 	}

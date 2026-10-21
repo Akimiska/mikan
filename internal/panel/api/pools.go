@@ -241,16 +241,8 @@ func (h *handlers) setPoolTariffs(ctx context.Context, in *groupTariffsInput) (*
 			if err := setTariffPools(ctx, q, t.ID, settings); err != nil {
 				return err
 			}
-			gifts, err := q.ListTariffGifts(ctx, t.ID)
-			if err != nil {
-				return err
-			}
-			ids := make([]int64, 0, len(gifts))
-			for _, g := range gifts {
-				ids = append(ids, g.PackageID)
-			}
 			var fe *domain.FieldError
-			if err := domain.SetTariffGifts(ctx, q, t, ids); errors.As(err, &fe) {
+			if err := domain.RecheckTariffGifts(ctx, q, t); errors.As(err, &fe) {
 				return fieldErrValue("body.tariffs", fe.Code, t.ID)
 			} else if err != nil {
 				return err
@@ -358,7 +350,7 @@ func (h *handlers) setUserPools(ctx context.Context, in *userPoolsInput) (*userP
 				return err
 			}
 		}
-		return nil
+		return domain.GroupGrantsToMain(ctx, q, in.ID)
 	})
 	if err != nil {
 		return nil, err
@@ -451,7 +443,11 @@ func setTariffPools(ctx context.Context, q *db.Queries, tariffID int64, settings
 			return err
 		}
 	}
-	return nil
+	if len(touched) == 0 {
+		return nil
+	}
+	// What the users bought for a group closed to them goes to their main traffic.
+	return q.MoveTariffGroupGrantsToMain(ctx, sql.NullInt64{Int64: tariffID, Valid: true})
 }
 
 // tariffPoolsOf lists how the tariff has every group (pools), for its view: a group without

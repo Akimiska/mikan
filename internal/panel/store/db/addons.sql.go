@@ -442,24 +442,17 @@ const listAddonEvents = `-- name: ListAddonEvents :many
 SELECT id, type, user_id, tg_id, data, dedupe_key, created_at FROM addon_events
 WHERE id > $1::BIGINT
   AND (COALESCE(cardinality($2::TEXT[]), 0) = 0 OR type = ANY($2::TEXT[]))
-  AND ($3::BOOLEAN OR type NOT LIKE 'bot.%')
-ORDER BY id LIMIT $4::INT
+ORDER BY id LIMIT $3::INT
 `
 
 type ListAddonEventsParams struct {
-	After  int64
-	Types  []string
-	BotToo bool
-	Lim    int32
+	After int64
+	Types []string
+	Lim   int32
 }
 
 func (q *Queries) ListAddonEvents(ctx context.Context, arg ListAddonEventsParams) ([]AddonEvent, error) {
-	rows, err := q.db.QueryContext(ctx, listAddonEvents,
-		arg.After,
-		pq.Array(arg.Types),
-		arg.BotToo,
-		arg.Lim,
-	)
+	rows, err := q.db.QueryContext(ctx, listAddonEvents, arg.After, pq.Array(arg.Types), arg.Lim)
 	if err != nil {
 		return nil, err
 	}

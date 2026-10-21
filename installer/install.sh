@@ -23,11 +23,11 @@ REPO="Miroshka000/mikan"
 BASE="https://github.com/$REPO/releases/latest/download"
 INDEX="https://github.com/$REPO/releases/download/updates/index.json"
 
-# The public half of the key that signs every release's manifest.json: the same key as
-# internal/release.PublicKey (installer/src/release.rs checks that this text matches it).
-PUBKEY='-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAZ3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8=
------END PUBLIC KEY-----'
+# The public halves of the release keys, which sign every release's manifest.json and the
+# release index: the same keys as internal/release.ReleaseKeys (installer/src/release.rs
+# checks that these lines match them). A signature of any of them is the release's.
+PUBKEYS='MCowBQYDK2VwAyEAZ3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8=
+MCowBQYDK2VwAyEAJ4DbLqhnFdx8ncEiF4BQOW1aucukNCCgMhcZ18pCWFw='
 
 fail() {
   echo "mikan: $*" >&2
@@ -94,12 +94,19 @@ try() {
   # shellcheck disable=SC2086 # $retry is a list of flags
   curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --speed-limit 1024 --speed-time 30 $retry "$1" -o "$2" 2>/dev/null
 }
-printf '%s\n' "$PUBKEY" >"$tmp/key.pem"
-# signed FILE SIG: whether SIG is the release key's signature over FILE's exact bytes.
+keys=0
+for k in $PUBKEYS; do
+  keys=$((keys + 1))
+  printf '%s\n' '-----BEGIN PUBLIC KEY-----' "$k" '-----END PUBLIC KEY-----' >"$tmp/key-$keys.pem"
+done
+# signed FILE SIG: whether SIG is a release key's signature over FILE's exact bytes.
 signed() {
   tr -d ' \n\r' <"$2" | base64 -d >"$tmp/check.bin" 2>/dev/null || return 1
   [ "$(wc -c <"$tmp/check.bin" | tr -d ' ')" = 64 ] || return 1
-  openssl pkeyutl -verify -pubin -inkey "$tmp/key.pem" -rawin -in "$1" -sigfile "$tmp/check.bin" >/dev/null 2>&1
+  for key in "$tmp"/key-*.pem; do
+    openssl pkeyutl -verify -pubin -inkey "$key" -rawin -in "$1" -sigfile "$tmp/check.bin" >/dev/null 2>&1 && return 0
+  done
+  return 1
 }
 # The newest stable release the index lists (internal/release/index.go): entries are flat
 # objects, so each is one line once split at "{"; one this script cannot read is skipped.
@@ -141,8 +148,8 @@ fi
 # The signature first: nothing in the manifest is read before it is known to be the release's.
 tr -d ' \n\r' <"$tmp/manifest.json.sig" | base64 -d >"$tmp/sig.bin" 2>/dev/null || fail "the manifest's signature is not base64"
 [ "$(wc -c <"$tmp/sig.bin" | tr -d ' ')" = 64 ] || fail "the manifest's signature has the wrong length"
-openssl pkeyutl -verify -pubin -inkey "$tmp/key.pem" -rawin -in "$tmp/manifest.json" -sigfile "$tmp/sig.bin" >/dev/null 2>&1 ||
-  fail "the release manifest's signature does not match the release key: nothing is installed"
+signed "$tmp/manifest.json" "$tmp/manifest.json.sig" ||
+  fail "the release manifest's signature does not match the release keys: nothing is installed"
 
 # The manifest lists "<arch>": { "url": …, "sha256": "…" } (no jq on a fresh server): the
 # arch's object, then its two fields, in whatever order and with whatever else it holds.

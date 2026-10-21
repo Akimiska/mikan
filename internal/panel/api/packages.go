@@ -73,7 +73,7 @@ type packagesOutput struct{ Body []PackageView }
 // GrantView is traffic a user got: the history of packages and the admin's gifts.
 type GrantView struct {
 	ID          int64      `json:"id"`
-	PoolID      *int64     `json:"pool_id" doc:"Пул трафика; null — основной трафик"`
+	PoolID      *int64     `json:"pool_id" doc:"Группа серверов; null — основной трафик"`
 	Bytes       int64      `json:"bytes"`
 	Remaining   int64      `json:"remaining"`
 	Lifetime    string     `json:"lifetime" enum:"used,period,days"`

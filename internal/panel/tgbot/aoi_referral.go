@@ -6,7 +6,7 @@ import (
 	"html"
 	"net/url"
 
-	"mikan/internal/panel/tgate"
+	"mikan/internal/tgapi"
 )
 
 // AoiVPN fork: the «Пригласить друга» screen of the referral programme (aoiref). Its words
@@ -45,15 +45,15 @@ func refWordsFor(w *words) *refWords {
 	return &refRu
 }
 
-func (b *Bot) referralScreen(ctx context.Context, w *words, chat int64, notice string) (string, *tgate.Keyboard) {
+func (b *Bot) referralScreen(ctx context.Context, w *words, chat int64, notice string) (string, *tgapi.Keyboard) {
 	rw := refWordsFor(w)
-	back := []tgate.Button{{Text: w.back, CallbackData: "m"}}
+	back := []tgapi.Button{{Text: w.back, CallbackData: "m"}}
 	st, err := b.d.Backend.Referral(ctx, chat)
 	if err != nil || st.Link == "" {
 		if err != nil {
 			b.d.Log.Warn("telegram: referral screen", "err", err)
 		}
-		return rw.off, &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
+		return rw.off, &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{back}}
 	}
 	text := "<b>" + rw.title + "</b>\n\n" + rw.intro + "\n\n<code>" + html.EscapeString(st.Link) + "</code>\n\n" +
 		fmt.Sprintf(rw.stats, st.Invited, st.Paid, st.Rewarded, st.Days)
@@ -64,5 +64,5 @@ func (b *Bot) referralScreen(ctx context.Context, w *words, chat int64, notice s
 		text = html.EscapeString(notice) + "\n\n" + text
 	}
 	share := "https://t.me/share/url?url=" + url.QueryEscape(st.Link) + "&text=" + url.QueryEscape(rw.shareText)
-	return text, &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: rw.share, URL: share}}, back}}
+	return text, &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: rw.share, URL: share}}, back}}
 }

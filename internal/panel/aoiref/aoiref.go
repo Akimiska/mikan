@@ -29,12 +29,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
 // Prefix starts the /start parameter of a referral link: /start ref-<code>.
-const Prefix = "ref-"
+const Prefix = model.ReferralPrefix
 
 // Referral states.
 const (
@@ -47,7 +48,7 @@ const (
 
 var (
 	// ErrInvalid: no account has this code.
-	ErrInvalid = errors.New("referral_invalid")
+	ErrInvalid = model.ErrReferralInvalid
 	codeRe     = regexp.MustCompile(`^[a-z0-9]{4,16}$`)
 )
 
@@ -213,15 +214,7 @@ func (s *Service) Refer(ctx context.Context, referredTg int64, code string) (boo
 }
 
 // Stats is an account's programme as the bot shows it.
-type Stats struct {
-	Code     string
-	Link     string
-	Invited  int64 // referrals made
-	Paid     int64 // of them, paid (rewarded or waiting for Hold)
-	Rewarded int64
-	Days     int64 // days earned
-	Bank     int64 // days waiting for a subscription
-}
+type Stats = model.ReferralStats
 
 func (s *Service) Stats(ctx context.Context, tgID int64) (Stats, error) {
 	link, err := s.Link(ctx, tgID)

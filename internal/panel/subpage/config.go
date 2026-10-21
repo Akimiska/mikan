@@ -11,6 +11,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"mikan/internal/textutil"
 )
 
 // Page is the page's settings document. The API takes and gives it whole.
@@ -371,7 +373,7 @@ func normalizeBlocks(c *Page) []Problem {
 					bad(i, at+"label", "label_required", nil)
 					ok = false
 				}
-				if !ValidLink(l.URL) {
+				if !textutil.ValidLink(l.URL, pageLinks) {
 					bad(i, at+"url", "link_invalid", nil)
 					ok = false
 				}
@@ -402,24 +404,8 @@ func normalizeBlocks(c *Page) []Problem {
 	return out
 }
 
-// ValidLink says whether s is a link a button of the page may open: http(s) with a host,
-// or a Telegram one, with no spaces or control characters.
-func ValidLink(s string) bool {
-	if s == "" || len(s) > 500 || strings.ContainsFunc(s, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
-		return false
-	}
-	u, err := url.Parse(s)
-	if err != nil {
-		return false
-	}
-	switch u.Scheme {
-	case "https", "http":
-		return u.Host != "" && u.User == nil
-	case "tg":
-		return u.Host != "" || u.Opaque != ""
-	}
-	return false
-}
+// pageLinks are the links a button of the page may open: http(s) or a Telegram one.
+var pageLinks = textutil.LinkRules{HTTP: true, TG: true, Opaque: true, MaxLen: 500}
 
 // FirstBadImage is the first image of a Markdown text that is not an https link, "" when
 // they all are: the page shows only those (its own origin and https).

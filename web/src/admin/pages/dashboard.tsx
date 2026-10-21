@@ -10,6 +10,7 @@ import { Avatar, Bar, Button, ErrorState, PageHeader, Pill, Segmented, Skeleton,
 import { getLocale, t } from "../../i18n";
 import { bits, bytes, dateShort, expiryText, maskedAs, num, uptime } from "../../lib/format";
 import { nodeLabel } from "../../lib/node-label";
+import { CardHead } from "../../components/layout";
 
 export function Dashboard() {
   const node = useNode();
@@ -137,6 +138,9 @@ function KpiGrid({ d, delta, value, unit }: { d: Overview; delta: number | null;
 function TrafficCard() {
   const [range, setRange] = useState<Range>("24h");
   const traffic = useServerTraffic(range);
+  // While another period loads the query keeps the previous one's points; cut into this period's
+  // steps they add up to nothing true, so the chart is dimmed and the totals wait for the real ones.
+  const stale = traffic.isPlaceholderData;
   const points = useMemo(() => buckets(traffic.data?.points ?? [], range), [traffic.data, range]);
   const totalDown = points.reduce((a, p) => a + p.down, 0);
   const totalUp = points.reduce((a, p) => a + p.up, 0);
@@ -170,14 +174,23 @@ function TrafficCard() {
       <QueryBoundary query={traffic} pending={<Skeleton style={{ height: 220, borderRadius: 16 }} />}>
         {() => (
           <>
-            <TrafficChart points={points} range={range} />
-            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-[var(--ink-500)]">
-              <span>
-                {t("chart.down")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalDown)}</b>
-              </span>
-              <span>
-                {t("chart.up")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalUp)}</b>
-              </span>
+            <TrafficChart points={points} range={range} stale={stale} />
+            <div className="mt-3 flex min-h-5 flex-wrap items-center gap-x-6 gap-y-2 text-[13px] text-[var(--ink-500)]" aria-busy={stale}>
+              {stale ? (
+                <>
+                  <Skeleton style={{ width: 112, height: 14 }} />
+                  <Skeleton style={{ width: 112, height: 14 }} />
+                </>
+              ) : (
+                <>
+                  <span>
+                    {t("chart.down")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalDown)}</b>
+                  </span>
+                  <span>
+                    {t("chart.up")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(totalUp)}</b>
+                  </span>
+                </>
+              )}
             </div>
           </>
         )}
@@ -198,15 +211,7 @@ function ServerCard() {
   const memPct = n && n.system.mem_total ? (n.system.mem_used / n.system.mem_total) * 100 : 0;
   return (
     <section className="card glass reveal xl:flex xl:h-0 xl:min-h-full xl:flex-col" style={{ "--i": 5 } as React.CSSProperties} aria-labelledby="srv-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="srv-title">
-            {t("shell.server")}
-          </h2>
-          <div className="card-sub">{n?.ok ? `${n.core}${n.started_at ? ` · ${t("dashboard.uptime", { uptime: uptime(n.started_at) })}` : ""}` : t("dashboard.nodeState")}</div>
-        </div>
-        {n ? n.ok ? <Pill tone="ok">{t("shell.running")}</Pill> : <Pill tone="bad">{t("shell.offline")}</Pill> : null}
-      </div>
+      <CardHead title={t("shell.server")} sub={n?.ok ? `${n.core}${n.started_at ? ` · ${t("dashboard.uptime", { uptime: uptime(n.started_at) })}` : ""}` : t("dashboard.nodeState")} aside={n ? n.ok ? <Pill tone="ok">{t("shell.running")}</Pill> : <Pill tone="bad">{t("shell.offline")}</Pill> : null} id="srv-title" />
       {n && !n.ok ? (
         <div className="banner err mb-4" role="alert">
           <span>
@@ -246,7 +251,19 @@ function ServerCard() {
       {inbounds.isError && !inbounds.data ? <CardError error={inbounds.error} onRetry={() => void inbounds.refetch()} /> : null}
       {/* Beside the chart (xl) the card is as tall as its row and the protocols scroll in it;
           stacked, the first few are shown and the rest open on request. */}
-      <div className="row-list border-t border-[var(--hairline)] [scrollbar-width:thin] xl:min-h-0 xl:flex-1 xl:overflow-y-auto">
+      <div className="row-list border-t border-[var(--hairline)] [scrollbar-width:thin] xl:min-h-0 xl:flex-1 xl:overflow-y-auto" aria-busy={inbounds.isPending}>
+        {inbounds.isPending
+          ? [0, 1, 2].map((i) => (
+              <div key={i} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3" aria-hidden>
+                <div className="min-w-0">
+                  <Skeleton style={{ width: 120 }} />
+                  <Skeleton className="mt-1.5" style={{ width: 180 }} />
+                </div>
+                <Skeleton style={{ width: 48, height: 20, borderRadius: 999 }} />
+              </div>
+            ))
+          : null}
+        {inbounds.data && list.length === 0 ? <p className="py-3 text-[13px] text-[var(--ink-500)]">{t("inbounds.emptyTitle")}</p> : null}
         {list.map((l, i) => (
           <div key={l.id} className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3${i >= INBOUNDS_SHOWN && !allInbounds ? " max-xl:hidden" : ""}`}>
             <div className="min-w-0">
@@ -367,14 +384,7 @@ function AttentionCard() {
   const retry = () => void attention.refetch();
   return (
     <section className="card glass reveal flex flex-col" style={{ "--i": 6 } as React.CSSProperties} aria-labelledby="att-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="att-title">
-            {t("dashboard.attention")}
-          </h2>
-          <div className="card-sub">{loading || failed ? "…" : list.length ? t("dashboard.attentionSub") : t("dashboard.allGood")}</div>
-        </div>
-      </div>
+      <CardHead title={t("dashboard.attention")} sub={loading || failed ? "…" : list.length ? t("dashboard.attentionSub") : t("dashboard.allGood")} id="att-title" />
       {failed ? (
         <CardError error={failed.error} onRetry={retry} />
       ) : loading ? (
@@ -433,14 +443,7 @@ function TopCard() {
   const max = top[0]?.bytes ?? 1;
   return (
     <section className="card glass reveal flex flex-col" style={{ "--i": 7 } as React.CSSProperties} aria-labelledby="top-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="top-title">
-            {t("dashboard.top")}
-          </h2>
-          <div className="card-sub">{t("dashboard.topSub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("dashboard.top")} sub={t("dashboard.topSub")} id="top-title" />
       {o.data === undefined && o.isError ? (
         <CardError error={o.error} onRetry={() => void o.refetch()} />
       ) : o.isPending ? (

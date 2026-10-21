@@ -103,9 +103,39 @@ func (s *Packages) Update(ctx context.Context, id int64, in PackageInput) (db.Tr
 		if err != nil {
 			return err
 		}
-		return setPackageTariffs(ctx, q, p.ID, in.Tariffs)
+		if err := setPackageTariffs(ctx, q, p.ID, in.Tariffs); err != nil {
+			return err
+		}
+		// A tariff that gives it must still give a quota it adds to: a package moved to a
+		// group the tariff does not give would be promised and never granted.
+		return recheckGiftsOf(ctx, q, p.ID)
 	})
 	return p, err
+}
+
+// recheckGiftsOf checks the gifts of every tariff that gives package id (RecheckTariffGifts);
+// one that no longer fits is refused as package_gift_not_fit.
+func recheckGiftsOf(ctx context.Context, q *db.Queries, id int64) error {
+	gifts, err := q.ListAllTariffGifts(ctx)
+	if err != nil {
+		return err
+	}
+	for _, g := range gifts {
+		if g.PackageID != id {
+			continue
+		}
+		t, err := q.GetTariff(ctx, g.TariffID)
+		if err != nil {
+			return err
+		}
+		var fe *FieldError
+		if err := RecheckTariffGifts(ctx, q, t); errors.As(err, &fe) && fe.Code == "gift_not_fit" {
+			return fieldErr("pool_id", "package_gift_not_fit")
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // setPackageTariffs writes the tariffs a package is sold to on q's transaction.
@@ -149,9 +179,11 @@ func (s *Packages) Archive(ctx context.Context, id int64) error {
 // PackageFits: the package adds to a quota the user has, and is sold to the user's tariff
 // (tariffs, the package's own list; none: every tariff). Unlimited traffic never uses
 // grants, so nothing is offered for it: a package for the main traffic needs a limited main
-// traffic, one for a server group the group's own limit. A group in the main traffic takes
-// the main traffic's packages, and a closed group sells nothing.
-func PackageFits(u db.User, pools []db.UserPool, p db.TrafficPackage, tariffs []int64) bool {
+// traffic, one for a server group the group's own limit, and a group the user reaches
+// (reach, UserGroups): traffic of a group none of whose servers the user may connect to is
+// nothing to spend. A group in the main traffic takes the main traffic's packages, and a
+// closed group sells nothing.
+func PackageFits(u db.User, pools []db.UserPool, p db.TrafficPackage, tariffs []int64, reach map[int64]bool) bool {
 	if len(tariffs) > 0 && (!u.TariffID.Valid || !slices.Contains(tariffs, u.TariffID.Int64)) {
 		return false
 	}
@@ -159,17 +191,18 @@ func PackageFits(u db.User, pools []db.UserPool, p db.TrafficPackage, tariffs []
 		return u.TrafficLimit.Valid
 	}
 	_, mode := UserPoolOf(pools, p.PoolID.Int64)
-	return mode == PoolOwn
+	return mode == PoolOwn && reach[p.PoolID.Int64]
 }
 
 // PackageForTariff: the package adds to a quota tariff t gives (its rows of the groups in
-// tariffPools), whoever buys it; the tariffs it is sold to are not looked at.
-func PackageForTariff(t db.Tariff, tariffPools []db.TariffPool, p db.TrafficPackage) bool {
+// tariffPools, of a group its servers serve: serves, TariffGroups), whoever buys it; the
+// tariffs it is sold to are not looked at.
+func PackageForTariff(t db.Tariff, tariffPools []db.TariffPool, p db.TrafficPackage, serves map[int64]bool) bool {
 	if !p.PoolID.Valid {
 		return t.TrafficLimit.Valid
 	}
 	mode, _ := TariffPoolMode(tariffPools, p.PoolID.Int64)
-	return mode == PoolOwn
+	return mode == PoolOwn && serves[p.PoolID.Int64]
 }
 
 // PackagePoolClosed: the package is for a server group that is closed for the user.
@@ -194,8 +227,10 @@ func PackageTariffs(ctx context.Context, q *db.Queries) (map[int64][]int64, erro
 	return out, nil
 }
 
-// PackagesFor are the packages on sale that fit the user, in the catalog's order.
-func PackagesFor(ctx context.Context, q *db.Queries, userID int64) ([]db.TrafficPackage, error) {
+// PackagesFor are the packages on sale that fit the user, in the catalog's order. A
+// subscription that cannot connect (off, or its term over) is sold none: what it would buy
+// could not be used, and a package for a term runs out meanwhile.
+func PackagesFor(ctx context.Context, q *db.Queries, userID int64, now time.Time) ([]db.TrafficPackage, error) {
 	u, err := q.GetUser(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -203,7 +238,14 @@ func PackagesFor(ctx context.Context, q *db.Queries, userID int64) ([]db.Traffic
 	if err != nil {
 		return nil, err
 	}
+	if u.Status != "active" || u.ExpiresAt.Valid && u.ExpiresAt.Int64 <= now.Unix() {
+		return []db.TrafficPackage{}, nil
+	}
 	pools, err := q.ListUserPools(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	reach, err := UserGroups(ctx, q, u)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +259,7 @@ func PackagesFor(ctx context.Context, q *db.Queries, userID int64) ([]db.Traffic
 	}
 	out := []db.TrafficPackage{}
 	for _, p := range all {
-		if PackageFits(u, pools, p, sold[p.ID]) {
+		if PackageFits(u, pools, p, sold[p.ID], reach) {
 			out = append(out, p)
 		}
 	}

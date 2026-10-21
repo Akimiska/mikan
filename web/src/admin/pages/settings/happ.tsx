@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import type { Schemas } from "../../../api/client";
-import { FormActions } from "../../../components/layout";
+import { CardHead, FormActions } from "../../../components/layout";
 import { Field, Segmented } from "../../../components/ui";
 import { SwitchRow } from "../../../components/switch";
 import { t } from "../../../i18n";
@@ -11,36 +11,36 @@ import { useSaveSettings } from "./shared";
 type Crypt = "off" | "api" | "local";
 type RoutingMode = "off" | "auto" | "link";
 
-/** What Happ gets beyond the profile: a routing profile, hidden server settings and a
- * crypt link that keeps the subscription address out of sight. */
-export function HappCard({ s }: { s: Schemas["SettingsView"] }) {
-  const save = useSaveSettings();
-  const { draft: form, setDraft: setForm, dirty, reset } = useDraft({
+/** The card's form as the settings hold it; after a save too, as the server trimmed it. */
+function happForm(s: Schemas["SettingsView"]) {
+  return {
     happ_routing: s.happ_routing === "auto" ? "" : s.happ_routing,
     // "auto": the panel makes the routing profile of Settings → Routing.
     mode: (s.happ_routing === "auto" ? "auto" : s.happ_routing ? "link" : "off") as RoutingMode,
     happ_provider_id: s.happ_provider_id,
     happ_crypt: (s.happ_crypt || "off") as Crypt,
-  });
+  };
+}
+
+/** What Happ gets beyond the profile: a routing profile, hidden server settings and a
+ * crypt link that keeps the subscription address out of sight. */
+export function HappCard({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const { draft: form, setDraft: setForm, dirty, reset } = useDraft(happForm(s));
   const routingMode = form.mode;
   const errors = fieldErrors(save.error);
   const provider = form.happ_provider_id.trim();
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const routing = form.mode === "auto" ? "auto" : form.mode === "off" ? "" : form.happ_routing.trim();
-    save.mutate({ happ_routing: routing, happ_provider_id: provider, happ_crypt: form.happ_crypt });
+    save.mutate({ happ_routing: routing, happ_provider_id: provider, happ_crypt: form.happ_crypt }, { onSuccess: (v) => setForm(happForm(v)) });
   };
   // The switch saves at once, like the other switches; it needs the saved provider id.
   const canHide = !!s.happ_provider_id;
   return (
     <section className="card glass reveal" style={{ "--i": 3 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">Happ</h2>
-            <div className="card-sub">{t("settings.happSub")}</div>
-          </div>
-        </div>
+        <CardHead title="Happ" sub={t("settings.happSub")} />
 
         <Field label={t("settings.happCrypt")} hint={t(`settings.happCryptHint.${form.happ_crypt}`)} error={errors.happ_crypt}>
           <Segmented

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/audit"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -73,23 +74,19 @@ type ReissueState struct {
 	Next time.Time
 }
 
-// Left is how many reissues the window still has room for; -1 without a limit, 0 when the
-// subscriber may not reissue at all.
-func (s ReissueState) Left() int {
-	switch {
-	case s.Rules.Off:
-		return 0
-	case s.Rules.Limit == 0:
-		return -1
-	}
-	return max(0, s.Rules.Limit-s.Used)
+// Left is how many reissues the window still has room for (model.ReissueState.Left).
+func (s ReissueState) Left() int { return s.Model().Left() }
+
+// Model is the state as the bot reads it.
+func (s ReissueState) Model() model.ReissueState {
+	return model.ReissueState{Rules: model.ReissueRules(s.Rules), Used: s.Used, Next: s.Next}
 }
 
 var (
 	// ErrReissueOff: the admin reissues links, the subscriber does not.
-	ErrReissueOff = errors.New("reissue_off")
+	ErrReissueOff = model.ErrReissueOff
 	// ErrReissueCooldown: the subscriber used up the reissues the admin's rules allow for now.
-	ErrReissueCooldown = errors.New("reissue_cooldown")
+	ErrReissueCooldown = model.ErrReissueCooldown
 )
 
 // ReissueState of userID now.
@@ -108,15 +105,26 @@ func reissueState(ctx context.Context, q *db.Queries, rules ReissueRules, userID
 	if rules.Off || rules.Limit == 0 {
 		return st, nil
 	}
-	ats, err := q.ListLinkReissuesSince(ctx, db.ListLinkReissuesSinceParams{UserID: userID, At: now.Add(-rules.window()).Unix()})
+	var err error
+	st.Used, st.Next, err = sliding(rules.Limit, rules.window(), now, func(since int64) ([]int64, error) {
+		return q.ListLinkReissuesSince(ctx, db.ListLinkReissuesSinceParams{UserID: userID, At: since})
+	})
+	return st, err
+}
+
+// sliding counts what list gives of a window of so long that ends now: used is how much, and
+// with limit of it there, next is when the oldest that fills it leaves the window (zero:
+// now). list gives the times (unix seconds, oldest first) since the window's start. The
+// rules of the link's reissues and of the devices' unbinds count alike.
+func sliding(limit int, window time.Duration, now time.Time, list func(since int64) ([]int64, error)) (used int, next time.Time, err error) {
+	ats, err := list(now.Add(-window).Unix())
 	if err != nil {
-		return st, err
+		return 0, time.Time{}, err
 	}
-	st.Used = len(ats)
-	if st.Used >= rules.Limit {
-		st.Next = store.Time(ats[st.Used-rules.Limit]).Add(rules.window())
+	if len(ats) >= limit {
+		next = store.Time(ats[len(ats)-limit]).Add(window)
 	}
-	return st, nil
+	return len(ats), next, nil
 }
 
 // ReissueByOwner is Reissue done by the subscriber themselves, within the admin's
@@ -131,14 +139,7 @@ func (s *Users) ReissueByOwner(ctx context.Context, id int64, via string) (db.Us
 	if rules.Off {
 		return db.User{}, ErrReissueOff
 	}
-	err = s.reissueByOwner(ctx, rules, id, via)
-	if errors.Is(err, ErrNoSlots) {
-		if err := s.pool.Refill(ctx, RefillBatch); err != nil {
-			return db.User{}, err
-		}
-		s.changes.SlotsChanged()
-		err = s.reissueByOwner(ctx, rules, id, via)
-	}
+	err = s.WithSlots(ctx, func() error { return s.reissueByOwner(ctx, rules, id, via) })
 	if err != nil {
 		return db.User{}, err
 	}

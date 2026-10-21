@@ -1,20 +1,14 @@
 package server
 
 import (
-	"embed"
 	"io/fs"
 	"net/http"
 	"os"
 	"path"
 	"strings"
+
+	"mikan/internal/frontpage"
 )
-
-//go:embed sites/*.html
-var sites embed.FS
-
-// Templates are the built-in front pages (sites/<name>.html), for a panel without a site of
-// its own.
-var Templates = []string{"maintenance", "cats"}
 
 // OwnSite serves dir, a site of the admin's own (/opt/mikan/data/panel/www on the host), on
 // every path the panel does not own. In front of a REALITY self-steal the panel is what a
@@ -62,7 +56,7 @@ func builtIn(w http.ResponseWriter, r *http.Request, name string, template func(
 	var page []byte
 	if t := ""; template != nil && (name == "" || name == "index.html") {
 		if t = template(); t != "" {
-			page, _ = sites.ReadFile("sites/" + path.Base(t) + ".html")
+			page = frontpage.Page(path.Base(t))
 		}
 	}
 	if page == nil {
@@ -70,11 +64,7 @@ func builtIn(w http.ResponseWriter, r *http.Request, name string, template func(
 		return true
 	}
 	plain(w.Header())
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if r.Method != http.MethodHead {
-		_, _ = w.Write(page)
-	}
+	frontpage.Write(w, r, page)
 	return true
 }
 

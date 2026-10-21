@@ -2,16 +2,16 @@ import { Check, TriangleAlert } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 
-type Toast = { id: number; text: string; error?: boolean; action?: { label: string; run: () => void } };
+type Toast = { id: number; text: string; error?: boolean };
 type Api = {
-  ok: (text: string, action?: Toast["action"]) => void;
+  ok: (text: string) => void;
   error: (text: string) => void;
 };
 
 const Ctx = createContext<Api | null>(null);
 
-/** How long a toast stays (an error or one with an action longer), and what is left of it once the pointer or focus leaves. */
-const LIFETIME = { ok: 4_200, error: 6_000, action: 8_000, resume: 2_500 };
+/** How long a toast stays (an error longer), and what is left of it once the pointer or focus leaves. */
+const LIFETIME = { ok: 4_200, error: 6_000, resume: 2_500 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
@@ -31,7 +31,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
   // A toast under the pointer or with focus inside stays until the reader is done with it
-  // (WCAG 2.2.1: a message with an action must not vanish while it is being reached for).
+  // (WCAG 2.2.1: a message must not vanish while it is being read).
   const hold = useCallback((id: number) => {
     window.clearTimeout(timers.current.get(id));
     timers.current.delete(id);
@@ -41,11 +41,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const id = ++seq.current;
       // Three at most; an older one pushed out has a timer left that finds nothing to remove.
       setItems((xs) => [...xs.slice(-2), { ...t, id }]);
-      arm(id, t.error ? LIFETIME.error : t.action ? LIFETIME.action : LIFETIME.ok);
+      arm(id, t.error ? LIFETIME.error : LIFETIME.ok);
     },
     [arm],
   );
-  const api = useMemo<Api>(() => ({ ok: (text, action) => push({ text, action }), error: (text) => push({ text, error: true }) }), [push]);
+  const api = useMemo<Api>(() => ({ ok: (text) => push({ text }), error: (text) => push({ text, error: true }) }), [push]);
 
   return (
     <Ctx.Provider value={api}>
@@ -69,18 +69,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             >
               {t.error ? <TriangleAlert size={16} aria-hidden /> : <Check size={16} aria-hidden className="text-[var(--mikan-400)]" />}
               <span>{t.text}</span>
-              {t.action ? (
-                <button
-                  type="button"
-                  className="toast-act"
-                  onClick={() => {
-                    t.action!.run();
-                    dismiss(t.id);
-                  }}
-                >
-                  {t.action.label}
-                </button>
-              ) : null}
             </motion.div>
           ))}
         </AnimatePresence>

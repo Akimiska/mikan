@@ -3,7 +3,7 @@ package proto
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"net"
 )
 
 // Slot is one pre-provisioned credential set: every listener carries all of them, so a
@@ -45,6 +45,13 @@ func Listener(t Template, name, listen, port string, slots []Slot, cert Cert, o 
 	if rc, ok := l["reality-config"].(map[string]any); ok {
 		if _, set := rc["max-time-difference"]; !set {
 			rc["max-time-difference"] = RealityMaxTimeDiff
+		}
+		// A dest given by name is dialed at the address it resolves to there and then, which
+		// must be public: the panel checked the name when it was saved, and a name that leads
+		// inside later does not reach in. The panel's own HTTPS (self-steal) is the node's own
+		// loopback, which "localhost" names.
+		if host, _, err := net.SplitHostPort(str(rc["dest"])); err == nil && host != "localhost" {
+			rc["public-dest"] = true
 		}
 	}
 	l["name"], l["port"], l["listen"] = name, port, listen
@@ -114,78 +121,6 @@ func clone(v any) any {
 	var out any
 	if json.Unmarshal(b, &out) != nil {
 		return v
-	}
-	return out
-}
-
-// FromPreset converts the settings of mikan ≤ 0.1.2 (one struct per preset) to a
-// template. The panel runs it once per inbound; the node uses it to restore a state
-// saved by an older version.
-func FromPreset(preset string, settings []byte) (Template, error) {
-	var s struct {
-		Reality *struct {
-			PrivateKey  string   `json:"private_key"`
-			ShortIDs    []string `json:"short_ids"`
-			Dest        string   `json:"dest"`
-			ServerNames []string `json:"server_names"`
-		} `json:"reality"`
-		Path              string `json:"path"`
-		Mode              string `json:"mode"`
-		ObfsPassword      string `json:"obfs_password"`
-		UpMbps            int    `json:"up_mbps"`
-		DownMbps          int    `json:"down_mbps"`
-		Masquerade        string `json:"masquerade"`
-		CongestionControl string `json:"congestion_control"`
-	}
-	if err := json.Unmarshal(settings, &s); err != nil {
-		return nil, err
-	}
-	reality := func() map[string]any {
-		if s.Reality == nil {
-			return nil
-		}
-		return map[string]any{"dest": s.Reality.Dest, "private-key": s.Reality.PrivateKey, "short-id": anyList(s.Reality.ShortIDs), "server-names": anyList(s.Reality.ServerNames)}
-	}
-	t := Template{}
-	switch preset {
-	case "vless_reality_vision":
-		t["type"], t["reality-config"] = "vless", reality()
-		t[extKey] = map[string]any{"flow": "xtls-rprx-vision"}
-	case "vless_reality_xhttp":
-		mode := s.Mode
-		if mode == "" {
-			mode = "stream-one"
-		}
-		t["type"], t["reality-config"] = "vless", reality()
-		t["xhttp-config"] = map[string]any{"path": s.Path, "mode": mode}
-	case "hysteria2":
-		t["type"], t["alpn"] = "hysteria2", []any{"h3"}
-		if s.ObfsPassword != "" {
-			t["obfs"], t["obfs-password"] = "salamander", s.ObfsPassword
-		}
-		if s.UpMbps > 0 && s.DownMbps > 0 {
-			t["up"], t["down"] = fmt.Sprintf("%d Mbps", s.UpMbps), fmt.Sprintf("%d Mbps", s.DownMbps)
-		}
-		if s.Masquerade != "" {
-			t["masquerade"] = s.Masquerade
-		}
-	case "tuic_v5":
-		cc := s.CongestionControl
-		if cc == "" {
-			cc = "bbr"
-		}
-		t["type"], t["alpn"], t["congestion-controller"] = "tuic", []any{"h3"}, cc
-		t["max-idle-time"], t["authentication-timeout"] = 15000, 1000
-	default:
-		return nil, fmt.Errorf("unknown preset %q", preset)
-	}
-	return t, nil
-}
-
-func anyList(ss []string) []any {
-	out := make([]any, len(ss))
-	for i, s := range ss {
-		out[i] = s
 	}
 	return out
 }

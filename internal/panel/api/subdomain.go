@@ -58,7 +58,7 @@ func (h *handlers) checkSubDomain(ctx context.Context, b *patchSettingsBody) ([]
 		panelDomain = strings.TrimSpace(*b.Domain)
 	}
 	if strings.EqualFold(dom, panelDomain) {
-		return []*huma.ErrorDetail{{Location: "body.sub_domain", Message: "sub_domain_panel"}}, nil
+		return []*huma.ErrorDetail{fieldDetail("body.sub_domain", "sub_domain_panel", nil)}, nil
 	}
 	if dom == cur && b.PublicHost == nil {
 		return nil, nil

@@ -65,7 +65,20 @@ func pageErr(err error) error {
 	return err
 }
 
+// pagesPeople refuses an addon's pages to a support operator the admin did not let see the
+// subscribers: a page shows what its addon answers, which no mask of the panel goes through.
+// In the extended mode the operator could read them through an addon anyway.
+func pagesPeople(ctx context.Context) error {
+	if hidesPeople(ctx) {
+		return requireSession(ctx, "id")
+	}
+	return nil
+}
+
 func (h *handlers) addonPage(ctx context.Context, in *AddonIDInput) (*addonPageOutput, error) {
+	if err := pagesPeople(ctx); err != nil {
+		return nil, err
+	}
 	ui, err := h.d.Pages.Open(ctx, in.ID)
 	if err != nil {
 		if !errors.Is(err, pages.ErrNoPages) && !errors.Is(err, pages.ErrForbidden) {
@@ -84,6 +97,9 @@ func (h *handlers) addonPage(ctx context.Context, in *AddonIDInput) (*addonPageO
 // callAddonPage forwards a call of the page to the addon. What changes something is written
 // to the audit log by its method and path; bodies stay out of it.
 func (h *handlers) callAddonPage(ctx context.Context, in *addonRPCInput) (*addonRPCOutput, error) {
+	if err := pagesPeople(ctx); err != nil {
+		return nil, err
+	}
 	a, err := h.d.Pages.Allowed(ctx, in.ID)
 	if err != nil {
 		return nil, pageErr(err)

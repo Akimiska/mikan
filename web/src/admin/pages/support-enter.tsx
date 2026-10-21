@@ -17,8 +17,10 @@ const TOKEN = /^ms_[0-9A-Za-z]{40}$/;
 
 type Outcome = { ok: true; who: SupportWhoami } | { ok: false; code: string };
 
-// The entry runs once per page load, whatever React does with the effect (StrictMode runs it
-// twice): a second call would burn the one-time link and answer "already used".
+// The entry runs once per link, whatever React does with the effect (StrictMode runs it
+// twice): a second call would burn the one-time link and answer "already used". The effect
+// that takes the outcome lets it go, so a later visit of this page (after "Leave", or when
+// the access ended) asks anew instead of entering again with what the link gave before.
 let entering: Promise<Outcome> | null = null;
 
 function enterOnce(): Promise<Outcome> | null {
@@ -48,7 +50,8 @@ export function SupportEnterPage() {
   const [probing, setProbing] = useState(false);
 
   useEffect(() => {
-    const p = enterOnce();
+    // An access that ended is never entered again from an entry of before.
+    const p = ended ? null : enterOnce();
     let alive = true;
     if (!p) {
       if (ended) return;
@@ -68,6 +71,7 @@ export function SupportEnterPage() {
     setAsked(true);
     void p.then((o) => {
       if (!alive) return;
+      entering = null;
       if (o.ok) {
         setCsrf(o.who.csrf_token ?? "");
         qc.setQueryData(supportKey.whoami, o.who);

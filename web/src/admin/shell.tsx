@@ -3,11 +3,12 @@ import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Activity, ArrowUpCircle, LayoutDashboard, LogOut, MoreHorizontal, Network, PanelLeftClose, PanelLeftOpen, Puzzle, Server, SlidersHorizontal, Tag, Users, Wallet } from "lucide-react";
 import { useState } from "react";
-import { api, unwrap } from "../api/client";
+import { api, ApiError, errorText, unwrap } from "../api/client";
 import { meQuery, useNode, useOverview, useUpdates } from "../api/hooks";
 import { useSupportMode } from "../api/support";
 import { Logo } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
+import { useToast } from "../components/toast";
 import { Avatar, Bar, Pill } from "../components/ui";
 import { t, useLocale } from "../i18n";
 import { num, uptime } from "../lib/format";
@@ -193,11 +194,17 @@ function AdminRow() {
   const me = useQuery({ ...meQuery, enabled: !operator });
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const toast = useToast();
   const logout = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/auth/logout")),
-    onSettled: () => {
+    onSuccess: () => {
       qc.clear();
       void navigate({ to: "/login", search: {} });
+    },
+    // A failed sign-out leaves the session alive on the server: the admin stays here with the reason
+    // instead of a login form that would be untrue. A 401 is the session already gone, and the unauthorized event moves them to the login.
+    onError: (e) => {
+      if (!(e instanceof ApiError && e.status === 401)) toast.error(errorText(e));
     },
   });
   if (operator) {

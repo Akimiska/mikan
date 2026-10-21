@@ -8,9 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"mikan/internal/panel/domain"
-	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/panel/model"
+	"mikan/internal/tgapi"
 )
 
 // The subscriber's own new link: a button on the subscription screen, a confirmation that
@@ -68,7 +67,7 @@ func (b *Bot) in(w *words, t time.Time) string {
 
 // reissueState is what the subscriber may do about the link now; ok is false when the bot
 // cannot reissue at all.
-func (b *Bot) reissueState(ctx context.Context, u db.User) (domain.ReissueState, bool) {
+func (b *Bot) reissueState(ctx context.Context, u model.User) (model.ReissueState, bool) {
 	st, err := b.d.Backend.ReissueState(ctx, u.ID)
 	if err != nil {
 		b.d.Log.Warn("telegram: reissue rules", "err", err)
@@ -80,7 +79,7 @@ func (b *Bot) reissueState(ctx context.Context, u db.User) (domain.ReissueState,
 // reissueRow is the subscription screen's part about the link: the button while the rules
 // allow it, and, while the limit is reached, the line that says when it is back. Nothing
 // when only the admin reissues.
-func (b *Bot) reissueRow(ctx context.Context, w *words, u db.User) (button *tgate.Button, line string) {
+func (b *Bot) reissueRow(ctx context.Context, w *words, u model.User) (button *tgapi.Button, line string) {
 	st, ok := b.reissueState(ctx, u)
 	if !ok || st.Rules.Off {
 		return nil, ""
@@ -89,12 +88,12 @@ func (b *Bot) reissueRow(ctx context.Context, w *words, u db.User) (button *tgat
 	if !st.Next.IsZero() {
 		return nil, html.EscapeString(fmt.Sprintf(lw.wait, b.in(w, st.Next)))
 	}
-	return &tgate.Button{Text: lw.button, CallbackData: "rl"}, ""
+	return &tgapi.Button{Text: lw.button, CallbackData: "rl"}, ""
 }
 
 // reissueConfirm is "rl": what the new link costs, before it is done. The screen of a
 // subscription that may not reissue now is the subscription screen with the reason.
-func (b *Bot) reissueConfirm(ctx context.Context, w *words, u db.User) (string, *tgate.Keyboard, bool) {
+func (b *Bot) reissueConfirm(ctx context.Context, w *words, u model.User) (string, *tgapi.Keyboard, bool) {
 	lw := linkWordsFor(w)
 	st, ok := b.reissueState(ctx, u)
 	switch {
@@ -105,7 +104,7 @@ func (b *Bot) reissueConfirm(ctx context.Context, w *words, u db.User) (string, 
 	case !st.Next.IsZero():
 		return fmt.Sprintf(lw.wait, b.in(w, st.Next)), nil, false
 	}
-	return html.EscapeString(fmt.Sprintf(lw.confirm, u.Name)), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{
+	return html.EscapeString(fmt.Sprintf(lw.confirm, u.Name)), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{
 		{{Text: lw.yes, CallbackData: "rn:" + strconv.FormatInt(u.ID, 10)}, {Text: w.cancel, CallbackData: "s"}}}}, true
 }
 
@@ -126,12 +125,12 @@ func (b *Bot) reissueAct(ctx context.Context, chat, id int64) (screen, notice st
 			_ = b.d.Backend.SetCurrent(ctx, chat, id)
 			b.d.Log.Info("telegram: the subscriber reissued their link", "user", id)
 			return "c", lw.done
-		case errors.Is(err, domain.ErrReissueCooldown):
+		case errors.Is(err, model.ErrReissueCooldown):
 			st, _ := b.d.Backend.ReissueState(ctx, id)
 			return "s", fmt.Sprintf(lw.wait, b.in(w, st.Next))
-		case errors.Is(err, domain.ErrReissueOff):
+		case errors.Is(err, model.ErrReissueOff):
 			return "s", lw.off
-		case errors.Is(err, domain.ErrNotFound):
+		case errors.Is(err, model.ErrNotFound):
 			return "m", ""
 		default:
 			b.d.Log.Warn("telegram: link not reissued", "user", id, "err", err)

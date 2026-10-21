@@ -37,21 +37,42 @@ const (
 )
 
 // supportDeniedTags and supportDeniedOps are what a support operator never reaches, at any
-// level: logins and the admin's own credentials (auth, api-keys, support: the grants
-// themselves), the way into the admin (the secret path), the journal and the database in
-// Telegram, a broadcast to every subscriber, and the bot itself: its token, its route and the
-// admin's chat for notices. The admin learns of an operator's entry and of a terminal only
-// through that chat, and the bot token carries the subscribers' conversations and the Stars,
-// so an operator who could mute, redirect or swap them would work unseen.
+// level and in any mode: logins and the admin's own credentials (auth, api-keys, support: the
+// grants themselves), the way into the admin (the secret path), the journal and the database
+// in Telegram, a broadcast to every subscriber, and the bot itself: its token, its route and
+// the admin's chat for notices. The admin learns of an operator's entry and of a terminal
+// only through that chat, and the bot token carries the subscribers' conversations and the
+// Stars, so an operator who could mute, redirect or swap them would work unseen.
+//
+// supportSessionOps are the operations only a session may call (sessionOnly: an API key
+// cannot) that an operator still reaches at its level without the extended mode: restarts, a
+// node's own switches, the official addons, the way back to an automatic certificate, an
+// import's progress, the updates. The other sessionOnly ones decide where money goes or
+// outlast the grant (a node's key, an own WireGuard exit or certificate, the payment details
+// and the balances, the bot, an addon from outside mikan's catalog, the page every subscriber
+// opens): the extended mode only. A new sessionOnly operation stays closed until it is named
+// here. Inside an operation let through, requireSession keeps the same line field by field:
+// a node's address and domain, an addon's settings, another author's code.
 var (
-	supportDeniedTags = []string{"auth", "api-keys", supportAdminTag}
+	supportDeniedTags = sessionOnlyTags // the tags no API key reaches either
 	supportDeniedOps  = []string{"list-audit", "reset-admin-path", "get-telegram-backup", "update-telegram-backup", "send-telegram-backup", "telegram-broadcast",
 		"update-telegram", "telegram-infrastructure-connect", "telegram-infrastructure-disconnect"}
+	supportSessionOps = []string{
+		"restart-server", "restart-node",
+		"update-node", "update-node-cascade", "register-node-warp",
+		"clear-certificate", "clear-node-certificate", "clear-sub-certificate",
+		"import-status", "import-cancel", "get-legacy-links",
+		"update-updates", "request-update",
+		"list-addons", "install-addon", "remove-addon", "update-addon",
+		"list-marketplace", "install-marketplace", "remove-marketplace",
+		"list-addon-sources", "delete-addon-source",
+		"get-addon-storage", "set-addon-storage", "get-addon-page", "call-addon-page",
+		"get-bot-addon", "get-payment-settings",
+	}
 )
 
 type supportCtx struct {
 	grant db.SupportGrant
-	via   string // "browser" or "api"
 }
 
 // supportGrantOf is the support grant a request works under; false: the admin's own
@@ -82,7 +103,8 @@ func supportReadOnlyPost(op *huma.Operation) bool {
 
 // supportGate is the decision for an operation a support operator called: 0 lets it
 // through, otherwise the status and the code to refuse with. Closed operations first (the
-// code says closed, not read-only), then the level: view only reads.
+// code says closed, not read-only), then the ones of the extended mode, then the level:
+// view only reads.
 func supportGate(op *huma.Operation, mutating bool, g db.SupportGrant) (int, string) {
 	if slices.Contains(supportDeniedOps, op.OperationID) {
 		return http.StatusForbidden, "support_denied"
@@ -91,6 +113,9 @@ func supportGate(op *huma.Operation, mutating bool, g db.SupportGrant) (int, str
 		if slices.Contains(supportDeniedTags, tag) {
 			return http.StatusForbidden, "support_denied"
 		}
+	}
+	if only, _ := op.Metadata["sessionOnly"].(bool); only && !g.Extended && !slices.Contains(supportSessionOps, op.OperationID) {
+		return http.StatusForbidden, "support_extended"
 	}
 	if mutating && !support.Writes(g.Level) && !supportReadOnlyPost(op) {
 		return http.StatusForbidden, "support_read_only"
@@ -163,7 +188,7 @@ func (h *handlers) supportServe(ctx huma.Context, next func(huma.Context), mutat
 		}
 	}
 	ctx = huma.WithValue(ctx, keySession, sess)
-	next(huma.WithValue(ctx, keySupport, supportCtx{grant: g, via: via}))
+	next(huma.WithValue(ctx, keySupport, supportCtx{grant: g}))
 }
 
 // supportSession serves a request of a browser session that belongs to a grant, which must
@@ -246,8 +271,8 @@ func (h *handlers) supportFromRequest(r *http.Request) (db.SupportGrant, bool, e
 
 // withSupportGrant is a context that carries a grant, as a request through the middleware
 // does: what supportTerminalAllowed and supportActor read.
-func withSupportGrant(ctx context.Context, g db.SupportGrant, via string) context.Context {
-	return context.WithValue(ctx, keySupport, supportCtx{grant: g, via: via})
+func withSupportGrant(ctx context.Context, g db.SupportGrant) context.Context {
+	return context.WithValue(ctx, keySupport, supportCtx{grant: g})
 }
 
 // What the admin sees of a grant.
@@ -255,6 +280,7 @@ type SupportGrantView struct {
 	ID              int64      `json:"id"`
 	Level           string     `json:"level" enum:"view,change,terminal" doc:"view: только чтение; change: ещё и изменения; terminal: ещё и терминал на серверах из terminal_targets"`
 	ShowPeople      bool       `json:"show_people" doc:"Оператор видит имена, Telegram и ссылки подписок; иначе они скрыты"`
+	Extended        bool       `json:"extended" doc:"Расширенный режим: ещё и то, что иначе может только сессия админа: ключи нод, адрес и домен ноды, свои сертификаты и WireGuard, оплата и балансы, бот, аддоны не из каталога mikan"`
 	TerminalTargets []string   `json:"terminal_targets" doc:"Где разрешён терминал: panel или node:<id>; пусто вне уровня terminal"`
 	Note            string     `json:"note"`
 	Status          string     `json:"status" enum:"active,expired,revoked"`
@@ -278,7 +304,7 @@ func (h *handlers) viewSupportGrant(g db.SupportGrant) SupportGrantView {
 	if targets == nil {
 		targets = []string{}
 	}
-	return SupportGrantView{ID: g.ID, Level: g.Level, ShowPeople: g.ShowPeople, TerminalTargets: targets, Note: g.Note, Status: status,
+	return SupportGrantView{ID: g.ID, Level: g.Level, ShowPeople: g.ShowPeople, Extended: g.Extended, TerminalTargets: targets, Note: g.Note, Status: status,
 		CreatedAt: store.Time(g.CreatedAt), ExpiresAt: support.Expires(g), EnteredAt: store.TimePtr(g.EnteredAt),
 		LastUsedAt: store.TimePtr(g.LastUsedAt), LastIP: g.LastIp, RevokedAt: store.TimePtr(g.RevokedAt)}
 }
@@ -289,10 +315,11 @@ type createSupportGrantInput struct {
 		Hours           int      `json:"hours" enum:"2,6,24" doc:"Срок доступа в часах"`
 		Level           string   `json:"level" enum:"view,change,terminal"`
 		ShowPeople      bool     `json:"show_people,omitempty" doc:"Показывать оператору имена, Telegram и ссылки подписчиков"`
+		Extended        bool     `json:"extended,omitempty" doc:"Расширенный режим, уровни change и terminal: ещё и ключи нод, адрес и домен ноды, свои сертификаты и WireGuard, оплата и балансы, бот, аддоны не из каталога mikan. Нужен пароль"`
 		TerminalTargets []string `json:"terminal_targets,omitempty" maxItems:"64" doc:"Уровень terminal: где разрешён терминал, panel и/или node:<id>. Полный доступ к этим серверам"`
 		Note            string   `json:"note,omitempty" maxLength:"200" doc:"Пометка для себя, например номер обращения"`
-		Password        string   `json:"password,omitempty" maxLength:"256" doc:"Пароль админа: нужен для уровня terminal"`
-		TOTP            string   `json:"totp,omitempty" maxLength:"16" doc:"Код из приложения, если включена 2FA: нужен для уровня terminal"`
+		Password        string   `json:"password,omitempty" maxLength:"256" doc:"Пароль админа: нужен для уровня terminal и для расширенного режима"`
+		TOTP            string   `json:"totp,omitempty" maxLength:"16" doc:"Код из приложения, если включена 2FA: нужен для уровня terminal и для расширенного режима"`
 	}
 }
 
@@ -335,6 +362,7 @@ type SupportWhoami struct {
 	Level           string        `json:"level" enum:"view,change,terminal"`
 	ExpiresAt       time.Time     `json:"expires_at"`
 	ShowPeople      bool          `json:"show_people"`
+	Extended        bool          `json:"extended" doc:"Расширенный режим: ещё и то, что иначе может только сессия админа"`
 	PanelVersion    string        `json:"panel_version"`
 	ReleaseKey      string        `json:"release_key" doc:"Отпечаток ключа подписи релизов, которому верит эта сборка: у официального mikan он один, у форка свой"`
 	Nodes           []SupportNode `json:"nodes"`
@@ -348,7 +376,7 @@ func (h *handlers) registerSupport() {
 	admin := []string{supportAdminTag}
 	huma.Register(h.api, huma.Operation{OperationID: "create-support-grant", Method: http.MethodPost, Path: "/api/v1/support/grants", Summary: "Открыть доступ для поддержки",
 		Description: "Только для официальной поддержки: панель проверяет код из обращения у бота поддержки, открывает доступ и сама передаёт ссылку боту, админу она не показывается. " +
-			"Одновременно активен один доступ: новый отзывает прежний. Уровень terminal требует пароль и код 2FA.",
+			"Одновременно активен один доступ: новый отзывает прежний. Уровень terminal и расширенный режим требуют пароль и код 2FA.",
 		Tags: admin, Metadata: sessionOnly, Extensions: sessionOnlyExt, DefaultStatus: http.StatusCreated}, h.createSupportGrant)
 	huma.Register(h.api, huma.Operation{OperationID: "list-support-grants", Method: http.MethodGet, Path: "/api/v1/support/grants", Summary: "Доступ для поддержки и действия оператора",
 		Tags: admin, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.listSupportGrants)
@@ -395,7 +423,7 @@ func (h *handlers) supportLink(ctx context.Context, token string) (string, error
 func (h *handlers) createSupportGrant(ctx context.Context, in *createSupportGrantInput) (*createSupportGrantOutput, error) {
 	// The operation is session only and closed to operators; the same refusal here, so that a
 	// lost mark does not let a key or an operator mint access.
-	if err := requireSession(ctx, "level"); err != nil {
+	if err := requireOwner(ctx, "level"); err != nil {
 		return nil, err
 	}
 	b := &in.Body
@@ -403,8 +431,9 @@ func (h *handlers) createSupportGrant(ctx context.Context, in *createSupportGran
 	if err != nil {
 		return nil, err
 	}
-	// A root shell on the servers is what a stolen session must not hand out alone.
-	if b.Level == support.LevelTerminal {
+	// A root shell on the servers, and the admin's own operations, are what a stolen session
+	// must not hand out alone.
+	if b.Level == support.LevelTerminal || b.Extended {
 		if err := h.reauth(ctx, admin, b.Password, strings.TrimSpace(b.TOTP)); err != nil {
 			return nil, err
 		}
@@ -416,7 +445,7 @@ func (h *handlers) createSupportGrant(ctx context.Context, in *createSupportGran
 	}
 	code, ok := support.NormCode(b.Code)
 	if !ok {
-		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.code", Message: "support_code"})
+		return nil, fieldErr("body.code", "support_code")
 	}
 	bot := h.d.Support.Bot()
 	if bot == nil {
@@ -432,14 +461,14 @@ func (h *handlers) createSupportGrant(ctx context.Context, in *createSupportGran
 		note = "#" + strconv.FormatInt(ticket, 10)
 	}
 	ip := clientOf(ctx).IP
-	created, err := h.d.Support.Create(ctx, support.CreateInput{AdminID: admin.ID, Hours: b.Hours, Level: b.Level, ShowPeople: b.ShowPeople,
+	created, err := h.d.Support.Create(ctx, support.CreateInput{AdminID: admin.ID, Hours: b.Hours, Level: b.Level, ShowPeople: b.ShowPeople, Extended: b.Extended,
 		Targets: b.TerminalTargets, Note: note, IP: ip})
 	if errors.Is(err, support.ErrDisabled) {
 		return nil, huma.Error403Forbidden("support_disabled")
 	}
 	var fe *support.FieldError
 	if errors.As(err, &fe) {
-		return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body." + fe.Field, Message: fe.Code})
+		return nil, fieldErr("body."+fe.Field, fe.Code)
 	}
 	if err != nil {
 		return nil, err
@@ -465,9 +494,9 @@ func supportBotError(err error) error {
 	var le *support.LinkError
 	switch {
 	case errors.Is(err, support.ErrCode):
-		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.code", Message: "support_code_invalid"})
+		return fieldErr("body.code", "support_code_invalid")
 	case errors.As(err, &le):
-		return huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.code", Message: "support_link_refused", Value: le.Reason})
+		return fieldErrValue("body.code", "support_link_refused", le.Reason)
 	case errors.Is(err, support.ErrBotDown):
 		return huma.Error502BadGateway("support_bot_down")
 	}
@@ -506,7 +535,7 @@ func (h *handlers) listSupportGrants(ctx context.Context, _ *struct{}) (*support
 }
 
 func (h *handlers) revokeSupportGrant(ctx context.Context, in *supportGrantIDInput) (*struct{}, error) {
-	if err := requireSession(ctx, "id"); err != nil {
+	if err := requireOwner(ctx, "id"); err != nil {
 		return nil, err
 	}
 	_, err := h.d.Support.Revoke(ctx, in.ID, sessionOf(ctx).AdminID, clientOf(ctx).IP)
@@ -563,7 +592,7 @@ func (h *handlers) supportWhoamiBody(ctx context.Context, g db.SupportGrant, csr
 	if targets == nil {
 		targets = []string{}
 	}
-	w := SupportWhoami{Level: g.Level, ExpiresAt: support.Expires(g), ShowPeople: g.ShowPeople, PanelVersion: h.d.Version, ReleaseKey: release.KeyFingerprint(),
+	w := SupportWhoami{Level: g.Level, ExpiresAt: support.Expires(g), ShowPeople: g.ShowPeople, Extended: g.Extended, PanelVersion: h.d.Version, ReleaseKey: release.KeyFingerprint(),
 		Nodes: make([]SupportNode, 0, len(nodes)), TerminalTargets: targets, CSRFToken: csrf}
 	for _, n := range nodes {
 		w.Nodes = append(w.Nodes, SupportNode{ID: n.ID, Name: n.Name})

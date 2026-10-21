@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
 )
 
@@ -15,10 +16,10 @@ import (
 
 // The modes of a group in a tariff or a subscription.
 const (
-	PoolMain      = "main"      // in, its traffic counts to the main traffic
-	PoolOwn       = "own"       // in, with a limit of its own apart from the main traffic
-	PoolUnlimited = "unlimited" // in, without a limit, apart from the main traffic
-	PoolClosed    = "closed"    // not in: left out of the subscription, the nodes turn the user away
+	PoolMain      = model.PoolMain      // in, its traffic counts to the main traffic
+	PoolOwn       = model.PoolOwn       // in, with a limit of its own apart from the main traffic
+	PoolUnlimited = model.PoolUnlimited // in, without a limit, apart from the main traffic
+	PoolClosed    = model.PoolClosed    // not in: left out of the subscription, the nodes turn the user away
 )
 
 // ValidPoolMode says whether m is one of the modes.
@@ -70,7 +71,31 @@ func ApplyTariffPools(ctx context.Context, q *db.Queries, userID, tariffID int64
 			return err
 		}
 	}
-	return nil
+	return GroupGrantsToMain(ctx, q, userID)
+}
+
+// PoolNames are the server groups' names by id.
+func PoolNames(ctx context.Context, q *db.Queries) (map[int64]string, error) {
+	pools, err := q.ListTrafficPools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]string, len(pools))
+	for _, p := range pools {
+		out[p.ID] = p.Name
+	}
+	return out, nil
+}
+
+// GroupGrantsToMain moves what is left of the traffic bought for a server group that is no
+// longer the user's own limit to the user's main traffic, on q's transaction: paid for, it
+// would otherwise wait unspent in a group that counts to the main traffic, has no limit or
+// is closed. Called wherever a group's mode for a user changes.
+func GroupGrantsToMain(ctx context.Context, q *db.Queries, userIDs ...int64) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	return q.MoveGroupGrantsToMain(ctx, userIDs)
 }
 
 // TariffParts are the parts of a tariff ApplyTariffToAll brings its users up to.
@@ -91,59 +116,37 @@ func (p TariffParts) Any() bool { return p.Traffic || p.Devices || p.Speed || p.
 // ErrNotFound for no such tariff.
 func (s *Users) ApplyTariffToAll(ctx context.Context, tariffID int64, parts TariffParts) (int, error) {
 	n := 0
-	err := s.st.Tx(ctx, func(q *db.Queries) error {
+	// A statement for each part, over all the users at once. READ COMMITTED, the users locked
+	// in id order first, as the traffic batches lock them: a batch waits for this and this
+	// for a batch, where a serializable snapshot would have the long one fail and start over.
+	err := s.st.TxRC(ctx, func(q *db.Queries) error {
 		n = 0
-		t, err := q.GetTariff(ctx, tariffID)
-		if errors.Is(err, sql.ErrNoRows) {
+		if _, err := q.GetTariff(ctx, tariffID); errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
 		}
 		ids, err := q.ListUserIDsOfTariff(ctx, sql.NullInt64{Int64: tariffID, Valid: true})
+		if err != nil || len(ids) == 0 {
+			return err
+		}
+		locked, err := q.LockUsers(ctx, ids)
 		if err != nil {
 			return err
 		}
-		now := s.now().Unix()
-		for _, id := range ids {
-			u, err := q.GetUser(ctx, id)
-			if err != nil {
+		n = len(locked)
+		if parts.Traffic || parts.Devices || parts.Speed {
+			if err := q.ApplyTariffLimits(ctx, db.ApplyTariffLimitsParams{Traffic: parts.Traffic, Devices: parts.Devices, Speed: parts.Speed,
+				Now: s.now().Unix(), TariffID: tariffID}); err != nil {
 				return err
 			}
-			if parts.Traffic || parts.Devices || parts.Speed {
-				par := db.UpdateUserParams{
-					Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID,
-					TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, SpeedLimit: u.SpeedLimit, ResetStrategy: u.ResetStrategy,
-					PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart, ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds,
-					BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID,
-				}
-				if parts.Traffic {
-					par.TrafficLimit, par.ResetStrategy = t.TrafficLimit, t.ResetStrategy
-				}
-				if parts.Devices {
-					// Devices bought on top of the tariff stay on top of it.
-					par.DeviceLimit = t.DeviceLimit
-					if par.DeviceLimit.Valid && u.ExtraDevices > 0 {
-						par.DeviceLimit.Int64 += u.ExtraDevices
-					}
-				}
-				if parts.Speed {
-					par.SpeedLimit = t.SpeedLimit
-				}
-				if u, err = q.UpdateUser(ctx, par); err != nil {
-					return err
-				}
-				if parts.Devices {
-					if err := setDeviceMode(ctx, q, &u, t.DeviceMode, now); err != nil {
-						return err
-					}
-				}
+		}
+		if parts.Groups {
+			if err := q.ApplyTariffUsersPools(ctx, tariffID); err != nil {
+				return err
 			}
-			if parts.Groups {
-				if err := ApplyTariffPools(ctx, q, id, tariffID); err != nil {
-					return err
-				}
-			}
-			n++
+			// What they bought for a group the tariff now has otherwise goes to their main traffic.
+			return q.MoveTariffGroupGrantsToMain(ctx, sql.NullInt64{Int64: tariffID, Valid: true})
 		}
 		return nil
 	})
@@ -172,7 +175,7 @@ func SetGroupInbounds(ctx context.Context, q *db.Queries, poolID int64, ids []in
 // its base quota is used and nothing is left of its grants (GrantsLeft.Pool). A group in
 // any other mode never runs out on its own.
 func PoolExhausted(p db.UserPool, grants int64) bool {
-	return p.Mode == PoolOwn && TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants) == 0
+	return p.Mode == PoolOwn && model.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants) == 0
 }
 
 // ExhaustedPools are the user's groups that do not serve: left out of the subscription, or

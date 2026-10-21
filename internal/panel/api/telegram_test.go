@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"mikan/internal/panel/botpanel"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/store/storetest"
@@ -31,8 +32,8 @@ func TestReadKeyDoesNotGetTheSubPath(t *testing.T) {
 	}
 	const sub = "s3cr3t-sub-path"
 	now := func() time.Time { return time.Unix(1_800_000_000, 0) }
-	bot := tgbot.NewPanel(tgbot.PanelDeps{
-		Backend: &tgbot.Local{
+	bot := botpanel.New(botpanel.Deps{
+		Backend: &botpanel.Local{
 			Store:    st,
 			Settings: set,
 			Now:      now,

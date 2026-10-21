@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/store/storetest"
 )
 
 // packageEnv: a subscription of buyer 555 on the sale tariff (150 GB) and a 50 GB package
@@ -110,8 +112,8 @@ func TestStarsPackage(t *testing.T) {
 	if len(gs) != 1 || gs[0].Bytes != 50*domain.GiB || gs[0].Source != domain.SourcePurchase || gs[0].PaymentID.Int64 != p.ID || gs[0].PackageID.Int64 != pk.ID {
 		t.Fatalf("grants: %+v", gs)
 	}
-	if e.tg.told() != 1 || e.tg.paid[0].Kind != KindPackage {
-		t.Fatalf("told %d", e.tg.told())
+	if paid := e.told(events.PaymentPaid); len(paid) != 1 || paid[0].Kind != KindPackage {
+		t.Fatalf("told %+v", paid)
 	}
 	// The subscription itself is as it was: no renewal, no new user.
 	after, _ := e.st.Q.GetUser(ctx, u.ID)
@@ -180,6 +182,8 @@ func TestPackageClosedPoolIsNotSold(t *testing.T) {
 	q := e.st.Q
 	pool, err := q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})
 	must(t, err)
+	_, err = storetest.ServePool(ctx, q, pool.ID)
+	must(t, err)
 	wl, err := q.CreateTrafficPackage(ctx, db.CreateTrafficPackageParams{Name: "wl", Bytes: domain.GiB, PoolID: sql.NullInt64{Int64: pool.ID, Valid: true},
 		Lifetime: domain.LifetimeUsed, PriceStars: sql.NullInt64{Int64: 5, Valid: true}, OnSale: 1, CreatedAt: 1})
 	must(t, err)
@@ -205,7 +209,8 @@ func TestPackageClosedPoolIsNotSold(t *testing.T) {
 	if _, err := buy(); !errors.Is(err, ErrNotForSale) {
 		t.Fatalf("invoice for a closed pool: %v", err)
 	}
-	if ups, _ := q.ListUserPools(ctx, u.ID); domain.PackageFits(u, ups, wl, nil) {
+	// Closed is closed, though the user reaches the group's servers.
+	if ups, _ := q.ListUserPools(ctx, u.ID); domain.PackageFits(u, ups, wl, nil, map[int64]bool{wl.PoolID.Int64: true}) {
 		t.Fatal("PackageFits must refuse a closed pool")
 	}
 	// A group in the main traffic takes the main traffic's packages, not its own.

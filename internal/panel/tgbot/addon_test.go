@@ -3,7 +3,7 @@ package tgbot
 import (
 	"testing"
 
-	"mikan/internal/panel/billing"
+	"mikan/internal/panel/model"
 )
 
 // Marketplace adapters get a button each, by their own name, and their code names them
@@ -11,7 +11,7 @@ import (
 func TestAddonButtons(t *testing.T) {
 	// YooKassa and CryptoBot keep the words and short codes of the built-in providers they
 	// replaced, and come first; the others go by their own names.
-	av := billing.Available{Stars: true, Addons: []string{"cryptobot", "pay-2", "yookassa"}}
+	av := model.Available{Stars: true, Addons: []string{"cryptobot", "pay-2", "yookassa"}}
 	rows := ru.payButtons("py:7:", 150, 19900, av, func(id string) string { return "Name of " + id })
 	want := [][2]string{{"⭐ Telegram Stars — ⭐ 150", "py:7:s"}, {"💳 Картой или СБП — 199 ₽", "py:7:y"}, {"🪙 Криптовалютой — 199 ₽", "py:7:c"},
 		{"💳 Name of pay-2 — 199 ₽", "py:7:a-pay-2"}}
@@ -26,7 +26,7 @@ func TestAddonButtons(t *testing.T) {
 	if rows := ru.payButtons("py:7:", 150, 0, av, func(string) string { return "" }); len(rows) != 1 {
 		t.Fatalf("an adapter offered without a ruble price: %+v", rows)
 	}
-	for code, want := range map[string]string{"s": billing.Stars, "y": "addon:yookassa", "c": "addon:cryptobot", "a-yookassa": "addon:yookassa", "a-pay-2": "addon:pay-2", "a-": "", "a-../x": "", "a-Big": "", "x": ""} {
+	for code, want := range map[string]string{"s": model.Stars, "y": "addon:yookassa", "c": "addon:cryptobot", "a-yookassa": "addon:yookassa", "a-pay-2": "addon:pay-2", "a-": "", "a-../x": "", "a-Big": "", "x": ""} {
 		if got, ok := providerOf(code); got != want || ok != (want != "") {
 			t.Errorf("providerOf(%q) = %q %v, want %q", code, got, ok, want)
 		}

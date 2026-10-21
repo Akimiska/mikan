@@ -4,12 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"math"
-	"slices"
 	"strconv"
-	"strings"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
 )
 
@@ -20,43 +19,42 @@ import (
 // ruble price in the balance's currency (Rate). A refund of such a payment goes back to it.
 
 // Balance is the payment method of the balance.
-const Balance = "balance"
+const Balance = model.Balance
 
 // Top-up states; a draft is one whose screenshot has not come yet.
 const (
-	TopupDraft    = "draft"
-	TopupPending  = "pending"
-	TopupApproved = "approved"
-	TopupRejected = "rejected"
+	TopupDraft    = model.TopupDraft
+	TopupPending  = model.TopupPending
+	TopupApproved = model.TopupApproved
+	TopupRejected = model.TopupRejected
 )
 
 // Kinds of balance operations.
 const (
-	OpTopup  = "topup"
-	OpSpend  = "spend"
-	OpRefund = "refund"
-	OpAdjust = "adjust"
+	OpTopup  = model.OpTopup
+	OpSpend  = model.OpSpend
+	OpRefund = model.OpRefund
+	OpAdjust = model.OpAdjust
 )
 
 // maxPendingTopups an account may have waiting for the admin at once.
 const maxPendingTopups = 3
 
 var (
-	ErrBalanceOff  = errors.New("balance_off")  // the balance is not on
-	ErrBalanceLow  = errors.New("balance_low")  // not enough on the balance
-	ErrTopupAmount = errors.New("topup_amount") // below the minimum or above the maximum
-	ErrTopupMany   = errors.New("topup_many")   // maxPendingTopups wait already
-	ErrTopupNone   = errors.New("topup_none")   // no top-up to send a screenshot for
-	ErrTopupGone   = errors.New("topup_gone")   // decided already, or no such top-up
+	ErrBalanceOff  = model.ErrBalanceOff  // the balance is not on
+	ErrBalanceLow  = model.ErrBalanceLow  // not enough on the balance
+	ErrTopupAmount = model.ErrTopupAmount // below the minimum or above the maximum
+	ErrTopupMany   = model.ErrTopupMany   // maxPendingTopups wait already
+	ErrTopupNone   = model.ErrTopupNone   // no top-up to send a screenshot for
+	ErrTopupGone   = model.ErrTopupGone   // decided already, or no such top-up
+	// ErrTopupCurrency: the top-up was asked in a currency the balances are no longer kept in.
+	ErrTopupCurrency = model.ErrTopupCurrency
 )
-
-// BalanceCurrencies are the currencies a balance may be kept in.
-var BalanceCurrencies = []string{"RUB", "USD", "EUR", "UAH", "BYN", "KZT", "UZS", "USDT"}
 
 // BalanceConfig is the admin's setup of the balance (Config.Balance).
 type BalanceConfig struct {
 	Enabled bool `json:"enabled"`
-	// Currency is the balance's (BalanceCurrencies); Rate is how many rubles one unit of it
+	// Currency is the balance's (model.BalanceCurrencies); Rate is how many rubles one unit of it
 	// is worth, for the tariffs' ruble prices: 1 for RUB.
 	Currency string  `json:"currency"`
 	Rate     float64 `json:"rate"`
@@ -67,18 +65,11 @@ type BalanceConfig struct {
 	Max int64 `json:"max,omitempty"`
 }
 
-// On: the balance takes top-ups and pays.
-func (c BalanceConfig) On() bool {
-	return c.Enabled && slices.Contains(BalanceCurrencies, c.Currency) && (c.Currency == "RUB" || c.Rate > 0) && strings.TrimSpace(c.Details) != ""
-}
+// On: the balance takes top-ups and pays (model.BalanceConfig.On).
+func (c BalanceConfig) On() bool { return model.BalanceConfig(c).On() }
 
 // FromRub is a ruble price (kopecks) in the balance's minor units, rounded up.
-func (c BalanceConfig) FromRub(kopecks int64) int64 {
-	if c.Currency == "RUB" || c.Rate <= 0 {
-		return kopecks
-	}
-	return int64(math.Ceil(float64(kopecks) / c.Rate))
-}
+func (c BalanceConfig) FromRub(kopecks int64) int64 { return model.BalanceConfig(c).FromRub(kopecks) }
 
 // BalanceOf is the account's balance now, in minor units of the balance's currency.
 func (s *Service) BalanceOf(ctx context.Context, tgID int64) (int64, error) {
@@ -95,11 +86,13 @@ func (s *Service) BalanceHistory(ctx context.Context, tgID int64, n int32) ([]db
 }
 
 // chargeBalance pays p from its buyer's balance: the money leaves the balance and the
-// payment is paid on one transaction, then applied as any paid payment (a failure to apply
-// is retried by Reconcile, the money stays taken). ErrBalanceLow when there is not enough.
-func (s *Service) chargeBalance(ctx context.Context, p db.Payment) error {
+// payment is paid on one transaction, then applied as any paid payment. charged says
+// whether the money was taken: an error after that is the apply's, which Reconcile retries
+// (the money stays taken); before it, nothing changed. ErrBalanceLow when there is not
+// enough.
+func (s *Service) chargeBalance(ctx context.Context, p db.Payment) (charged bool, err error) {
 	now := s.d.Now().Unix()
-	err := s.d.Store.Tx(ctx, func(q *db.Queries) error {
+	err = s.d.Store.Tx(ctx, func(q *db.Queries) error {
 		n, err := q.DebitBalance(ctx, db.DebitBalanceParams{Amount: p.Amount, UpdatedAt: now, TgID: p.TgID})
 		if err != nil {
 			return err
@@ -122,10 +115,10 @@ func (s *Service) chargeBalance(ctx context.Context, p db.Payment) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	s.d.Log.Info("billing: paid from the balance", "payment", p.ID, "amount", p.Amount, "currency", p.Currency)
-	return s.Apply(ctx, p.ID)
+	return true, s.Apply(ctx, p.ID)
 }
 
 // refundToBalance puts a refunded balance payment back on the balance, once, on the
@@ -275,6 +268,10 @@ func (s *Service) DecideTopup(ctx context.Context, id int64, approve bool, admin
 			return ErrTopupGone
 		}
 		t.Status, t.Reason = status, reason
+		// A top-up is credited in the currency it was asked in, which the balances hold.
+		if approve && t.Currency != s.Config(ctx).Balance.Currency {
+			return ErrTopupCurrency
+		}
 		if approve {
 			if balance, err = q.CreditBalance(ctx, db.CreditBalanceParams{TgID: t.TgID, Amount: t.Amount, UpdatedAt: now.Unix()}); err != nil {
 				return err
@@ -288,7 +285,7 @@ func (s *Service) DecideTopup(ctx context.Context, id int64, approve bool, admin
 		} else if err != nil {
 			return err
 		}
-		return events.Emit(ctx, q, now, events.BalanceTopup, 0, t.TgID, events.Topup{TopupID: id, Status: status, Amount: t.Amount, Currency: t.Currency,
+		return feed.Emit(ctx, q, now, events.BalanceTopup, 0, t.TgID, events.Topup{TopupID: id, Status: status, Amount: t.Amount, Currency: t.Currency,
 			Balance: balance, Reason: reason}, events.BalanceTopup+":"+strconv.FormatInt(id, 10))
 	})
 	if err != nil {

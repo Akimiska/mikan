@@ -2,6 +2,7 @@ package subs
 
 import (
 	"mikan/internal/panel/domain"
+	"mikan/internal/textutil"
 )
 
 // A subscription that cannot connect (its term over, its traffic used up, turned off) gets
@@ -25,7 +26,7 @@ func inactiveNotice(cfg Config, state string, vars map[string]string) error {
 			return &inactiveError{text: s}
 		}
 	}
-	return &inactiveError{text: inactiveDefault(state, cfg.Lang == "en")}
+	return &inactiveError{text: inactiveDefault(state, textutil.Lang(cfg.Lang).En())}
 }
 
 func inactiveDefault(state string, en bool) string {

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -27,7 +28,8 @@ type NodeInfo struct {
 	Name       string `json:"name" doc:"Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений"`
 	Local      bool   `json:"local" doc:"Своя нода панели"`
 	Address    string `json:"address" doc:"host:port API ноды; пусто у своей ноды"`
-	Host       string `json:"host" doc:"Адрес для клиентов"`
+	Host       string `json:"host" doc:"Адрес для клиентов: домен ноды, без него server_host"`
+	ServerHost string `json:"server_host" doc:"IP или имя сервера, как его задали: по нему панель ходит в API ноды; пусто у своей ноды"`
 	Domain     string `json:"domain"`
 	PublicName string `json:"public_name" doc:"Публичное имя для канала состояния; пустое — нода скрыта из списка"`
 	Enabled    bool   `json:"enabled"`
@@ -78,6 +80,9 @@ type NodeInfo struct {
 	// RouterError says why it could not take the port.
 	SNIRouter   bool   `json:"sni_router" doc:"Порт 443 ноды делят подключения по имени TLS (SNI-роутер)"`
 	RouterError string `json:"router_error,omitempty" doc:"Почему нода не смогла занять порт 443"`
+	// FrontPage is the built-in page strangers get on the node's own domain through the
+	// shared 443.
+	FrontPage string `json:"front_page" enum:",maintenance,cats" doc:"Заглушка для посторонних: её отдают протоколы VLESS и Trojan с XHTTP, WebSocket или gRPC на чужие запросы вместо пустого 404, а с общим портом 443 и домен ноды; пусто — нет, maintenance — технические работы, cats — котики-кликер"`
 	// APILockdown: the node's API answers only the panel's addresses and APIAllow;
 	// APILockError says why the node's server has no firewall rule for it (the node refuses
 	// strangers in its own listener all the same).
@@ -118,9 +123,10 @@ type patchNodeInput struct {
 		Enabled    *bool   `json:"enabled,omitempty"`
 		FairShare  *bool   `json:"fair_share,omitempty" doc:"Делить канал ноды поровну между теми, кто сейчас качает; нужен channel_mbps"`
 		// The node's channel each way, which the fair share splits.
-		ChannelMbps  *int64 `json:"channel_mbps,omitempty" minimum:"1" maximum:"100000" doc:"Ширина канала ноды, Мбит/с в каждую сторону"`
-		HTTPRedirect *bool  `json:"http_redirect,omitempty" doc:"Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели"`
-		SNIRouter    *bool  `json:"sni_router,omitempty" doc:"SNI-роутер на 443: подключения с отметкой «через общий 443» слушают на loopback за ним"`
+		ChannelMbps  *int64  `json:"channel_mbps,omitempty" minimum:"1" maximum:"100000" doc:"Ширина канала ноды, Мбит/с в каждую сторону"`
+		HTTPRedirect *bool   `json:"http_redirect,omitempty" doc:"Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели"`
+		SNIRouter    *bool   `json:"sni_router,omitempty" doc:"SNI-роутер на 443: подключения с отметкой «через общий 443» слушают на loopback за ним"`
+		FrontPage    *string `json:"front_page,omitempty" enum:",maintenance,cats" doc:"Заглушка для посторонних: протоколы с XHTTP, WebSocket или gRPC отдают её на чужие запросы вместо пустого 404, общий порт 443 — на домене ноды и на запросах без имени (сертификат ноды, TLS 1.2+, HSTS); пусто — нет"`
 		// The node's API for the panel alone, and the networks added to the panel's own.
 		APILockdown *bool     `json:"api_lockdown,omitempty" doc:"API ноды только с адресов панели; не для ноды панели"`
 		APIAllow    *[]string `json:"api_allow,omitempty" maxItems:"16" doc:"Ещё сети или адреса (203.0.113.5, 198.51.100.0/24), с которых панель ходит к ноде"`
@@ -155,26 +161,13 @@ func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct
 		if err != nil {
 			return err
 		}
-		have := make(map[int64]bool, len(nodes))
-		for _, n := range nodes {
-			have[n.ID] = true
+		have := make([]int64, len(nodes))
+		for i, n := range nodes {
+			have[i] = n.ID
 		}
-		seen := make(map[int64]bool, len(ids))
-		for _, id := range ids {
-			if !have[id] || seen[id] {
-				return fieldErrValue("body.ids", "node_order_mismatch", id)
-			}
-			seen[id] = true
-		}
-		if len(ids) != len(nodes) {
-			return fieldErr("body.ids", "node_order_mismatch")
-		}
-		for i, id := range ids {
-			if err := q.SetNodeSort(ctx, db.SetNodeSortParams{Sort: int64(i + 1), ID: id}); err != nil {
-				return err
-			}
-		}
-		return nil
+		return setOrder(ids, have, "node_order_mismatch", func(id, place int64) error {
+			return q.SetNodeSort(ctx, db.SetNodeSortParams{Sort: place, ID: id})
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -186,10 +179,10 @@ func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct
 }
 
 func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {
-	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
+	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), ServerHost: n.PublicHost, Domain: n.Domain,
 		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown",
 		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps), BalanceGroup: n.BalanceGroup, Capacity: store.Int64Ptr(n.Capacity),
-		HTTPRedirect: n.HttpRedirect != 0, SNIRouter: n.SniRouter != 0, APILockdown: n.ApiLockdown != 0, APIAllow: n.ApiAllow}
+		HTTPRedirect: n.HttpRedirect != 0, SNIRouter: n.SniRouter != 0, FrontPage: n.FrontPage, APILockdown: n.ApiLockdown != 0, APIAllow: n.ApiAllow}
 	if v.APIAllow == nil {
 		v.APIAllow = []string{}
 	}
@@ -325,19 +318,41 @@ func (h *handlers) getNode(ctx context.Context, id int64) (db.Node, error) {
 
 func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInfoOutput, error) {
 	b := in.Body
+	// A node's address and domain are where its clients go: the admin's alone, or an
+	// operator's in the extended mode. The form sends both as they are, so only a change is
+	// refused.
+	if _, ok := supportGrantOf(ctx); ok && (b.Host != nil || b.Domain != nil) {
+		cur, err := h.d.Store.Q.GetNode(ctx, in.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, huma.Error404NotFound("not_found")
+		}
+		if err != nil {
+			return nil, err
+		}
+		if b.Host != nil && strings.TrimSpace(*b.Host) != cur.PublicHost {
+			if err := requireSession(ctx, "host"); err != nil {
+				return nil, err
+			}
+		}
+		if b.Domain != nil && strings.TrimSpace(*b.Domain) != cur.Domain {
+			if err := requireSession(ctx, "domain"); err != nil {
+				return nil, err
+			}
+		}
+	}
 	rules, err := h.nodeRules(ctx)
 	if err != nil {
 		return nil, err
 	}
 	n, err := domain.UpdateNode(ctx, h.d.Store, in.ID, domain.NodePatch{Name: b.Name, PublicName: b.PublicName, Host: b.Host, Domain: b.Domain,
-		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, HTTPRedirect: b.HTTPRedirect, SNIRouter: b.SNIRouter, APILockdown: b.APILockdown, APIAllow: b.APIAllow, Rules: rules}, h.d.Now())
+		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, HTTPRedirect: b.HTTPRedirect, SNIRouter: b.SNIRouter, FrontPage: b.FrontPage, APILockdown: b.APILockdown, APIAllow: b.APIAllow, Rules: rules}, h.d.Now())
 	if err != nil {
 		return nil, h.nodeErr(err)
 	}
 	h.nodesChanged()
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "public_name": n.PublicName, "enabled": n.Enabled != 0,
-		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64, "http_redirect": n.HttpRedirect != 0, "sni_router": n.SniRouter != 0, "api_lockdown": n.ApiLockdown != 0, "api_allow": n.ApiAllow})
+		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64, "http_redirect": n.HttpRedirect != 0, "sni_router": n.SniRouter != 0, "front_page": n.FrontPage, "api_lockdown": n.ApiLockdown != 0, "api_allow": n.ApiAllow})
 	return h.nodeInfo(ctx, n.ID)
 }
 
@@ -363,14 +378,17 @@ func (h *handlers) nodeErr(err error) error {
 		return huma.Error404NotFound("not_found")
 	case errors.Is(err, domain.ErrLocalNode):
 		// The panel's own node follows the panel's address in the settings.
-		return huma.Error422UnprocessableEntity("local_node")
+		return refusal("local_node")
 	case errors.Is(err, domain.ErrChannelRequired):
 		return fieldErr("body.channel_mbps", "channel_required")
 	case errors.Is(err, domain.ErrLocalLockdown):
 		// The panel reaches its own node over the socket: there is no API port to close.
-		return huma.Error422UnprocessableEntity("local_node_lockdown")
+		return refusal("local_node_lockdown")
 	case errors.Is(err, domain.ErrManyAPIAllow):
 		return fieldErr("body.api_allow", "api_allow_many")
+	}
+	if fe, ok := fieldFromDomain(err); ok {
+		return fe
 	}
 	var bad *domain.APIAllowError
 	if errors.As(err, &bad) {
@@ -453,7 +471,22 @@ func (h *handlers) nodeUnused(ctx context.Context, q *db.Queries, id int64) erro
 	if route.Mode == tgate.RouteNode && route.NodeID == id {
 		return huma.Error409Conflict("node_in_use", &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_telegram"})
 	}
-	return nil
+	return serversLeft(ctx, q, id, 0)
+}
+
+// serversLeft refuses a deletion (of node nodeID, or of inbound inboundID) that would leave a
+// tariff of chosen servers with none: its users would have nothing to connect to. The answer
+// names the tariffs, to choose other servers for first.
+func serversLeft(ctx context.Context, q *db.Queries, nodeID, inboundID int64) error {
+	rows, err := q.TariffsLeftWithoutServers(ctx, db.TariffsLeftWithoutServersParams{NodeID: nodeID, InboundID: inboundID})
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		names = append(names, r.Name)
+	}
+	return huma.Error409Conflict("tariff_servers", &huma.ErrorDetail{Location: "path.id", Message: "tariff_servers", Value: strings.Join(names, ", ")})
 }
 
 func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, error) {

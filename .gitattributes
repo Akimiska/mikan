@@ -2,3 +2,5 @@
 *.sh text eol=lf
 *.go text eol=lf
 Dockerfile text eol=lf
+# Golden files of the bot's wire: compared byte for byte, so LF on every checkout.
+internal/panel/model/testdata/* text eol=lf

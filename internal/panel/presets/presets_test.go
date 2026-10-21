@@ -1,6 +1,7 @@
 package presets
 
 import (
+	"strings"
 	"testing"
 
 	"mikan/internal/proto"
@@ -43,6 +44,18 @@ func TestRekey(t *testing.T) {
 		}
 		if id != PresetTLSWS && !changed {
 			t.Fatalf("%s: nothing new", id)
+		}
+	}
+}
+
+// TLS in TLS is said of Trojan and of VLESS without Vision, and of nothing else: Vision
+// hides the records of the client's own TLS, and the other protocols have no TLS of their
+// own around them, or pad it (AnyTLS).
+func TestNestedTLS(t *testing.T) {
+	for _, p := range All {
+		want := (p.Type == "trojan" || p.Type == "vless") && !strings.Contains(p.ID, "vision")
+		if p.NestedTLS != want {
+			t.Errorf("%s: nested TLS %v, want %v", p.ID, p.NestedTLS, want)
 		}
 	}
 }

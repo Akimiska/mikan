@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"mikan/internal/panel/model"
 	"mikan/internal/textutil"
@@ -105,15 +106,34 @@ func aoiConnectRows(w *words, subURL string) [][]tgapi.Button {
 }
 
 // aoiVars (AoiVPN fork) adds what the legacy bot's cabinet showed: {until_full} is the end of
-// the term with its time, "16 декабря 2026, 21:00 МСК".
-func aoiVars(v map[string]string, w *words, u model.User) {
+// the term with its time, "16 декабря 2026, 21:00 МСК"; {term_line} is the term's line as the
+// subscription stands: valid until, over since (a past date with "0 days left" says nothing
+// right), or without an end.
+func aoiVars(v map[string]string, w *words, u model.User, now time.Time) {
+	en := w == &en
 	v["until_full"] = v["until"]
-	if u.ExpiresAt.Valid {
-		t := model.Time(u.ExpiresAt.Int64).In(textutil.Zone)
-		zone := "МСК"
-		if w == &en {
-			zone = "MSK"
-		}
-		v["until_full"] = w.date(t) + ", " + t.Format("15:04") + " " + zone
+	v["term_line"] = "📅 Бессрочно"
+	if en {
+		v["term_line"] = "📅 No end date"
+	}
+	if !u.ExpiresAt.Valid {
+		return
+	}
+	exp := model.Time(u.ExpiresAt.Int64)
+	t := exp.In(textutil.Zone)
+	zone := "МСК"
+	if en {
+		zone = "MSK"
+	}
+	v["until_full"] = w.date(t) + ", " + t.Format("15:04") + " " + zone
+	switch {
+	case !now.Before(exp) && en:
+		v["term_line"] = "📅 Ended on " + w.date(t) + " — renew with «💳 Renew»"
+	case !now.Before(exp):
+		v["term_line"] = "📅 Закончилась " + w.date(t) + " — продлите в «💳 Продлить»"
+	case en:
+		v["term_line"] = "📅 Valid until " + v["until_full"] + " (" + v["days"] + " left)"
+	default:
+		v["term_line"] = "📅 Действует до: " + v["until_full"] + " (осталось " + v["days"] + ")"
 	}
 }

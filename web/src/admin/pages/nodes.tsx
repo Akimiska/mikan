@@ -10,7 +10,7 @@ import { CertDrawer, certUntil } from "../../components/cert-drawer";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
-import { Bar, Button, EmptyState, Field, PageHeader, Pill, Skeleton } from "../../components/ui";
+import { Bar, Button, EmptyState, Field, PageHeader, Pill, Segmented, Skeleton } from "../../components/ui";
 import { Switch } from "../../components/switch";
 import { t, tMaybe } from "../../i18n";
 import { useCopy } from "../../lib/copy";
@@ -675,13 +675,13 @@ function KeyDrawer({ joined, onClose, actions }: { joined: Joined | null; onClos
 function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false, sni_router: false, api_lockdown: false, api_allow: "" });
+  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false, sni_router: false, front_page: "", api_lockdown: false, api_allow: "" });
   const balance = useBalance();
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     if (node) {
       setForm({ name: node.name, public_name: node.public_name, host: node.host, domain: node.domain, enabled: node.enabled, fair_share: node.fair_share, channel: node.channel_mbps != null ? String(node.channel_mbps) : "",
-        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect, sni_router: node.sni_router, api_lockdown: node.api_lockdown, api_allow: node.api_allow.join(", ") });
+        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect, sni_router: node.sni_router, front_page: node.front_page, api_lockdown: node.api_lockdown, api_allow: node.api_allow.join(", ") });
       setErrors({});
     }
   }, [node]);
@@ -709,7 +709,10 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!node) return;
-    const body: Schemas["PatchNodeInputBody"] = { name: form.name.trim(), public_name: form.public_name.trim(), enabled: form.enabled, fair_share: form.fair_share };
+    const body: Schemas["PatchNodeInputBody"] = { public_name: form.public_name.trim(), enabled: form.enabled, fair_share: form.fair_share };
+    // A node without a name of its own (the panel's, shown as "Own node") keeps none: an empty
+    // field is no new name, and saving the rest must not fail on it.
+    if (form.name.trim() || node.name) body.name = form.name.trim();
     const channel = Number(form.channel);
     if (form.channel.trim() || form.fair_share) {
       if (!Number.isInteger(channel) || channel < 1 || channel > 100000) {
@@ -732,6 +735,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
       body.api_allow = allow;
     }
     body.sni_router = form.sni_router;
+    body.front_page = form.front_page as NonNullable<Schemas["PatchNodeInputBody"]["front_page"]>;
     const group = form.group.trim();
     const capacity = group && form.capacity.trim() ? Number(form.capacity) : undefined;
     if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1)) {
@@ -841,6 +845,20 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
               {t("nodes.sniRouterBusy", { error: node.router_error })}
             </p>
           ) : null}
+        </div>
+        <div className="dr-sec">
+          <Field label={t("nodes.frontPage")} hint={form.sni_router ? `${t("nodes.frontPageHint")} ${t("nodes.frontPageRouter")}` : t("nodes.frontPageHint")}>
+            <Segmented
+              label={t("nodes.frontPage")}
+              value={form.front_page || "none"}
+              onChange={(v) => setForm((f) => ({ ...f, front_page: v === "none" ? "" : v }))}
+              options={[
+                { value: "none", label: t("nodes.frontPageNone") },
+                { value: "maintenance", label: t("nodes.frontPageMaintenance") },
+                { value: "cats", label: t("nodes.frontPageCats") },
+              ]}
+            />
+          </Field>
         </div>
         {node && !node.local ? (
           <div className="dr-sec">

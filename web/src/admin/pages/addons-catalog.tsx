@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { ExternalLink, Search, Star, Store, Wallet } from "lucide-react";
+import { Download, ExternalLink, Search, Star, Store, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorText, type Schemas } from "../../api/client";
 import type { useAddons } from "../../api/hooks";
@@ -225,6 +225,11 @@ export function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item;
         {e?.stars ? (
           <span className="inline-flex items-center gap-1 text-xs text-[var(--ink-500)]" title={t("market.stars")}>
             <Star size={12} aria-hidden /> <span className="num">{num(e.stars)}</span>
+          </span>
+        ) : null}
+        {e?.downloads ? (
+          <span className="inline-flex items-center gap-1 text-xs text-[var(--ink-500)]" title={t("market.downloads")}>
+            <Download size={12} aria-hidden /> <span className="num">{num(e.downloads)}</span>
           </span>
         ) : null}
         {repo ? (

@@ -76,7 +76,7 @@ export function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: bool
               <button key={p.id} type="button" role="radio" aria-checked={preset === p.id} className="opt" onClick={() => setPreset(p.id)}>
                 <span className="font-semibold">{presetTitle(p)}</span>
                 <span className="text-xs text-[var(--ink-500)]">{presetSummary(p)}</span>
-                <LimitBadges clashOnly={p.apps === "mihomo"} shared={!!p.shared} />
+                <LimitBadges clashOnly={p.apps === "mihomo"} shared={!!p.shared} nestedTLS={!!p.nested_tls} />
               </button>
             ))}
           </div>
@@ -89,7 +89,7 @@ export function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: bool
         >
           <input id="in-port" className="input max-w-[200px]" inputMode="numeric" placeholder={chosen?.default_port} value={port} onChange={(e) => setPort(e.target.value)} aria-invalid={!!errors.port} />
         </Field>
-        {chosen && !custom ? <LimitNotes clashOnly={chosen.apps === "mihomo"} shared={!!chosen.shared} domainCert={!!chosen.domain_cert} /> : null}
+        {chosen && !custom ? <LimitNotes clashOnly={chosen.apps === "mihomo"} shared={!!chosen.shared} domainCert={!!chosen.domain_cert} nestedTLS={!!chosen.nested_tls} /> : null}
         {custom ? (
           <Field label={t("inbounds.configLabel")} hint={t("inbounds.configHint")} error={errors.config}>
             <Editor value={config} onChange={editConfig} invalid={!!errors.config} />

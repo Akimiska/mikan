@@ -31,6 +31,7 @@ import (
 	"github.com/metacubex/mihomo/tunnel/statistic"
 
 	"mikan/internal/acmechallenge"
+	"mikan/internal/frontpage"
 	"mikan/internal/fsutil"
 	"mikan/internal/hostchan"
 	"mikan/internal/logbuf"
@@ -86,6 +87,8 @@ type Engine struct {
 	router       *sniRouter
 	routerAddr   string
 	routerStatus atomic.Pointer[nodeapi.PortStatus]
+	// front is the page the router gives strangers on the node's own names (front.go).
+	front *frontPage
 
 	mu         sync.Mutex // serializes Apply
 	savedShape string     // policyShape of the policies in the state file
@@ -256,7 +259,7 @@ var (
 // ours are patched separately in Apply; the way out and the DNS come with every Apply.
 func applyBase() error {
 	baseOnce.Do(func() {
-		base, _, err := buildConfig(nodeapi.DesiredState{}, proto.Cert{}, false)
+		base, _, err := buildConfig(nodeapi.DesiredState{}, proto.Cert{}, false, "")
 		if err != nil {
 			baseErr = err
 			return
@@ -331,7 +334,19 @@ func (e *Engine) apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		}
 	}
 	e.cert = cert
-	raw, rejected, err := buildConfig(st, cert, e.allowPrivate)
+	// The front page as a file for the inbounds on an HTTP transport (fallback-page); the
+	// router's names get it from the page held in memory (front.go).
+	front := ""
+	if page := frontpage.Page(st.FrontPage); page != nil {
+		front = filepath.Join(e.home, "front", st.FrontPage+".html")
+		if err := os.MkdirAll(filepath.Dir(front), 0o755); err != nil {
+			return nodeapi.ApplyResult{}, err
+		}
+		if err := fsutil.WriteFileAtomic(front, page, 0o644); err != nil {
+			return nodeapi.ApplyResult{}, err
+		}
+	}
+	raw, rejected, err := buildConfig(st, cert, e.allowPrivate, front)
 	if err != nil {
 		return nodeapi.ApplyResult{}, &nodeapi.Error{Code: "invalid_state", Message: err.Error()}
 	}
@@ -414,6 +429,10 @@ func (e *Engine) apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	for _, in := range st.Inbounds {
 		ports[in.Name] = in.Port
 	}
+	if e.front == nil {
+		e.front = newFrontPage()
+	}
+	e.front.set(st.FrontPage, st.TLS)
 	e.setRouter(st.Router, ports)
 	recreated := make([]string, 0, len(started))
 	for name := range started {

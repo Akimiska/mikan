@@ -3,9 +3,15 @@ title: Server groups and traffic packages
 description: What a plan includes, a limit of their own for some servers, buying extra traffic and gifts with a payment.
 ---
 
+## Servers in a plan
+
+In the plan's form, under "What is included" → **"Servers"**: "All" or "Chosen". The chosen ones are ticked by server. "Whole server, new protocols too" takes a server whole, with the protocols added to it later; single protocols can be ticked too. For example, when only 2 of 20 nodes should be in a plan, tick those two: no groups are needed for it.
+
+The choice reaches all the plan's clients at once. A client with a list of protocols of their own in the card keeps it, marked "A list of their own, not as in the plan"; "As in the plan" brings the plan's servers back. Load balancing places a client only on a node their plan includes.
+
 ## Server groups
 
-A group puts servers and protocols together, such as "Whitelists" or "Premium". The protocols in no group are the main servers: they are in every plan and spend the main traffic.
+A group puts servers and protocols together, such as "Whitelists" or "Premium". The protocols in no group are the main servers: they spend the main traffic in the plans that include them.
 
 In each plan a group is in one of four ways:
 
@@ -16,7 +22,7 @@ In each plan a group is in one of four ways:
 
 For example, a cheap plan: "Premium" not included, "Whitelists" 30 GB of its own. An expensive one: "Premium" on the main traffic, "Whitelists" 100 GB of its own.
 
-1. **Plans → Server groups → Add a group**: the name and the protocols. The protocols are listed by server, and "Whole server" ticks all of them. A protocol is in one group only. You can also pick the group in the protocol's settings.
+1. **Plans → Server groups → Add a group**: the name and the protocols. The protocols are listed by server. A protocol is in one group only: the group decides which traffic it spends. So "Whole server" takes the free protocols and the group's own, and a protocol of another group moves here only when you tick it on its own ("moves here from …"). You can also pick the group in the protocol's settings.
 2. In the same form, under "In the plans", pick how the group is in each plan. The plan's own form sets the same under "What is included".
 3. For a single client, change the groups in their card: "Server groups" → "Edit". A setting that differs from the plan is marked.
 

@@ -35,6 +35,10 @@ Sudoku, Snell and Shadowsocks-2022 with the ChaCha20 method work with a single k
 Shadowsocks-2022 with the AES methods (`2022-blake3-aes-128-gcm` by default) gives every client a key of its own, and all of this works on it as on VLESS.
 :::
 
+:::note[TLS in TLS]
+In Trojan and in VLESS without Vision (REALITY XHTTP, gRPC and PQ, TLS XHTTP, TLS WebSocket and both CDN ones) the TLS of the sites a client opens goes inside the protocol's own TLS. DPI can tell a proxy by the sizes of the first packets. Vision and AnyTLS hide this pattern: keep a protocol with one of them next to it. The list of presets marks such protocols "TLS in TLS".
+:::
+
 ## Who gets what
 
 The subscription detects the app and sends it only what it can run. The connection form shows this on the "Delivered to" line.

@@ -52,6 +52,11 @@ type DesiredState struct {
 	// (SNIRouter); nil: none. Nodes older than it ignore it, and their routed inbounds stay
 	// on their own ports.
 	Router *SNIRouter `json:"sni_router,omitempty"`
+	// FrontPage is the built-in page (frontpage.Templates) a stranger gets: from the inbounds
+	// on an HTTP transport for a request that is not theirs (the core's fallback-page), and
+	// on the names of Router.Stub over TLS with the node's certificate (TLS); "": none. Nodes
+	// older than it ignore it.
+	FrontPage string `json:"front_page,omitempty"`
 	// APIAllow: the node's API answers only these networks ("203.0.113.5/32"), loopback and
 	// the addresses the panel has reached it from; nil: anyone (the panel's certificate
 	// still guards it). Empty but not nil is on too, with the panel's addresses alone. The
@@ -73,6 +78,10 @@ type SNIRouter struct {
 	Listen  string     `json:"listen,omitempty"`
 	Routes  []SNIRoute `json:"routes"`
 	Default string     `json:"default,omitempty"`
+	// Stub: the names that get the node's front page (DesiredState.FrontPage) instead, ""
+	// for a ClientHello with no name; with no Default it takes any other name too. Nodes
+	// older than it ignore it.
+	Stub []string `json:"stub,omitempty"`
 }
 
 type SNIRoute struct {

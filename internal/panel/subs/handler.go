@@ -435,7 +435,11 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 	if err != nil {
 		return prof, err
 	}
-	allowed := domain.DecodeInbounds(u.Inbounds)
+	servers, err := domain.TariffServers(ctx, h.st.Q, u.TariffID)
+	if err != nil {
+		return prof, err
+	}
+	access := domain.AccessOf(u, servers)
 	if grants == nil {
 		if grants, err = domain.UserGrantsLeft(ctx, h.st.Q, u.ID, h.now()); err != nil {
 			return prof, err
@@ -446,9 +450,17 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 	if err != nil {
 		return prof, err
 	}
-	nodes := map[int64]bool{}
+	on := map[int64]bool{}
 	for _, n := range cfg.Nodes {
-		nodes[n.ID] = true
+		on[n.ID] = true
+	}
+	// The nodes the client may use: a balance group places the client among these only, so
+	// a node the tariff leaves out is never the one the client gets.
+	nodes := map[int64]bool{}
+	for _, in := range all {
+		if in.Enabled != 0 && on[in.NodeID] && access.Allows(in) {
+			nodes[in.NodeID] = true
+		}
 	}
 	// One node of each balance group: the client's own. A balancer that fails shows the
 	// group whole rather than leave the client without servers.
@@ -460,7 +472,7 @@ func (h *Handler) profile(ctx context.Context, u db.User, cfg Config, slot db.Sl
 		}
 	}
 	for _, in := range all {
-		if in.Enabled == 0 || !nodes[in.NodeID] || (len(allowed) > 0 && !slices.Contains(allowed, in.ID)) || in.PoolID.Valid && spent[in.PoolID.Int64] {
+		if in.Enabled == 0 || !nodes[in.NodeID] || !access.Allows(in) || in.PoolID.Valid && spent[in.PoolID.Int64] {
 			continue
 		}
 		prof.Inbounds = append(prof.Inbounds, in)
@@ -678,7 +690,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 			out.Locations = append(out.Locations, n.Name)
 		}
 	}
-	pools, err := h.poolInfo(ctx, u.ID, grants)
+	pools, err := h.poolInfo(ctx, u, grants)
 	if err != nil {
 		internalError(w)
 		return
@@ -885,9 +897,11 @@ type PoolInfo struct {
 }
 
 // poolInfo lists the user's server groups worth showing apart from the main traffic: those
-// with a limit of their own, and those without a limit that carried some traffic. A group
-// in the main traffic is part of it; a closed one is not the user's.
-func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.GrantsLeft) ([]PoolInfo, error) {
+// with a limit of their own, and those without a limit that carried some traffic, each with
+// a server the user may use. A group in the main traffic is part of it; a closed one is not
+// the user's.
+func (h *Handler) poolInfo(ctx context.Context, u db.User, grants domain.GrantsLeft) ([]PoolInfo, error) {
+	userID := u.ID
 	rows, err := h.st.Q.ListUserPools(ctx, userID)
 	if err != nil || len(rows) == 0 {
 		return nil, err
@@ -900,10 +914,25 @@ func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.Gran
 	for _, p := range pools {
 		names[p.ID] = p.Name
 	}
+	servers, err := domain.TariffServers(ctx, h.st.Q, u.TariffID)
+	if err != nil {
+		return nil, err
+	}
+	access := domain.AccessOf(u, servers)
+	ins, err := h.st.Q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reach := map[int64]bool{}
+	for _, in := range ins {
+		if in.Enabled != 0 && in.PoolID.Valid && access.Allows(in) {
+			reach[in.PoolID.Int64] = true
+		}
+	}
 	var out []PoolInfo
 	for _, r := range rows {
 		used := r.UsedUp + r.UsedDown
-		if r.Mode != domain.PoolOwn && (r.Mode != domain.PoolUnlimited || used == 0) {
+		if !reach[r.PoolID] || r.Mode != domain.PoolOwn && (r.Mode != domain.PoolUnlimited || used == 0) {
 			continue
 		}
 		pi := PoolInfo{Name: names[r.PoolID], Used: used}

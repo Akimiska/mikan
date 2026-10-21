@@ -4053,6 +4053,7 @@ export interface components {
             default_port: string;
             domain_cert?: boolean;
             id: string;
+            nested_tls?: boolean;
             network: string;
             shared?: boolean;
             sub_name: string;
@@ -4190,6 +4191,11 @@ export interface components {
             };
             /** @description Дайджест образа неофициальной записи */
             digest?: string;
+            /**
+             * Format: int64
+             * @description Сколько раз скачан образ, по странице пакета на GitHub, с точностью до двух знаков (community)
+             */
+            downloads?: number;
             /** @description Отпечаток ключа автора, которым подписан релиз (community) */
             fingerprint?: string;
             homepage: string;
@@ -4437,6 +4443,11 @@ export interface components {
             error_since?: string;
             /** @description Канал ноды делится поровну между теми, кто сейчас качает */
             fair_share: boolean;
+            /**
+             * @description Заглушка на домене ноды через общий порт 443: пусто — нет, maintenance — технические работы, cats — котики-кликер
+             * @enum {string}
+             */
+            front_page: "" | "maintenance" | "cats";
             /** @description Последний hello ноды после запуска: достучалась ли панель в ответ */
             hello?: components["schemas"]["NodeHello"];
             /** @description Адрес для клиентов */
@@ -4919,6 +4930,11 @@ export interface components {
             enabled?: boolean;
             /** @description Делить канал ноды поровну между теми, кто сейчас качает; нужен channel_mbps */
             fair_share?: boolean;
+            /**
+             * @description Заглушка на домене ноды и на запросах без имени через общий порт 443: настоящий сертификат ноды, TLS 1.2+, HSTS; пусто — нет
+             * @enum {string}
+             */
+            front_page?: "" | "maintenance" | "cats";
             host?: string;
             /** @description Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели */
             http_redirect?: boolean;
@@ -5680,6 +5696,22 @@ export interface components {
             interval?: number;
             no_countries?: boolean;
         };
+        ServersBody: {
+            /** @description Все серверы; false — только выбранные, хотя бы одна нода или протокол */
+            all: boolean;
+            /** @description Отдельные протоколы */
+            inbounds?: number[];
+            /** @description Ноды целиком, с протоколами, которые на них появятся потом */
+            nodes?: number[];
+        };
+        ServersView: {
+            /** @description Все серверы; false — только выбранные ноды и протоколы */
+            all: boolean;
+            /** @description Отдельные протоколы */
+            inbounds: number[];
+            /** @description Ноды целиком, с протоколами, которые на них появятся потом */
+            nodes: number[];
+        };
         ServiceRegion: {
             /** @description Ответ — пускает ли сайт адрес (open), а не страна */
             access: boolean;
@@ -6126,6 +6158,8 @@ export interface components {
              * @enum {string}
              */
             reset_strategy: "none" | "month_start" | "period";
+            /** @description Какие серверы входят в тариф: все или выбранные ноды и протоколы. Не передан — без изменений (у нового тарифа — все) */
+            servers?: components["schemas"]["ServersBody"];
             /** Format: int64 */
             sort?: number;
             /**
@@ -6182,6 +6216,8 @@ export interface components {
             price_stars: number | null;
             /** @enum {string} */
             reset_strategy: "none" | "month_start" | "period";
+            /** @description Какие серверы входят в тариф: все или выбранные. Действует сразу на всех клиентов тарифа; клиент со своим списком протоколов в карточке остаётся при нём */
+            servers: components["schemas"]["ServersView"];
             /** Format: int64 */
             sort: number;
             /**

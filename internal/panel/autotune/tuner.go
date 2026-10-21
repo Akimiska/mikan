@@ -289,9 +289,13 @@ func (t *Tuner) load(ctx context.Context) (*world, error) {
 	if err != nil {
 		return nil, err
 	}
+	servers, err := domain.AllTariffServers(ctx, q)
+	if err != nil {
+		return nil, err
+	}
 	allowed := make(map[int64][]int64, len(users))
 	for _, u := range users {
-		allowed[u.ID] = domain.DecodeInbounds(u.Inbounds)
+		allowed[u.ID] = domain.AccessOf(u, domain.ServersOf(servers, u.TariffID)).IDs(inbounds)
 		if u.SlotID.Valid {
 			w.users[slotName[u.SlotID.Int64]] = User{Inbounds: allowed[u.ID], SubFetched: fetched[u.ID]}
 		}

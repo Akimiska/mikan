@@ -359,11 +359,19 @@ func (s *Service) contents(ctx context.Context) (func(int64) []OfferGroup, map[i
 	if err != nil {
 		return nil, nil, err
 	}
-	serving := map[int64]bool{}
-	for _, in := range ins {
-		if in.Enabled != 0 && in.PoolID.Valid {
-			serving[in.PoolID.Int64] = true
+	servers, err := domain.AllTariffServers(ctx, q)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A group a tariff includes no server of says nothing to its buyers.
+	serving := func(tariffID, pool int64) bool {
+		s := domain.ServersOf(servers, sql.NullInt64{Int64: tariffID, Valid: true})
+		for _, in := range ins {
+			if in.Enabled != 0 && in.PoolID.Valid && in.PoolID.Int64 == pool && s.Has(in) {
+				return true
+			}
 		}
+		return false
 	}
 	tps, err := q.ListAllTariffPools(ctx)
 	if err != nil {
@@ -380,7 +388,7 @@ func (s *Service) contents(ctx context.Context) (func(int64) []OfferGroup, map[i
 	groups := func(tariffID int64) []OfferGroup {
 		var out []OfferGroup
 		for _, p := range pools {
-			if !serving[p.ID] {
+			if !serving(tariffID, p.ID) {
 				continue
 			}
 			mode, limit := domain.TariffPoolMode(byTariff[tariffID], p.ID)

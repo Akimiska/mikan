@@ -4,6 +4,7 @@
 package nodesync
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -267,8 +268,11 @@ func (s *Syncer) desiredPin(ctx context.Context) (st nodeapi.DesiredState, pin s
 	st.Detail = snap.detail
 	st.HTTPRedirect = n.HttpRedirect != 0 && n.Address != ""
 	st.APIAllow = s.apiAllow(ctx, n)
+	// The front page: what the inbounds on an HTTP transport give a stranger's request, and
+	// with the shared 443 what the node's own domain gives.
+	st.FrontPage = n.FrontPage
 	if n.SniRouter != 0 {
-		st.Router = sniRouter(st.Inbounds, n.Domain)
+		st.Router = sniRouter(st.Inbounds, n.Domain, n.FrontPage != "")
 	}
 	if n.FairShare != 0 && n.ChannelMbps.Valid {
 		st.Shaping = &nodeapi.Shaping{ChannelMbps: int(n.ChannelMbps.Int64)}
@@ -448,16 +452,17 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 		slotUser[o.SlotName] = o.UserID
 		slotsOf[o.UserID] = append(slotsOf[o.UserID], o.SlotName)
 	}
-	here := map[int64]string{}
+	var here []db.Inbound
 	inPool := map[int64][]int64{} // pool → its inbounds on this node
 	for _, in := range snap.inbounds {
 		if in.NodeID == s.id {
-			here[in.ID] = in.Name
+			here = append(here, in)
 			if in.PoolID.Valid {
 				inPool[in.PoolID.Int64] = append(inPool[in.PoolID.Int64], in.ID)
 			}
 		}
 	}
+	slices.SortFunc(here, func(a, b db.Inbound) int { return cmp.Compare(a.ID, b.ID) })
 	// The inbounds here each user's tariff leaves out, through the server groups they are in.
 	shut := map[int64]map[int64]bool{}
 	for _, up := range snap.pools {
@@ -486,8 +491,9 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 	for _, u := range snap.users {
 		names := slotsOf[u.ID]
 		sort.Strings(names)
+		access := domain.AccessOf(u, domain.ServersOf(snap.servers, u.TariffID))
 		for _, name := range names {
-			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, shut[u.ID], others[name])
+			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, access, shut[u.ID], others[name])
 			p.Pools = userPoolQuotas(u.ID, rows[u.ID], groupsHere, p.QuotaRemaining, grants)
 			p.TorrentExempt = snap.torrent.IsExempt(u.ID)
 			if !p.TorrentExempt {
@@ -501,9 +507,10 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 }
 
 // userPolicy is the user's rules for one of the user's slots; grants is what is left of
-// the user's main grants, added to the quota, and shut the inbounds here the user's tariff
-// leaves out (an excluded pool).
-func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here map[int64]string, shut map[int64]bool, otherIPs []string) nodeapi.Policy {
+// the user's main grants, added to the quota, here the node's inbounds by id, access what
+// the user may connect to (the card's protocols or the tariff's servers) and shut the
+// inbounds here the user's tariff leaves out (a closed group).
+func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here []db.Inbound, access domain.Access, shut map[int64]bool, otherIPs []string) nodeapi.Policy {
 	// A user whose main traffic ran out still gets in: the node turns away the inbounds
 	// outside every pool (QuotaRemaining 0) and keeps the pools that have traffic left.
 	state := domain.State(u, grants, now)
@@ -518,21 +525,14 @@ func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, 
 	// The user's devices are slots of their own: they share the user's speed and the
 	// node's fair share as one.
 	p.Group = strconv.FormatInt(u.ID, 10)
-	allowed := domain.DecodeInbounds(u.Inbounds)
-	if len(allowed) == 0 && len(shut) > 0 {
-		// "All" but the excluded: the list is spelled out.
-		for id := range here {
-			allowed = append(allowed, id)
-		}
-		slices.Sort(allowed)
-	}
-	if len(allowed) > 0 {
-		for _, id := range allowed {
-			if n, ok := here[id]; ok && !shut[id] {
-				p.Inbounds = append(p.Inbounds, n)
+	// No list is "all": anything less is spelled out.
+	if !access.Everything() || len(shut) > 0 {
+		for _, in := range here {
+			if access.Allows(in) && !shut[in.ID] {
+				p.Inbounds = append(p.Inbounds, in.Name)
 			}
 		}
-		// An empty list means "all": a user limited to other nodes' inbounds gets none here.
+		// A user limited to other nodes' inbounds gets none here.
 		if len(p.Inbounds) == 0 {
 			p.Allowed = false
 		}
@@ -842,8 +842,9 @@ func stateKey(st nodeapi.DesiredState) string {
 		X bool
 		V bool
 		O *nodeapi.SNIRouter
+		G string
 	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent, st.Filters, st.Shaping, st.DNS, st.APIAllow,
-		st.HTTPRedirect, st.Detail, st.Router})
+		st.HTTPRedirect, st.Detail, st.Router, st.FrontPage})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -1143,20 +1144,38 @@ func countSites(ctx context.Context, q *db.Queries, c nodeapi.Counters, owner ma
 
 // sniRouter is the node's SNI router for the inbounds marked for it: each by the names its
 // clients ask for, the first REALITY one taking any other name (it passes a stranger on to
-// its target, as on a port of its own). nil when no inbound is marked.
-func sniRouter(inbounds []nodeapi.Inbound, nodeDomain string) *nodeapi.SNIRouter {
+// its target, as on a port of its own). With front, the node's front page takes the node's
+// own domain, unless an inbound asks for it, and a ClientHello with no name. nil when no
+// inbound is marked, and with only the page when an inbound of its own holds TCP 443.
+func sniRouter(inbounds []nodeapi.Inbound, nodeDomain string, front bool) *nodeapi.SNIRouter {
 	r := &nodeapi.SNIRouter{}
+	taken := map[string]bool{}
+	busy := false // TCP 443 held by an inbound outside the router
 	for _, in := range inbounds {
 		t, err := proto.Parse(string(in.Config))
-		if err != nil || !proto.SNI443(t) || !proto.CanSNI443(t) {
+		if err != nil {
 			continue
 		}
-		r.Routes = append(r.Routes, nodeapi.SNIRoute{Inbound: in.Name, Names: proto.SNINames(t, nodeDomain)})
+		if !proto.SNI443(t) || !proto.CanSNI443(t) {
+			busy = busy || in.Port == "443" && t.Network() != "udp"
+			continue
+		}
+		names := proto.SNINames(t, nodeDomain)
+		for _, n := range names {
+			taken[strings.ToLower(strings.TrimSuffix(n, "."))] = true
+		}
+		r.Routes = append(r.Routes, nodeapi.SNIRoute{Inbound: in.Name, Names: names})
 		if r.Default == "" && proto.Reality(t) {
 			r.Default = in.Name
 		}
 	}
-	if len(r.Routes) == 0 {
+	if front {
+		if d := strings.ToLower(strings.TrimSuffix(nodeDomain, ".")); d != "" && !taken[d] {
+			r.Stub = append(r.Stub, d)
+		}
+		r.Stub = append(r.Stub, "")
+	}
+	if len(r.Routes) == 0 && (len(r.Stub) == 0 || busy) {
 		return nil
 	}
 	return r

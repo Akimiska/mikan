@@ -284,7 +284,7 @@ func TestBrokenInboundIsRejectedAlone(t *testing.T) {
 		Inbounds: []nodeapi.Inbound{bad, good},
 		Slots:    []nodeapi.Slot{{Name: "s1", UUID: "00000000-0000-4000-8000-000000000001", Secret: "x"}},
 	}
-	raw, rejected, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false)
+	raw, rejected, err := buildConfig(st, proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}, false, "")
 	if err != nil {
 		t.Fatalf("one bad inbound failed the whole state: %v", err)
 	}

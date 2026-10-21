@@ -3491,6 +3491,9 @@
           "id": {
             "type": "string"
           },
+          "nested_tls": {
+            "type": "boolean"
+          },
           "network": {
             "type": "string"
           },
@@ -3867,6 +3870,11 @@
           "digest": {
             "description": "Дайджест образа неофициальной записи",
             "type": "string"
+          },
+          "downloads": {
+            "description": "Сколько раз скачан образ, по странице пакета на GitHub, с точностью до двух знаков (community)",
+            "format": "int64",
+            "type": "integer"
           },
           "fingerprint": {
             "description": "Отпечаток ключа автора, которым подписан релиз (community)",
@@ -4496,6 +4504,15 @@
             "description": "Канал ноды делится поровну между теми, кто сейчас качает",
             "type": "boolean"
           },
+          "front_page": {
+            "description": "Заглушка на домене ноды через общий порт 443: пусто — нет, maintenance — технические работы, cats — котики-кликер",
+            "enum": [
+              "",
+              "maintenance",
+              "cats"
+            ],
+            "type": "string"
+          },
           "hello": {
             "$ref": "#/components/schemas/NodeHello",
             "description": "Последний hello ноды после запуска: достучалась ли панель в ответ"
@@ -4616,6 +4633,7 @@
           "balance_group",
           "http_redirect",
           "sni_router",
+          "front_page",
           "api_lockdown",
           "api_allow",
           "capacity",
@@ -5850,6 +5868,15 @@
           "fair_share": {
             "description": "Делить канал ноды поровну между теми, кто сейчас качает; нужен channel_mbps",
             "type": "boolean"
+          },
+          "front_page": {
+            "description": "Заглушка на домене ноды и на запросах без имени через общий порт 443: настоящий сертификат ноды, TLS 1.2+, HSTS; пусто — нет",
+            "enum": [
+              "",
+              "maintenance",
+              "cats"
+            ],
+            "type": "string"
           },
           "host": {
             "maxLength": 253,
@@ -7938,6 +7965,68 @@
         },
         "type": "object"
       },
+      "ServersBody": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "description": "Все серверы; false — только выбранные, хотя бы одна нода или протокол",
+            "type": "boolean"
+          },
+          "inbounds": {
+            "description": "Отдельные протоколы",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "nodes": {
+            "description": "Ноды целиком, с протоколами, которые на них появятся потом",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "all"
+        ],
+        "type": "object"
+      },
+      "ServersView": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "description": "Все серверы; false — только выбранные ноды и протоколы",
+            "type": "boolean"
+          },
+          "inbounds": {
+            "description": "Отдельные протоколы",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "description": "Ноды целиком, с протоколами, которые на них появятся потом",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "all",
+          "nodes",
+          "inbounds"
+        ],
+        "type": "object"
+      },
       "ServiceRegion": {
         "additionalProperties": false,
         "properties": {
@@ -9107,6 +9196,10 @@
             ],
             "type": "string"
           },
+          "servers": {
+            "$ref": "#/components/schemas/ServersBody",
+            "description": "Какие серверы входят в тариф: все или выбранные ноды и протоколы. Не передан — без изменений (у нового тарифа — все)"
+          },
           "sort": {
             "format": "int64",
             "type": "integer"
@@ -9231,6 +9324,10 @@
             ],
             "type": "string"
           },
+          "servers": {
+            "$ref": "#/components/schemas/ServersView",
+            "description": "Какие серверы входят в тариф: все или выбранные. Действует сразу на всех клиентов тарифа; клиент со своим списком протоколов в карточке остаётся при нём"
+          },
           "sort": {
             "format": "int64",
             "type": "integer"
@@ -9281,6 +9378,7 @@
           "on_sale",
           "terms",
           "extra_devices",
+          "servers",
           "pools",
           "gifts",
           "subscribers",

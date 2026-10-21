@@ -2,7 +2,7 @@ import { Copy, ExternalLink, RefreshCw, Send } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, errorText, unwrap, type User } from "../../../api/client";
-import { useInbounds, userActions, useUserMutation } from "../../../api/hooks";
+import { useInbounds, useNodes, userActions, useTariffs, useUserMutation } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
 import { Button, QR } from "../../../components/ui";
@@ -10,7 +10,9 @@ import { Switch } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { useCopy } from "../../../lib/copy";
 import { useDraft } from "../../../lib/draft";
+import { nodeLabel } from "../../../lib/node-label";
 import { safeHref } from "../../../lib/url";
+import { byNode, serversHas } from "../servers-tree";
 import { Section } from "./section";
 
 export function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () => void }) {
@@ -160,12 +162,20 @@ export function TelegramSection({ u }: { u: User }) {
   );
 }
 
+/** The protocols the client may use: the tariff's servers, or a list of the card's own
+ * that stays over them until it is reset. */
 export function ProtocolsSection({ u }: { u: User }) {
   const inbounds = useInbounds();
+  const tariffs = useTariffs();
+  const nodes = useNodes();
   const update = useUserMutation(userActions.update);
   const toast = useToast();
   const all = (inbounds.data ?? []).filter((i) => i.enabled);
-  const allowed = new Set(u.inbounds.length ? u.inbounds : all.map((i) => i.id));
+  const tariff = tariffs.data?.find((tr) => tr.id === u.tariff_id);
+  const base = new Set(all.filter((i) => !tariff || serversHas(tariff.servers, i)).map((i) => i.id));
+  const own = u.inbounds.length > 0;
+  const allowed = own ? new Set(u.inbounds) : base;
+  const send = (ids: number[]) => update.mutate({ id: u.id, body: { inbounds: ids } }, { onError: (e) => toast.error(errorText(e)) });
   const toggle = (id: number, on: boolean) => {
     const next = new Set(allowed);
     if (on) next.add(id);
@@ -174,22 +184,43 @@ export function ProtocolsSection({ u }: { u: User }) {
       toast.error(t("userDrawer.needOneProtocol"));
       return;
     }
-    const ids = next.size === all.length ? [] : [...next];
-    update.mutate({ id: u.id, body: { inbounds: ids } }, { onError: (e) => toast.error(errorText(e)) });
+    // A list that comes back to the tariff's is no list of its own: the tariff's servers apply again.
+    const same = next.size === base.size && [...next].every((x) => base.has(x));
+    send(same ? [] : [...next]);
   };
+  const tree = byNode(all);
   return (
-    <Section title={t("userDrawer.protocols")}>
-      {all.map((i) => (
-        <div key={i.id} className="flex items-center justify-between gap-3 py-2">
-          <div>
-            <div className="text-[13px] font-medium">{i.sub_name}</div>
-            <div className="text-xs text-[var(--ink-500)]">
-              {i.title} · {i.port}/{i.network}
-            </div>
+    <Section
+      title={t("userDrawer.protocols")}
+      aside={
+        own ? (
+          <button type="button" className="link-btn text-xs" onClick={() => send([])} disabled={update.isPending}>
+            {t("servers.asTariff")}
+          </button>
+        ) : undefined
+      }
+    >
+      {own ? <p className="mb-1 text-xs text-[var(--honey-600)]">{t("servers.notAsTariff")}</p> : null}
+      {tree.map(([nodeId, list]) => {
+        const node = nodes.data?.find((n) => n.id === nodeId);
+        return (
+          <div key={nodeId}>
+            {tree.length > 1 ? <div className="pt-2 text-xs font-semibold text-[var(--ink-500)]">{node ? nodeLabel(node) : String(nodeId)}</div> : null}
+            {list.map((i) => (
+              <div key={i.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-medium">{i.sub_name}</div>
+                  <div className="text-xs text-[var(--ink-500)]">
+                    {i.title} · {i.port}/{i.network}
+                    {own || base.has(i.id) ? "" : ` · ${t("servers.notInTariff")}`}
+                  </div>
+                </div>
+                <Switch checked={allowed.has(i.id)} onChange={(v) => toggle(i.id, v)} label={i.sub_name} disabled={update.isPending} />
+              </div>
+            ))}
           </div>
-          <Switch checked={allowed.has(i.id)} onChange={(v) => toggle(i.id, v)} label={i.sub_name} disabled={update.isPending} />
-        </div>
-      ))}
+        );
+      })}
     </Section>
   );
 }

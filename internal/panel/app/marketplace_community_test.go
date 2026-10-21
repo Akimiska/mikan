@@ -15,7 +15,7 @@ import (
 // and the author's key ("" unsigned).
 func communityAddon(id, version, digestChar, key string, perms ...string) map[string]any {
 	a := srcEntry(id, version, digestChar, "generic", perms...)
-	a["repo"], a["repo_id"], a["stars"], a["added_at"], a["updated_at"] = "github.com/Author/"+id, 7, 3, 100, 200
+	a["repo"], a["repo_id"], a["stars"], a["downloads"], a["added_at"], a["updated_at"] = "github.com/Author/"+id, 7, 3, 1300, 100, 200
 	if key != "" {
 		a["key"] = key
 	}
@@ -48,6 +48,7 @@ type communityV struct {
 		KeyChanged       bool   `json:"key_changed"`
 		Fingerprint      string `json:"fingerprint"`
 		Stars            int    `json:"stars"`
+		Downloads        int    `json:"downloads"`
 		Origin           struct {
 			Kind    string `json:"kind"`
 			Repo    string `json:"repo"`
@@ -104,7 +105,7 @@ func TestCommunityAddons(t *testing.T) {
 		t.Fatalf("community: %+v", v)
 	}
 	if c := v.Community[0]; c.ID != "hello" || c.Origin.Kind != "community" || c.Origin.Repo != "https://github.com/Author/hello" || !c.Origin.Signed ||
-		c.Fingerprint != addons.Fingerprint(key1) || c.Stars != 3 || c.Installed {
+		c.Fingerprint != addons.Fingerprint(key1) || c.Stars != 3 || c.Downloads != 1300 || c.Installed {
 		t.Fatalf("entry: %+v", c)
 	}
 

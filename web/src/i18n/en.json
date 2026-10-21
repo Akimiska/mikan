@@ -576,7 +576,10 @@
       "package_not_found": "No such package",
       "tariff_duplicate": "A tariff is named twice",
       "apply_nothing": "Pick what to apply",
-      "inbound_not_found": "No such protocol"
+      "inbound_not_found": "No such protocol",
+      "servers_empty": "Choose at least one server or protocol",
+      "node_not_found": "No such node",
+      "bad_front_page": "No such front page"
     },
     "acme": {
       "port80_busy": "Port 80 is held by another program, and the certificate authority checks the server through it. If it is nginx or Caddy, the command below lets the check through to mikan; otherwise free the port",
@@ -1091,7 +1094,7 @@
       "errMax": "From 0 to 50"
     },
     "contents": "What is included",
-    "contentsSub": "The main traffic, the server groups and the gifts with a payment.",
+    "contentsSub": "The servers, the server groups and the gifts with a payment.",
     "gifts": "Gift with a payment",
     "giftsHint": "The client gets these packages with every payment for the plan: a purchase or a renewal. Packages for a limited main traffic and for groups with a limit of their own fit.",
     "giftsNone": "No package fits. Make one in the Traffic packages tab.",
@@ -1412,7 +1415,9 @@
       "title": "Through shared 443",
       "sub": "The protocol shares the node's port 443 with others by TLS name; clients connect to 443. Needs the SNI router in the node's settings.",
       "routerOff": "The node's SNI router is off: the protocol stays on its own port until it is on."
-    }
+    },
+    "nestedTLS": "TLS in TLS",
+    "nestedTLSNote": "The TLS of the sites a client opens goes inside this protocol's own TLS (TLS in TLS): DPI can tell a proxy by the sizes of the first packets. Keep a protocol with Vision or AnyTLS next to it: they have no such pattern."
   },
   "settings": {
     "subtitle": "Server address, subscription look and sign-in security",
@@ -2475,7 +2480,13 @@
     "apiAllow": "More panel addresses",
     "apiAllowHint": "Optional. Addresses or networks, separated by commas, if the panel reaches nodes from an IP other than its public one (NAT, a second address). The node takes the panel's IP and the address it connects from by itself. Up to 16.",
     "apiAllowMany": "16 addresses at most",
-    "apiLockFailed": "The node closes the port itself, but its server's firewall has no rule: {error}"
+    "apiLockFailed": "The node closes the port itself, but its server's firewall has no rule: {error}",
+    "frontPage": "Front page for strangers",
+    "frontPageHint": "What a stranger who opens the server in a browser sees instead of a bare 404: VLESS and Trojan on XHTTP, WebSocket or gRPC give this page on any domain of theirs.",
+    "frontPageNone": "None",
+    "frontPageMaintenance": "Maintenance",
+    "frontPageCats": "Cats clicker",
+    "frontPageRouter": "With the shared port 443 the node's domain and a request with no name get it too: the node's real certificate, TLS 1.2 or later, HSTS. A domain a protocol on the shared 443 takes stays with the protocol and shows the page too if it is XHTTP, WebSocket or gRPC."
   },
   "telegram": {
     "subtitle": "A bot for subscription owners and a Mini App with the subscription page",
@@ -3024,7 +3035,7 @@
   "pools": {
     "title": "Server groups",
     "sub": "A group puts servers and protocols together, such as \"Whitelists\" or \"Premium\". In each plan a group is on the main traffic, has a limit of its own, has no limit, or is not included.",
-    "none": "Without groups every server is in every plan and spends the main traffic. A group gives some servers a limit of their own or keeps them out of a cheap plan.",
+    "none": "Without groups the servers spend the main traffic. A group gives some servers a limit of their own or traffic without a limit. Which servers a plan includes is chosen in the plan itself.",
     "empty": "No servers in the group yet",
     "name": "Group name",
     "placeholder": "Whitelists, for example",
@@ -3037,7 +3048,7 @@
     "deleteText": "Its servers become main servers and spend the main traffic. The group's settings in plans and on clients go, and its packages are deleted with what is left of them.",
     "hint": "A protocol is in one group. Pick the group here or in the protocol's settings.",
     "inbound": "Server group",
-    "inboundHint": "The protocol is in the plans the way they have its group. Without a group it is a main server: in every plan, on the main traffic.",
+    "inboundHint": "A protocol spends traffic the way the plans have its group. Without a group it is a main server: it spends the main traffic in the plans that include it.",
     "mainTraffic": "Main traffic",
     "tariffLimits": "Server groups",
     "tariffLimitsHint": "How each group is in the plan.",
@@ -3061,7 +3072,7 @@
     "mainServers": "Main servers",
     "mainServersSub": "Protocols in no group: in every plan, on the main traffic.",
     "servers": "Servers and protocols",
-    "serversHint": "Tick what is in the group. A protocol is in one group only: one ticked here leaves the group it was in.",
+    "serversHint": "A protocol is in one group only: the group decides which traffic it spends. \"Whole server\" takes the free protocols; tick a protocol of another group on its own and it moves here. Which servers a plan includes is chosen in the plan itself.",
     "wholeNode": "Whole server",
     "inOther": "now in \"{name}\"",
     "noInbounds": "No protocols yet: add them under Protocols.",
@@ -3092,7 +3103,8 @@
     "asTariff": "as in the plan",
     "changed": "not as in the plan",
     "usedOf": "{used} of {limit}",
-    "usedUnlimited": "{used} · unlimited"
+    "usedUnlimited": "{used} · unlimited",
+    "moveFrom": "moves here from \"{name}\""
   },
   "cert": {
     "panelTitle": "Own panel certificate",
@@ -3259,7 +3271,8 @@
     "revokedInstalled": "{name}: mikan took this addon out of the community registry ({reason}). Remove it in the menu of its row.",
     "repo": "Repository",
     "stars": "Stars on GitHub",
-    "sourceOf": "Source"
+    "sourceOf": "Source",
+    "downloads": "How many times the image was pulled, by its GitHub package page"
   },
   "addons": {
     "storage": {
@@ -4389,5 +4402,17 @@
     "title": "Your servers:",
     "panel": "Panel",
     "sub": "Subscription"
+  },
+  "servers": {
+    "label": "Servers",
+    "hint": "Which servers the plan includes. It reaches all the plan's clients at once; a client with a list of protocols of their own in the card keeps that list.",
+    "all": "All",
+    "chosen": "Chosen",
+    "wholeNode": "Whole server, new protocols too",
+    "none": "Nothing chosen",
+    "off": "off",
+    "asTariff": "As in the plan",
+    "notAsTariff": "A list of their own, not as in the plan: changes of the plan do not reach it.",
+    "notInTariff": "not in the plan"
   }
 }

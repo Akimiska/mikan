@@ -31,10 +31,13 @@ type CommunityPrior struct {
 // from, and the author's key the release was signed with ("" unsigned).
 type CommunityAddon struct {
 	Entry
-	Repo      string          `json:"repo"`
-	RepoID    int64           `json:"repo_id"`
-	Key       string          `json:"key,omitempty"`
-	Stars     int             `json:"stars"`
+	Repo   string `json:"repo"`
+	RepoID int64  `json:"repo_id"`
+	Key    string `json:"key,omitempty"`
+	Stars  int    `json:"stars"`
+	// Downloads: the image's pulls as its GitHub package counts them, two significant digits;
+	// 0 when the registry has none.
+	Downloads int             `json:"downloads,omitempty"`
 	Previous  *CommunityPrior `json:"previous,omitempty"`
 	AddedAt   int64           `json:"added_at"`
 	UpdatedAt int64           `json:"updated_at"`

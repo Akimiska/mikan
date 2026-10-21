@@ -62,6 +62,7 @@ type MarketEntry struct {
 	InstalledVersion string `json:"installed_version,omitempty" doc:"Одобренная версия установленного неофициального аддона"`
 	InstalledDigest  string `json:"installed_digest,omitempty" doc:"Дайджест установленного неофициального аддона"`
 	Stars            int    `json:"stars,omitempty" doc:"Звёзды репозитория автора (community)"`
+	Downloads        int    `json:"downloads,omitempty" doc:"Сколько раз скачан образ, по странице пакета на GitHub, с точностью до двух знаков (community)"`
 	UpdatedAt        int64  `json:"updated_at,omitempty" doc:"Когда реестр увидел эту сборку, unix (community)"`
 	Fingerprint      string `json:"fingerprint,omitempty" doc:"Отпечаток ключа автора, которым подписан релиз (community)"`
 	KeyChanged       bool   `json:"key_changed,omitempty" doc:"Релиз подписан не тем ключом, что при установке: обновление ждёт, пока админ сверит и примет новый ключ"`
@@ -268,7 +269,7 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 			continue
 		}
 		me := marketEntry(c.Entry, communityMark(c.Repo, c.Key, comm, c.ID), a, here, grants[c.ID])
-		me.Stars, me.UpdatedAt, me.Fingerprint = c.Stars, c.UpdatedAt, addons.Fingerprint(c.Key)
+		me.Stars, me.Downloads, me.UpdatedAt, me.Fingerprint = c.Stars, c.Downloads, c.UpdatedAt, addons.Fingerprint(c.Key)
 		if here {
 			me.InstalledVersion = versions[c.ID]
 			me.KeyChanged = row.Key != c.Key

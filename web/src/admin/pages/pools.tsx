@@ -16,6 +16,7 @@ import { t } from "../../i18n";
 import { bytes, GiB } from "../../lib/format";
 import { nodeLabel } from "../../lib/node-label";
 import { parseDecimal } from "../../lib/validate";
+import { byNode, ServersTree } from "./servers-tree";
 
 type Pool = Schemas["PoolView"];
 export type GroupMode = Schemas["PoolSetting"]["mode"];
@@ -358,7 +359,6 @@ function GroupDrawer({ group, onClose }: { group: Pool | "new" | null; onClose: 
   const qc = useQueryClient();
   const toast = useToast();
   const inbounds = useInbounds();
-  const nodes = useNodes();
   const tariffs = useTariffs();
   const pools = usePools();
   const isNew = group === "new";
@@ -377,12 +377,12 @@ function GroupDrawer({ group, onClose }: { group: Pool | "new" | null; onClose: 
     // The tariffs are read when the drawer opens; a refetch meanwhile must not reset the form.
   }, [group]);
 
-  const byNode = useMemo(() => {
-    const out = new Map<number, Inbound[]>();
-    for (const i of inbounds.data ?? []) out.set(i.node_id, [...(out.get(i.node_id) ?? []), i]);
-    return [...out.entries()];
-  }, [inbounds.data]);
+  const tree = useMemo(() => byNode(inbounds.data), [inbounds.data]);
   const groupName = (id: number | null | undefined) => pools.data?.find((p) => p.id === id)?.name;
+  /** The name of the other group protocol i is in now. */
+  const otherGroup = (i: Inbound) => (i.pool_id != null && (group === "new" || i.pool_id !== group?.id) ? groupName(i.pool_id) : undefined);
+  /** Whether "Whole server" takes protocol i: no other group has it. */
+  const takes = (i: Inbound) => !otherGroup(i);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -458,54 +458,32 @@ function GroupDrawer({ group, onClose }: { group: Pool | "new" | null; onClose: 
         <Field label={t("pools.servers")} hint={t("pools.serversHint")}>
           {inbounds.isPending ? (
             <Skeleton style={{ height: 96 }} />
-          ) : byNode.length === 0 ? (
+          ) : tree.length === 0 ? (
             <p className="text-xs text-[var(--ink-500)]">{t("pools.noInbounds")}</p>
           ) : (
-            <div className="flex flex-col gap-2">
-              {byNode.map(([nodeId, list]) => {
-                const node = nodes.data?.find((n) => n.id === nodeId);
-                const ids = list.map((i) => i.id);
-                const on = ids.filter((id) => picked.has(id)).length;
-                return (
-                  <fieldset key={nodeId} className="panel-soft px-3 py-2">
-                    <legend className="sr-only">{node ? nodeLabel(node) : String(nodeId)}</legend>
-                    <label className="flex items-center gap-2 py-1.5 text-[13px] font-semibold">
-                      <input
-                        type="checkbox"
-                        className="check"
-                        checked={on === ids.length}
-                        ref={(el) => {
-                          if (el) el.indeterminate = on > 0 && on < ids.length;
-                        }}
-                        onChange={(e) => toggle(ids, e.target.checked)}
-                      />
-                      <span className="min-w-0 flex-1 truncate">{node ? nodeLabel(node) : String(nodeId)}</span>
-                      <span className="text-xs font-normal text-[var(--ink-500)]">{t("pools.wholeNode")}</span>
-                    </label>
-                    <ul className="border-t border-[var(--hairline)] pt-1">
-                      {list.map((i) => {
-                        const other = i.pool_id != null && (group === "new" || i.pool_id !== group?.id) ? groupName(i.pool_id) : undefined;
-                        return (
-                          <li key={i.id}>
-                            <label className="flex items-center gap-2 py-1.5 pl-6 text-[13px]">
-                              <input type="checkbox" className="check" checked={picked.has(i.id)} onChange={(e) => toggle([i.id], e.target.checked)} />
-                              <span className="min-w-0 flex-1 truncate">
-                                {i.sub_name || i.title}
-                                <span className="text-xs text-[var(--ink-500)]">
-                                  {" "}
-                                  · {i.port}/{i.network}
-                                </span>
-                              </span>
-                              {other && picked.has(i.id) ? <span className="text-xs text-[var(--honey-600)]">{t("pools.inOther", { name: other })}</span> : other ? <span className="text-xs text-[var(--ink-500)]">{t("pools.inOther", { name: other })}</span> : null}
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </fieldset>
+            <ServersTree
+              nodes={tree}
+              // "Whole server" takes the protocols no other group has: one of another group
+              // comes over only when ticked on its own.
+              nodeState={(_, list) => {
+                const free = list.filter(takes);
+                const on = free.filter((i) => picked.has(i.id)).length;
+                return free.length > 0 && on === free.length ? "on" : list.some((i) => picked.has(i.id)) ? "some" : "off";
+              }}
+              nodeDisabled={(_, list) => !list.some(takes)}
+              onNode={(_, list, on) => toggle((on ? list.filter(takes) : list).map((i) => i.id), on)}
+              checked={(i) => picked.has(i.id)}
+              onInbound={(i, _, on) => toggle([i.id], on)}
+              aside={(i) => {
+                const other = otherGroup(i);
+                if (!other) return null;
+                return picked.has(i.id) ? (
+                  <span className="text-xs text-[var(--honey-600)]">{t("pools.moveFrom", { name: other })}</span>
+                ) : (
+                  <span className="text-xs text-[var(--ink-500)]">{t("pools.inOther", { name: other })}</span>
                 );
-              })}
-            </div>
+              }}
+            />
           )}
         </Field>
 

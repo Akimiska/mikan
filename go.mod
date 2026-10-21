@@ -158,7 +158,7 @@ require (
 // mihomo pins a protobuf fork; replace directives of dependencies are not inherited.
 replace google.golang.org/protobuf => github.com/metacubex/protobuf-go v0.0.0-20260306035419-7ceee0674686
 
-replace github.com/metacubex/mihomo => github.com/getmikan/Citrus v1.19.33-0.20261020235141-bd5ea27d23e9
+replace github.com/metacubex/mihomo => github.com/getmikan/Citrus v1.19.33-0.20261021103735-758610b88e26
 
 replace github.com/metacubex/utls => github.com/getmikan/utls v1.8.9-0.20261020173537-32502cba39f4
 

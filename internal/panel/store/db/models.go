@@ -272,6 +272,7 @@ type Node struct {
 	SniRouter    int64
 	ApiLockdown  int64
 	ApiAllow     []string
+	FrontPage    string
 }
 
 type NodeAssignment struct {
@@ -523,11 +524,22 @@ type Tariff struct {
 	DevicePriceStars sql.NullInt64
 	DevicePriceRub   sql.NullInt64
 	DeviceExtraMax   int64
+	ChosenServers    int64
 }
 
 type TariffGift struct {
 	TariffID  int64
 	PackageID int64
+}
+
+type TariffInbound struct {
+	TariffID  int64
+	InboundID int64
+}
+
+type TariffNode struct {
+	TariffID int64
+	NodeID   int64
 }
 
 type TariffPool struct {

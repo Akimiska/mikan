@@ -70,7 +70,21 @@ func outbounds(st nodeapi.DesiredState) ([]any, error) {
 // with the reason): one broken inbound must not stop the node from taking every other
 // change of the state, new users and policies included. What the whole state needs, the
 // outbounds, is an error as before.
-func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (raw []byte, rejected []nodeapi.ListenerStatus, err error) {
+// speaksHTTP says whether listener l is VLESS or Trojan on an HTTP transport (WebSocket, gRPC,
+// XHTTP): the ones that answer any request of a browser (Citrus' fallback-page).
+func speaksHTTP(l map[string]any) bool {
+	if l["type"] != "vless" && l["type"] != "trojan" {
+		return false
+	}
+	ws, _ := l["ws-path"].(string)
+	grpc, _ := l["grpc-service-name"].(string)
+	_, xhttp := l["xhttp-config"]
+	return ws != "" || grpc != "" || xhttp && l["type"] == "vless"
+}
+
+// buildConfig renders st with cert, the node's certificate, and front, the file of the
+// node's front page ("" none) that its inbounds on an HTTP transport give strangers.
+func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool, front string) (raw []byte, rejected []nodeapi.ListenerStatus, err error) {
 	listeners := make([]map[string]any, 0, len(st.Inbounds)+1)
 	keep := func(name string, l map[string]any, err error) {
 		if err == nil {
@@ -89,6 +103,10 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (r
 		// client's address in a PROXY header.
 		if err == nil && st.Router.Routed(in.Name) {
 			l["listen"], l["proxy-protocol"], l["proxy-protocol-trusted"] = "127.0.0.1", true, []string{"loopback"}
+		}
+		// A stranger's request on an HTTP transport gets the front page, not a bare 404.
+		if err == nil && front != "" && speaksHTTP(l) {
+			l["fallback-page"] = front
 		}
 		keep(in.Name, l, err)
 	}

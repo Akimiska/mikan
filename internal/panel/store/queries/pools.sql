@@ -115,3 +115,31 @@ INSERT INTO tariff_gifts (tariff_id, package_id) VALUES ($1, $2);
 -- name: DropPackageGifts :exec
 -- A package taken off the catalog is no tariff's gift any more.
 DELETE FROM tariff_gifts WHERE package_id = $1;
+
+-- name: SetTariffChosenServers :exec
+-- 1: the tariff includes only its chosen nodes and protocols; 0: every server.
+UPDATE tariffs SET chosen_servers = $2 WHERE id = $1;
+
+-- name: ListTariffNodes :many
+SELECT node_id FROM tariff_nodes WHERE tariff_id = $1 ORDER BY node_id;
+
+-- name: ListTariffInbounds :many
+SELECT inbound_id FROM tariff_inbounds WHERE tariff_id = $1 ORDER BY inbound_id;
+
+-- name: ListAllTariffNodes :many
+SELECT * FROM tariff_nodes ORDER BY tariff_id, node_id;
+
+-- name: ListAllTariffInbounds :many
+SELECT * FROM tariff_inbounds ORDER BY tariff_id, inbound_id;
+
+-- name: ClearTariffNodes :exec
+DELETE FROM tariff_nodes WHERE tariff_id = $1;
+
+-- name: ClearTariffInbounds :exec
+DELETE FROM tariff_inbounds WHERE tariff_id = $1;
+
+-- name: AddTariffNode :exec
+INSERT INTO tariff_nodes (tariff_id, node_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+
+-- name: AddTariffInbound :exec
+INSERT INTO tariff_inbounds (tariff_id, inbound_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;

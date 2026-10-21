@@ -39,6 +39,8 @@ type sniRouter struct {
 	mu     sync.RWMutex
 	routes map[string]string // name (lowercase) → backend address
 	def    string            // backend for any other name; "": closed
+	stub   map[string]bool   // names that get the front page instead ("": no name)
+	front  *frontPage        // the node's front page; nil: none
 	wg     sync.WaitGroup
 	err    error
 }
@@ -53,6 +55,21 @@ func (r *sniRouter) route(name string) string {
 	return r.def
 }
 
+// stubbed says whether name gets the front page: a name of the stub's, or with no default
+// inbound any name no route has. The page must be on.
+func (r *sniRouter) stubbed(name string) bool {
+	if !r.front.on() {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n := strings.ToLower(strings.TrimSuffix(name, "."))
+	if _, ok := r.routes[n]; ok {
+		return false
+	}
+	return r.stub[n] || r.def == "" && len(r.stub) > 0
+}
+
 // set replaces the routes: names to inbound ports on loopback, by the ports the inbounds run.
 func (r *sniRouter) set(rt *nodeapi.SNIRouter, ports map[string]string) {
 	routes := map[string]string{}
@@ -65,12 +82,17 @@ func (r *sniRouter) set(rt *nodeapi.SNIRouter, ports map[string]string) {
 			routes[strings.ToLower(strings.TrimSuffix(n, "."))] = net.JoinHostPort("127.0.0.1", p)
 		}
 	}
+	stub := map[string]bool{}
+	for _, n := range rt.Stub {
+		stub[strings.ToLower(strings.TrimSuffix(n, "."))] = true
+	}
 	def := ""
 	if p, ok := ports[rt.Default]; ok {
 		def = net.JoinHostPort("127.0.0.1", p)
 	}
 	r.mu.Lock()
 	r.routes, r.def = routes, def
+	r.stub = stub
 	r.mu.Unlock()
 }
 
@@ -99,6 +121,10 @@ func (r *sniRouter) handle(c net.Conn, admit func(netip.Addr) bool) {
 		return
 	}
 	hello, name := readHello(c)
+	if r.stubbed(name) {
+		r.front.take(c, hello)
+		return
+	}
 	to := r.route(name)
 	if to == "" {
 		return
@@ -132,11 +158,24 @@ func readHello(c net.Conn) ([]byte, string) {
 		if name, serr := sniffer.SniffTLS(buf); serr == nil && name != nil {
 			return buf, *name
 		}
-		if err != nil {
+		// A whole ClientHello with no name in it is done with at once, not waited on for
+		// the rest of helloWait.
+		if err != nil || helloWhole(buf) {
 			return buf, ""
 		}
 	}
 	return buf, ""
+}
+
+// helloWhole says whether buf holds a whole ClientHello in its first record: the record's
+// length and the handshake message's both fit.
+func helloWhole(buf []byte) bool {
+	if len(buf) < 9 || buf[0] != 0x16 || buf[5] != 0x01 {
+		return false
+	}
+	rec := int(buf[3])<<8 | int(buf[4])
+	msg := int(buf[6])<<16 | int(buf[7])<<8 | int(buf[8])
+	return 4+msg <= rec && len(buf) >= 5+rec
 }
 
 // proxyV2 is a PROXY protocol v2 header for a TCP connection from src to dst.
@@ -225,7 +264,7 @@ func (e *Engine) setRouter(rt *nodeapi.SNIRouter, ports map[string]string) {
 		e.log.Warn("sni router", "listen", listen, "err", err)
 		return
 	}
-	r := &sniRouter{ln: ln, log: e.log}
+	r := &sniRouter{ln: ln, log: e.log, front: e.front}
 	r.set(rt, ports)
 	e.router, e.routerAddr = r, listen
 	e.routerStatus.Store(&nodeapi.PortStatus{OK: true})

@@ -4,7 +4,8 @@ import { Archive, Check, Gift, Layers, Package, Pencil, Plus, Tag, X } from "luc
 import { useEffect, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas, type Tariff } from "../../api/client";
 import { onFormError } from "../../lib/fields";
-import { qk, usePackages, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
+import { qk, useInbounds, useNodes, usePackages, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
+import { nodeLabel } from "../../lib/node-label";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { Tabs } from "../../components/tabs";
@@ -17,6 +18,7 @@ import { isKopecks, isStars, parseDecimal, rubKopecks } from "../../lib/validate
 import { TARIFF_TABS } from "../search";
 import { fitsTariff, PackagesCard, packageLine } from "./packages";
 import { draftOf, GroupModesField, modeShort, PoolsCard, settingsOf, type GroupDraft } from "./pools";
+import { byNode, serversBody, serversDraftOf, serversHas, TariffServersTree, type ServersDraft } from "./servers-tree";
 import { DeviceModePicker, modeOf, type DeviceMode } from "./user/device-mode";
 
 /** What the server accepts of a description for buyers (domain.CleanDescription). */
@@ -95,6 +97,16 @@ export function TariffsPage() {
     onError: (e) => toast.error(errorText(e)),
   });
   const giftNames = (tr: Tariff) => tr.gifts.map((id) => packages.data?.find((p) => p.id === id)?.name).filter(Boolean).join(", ");
+  const nodes = useNodes();
+  const inbounds = useInbounds();
+  // The chosen servers by name: the nodes whole, then the single protocols.
+  const serversText = (tr: Tariff) => {
+    const names = [
+      ...tr.servers.nodes.map((id) => nodes.data?.find((n) => n.id === id)).flatMap((n) => (n ? [nodeLabel(n)] : [])),
+      ...tr.servers.inbounds.map((id) => inbounds.data?.find((i) => i.id === id)).flatMap((i) => (i ? [i.sub_name || i.title] : [])),
+    ];
+    return names.length ? names.join(", ") : t("servers.none");
+  };
 
   return (
     <>
@@ -185,6 +197,11 @@ export function TariffsPage() {
                         <Item label={t("tariffs.speed")} value={tr.speed_limit != null ? t("tariffs.speedShort", { n: tr.speed_limit }) : t("users.unlimited")} />
                         <Item label={t("tariffs.reset")} value={resetLabel(tr)} />
                         <Item label={t("nav.users")} value={t("tariffs.subscribers", { n: tr.subscribers })} />
+                        {tr.servers.all ? null : (
+                          <div className="col-span-2">
+                            <Item label={t("servers.label")} value={serversText(tr)} />
+                          </div>
+                        )}
                         {groupsText(tr, poolNames) ? (
                           <div className="col-span-2">
                             <Item label={t("pools.tariffLimits")} value={groupsText(tr, poolNames)} />
@@ -269,7 +286,10 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   // With selling off the sale block is hidden; its values stay as they were.
   const selling = usePaymentSettings().data?.enabled === true;
   const allPackages = usePackages();
-  // How the tariff has each server group, and the packages it gives with every payment.
+  const inbounds = useInbounds();
+  // The servers the tariff includes, how it has each server group, and the packages it
+  // gives with every payment.
+  const [servers, setServers] = useState<ServersDraft>(serversDraftOf(undefined));
   const [groups, setGroups] = useState<Record<number, GroupDraft>>({});
   const [gifts, setGifts] = useState<Set<number>>(new Set());
   const [stars, setStars] = useState("");
@@ -306,6 +326,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setPrice(tr?.price_label ?? "");
     setDescription(tr?.description ?? "");
     setOnSale(tr?.on_sale ?? false);
+    setServers(serversDraftOf(tr?.servers));
     // The view lists every group with the tariff's mode; a new tariff has them all on the main traffic.
     setGroups(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, draftOf(p)])));
     setGifts(new Set(tr?.gifts ?? []));
@@ -351,6 +372,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     const groupSettings = settingsOf(allPools.data ?? [], groups);
     if (groupSettings.error) errs.pools = groupSettings.error;
     const toDay = term === "day";
+    if (!servers.all && servers.nodes.size === 0 && servers.inbounds.size === 0) errs.servers = t("errors.api.servers_empty");
     if (!name.trim()) errs.name = t("tariffs.errName");
     if ([...description.trim()].length > DESCRIPTION_MAX) errs.description = t("errors.api.description_too_long");
     else if (description.trim().split("\n").length > DESCRIPTION_LINES) errs.description = t("errors.api.description_too_many_lines");
@@ -408,6 +430,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       price_rub: rub.trim() ? rubN : undefined,
       terms,
       on_sale: onSale,
+      servers: serversBody(servers),
       pools: groupSettings.settings,
       // A gift that no longer fits what the form gives (a limit taken off) is not sent.
       gifts: [...gifts].filter((id) => {
@@ -542,6 +565,26 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
             </div>
             <div className="text-xs text-[var(--ink-500)]">{t("tariffs.contentsSub")}</div>
           </div>
+          <Field label={t("servers.label")} hint={t("servers.hint")} error={errors.servers}>
+            <Segmented
+              label={t("servers.label")}
+              value={servers.all ? "all" : "chosen"}
+              onChange={(v) => setServers({ ...servers, all: v === "all" })}
+              options={[
+                { value: "all", label: t("servers.all") },
+                { value: "chosen", label: t("servers.chosen") },
+              ]}
+            />
+            {servers.all ? null : inbounds.isPending ? (
+              <Skeleton className="mt-2" style={{ height: 96 }} />
+            ) : (inbounds.data ?? []).length === 0 ? (
+              <p className="mt-2 text-xs text-[var(--ink-500)]">{t("pools.noInbounds")}</p>
+            ) : (
+              <div className="mt-2">
+                <TariffServersTree nodes={byNode(inbounds.data)} value={servers} onChange={setServers} />
+              </div>
+            )}
+          </Field>
           {allPools.data?.length ? (
             <Field label={t("pools.tariffLimits")} hint={`${t("pools.tariffLimitsHint")} ${t("pools.closeHint")}`} error={errors.pools}>
               <GroupModesField groups={allPools.data} value={groups} onChange={setGroups} />
@@ -605,7 +648,12 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
             devices={devicesUnlimited ? null : Number(devices) || null}
             online={deviceMode === "online"}
             speed={speedUnlimited ? null : Number(speed) || null}
-            groups={(allPools.data ?? []).map((g) => ({ name: g.name, draft: groups[g.id] ?? draftOf(undefined), serving: g.inbound_ids.length > 0 }))}
+            groups={(allPools.data ?? []).map((g) => ({
+              name: g.name,
+              draft: groups[g.id] ?? draftOf(undefined),
+              // A group shows when the tariff includes a server of it.
+              serving: (inbounds.data ?? []).some((i) => g.inbound_ids.includes(i.id) && serversHas(servers, i)),
+            }))}
             gifts={(allPackages.data ?? []).filter((p) => gifts.has(p.id) && giftable.includes(p)).map((p) => packageLine(p, allPools.data))}
             description={description.trim()}
           />

@@ -127,7 +127,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return b.devices(ctx, w, u, cmd, id, notice, now)
 	case "c":
 		text := "<b>" + w.connectTitle + "</b>\n\n" + fmt.Sprintf(w.connectText, html.EscapeString(b.subURL(ctx, u)))
-		rows := aoiDownloadRows(w) // AoiVPN fork: the app's own downloads first
+		rows := aoiConnectRows(w, b.subURL(ctx, u)) // AoiVPN fork: open in the app, its downloads
 		if btn, ok := b.pageButton(ctx, cfg, w, w.openPage); ok {
 			rows = append(rows, []tgapi.Button{btn})
 		}

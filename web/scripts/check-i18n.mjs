@@ -22,9 +22,12 @@ function flat(o, prefix = "", out = {}) {
 const ru = flat(JSON.parse(read("src/i18n/ru.json")));
 const en = flat(JSON.parse(read("src/i18n/en.json")));
 // The names a text substitutes: {name}, and the number of a plural ({n, plural, …}); the
-// words of a plural's cases ("=0 {Nobody}") are no names.
+// words of a plural's cases ("=0 {Nobody}") are no names. The cases go until none is left,
+// so one that a removed case leaves whole goes too.
+const pluralCase = /(?:=\d+|\b(?:zero|one|two|few|many|other))\s*\{[^{}]*\}/g;
 const vars = (s) => {
-  const bare = s.replace(/(?:=\d+|\b(?:zero|one|two|few|many|other))\s*\{[^{}]*\}/g, "");
+  let bare = s;
+  for (let next = bare.replace(pluralCase, ""); next !== bare; next = bare.replace(pluralCase, "")) bare = next;
   return [...new Set([...bare.matchAll(/\{(\w+)(?=[,}])/g)].map((m) => m[1]))].sort().join(", ");
 };
 for (const k of Object.keys(ru)) {

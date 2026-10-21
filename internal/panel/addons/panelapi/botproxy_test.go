@@ -256,11 +256,13 @@ func TestBotRPCOnlyForTheHolder(t *testing.T) {
 		_, _ = io.WriteString(w, `{"results":["`+r.PathValue("method")+`"]}`)
 	})
 	s := New(d)
+	var header http.Header
 	call := func(token string) (int, string) {
 		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:41990/panel/v2/bot/Config", strings.NewReader(`[]`))
 		r.Header.Set("Authorization", "Bearer "+token)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
+		header = w.Header()
 		return w.Code, w.Body.String()
 	}
 	if code, _ := call(botToken); code != http.StatusForbidden {
@@ -271,6 +273,10 @@ func TestBotRPCOnlyForTheHolder(t *testing.T) {
 	}
 	if code, body := call(botToken); code != 200 || !strings.Contains(body, "Config") {
 		t.Fatalf("the holder: %d %s", code, body)
+	}
+	// The answer is JSON whatever the handler set (this one sets nothing), and never sniffed.
+	if ct, sniff := header.Get("Content-Type"), header.Get("X-Content-Type-Options"); ct != "application/json" || sniff != "nosniff" {
+		t.Fatalf("the holder's answer: Content-Type %q, X-Content-Type-Options %q", ct, sniff)
 	}
 	if code, _ := call(strings.Repeat("k", 48)); code != http.StatusForbidden {
 		t.Fatalf("another addon with bot: %d", code)

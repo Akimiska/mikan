@@ -131,6 +131,11 @@ merge — обязательный чек-лист из §6.
 - App-установка = синтетический отрицательный tg_id (`-(7e9+n)`; легаси-боты ≈ −5.5e9 переносятся как есть). Точки сшивки: `subs.Handler.SetApp` + маршрут `token == "app"` (handler.go), `billing.WithReturnURL` (aoi_return.go + 3 строки в `openAddonInvoice`), `tgbot.HandleEvent` пропускает `TgID < 0`, `panel.go` — `SetApp(aoiapp.New(...))`. При мерже проверить: `grep -n "AoiVPN fork" internal/panel/{subs/handler.go,billing/addon.go,tgbot/events.go}`.
 - Тариф приложения — `MIKAN_AOI_APP_TARIFF` (по умолчанию 3 «Стандарт»), возврат после оплаты — `MIKAN_AOI_APP_RETURN_URL` (по умолчанию `https://vpn.aoimusic.ru/app-pay-return.html`).
 
+### 3.7 Рефералка (`internal/panel/aoiref/`, с 0.5.1.1-rc.11.aoi.3)
+- Правила легаси-бота: ссылка `t.me/<bot>?start=ref-<code>` (старые коды перенесены — разосланные ссылки работают), рефералом становится аккаунт без подписок/триала/оплат; за его первую оплату тарифа (kind new/renew) рефереру +7 дней, не раньше 24 ч после приглашения; нет подписки — дни копятся в `aoi_ref_bank` и добавятся, когда она появится; возврат платежа — дни списываются, реферал → `ineligible`.
+- Свои таблицы `aoi_ref_codes`, `aoi_referrals`, `aoi_ref_bank` (создаёт пакет). Фоновый цикл `Referrals.Run` (5 мин) в workers панели.
+- Бот: `Backend.Referral/Refer` (Local + Remote + rpc-ошибка `referral_invalid`), `/start ref-…` в `bot.go`, встроенная кнопка `invite` (config.go: builtins, Default, enum; screens.go: меню + `case "rf"`), экран и тексты — `tgbot/aoi_referral.go`; админка: `ACTIONS` в `web/src/admin/pages/telegram.tsx`, `telegram.action.invite` в i18n, enum в `openapi.json`/`schema.d.ts`. При мерже: `grep -rn "aoiref\|invite" internal/panel/tgbot/*.go web/src/admin/pages/telegram.tsx`.
+
 ## 4. Брендинг (правила с 18.10.2026)
 
 По TRADEMARK.md апстрима имя «mikan», логотип и маскот НЕ входят в GPL-лицензию —

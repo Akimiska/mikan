@@ -33,7 +33,7 @@ type Config struct {
 // a text of the admin's.
 type MenuButton struct {
 	ID     string `json:"id" doc:"Постоянный id кнопки"`
-	Action string `json:"action" enum:"sub,devices,connect,renew,support,app,url,page"`
+	Action string `json:"action" enum:"sub,devices,connect,renew,support,app,invite,url,page"`
 	Label  string `json:"label"`
 	On     bool   `json:"on"`
 	Row    bool   `json:"row" doc:"В одном ряду с предыдущей"`
@@ -64,7 +64,7 @@ type Notify struct {
 }
 
 // Built-in actions, each at most once in the menu.
-var builtins = []string{"sub", "devices", "connect", "renew", "support", "app"}
+var builtins = []string{"sub", "devices", "connect", "renew", "support", "app", "invite"}
 
 // Default is the menu of a fresh bot in lang, "en" or else Russian.
 func Default(lang string) Config {
@@ -86,6 +86,7 @@ func Default(lang string) Config {
 			{ID: "renew", Action: "renew", Label: l("💳 Продлить", "💳 Renew"), On: true},
 			{ID: "support", Action: "support", Label: l("💬 Поддержка", "💬 Support"), On: true, Row: true},
 			{ID: "app", Action: "app", Label: l("🌐 Открыть страницу подписки", "🌐 Open the subscription page"), On: true},
+			{ID: "invite", Action: "invite", Label: l("👥 Пригласить друга", "👥 Invite a friend"), On: true},
 		},
 		Notify:      Notify{Expire3d: true, Expire1d: true, Expired: true, Traffic90: true, Traffic100: true},
 		MiniApp:     true,

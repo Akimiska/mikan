@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/panel/aoiref"
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/panelimport"
@@ -35,7 +36,25 @@ type Local struct {
 	// MiniApp: the panel's certificate is one Telegram apps accept (not self-signed).
 	MiniApp func() bool
 	Now     func() time.Time
+	// Referrals is the referral programme (AoiVPN fork); nil: none.
+	Referrals *aoiref.Service
 }
+
+func (l *Local) Referral(ctx context.Context, tgID int64) (aoiref.Stats, error) {
+	if l.Referrals == nil {
+		return aoiref.Stats{}, errNoReferrals
+	}
+	return l.Referrals.Stats(ctx, tgID)
+}
+
+func (l *Local) Refer(ctx context.Context, tgID int64, code string) (bool, error) {
+	if l.Referrals == nil {
+		return false, errNoReferrals
+	}
+	return l.Referrals.Refer(ctx, tgID, code)
+}
+
+var errNoReferrals = errors.New("referrals_off")
 
 func (l *Local) TagCampaign(ctx context.Context, tgID int64, code string) (bool, error) {
 	return domain.NewCampaigns(l.Store, l.Now).Tag(ctx, tgID, code)

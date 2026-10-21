@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/panel/aoiref"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
@@ -111,6 +112,14 @@ func (b *Bot) onMessage(ctx context.Context, m *tgate.Message) {
 		code := strings.TrimSpace(strings.TrimPrefix(text, "/start "+domain.CampaignPrefix))
 		if _, err := b.d.Backend.TagCampaign(ctx, chat, code); err != nil {
 			b.d.Log.Warn("telegram: campaign", "err", err)
+		}
+	case strings.HasPrefix(text, "/start "+aoiref.Prefix):
+		// AoiVPN fork: a friend's link; the menu greets the account as usual (the trial).
+		code := strings.TrimSpace(strings.TrimPrefix(text, "/start "+aoiref.Prefix))
+		if _, err := b.d.Backend.Refer(ctx, chat, code); errors.Is(err, aoiref.ErrInvalid) {
+			notice = refWordsFor(w).invalid
+		} else if err != nil {
+			b.d.Log.Warn("telegram: referral", "err", err)
 		}
 	case strings.HasPrefix(text, "/start "):
 		notice = b.linkByCode(ctx, w, chat, who(m.From), strings.TrimSpace(strings.TrimPrefix(text, "/start ")))

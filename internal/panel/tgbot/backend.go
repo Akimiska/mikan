@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"mikan/internal/panel/aoiref"
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
@@ -51,6 +52,10 @@ type Backend interface {
 	// campaign's link with no subscription yet (domain.Campaigns.Tag).
 	TagCampaign(ctx context.Context, tgID int64, code string) (bool, error)
 	UserOfAddress(ctx context.Context, urlPath string) (int64, bool)
+	// Referral is the account's referral programme: its link and what it earned; Refer makes
+	// the account the referral of a code's owner (AoiVPN fork, aoiref).
+	Referral(ctx context.Context, tgID int64) (aoiref.Stats, error)
+	Refer(ctx context.Context, tgID int64, code string) (bool, error)
 	// Link ties subscription userID to account tgID, unless another account it can ask
 	// owns it (LinkTaken) or tgID holds tgate.MaxLinks already.
 	Link(ctx context.Context, tgID, userID int64) (Linked, error)

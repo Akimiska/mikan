@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"mikan/internal/panel/aoiapp"
+	"mikan/internal/panel/aoiref"
 	"net"
 	"net/http"
 	"net/netip"
@@ -69,10 +70,12 @@ type Panel struct {
 	Gateway  *tgate.Gateway
 	Telegram *tgbot.Panel
 	Billing  *billing.Service
-	Updates  *updates.Checker
-	Alerts   *infraalerts.Monitor
-	Backups  *tgbackup.Service
-	Importer *panelimport.Importer
+	// Referrals is the AoiVPN fork's referral programme (aoiref).
+	Referrals *aoiref.Service
+	Updates   *updates.Checker
+	Alerts    *infraalerts.Monitor
+	Backups   *tgbackup.Service
+	Importer  *panelimport.Importer
 	// Support keeps the support access grants; the operator's terminal hooks into it.
 	Support   *support.Service
 	Addons    *addons.Manager
@@ -306,7 +309,15 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Gateway = tgate.New(tgate.Deps{Store: st, Settings: set, API: o.TelegramAPI, Log: o.Log, Now: o.Now, Billing: p.Billing, Tunnel: tunnel})
 	// The bot's screens see the panel through a Backend: in process here, over the Panel
 	// API once they run as an addon.
-	backend := &tgbot.Local{Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
+	// AoiVPN fork: the referral programme; its rewards are told in the bot.
+	p.Referrals = aoiref.New(aoiref.Deps{Store: st, Users: deps.Users, BotURL: p.Gateway.BotURL, Now: o.Now, Log: o.Log,
+		Notify: func(_ context.Context, tg int64, text string) {
+			p.Gateway.Outbox().Reply(tg, "", 1, func(ctx context.Context, c *tgate.Client) error {
+				_, err := c.Send(ctx, tg, text, nil, false)
+				return err
+			})
+		}})
+	backend := &tgbot.Local{Referrals: p.Referrals, Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
 	// The panel's API for addons, with the Bot API proxy over the gateway for the addon that
@@ -630,7 +641,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.NodeUpdates != nil {
 		workers = append(workers, p.NodeUpdates.Run)
 	}
-	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
+	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.Referrals.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			every(ctx, 5*time.Second, func() {
 				if _, err := p.Apply(ctx); err != nil {

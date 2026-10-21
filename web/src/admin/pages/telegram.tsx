@@ -693,7 +693,7 @@ function RouteCard({ v }: { v: View }) {
   );
 }
 
-const ACTIONS = ["sub", "devices", "connect", "renew", "support", "app"] as const;
+const ACTIONS = ["sub", "devices", "connect", "renew", "support", "app", "invite"] as const;
 
 function actionLabel(a: string): string {
   return tMaybe(`telegram.action.${a}`) ?? a;

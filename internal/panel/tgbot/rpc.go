@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/panel/aoiref"
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
@@ -57,6 +58,7 @@ var rpcErrors = map[string]error{
 	"topup_amount":      billing.ErrTopupAmount,
 	"topup_many":        billing.ErrTopupMany,
 	"topup_none":        billing.ErrTopupNone,
+	"referral_invalid":  aoiref.ErrInvalid,
 	"context_canceled":  context.Canceled,
 	"deadline_exceeded": context.DeadlineExceeded,
 }

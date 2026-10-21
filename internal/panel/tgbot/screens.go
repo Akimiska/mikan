@@ -62,6 +62,8 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return b.trialInvoice(ctx, w, chat, arg)
 	case "fp":
 		return b.takeFree(ctx, cfg, w, chat)
+	case "rf":
+		return b.referralScreen(ctx, w, chat, notice)
 	}
 	if !ok {
 		return b.welcome(ctx, cfg, w, chat, notice)
@@ -229,6 +231,8 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, chat int64, subs i
 			if btn, ok = b.pageButton(ctx, cfg, w, mb.Label); !ok {
 				continue
 			}
+		case "invite":
+			btn = tgate.Button{Text: mb.Label, CallbackData: "rf"}
 		case "url":
 			btn = tgate.Button{Text: mb.Label, URL: mb.URL}
 		case "page":

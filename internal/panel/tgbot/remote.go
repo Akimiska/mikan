@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"mikan/internal/panel/aoiref"
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
@@ -75,6 +76,18 @@ func (r *Remote) TagCampaign(ctx context.Context, tgID int64, code string) (bool
 	var tagged bool
 	err := r.call(ctx, "TagCampaign", []any{tgID, code}, &tagged)
 	return tagged, err
+}
+
+func (r *Remote) Referral(ctx context.Context, tgID int64) (aoiref.Stats, error) {
+	var st aoiref.Stats
+	err := r.call(ctx, "Referral", []any{tgID}, &st)
+	return st, err
+}
+
+func (r *Remote) Refer(ctx context.Context, tgID int64, code string) (bool, error) {
+	var ok bool
+	err := r.call(ctx, "Refer", []any{tgID, code}, &ok)
+	return ok, err
 }
 
 func (r *Remote) UserOfCode(ctx context.Context, code string) (int64, error) {

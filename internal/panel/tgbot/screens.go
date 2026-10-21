@@ -519,6 +519,7 @@ func (b *Bot) vars(ctx context.Context, w *words, u model.User, now time.Time) m
 	// The subscription link itself: an admin's own menu text can show it without the
 	// "Connect" screen.
 	v["link"] = b.subURL(ctx, u)
+	aoiVars(v, w, u) // AoiVPN fork: {until_full}
 	return v
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"mikan/internal/panel/model"
+	"mikan/internal/textutil"
 	"mikan/internal/tgapi"
 )
 
@@ -91,4 +92,18 @@ func aoiDownloadRows(w *words) [][]tgapi.Button {
 	}
 	const base = "https://api.aoimusic.ru/api/version/download?platform=aoivpn"
 	return [][]tgapi.Button{{{Text: android, URL: base}, {Text: windows, URL: base + "&os=windows"}}}
+}
+
+// aoiVars (AoiVPN fork) adds what the legacy bot's cabinet showed: {until_full} is the end of
+// the term with its time, "16 декабря 2026, 21:00 МСК".
+func aoiVars(v map[string]string, w *words, u model.User) {
+	v["until_full"] = v["until"]
+	if u.ExpiresAt.Valid {
+		t := model.Time(u.ExpiresAt.Int64).In(textutil.Zone)
+		zone := "МСК"
+		if w == &en {
+			zone = "MSK"
+		}
+		v["until_full"] = w.date(t) + ", " + t.Format("15:04") + " " + zone
+	}
 }

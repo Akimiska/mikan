@@ -14,7 +14,7 @@ import (
 	"mikan/internal/panel/store/db"
 )
 
-// A pool closed on a tariff reaches its users at once: the subscription loses the pool's
+// A server group closed on a tariff reaches its users at once: the subscription loses the pool's
 // inbound and the user's pools say so; opened again, both come back. A user closed by
 // hand on another pool keeps it.
 func TestTariffClosesPool(t *testing.T) {
@@ -48,7 +48,7 @@ func TestTariffClosesPool(t *testing.T) {
 	csrf := map[string]string{"X-CSRF-Token": h.csrf}
 	userPools := "/" + adminPath + "/api/v1/users/" + strconv.FormatInt(u.ID, 10) + "/pools"
 	// The admin closes the other pool for this user alone.
-	if resp, body := h.do(http.MethodPut, userPools, map[string]any{"pools": []map[string]any{{"pool_id": other.ID, "traffic_limit": nil, "excluded": true}}}, csrf); resp.StatusCode != http.StatusOK {
+	if resp, body := h.do(http.MethodPut, userPools, map[string]any{"pools": []map[string]any{{"pool_id": other.ID, "mode": "closed"}}}, csrf); resp.StatusCode != http.StatusOK {
 		t.Fatalf("close per user: %d %s", resp.StatusCode, body)
 	}
 	sub := func() string {
@@ -69,15 +69,15 @@ func TestTariffClosesPool(t *testing.T) {
 		t.Helper()
 		_, body := h.do(http.MethodGet, userPools, nil, nil)
 		var ps []struct {
-			PoolID   int64 `json:"pool_id"`
-			Excluded bool  `json:"excluded"`
+			PoolID int64  `json:"pool_id"`
+			Mode   string `json:"mode"`
 		}
 		if err := json.Unmarshal(body, &ps); err != nil {
 			t.Fatalf("%v %s", err, body)
 		}
 		out := map[int64]bool{}
 		for _, p := range ps {
-			out[p.PoolID] = p.Excluded
+			out[p.PoolID] = p.Mode == "closed"
 		}
 		return out
 	}
@@ -89,7 +89,7 @@ func TestTariffClosesPool(t *testing.T) {
 		}
 	}
 
-	put([]map[string]any{{"pool_id": premium.ID, "traffic_limit": nil, "excluded": true}})
+	put([]map[string]any{{"pool_id": premium.ID, "mode": "closed"}})
 	if ex := excluded(); !ex[premium.ID] || !ex[other.ID] {
 		t.Fatalf("closed for the tariff's user at once, the per-user one kept: %v", ex)
 	}
@@ -97,7 +97,7 @@ func TestTariffClosesPool(t *testing.T) {
 		t.Fatalf("the closed pool's inbound must leave the subscription: %d of %d", n, all)
 	}
 	_, body := h.do(http.MethodGet, "/"+adminPath+"/api/v1/tariffs", nil, nil)
-	if !strings.Contains(string(body), `"excluded":true`) {
+	if !strings.Contains(string(body), `"mode":"closed"`) {
 		t.Fatalf("the tariff shows the closed pool: %s", body)
 	}
 

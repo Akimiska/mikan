@@ -9,13 +9,19 @@ import (
 )
 
 // The protocols of mihomo's newer cores: TrustTunnel, ShadowQUIC and Mieru check every
-// user; Shadowsocks-2022, Sudoku and Snell have one key for everyone.
+// user, and so does Shadowsocks-2022 with an AES method; Sudoku, Snell and
+// Shadowsocks-2022 with ChaCha20 have one key for everyone.
 func TestExtraTypes(t *testing.T) {
 	key := make([]byte, 16)
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
 	}
 	ssKey := base64.StdEncoding.EncodeToString(key)
+	key32 := make([]byte, 32)
+	if _, err := rand.Read(key32); err != nil {
+		t.Fatal(err)
+	}
+	ssKey32 := base64.StdEncoding.EncodeToString(key32)
 	cert := Cert{CertPath: "/c", KeyPath: "/k"}
 	in := ClientInput{Name: "X", Host: "vpn.example.com", Port: 4443, SNI: "vpn.example.com", Slot: slots[0]}
 	cases := []struct {
@@ -59,24 +65,41 @@ func TestExtraTypes(t *testing.T) {
 			}
 			m := c.Mihomo
 			// mihomo 1.19.31 does not tell the node who sends UDP over Mieru: TCP only.
-			if m["type"] != "mieru" || m["transport"] != "TCP" || m["username"] != "s000001" || m["password"] != "S3cr3t+/=" || m["udp"] != false {
+			if m["type"] != "mieru" || m["transport"] != "TCP" || m["username"] != "s000001" || m["password"] != "S3cr3t+/=" || m["udp"] != true {
 				t.Errorf("mieru client: %v", m)
 			}
 		}},
-		{"type: shadowsocks\ncipher: 2022-blake3-aes-128-gcm\npassword: " + ssKey + "\n", true, func(c Client, l map[string]any) {
-			if _, has := l["users"]; has {
-				t.Errorf("one key, no users: %v", l)
+		{"type: shadowsocks\ncipher: 2022-blake3-aes-128-gcm\npassword: " + ssKey + "\n", false, func(c Client, l map[string]any) {
+			// A key per user (EIH): the listener's password is the server's key, each user
+			// has one of its own, and the app gets both.
+			us, _ := l["users"].([]map[string]any)
+			own := ssUserKey("2022-blake3-aes-128-gcm", "S3cr3t+/=")
+			if l["password"] != ssKey || len(us) != 2 || us[0]["name"] != "s000001" || us[0]["password"] != own || us[1]["password"] == own {
+				t.Errorf("shadowsocks listener: %v", l)
+			}
+			if k, err := base64.StdEncoding.DecodeString(own); err != nil || len(k) != 16 {
+				t.Errorf("a user key fits the cipher: %q", own)
 			}
 			m := c.Mihomo
-			if m["type"] != "ss" || m["cipher"] != "2022-blake3-aes-128-gcm" || m["password"] != ssKey || m["udp"] != false {
+			if m["type"] != "ss" || m["cipher"] != "2022-blake3-aes-128-gcm" || m["password"] != ssKey+":"+own || m["udp"] != true ||
+				m["udp-over-tcp"] != true || m["udp-over-tcp-version"] != 2 {
 				t.Errorf("shadowsocks client: %v", m)
 			}
 			u, err := url.Parse(c.URI)
 			if err != nil || u.Scheme != "ss" || u.User.Username() != "2022-blake3-aes-128-gcm" || u.Host != "vpn.example.com:4443" {
 				t.Fatalf("ss link: %s %v", c.URI, err)
 			}
-			if p, _ := u.User.Password(); p != ssKey {
+			if p, _ := u.User.Password(); p != ssKey+":"+own {
 				t.Errorf("ss link key: %q", p)
+			}
+		}},
+		{"type: shadowsocks\ncipher: 2022-blake3-chacha20-poly1305\npassword: " + ssKey32 + "\n", true, func(c Client, l map[string]any) {
+			// ChaCha20 has no identity header: one key for everyone.
+			if _, has := l["users"]; has {
+				t.Errorf("one key, no users: %v", l)
+			}
+			if m := c.Mihomo; m["password"] != ssKey32 || m["udp"] != true || m["udp-over-tcp"] != true {
+				t.Errorf("shadowsocks client: %v", m)
 			}
 		}},
 		{"type: sudoku\nkey: 6f1a44b8-c4e1-4a36-9d62-0b4ddc4c7c4f\naead-method: chacha20-poly1305\npadding-min: 2\npadding-max: 7\ntable-type: prefer_ascii\nenable-pure-downlink: false\n", true, func(c Client, l map[string]any) {
@@ -85,13 +108,13 @@ func TestExtraTypes(t *testing.T) {
 			}
 			m := c.Mihomo
 			if m["type"] != "sudoku" || m["key"] != "6f1a44b8-c4e1-4a36-9d62-0b4ddc4c7c4f" || m["aead-method"] != "chacha20-poly1305" || m["table-type"] != "prefer_ascii" || m["padding-max"] != 7 ||
-				m["enable-pure-downlink"] != false {
+				m["enable-pure-downlink"] != false || m["udp"] != true {
 				t.Errorf("sudoku client: %v", m)
 			}
 		}},
 		{"type: snell\npsk: p5k-Secret\nversion: 3\n", true, func(c Client, l map[string]any) {
 			m := c.Mihomo
-			if m["type"] != "snell" || m["psk"] != "p5k-Secret" || m["version"] != 3 || c.URI != "" {
+			if m["type"] != "snell" || m["psk"] != "p5k-Secret" || m["version"] != 3 || m["udp"] != true || l["udp"] != true || c.URI != "" {
 				t.Errorf("snell client: %v %s", m, c.URI)
 			}
 		}},
@@ -101,8 +124,8 @@ func TestExtraTypes(t *testing.T) {
 		if err := Validate(tpl, Options{}); err != nil {
 			t.Fatalf("%s: %v", tc.src, err)
 		}
-		if Shared(tpl.Type()) != tc.shared {
-			t.Errorf("%s: shared %v", tpl.Type(), Shared(tpl.Type()))
+		if Shared(tpl) != tc.shared {
+			t.Errorf("%s: shared %v", tc.src, Shared(tpl))
 		}
 		l, err := Listener(tpl, "n", "", "4443", slots, cert, Options{})
 		if err != nil {

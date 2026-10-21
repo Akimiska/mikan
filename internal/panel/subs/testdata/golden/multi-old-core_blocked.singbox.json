@@ -385,6 +385,24 @@
         "outbound": "direct"
       },
       {
+        "domain_suffix": [
+          "sub.aoimusic.ru"
+        ],
+        "outbound": "VPN"
+      },
+      {
+        "domain_suffix": [
+          "panel.aoimusic.ru"
+        ],
+        "outbound": "VPN"
+      },
+      {
+        "domain_suffix": [
+          "vpn.aoimusic.ru"
+        ],
+        "outbound": "VPN"
+      },
+      {
         "ip_is_private": true,
         "outbound": "direct"
       },

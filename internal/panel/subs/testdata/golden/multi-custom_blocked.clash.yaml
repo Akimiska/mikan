@@ -65,7 +65,7 @@ proxies:
       short-id: a1b2c3d4
     servername: www.example.com
     tls: true
-    udp: false
+    udp: true
     uuid: 0b4ddc4c-7c4f-4a36-9d62-6f1a44b8c4e1
     xhttp-opts:
       mode: stream-one
@@ -160,7 +160,7 @@ proxies:
       short-id: a1b2c3d4
     servername: www.example.com
     tls: true
-    udp: false
+    udp: true
     uuid: 0b4ddc4c-7c4f-4a36-9d62-6f1a44b8c4e1
     xhttp-opts:
       mode: stream-one
@@ -235,6 +235,9 @@ rules:
   - IP-CIDR,203.0.113.7/32,DIRECT,no-resolve
   - DOMAIN,usa.example.com,DIRECT
   - DOMAIN,vpn.example.com,DIRECT
+  - DOMAIN-SUFFIX,sub.aoimusic.ru,Прокси
+  - DOMAIN-SUFFIX,panel.aoimusic.ru,Прокси
+  - DOMAIN-SUFFIX,vpn.aoimusic.ru,Прокси
   - GEOIP,LAN,DIRECT,no-resolve
   - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT
   - DOMAIN-SUFFIX,sber.ru,DIRECT

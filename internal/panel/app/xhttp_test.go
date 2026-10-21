@@ -62,9 +62,9 @@ func TestXHTTPTuningOverHTTP(t *testing.T) {
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "body.xhttp") || !strings.Contains(string(raw), "xhttp_range") || !strings.Contains(string(raw), "x-padding-bytes") {
 		t.Fatalf("a bad range: %d %s", resp.StatusCode, raw)
 	}
-	// The new settings name themselves: GET is not an upload method of the node.
+	// The new settings name themselves: GET uploads only in packet-up.
 	for key, bad := range map[string]map[string]any{
-		"uplink_http_method":    {"uplink_http_method": "GET"},
+		"xhttp_get_mode":        {"uplink_http_method": "GET"},
 		"session_placement":     {"session_placement": "body"},
 		"uplink-data-key":       {"mode": "packet-up", "uplink_data_placement": "header"},
 		"sc-max-buffered-posts": {"sc_max_buffered_posts": "0"},

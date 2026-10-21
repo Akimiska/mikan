@@ -47,6 +47,9 @@ type Backend interface {
 	// tgate.ErrLinkInvalid); UserOfAddress the one an address path leads to, the panel's own
 	// or an old panel's (POST /tg/link/redeem).
 	UserOfCode(ctx context.Context, code string) (int64, error)
+	// TagCampaign makes the account an ad campaign's when it starts the bot by the
+	// campaign's link with no subscription yet (domain.Campaigns.Tag).
+	TagCampaign(ctx context.Context, tgID int64, code string) (bool, error)
 	UserOfAddress(ctx context.Context, urlPath string) (int64, bool)
 	// Link ties subscription userID to account tgID, unless another account it can ask
 	// owns it (LinkTaken) or tgID holds tgate.MaxLinks already.
@@ -111,6 +114,8 @@ type Shop interface {
 	Invoice(ctx context.Context, req billing.InvoiceRequest) (db.Payment, error)
 	PackageOffers(ctx context.Context, userID int64) ([]billing.PackageOffer, billing.Available, error)
 	PackageInvoice(ctx context.Context, req billing.PackageRequest) (db.Payment, error)
+	DeviceOfferFor(ctx context.Context, userID int64) (billing.DeviceOffer, billing.Available, bool, error)
+	DeviceInvoice(ctx context.Context, req billing.DeviceRequest) (db.Payment, error)
 	TrialTariff(ctx context.Context) (db.Tariff, bool)
 	TrialOpen(ctx context.Context, tgID int64) bool
 	TrialAllowed(ctx context.Context, tgID int64) bool
@@ -119,6 +124,14 @@ type Shop interface {
 	TrialInvoice(ctx context.Context, tgID int64, provider string) (db.Payment, error)
 	FreeOffer(ctx context.Context, tgID int64) (billing.FreeOffer, bool)
 	FreePlan(ctx context.Context, tgID int64) (db.User, error)
+	// The account's balance and its top-ups (billing/balance.go).
+	BalanceOf(ctx context.Context, tgID int64) (int64, error)
+	BalanceHistory(ctx context.Context, tgID int64, n int32) ([]db.BalanceOp, error)
+	StartTopup(ctx context.Context, tgID, amount int64) (db.Topup, error)
+	SetTopupAmount(ctx context.Context, tgID, amount int64) (db.Topup, error)
+	TopupDraft(ctx context.Context, tgID int64) (db.Topup, bool)
+	CancelTopup(ctx context.Context, tgID int64) error
+	SubmitTopup(ctx context.Context, tgID int64, photo string) (db.Topup, error)
 }
 
 // Account is a Telegram account as the bot sees it.

@@ -37,13 +37,14 @@ type words struct {
 	menuApp string
 
 	// The shop.
-	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew string
-	notForSale, payUnavailable, tooManyInvoices, paidNew, paidRenew                                                 string
-	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                     string
-	trialPaid, trialTitle                                                                                           string // the priced trial: its button with the price, its title over the ways to pay
-	trialNotGiven                                                                                                   string // a paid trial not given, its money back by hand
-	pickTerm, priceFrom                                                                                             string
-	poolOut                                                                                                         string // a traffic pool used up
+	balanceButton, balanceTitle, balanceHint, balanceOff, balanceLow, balancePaid, payBalance, topupButton, topupTitle, topupAmountAsk, topupFrom, topupTo, topupFromTo, topupPay, topupShot, topupSent, topupBad, topupMany, topupNone, topupCancelled, topupApproved, topupRejected, opTopup, opSpend, opRefund, opAdjust string
+	buy, buyAnother, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew                                                                                                                                                                                             string
+	notForSale, payUnavailable, tooManyInvoices, paidNew, paidRenew                                                                                                                                                                                                                                                         string
+	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                                                                                                                                                                                                                             string
+	trialPaid, trialTitle                                                                                                                                                                                                                                                                                                   string // the priced trial: its button with the price, its title over the ways to pay
+	trialNotGiven                                                                                                                                                                                                                                                                                                           string // a paid trial not given, its money back by hand
+	pickTerm, priceFrom                                                                                                                                                                                                                                                                                                     string
+	poolOut                                                                                                                                                                                                                                                                                                                 string // a traffic pool used up
 
 	// The channel a subscriber must join, and the free plan.
 	channelJoin, channelCheck, channelNotYet             string
@@ -51,6 +52,9 @@ type words struct {
 
 	// Traffic packages.
 	buyTraffic, trafficTitle, payPackage, packageGone, paidPackage, plusPackages string
+
+	// One more device.
+	buyDevice, deviceTitle, deviceNow, deviceKeep, deviceUntil, deviceLeft, payDevice, deviceGone, paidDevice, refundedDevice string
 
 	// A refund takes back what the payment gave.
 	refundedNew, refundedRenew, refundedPackage, refundedGone string
@@ -112,7 +116,8 @@ var ru = words{
 	commands: "Главное меню",
 	menuApp:  "Подписка",
 
-	buy: "🛒 Купить подписку", buyTitle: "Выберите тариф", renewTitle: "Продление подписки «%s»: выберите тариф",
+	balanceButton: "💰 Баланс: %s", balanceTitle: "💰 На балансе %s", balanceHint: "Баланс пополняется переводом: нажмите «Пополнить», укажите сумму и пришлите скриншот перевода. После проверки деньги появятся на балансе, ими можно оплатить подписку, продление и докупки.", balanceOff: "Баланс сейчас недоступен.", balanceLow: "На балансе не хватает денег. Пополните его в меню «💰 Баланс».", balancePaid: "✅ Оплачено с баланса: %s. Сейчас придёт сообщение о покупке.", payBalance: "💰 С баланса · %s", topupButton: "➕ Пополнить", topupTitle: "Пополнение баланса", topupAmountAsk: "Выберите сумму или напишите её сообщением, например 750.", topupFrom: "Сумма от %s.", topupTo: "Сумма до %s.", topupFromTo: "Сумма от %s до %s.", topupPay: "Переведите %s", topupShot: "Затем пришлите сюда скриншот перевода одной картинкой.", topupSent: "📨 Заявка на %s отправлена. Мы проверим перевод и пополним баланс, об этом придёт сообщение.", topupBad: "Такую сумму не принять: проверьте границы.", topupMany: "Уже есть заявки на проверке. Дождитесь ответа.", topupNone: "Заявка не найдена, начните пополнение заново.", topupCancelled: "Пополнение отменено.", topupApproved: "✅ Баланс пополнен на %s. Теперь на нём %s.", topupRejected: "❌ Пополнение на %s отклонено.", opTopup: "пополнение", opSpend: "оплата", opRefund: "возврат", opAdjust: "изменено администратором",
+	buy: "🛒 Купить подписку", buyAnother: "➕ Ещё одна подписка", buyTitle: "Выберите тариф", renewTitle: "Продление подписки «%s»: выберите тариф",
 	payHow: "Как оплатить?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Картой или СБП — %s", payCrypto: "🪙 Криптовалютой — %s", payAddon: "💳 %s — %s", payButton: "Оплатить %s",
 	invoice:         "Счёт: «%s» — %s.\n\nОплатите по кнопке ниже: %s сразу после оплаты, бот пришлёт сообщение.",
 	payNew:          "подписка будет готова",
@@ -150,6 +155,17 @@ var ru = words{
 	packageGone:  "Этот пакет больше не продаётся.",
 	paidPackage:  "✅ Оплата получена — пакет «%s» начислен на подписку «%s».",
 	plusPackages: "%s + пакеты %s",
+
+	buyDevice:      "📱 Докупить устройство",
+	deviceTitle:    "Ещё одно устройство для подписки «%s»",
+	deviceNow:      "Сейчас устройств: %d, станет %d.",
+	deviceKeep:     "Устройство останется и при продлении: продление будет дороже на его цену.",
+	deviceUntil:    "Устройство действует до конца срока: %s.",
+	deviceLeft:     "Можно докупить ещё: %d.",
+	payDevice:      "устройство добавится",
+	deviceGone:     "Докупить устройство сейчас нельзя.",
+	paidDevice:     "✅ Оплата получена — к подписке «%s» добавлено устройство, теперь их %d.",
+	refundedDevice: "↩️ Платёж за устройство возвращён. Подписка «%s»: устройств %d.",
 
 	refundedNew:     "↩️ Платёж за тариф «%s» возвращён. Подписка «%s» отключена.",
 	refundedRenew:   "↩️ Платёж за продление «%s» возвращён. Срок подписки «%s» уменьшен. Окончание: %s.",
@@ -213,7 +229,8 @@ var en = words{
 	commands: "Main menu",
 	menuApp:  "Subscription",
 
-	buy: "🛒 Buy a subscription", buyTitle: "Pick a plan", renewTitle: "Renew subscription “%s”: pick a plan",
+	balanceButton: "💰 Balance: %s", balanceTitle: "💰 Your balance is %s", balanceHint: "The balance is topped up by a transfer: press “Top up”, give the amount and send a screenshot of the transfer. Once checked, the money is on the balance and pays for a subscription, a renewal and extras.", balanceOff: "The balance is not available now.", balanceLow: "The balance is not enough. Top it up in “💰 Balance”.", balancePaid: "✅ Paid from the balance: %s. A message about the purchase comes next.", payBalance: "💰 From the balance · %s", topupButton: "➕ Top up", topupTitle: "Top up the balance", topupAmountAsk: "Pick an amount or write it in a message, e.g. 750.", topupFrom: "From %s.", topupTo: "Up to %s.", topupFromTo: "From %s to %s.", topupPay: "Transfer %s", topupShot: "Then send a screenshot of the transfer here, as one picture.", topupSent: "📨 The request for %s is sent. We check the transfer and top up the balance; a message comes then.", topupBad: "This amount cannot be taken: check the bounds.", topupMany: "Requests are being checked already. Wait for the answer.", topupNone: "The request is not found, start the top-up again.", topupCancelled: "The top-up is cancelled.", topupApproved: "✅ The balance is topped up with %s. It is %s now.", topupRejected: "❌ The top-up of %s is declined.", opTopup: "top-up", opSpend: "payment", opRefund: "refund", opAdjust: "changed by the admin",
+	buy: "🛒 Buy a subscription", buyAnother: "➕ Another subscription", buyTitle: "Pick a plan", renewTitle: "Renew subscription “%s”: pick a plan",
 	payHow: "How would you like to pay?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Card or SBP — %s", payCrypto: "🪙 Crypto — %s", payAddon: "💳 %s — %s", payButton: "Pay %s",
 	invoice:         "Invoice: “%s” — %s.\n\nPay with the button below: the %s as soon as it is paid, and the bot will message you.",
 	payNew:          "subscription is ready",
@@ -251,6 +268,17 @@ var en = words{
 	packageGone:  "This package is no longer sold.",
 	paidPackage:  "✅ Payment received — package “%s” is added to subscription “%s”.",
 	plusPackages: "%s + packages %s",
+
+	buyDevice:      "📱 Buy one more device",
+	deviceTitle:    "One more device for subscription “%s”",
+	deviceNow:      "Devices now: %d, then %d.",
+	deviceKeep:     "The device stays with renewals: they cost its price more.",
+	deviceUntil:    "The device lasts until the term ends: %s.",
+	deviceLeft:     "You can buy %d more.",
+	payDevice:      "the device is added",
+	deviceGone:     "One more device cannot be bought now.",
+	paidDevice:     "✅ Payment received — a device is added to subscription “%s”, %d in all now.",
+	refundedDevice: "↩️ The payment for a device is refunded. Subscription “%s”: %d devices.",
 
 	refundedNew:     "↩️ The payment for plan “%s” is refunded. Subscription “%s” is turned off.",
 	refundedRenew:   "↩️ The payment for the renewal “%s” is refunded. The term of subscription “%s” is shortened. Ends: %s.",

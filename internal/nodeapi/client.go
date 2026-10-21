@@ -195,6 +195,14 @@ func (c *Client) SpeedTest(ctx context.Context) (SpeedTest, error) {
 	return r, err
 }
 
+// ServiceRegions asks the sites from the node, about ten seconds. Nodes that predate it
+// answer 404 (a *StatusError); one already asking answers 409 regions_busy.
+func (c *Client) ServiceRegions(ctx context.Context) (ServiceRegions, error) {
+	var r ServiceRegions
+	err := c.do(ctx, http.MethodPost, "/v1/regions", nil, &r, 45*time.Second)
+	return r, err
+}
+
 func (c *Client) Activity(ctx context.Context) (Activity, error) {
 	var r Activity
 	err := c.do(ctx, http.MethodGet, "/v1/activity", nil, &r, 10*time.Second)

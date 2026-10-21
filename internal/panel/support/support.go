@@ -164,7 +164,7 @@ func Live(g db.SupportGrant, now time.Time) bool {
 }
 
 // Expires is when the grant ends.
-func Expires(g db.SupportGrant) time.Time { return time.Unix(g.ExpiresAt, 0).UTC() }
+func Expires(g db.SupportGrant) time.Time { return store.Time(g.ExpiresAt) }
 
 // Writes reports whether the level lets the operator change things.
 func Writes(level string) bool { return level == LevelChange || level == LevelTerminal }

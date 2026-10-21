@@ -5,7 +5,7 @@
 // and the operator; the API decides what each may do.
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ClipboardCopy, FileText, Globe, Power, RefreshCw, Search, Stethoscope, TerminalSquare } from "lucide-react";
+import { ClipboardCopy, FileText, Globe, MapPin, Power, RefreshCw, Search, Stethoscope, TerminalSquare } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { useNodes } from "../../api/hooks";
@@ -21,7 +21,9 @@ import { useCopy } from "../../lib/copy";
 import { ago, time } from "../../lib/format";
 import { nodeLabel } from "../../lib/node-label";
 import { DIAG_TABS } from "../search";
+import { GeoTab } from "./geo-check";
 import { CheckSkeleton, ReachView, StatusMark } from "./node-check";
+import { ServerPicks, useServerPicks } from "./server-picks";
 
 const TerminalTab = lazy(() => import("./diag-terminal").then((m) => ({ default: m.TerminalTab })));
 
@@ -48,6 +50,7 @@ export function DiagnosticsPage() {
     { id: "logs", label: t("diag.tabs.logs"), icon: FileText },
     { id: "check", label: t("diag.tabs.check"), icon: Stethoscope },
     { id: "reach", label: t("diag.tabs.reach"), icon: Globe },
+    { id: "geo", label: t("diag.tabs.geo"), icon: MapPin },
     ...(terminal ? [{ id: "terminal" as const, label: t("diag.tabs.terminal"), icon: TerminalSquare }] : []),
   ];
   return (
@@ -57,6 +60,7 @@ export function DiagnosticsPage() {
         {current === "logs" ? <LogsTab servers={servers} source={shown} onSource={pick} /> : null}
         {current === "check" ? <CheckTab servers={servers} source={shown} onSource={pick} level={who?.level} /> : null}
         {current === "reach" ? <ReachTab /> : null}
+        {current === "geo" ? <GeoTab /> : null}
         {current === "terminal" && who ? (
           <Suspense fallback={<Skeleton style={{ height: 320, borderRadius: 20 }} />}>
             <TerminalTab who={who} />
@@ -345,7 +349,7 @@ function parsePorts(text: string): number[] | null {
 
 /** Whether a server opens from Russia, before anything is installed on it or after. */
 function ReachTab() {
-  const nodes = useNodes();
+  const picks = useServerPicks();
   const [host, setHost] = useState("");
   const [portsText, setPortsText] = useState("22");
   const [touched, setTouched] = useState(false);
@@ -353,7 +357,6 @@ function ReachTab() {
   const check = useMutation({
     mutationFn: (body: { host: string; ports: number[] }) => unwrap(api.POST("/api/v1/system/reach", { body })),
   });
-  const hosts = [...new Set((nodes.data ?? []).map((n) => n.host).filter(Boolean))];
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setTouched(true);
@@ -378,20 +381,12 @@ function ReachTab() {
             value={host}
             onChange={(e) => setHost(e.target.value)}
             placeholder={t("diag.reach.hostPlaceholder")}
-            list={hosts.length ? "reach-hosts" : undefined}
             autoComplete="off"
             spellCheck={false}
             inputMode="url"
             required
           />
         </Field>
-        {hosts.length ? (
-          <datalist id="reach-hosts">
-            {hosts.map((h) => (
-              <option key={h} value={h} />
-            ))}
-          </datalist>
-        ) : null}
         <Field label={t("diag.reach.ports")} htmlFor="reach-ports" hint={t("diag.reach.portsHint")} error={touched && !ports ? t("diag.reach.portsBad") : undefined}>
           <input
             id="reach-ports"
@@ -409,6 +404,7 @@ function ReachTab() {
           </Button>
         </div>
       </form>
+      <ServerPicks picks={picks} value={host} onPick={setHost} />
       <p className="mb-4 text-xs text-[var(--ink-500)]">{t("diag.reach.caveat")}</p>
       <div aria-live="polite" aria-busy={check.isPending}>
         {check.isPending ? (

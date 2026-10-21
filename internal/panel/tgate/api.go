@@ -201,6 +201,35 @@ type Message struct {
 	SuccessfulPayment *SuccessfulPayment `json:"successful_payment"`
 	// RefundedPayment: a Stars payment was refunded (a service message from Telegram).
 	RefundedPayment *RefundedPayment `json:"refunded_payment"`
+	// Photo is a picture sent, in its sizes (largest last); Document a file, a picture
+	// sent as one included (a top-up's screenshot).
+	Photo    []PhotoSize `json:"photo,omitempty"`
+	Document *Document   `json:"document,omitempty"`
+}
+
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int64  `json:"file_size,omitempty"`
+}
+
+type Document struct {
+	FileID   string `json:"file_id"`
+	MimeType string `json:"mime_type,omitempty"`
+	FileSize int64  `json:"file_size,omitempty"`
+}
+
+// Picture is the file id of the picture a message carries: its largest photo, or a document
+// that is an image; "" for none.
+func (m *Message) Picture() string {
+	if n := len(m.Photo); n > 0 {
+		return m.Photo[n-1].FileID
+	}
+	if d := m.Document; d != nil && strings.HasPrefix(d.MimeType, "image/") {
+		return d.FileID
+	}
+	return ""
 }
 
 type CallbackQuery struct {
@@ -523,3 +552,50 @@ func (c *Client) Forward(parent context.Context, method, contentType string, bod
 
 // maxAnswer bounds an answer of the Bot API read for an addon.
 const maxAnswer = 4 << 20
+
+// MaxPhoto bounds a file the panel downloads from Telegram (a top-up's screenshot): the Bot
+// API serves files up to 20 MB.
+const MaxPhoto = 20 << 20
+
+// File downloads a file a user sent the bot, by its file_id: getFile, then the file at
+// /file/bot<token>/<path>. The token stays in this client.
+func (c *Client) File(parent context.Context, fileID string) ([]byte, error) {
+	var f struct {
+		FilePath string `json:"file_path"`
+		FileSize int64  `json:"file_size"`
+	}
+	if err := c.call(parent, "getFile", map[string]any{"file_id": fileID}, &f); err != nil {
+		return nil, err
+	}
+	if f.FilePath == "" || f.FileSize > MaxPhoto {
+		return nil, &APIError{Code: 400, Description: "no such file, or too large"}
+	}
+	ctx, cancel := context.WithTimeout(parent, documentTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/file/bot"+c.token+"/"+f.FilePath, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, unreachable(parent, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &APIError{Code: resp.StatusCode, Description: "the file is not served"}
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, MaxPhoto+1))
+}
+
+// SendPhoto sends a picture the bot already has (its file_id) with an HTML caption.
+func (c *Client) SendPhoto(ctx context.Context, chat int64, fileID, caption string) (Message, error) {
+	var m Message
+	in := map[string]any{"chat_id": chat, "photo": fileID, "caption": caption, "parse_mode": "HTML"}
+	err := c.call(ctx, "sendPhoto", in, &m)
+	if unparsable(err) {
+		in["caption"] = PlainText(caption)
+		delete(in, "parse_mode")
+		err = c.call(ctx, "sendPhoto", in, &m)
+	}
+	return m, err
+}

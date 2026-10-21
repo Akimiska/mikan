@@ -21,6 +21,7 @@ import { HelloLine, JoinProgress, NodeCheckDrawer, NodeProblem, SkewLine, type F
 import { SpeedDrawer } from "./node-speed";
 import { NodeTrafficDrawer } from "./node-traffic";
 import { WarpDrawer } from "./node-warp";
+import { BalanceFields, BalanceGroups, balanceKey, useBalance } from "./nodes-balance";
 
 type Node = Schemas["NodeInfo"];
 type Joined = { id: number; name: string; key: string; command: string };
@@ -190,6 +191,7 @@ export function NodesPage() {
           </>
         }
       />
+      {nodes.data ? <BalanceGroups nodes={nodes.data} /> : null}
       <QueryBoundary
         query={nodes}
         pending={
@@ -738,11 +740,13 @@ function KeyDrawer({ joined, onClose, actions }: { joined: Joined | null; onClos
 function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "" });
+  const [form, setForm] = useState({ name: "", public_name: "", host: "", domain: "", enabled: true, fair_share: false, channel: "", group: "", capacity: "", http_redirect: false, sni_router: false, api_lockdown: false, api_allow: "" });
+  const balance = useBalance();
   const [errors, setErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     if (node) {
-      setForm({ name: node.name, public_name: node.public_name, host: node.host, domain: node.domain, enabled: node.enabled, fair_share: node.fair_share, channel: node.channel_mbps != null ? String(node.channel_mbps) : "" });
+      setForm({ name: node.name, public_name: node.public_name, host: node.host, domain: node.domain, enabled: node.enabled, fair_share: node.fair_share, channel: node.channel_mbps != null ? String(node.channel_mbps) : "",
+        group: node.balance_group, capacity: node.capacity != null ? String(node.capacity) : "", http_redirect: node.http_redirect, sni_router: node.sni_router, api_lockdown: node.api_lockdown, api_allow: node.api_allow.join(", ") });
       setErrors({});
     }
   }, [node]);
@@ -750,7 +754,10 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
   const tests = useSpeedTests(node?.id);
   const measured = tests.data?.[0]?.down_bps ? Math.floor(tests.data[0].down_bps / 1_000_000) : 0;
   const save = useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Schemas["PatchNodeInputBody"] }) => unwrap(api.PATCH("/api/v1/nodes/{id}", { params: { path: { id } }, body })),
+    mutationFn: async ({ id, body, balance }: { id: number; body: Schemas["PatchNodeInputBody"]; balance?: Schemas["SetNodeBalanceInputBody"] }) => {
+      const n = await unwrap(api.PATCH("/api/v1/nodes/{id}", { params: { path: { id } }, body }));
+      return balance ? unwrap(api.PUT("/api/v1/nodes/{id}/balance", { params: { path: { id } }, body: balance })) : n;
+    },
     onSuccess: () => {
       toast.ok(t("nodes.saved"));
       onClose();
@@ -758,6 +765,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.nodes });
       void qc.invalidateQueries({ queryKey: qk.inbounds });
+      void qc.invalidateQueries({ queryKey: balanceKey });
     },
     onError: (e) => {
       onFormError(e, toast, setErrors);
@@ -778,8 +786,25 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
     if (!node.local) {
       body.host = form.host.trim();
       body.domain = form.domain.trim();
+      body.http_redirect = form.http_redirect;
+      // The addresses are checked by the panel; here only how many there are.
+      const allow = form.api_allow.split(/[\s,;]+/).filter(Boolean);
+      if (allow.length > 16) {
+        setErrors({ api_allow: t("nodes.apiAllowMany") });
+        return;
+      }
+      body.api_lockdown = form.api_lockdown;
+      body.api_allow = allow;
     }
-    save.mutate({ id: node.id, body });
+    body.sni_router = form.sni_router;
+    const group = form.group.trim();
+    const capacity = group && form.capacity.trim() ? Number(form.capacity) : undefined;
+    if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1)) {
+      setErrors({ group: t("balance.capacityErr") });
+      return;
+    }
+    const balanceChanged = group !== node.balance_group || (capacity ?? null) !== (node.capacity ?? null);
+    save.mutate({ id: node.id, body, balance: balanceChanged ? { group, capacity } : undefined });
   };
   const set = (k: "name" | "public_name" | "host" | "domain") => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -852,6 +877,80 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
           </Field>
           {form.fair_share && !node?.fair_share ? <p className="text-xs text-[var(--honey-600)]">{t("nodes.fairShareReconnect")}</p> : null}
         </div>
+        {node && !node.local ? (
+          <div className="dr-sec">
+            <div className="switch-row pt-0">
+              <div>
+                <div className="switch-row-title">{t("nodes.httpRedirect")}</div>
+                <div className="switch-row-sub">{t("nodes.httpRedirectHint")}</div>
+              </div>
+              <Switch checked={form.http_redirect} onChange={(v) => setForm((f) => ({ ...f, http_redirect: v }))} label={t("nodes.httpRedirect")} />
+            </div>
+            {node.http_redirect && node.redirect_error ? (
+              <p className="text-xs text-[var(--berry-600)]" role="alert">
+                {t("nodes.httpRedirectBusy", { error: node.redirect_error })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <div className="dr-sec">
+          <div className="switch-row pt-0">
+            <div>
+              <div className="switch-row-title">{t("nodes.sniRouter")}</div>
+              <div className="switch-row-sub">{t("nodes.sniRouterHint")}</div>
+            </div>
+            <Switch checked={form.sni_router} onChange={(v) => setForm((f) => ({ ...f, sni_router: v }))} label={t("nodes.sniRouter")} />
+          </div>
+          {node?.sni_router && node.router_error ? (
+            <p className="text-xs text-[var(--berry-600)]" role="alert">
+              {t("nodes.sniRouterBusy", { error: node.router_error })}
+            </p>
+          ) : null}
+        </div>
+        {node && !node.local ? (
+          <div className="dr-sec">
+            <div className="switch-row pt-0">
+              <div>
+                <div className="switch-row-title">{t("nodes.apiLockdown")}</div>
+                <div className="switch-row-sub">{t("nodes.apiLockdownHint")}</div>
+              </div>
+              <Switch checked={form.api_lockdown} onChange={(v) => setForm((f) => ({ ...f, api_lockdown: v }))} label={t("nodes.apiLockdown")} />
+            </div>
+            {form.api_lockdown ? (
+              <Field label={t("nodes.apiAllow")} htmlFor="e-api-allow" hint={t("nodes.apiAllowHint")} error={errors.api_allow}>
+                <input
+                  id="e-api-allow"
+                  className="input mono"
+                  value={form.api_allow}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, api_allow: e.target.value }));
+                    setErrors(({ api_allow: _, ...rest }) => rest);
+                  }}
+                  placeholder="203.0.113.5, 198.51.100.0/24"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-invalid={!!errors.api_allow}
+                />
+              </Field>
+            ) : null}
+            {node.api_lockdown && node.api_lock_error ? (
+              <p className="text-xs text-[var(--berry-600)]" role="alert">
+                {t("nodes.apiLockFailed", { error: node.api_lock_error })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+        <BalanceFields
+          group={form.group}
+          capacity={form.capacity}
+          onGroup={(group) => {
+            setForm((f) => ({ ...f, group }));
+            setErrors(({ group: _, ...rest }) => rest);
+          }}
+          onCapacity={(capacity) => setForm((f) => ({ ...f, capacity }))}
+          error={errors.group}
+          groups={(balance.data ?? []).map((g) => g.group)}
+        />
       </form>
     </Drawer>
   );

@@ -42,6 +42,7 @@ const (
 const (
 	FixRenew      = "renew"       // the panel's certificate: «Получить сейчас» / «Повторить»
 	FixRenewNode  = "renew_node"  // a node's certificate
+	FixRenewSub   = "renew_sub"   // the subscription domain's certificate
 	FixUseZeroSSL = "use_zerossl" // choose ZeroSSL
 	FixUpdateNode = "update_node" // update the node from the panel
 	FixCopy       = "copy"        // run Command on the server
@@ -49,7 +50,7 @@ const (
 
 // CertCheck is one finding.
 type CertCheck struct {
-	ID      string            `json:"id" doc:"Что проверено: served, compat, dns, port80, acme, node_cert, node_port"`
+	ID      string            `json:"id" doc:"Что проверено: served, compat, dns, port80, acme, sub_served, sub_dns, sub_acme, node_cert, node_port"`
 	Status  string            `json:"status" enum:"ok,info,warn,fail"`
 	Code    string            `json:"code" doc:"Что именно, текст — certCheck.<code> в языке панели"`
 	Params  map[string]string `json:"params,omitempty"`
@@ -61,7 +62,7 @@ type CertCheck struct {
 
 // CertFix is what repairs a finding.
 type CertFix struct {
-	Action  string `json:"action" enum:"renew,renew_node,use_zerossl,update_node,copy"`
+	Action  string `json:"action" enum:"renew,renew_node,renew_sub,use_zerossl,update_node,copy"`
 	Command string `json:"command,omitempty" doc:"Команда для сервера (action copy)"`
 	NodeID  int64  `json:"node_id,omitempty"`
 }
@@ -83,7 +84,18 @@ type Input struct {
 	Status   acme.Status
 	// Challenge is the panel's HTTP-01 responder; nil skips the port 80 check.
 	Challenge *acmechallenge.Server
-	Nodes     []Node
+	// Sub is the subscription domain, nil without one.
+	Sub   *Sub
+	Nodes []Node
+}
+
+// Sub is the subscription domain: where its links lead and the certificate it has.
+type Sub struct {
+	Domain string
+	Port   int // the port of its links
+	// Expected is its own certificate, nil while it has none (the panel's is served then).
+	Expected *x509.Certificate
+	Status   acme.Status
 }
 
 // Node is a node to check.
@@ -147,6 +159,21 @@ func (c *Checker) Run(ctx context.Context, in Input) CertReport {
 		}
 	})
 	add(acmeCheck(in.Status)...)
+	if s := in.Sub; s != nil && s.Domain != "" {
+		wg.Go(func() { add(c.subServed(ctx, in)) })
+		wg.Go(func() {
+			ch := c.dns(ctx, Input{Domain: s.Domain, Host: s.Domain, Own: in.Own})
+			ch.ID = "sub_dns"
+			add(ch)
+		})
+		for _, ch := range acmeCheck(s.Status) {
+			ch.ID = "sub_acme"
+			if ch.CertFix != nil && ch.CertFix.Action == FixRenew {
+				ch.CertFix.Action = FixRenewSub
+			}
+			add(ch)
+		}
+	}
 	for _, n := range in.Nodes {
 		add(nodeCert(n, in.Status))
 		for _, p := range n.Ports {
@@ -172,7 +199,7 @@ func dedupe(ports []int) []int {
 var rank = map[string]int{Fail: 0, Warn: 1, Info: 2, OK: 3}
 
 func sortChecks(cs []CertCheck) {
-	order := map[string]int{"served": 0, "acme": 1, "dns": 2, "port80": 3, "compat": 4, "node_cert": 5, "node_port": 6}
+	order := map[string]int{"served": 0, "acme": 1, "dns": 2, "port80": 3, "compat": 4, "sub_served": 5, "sub_acme": 6, "sub_dns": 7, "node_cert": 8, "node_port": 9}
 	slices.SortStableFunc(cs, func(a, b CertCheck) int {
 		return cmp.Or(cmp.Compare(rank[a.Status], rank[b.Status]), cmp.Compare(order[a.ID], order[b.ID]), cmp.Compare(a.NodeID, b.NodeID),
 			cmp.Compare(a.Params["port"], b.Params["port"]))
@@ -211,6 +238,44 @@ func (c *Checker) served(ctx context.Context, in Input, port int) []CertCheck {
 		out = append(out, CertCheck{ID: "compat", Status: Info, Code: "compat_le_old_devices", CertFix: &CertFix{Action: FixUseZeroSSL}})
 	}
 	return out
+}
+
+// subServed is what a client of a subscription link gets: the subscription domain's own
+// certificate, or the panel's while it has none. Anything else is a proxy in front of the
+// panel with a certificate of its own, which sends the links somewhere the panel is not.
+func (c *Checker) subServed(ctx context.Context, in Input) CertCheck {
+	s := in.Sub
+	ch := CertCheck{ID: "sub_served", Params: map[string]string{"port": strconv.Itoa(s.Port), "domain": s.Domain}}
+	if s.Port <= 0 {
+		ch.Status, ch.Code = Warn, "served_no_host"
+		return ch
+	}
+	dctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	chain, err := c.Dial(dctx, net.JoinHostPort(s.Domain, strconv.Itoa(s.Port)), s.Domain)
+	if err != nil {
+		ch.Status, ch.Code, ch.Detail = Fail, "served_unreachable", err.Error()
+		return ch
+	}
+	v := c.verify(chain, s.Domain)
+	maps.Copy(ch.Params, v.params)
+	want := s.Expected
+	if want == nil {
+		want = in.Expected
+	}
+	if want != nil && !bytes.Equal(chain[0].Raw, want.Raw) {
+		ch.Status, ch.Code = Fail, "served_foreign"
+		return ch
+	}
+	ch.Status, ch.Code = v.status, v.code
+	switch v.code {
+	case "served_wrong_host":
+		// The panel's own certificate: the domain's has not come yet.
+		ch.Code, ch.CertFix = "sub_served_wrong_host", &CertFix{Action: FixRenewSub}
+	case "served_self_signed", "served_expired":
+		ch.CertFix = &CertFix{Action: FixRenewSub}
+	}
+	return ch
 }
 
 func firstPort(ports []int) int {

@@ -52,6 +52,11 @@ var rpcErrors = map[string]error{
 	"too_many_subs":     billing.ErrTooManySubs,
 	"trial_off":         billing.ErrTrialOff,
 	"trial_used":        billing.ErrTrialUsed,
+	"balance_off":       billing.ErrBalanceOff,
+	"balance_low":       billing.ErrBalanceLow,
+	"topup_amount":      billing.ErrTopupAmount,
+	"topup_many":        billing.ErrTopupMany,
+	"topup_none":        billing.ErrTopupNone,
 	"context_canceled":  context.Canceled,
 	"deadline_exceeded": context.DeadlineExceeded,
 }

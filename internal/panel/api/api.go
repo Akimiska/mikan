@@ -27,6 +27,7 @@ import (
 	"mikan/internal/panel/certcheck"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/ipgeo"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/panelimport"
@@ -62,6 +63,8 @@ type Deps struct {
 	Inbounds  *domain.Inbounds
 	Devices   *domain.Devices
 	Packages  *domain.Packages
+	Campaigns *domain.Campaigns
+	Balancer  *domain.Balancer
 	Pool      *domain.Pool
 	Changes   domain.Changes
 	Online    func() map[string]nodeapi.Online
@@ -112,6 +115,10 @@ type Deps struct {
 	// why the saved one is not served. nil: the panel runs no server (tests).
 	SubPort      func(port int) error
 	SubPortError func() string
+	// SubDomain serves a new subscription domain ("" none): its requests, its certificate.
+	// SubCerts is that certificate. nil in development and tests.
+	SubDomain func(name string)
+	SubCerts  SubCerts
 	// SetCert installs the admin's own certificate for the panel, ClearCert goes back to
 	// Let's Encrypt; nil in development.
 	SetCert   func(ctx context.Context, certPEM, keyPEM []byte) error
@@ -136,6 +143,8 @@ type Deps struct {
 	DNS *dnscheck.Checker
 	// Reach checks ports of a node or any server from Russia (Globalping); nil: not offered.
 	Reach *reach.Client
+	// Geo asks public geo bases which country an address is in; nil: not offered.
+	Geo *ipgeo.Client
 	// DataDir is the panel's data directory, whose disk "Check server" looks at; "": none.
 	DataDir string
 	// Support keeps the support grants (internal/panel/support); nil in tests that do not
@@ -164,6 +173,8 @@ type NodeRuntime interface {
 	Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error)
 	// SpeedTest measures a node's own way to the internet.
 	SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error)
+	// ServiceRegions asks the sites from a node what they make of its address.
+	ServiceRegions(ctx context.Context, id int64) (nodeapi.ServiceRegions, error)
 	// CheckNow asks a node for its health at once (Check node, a node's hello).
 	CheckNow(ctx context.Context, id int64) (nodesync.HealthView, bool)
 	// Hello is a node's last hello since the panel started.
@@ -292,10 +303,16 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerSubPage()
 	h.registerRoutes()
 	h.registerCerts()
+	h.registerSubDomain()
+	h.registerCampaigns()
+	h.registerBalance()
+	h.registerWallet()
+	h.registerSites()
 	h.registerTelegram()
 	h.registerUpdates()
 	h.registerNodes()
 	h.registerNodeChecks()
+	h.registerGeo()
 	h.registerTorrent()
 	h.registerFilters()
 	h.registerExitDNS()

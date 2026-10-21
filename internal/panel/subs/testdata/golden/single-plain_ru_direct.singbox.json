@@ -3,10 +3,16 @@
     "final": "remote",
     "rules": [
       {
+        "domain_suffix": [
+          "aoimusic.ru"
+        ],
+        "server": "policy-0"
+      },
+      {
         "rule_set": [
           "geosite-category-ru"
         ],
-        "server": "policy-0"
+        "server": "policy-1"
       }
     ],
     "servers": [
@@ -22,8 +28,14 @@
         "type": "https"
       },
       {
-        "server": "77.88.8.8",
+        "detour": "VPN",
+        "server": "1.1.1.1",
         "tag": "policy-0",
+        "type": "https"
+      },
+      {
+        "server": "77.88.8.8",
+        "tag": "policy-1",
         "type": "udp"
       }
     ],
@@ -122,6 +134,24 @@
           "vpn.example.com"
         ],
         "outbound": "direct"
+      },
+      {
+        "domain_suffix": [
+          "sub.aoimusic.ru"
+        ],
+        "outbound": "VPN"
+      },
+      {
+        "domain_suffix": [
+          "panel.aoimusic.ru"
+        ],
+        "outbound": "VPN"
+      },
+      {
+        "domain_suffix": [
+          "vpn.aoimusic.ru"
+        ],
+        "outbound": "VPN"
       },
       {
         "ip_is_private": true,

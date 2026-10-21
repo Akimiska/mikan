@@ -47,6 +47,8 @@ dns:
     - https://1.1.1.1/dns-query#VPN
     - https://8.8.8.8/dns-query#VPN
   nameserver-policy:
+    +.aoimusic.ru:
+      - https://1.1.1.1/dns-query#VPN
     geosite:category-ru:
       - 77.88.8.8
       - 77.88.8.1
@@ -60,6 +62,9 @@ proxy-groups:
     type: select
     include-all-proxies: true
 rules:
+  - DOMAIN-SUFFIX,sub.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,panel.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,vpn.aoimusic.ru,VPN
   - GEOIP,LAN,DIRECT,no-resolve
   - RULE-SET,mikan-blocked,VPN
   - RULE-SET,mikan-blocked,REJECT

@@ -35,7 +35,7 @@
         "ru": "Клиент сам докупает +1 устройство к подписке в боте и Mini App, без продления тарифа.",
         "en": "A client buys one more device for the subscription in the bot and the Mini App, without renewing the plan."
       },
-      "target": 50, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qV"
+      "target": 50, "raised": 0, "currency": "USD", "status": "done", "version": "0.5.1.1", "url": "https://t.me/tribute/app?startapp=g6qV"
     },
     {
       "id": "utm",
@@ -44,7 +44,7 @@
         "ru": "Ссылки на бота с меткой кампании и статистика: сколько людей пришло, купило и продлило по каждой рекламе.",
         "en": "Bot links tagged by campaign, with stats: how many came, bought and renewed from each ad."
       },
-      "target": 50, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qW"
+      "target": 50, "raised": 0, "currency": "USD", "status": "done", "version": "0.5.1.1", "url": "https://t.me/tribute/app?startapp=g6qW"
     },
     {
       "id": "grace-access",
@@ -62,7 +62,7 @@
         "ru": "Отдельный домен или поддомен для ссылок подписки, отдельно от панели и серверов. Ссылки не меняются при переезде панели.",
         "en": "A separate domain or subdomain for subscription links, apart from the panel and the servers. Links stay the same when the panel moves."
       },
-      "target": 50, "raised": 10, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qY"
+      "target": 50, "raised": 10, "currency": "USD", "status": "done", "version": "0.5.1.1", "url": "https://t.me/tribute/app?startapp=g6qY"
     },
     {
       "id": "node-clients",
@@ -80,7 +80,7 @@
         "ru": "Скопировать настроенный протокол на ту же или другую ноду и поменять только порт или SNI, не настраивая всё заново.",
         "en": "Copy a set-up protocol to the same or another node and change only the port or SNI, without setting it all up again."
       },
-      "target": 50, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6r0"
+      "target": 50, "raised": 0, "currency": "USD", "status": "done", "version": "0.5.1.1", "url": "https://t.me/tribute/app?startapp=g6r0"
     },
     {
       "id": "inbound-order",

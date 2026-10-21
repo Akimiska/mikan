@@ -14,7 +14,6 @@ import { FINGERPRINTS } from "../lib/fingerprints";
 // saves typing.
 const TOP: Record<string, string[]> = {
   vless: ["ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option", "decryption"],
-  vmess: ["ws-path", "grpc-service-name", "reality-config", "mux-option"],
   trojan: ["ws-path", "grpc-service-name", "reality-config", "mux-option"],
   hysteria2: ["obfs", "obfs-password", "obfs-min-packet-size", "obfs-max-packet-size", "alpn", "up", "down", "ignore-client-bandwidth", "masquerade", "max-idle-time", "cwnd", "udp-mtu", "bbr-profile"],
   tuic: ["congestion-controller", "alpn", "max-idle-time", "authentication-timeout", "max-udp-relay-packet-size", "cwnd", "bbr-profile"],
@@ -27,7 +26,10 @@ const TOP: Record<string, string[]> = {
   snell: ["psk", "version", "obfs-opts"],
 };
 const NESTED: Record<string, string[]> = {
-  "reality-config": ["dest", "private-key", "short-id", "server-names", "max-time-difference", "limit-fallback-upload", "limit-fallback-download"],
+  "reality-config": [
+    "dest", "private-key", "short-id", "server-names", "max-time-difference", "limit-fallback-upload", "limit-fallback-download",
+    "mldsa65-seed", "require-x25519mlkem768", "min-client-ver", "max-client-ver",
+  ],
   "xhttp-config": ["path", "mode", "host", "x-padding-bytes"],
   mikan: ["flow", "tls", "client"],
   client: ["server", "port", "sni", "fingerprint"],

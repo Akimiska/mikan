@@ -77,6 +77,8 @@ type BlocksProps = {
   reissue?: ReactNode;
   /** The shop sells here: "renew" goes to it instead of support. */
   selling?: boolean;
+  /** Traffic packages on sale for the subscription on screen: for the main traffic, for these groups by name; go shows them. */
+  buy?: { main: boolean; pools: Set<string>; go: () => void };
   reload: () => Promise<void>;
   onOpenDoc: (id: number) => void;
   /** The platform tab open first; the admin's choice (or the device) when not given. */
@@ -104,7 +106,7 @@ function block(b: PageBlock, p: BlocksProps): ReactNode {
     case "shop":
       return p.shop ?? null;
     case "traffic":
-      return <Traffic block={b} info={info} />;
+      return <Traffic block={b} info={info} buy={p.buy} />;
     case "devices":
       return info.binding || info.devices?.length ? <Devices info={info} subURL={p.subURL} reload={p.reload} title={b.title} /> : null;
     case "apps":
@@ -170,7 +172,7 @@ function Status({ info, selling }: { info: Info; selling: boolean }) {
   );
 }
 
-function Traffic({ block: b, info }: { block: PageBlock; info: Info }) {
+function Traffic({ block: b, info, buy }: { block: PageBlock; info: Info; buy?: BlocksProps["buy"] }) {
   const used = info.used_up + info.used_down;
   const extra = info.extra ?? 0;
   // Traffic packages are spent after the tariff's traffic: they add to what is left.
@@ -187,6 +189,11 @@ function Traffic({ block: b, info }: { block: PageBlock; info: Info }) {
           {t("sub.used")}
           <b className="num block text-base font-medium text-[var(--ink-900)]">{info.limit != null ? `${bytes(used)} ${ofTotal(info.limit, extra)}` : bytes(used)}</b>
         </div>
+        {buy?.main && info.limit != null ? (
+          <button type="button" className="btn btn-glass h-9 self-start rounded-xl px-3 text-[13px]" onClick={buy.go}>
+            {t("sub.buyMore")}
+          </button>
+        ) : null}
         {info.resets_at ? (
           <div>
             {t("sub.resets")}
@@ -226,10 +233,15 @@ function Traffic({ block: b, info }: { block: PageBlock; info: Info }) {
               <li key={pool.name}>
                 <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
                   <span className="font-medium">{pool.name}</span>
-                  <span className="num text-xs text-[var(--ink-600)]">{pool.limit != null ? `${bytes(pool.used)} ${ofTotal(pool.limit, pool.extra ?? 0)}` : bytes(pool.used)}</span>
+                  <span className="num text-xs text-[var(--ink-600)]">{pool.limit != null ? `${bytes(pool.used)} ${ofTotal(pool.limit, pool.extra ?? 0)}` : `${bytes(pool.used)} · ${t("sub.poolUnlimited")}`}</span>
                 </div>
                 {pool.limit != null ? <Bar label={pool.name} pct={Math.min(100, (pool.used / (Math.max(pool.limit, pool.used) + (pool.extra ?? 0))) * 100)} /> : null}
                 {pool.limit != null && pool.used >= pool.limit && !pool.extra ? <p className="mt-1 text-xs text-[var(--berry-600)]">{t("sub.poolOut")}</p> : null}
+                {pool.limit != null && buy?.pools.has(pool.name) ? (
+                  <button type="button" className="link-btn mt-1 text-xs" onClick={buy.go}>
+                    {t("sub.buyMore")}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>

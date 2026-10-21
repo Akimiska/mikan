@@ -211,6 +211,16 @@ impl std::fmt::Display for Refused {
 
 impl std::error::Error for Refused {}
 
+/// Whether e is the index refusing the release asked for (not a failure to get it).
+pub fn refused(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Refused>().is_some()
+}
+
+#[cfg(test)]
+pub fn refused_for_test(why: &str) -> anyhow::Error {
+    Refused(why.to_owned()).into()
+}
+
 /// The release found for a server.
 #[derive(Debug)]
 pub struct Found {

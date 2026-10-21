@@ -71,10 +71,10 @@ func TestPackagesCatalog(t *testing.T) {
 	}
 
 	// The user has a main limit and a WL limit; Other is unlimited for them.
-	if err := e.st.Q.SetUserPoolLimit(e.ctx, db.SetUserPoolLimitParams{UserID: e.u.ID, PoolID: pool.ID, TrafficLimit: sql.NullInt64{Int64: 10, Valid: true}}); err != nil {
+	if err := e.st.Q.SetUserPool(e.ctx, db.SetUserPoolParams{UserID: e.u.ID, PoolID: pool.ID, Mode: PoolOwn, TrafficLimit: sql.NullInt64{Int64: 10, Valid: true}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.st.Q.SetUserPoolLimit(e.ctx, db.SetUserPoolLimitParams{UserID: e.u.ID, PoolID: other.ID}); err != nil {
+	if err := e.st.Q.SetUserPool(e.ctx, db.SetUserPoolParams{UserID: e.u.ID, PoolID: other.ID, Mode: PoolUnlimited}); err != nil {
 		t.Fatal(err)
 	}
 	ids := func() []int64 {

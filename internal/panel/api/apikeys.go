@@ -16,6 +16,7 @@ import (
 
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/secure"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/support"
 )
@@ -86,16 +87,16 @@ func (h *handlers) registerAPIKeys() {
 }
 
 func viewAPIKey(k db.ApiKey) APIKeyView {
-	v := APIKeyView{ID: k.ID, Name: k.Name, Prefix: k.Prefix, Scope: k.Scope, CreatedAt: time.Unix(k.CreatedAt, 0).UTC(), LastIP: k.LastIp}
-	if k.ExpiresAt.Valid {
-		t := time.Unix(k.ExpiresAt.Int64, 0).UTC()
-		v.ExpiresAt = &t
+	return APIKeyView{
+		ID:         k.ID,
+		Name:       k.Name,
+		Prefix:     k.Prefix,
+		Scope:      k.Scope,
+		CreatedAt:  store.Time(k.CreatedAt),
+		LastIP:     k.LastIp,
+		ExpiresAt:  store.TimePtr(k.ExpiresAt),
+		LastUsedAt: store.TimePtr(k.LastUsedAt),
 	}
-	if k.LastUsedAt.Valid {
-		t := time.Unix(k.LastUsedAt.Int64, 0).UTC()
-		v.LastUsedAt = &t
-	}
-	return v
 }
 
 func hashAPIKey(key string) string {

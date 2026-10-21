@@ -64,7 +64,7 @@ func TestSavedFilesLoad(t *testing.T) {
 	if _, ok, err := loadState(filepath.Join(dir, stateFile), quiet()); ok || err != nil {
 		t.Fatalf("no file yet: nothing to apply, %v %v", ok, err)
 	}
-	e := &Engine{dataDir: dir, log: quiet(), Reg: NewRegistry("e1", 7, time.Minute, time.Now)}
+	e := &Engine{dataDir: dir, log: quiet(), Reg: NewRegistry("e1", 7, time.Minute, time.Now, &fakeCore{})}
 	if err := e.saveState(nodeapi.DesiredState{Revision: 5, Epoch: "e1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func counted(r *Registry, slot string, up, down int64) {
 // the panel drops a batch whose seq it has stored already. The first traffic after a
 // crash must therefore get a seq beyond anything the old process cut.
 func TestRestoreSkipsAheadOfBatchesLostInACrash(t *testing.T) {
-	r := NewRegistry("e1", 0, time.Minute, time.Now)
+	r := NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{})
 	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
 	counted(r, "s1", 10, 20)
@@ -108,7 +108,7 @@ func TestRestoreSkipsAheadOfBatchesLostInACrash(t *testing.T) {
 	}
 	panelSeq := int64(5) // the panel stored all of them
 
-	r2 := NewRegistry(saved.Epoch, saved.Seq, time.Minute, time.Now)
+	r2 := NewRegistry(saved.Epoch, saved.Seq, time.Minute, time.Now, &fakeCore{})
 	r2.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
 	r2.restore(saved)
 	// The pending batch of the file is sent again under its own seq: the panel drops it.
@@ -131,10 +131,12 @@ func TestRestoreSkipsAheadOfBatchesLostInACrash(t *testing.T) {
 // With no traffic nothing is cut: no seq burned, no pending batch, nothing to store or to
 // acknowledge, and the live view still comes through.
 func TestIdleCountersCutNoBatch(t *testing.T) {
-	r := NewRegistry("e1", 3, time.Minute, time.Now)
+	core := &fakeCore{}
+	r := NewRegistry("e1", 3, time.Minute, time.Now, core)
 	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
+	r.SetInbounds(map[string]bool{"vless": false})
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
-	r.admit("u1", "vless", "203.0.113.1", false)
+	core.online("vless", "s1", "203.0.113.1", 1, time.Now())
 	for range 3 {
 		c := r.Counters()
 		if !c.Idle || c.Seq != 3 || len(c.Slots) != 0 || c.Epoch != "e1" {
@@ -167,7 +169,7 @@ func TestIdleCountersCutNoBatch(t *testing.T) {
 // Apply runs before the counters are restored, so after a restart the quotas are set once
 // more with the counters in place.
 func TestRestoreRebasesQuotas(t *testing.T) {
-	e := &Engine{dataDir: t.TempDir(), log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now)}
+	e := &Engine{dataDir: t.TempDir(), log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{})}
 	e.Reg.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
 	policies := []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: 1000}}
 	e.applied = nodeapi.DesiredState{Epoch: "e1", Policies: policies}
@@ -181,14 +183,14 @@ func TestRestoreRebasesQuotas(t *testing.T) {
 // Listeners with one key for everyone have no devices and no counters to keep: every
 // packet of a busy UDP listener would otherwise take locks and grow maps nobody reads.
 func TestSharedListenerKeepsNothing(t *testing.T) {
-	r := NewRegistry("e1", 0, time.Minute, time.Now)
+	r := NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{})
 	r.SetShared([]string{"ss"})
 	for i := range 500 {
-		s := r.admit("", "ss", "198.51.100."+string(rune('a'+i%26)), true)
+		s := r.admitIn("", "ss", "198.51.100."+string(rune('a'+i%26)))
 		if s == nil {
 			t.Fatal("a shared listener takes everyone")
 		}
-		s.countIn(nil, 1000, 1000)
+		s.countIn("", 1000, 1000)
 	}
 	s := r.sharedSlot("ss")
 	if len(s.ips) != 0 || len(s.seen) != 0 || s.up.Load() != 0 || s.down.Load() != 0 {
@@ -199,36 +201,11 @@ func TestSharedListenerKeepsNothing(t *testing.T) {
 	}
 }
 
-// A device that left is dropped from the slot, but not by a sweep on every packet.
-func TestDevicesThatLeftAreSweptOncePerSecond(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	r := NewRegistry("e1", 0, 10*time.Second, func() time.Time { return now })
-	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
-	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, DeviceLimit: 1}})
-	r.admit("u1", "hy2", "203.0.113.1", false)
-	now = now.Add(11 * time.Second)
-	// The first device is gone: a second one takes its place at once.
-	if r.admit("u1", "hy2", "203.0.113.2", false) == nil {
-		t.Fatal("the place of a device that left is free")
-	}
-	// The same device's packets within the same second do not sweep again.
-	swept := r.lookup("s1").cleaned
-	for range 50 {
-		r.admit("u1", "hy2", "203.0.113.2", false)
-	}
-	if !r.lookup("s1").cleaned.Equal(swept) {
-		t.Fatal("the sweep ran again within the second")
-	}
-	if r.admit("u1", "hy2", "203.0.113.3", false) != nil {
-		t.Fatal("the limit still holds for a third device")
-	}
-}
-
 // The panel pushes the quotas left every half minute; they change with every byte, and
 // the node does not write the whole state file for that, only for a real change.
 func TestPoliciesPushWritesStateOnlyWhenTheyChange(t *testing.T) {
 	dir := t.TempDir()
-	e := &Engine{dataDir: dir, log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now)}
+	e := &Engine{dataDir: dir, log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{})}
 	e.Reg.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}})
 	file := filepath.Join(dir, stateFile)
 	push := func(allowed bool, quota int64) {
@@ -271,7 +248,7 @@ func TestPoliciesPushWritesStateOnlyWhenTheyChange(t *testing.T) {
 // A panel newer than the node sends fields the node does not know; they must not turn
 // the push of policies or state into an error.
 func TestNodeAPIIgnoresUnknownFields(t *testing.T) {
-	e := &Engine{dataDir: t.TempDir(), log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now)}
+	e := &Engine{dataDir: t.TempDir(), log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{})}
 	srv := httptest.NewServer(Handler(e, quiet()))
 	defer srv.Close()
 	body := `{"epoch":"e1","policies":[{"slot":"s1","allowed":true,"quota_remaining":-1,"base_seq":0,"from_the_future":{"x":1}}],"also_new":true}`
@@ -319,8 +296,5 @@ func TestBrokenInboundIsRejectedAlone(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil || len(cfg.Listeners) != 1 || cfg.Listeners[0]["name"] != "hysteria2" {
 		t.Fatalf("the good inbound runs on: %s %v", raw, err)
-	}
-	if got := withoutRejected([]string{"mystery", "hysteria2"}, rejected); len(got) != 1 || got[0] != "hysteria2" {
-		t.Fatalf("a rejected inbound is not 'recreated': %v", got)
 	}
 }

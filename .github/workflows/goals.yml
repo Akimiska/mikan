@@ -13,7 +13,8 @@ permissions: {}
 
 jobs:
   index:
-    if: github.ref == 'refs/heads/main'
+    # AoiVPN fork: upstream's signed release index; the fork has no signing key.
+    if: github.repository == 'Miroshka000/mikan' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     # The release workflow writes the same index: one writer at a time, each carrying the
     # other's work on.

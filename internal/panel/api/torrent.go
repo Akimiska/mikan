@@ -173,7 +173,7 @@ func (h *handlers) listTorrentHits(ctx context.Context, in *torrentHitsInput) (*
 		out.Body = append(out.Body, TorrentHitView{
 			ID: r.ID, UserID: r.UserID, UserName: r.UserName, NodeID: store.Int64Ptr(r.NodeID), NodeName: r.NodeName,
 			IP: r.Ip, Inbound: r.Inbound, Network: r.Network, Kind: r.Kind, Dest: r.Dest, Hits: r.Hits,
-			At: time.Unix(r.At, 0).UTC(), BannedUntil: store.TimePtr(sql.NullInt64{Int64: r.BannedUntil, Valid: r.BannedUntil > 0}),
+			At: store.Time(r.At), BannedUntil: store.TimePtr(sql.NullInt64{Int64: r.BannedUntil, Valid: r.BannedUntil > 0}),
 			LiftedAt: store.TimePtr(r.LiftedAt),
 		})
 	}

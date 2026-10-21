@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/secure"
+	"mikan/internal/panel/server"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
@@ -22,37 +24,43 @@ import (
 )
 
 type SettingsView struct {
-	Brand         string      `json:"brand"`
-	SupportURL    string      `json:"support_url"`
-	SubTitle      string      `json:"sub_title" doc:"Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего, {devices} — привязанные устройства (2/3); без срока или лимита — ∞"`
-	Announce      string      `json:"sub_announce" doc:"Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title"`
-	AnnounceURL   string      `json:"sub_announce_url" doc:"Куда ведёт нажатие на объявление"`
-	AppBranding   bool        `json:"app_branding" doc:"Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки"`
-	BrandAccent   string      `json:"brand_accent" doc:"Цвет бренда #RRGGBB; пусто — цвет приложения"`
-	BrandLogoURL  string      `json:"brand_logo_url" doc:"Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения"`
-	PublicHost    string      `json:"public_host"`
-	Domain        string      `json:"domain"`
-	PanelPort     int         `json:"panel_port"`
-	SubPort       int         `json:"sub_port" doc:"Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае"`
-	SubPortError  string      `json:"sub_port_error,omitempty" doc:"sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели"`
-	QuietHourUTC  int         `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
-	AdminURL      string      `json:"admin_url"`
-	SubBaseURL    string      `json:"sub_base_url"`
-	SubPublicBase string      `json:"sub_public_base" doc:"Публичный базовый URL подписок, когда панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки ведут на саму панель"`
-	SubGroupMain  string      `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
-	SubGroupAuto  string      `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
-	SubRules      string      `json:"sub_rules" doc:"Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий"`
-	RuleTargets   []string    `json:"rule_targets" doc:"Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы"`
-	SubRouting    string      `json:"sub_routing" enum:"ru_direct,all,blocked" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN, blocked — через VPN только заблокированное (списки privWL-clash), остальное напрямую"`
-	SubTemplate   string      `json:"sub_template" doc:"Свой профиль Clash (YAML) вместо встроенного для приложений на mihomo; пусто — встроенный. Серверы панель подставляет сама: в proxies и в группы с include-all-proxies или mikan: {nodes, types}"`
-	SubRoutes     subs.Routes `json:"sub_routes" doc:"Куда идут сервисы (services: id → vpn, direct, block или node:<id>), какие приложения и сайты идут мимо VPN (direct) и свои DNS (dns). Каталог — GET /api/v1/settings/routes/catalog"`
-	Fingerprint   string      `json:"client_fingerprint" doc:"Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение"`
-	AutoPort      bool        `json:"auto_port" doc:"Переносить подключение на другой порт, если клиенты перестали до него доходить"`
-	AutoSNI       bool        `json:"auto_sni" doc:"Менять сайт маскировки REALITY, если он перестал подходить"`
-	WideScan      bool        `json:"wide_sni_scan" doc:"Искать сайты маскировки REALITY не только в /24 ноды, но и в соседних /24 её /16, до 20 найденных сайтов или 2 минут. Много подключений: хостер может принять это за сканирование сети"`
-	AnyPort       bool        `json:"any_port" doc:"Когда запасные порты (2053, 2083…) заняты, панель сама берёт любой свободный из 20000-32767: для нового подключения без порта и при автопереносе. Эти порты установщик в файрволе не открывает"`
-	SupportAccess bool        `json:"support_access" doc:"Разрешить доступ для поддержки (Настройки → Безопасность). Выключено: новый доступ не выдать, действующий закрывается. MIKAN_SUPPORT_ACCESS=off в .env сервера выключает его независимо от этой настройки"`
-
+	Brand          string `json:"brand"`
+	SupportURL     string `json:"support_url"`
+	SubTitle       string `json:"sub_title" doc:"Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего, {devices} — привязанные устройства (2/3); без срока или лимита — ∞"`
+	Announce       string `json:"sub_announce" doc:"Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title"`
+	AnnounceURL    string `json:"sub_announce_url" doc:"Куда ведёт нажатие на объявление"`
+	AppBranding    bool   `json:"app_branding" doc:"Брендинг в приложениях, читающих операторские заголовки (ClashFest, SlothClash): название, логотип, цвет, ссылки"`
+	InactiveServer bool   `json:"sub_inactive_server" doc:"Подписка, которая не может подключиться (кончился срок или трафик, отключена), получает вместо серверов одну запись с объяснением"`
+	InactiveText   string `json:"sub_inactive_text" doc:"Свой текст этой записи; пусто — свой по причине. Переменные как в названии подписки"`
+	SiteTemplate   string `json:"site_template" enum:",maintenance,cats" doc:"Первая страница по адресу панели для посторонних: пусто — ответ 404, maintenance — технические работы, cats — котики-кликер"`
+	SiteOwn        bool   `json:"site_own" doc:"В data/panel/www есть своя страница: шаблон не действует"`
+	BrandAccent    string `json:"brand_accent" doc:"Цвет бренда #RRGGBB; пусто — цвет приложения"`
+	BrandLogoURL   string `json:"brand_logo_url" doc:"Логотип: https, PNG, WebP или JPEG до 512 КБ; пусто — значок приложения"`
+	PublicHost     string `json:"public_host"`
+	Domain         string `json:"domain"`
+	SubDomain      string `json:"sub_domain" doc:"Свой домен для ссылок подписки; пусто — адрес панели"`
+	// SubCertificate is the subscription domain's own certificate; absent in development.
+	SubCertificate *acme.Status `json:"sub_certificate,omitempty" doc:"Сертификат домена подписки: kind off — домен не задан"`
+	PanelPort      int          `json:"panel_port"`
+	SubPort        int          `json:"sub_port" doc:"Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае"`
+	SubPortError   string       `json:"sub_port_error,omitempty" doc:"sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели"`
+	QuietHourUTC   int          `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
+	AdminURL       string       `json:"admin_url"`
+	SubBaseURL     string       `json:"sub_base_url"`
+	SubPublicBase  string       `json:"sub_public_base" doc:"Публичный базовый URL подписок, когда панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки ведут на саму панель"`
+	SubGroupMain   string       `json:"sub_group_main" doc:"Главная группа в Clash-приложениях"`
+	SubGroupAuto   string       `json:"sub_group_auto" doc:"Группа автовыбора самого быстрого подключения"`
+	SubRules       string       `json:"sub_rules" doc:"Свои правила Clash: по строке TYPE,VALUE,TARGET[,no-resolve]; # — комментарий"`
+	RuleTargets    []string     `json:"rule_targets" doc:"Куда правило может направить трафик: DIRECT, REJECT, REJECT-DROP, PROXY и группы"`
+	SubRouting     string       `json:"sub_routing" enum:"ru_direct,all,blocked" doc:"Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN, blocked — через VPN только заблокированное (списки privWL-clash), остальное напрямую"`
+	SubTemplate    string       `json:"sub_template" doc:"Свой профиль Clash (YAML) вместо встроенного для приложений на mihomo; пусто — встроенный. Серверы панель подставляет сама: в proxies и в группы с include-all-proxies или mikan: {nodes, types}"`
+	SubRoutes      subs.Routes  `json:"sub_routes" doc:"Куда идут сервисы (services: id → vpn, direct, block или node:<id>), какие приложения и сайты идут мимо VPN (direct) и свои DNS (dns). Каталог — GET /api/v1/settings/routes/catalog"`
+	Fingerprint    string       `json:"client_fingerprint" doc:"Отпечаток TLS (uTLS) у клиентов, если у подключения не задан свой: chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized или своё значение"`
+	AutoPort       bool         `json:"auto_port" doc:"Переносить подключение на другой порт, если клиенты перестали до него доходить"`
+	AutoSNI        bool         `json:"auto_sni" doc:"Менять сайт маскировки REALITY, если он перестал подходить"`
+	WideScan       bool         `json:"wide_sni_scan" doc:"Искать сайты маскировки REALITY не только в /24 ноды, но и в соседних /24 её /16, до 20 найденных сайтов или 2 минут. Много подключений: хостер может принять это за сканирование сети"`
+	AnyPort        bool         `json:"any_port" doc:"Когда запасные порты (2053, 2083…) заняты, панель сама берёт любой свободный из 20000-32767: для нового подключения без порта и при автопереносе. Эти порты установщик в файрволе не открывает"`
+	SupportAccess  bool         `json:"support_access" doc:"Разрешить доступ для поддержки (Настройки → Безопасность). Выключено: новый доступ не выдать, действующий закрывается. MIKAN_SUPPORT_ACCESS=off в .env сервера выключает его независимо от этой настройки"`
 	// Devices: see domain.Devices.
 	DeviceBinding bool `json:"device_binding" doc:"Привязывать подписку к устройствам: у каждого устройства свои ключи"`
 	RequireHWID   bool `json:"device_require_hwid" doc:"Не выдавать подписку приложениям без ID устройства (иначе они вместе занимают одно место)"`
@@ -86,44 +94,48 @@ type patchSettingsInput struct {
 // patchSettingsBody is the body of PATCH /settings; an alias of the struct, so the API's
 // schema keeps its name (PatchSettingsInputBody). settingFields says how each is written.
 type patchSettingsBody = struct {
-	Brand         *string              `json:"brand,omitempty" maxLength:"40"`
-	SupportURL    *string              `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
-	SubTitle      *string              `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
-	Announce      *string              `json:"sub_announce,omitempty" maxLength:"1000" doc:"До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов"`
-	AnnounceURL   *string              `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
-	AppBranding   *bool                `json:"app_branding,omitempty"`
-	BrandAccent   *string              `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
-	BrandLogoURL  *string              `json:"brand_logo_url,omitempty" maxLength:"500" doc:"https://… или пусто"`
-	HappRouting   *string              `json:"happ_routing,omitempty" maxLength:"65536" doc:"happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать"`
-	HappProvider  *string              `json:"happ_provider_id,omitempty" maxLength:"64"`
-	HappHide      *bool                `json:"happ_hide_settings,omitempty"`
-	HappCrypt     *string              `json:"happ_crypt,omitempty" enum:"off,api,local"`
-	PublicHost    *string              `json:"public_host,omitempty" maxLength:"253"`
-	Domain        *string              `json:"domain,omitempty" maxLength:"253"`
-	QuietHourUTC  *int                 `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
-	SubGroupMain  *string              `json:"sub_group_main,omitempty" maxLength:"200"`
-	SubGroupAuto  *string              `json:"sub_group_auto,omitempty" maxLength:"200"`
-	SubRouting    *string              `json:"sub_routing,omitempty" enum:"ru_direct,all,blocked"`
-	SubRoutes     *subs.Routes         `json:"sub_routes,omitempty"`
-	SubTemplate   *string              `json:"sub_template,omitempty" maxLength:"524288" doc:"Свой профиль Clash; пусто — вернуть встроенный"`
-	SubRules      *string              `json:"sub_rules,omitempty" maxLength:"65536" doc:"Свои правила Clash, до 500 строк; ошибка указывает номер строки"`
-	Fingerprint   *string              `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
-	AutoPort      *bool                `json:"auto_port,omitempty"`
-	AutoSNI       *bool                `json:"auto_sni,omitempty"`
-	AnyPort       *bool                `json:"any_port,omitempty"`
-	SupportAccess *bool                `json:"support_access,omitempty"`
-	WideScan      *bool                `json:"wide_sni_scan,omitempty"`
-	DeviceBinding *bool                `json:"device_binding,omitempty"`
-	RequireHWID   *bool                `json:"device_require_hwid,omitempty"`
-	DeviceUnbind  *domain.UnbindRules  `json:"device_unbind,omitempty"`
-	LinkReissue   *domain.ReissueRules `json:"link_reissue,omitempty"`
-	DefaultLang   *string              `json:"default_lang,omitempty" enum:"auto,ru,en"`
-	SubPort       *int                 `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
-	SubPublicBase *string              `json:"sub_public_base,omitempty" maxLength:"253" doc:"Публичный адрес подписок, если панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки на саму панель"`
-	ACMECA        *string              `json:"acme_ca,omitempty" enum:"letsencrypt,zerossl,google" doc:"Смена центра выпускает сертификаты панели и нод заново"`
-	ACMEEmail     *string              `json:"acme_email,omitempty" maxLength:"254"`
-	ACMEEABKID    *string              `json:"acme_eab_kid,omitempty" maxLength:"256"`
-	ACMEEABHMAC   *string              `json:"acme_eab_hmac,omitempty" maxLength:"512" doc:"Ключ HMAC (base64url); пусто — убрать. Обратно не показывается"`
+	Brand          *string              `json:"brand,omitempty" maxLength:"40"`
+	SupportURL     *string              `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+	SubTitle       *string              `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
+	Announce       *string              `json:"sub_announce,omitempty" maxLength:"1000" doc:"До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов"`
+	AnnounceURL    *string              `json:"sub_announce_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
+	AppBranding    *bool                `json:"app_branding,omitempty"`
+	InactiveServer *bool                `json:"sub_inactive_server,omitempty"`
+	InactiveText   *string              `json:"sub_inactive_text,omitempty" maxLength:"120"`
+	SiteTemplate   *string              `json:"site_template,omitempty" enum:",maintenance,cats"`
+	BrandAccent    *string              `json:"brand_accent,omitempty" maxLength:"7" doc:"#RRGGBB или пусто"`
+	BrandLogoURL   *string              `json:"brand_logo_url,omitempty" maxLength:"500" doc:"https://… или пусто"`
+	HappRouting    *string              `json:"happ_routing,omitempty" maxLength:"65536" doc:"happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать"`
+	HappProvider   *string              `json:"happ_provider_id,omitempty" maxLength:"64"`
+	HappHide       *bool                `json:"happ_hide_settings,omitempty"`
+	HappCrypt      *string              `json:"happ_crypt,omitempty" enum:"off,api,local"`
+	PublicHost     *string              `json:"public_host,omitempty" maxLength:"253"`
+	Domain         *string              `json:"domain,omitempty" maxLength:"253"`
+	SubDomain      *string              `json:"sub_domain,omitempty" maxLength:"253" doc:"Домен для ссылок подписки, отдельный от домена панели; пусто — убрать. Старые ссылки продолжают работать"`
+	QuietHourUTC   *int                 `json:"quiet_hour_utc,omitempty" minimum:"0" maximum:"23"`
+	SubGroupMain   *string              `json:"sub_group_main,omitempty" maxLength:"200"`
+	SubGroupAuto   *string              `json:"sub_group_auto,omitempty" maxLength:"200"`
+	SubRouting     *string              `json:"sub_routing,omitempty" enum:"ru_direct,all,blocked"`
+	SubRoutes      *subs.Routes         `json:"sub_routes,omitempty"`
+	SubTemplate    *string              `json:"sub_template,omitempty" maxLength:"524288" doc:"Свой профиль Clash; пусто — вернуть встроенный"`
+	SubRules       *string              `json:"sub_rules,omitempty" maxLength:"65536" doc:"Свои правила Clash, до 500 строк; ошибка указывает номер строки"`
+	Fingerprint    *string              `json:"client_fingerprint,omitempty" pattern:"^[a-z0-9_]{1,32}$" doc:"Из списка или своё: латиница в нижнем регистре, цифры и _, до 32 символов"`
+	AutoPort       *bool                `json:"auto_port,omitempty"`
+	AutoSNI        *bool                `json:"auto_sni,omitempty"`
+	AnyPort        *bool                `json:"any_port,omitempty"`
+	SupportAccess  *bool                `json:"support_access,omitempty"`
+	WideScan       *bool                `json:"wide_sni_scan,omitempty"`
+	DeviceBinding  *bool                `json:"device_binding,omitempty"`
+	RequireHWID    *bool                `json:"device_require_hwid,omitempty"`
+	DeviceUnbind   *domain.UnbindRules  `json:"device_unbind,omitempty"`
+	LinkReissue    *domain.ReissueRules `json:"link_reissue,omitempty"`
+	DefaultLang    *string              `json:"default_lang,omitempty" enum:"auto,ru,en"`
+	SubPort        *int                 `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
+	SubPublicBase  *string              `json:"sub_public_base,omitempty" maxLength:"253" doc:"Публичный адрес подписок, если панель за прокси на другом хосте: https://sub.example.com/sub; пусто — ссылки на саму панель"`
+	ACMECA         *string              `json:"acme_ca,omitempty" enum:"letsencrypt,zerossl,google" doc:"Смена центра выпускает сертификаты панели и нод заново"`
+	ACMEEmail      *string              `json:"acme_email,omitempty" maxLength:"254"`
+	ACMEEABKID     *string              `json:"acme_eab_kid,omitempty" maxLength:"256"`
+	ACMEEABHMAC    *string              `json:"acme_eab_hmac,omitempty" maxLength:"512" doc:"Ключ HMAC (base64url); пусто — убрать. Обратно не показывается"`
 }
 
 type resetPathOutput struct {
@@ -172,6 +184,7 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	get(settings.KeyPublicHost, &v.PublicHost)
 	get(settings.KeyDomain, &v.Domain)
 	get(settings.KeySubPublicBase, &v.SubPublicBase)
+	get(settings.KeySubDomain, &v.SubDomain)
 	get(settings.KeyGroupMain, &v.SubGroupMain)
 	get(settings.KeyGroupAuto, &v.SubGroupAuto)
 	get(settings.KeyRouting, &v.SubRouting)
@@ -239,6 +252,14 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if v.LinkReissue, err = domain.LoadReissueRules(ctx, h.d.Settings); err != nil {
 		return v, err
 	}
+	if v.InactiveServer, err = h.d.Settings.On(ctx, settings.InactiveServer); err != nil {
+		return v, err
+	}
+	get(settings.KeyInactiveText, &v.InactiveText)
+	get(settings.KeySiteTemplate, &v.SiteTemplate)
+	if h.d.DataDir != "" {
+		v.SiteOwn = server.HasOwnSite(filepath.Join(h.d.DataDir, "www"))
+	}
 	if v.AppBranding, err = h.d.Settings.On(ctx, settings.AppBranding); err != nil {
 		return v, err
 	}
@@ -277,6 +298,10 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	v.Certificate = acme.Status{Kind: "self-signed", WantCA: acme.CALetsEncrypt}
 	if h.d.Cert != nil {
 		v.Certificate = h.d.Cert()
+	}
+	if h.d.SubCerts != nil {
+		st := h.d.SubCerts.Status()
+		v.SubCertificate = &st
 	}
 	if v.ACMECA, err = acme.ChosenCA(ctx, h.d.Settings); err != nil {
 		return v, err
@@ -330,6 +355,12 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	}
 	if b.Domain != nil && *b.Domain != "" && !hostname.Valid(*b.Domain) {
 		details = append(details, &huma.ErrorDetail{Location: "body.domain", Message: "domain_invalid"})
+	}
+	// The subscription domain is a name of its own: a CA certifies it apart from the panel's.
+	if b.SubDomain != nil {
+		if d := strings.TrimSpace(*b.SubDomain); d != "" && (!hostname.Name(d) || hostname.Reserved(d)) {
+			details = append(details, &huma.ErrorDetail{Location: "body.sub_domain", Message: "sub_domain_invalid"})
+		}
 	}
 	if b.SupportURL != nil && strings.TrimSpace(*b.SupportURL) != "" && !subs.ValidLink(strings.TrimSpace(*b.SupportURL), true) {
 		details = append(details, &huma.ErrorDetail{Location: "body.support_url", Message: "support_url_invalid"})
@@ -473,6 +504,15 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			}
 		}
 	}
+	if (b.SubDomain != nil || b.PublicHost != nil || b.Domain != nil) && len(details) == 0 {
+		ds, err := h.checkSubDomain(ctx, b)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range ds {
+			details = append(details, d)
+		}
+	}
 	if len(details) > 0 {
 		return nil, fieldErrs(details...)
 	}
@@ -513,8 +553,12 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 		return nil, err
 	}
+	// The domain is served at once: its requests, its certificate, ordered now.
+	if b.SubDomain != nil && h.d.SubDomain != nil {
+		h.d.SubDomain(strings.TrimSpace(*b.SubDomain))
+	}
 	// The bot's Mini App button points at the subscription page.
-	if b.SubPort != nil && h.d.Gateway != nil {
+	if (b.SubPort != nil || b.SubDomain != nil) && h.d.Gateway != nil {
 		h.d.Gateway.Reload()
 	}
 	// The certificate is for the domain, or the address without one: a new name gets its
@@ -537,6 +581,9 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	auditDetails := map[string]any{}
 	if b.SubPort != nil {
 		auditDetails["sub_port"] = *b.SubPort
+	}
+	if b.SubDomain != nil {
+		auditDetails["sub_domain"] = strings.TrimSpace(*b.SubDomain)
 	}
 	if b.SupportAccess != nil {
 		auditDetails["support_access"] = *b.SupportAccess

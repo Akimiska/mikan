@@ -51,7 +51,11 @@ func helloLoop(ctx context.Context, key nodetls.Key, dataDir string, log *slog.L
 func helloOnce() {
 	now := time.Now().UTC()
 	var s nodehello.Status
-	key, err := nodetls.DecodeKey(os.Getenv("MIKAN_NODE_JOIN"))
+	raw, err := config.Secret("MIKAN_NODE_JOIN")
+	var key nodetls.Key
+	if err == nil {
+		key, err = nodetls.DecodeKey(raw)
+	}
 	if err != nil {
 		s = nodehello.Status{Result: nodehello.Result{Code: nodehello.NoPanelURL, Error: err.Error()}}
 	} else {
@@ -63,6 +67,6 @@ func helloOnce() {
 	if err := nodehello.Write(envOr("MIKAN_DATA_DIR", config.DefaultDataDir), s); err != nil {
 		fmt.Fprintln(os.Stderr, "mikan-node: save the answer:", err)
 	}
-	raw, _ := json.Marshal(s)
-	fmt.Println(string(raw))
+	out, _ := json.Marshal(s)
+	fmt.Println(string(out))
 }

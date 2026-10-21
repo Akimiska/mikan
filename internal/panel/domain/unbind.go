@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/settings"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -138,7 +139,7 @@ func unbindState(ctx context.Context, q *db.Queries, rules UnbindRules, userID i
 	}
 	st.Used = len(ats)
 	if st.Used >= rules.Limit {
-		st.Next = time.Unix(ats[st.Used-rules.Limit], 0).Add(rules.window()).UTC()
+		st.Next = store.Time(ats[st.Used-rules.Limit]).Add(rules.window())
 	}
 	return st, nil
 }

@@ -45,25 +45,25 @@ func TestTariffPoolsAreWrittenAtomically(t *testing.T) {
 		}
 		return ps
 	}
-	if resp, body := put("Std", []map[string]any{{"pool_id": pool.ID, "traffic_limit": 1 << 30}}); resp.StatusCode != http.StatusOK {
+	if resp, body := put("Std", []map[string]any{{"pool_id": pool.ID, "mode": "own", "traffic_limit": 1 << 30}}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("set limits: %d %s", resp.StatusCode, body)
 	}
 
 	// The same pool twice: refused, and the old limit is still there (it used to be wiped
 	// and the request ended in a 500).
-	resp, body := put("Renamed", []map[string]any{{"pool_id": pool.ID, "traffic_limit": 2 << 30}, {"pool_id": pool.ID, "traffic_limit": 3 << 30}})
+	resp, body := put("Renamed", []map[string]any{{"pool_id": pool.ID, "mode": "own", "traffic_limit": 2 << 30}, {"pool_id": pool.ID, "mode": "own", "traffic_limit": 3 << 30}})
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "pool_duplicate") {
 		t.Fatalf("duplicate pool: %d %s", resp.StatusCode, body)
 	}
-	if ps := limits(); len(ps) != 1 || ps[0].TrafficLimit != 1<<30 {
+	if ps := limits(); len(ps) != 1 || ps[0].TrafficLimit.Int64 != 1<<30 {
 		t.Fatalf("limits after a refused duplicate: %+v", ps)
 	}
 	// An unknown pool after a good one: nothing of the list is applied.
-	resp, body = put("Renamed", []map[string]any{{"pool_id": pool.ID, "traffic_limit": 2 << 30}, {"pool_id": 999, "traffic_limit": 3 << 30}})
+	resp, body = put("Renamed", []map[string]any{{"pool_id": pool.ID, "mode": "own", "traffic_limit": 2 << 30}, {"pool_id": 999, "mode": "own", "traffic_limit": 3 << 30}})
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "pool_not_found") {
 		t.Fatalf("unknown pool: %d %s", resp.StatusCode, body)
 	}
-	if ps := limits(); len(ps) != 1 || ps[0].TrafficLimit != 1<<30 {
+	if ps := limits(); len(ps) != 1 || ps[0].TrafficLimit.Int64 != 1<<30 {
 		t.Fatalf("limits after a refused list: %+v", ps)
 	}
 	if got, _ := h.st.Q.GetTariff(ctx, std.ID); got.Name != "Std" {
@@ -71,7 +71,7 @@ func TestTariffPoolsAreWrittenAtomically(t *testing.T) {
 	}
 	// A new tariff with a bad list is not created at all.
 	resp, _ = h.do(http.MethodPost, api+"/tariffs", map[string]any{"name": "Ghost", "duration_days": 30, "reset_strategy": "none",
-		"pools": []map[string]any{{"pool_id": 999, "traffic_limit": 1 << 30}}}, csrf)
+		"pools": []map[string]any{{"pool_id": 999, "mode": "own", "traffic_limit": 1 << 30}}}, csrf)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("create with an unknown pool: %d", resp.StatusCode)
 	}
@@ -82,10 +82,10 @@ func TestTariffPoolsAreWrittenAtomically(t *testing.T) {
 		t.Fatalf("unknown tariff: %d", resp.StatusCode)
 	}
 	// A good list replaces the limits.
-	if resp, body := put("Std", []map[string]any{{"pool_id": pool.ID, "traffic_limit": 5 << 30}}); resp.StatusCode != http.StatusOK {
+	if resp, body := put("Std", []map[string]any{{"pool_id": pool.ID, "mode": "own", "traffic_limit": 5 << 30}}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("replace: %d %s", resp.StatusCode, body)
 	}
-	if ps := limits(); len(ps) != 1 || ps[0].TrafficLimit != 5<<30 {
+	if ps := limits(); len(ps) != 1 || ps[0].TrafficLimit.Int64 != 5<<30 {
 		t.Fatalf("limits after a good list: %+v", ps)
 	}
 }

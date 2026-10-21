@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Archive, Layers, Package, Pencil, Plus, Tag, X } from "lucide-react";
+import { Archive, Check, Gift, Layers, Package, Pencil, Plus, Tag, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas, type Tariff } from "../../api/client";
 import { onFormError } from "../../lib/fields";
-import { qk, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
+import { qk, usePackages, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { Tabs } from "../../components/tabs";
@@ -15,8 +15,8 @@ import { t } from "../../i18n";
 import { bytes, days, GiB, months, rubles, termMonths } from "../../lib/format";
 import { isKopecks, isStars, parseDecimal, rubKopecks } from "../../lib/validate";
 import { TARIFF_TABS } from "../search";
-import { PackagesCard } from "./packages";
-import { PoolLimitsField, PoolsCard } from "./pools";
+import { fitsTariff, PackagesCard, packageLine } from "./packages";
+import { draftOf, GroupModesField, modeShort, PoolsCard, settingsOf, type GroupDraft } from "./pools";
 import { DeviceModePicker, modeOf, type DeviceMode } from "./user/device-mode";
 
 /** What the server accepts of a description for buyers (domain.CleanDescription). */
@@ -47,24 +47,30 @@ export function tariffSummary(tr: Tariff): string {
 
 const TAB_ICONS = { tariffs: Tag, pools: Layers, packages: Package } as const;
 
-/** A tariff's pool limits by pool name: "WL 100 GB", "Premium closed"; pools without a limit are left out. */
-function poolLimitsText(tr: Tariff, names: Map<number, string>): string {
+/** A tariff's groups apart from the main traffic, by name: "WL 100 GB · Premium not included"; the ones on the main traffic are left out. */
+function groupsText(tr: Tariff, names: Map<number, string>): string {
   return tr.pools
-    .filter((p) => (p.excluded || p.traffic_limit != null) && names.has(p.pool_id))
-    .map((p) => `${names.get(p.pool_id)} ${p.excluded ? t("pools.closed") : bytes(p.traffic_limit!)}`)
+    .filter((p) => p.mode !== "main" && names.has(p.pool_id))
+    .map((p) => `${names.get(p.pool_id)} ${modeShort(p.mode, p.traffic_limit)}`)
     .join(" · ");
 }
+
+/** The parts of a tariff "apply to the subscriptions given out" can bring its users up to. */
+const APPLY_PARTS = ["traffic", "devices", "speed", "groups"] as const;
+type ApplyPart = (typeof APPLY_PARTS)[number];
 
 export function TariffsPage() {
   const { tab } = useSearch({ from: "/_app/tariffs" });
   const navigate = useNavigate({ from: "/tariffs" });
   const pools = usePools();
   const poolNames = new Map((pools.data ?? []).map((p) => [p.id, p.name]));
+  const packages = usePackages();
   const tariffs = useTariffs();
   const selling = usePaymentSettings().data?.enabled === true;
   const [edit, setEdit] = useState<Tariff | "new" | null>(null);
   const [archive, setArchive] = useState<Tariff | null>(null);
   const [applying, setApplying] = useState<Tariff | null>(null);
+  const [parts, setParts] = useState<Record<ApplyPart, boolean>>({ traffic: false, devices: false, speed: false, groups: true });
   const [creating, setCreating] = useState<"pools" | "packages" | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
@@ -78,16 +84,17 @@ export function TariffsPage() {
     },
     onError: (e) => toast.error(errorText(e)),
   });
-  // A tariff's pool limits reach the subscriptions given out before they were set.
-  const applyPools = useMutation({
-    mutationFn: (id: number) => unwrap(api.POST("/api/v1/tariffs/{id}/apply-pools", { params: { path: { id } } })),
+  // A tariff changed after it was given out reaches its subscriptions in the parts chosen.
+  const apply = useMutation({
+    mutationFn: (id: number) => unwrap(api.POST("/api/v1/tariffs/{id}/apply", { params: { path: { id } }, body: parts })),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: qk.users });
-      toast.ok(t("tariffs.applyPoolsDone", { n: r.applied }));
+      toast.ok(t("tariffs.apply.done", { n: r.applied }));
       setApplying(null);
     },
     onError: (e) => toast.error(errorText(e)),
   });
+  const giftNames = (tr: Tariff) => tr.gifts.map((id) => packages.data?.find((p) => p.id === id)?.name).filter(Boolean).join(", ");
 
   return (
     <>
@@ -139,7 +146,7 @@ export function TariffsPage() {
                   {list.map((tr, i) => (
                     <section key={tr.id} className="card glass reveal flex flex-col" style={{ "--i": i } as React.CSSProperties}>
                       <div className="flex items-start justify-between gap-3">
-                        <div>
+                        <div className="min-w-0">
                           <h2 className="font-display text-xl font-medium tracking-tight">{tr.name}</h2>
                           {tr.price_label ? <div className="mt-1 text-[13px] font-medium text-[var(--mikan-700)]">{tr.price_label}</div> : null}
                           {tr.description ? <p className="mt-2 whitespace-pre-line text-[13px] text-[var(--ink-700)]">{tr.description}</p> : null}
@@ -156,11 +163,16 @@ export function TariffsPage() {
                           <button type="button" className="icon-btn" aria-label={t("tariffs.editLabel", { name: tr.name })} onClick={() => setEdit(tr)}>
                             <Pencil size={16} />
                           </button>
-                          {tr.pools.length > 0 ? (
-                            <button type="button" className="icon-btn" aria-label={t("tariffs.applyPoolsLabel", { name: tr.name })} title={t("tariffs.applyPools")} onClick={() => setApplying(tr)}>
-                              <Layers size={16} />
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label={t("tariffs.apply.labelOf", { name: tr.name })}
+                            title={tr.subscribers ? t("tariffs.apply.label") : t("tariffs.apply.none")}
+                            disabled={!tr.subscribers}
+                            onClick={() => setApplying(tr)}
+                          >
+                            <Layers size={16} />
+                          </button>
                           <button type="button" className="icon-btn" aria-label={t("tariffs.archiveLabel", { name: tr.name })} onClick={() => setArchive(tr)}>
                             <Archive size={16} />
                           </button>
@@ -172,9 +184,15 @@ export function TariffsPage() {
                         <Item label={t("users.colDevices")} value={tr.device_limit != null ? (modeOf(tr) === "online" ? t("deviceMode.shortOnline", { n: tr.device_limit }) : String(tr.device_limit)) : t("users.unlimited")} />
                         <Item label={t("tariffs.speed")} value={tr.speed_limit != null ? t("tariffs.speedShort", { n: tr.speed_limit }) : t("users.unlimited")} />
                         <Item label={t("tariffs.reset")} value={resetLabel(tr)} />
-                        {poolLimitsText(tr, poolNames) ? (
+                        <Item label={t("nav.users")} value={t("tariffs.subscribers", { n: tr.subscribers })} />
+                        {groupsText(tr, poolNames) ? (
                           <div className="col-span-2">
-                            <Item label={t("pools.tariffLimits")} value={poolLimitsText(tr, poolNames)} />
+                            <Item label={t("pools.tariffLimits")} value={groupsText(tr, poolNames)} />
+                          </div>
+                        ) : null}
+                        {giftNames(tr) ? (
+                          <div className="col-span-2">
+                            <Item label={t("tariffs.gifts")} value={giftNames(tr)} />
                           </div>
                         ) : null}
                       </dl>
@@ -199,12 +217,22 @@ export function TariffsPage() {
       <Confirm
         open={!!applying}
         onOpenChange={(v) => !v && setApplying(null)}
-        title={t("tariffs.applyPoolsTitle", { name: applying?.name ?? "" })}
-        text={applying ? t("tariffs.applyPoolsText", { limits: poolLimitsText(applying, poolNames) }) : ""}
-        confirm={t("tariffs.applyPoolsConfirm")}
-        loading={applyPools.isPending}
-        onConfirm={() => applying && applyPools.mutate(applying.id)}
-      />
+        title={t("tariffs.apply.title", { name: applying?.name ?? "" })}
+        text={applying ? t("tariffs.apply.text", { n: applying.subscribers }) : ""}
+        confirm={t("tariffs.apply.confirm")}
+        confirmDisabled={!APPLY_PARTS.some((p) => parts[p])}
+        loading={apply.isPending}
+        onConfirm={() => applying && apply.mutate(applying.id)}
+      >
+        <fieldset className="mt-4 flex flex-col gap-1" aria-label={t("tariffs.apply.label")}>
+          {APPLY_PARTS.map((p) => (
+            <label key={p} className="flex items-center gap-2 py-1.5 text-[13px]">
+              <input type="checkbox" className="check" checked={parts[p]} onChange={(e) => setParts({ ...parts, [p]: e.target.checked })} />
+              {t(`tariffs.apply.${p}`)}
+            </label>
+          ))}
+        </fieldset>
+      </Confirm>
     </>
   );
 }
@@ -240,13 +268,24 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
   const allPools = usePools();
   // With selling off the sale block is hidden; its values stay as they were.
   const selling = usePaymentSettings().data?.enabled === true;
-  const [poolGB, setPoolGB] = useState<Record<number, string>>({});
-  const [poolClosed, setPoolClosed] = useState<Record<number, boolean>>({});
+  const allPackages = usePackages();
+  // How the tariff has each server group, and the packages it gives with every payment.
+  const [groups, setGroups] = useState<Record<number, GroupDraft>>({});
+  const [gifts, setGifts] = useState<Set<number>>(new Set());
   const [stars, setStars] = useState("");
   const [rub, setRub] = useState("");
   // The terms after the first: days, or months with a billing day, and their prices.
   const [more, setMore] = useState<ExtraTerm[]>([]);
+  // One more device bought in the bot: its price and how many a subscription may buy.
+  const [devMax, setDevMax] = useState("0");
+  const [devStars, setDevStars] = useState("");
+  const [devRub, setDevRub] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // What the form gives now: the packages that add to it can be gifts and be bought.
+  const draft = { trafficLimited: !unlimited, groups };
+  const tariffId = tariff && tariff !== "new" ? tariff.id : 0;
+  const giftable = (allPackages.data ?? []).filter((p) => fitsTariff(p, draft));
+  const buyable = (allPackages.data ?? []).filter((p) => p.on_sale && fitsTariff(p, draft) && (p.tariffs.length === 0 || p.tariffs.includes(tariffId)));
 
   useEffect(() => {
     if (!tariff) return;
@@ -267,10 +306,14 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     setPrice(tr?.price_label ?? "");
     setDescription(tr?.description ?? "");
     setOnSale(tr?.on_sale ?? false);
-    setPoolGB(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, p.traffic_limit != null ? String(+(p.traffic_limit / GiB).toFixed(2)) : ""])));
-    setPoolClosed(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, !!p.excluded])));
+    // The view lists every group with the tariff's mode; a new tariff has them all on the main traffic.
+    setGroups(Object.fromEntries((tr?.pools ?? []).map((p) => [p.pool_id, draftOf(p)])));
+    setGifts(new Set(tr?.gifts ?? []));
     setStars(tr?.price_stars != null ? String(tr.price_stars) : "");
     setRub(tr?.price_rub != null ? String(tr.price_rub / 100) : "");
+    setDevMax(String(tr?.extra_devices.max ?? 0));
+    setDevStars(tr?.extra_devices.price_stars != null ? String(tr.extra_devices.price_stars) : "");
+    setDevRub(tr?.extra_devices.price_rub != null ? String(tr.extra_devices.price_rub / 100) : "");
     setMore(
       (tr?.terms ?? []).slice(1).map((x) => ({
         key: nextKey++,
@@ -305,12 +348,8 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     const dayN = Number(billingDay);
     const devN = Number(devices);
     const speedN = Number(speed);
-    const poolLimits = (allPools.data ?? []).map((p) => {
-      if (poolClosed[p.id]) return { pool_id: p.id, traffic_limit: null, excluded: true };
-      const v = (poolGB[p.id] ?? "").trim();
-      return { pool_id: p.id, traffic_limit: v ? Math.round(parseDecimal(v) * GiB) : null };
-    });
-    if (poolLimits.some((p) => p.traffic_limit !== null && (!Number.isFinite(p.traffic_limit) || p.traffic_limit <= 0))) errs.pools = t("pools.errLimit");
+    const groupSettings = settingsOf(allPools.data ?? [], groups);
+    if (groupSettings.error) errs.pools = groupSettings.error;
     const toDay = term === "day";
     if (!name.trim()) errs.name = t("tariffs.errName");
     if ([...description.trim()].length > DESCRIPTION_MAX) errs.description = t("errors.api.description_too_long");
@@ -326,6 +365,13 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
     if (stars.trim() && !isStars(starsN)) errs.price_stars = t("tariffs.errStars");
     if (rub.trim() && !isKopecks(rubN)) errs.price_rub = t("tariffs.errRub");
     if (onSale && !stars.trim() && !rub.trim()) errs.on_sale = t("errors.api.on_sale_no_price");
+    const devMaxN = Number(devMax || "0");
+    const devStarsN = Number(devStars);
+    const devRubN = rubKopecks(devRub);
+    if (!Number.isInteger(devMaxN) || devMaxN < 0 || devMaxN > 50) errs["extra_devices.max"] = t("tariffs.extraDevices.errMax");
+    if (devStars.trim() && !isStars(devStarsN)) errs["extra_devices.price_stars"] = t("tariffs.errStars");
+    if (devRub.trim() && !isKopecks(devRubN)) errs["extra_devices.price_rub"] = t("tariffs.errRub");
+    if (devMaxN > 0 && !devStars.trim() && !devRub.trim()) errs["extra_devices.price_rub"] = t("errors.api.extra_devices_price");
     const firstDays = toDay ? monN * 30 : durN;
     const seen = new Set([firstDays]);
     const terms: Schemas["TermBody"][] = [{ days: firstDays, price_stars: stars.trim() ? starsN : undefined, price_rub: rub.trim() ? rubN : undefined }];
@@ -362,7 +408,15 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       price_rub: rub.trim() ? rubN : undefined,
       terms,
       on_sale: onSale,
-      pools: poolLimits,
+      pools: groupSettings.settings,
+      // A gift that no longer fits what the form gives (a limit taken off) is not sent.
+      gifts: [...gifts].filter((id) => {
+        const p = allPackages.data?.find((x) => x.id === id);
+        return p != null && fitsTariff(p, draft);
+      }),
+      extra_devices: devicesUnlimited
+        ? { max: 0, price_stars: null, price_rub: null }
+        : { max: devMaxN, price_stars: devStars.trim() ? devStarsN : null, price_rub: devRub.trim() ? devRubN : null },
       // PUT replaces the tariff: keep its place in the list.
       sort: tariff && tariff !== "new" ? tariff.sort : undefined,
     });
@@ -481,11 +535,81 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
             />
           </Field>
         ) : null}
-        {allPools.data?.length ? (
-          <Field label={t("pools.tariffLimits")} hint={`${t("pools.tariffLimitsHint")} ${t("pools.closeHint")}`} error={errors.pools}>
-            <PoolLimitsField pools={allPools.data} value={poolGB} onChange={setPoolGB} closed={poolClosed} onClosed={setPoolClosed} />
+        <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-labelledby="t-contents">
+          <div className="mb-3">
+            <div id="t-contents" className="text-[13px] font-semibold">
+              {t("tariffs.contents")}
+            </div>
+            <div className="text-xs text-[var(--ink-500)]">{t("tariffs.contentsSub")}</div>
+          </div>
+          {allPools.data?.length ? (
+            <Field label={t("pools.tariffLimits")} hint={`${t("pools.tariffLimitsHint")} ${t("pools.closeHint")}`} error={errors.pools}>
+              <GroupModesField groups={allPools.data} value={groups} onChange={setGroups} />
+            </Field>
+          ) : null}
+          <Field label={t("tariffs.gifts")} hint={t("tariffs.giftsHint")} error={errors.gifts}>
+            {allPackages.isPending ? (
+              <Skeleton style={{ height: 44 }} />
+            ) : (allPackages.data ?? []).length === 0 ? (
+              <p className="text-xs text-[var(--ink-500)]">{t("tariffs.giftsNone")}</p>
+            ) : (
+              <ul className="row-list rounded-2xl border border-[var(--hairline)] px-3">
+                {(allPackages.data ?? []).map((p) => {
+                  const fits = giftable.includes(p);
+                  return (
+                    <li key={p.id}>
+                      <label className={`flex items-center gap-2 py-2 text-[13px] ${fits ? "" : "text-[var(--ink-400)]"}`}>
+                        <input
+                          type="checkbox"
+                          className="check"
+                          checked={fits && gifts.has(p.id)}
+                          disabled={!fits}
+                          aria-label={t("tariffs.giftOf", { name: p.name })}
+                          onChange={(e) => {
+                            const next = new Set(gifts);
+                            if (e.target.checked) next.add(p.id);
+                            else next.delete(p.id);
+                            setGifts(next);
+                          }}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="font-medium">{p.name}</span>
+                          <span className="block truncate text-xs text-[var(--ink-500)]">{packageLine(p, allPools.data)}</span>
+                        </span>
+                        {fits ? null : <span className="text-xs">{t("packages.notFit")}</span>}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Field>
-        ) : null}
+          <Field label={t("tariffs.buyable")}>
+            {buyable.length ? (
+              <ul className="flex flex-wrap gap-1.5">
+                {buyable.map((p) => (
+                  <li key={p.id}>
+                    <Pill tone="ok">
+                      {p.name} · {bytes(p.bytes)}
+                    </Pill>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-[var(--ink-500)]">{t("tariffs.buyableNone")}</p>
+            )}
+          </Field>
+          <TariffPreview
+            name={name.trim() || t("tariffs.namePlaceholder")}
+            traffic={unlimited ? null : Math.round(Number(gb) * GiB) || null}
+            devices={devicesUnlimited ? null : Number(devices) || null}
+            online={deviceMode === "online"}
+            speed={speedUnlimited ? null : Number(speed) || null}
+            groups={(allPools.data ?? []).map((g) => ({ name: g.name, draft: groups[g.id] ?? draftOf(undefined), serving: g.inbound_ids.length > 0 }))}
+            gifts={(allPackages.data ?? []).filter((p) => gifts.has(p.id) && giftable.includes(p)).map((p) => packageLine(p, allPools.data))}
+            description={description.trim()}
+          />
+        </div>
         <div className="border-t border-[var(--hairline)] pt-4" role="group" aria-label={t("tariffs.sale")}>
           {selling ? (
             <>
@@ -516,6 +640,29 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
                 </Field>
               </div>
               <MoreTerms value={more} onChange={setMore} toDay={term === "day"} errors={errors} />
+              {devicesUnlimited ? null : (
+                <div className="mb-4" role="group" aria-label={t("tariffs.extraDevices.title")}>
+                  <div className="text-[13px] font-semibold">{t("tariffs.extraDevices.title")}</div>
+                  <div className="mb-2 text-xs text-[var(--ink-500)]">{t("tariffs.extraDevices.sub")}</div>
+                  <div className="grid gap-x-3 sm:grid-cols-3">
+                    <Field label={t("tariffs.extraDevices.max")} htmlFor="t-dev-max" error={errors["extra_devices.max"]}>
+                      <input id="t-dev-max" className="input max-w-[100px]" inputMode="numeric" value={devMax} onChange={(e) => setDevMax(e.target.value)} aria-invalid={!!errors["extra_devices.max"]} />
+                    </Field>
+                    <Field label={t("tariffs.extraDevices.stars")} htmlFor="t-dev-stars" error={errors["extra_devices.price_stars"]}>
+                      <div className="flex items-center gap-2">
+                        <input id="t-dev-stars" className="input max-w-[120px]" inputMode="numeric" value={devStars} onChange={(e) => setDevStars(e.target.value)} placeholder="40" aria-invalid={!!errors["extra_devices.price_stars"]} />
+                        <span className="text-[var(--ink-500)]">⭐</span>
+                      </div>
+                    </Field>
+                    <Field label={t("tariffs.extraDevices.rub")} htmlFor="t-dev-rub" error={errors["extra_devices.price_rub"]}>
+                      <div className="flex items-center gap-2">
+                        <input id="t-dev-rub" className="input max-w-[120px]" inputMode="decimal" value={devRub} onChange={(e) => setDevRub(e.target.value)} placeholder="49" aria-invalid={!!errors["extra_devices.price_rub"]} />
+                        <span className="text-[var(--ink-500)]">₽</span>
+                      </div>
+                    </Field>
+                  </div>
+                </div>
+              )}
             </>
           ) : null}
           <Field label={t("tariffs.price")} htmlFor="t-price" hint={t("tariffs.priceHint")}>
@@ -582,5 +729,77 @@ function MoreTerms({ value, onChange, toDay, errors }: { value: ExtraTerm[]; onC
         </Button>
       ) : null}
     </div>
+  );
+}
+
+/** The tariff as the buyer reads it in the bot and the Mini App: the line of its limits, its
+ * server groups (the ones with servers in them), its gifts and the admin's description. */
+function TariffPreview({
+  name,
+  traffic,
+  devices,
+  online,
+  speed,
+  groups,
+  gifts,
+  description,
+}: {
+  name: string;
+  traffic: number | null;
+  devices: number | null;
+  online: boolean;
+  speed: number | null;
+  groups: { name: string; draft: GroupDraft; serving: boolean }[];
+  gifts: string[];
+  description: string;
+}) {
+  const limits = [
+    traffic != null ? bytes(traffic) : t("users.unlimited"),
+    ...(devices != null ? [t(online ? "deviceMode.shortOnline" : "userDrawer.devicesShort", { n: devices })] : []),
+    ...(speed != null ? [t("tariffs.speedShort", { n: speed })] : []),
+  ].join(" · ");
+  const line = (g: { name: string; draft: GroupDraft }) => {
+    switch (g.draft.mode) {
+      case "own": {
+        const gb = parseDecimal(g.draft.gb.trim());
+        return t("tariffs.groupOwn", { name: g.name, gb: gb > 0 ? bytes(Math.round(gb * GiB)) : "—" });
+      }
+      case "unlimited":
+        return t("tariffs.groupUnlimited", { name: g.name });
+      case "closed":
+        return t("tariffs.groupClosed", { name: g.name });
+      default:
+        return t("tariffs.groupIn", { name: g.name });
+    }
+  };
+  const shown = groups.filter((g) => g.serving);
+  return (
+    <section className="panel-soft p-4" aria-labelledby="t-preview">
+      <div id="t-preview" className="text-[13px] font-semibold">
+        {t("tariffs.preview")}
+      </div>
+      <div className="mb-3 text-xs text-[var(--ink-500)]">{t("tariffs.previewHint")}</div>
+      <div className="rounded-2xl border border-[var(--hairline)] bg-[var(--surface)] p-3">
+        <div className="text-[13px] font-semibold">{name}</div>
+        <div className="text-xs text-[var(--ink-600)]">{limits}</div>
+        {shown.length || gifts.length ? (
+          <ul className="mt-2 flex flex-col gap-1 text-xs text-[var(--ink-700)]">
+            {shown.map((g) => (
+              <li key={g.name} className="flex items-center gap-1.5">
+                {g.draft.mode === "closed" ? <X size={14} className="shrink-0 text-[var(--ink-400)]" aria-hidden /> : <Check size={14} className="shrink-0 text-[var(--leaf-500)]" aria-hidden />}
+                {line(g)}
+              </li>
+            ))}
+            {gifts.map((what) => (
+              <li key={what} className="flex items-center gap-1.5">
+                <Gift size={14} className="shrink-0 text-[var(--mikan-600)]" aria-hidden />
+                {t("tariffs.previewGift", { what })}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {description ? <p className="mt-2 whitespace-pre-line text-xs text-[var(--ink-600)]">{description}</p> : null}
+      </div>
+    </section>
   );
 }

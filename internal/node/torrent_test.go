@@ -27,13 +27,15 @@ func utpSynPacket(ext ...[]byte) []byte {
 	binary.BigEndian.PutUint32(b[4:], 123456789) // timestamp
 	binary.BigEndian.PutUint32(b[12:], 1<<20)    // window
 	binary.BigEndian.PutUint16(b[16:], 1)        // seq
+	// The extension bits (type 2, 8 bytes) first, as libutp sends them, then selective
+	// acks (type 1, whole 32-bit words).
 	for i, e := range ext {
 		if i == 0 {
 			b[1] = 2
 		}
 		next := byte(0)
 		if i < len(ext)-1 {
-			next = 2
+			next = 1
 		}
 		b = append(append(b, next, byte(len(e))), e...)
 	}
@@ -66,7 +68,7 @@ func TestTorrentTCP(t *testing.T) {
 
 func TestTorrentUDP(t *testing.T) {
 	tracker := make([]byte, 16)
-	binary.BigEndian.PutUint64(tracker, udpTrackerMagic)
+	binary.BigEndian.PutUint64(tracker, 0x41727101980)   // BEP 15: the connect magic
 	binary.BigEndian.PutUint32(tracker[12:], 0xdeadbeef) // transaction id
 	announce := append([]byte(nil), tracker...)
 	binary.BigEndian.PutUint32(announce[8:], 1) // not a connect
@@ -87,6 +89,7 @@ func TestTorrentUDP(t *testing.T) {
 		{"tracker, not a connect", announce, ""},
 		{"utp syn", utpSynPacket(), nodeapi.TorrentUTP},
 		{"utp syn with extensions", utpSynPacket(make([]byte, 8), []byte{1, 2, 3, 4}), nodeapi.TorrentUTP},
+		{"utp syn with a malformed extension", utpSynPacket([]byte{1, 2, 3, 4}), ""},
 		{"utp syn with data after it", append(utpSynPacket(), 1, 2, 3), ""},
 		{"quic short header", quic, ""},
 		{"quic initial", append([]byte{0xc3, 0, 0, 0, 1}, make([]byte, 1195)...), ""},
@@ -101,7 +104,7 @@ func TestTorrentUDP(t *testing.T) {
 }
 
 func torrentRegistry(now *time.Time, ban int64) *Registry {
-	r := NewRegistry("e1", 0, time.Minute, func() time.Time { return *now })
+	r := NewRegistry("e1", 0, time.Minute, func() time.Time { return *now }, &fakeCore{})
 	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "u1"}, {Name: "s2", UUID: "u2"}})
 	r.SetPolicies("e1", []nodeapi.Policy{
 		{Slot: "s1", Allowed: true, QuotaRemaining: -1},
@@ -116,14 +119,14 @@ func torrentRegistry(now *time.Time, ban int64) *Registry {
 func TestTorrentBanAndHits(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	r := torrentRegistry(&now, 3600)
-	s1 := r.admit("u1", "vless", "203.0.113.1", false)
-	if !r.torrentWatch(s1) || r.torrentWatch(r.admit("u2", "vless", "203.0.113.2", false)) {
+	s1 := r.admitIn("u1", "vless", "203.0.113.1")
+	if !r.torrentWatch(s1) || r.torrentWatch(r.admitIn("u2", "vless", "203.0.113.2")) {
 		t.Fatal("s1 is watched, s2 is exempt")
 	}
 
 	r.caught(s1, "203.0.113.1", "vless", "tcp", nodeapi.TorrentHandshake, "198.51.100.9:6881")
 	r.caught(s1, "203.0.113.1", "vless", "udp", nodeapi.TorrentDHT, "198.51.100.9:6881")
-	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") != nil {
 		t.Fatal("a caught slot must be kept out")
 	}
 	hits := r.TorrentHits("", 0)
@@ -132,15 +135,15 @@ func TestTorrentBanAndHits(t *testing.T) {
 	}
 
 	now = now.Add(torrentLocalBan + time.Second)
-	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") == nil {
 		t.Fatal("the node's own ban is short: the panel's holds after it")
 	}
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, BannedUntil: now.Unix() + 600}})
-	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") != nil {
 		t.Fatal("the panel's ban must keep the slot out")
 	}
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
-	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") == nil {
 		t.Fatal("a ban the panel lifted must not hold")
 	}
 
@@ -159,24 +162,24 @@ func TestTorrentBanAndHits(t *testing.T) {
 func TestTorrentLiftClearsLocalBan(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	r := torrentRegistry(&now, 3600)
-	s1 := r.admit("u1", "vless", "203.0.113.1", false)
+	s1 := r.admitIn("u1", "vless", "203.0.113.1")
 	r.caught(s1, "203.0.113.1", "vless", "tcp", nodeapi.TorrentHandshake, "198.51.100.9:6881")
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1, BannedUntil: now.Unix() + 3600}})
-	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") != nil {
 		t.Fatal("caught and banned by the panel")
 	}
 	now = now.Add(10 * time.Second)
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
-	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") == nil {
 		t.Fatal("a lifted ban must not leave the node's local ban holding")
 	}
 
 	// A policy push before the panel has read the catch must not undo the local ban.
 	now = now.Add(time.Minute)
-	s1 = r.admit("u1", "vless", "203.0.113.1", false)
+	s1 = r.admitIn("u1", "vless", "203.0.113.1")
 	r.caught(s1, "203.0.113.1", "vless", "tcp", nodeapi.TorrentHandshake, "198.51.100.9:6881")
 	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
-	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") != nil {
 		t.Fatal("no ban was lifted: the local ban holds")
 	}
 }
@@ -185,13 +188,13 @@ func TestTorrentLiftClearsLocalBan(t *testing.T) {
 func TestTorrentOffClearsLocalBan(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	r := torrentRegistry(&now, 3600)
-	s1 := r.admit("u1", "vless", "203.0.113.1", false)
+	s1 := r.admitIn("u1", "vless", "203.0.113.1")
 	r.caught(s1, "203.0.113.1", "vless", "udp", nodeapi.TorrentDHT, "198.51.100.9:6881")
-	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") != nil {
 		t.Fatal("caught")
 	}
 	r.SetTorrent(nil)
-	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") == nil {
 		t.Fatal("the blocker is off: the local ban must go")
 	}
 }
@@ -201,9 +204,9 @@ func TestTorrentOffClearsLocalBan(t *testing.T) {
 func TestTorrentHTTPTrackerNoLocalBan(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	r := torrentRegistry(&now, 3600)
-	s1 := r.admit("u1", "vless", "203.0.113.1", false)
+	s1 := r.admitIn("u1", "vless", "203.0.113.1")
 	r.caught(s1, "203.0.113.1", "vless", "tcp", nodeapi.TorrentTracker, "198.51.100.9:80")
-	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") == nil {
 		t.Fatal("one HTTP tracker line must not keep the slot out")
 	}
 	h := r.TorrentHits("", 0).Hits
@@ -214,7 +217,7 @@ func TestTorrentHTTPTrackerNoLocalBan(t *testing.T) {
 	// A UDP tracker connect cannot be forged by a browser: it bans at once.
 	now = now.Add(time.Minute)
 	r.caught(s1, "203.0.113.1", "vless", "udp", nodeapi.TorrentTracker, "198.51.100.9:6969")
-	if r.admit("u1", "vless", "203.0.113.1", false) != nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") != nil {
 		t.Fatal("a UDP tracker connect bans at once")
 	}
 }
@@ -222,9 +225,9 @@ func TestTorrentHTTPTrackerNoLocalBan(t *testing.T) {
 func TestTorrentWithoutBanOnlyDrops(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	r := torrentRegistry(&now, 0)
-	s1 := r.admit("u1", "vless", "203.0.113.1", false)
+	s1 := r.admitIn("u1", "vless", "203.0.113.1")
 	r.caught(s1, "203.0.113.1", "vless", "udp", nodeapi.TorrentUTP, "198.51.100.9:6881")
-	if r.admit("u1", "vless", "203.0.113.1", false) == nil {
+	if r.admitIn("u1", "vless", "203.0.113.1") == nil {
 		t.Fatal("without a ban the slot keeps its access")
 	}
 	if h := r.TorrentHits("", 0).Hits; len(h) != 1 || h[0].BannedUntil != 0 {

@@ -111,7 +111,7 @@ func TestFiltersConfigParses(t *testing.T) {
 }
 
 func TestIngress(t *testing.T) {
-	r := NewRegistry("e", 0, time.Minute, time.Now)
+	r := NewRegistry("e", 0, time.Minute, time.Now, &fakeCore{})
 	in, out := netip.MustParseAddr("203.0.113.5"), netip.MustParseAddr("198.51.100.5")
 	mapped := netip.MustParseAddr("::ffff:203.0.113.5")
 	if !r.admitFrom(in) || !r.admitFrom(out) {
@@ -142,7 +142,7 @@ func TestIngress(t *testing.T) {
 // The networks become ranges that do not overlap: nested, overlapping and touching
 // networks, IPv4 beside IPv6, the edges of each range.
 func TestIngressRanges(t *testing.T) {
-	r := NewRegistry("e", 0, time.Minute, time.Now)
+	r := NewRegistry("e", 0, time.Minute, time.Now, &fakeCore{})
 	r.SetIngress(&nodeapi.Filters{Ingress: nodeapi.Ingress{Allow: true, Networks: []string{
 		"10.0.0.0/8", "10.1.0.0/16", // nested
 		"192.0.2.0/25", "192.0.2.64/26", "192.0.2.128/25", // overlapping, touching
@@ -180,7 +180,7 @@ func TestIngressRanges(t *testing.T) {
 // of the panel relaying its users is never turned away.
 func TestIngressInTunnel(t *testing.T) {
 	inner := &recordingTunnel{}
-	reg := NewRegistry("e", 0, time.Minute, time.Now)
+	reg := NewRegistry("e", 0, time.Minute, time.Now, &fakeCore{})
 	reg.SetIngress(&nodeapi.Filters{Ingress: nodeapi.Ingress{Networks: []string{"198.51.100.0/24"}}})
 	tun := &Tunnel{inner: inner, reg: reg}
 	a, b := net.Pipe()

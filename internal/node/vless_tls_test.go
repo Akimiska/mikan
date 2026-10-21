@@ -35,3 +35,22 @@ func TestVLESSTLSListener(t *testing.T) {
 		}
 	}
 }
+
+// Behind a CDN the listener takes the client's address from the CDN's header: the core
+// accepts the trusted proxies the template names, Cloudflare's included.
+func TestCDNListenerParses(t *testing.T) {
+	slots := []nodeapi.Slot{{Name: "s1", UUID: "00000000-0000-4000-8000-000000000001", Secret: "x"}}
+	cert := proto.Cert{CertPath: "/tmp/c.pem", KeyPath: "/tmp/k.pem"}
+	cfg := `{"type":"vless","xhttp-config":{"path":"/p","mode":"packet-up","uplink-http-method":"GET","uplink-data-placement":"header","uplink-data-key":"X-Data"},` +
+		`"mikan":{"tls":"node","client":{"server":"cdn.example.com","port":443},"cdn":{"header":"CF-Connecting-IP","trusted":["cloudflare","203.0.113.0/24"]}}}`
+	l, err := listenerFor(nodeapi.Inbound{Name: "vless-cdn", Port: "2083", Config: []byte(cfg)}, slots, cert, proto.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l["trusted-proxy-header"] != "CF-Connecting-IP" {
+		t.Fatalf("listener: %v", l)
+	}
+	if _, err := listener.ParseListener(l); err != nil {
+		t.Fatalf("the core refuses it: %v", err)
+	}
+}

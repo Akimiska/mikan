@@ -62,6 +62,9 @@ proxy-groups:
       nodes:
         - "\U0001F1FA\U0001F1F8 США"
 rules:
+  - DOMAIN-SUFFIX,sub.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,panel.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,vpn.aoimusic.ru,VPN
   - GEOIP,LAN,DIRECT,no-resolve
   - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT
   - DOMAIN-SUFFIX,sber.ru,DIRECT

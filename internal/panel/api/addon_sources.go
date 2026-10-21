@@ -332,10 +332,10 @@ func (h *handlers) sourcesView(ctx context.Context, st addons.State, c *addons.C
 }
 
 func sourceView(b sourceBoard, s db.AddonSource) SourceView {
-	sv := SourceView{ID: s.ID, URL: s.Url, Title: s.Title, Signed: s.Key != "", Fingerprint: addons.Fingerprint(s.Key), AddedAt: time.Unix(s.AddedAt, 0).UTC(),
+	sv := SourceView{ID: s.ID, URL: s.Url, Title: s.Title, Signed: s.Key != "", Fingerprint: addons.Fingerprint(s.Key), AddedAt: store.Time(s.AddedAt),
 		Error: s.Error, Skipped: []SourceSkipView{}, Installed: []string{}}
 	if s.FetchedAt > 0 {
-		t := time.Unix(s.FetchedAt, 0).UTC()
+		t := store.Time(s.FetchedAt)
 		sv.FetchedAt = &t
 	}
 	state, fetched := b.states[s.ID]

@@ -17,7 +17,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, LineGauge, Padding, Pa
 
 use super::Screen;
 use super::widgets::{self, ACCENT, DIM, ERR, FAINT, Input, OK, Task, WARN, center, dim, field, item, spinner, wrap};
-use crate::envfile::EnvFile;
+use crate::config::Config;
 use crate::lock::{self, Wait};
 use crate::ops::{self, Install};
 use crate::release::{self, Manifest};
@@ -255,11 +255,11 @@ impl Menu {
             let Some(_lock) = lock::acquire(Wait::Skip, &mut quiet)? else {
                 anyhow::bail!("an update or another change is running: try again when it ends");
             };
-            let mut env = EnvFile::load(std::path::Path::new(DIR).join(".env"))?;
+            let mut env = Config::load(DIR)?;
             let on = env.get("MIKAN_AUTO_UPDATE") == Some("1");
             env.set("MIKAN_AUTO_UPDATE", if on { "0" } else { "1" })?;
             env.save()?;
-            self.install.env = env;
+            self.install.config = env;
             Ok(())
         })();
         if let Err(e) = result {
@@ -786,7 +786,7 @@ impl Menu {
             }
         }
         let auto = if self.install.node {
-            let on = self.install.env.get("MIKAN_AUTO_UPDATE") == Some("1");
+            let on = self.install.config.get("MIKAN_AUTO_UPDATE") == Some("1");
             format!("{}   a to switch", if on { "on" } else { "off" })
         } else {
             let on = self.policy_on;

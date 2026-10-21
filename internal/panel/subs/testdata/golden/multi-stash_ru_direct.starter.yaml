@@ -58,6 +58,9 @@ proxy-groups:
     type: select
     include-all-proxies: true
 rules:
+  - DOMAIN-SUFFIX,sub.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,panel.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,vpn.aoimusic.ru,VPN
   - GEOIP,LAN,DIRECT,no-resolve
   - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT
   - DOMAIN-SUFFIX,sber.ru,DIRECT

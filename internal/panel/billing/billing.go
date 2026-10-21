@@ -71,6 +71,11 @@ type Config struct {
 	// FreeCondition is what the free plan asks of an account: FreeNoCondition, or
 	// FreeChannel, a subscription to the bot's channel.
 	FreeCondition string `json:"free_condition,omitempty"`
+	// ExtraDevicesKeep: devices bought on top of the tariff stay with renewals, which are
+	// then priced with them; off, they last until the term ends.
+	ExtraDevicesKeep bool `json:"extra_devices_keep,omitempty"`
+	// Balance is the accounts' internal balance (balance.go).
+	Balance BalanceConfig `json:"balance"`
 }
 
 // TrialPaid: the trial has a price and is bought, not taken.
@@ -112,11 +117,14 @@ type Notifier interface {
 }
 
 type Deps struct {
-	Store    *store.Store
-	Settings *settings.Settings
-	Users    *domain.Users
-	Log      *slog.Logger
-	Now      func() time.Time
+	// TopupWaiting tells the admin a top-up waits for them (its screenshot came); nil: nobody
+	// is told, the Payments page shows it anyway.
+	TopupWaiting func(ctx context.Context, t db.Topup)
+	Store        *store.Store
+	Settings     *settings.Settings
+	Users        *domain.Users
+	Log          *slog.Logger
+	Now          func() time.Time
 	// TrustProxy reads the client's IP from X-Forwarded-For: adapters check where a
 	// webhook came from (YooKassa's addresses).
 	TrustProxy bool
@@ -230,16 +238,21 @@ type Available struct {
 	Stars bool
 	// Addons are the adapters that take rubles now, by id.
 	Addons []string
+	// Balance pays at the ruble prices, in its own currency; zero while it is off.
+	Balance BalanceConfig
 }
 
 func (a Available) Any() bool { return a.Stars || a.Rub() }
 
-// Rub: some provider takes rubles.
-func (a Available) Rub() bool { return len(a.Addons) > 0 }
+// Rub: some provider takes rubles (the balance counts: it pays the ruble prices).
+func (a Available) Rub() bool { return len(a.Addons) > 0 || a.Balance.On() }
 
 func (a Available) has(provider string) bool {
-	if provider == Stars {
+	switch provider {
+	case Stars:
 		return a.Stars
+	case Balance:
+		return a.Balance.On()
 	}
 	id := AddonID(provider)
 	return id != "" && slices.Contains(a.Addons, id)
@@ -251,10 +264,14 @@ func (s *Service) Available(ctx context.Context) Available {
 		return Available{}
 	}
 	tg := s.telegram()
-	return Available{
+	av := Available{
 		Stars:  c.Stars && tg != nil && tg.BotURL(ctx) != "",
 		Addons: s.availableAddons(ctx),
 	}
+	if c.Balance.On() {
+		av.Balance = c.Balance
+	}
+	return av
 }
 
 // Offer is a tariff on sale with the terms a buyer can pay for now. Stars and Rub are
@@ -265,6 +282,23 @@ type Offer struct {
 	First  int64       // days of the tariff's first term, which Terms may not hold
 	Stars  int64       // 0: not for Stars
 	Rub    int64       // kopecks; 0: not for rubles
+	// Groups are the server groups with servers in them, as the tariff has each; Gifts the
+	// packages it gives with every payment. Both say what the tariff is made of.
+	Groups []OfferGroup
+	Gifts  []OfferGift
+}
+
+// OfferGroup is a server group as a tariff on sale has it.
+type OfferGroup struct {
+	Name  string
+	Mode  string // domain.PoolMain, PoolOwn, PoolUnlimited, PoolClosed
+	Limit int64  // bytes, with PoolOwn
+}
+
+// OfferGift is a traffic package a tariff on sale gives with every payment.
+type OfferGift struct {
+	Package db.TrafficPackage
+	Pool    string // the group's name; "" for the main traffic
 }
 
 // OfferTerm is a term of a tariff on sale with the prices the available providers take.
@@ -289,9 +323,13 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 	if err != nil {
 		return nil, av, err
 	}
+	groups, gifts, err := s.contents(ctx)
+	if err != nil {
+		return nil, av, err
+	}
 	var out []Offer
 	for _, t := range ts {
-		o := Offer{Tariff: t}
+		o := Offer{Tariff: t, Groups: groups(t.ID), Gifts: gifts[t.ID]}
 		terms := domain.TariffTerms(t, rows)
 		o.First = terms[0].Days
 		for _, term := range terms {
@@ -307,6 +345,65 @@ func (s *Service) Offers(ctx context.Context) ([]Offer, Available, error) {
 		}
 	}
 	return out, av, nil
+}
+
+// contents reads what the tariffs are made of: the groups of each tariff (only groups with
+// servers in them say anything to a buyer) and its gifts, by tariff id.
+func (s *Service) contents(ctx context.Context) (func(int64) []OfferGroup, map[int64][]OfferGift, error) {
+	q := s.d.Store.Q
+	pools, err := q.ListTrafficPools(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	ins, err := q.ListInbounds(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	serving := map[int64]bool{}
+	for _, in := range ins {
+		if in.Enabled != 0 && in.PoolID.Valid {
+			serving[in.PoolID.Int64] = true
+		}
+	}
+	tps, err := q.ListAllTariffPools(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	byTariff := map[int64][]db.TariffPool{}
+	for _, r := range tps {
+		byTariff[r.TariffID] = append(byTariff[r.TariffID], r)
+	}
+	names := map[int64]string{}
+	for _, p := range pools {
+		names[p.ID] = p.Name
+	}
+	groups := func(tariffID int64) []OfferGroup {
+		var out []OfferGroup
+		for _, p := range pools {
+			if !serving[p.ID] {
+				continue
+			}
+			mode, limit := domain.TariffPoolMode(byTariff[tariffID], p.ID)
+			out = append(out, OfferGroup{Name: p.Name, Mode: mode, Limit: limit.Int64})
+		}
+		return out
+	}
+	giftRows, err := q.ListAllTariffGifts(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	gifts := map[int64][]OfferGift{}
+	for _, g := range giftRows {
+		p, err := q.GetTrafficPackage(ctx, g.PackageID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if p.Archived != 0 {
+			continue
+		}
+		gifts[g.TariffID] = append(gifts[g.TariffID], OfferGift{Package: p, Pool: names[p.PoolID.Int64]})
+	}
+	return groups, gifts, nil
 }
 
 // Term is the offer's term of so many days; nil days: the tariff's first term, the one an
@@ -360,9 +457,16 @@ func (s *Service) Invoice(ctx context.Context, req InvoiceRequest) (db.Payment, 
 			return db.Payment{}, ErrNotForSale
 		}
 	}
-	amount, currency, ok := s.Available(ctx).price(req.Provider, term.PriceStars, term.PriceRub)
+	av := s.Available(ctx)
+	amount, currency, ok := av.price(req.Provider, term.PriceStars, term.PriceRub)
 	if !ok {
 		return db.Payment{}, ErrProviderOff
+	}
+	// Devices bought that stay with renewals are paid for with each of them.
+	if req.UserID != 0 {
+		if u, err := q.GetUser(ctx, req.UserID); err == nil {
+			amount += renewalExtra(s.Config(ctx), u, t, av, req.Provider)
+		}
 	}
 	termDays := sql.NullInt64{Int64: term.Days, Valid: true}
 	kind := "renew"
@@ -590,6 +694,8 @@ func (av Available) price(provider string, stars, rub sql.NullInt64) (amount int
 	switch {
 	case provider == Stars && av.Stars && stars.Valid:
 		return stars.Int64, "XTR", true
+	case provider == Balance && av.has(provider) && rub.Valid:
+		return av.Balance.FromRub(rub.Int64), av.Balance.Currency, true
 	case provider != Stars && av.has(provider) && rub.Valid:
 		return rub.Int64, "RUB", true
 	}
@@ -600,6 +706,22 @@ func (av Available) price(provider string, stars, rub sql.NullInt64) (amount int
 // URL to pay at; a provider that fails marks the payment failed.
 func (s *Service) openPayment(ctx context.Context, p db.Payment, title, desc string) (db.Payment, error) {
 	q := s.d.Store.Q
+	// The balance has no invoice: it pays at once, or the payment fails for want of money.
+	if p.Provider == Balance {
+		switch err := s.chargeBalance(ctx, p); {
+		case errors.Is(err, ErrBalanceLow):
+			_, _ = q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: PaymentFailed, ID: p.ID, OldStatus: PaymentPending})
+			if s.d.Promo != nil {
+				_ = s.d.Promo.ReleasePayment(ctx, p.ID)
+			}
+			_ = q.SetPaymentError(ctx, db.SetPaymentErrorParams{Error: ErrBalanceLow.Error(), ID: p.ID})
+			return db.Payment{}, ErrBalanceLow
+		case err != nil:
+			// Paid but not applied: Reconcile applies it, the buyer sees it paid.
+			s.d.Log.Warn("billing: apply a balance payment", "payment", p.ID, "err", err)
+		}
+		return q.GetPayment(ctx, p.ID)
+	}
 	ext, url, err := s.openInvoice(ctx, p, title, desc)
 	if err != nil {
 		_, _ = q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{NewStatus: PaymentFailed, ID: p.ID, OldStatus: PaymentPending})
@@ -717,6 +839,37 @@ func DescribeLimits(t db.Tariff, lang string) string {
 	return strings.Join(parts, " · ")
 }
 
+// DescribeContents is what offer o is made of besides its limits, a line each, in lang
+// ("en", else Russian): its server groups ("WL: 50 GB of its own", "Premium: not
+// included") and its gifts ("Gift: 50 GB · WL · until used up"). None for a tariff without
+// groups or gifts.
+func DescribeContents(o Offer, lang string) []string {
+	en := lang == "en"
+	pick := func(ru, en_ string) string {
+		if en {
+			return en_
+		}
+		return ru
+	}
+	var out []string
+	for _, g := range o.Groups {
+		switch g.Mode {
+		case domain.PoolMain:
+			out = append(out, g.Name+pick(": входит", ": included"))
+		case domain.PoolOwn:
+			out = append(out, fmt.Sprintf(pick("%s: %s ГБ отдельно", "%s: %s GB of its own"), g.Name, gigabytes(g.Limit, en)))
+		case domain.PoolUnlimited:
+			out = append(out, g.Name+pick(": без лимита", ": unlimited"))
+		case domain.PoolClosed:
+			out = append(out, g.Name+pick(": не входит", ": not included"))
+		}
+	}
+	for _, g := range o.Gifts {
+		out = append(out, pick("В подарок: ", "Gift: ")+DescribePackage(g.Package, g.Pool, lang))
+	}
+	return out
+}
+
 // PreCheckout is Telegram asking whether a Stars payment may go ahead.
 func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency string, amount int64) error {
 	p, err := s.d.Store.Q.GetPaymentByPayload(ctx, payload)
@@ -730,6 +883,9 @@ func (s *Service) PreCheckout(ctx context.Context, tgID int64, payload, currency
 	}
 	if p.Kind == KindPackage {
 		return s.packageOnSale(ctx, p)
+	}
+	if p.Kind == KindDevice {
+		return s.deviceOnSale(ctx, p)
 	}
 	if p.Kind == KindTrial {
 		// The trial's tariff is seldom on sale itself: the price is the trial's. What has
@@ -888,6 +1044,12 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			}
 			return markApplied(ctx, q, id, u.ID, s.d.Now())
 		}
+		if pay.Kind == KindDevice {
+			if u, err = s.applyDevice(ctx, q, pay); err != nil {
+				return err
+			}
+			return markApplied(ctx, q, id, u.ID, s.d.Now())
+		}
 		if pay.Kind == KindTrial {
 			if u, err = s.applyTrial(ctx, q, pay); err != nil {
 				return err
@@ -912,7 +1074,12 @@ func (s *Service) Apply(ctx context.Context, id int64) error {
 			}
 		}
 		if u, created, err = s.d.Users.Purchase(ctx, q, domain.PurchaseInput{UserID: userID, TariffID: pay.TariffID.Int64,
-			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), TgID: pay.TgID, ResetTraffic: reset}); err != nil {
+			Term: pay.TermDays, Name: buyerName(ctx, q, pay.TgID), TgID: pay.TgID, ResetTraffic: reset, KeepExtraDevices: cfg.ExtraDevicesKeep}); err != nil {
+			return err
+		}
+		// The tariff's gifts come with every payment for it, on its transaction: a refund
+		// takes them back with it (takeBack).
+		if _, err := domain.GrantGifts(ctx, q, u, pay.TariffID.Int64, pay.ID, s.d.Now()); err != nil {
 			return err
 		}
 		if created {
@@ -1023,8 +1190,12 @@ func (s *Service) Refund(ctx context.Context, id int64) (Reverted, error) {
 	if err != nil {
 		return Reverted{}, err
 	}
-	if p.Provider != Stars || p.Status != PaymentApplied && p.Status != PaymentPaid || !p.ExternalID.Valid {
+	if p.Provider != Stars && p.Provider != Balance || p.Status != PaymentApplied && p.Status != PaymentPaid || !p.ExternalID.Valid {
 		return Reverted{}, ErrNotRefunable
+	}
+	if p.Provider == Balance {
+		// The money goes back on the balance, on the transaction of the refund (refunded).
+		return s.refunded(ctx, id)
 	}
 	tg := s.telegram()
 	if tg == nil {

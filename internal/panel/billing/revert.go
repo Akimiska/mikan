@@ -98,12 +98,27 @@ func (s *Service) takeBack(ctx context.Context, q *db.Queries, p db.Payment) (rv
 	} else if err != nil {
 		return rv, u, err
 	}
+	if p.Kind == KindDevice {
+		// The place goes back; a subscription that has no bought place left keeps its own.
+		taken, err := q.TakeUserExtraDevice(ctx, db.TakeUserExtraDeviceParams{UpdatedAt: s.d.Now().Unix(), ID: u.ID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return rv, u, nil
+		}
+		if err == nil {
+			rv.Action, u = "device", taken
+		}
+		return rv, u, err
+	}
 	if p.Kind == KindPackage {
 		// The grant goes whole: what was used of it is already counted as used.
 		n, err := q.DeleteGrantByPayment(ctx, sql.NullInt64{Int64: p.ID, Valid: true})
 		if n > 0 {
 			rv.Action = "grant"
 		}
+		return rv, u, err
+	}
+	// The tariff's gifts go with the payment that gave them, whole like a package.
+	if _, err := q.DeleteGrantByPayment(ctx, sql.NullInt64{Int64: p.ID, Valid: true}); err != nil {
 		return rv, u, err
 	}
 	return s.takeBackTariff(ctx, q, p, u, rv)
@@ -168,7 +183,7 @@ func (s *Service) takeBackTariff(ctx context.Context, q *db.Queries, p db.Paymen
 	case restoreTariff != 0:
 		err = domain.ApplyTariffPools(ctx, q, u.ID, restoreTariff)
 	default:
-		err = q.ClearUserPoolLimits(ctx, u.ID)
+		err = q.ResetUserPoolModes(ctx, u.ID)
 	}
 	return rv, u, err
 }
@@ -278,6 +293,9 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 				return err
 			}
 			done = true
+			if err := refundToBalance(ctx, q, p, at.Int64); err != nil {
+				return err
+			}
 			if rv, u, err = s.takeBack(ctx, q, p); err != nil {
 				return err
 			}
@@ -287,6 +305,9 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 			n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: at, ID: id})
 			open = n == 1
 			if err != nil || !open {
+				return err
+			}
+			if err := refundToBalance(ctx, q, p, at.Int64); err != nil {
 				return err
 			}
 			// Still a refund the addons count: told once, in the transaction of the change.

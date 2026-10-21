@@ -8,6 +8,7 @@
 //	                    the checks and writes doctor/report.json, the report of
 //	                    `mikan doctor --json` with the same "id"
 //	restart/request     the same: `mikan restart --requested` restarts the containers
+//	apilock/request     a node's: the firewall rule for its API port (apilock.go)
 //
 // The host's side is not trusted with more than it is: what it writes is a small regular
 // file, read without following links, cut to size and cleaned of secrets before anyone

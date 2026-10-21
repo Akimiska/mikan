@@ -64,7 +64,7 @@ func TestTrafficPoolsOverHTTP(t *testing.T) {
 	std := tariffs[1]
 	const gb = 1 << 30
 	resp, body = h.do(http.MethodPut, api+"/tariffs/"+id(std.ID), map[string]any{"name": std.Name, "duration_days": 30, "reset_strategy": "period",
-		"pools": []map[string]any{{"pool_id": pool.ID, "traffic_limit": 100 * gb}}}, csrf)
+		"pools": []map[string]any{{"pool_id": pool.ID, "mode": "own", "traffic_limit": 100 * gb}}}, csrf)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"pools":[{"pool_id":`+id(pool.ID)) {
 		t.Fatalf("tariff pools: %d %s", resp.StatusCode, body)
 	}
@@ -83,7 +83,7 @@ func TestTrafficPoolsOverHTTP(t *testing.T) {
 		t.Fatalf("user pools: %d %s", resp.StatusCode, body)
 	}
 	// The admin gives this user 1 KB of WL; it is soon used up.
-	resp, body = h.do(http.MethodPut, api+"/users/"+id(u.ID)+"/pools", map[string]any{"pools": []map[string]any{{"pool_id": pool.ID, "traffic_limit": 1024}}}, csrf)
+	resp, body = h.do(http.MethodPut, api+"/users/"+id(u.ID)+"/pools", map[string]any{"pools": []map[string]any{{"pool_id": pool.ID, "mode": "own", "traffic_limit": 1024}}}, csrf)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"traffic_limit":1024`) {
 		t.Fatalf("set user pools: %d %s", resp.StatusCode, body)
 	}

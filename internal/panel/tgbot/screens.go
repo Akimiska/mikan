@@ -11,6 +11,7 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 )
@@ -36,6 +37,11 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return b.gateScreen(ctx, cfg, w, notice)
 	}
 	list, u, ok := b.subs(ctx, chat)
+	// The balance is the account's, with or without a subscription.
+	switch cmd {
+	case "bl", "bt", "ba", "bx":
+		return b.balanceScreen(ctx, w, chat, cmd, notice)
+	}
 	// Buying a new subscription works with or without one.
 	if b.canBuyNew(ctx) {
 		home := []tgate.Button{{Text: w.back, CallbackData: "m"}}
@@ -93,6 +99,9 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if offers := b.packageOffers(ctx, u.ID); len(offers) > 0 {
 			rows = append(rows, []tgate.Button{{Text: w.buyTraffic, CallbackData: "x"}})
 		}
+		if _, _, ok := b.deviceOffer(ctx, u.ID); ok {
+			rows = append(rows, []tgate.Button{{Text: w.buyDevice, CallbackData: "e"}})
+		}
 		if newLink != nil {
 			rows = append(rows, []tgate.Button{*newLink})
 		}
@@ -112,6 +121,8 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return withNotice(text), kb
 	case "x", "xk", "xp":
 		return b.trafficShop(ctx, w, chat, u, cmd, arg, notice)
+	case "e", "ep":
+		return b.extraDevice(ctx, w, chat, u, cmd, arg, notice)
 	case "d", "dc":
 		id, _ := strconv.ParseInt(arg, 10, 64)
 		return b.devices(ctx, w, u, cmd, id, notice, now)
@@ -151,6 +162,9 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			}
 			rows = append(rows, []tgate.Button{{Text: mark + s.Name, CallbackData: "u:" + strconv.FormatInt(s.ID, 10)}})
 		}
+		if len(list) < tgate.MaxLinks && b.canBuyNew(ctx) {
+			rows = append(rows, []tgate.Button{{Text: w.buyAnother, CallbackData: "b"}})
+		}
 		return w.switchTitle, &tgate.Keyboard{InlineKeyboard: append(rows, back)}
 	}
 	return withNotice(render(pick(cfg.Texts.Main, w.main), vars)), b.menu(ctx, cfg, w, chat, len(list))
@@ -174,6 +188,9 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, not
 	}
 	if b.canBuyNew(ctx) {
 		rows = append(rows, []tgate.Button{{Text: w.buy, CallbackData: "b"}})
+	}
+	if btn, ok := b.balanceButton(ctx, w, chat); ok {
+		rows = append(rows, []tgate.Button{btn})
 	}
 	if sup := b.supportURL(ctx); sup != "" {
 		rows = append(rows, []tgate.Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
@@ -233,7 +250,12 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, chat int64, subs i
 	if url := b.miniAppURL(ctx, cfg); url != "" && cfg.PromoButton {
 		rows = append(rows, []tgate.Button{{Text: w.promo, WebApp: &tgate.WebApp{URL: url + "#promocodes"}}})
 	}
-	if subs > 1 {
+	if btn, ok := b.balanceButton(ctx, w, chat); ok {
+		rows = append(rows, []tgate.Button{btn})
+	}
+	// The list of subscriptions is where another one is bought too: it shows with one
+	// subscription as soon as a second may be bought.
+	if subs > 1 || subs == 1 && subs < tgate.MaxLinks && b.canBuyNew(ctx) {
 		rows = append(rows, []tgate.Button{{Text: fmt.Sprintf("%s (%d)", w.subscriptions, subs), CallbackData: "w"}})
 	}
 	return &tgate.Keyboard{InlineKeyboard: rows}
@@ -316,7 +338,7 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		if n := used[d.ID]; n > 0 {
 			meta = append(meta, w.bytes(n))
 		}
-		meta = append(meta, w.ago(time.Unix(d.LastSeen, 0), now))
+		meta = append(meta, w.ago(store.Time(d.LastSeen), now))
 		lines = append(lines, fmt.Sprintf("%d. %s — %s", i+1, html.EscapeString(name(d)), html.EscapeString(strings.Join(meta, " · "))))
 		if !waiting {
 			rows = append(rows, []tgate.Button{{Text: "❌ " + name(d), CallbackData: "dc:" + strconv.FormatInt(d.ID, 10)}})
@@ -366,6 +388,8 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 	cmd, arg, _ := strings.Cut(data, ":")
 	id, _ := strconv.ParseInt(arg, 10, 64)
 	switch cmd {
+	case "bt", "ba", "bx":
+		return b.balanceAct(ctx, chat, cmd, arg)
 	case "du":
 		w := wordsFor(b.config(ctx).Lang)
 		_, u, ok := b.subs(ctx, chat)
@@ -460,7 +484,7 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 		v["state"] = w.stateOff
 	}
 	if u.ExpiresAt.Valid {
-		exp := time.Unix(u.ExpiresAt.Int64, 0).UTC()
+		exp := store.Time(u.ExpiresAt.Int64)
 		left := int((exp.Sub(now) + 24*time.Hour - time.Second) / (24 * time.Hour))
 		v["until"] = w.date(exp)
 		v["days"] = w.days(max(0, left))

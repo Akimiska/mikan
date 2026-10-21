@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -24,17 +23,17 @@ import (
 )
 
 type NodeInfo struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name" doc:"Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений"`
-	Local       bool       `json:"local" doc:"Своя нода панели"`
-	Address     string     `json:"address" doc:"host:port API ноды; пусто у своей ноды"`
-	Host        string     `json:"host" doc:"Адрес для клиентов"`
-	Domain      string     `json:"domain"`
-	PublicName  string     `json:"public_name" doc:"Публичное имя для канала состояния; пустое — нода скрыта из списка"`
-	Enabled     bool       `json:"enabled"`
-	Inbounds    int        `json:"inbounds"`
-	Status      string     `json:"status" enum:"ok,error,unknown"`
-	Error       string     `json:"error,omitempty" doc:"Слова ошибки связи как есть, для «подробнее»"`
+	ID         int64  `json:"id"`
+	Name       string `json:"name" doc:"Группа в подписке, например «🇳🇱 Нидерланды»; её флаг — префикс имён подключений"`
+	Local      bool   `json:"local" doc:"Своя нода панели"`
+	Address    string `json:"address" doc:"host:port API ноды; пусто у своей ноды"`
+	Host       string `json:"host" doc:"Адрес для клиентов"`
+	Domain     string `json:"domain"`
+	PublicName string `json:"public_name" doc:"Публичное имя для канала состояния; пустое — нода скрыта из списка"`
+	Enabled    bool   `json:"enabled"`
+	Inbounds   int    `json:"inbounds"`
+	Status     string `json:"status" enum:"ok,error,unknown"`
+	Error      string `json:"error,omitempty" doc:"Слова ошибки связи как есть, для «подробнее»"`
 	// Why the panel cannot reach the node, since when, and when it last could; the node's
 	// clock against the panel's; its last hello.
 	ErrorCode   string            `json:"error_code,omitempty" enum:"timeout,refused,unreachable,dns,pin_mismatch,tls,http_status,unknown" doc:"Почему панель не достучалась до ноды"`
@@ -68,8 +67,25 @@ type NodeInfo struct {
 	// TLS is the certificate its protocols on TLS use now; nil when not known.
 	TLS *NodeTLSView `json:"tls,omitempty"`
 	// FairShare splits ChannelMbps evenly between the users moving traffic through the node.
-	FairShare   bool   `json:"fair_share" doc:"Канал ноды делится поровну между теми, кто сейчас качает"`
-	ChannelMbps *int64 `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
+	FairShare bool `json:"fair_share" doc:"Канал ноды делится поровну между теми, кто сейчас качает"`
+	// BalanceGroup and Capacity: the node shares its group's clients out (domain.Balancer).
+	BalanceGroup string `json:"balance_group" doc:"Группа балансировки; пусто — вне групп"`
+	// HTTPRedirect: plain HTTP on port 80 gets 301 to https; RedirectError says why the
+	// node could not (another program holds the port).
+	HTTPRedirect  bool   `json:"http_redirect" doc:"HTTP на порту 80 получает 301 на https"`
+	RedirectError string `json:"redirect_error,omitempty" doc:"Почему нода не смогла занять порт 80"`
+	// SNIRouter: the node shares its TCP 443 between the inbounds marked for it;
+	// RouterError says why it could not take the port.
+	SNIRouter   bool   `json:"sni_router" doc:"Порт 443 ноды делят подключения по имени TLS (SNI-роутер)"`
+	RouterError string `json:"router_error,omitempty" doc:"Почему нода не смогла занять порт 443"`
+	// APILockdown: the node's API answers only the panel's addresses and APIAllow;
+	// APILockError says why the node's server has no firewall rule for it (the node refuses
+	// strangers in its own listener all the same).
+	APILockdown  bool     `json:"api_lockdown" doc:"API ноды отвечает только адресам панели"`
+	APIAllow     []string `json:"api_allow" doc:"Сети и адреса, которые админ добавил к адресам панели"`
+	APILockError string   `json:"api_lock_error,omitempty" doc:"Почему на сервере ноды нет правила файрвола для API"`
+	Capacity     *int64   `json:"capacity" doc:"Мест для клиентов в группе; null — без ограничения"`
+	ChannelMbps  *int64   `json:"channel_mbps" doc:"Ширина канала ноды, Мбит/с в каждую сторону; null — не задана"`
 }
 
 type nodesOutput struct{ Body []NodeInfo }
@@ -102,7 +118,12 @@ type patchNodeInput struct {
 		Enabled    *bool   `json:"enabled,omitempty"`
 		FairShare  *bool   `json:"fair_share,omitempty" doc:"Делить канал ноды поровну между теми, кто сейчас качает; нужен channel_mbps"`
 		// The node's channel each way, which the fair share splits.
-		ChannelMbps *int64 `json:"channel_mbps,omitempty" minimum:"1" maximum:"100000" doc:"Ширина канала ноды, Мбит/с в каждую сторону"`
+		ChannelMbps  *int64 `json:"channel_mbps,omitempty" minimum:"1" maximum:"100000" doc:"Ширина канала ноды, Мбит/с в каждую сторону"`
+		HTTPRedirect *bool  `json:"http_redirect,omitempty" doc:"Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели"`
+		SNIRouter    *bool  `json:"sni_router,omitempty" doc:"SNI-роутер на 443: подключения с отметкой «через общий 443» слушают на loopback за ним"`
+		// The node's API for the panel alone, and the networks added to the panel's own.
+		APILockdown *bool     `json:"api_lockdown,omitempty" doc:"API ноды только с адресов панели; не для ноды панели"`
+		APIAllow    *[]string `json:"api_allow,omitempty" maxItems:"16" doc:"Ещё сети или адреса (203.0.113.5, 198.51.100.0/24), с которых панель ходит к ноде"`
 	}
 }
 
@@ -167,7 +188,11 @@ func (h *handlers) orderNodes(ctx context.Context, in *orderNodesInput) (*struct
 func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inbound) NodeInfo {
 	v := NodeInfo{ID: n.ID, Name: n.Name, PublicName: n.PublicName, Local: n.Address == "", Address: n.Address, Host: domain.NodeHost(n), Domain: n.Domain,
 		Enabled: n.Enabled != 0, Inbounds: len(domain.NodeInbounds(inbounds, n.ID)), Status: "unknown",
-		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps)}
+		FairShare: n.FairShare != 0, ChannelMbps: store.Int64Ptr(n.ChannelMbps), BalanceGroup: n.BalanceGroup, Capacity: store.Int64Ptr(n.Capacity),
+		HTTPRedirect: n.HttpRedirect != 0, SNIRouter: n.SniRouter != 0, APILockdown: n.ApiLockdown != 0, APIAllow: n.ApiAllow}
+	if v.APIAllow == nil {
+		v.APIAllow = []string{}
+	}
 	if v.Local {
 		// The panel's own node is reached at the panel's address.
 		ep, _ := h.d.Settings.Endpoint(ctx)
@@ -215,6 +240,15 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 		if l.OK {
 			v.ListenersOK++
 		}
+	}
+	if l := hv.Health.APILock; v.APILockdown && !v.Local && l != nil && !l.OK {
+		v.APILockError = l.Error
+	}
+	if r := hv.Health.Redirect; v.HTTPRedirect && r != nil && !r.OK {
+		v.RedirectError = r.Error
+	}
+	if r := hv.Health.Router; v.SNIRouter && r != nil && !r.OK {
+		v.RouterError = r.Error
 	}
 	h.nodeUpdateView(ctx, &v, nodeupdate.Reported(hv.Health.Update))
 	return v
@@ -296,14 +330,14 @@ func (h *handlers) updateNode(ctx context.Context, in *patchNodeInput) (*nodeInf
 		return nil, err
 	}
 	n, err := domain.UpdateNode(ctx, h.d.Store, in.ID, domain.NodePatch{Name: b.Name, PublicName: b.PublicName, Host: b.Host, Domain: b.Domain,
-		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, Rules: rules}, h.d.Now())
+		Enabled: b.Enabled, FairShare: b.FairShare, ChannelMbps: b.ChannelMbps, HTTPRedirect: b.HTTPRedirect, SNIRouter: b.SNIRouter, APILockdown: b.APILockdown, APIAllow: b.APIAllow, Rules: rules}, h.d.Now())
 	if err != nil {
 		return nil, h.nodeErr(err)
 	}
 	h.nodesChanged()
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.update", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "public_name": n.PublicName, "enabled": n.Enabled != 0,
-		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64})
+		"fair_share": n.FairShare != 0, "channel_mbps": n.ChannelMbps.Int64, "http_redirect": n.HttpRedirect != 0, "sni_router": n.SniRouter != 0, "api_lockdown": n.ApiLockdown != 0, "api_allow": n.ApiAllow})
 	return h.nodeInfo(ctx, n.ID)
 }
 
@@ -332,6 +366,15 @@ func (h *handlers) nodeErr(err error) error {
 		return huma.Error422UnprocessableEntity("local_node")
 	case errors.Is(err, domain.ErrChannelRequired):
 		return fieldErr("body.channel_mbps", "channel_required")
+	case errors.Is(err, domain.ErrLocalLockdown):
+		// The panel reaches its own node over the socket: there is no API port to close.
+		return huma.Error422UnprocessableEntity("local_node_lockdown")
+	case errors.Is(err, domain.ErrManyAPIAllow):
+		return fieldErr("body.api_allow", "api_allow_many")
+	}
+	var bad *domain.APIAllowError
+	if errors.As(err, &bad) {
+		return fieldErrValue("body.api_allow", "api_allow_invalid", bad.Value)
 	}
 	var details []error
 	if errors.Is(err, domain.ErrBadHost) {
@@ -400,59 +443,15 @@ func (h *handlers) rekeyNode(ctx context.Context, in *nodeIDInput) (*nodeKeyOutp
 	return out, nil
 }
 
-// nodeUnused refuses to delete a node something still goes through: a cascade would
-// quietly go straight out, the bot would lose its way to Telegram. The details list
-// what to switch first.
+// nodeUnused refuses to delete the node the bot goes to Telegram through: it would lose
+// its way there. What else leaves through the node moves on first (domain.MoveExits).
 func (h *handlers) nodeUnused(ctx context.Context, q *db.Queries, id int64) error {
-	uses, err := domain.ExitUsesOf(ctx, q, id)
+	route, _, err := settings.Get[tgate.Route](ctx, settings.New(q), tgate.KeyRoute)
 	if err != nil {
 		return err
-	}
-	set := settings.New(q)
-	route, _, err := settings.Get[tgate.Route](ctx, set, tgate.KeyRoute)
-	if err != nil {
-		return err
-	}
-	panelHost, err := set.String(ctx, settings.KeyPublicHost)
-	if err != nil {
-		return err
-	}
-	nodes, err := q.ListNodes(ctx)
-	if err != nil {
-		return err
-	}
-	// A node shows by its name, else by its address: the panel's own node by the panel's.
-	labels := map[int64]string{}
-	for _, n := range nodes {
-		switch {
-		case n.Name != "":
-			labels[n.ID] = n.Name
-		case n.PublicHost != "":
-			labels[n.ID] = n.PublicHost
-		default:
-			labels[n.ID] = panelHost
-		}
-	}
-	var details []error
-	if len(uses.Inbounds) > 0 {
-		var list []string
-		for _, in := range uses.Inbounds {
-			list = append(list, in.Name+" ("+labels[in.NodeID]+")")
-		}
-		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_inbounds", Value: strings.Join(list, ", ")})
-	}
-	if len(uses.Relays) > 0 {
-		var list []string
-		for _, src := range uses.Relays {
-			list = append(list, labels[src])
-		}
-		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_relays", Value: strings.Join(list, ", ")})
 	}
 	if route.Mode == tgate.RouteNode && route.NodeID == id {
-		details = append(details, &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_telegram"})
-	}
-	if len(details) > 0 {
-		return huma.Error409Conflict("node_in_use", details...)
+		return huma.Error409Conflict("node_in_use", &huma.ErrorDetail{Location: "path.id", Message: "node_in_use_telegram"})
 	}
 	return nil
 }
@@ -465,7 +464,14 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 	if n.Address == "" {
 		return nil, huma.Error409Conflict("local_node")
 	}
+	var moved []domain.MovedExit
 	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		// What went out through the node goes through another one, or straight out: the
+		// cascade does not keep the node from going.
+		var err error
+		if moved, err = domain.MoveExits(ctx, q, n.ID, h.d.Now(), h.hostOf); err != nil {
+			return err
+		}
 		if err := h.nodeUnused(ctx, q, n.ID); err != nil {
 			return err
 		}
@@ -499,7 +505,7 @@ func (h *handlers) deleteNode(ctx context.Context, in *nodeIDInput) (*struct{}, 
 	// that gets this id later (see forgetNode) inherits them.
 	h.forgetNode(n.ID)
 	h.d.Changes.SlotsChanged()
-	h.audit(ctx, sessionOf(ctx).AdminID, "node.delete", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name})
+	h.audit(ctx, sessionOf(ctx).AdminID, "node.delete", "node", strconv.FormatInt(n.ID, 10), map[string]any{"name": n.Name, "exits_moved": moved})
 	return nil, nil
 }
 

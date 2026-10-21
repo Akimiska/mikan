@@ -18,6 +18,7 @@ import { nodeLabel } from "../../../lib/node-label";
 import { useWarp } from "../node-warp";
 import { Editor, type ListenAt, ValidateResult, hostPort, listenAt, loopback, preloadEditor, useValidate } from "./shared";
 import { TargetPicker } from "./target";
+import { CdnSettings, cdnClient, cdnFormOf, type CdnForm } from "./cdn";
 
 export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onClose: () => void }) {
   const qc = useQueryClient();
@@ -45,9 +46,12 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
   const [clientServer, setClientServer] = useState(""); // what clients get: "" = as now
   const [clientPort, setClientPort] = useState("");
   const [clientSni, setClientSni] = useState("");
+  const [cdn, setCdn] = useState<CdnForm | null>(null);
+  const [sni443, setSni443] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const settings = useSettings();
   const warp = useWarp(inbound?.node_id ?? null, !!inbound);
+  const nodeRouter = !!allNodes.data?.find((n) => n.id === inbound?.node_id)?.sni_router;
   useEffect(() => {
     if (!inbound) return;
     setTab("main");
@@ -69,6 +73,8 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     setClientServer(inbound.client.server);
     setClientPort(inbound.client.port ? String(inbound.client.port) : "");
     setClientSni(inbound.client.sni);
+    setCdn(cdnFormOf(inbound));
+    setSni443(inbound.sni443);
     setErrors({});
     validate.reset();
     // `validate` changes identity on every render; reset only for another inbound.
@@ -139,6 +145,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
     if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && (obfs === "salamander" || obfs === "gecko")) body.obfs = obfs;
     // The whole tuning goes: an emptied field is a value too (back to the default).
     if (!configChanged && inbound?.xhttp && JSON.stringify(xhttp) !== JSON.stringify(inbound.xhttp)) body.xhttp = xhttp;
+    if (!configChanged && inbound && sni443 !== inbound.sni443) body.sni443 = sni443;
     if (listenMode === "custom" && !listen) {
       reject({ listen: t("inbounds.listenRequired") });
       return;
@@ -150,9 +157,23 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
       return;
     }
     // Without a TLS name of its own to change (REALITY, no TLS) the SNI is not the form's.
-    const client = { server: clientServer.trim(), port: cport, sni: inbound?.client_sni ? clientSni.trim() : "" };
+    let client: Schemas["ClientEndpoint"] = { server: clientServer.trim(), port: cport, sni: inbound?.client_sni ? clientSni.trim() : "", host: "" };
+    if (inbound && cdn?.on) {
+      const made = cdnClient(cdn, inbound);
+      if ("errors" in made) {
+        reject(made.errors);
+        return;
+      }
+      client = made.client;
+    }
+    const was = inbound?.client;
     const clientChanged =
-      !!inbound && (client.server !== inbound.client.server || client.port !== inbound.client.port || (inbound.client_sni && client.sni !== inbound.client.sni));
+      !!was &&
+      (client.server !== was.server ||
+        client.port !== was.port ||
+        (inbound.client_sni && client.sni !== was.sni) ||
+        (client.host ?? "") !== (was.host ?? "") ||
+        JSON.stringify(client.cdn ?? null) !== JSON.stringify(was.cdn ?? null));
     if (!configChanged && clientChanged) body.client = client;
     if (poolId !== (inbound?.pool_id ?? 0)) body.pool_id = poolId;
     const autoPortNow = autoPort && !behindProxy;
@@ -352,7 +373,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
               {pools.data?.length ? (
                 <Field label={t("pools.inbound")} htmlFor="ed-pool" hint={t("pools.inboundHint")}>
                   <select id="ed-pool" className="input max-w-[320px]" value={poolId} onChange={(e) => setPoolId(Number(e.target.value))}>
-                    <option value={0}>{t("pools.mainTraffic")}</option>
+                    <option value={0}>{t("pools.mainServers")}</option>
                     {pools.data.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -361,7 +382,26 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                   </select>
                 </Field>
               ) : null}
-              <Disclosure title={t("inbounds.proxy")} sub={t("common.forExperts")} open={!!(errors.listen || errors["client.server"] || errors["client.port"] || errors["client.sni"]) || behindProxy}>
+              {inbound?.sni443_possible ? (
+                <SwitchRow
+                  label={t("inbounds.sni443.title")}
+                  sub={sni443 && !nodeRouter ? t("inbounds.sni443.routerOff") : t("inbounds.sni443.sub")}
+                  warn={sni443 && !nodeRouter}
+                  checked={sni443}
+                  disabled={configChanged}
+                  onChange={setSni443}
+                />
+              ) : null}
+              {inbound?.cdn_possible && cdn ? (
+                <Disclosure title={t("inbounds.cdn.title")} sub={t("inbounds.cdn.sub")} open={cdn.on || Object.keys(errors).some((k) => k.startsWith("client.cdn"))}>
+                  <CdnSettings value={cdn} onChange={setCdn} errors={errors} clearError={clearError} inbound={inbound} disabled={configChanged} />
+                </Disclosure>
+              ) : null}
+              <Disclosure
+                title={t("inbounds.proxy")}
+                sub={t("common.forExperts")}
+                open={!!(errors.listen || (!cdn?.on && (errors["client.server"] || errors["client.port"] || errors["client.sni"]))) || behindProxy}
+              >
                 <p className="mb-4 text-xs text-[var(--ink-500)]">{t("inbounds.proxySub")}</p>
                 <Field
                   label={t("inbounds.listen")}
@@ -404,6 +444,12 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                     />
                   ) : null}
                 </Field>
+                {cdn?.on ? (
+                  <p className="text-xs text-[var(--ink-500)]" role="note">
+                    {t("inbounds.cdn.proxyNote")}
+                  </p>
+                ) : (
+                <>
                 <div className="grid gap-x-4 sm:grid-cols-[1fr_160px]">
                   <Field label={t("inbounds.clientServer")} htmlFor="ed-client-server" error={errors["client.server"]}>
                     <input
@@ -464,6 +510,8 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                         ? t("inbounds.clientHintReality")
                         : t("inbounds.clientHint")}
                 </p>
+                </>
+                )}
               </Disclosure>
               <Disclosure title={t("inbounds.auto")} sub={t("settings.autoSub")}>
                 <AutoSwitch

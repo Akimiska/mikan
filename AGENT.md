@@ -57,13 +57,14 @@ Golden-тесты (`internal/panel/subs/testdata/golden/`) перегенери�
 
 ---
 
-## 2. История: как различия терялись (два прецедента)
+## 2. История мержей: как различия терялись
 
 1. **Merge v0.5.1.1-rc.6 (29edb18, 2026-10-17)** взял апстримовую версию
    `mihomoConfigOf` целиком → подписка стала 6 групп (AoiVPN + Авто + 🇳🇱/🇸🇪/🇫🇮 +
    PROXY). Восстановлено в `0929914` (плоская раскладка + DNS-суффикс `#g.Main`).
 2. **Ребейс openapi** (коммит `371e95c` так и назван «восстановлено после rebase») —
    fork-правки openapi.json/schema потерялись при rebase и их восстанавливали вручную.
+3. **Merge v0.5.1.1-rc.11 (21.10.2026)**: конфликты в 5 файлах (settings ×2, panel.go, settings/index.tsx, routing.tsx — апстрим разбил страницу маршрутизации на части, fork-правки перенесены заново). Апстрим заменил ядро нод mihomo → **Citrus** (getmikan/Citrus), вынес секреты из `.env` в `/run/secrets` (env-переменные `MIKAN_DATABASE_URL`/`MIKAN_NODE_JOIN` по-прежнему читаются — наши ручные compose работают), добавил `sub_domain` (рядом с нашим `sub_public_base`), SNI-роутер на 443 и блокировку API нод (по умолчанию выкл.).
 
 Мержи здесь большие (merge rc.6 = 824 файла, +131k строк), git при этом молча берёт
 апстримную сторону там, где обе стороны меняли одно место. Поэтому: после каждого
@@ -71,7 +72,7 @@ merge — обязательный чек-лист из §6.
 
 ---
 
-## 3. Инвентарь fork-различий (на 18.10.2026, main = 771711b)
+## 3. Инвентарь fork-различий (на 21.10.2026, после merge v0.5.1.1-rc.11)
 
 ### 3.1 Подписка (`internal/panel/subs/`)
 
@@ -96,21 +97,24 @@ merge — обязательный чек-лист из §6.
 |---|---|---|
 | hysteria2 up/down в клиентский конфиг | f7c3f2a | ✅ в main |
 | Hysteria2/VLESS-клиент: `pcs` для закреплённого серта | есть (в форме апстрима `28fb242`) | ✅ |
-| **mieru `udp:true`** (QUIC/HTTP3 claude.ai через туннель) | `1a73a98` | ❌ ПОТЕРЯН в main — `extra.go` ~:168 сейчас `udp: false` |
-| **reality `support-x25519mlkem768: true` в reality-opts** (xray ≥26.9.8 требует PQ keyshare; без него mihomo/AoiVPN не коннектится к xhttp-reality) | ea9a6da | ❌ ПОТЕРЯН в main (`client.go:220` — только pbk+sid) |
-| только `pcs`, без `allowInsecure` (Xray ≥26.1 удалил allowInsecure; битый vless-outbound роняет весь конфиг) | 82f5f1c | ❌ на main вернулись `allowInsecure=1` + `insecure=1` + `pcs` |
+| mieru `udp:true` (QUIC/HTTP3 claude.ai через туннель) | `1a73a98` | ✅ апстрим сам отдаёт `udp: true` (rc.11, `extra.go`) — fork-правка не нужна |
+| reality `support-x25519mlkem768: true` в reality-opts | ea9a6da | ✅ апстрим ставит его, когда сервер требует (`require-x25519mlkem768`, `client.go`) — наши ноды на Citrus, не xray |
+| только `pcs`, без `allowInsecure` (Xray ≥26.1 удалил allowInsecure; битый vless-outbound роняет весь конфиг) | 82f5f1c | ✅ восстановлено 21.10 (merge rc.11), маркер «AoiVPN fork (82f5f1c)» в `client.go` |
 | без `pqv=1` в reality-ссылке (Xray падает на invalid mldsa65Verify) | 77e62c9 | ✅ (в main pqv никогда не эмитится) |
 | mihomo v1.19.32, ipv6 off на ноде | 3f500cb | ✅ |
 
 ### 3.3 Инбаунды/пресеты
 
-- **Shadowsocks снят с раздачи** (решение владельца): инбаунды типа shadowsocks не рендерятся в подписку + пресет Shadowsocks-2022 убран из каталога — коммит `ea9a6da` на ветке `origin/aoi-0.5.0.4`, в main **ПОТЕРЯН**: preset `shadowsocks_2022` в каталоге, инбаунды рендерятся. При следующем касании presets/render — восстановить или спросить владельца.
+- **Shadowsocks снят с раздачи** (решение владельца): инбаунды типа shadowsocks не рендерятся в подписку — восстановлено 21.10 в `render.go` (`build`, маркер «AoiVPN fork: shadowsocks is off»). Пресет `shadowsocks_2022` в каталоге панели остаётся (апстрим с rc.11 даёт SS2022 ключ на клиента) — вернуть SS в раздачу = убрать этот `continue`, только по решению владельца.
+- **Control-домены через туннель** (`ea9a6da`): `DOMAIN-SUFFIX,{sub,panel,vpn}.aoimusic.ru,<g.Main>` сразу после `directRules` (шаблоны режут правила по `len(directRules)` — ставить ДО них нельзя) + `nameserver-policy` `+.aoimusic.ru` через `#<g.Main>`. Восстановлено 21.10.
 
 ### 3.4 Панель/Люди
 
 - Telegram-identity в списке People + состояние `no_subscription` (`NULL expires_at` = «без подписки», не «active»): `2350e33`, `3284450`, `379d11f`, `371e95c` (openapi) — ✅ в main.
 - Версия форка в сайдбаре («AoiVPN · форк mikan X»), ручная проверка ядер протоколов нод: `23e1963`.
-- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` (сейчас 0.5.1.3) → тег образа + версия в сайдбаре.
+- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` → тег образа + версия в сайдбаре. Схема с 21.10: **`<версия апстрима>.aoi.<N>`** через точку внутри pre-release (сейчас `0.5.1.1-rc.11.aoi.1`): по semver она новее своей базы rc.11 и старше rc.12/0.5.1.1, т.е. честно показывает, на каком апстриме форк. Новый мерж апстрима → база меняется, N=1; fork-релиз без мержа → N+1. НЕ через дефис (`rc.11-aoi.1`): `11-aoi` — буквенный идентификатор и обгонит любой числовой rc. Раньше форк «спешил» (0.5.1.3 при апстриме 0.5.1.1-rc.x) — это была защита от апдейтера, теперь её роль играет блокировка ниже.
+- **Блокировка апдейтера** (`internal/panel/updates/updates.go`, `forkLocked`/`ErrForkManual`): панель показывает, что вышло у апстрима, но `Request()` не пишет файл-запрос для хоста (API → 409 `update_fork_manual`), а `policy.json` всегда `auto:false`. Тест `TestForkLocked`. Не удалять при мерже.
+- CI апстрима `goals.yml`/`pages.yml` (подписанный индекс релизов, сайт) в форке выключены условием `github.repository == 'Miroshka000/mikan'`.
 - Брендинг AoiVPN (логотип/название/favicon вместо mikan) — см. §4.
 
 ### 3.5 Только на ветке `origin/aoi-0.5.0.4` (в main НЕТ; см. §3.2–3.3 и §7)
@@ -174,7 +178,8 @@ merge — обязательный чек-лист из §6.
    ```
    Golden-дифф: `git diff -- internal/panel/subs/testdata/golden/ | grep -E "^[+-].*name:"` — там не должны появиться Авто/страны/PROXY.
 5. **Живой smoke на SE после деплоя** (см. §1 curl): ровно 2 группы, DNS nameserver с `#<g.Main>`, обход-группа последняя.
-6. **Версия**: бампнуть `FORK_VERSION` в `.github/workflows/aoi-image.yml`, задеплоить образ (`cd /opt/mikan && MIKAN_IMAGE=... docker compose up -d`), образы старых версий остаются локально для отката. Держать `FORK_VERSION` ≥ последнего upstream-релиза, `auto=false`, `nodes_follow_panel=false`.
+6. **Версия**: `FORK_VERSION` = `<апстрим>.aoi.<N>` (см. §3.4), задеплоить образ (`cd /opt/mikan && MIKAN_IMAGE=... docker compose up -d`), образы старых версий остаются локально для отката. Проверить, что `forkLocked` на месте (`grep -n forkLocked internal/panel/updates/updates.go`), `auto=false`, `nodes_follow_panel=false`.
+   Тесты пакетов с Postgres (`api`, `settings`, `app`, …) в CLI-окружении НЕ гонять (proot: initdb виснет) — `go build ./... && go vet` + тесты без БД + живой smoke.
 7. **Не жать «Обновить» в панели** и не включать auto-update: updater тянет upstream-релизы (installer/src/release.rs: REPO + PUBLIC_KEY upstream), обновление затрёт форк.
 
 ## 7. Если раскладка всё же разъехалась

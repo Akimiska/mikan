@@ -71,6 +71,12 @@ func (r *Remote) SetCurrent(ctx context.Context, tgID, userID int64) error {
 	return r.call(ctx, "SetCurrent", []any{tgID, userID})
 }
 
+func (r *Remote) TagCampaign(ctx context.Context, tgID int64, code string) (bool, error) {
+	var tagged bool
+	err := r.call(ctx, "TagCampaign", []any{tgID, code}, &tagged)
+	return tagged, err
+}
+
 func (r *Remote) UserOfCode(ctx context.Context, code string) (int64, error) {
 	var id int64
 	err := r.call(ctx, "UserOfCode", []any{code}, &id)
@@ -217,6 +223,22 @@ func (s remoteShop) PackageOffers(ctx context.Context, userID int64) ([]billing.
 	return o, a, err
 }
 
+func (s remoteShop) DeviceOfferFor(ctx context.Context, userID int64) (billing.DeviceOffer, billing.Available, bool, error) {
+	var (
+		o  billing.DeviceOffer
+		a  billing.Available
+		ok bool
+	)
+	err := s.r.call(ctx, "Shop.DeviceOfferFor", []any{userID}, &o, &a, &ok)
+	return o, a, ok, err
+}
+
+func (s remoteShop) DeviceInvoice(ctx context.Context, req billing.DeviceRequest) (db.Payment, error) {
+	var p db.Payment
+	err := s.r.call(ctx, "Shop.DeviceInvoice", []any{req}, &p)
+	return p, err
+}
+
 func (s remoteShop) PackageInvoice(ctx context.Context, req billing.PackageRequest) (db.Payment, error) {
 	var p db.Payment
 	err := s.r.call(ctx, "Shop.PackageInvoice", []any{req}, &p)
@@ -285,4 +307,49 @@ func (s remoteShop) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 	var u db.User
 	err := s.r.call(ctx, "Shop.FreePlan", []any{tgID}, &u)
 	return u, err
+}
+
+func (s remoteShop) BalanceOf(ctx context.Context, tgID int64) (int64, error) {
+	var n int64
+	err := s.r.call(ctx, "Shop.BalanceOf", []any{tgID}, &n)
+	return n, err
+}
+
+func (s remoteShop) BalanceHistory(ctx context.Context, tgID int64, n int32) ([]db.BalanceOp, error) {
+	var ops []db.BalanceOp
+	err := s.r.call(ctx, "Shop.BalanceHistory", []any{tgID, n}, &ops)
+	return ops, err
+}
+
+func (s remoteShop) StartTopup(ctx context.Context, tgID, amount int64) (db.Topup, error) {
+	var t db.Topup
+	err := s.r.call(ctx, "Shop.StartTopup", []any{tgID, amount}, &t)
+	return t, err
+}
+
+func (s remoteShop) SetTopupAmount(ctx context.Context, tgID, amount int64) (db.Topup, error) {
+	var t db.Topup
+	err := s.r.call(ctx, "Shop.SetTopupAmount", []any{tgID, amount}, &t)
+	return t, err
+}
+
+func (s remoteShop) TopupDraft(ctx context.Context, tgID int64) (db.Topup, bool) {
+	var (
+		t  db.Topup
+		ok bool
+	)
+	if err := s.r.call(ctx, "Shop.TopupDraft", []any{tgID}, &t, &ok); err != nil {
+		return db.Topup{}, false
+	}
+	return t, ok
+}
+
+func (s remoteShop) CancelTopup(ctx context.Context, tgID int64) error {
+	return s.r.call(ctx, "Shop.CancelTopup", []any{tgID})
+}
+
+func (s remoteShop) SubmitTopup(ctx context.Context, tgID int64, photo string) (db.Topup, error) {
+	var t db.Topup
+	err := s.r.call(ctx, "Shop.SubmitTopup", []any{tgID, photo}, &t)
+	return t, err
 }

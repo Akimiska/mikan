@@ -29,6 +29,7 @@ const (
 const (
 	SourcePurchase = "purchase"
 	SourceAdmin    = "admin"
+	SourceGift     = "gift" // a gift of the tariff a payment was for (gifts.go)
 )
 
 // Limits of a package or a grant.
@@ -143,6 +144,10 @@ func CountTraffic(ctx context.Context, q *db.Queries, b TrafficBatch, now time.T
 			pools[id] = true
 		}
 	}
+	b, err := mainGroupsToMain(ctx, q, b, pools)
+	if err != nil {
+		return err
+	}
 	// What each user's row takes: main traffic and the traffic of pools that still exist.
 	type sums struct{ main, pool Bytes }
 	byUser := map[int64]*sums{}
@@ -247,6 +252,52 @@ func CountTraffic(ctx context.Context, q *db.Queries, b TrafficBatch, now time.T
 		return nil
 	}
 	return q.AddNodeTraffic(ctx, db.AddNodeTrafficParams{NodeID: b.Node, Hour: now.Unix() / 3600, Day: now.Unix() / 86400, Up: up, Down: down})
+}
+
+// mainGroupsToMain moves the traffic of the server groups that count to the user's main
+// traffic (the mode main, or no row) from b's pools to its main traffic. A node that does
+// not know the mode (older than it) reports such traffic under the group; one that does
+// reports it as main traffic already. The traffic of a group deleted meanwhile (not in
+// exist) stays where it is, to be skipped like before.
+func mainGroupsToMain(ctx context.Context, q *db.Queries, b TrafficBatch, exist map[int64]bool) (TrafficBatch, error) {
+	if len(b.Pools) == 0 {
+		return b, nil
+	}
+	var users, pools []int64
+	seen := map[[2]int64]bool{}
+	for k := range b.Pools {
+		if !seen[[2]int64{k[0], 0}] {
+			seen[[2]int64{k[0], 0}] = true
+			users = append(users, k[0])
+		}
+		if !seen[[2]int64{0, k[1]}] {
+			seen[[2]int64{0, k[1]}] = true
+			pools = append(pools, k[1])
+		}
+	}
+	rows, err := q.UserPoolModes(ctx, db.UserPoolModesParams{UserIds: users, PoolIds: pools})
+	if err != nil {
+		return b, err
+	}
+	apart := map[[2]int64]bool{}
+	for _, r := range rows {
+		if r.Mode != PoolMain {
+			apart[[2]int64{r.UserID, r.PoolID}] = true
+		}
+	}
+	out := TrafficBatch{Main: make(map[int64]Bytes, len(b.Main)), Pools: make(map[[2]int64]Bytes, len(b.Pools)), Node: b.Node}
+	for id, t := range b.Main {
+		out.Main[id] = t
+	}
+	for k, t := range b.Pools {
+		if !exist[k[1]] || apart[k] {
+			out.Pools[k] = t
+			continue
+		}
+		cur := out.Main[k[0]]
+		out.Main[k[0]] = Bytes{Up: cur.Up + t.Up, Down: cur.Down + t.Down}
+	}
+	return out, nil
 }
 
 // spendGrants takes what went past the base quotas from the active grants of each target

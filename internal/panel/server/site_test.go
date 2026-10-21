@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mikan/internal/panel/settings"
@@ -37,7 +38,7 @@ func TestOwnSite(t *testing.T) {
 	if code, body, _ := get("/"); code != http.StatusNotFound || body != "404 Not Found\n" {
 		t.Fatalf("no site set: %d %q", code, body)
 	}
-	s.SetSite(OwnSite(dir))
+	s.SetSite(OwnSite(dir, func() string { return "cats" }))
 	for p, want := range map[string]struct {
 		code int
 		body string
@@ -59,8 +60,35 @@ func TestOwnSite(t *testing.T) {
 		}
 	}
 
-	s.SetSite(OwnSite(filepath.Join(dir, "missing")))
+	s.SetSite(OwnSite(filepath.Join(dir, "missing"), nil))
 	if code, body, _ := get("/robots.txt"); code != http.StatusNotFound || body != "404 Not Found\n" {
 		t.Fatalf("no site on disk: %d %q", code, body)
+	}
+
+	// Without a site of the admin's, "/" is the chosen template; the rest stays 404.
+	template := "maintenance"
+	s.SetSite(OwnSite(filepath.Join(dir, "missing"), func() string { return template }))
+	if code, body, h := get("/"); code != http.StatusOK || !strings.Contains(body, "Scheduled maintenance") || h.Get("Content-Security-Policy") != "" {
+		t.Fatalf("maintenance: %d %.80q", code, body)
+	}
+	if code, _, _ := get("/robots.txt"); code != http.StatusNotFound {
+		t.Fatalf("a template has one page: %d", code)
+	}
+	template = "cats"
+	if _, body, _ := get("/"); !strings.Contains(body, "Cat Clicker") {
+		t.Fatalf("cats: %.80q", body)
+	}
+	template = ""
+	if code, _, _ := get("/"); code != http.StatusNotFound {
+		t.Fatalf("no template: %d", code)
+	}
+	empty := t.TempDir()
+	template = "cats"
+	s.SetSite(OwnSite(empty, func() string { return template }))
+	if _, body, _ := get("/"); !strings.Contains(body, "Cat Clicker") {
+		t.Fatalf("an empty www: %.80q", body)
+	}
+	if HasOwnSite(empty) || !HasOwnSite(dir) {
+		t.Fatal("HasOwnSite")
 	}
 }

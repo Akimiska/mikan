@@ -211,6 +211,9 @@ func (h *handlers) requestUpdate(ctx context.Context, _ *struct{}) (*updatesOutp
 		if errors.Is(err, updates.ErrUnavailable) {
 			return nil, huma.Error409Conflict("updates_unavailable")
 		}
+		if errors.Is(err, updates.ErrForkManual) {
+			return nil, huma.Error409Conflict("update_fork_manual")
+		}
 		return nil, err
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "updates.request", "", "", map[string]any{"version": h.d.Updates.State().Latest.Version})

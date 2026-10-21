@@ -67,6 +67,8 @@ type hostFixture struct {
 	// handler is the API itself (to serve for a WebSocket), deps what it was made of.
 	handler http.Handler
 	deps    Deps
+	// send sends a JSON body as the admin's session.
+	send func(method, path, body string) (int, string)
 	// do sends a request as the admin's session; as "none" with no credentials, or with the
 	// given Authorization header.
 	do func(method, path, as string) (int, string)
@@ -144,6 +146,16 @@ func newHostFixture(t *testing.T, withHost bool, tweak ...func(*Deps)) *hostFixt
 		default:
 			t.Fatalf("who is %q", as)
 		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	f.send = func(method, path, body string) (int, string) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: token})
+		req.Header.Set("X-CSRF-Token", sess.CsrfToken)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		return rec.Code, rec.Body.String()

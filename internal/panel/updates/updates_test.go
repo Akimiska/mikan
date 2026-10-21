@@ -201,6 +201,8 @@ func TestFetchChecksTheSignature(t *testing.T) {
 // The panel and the host updater meet in files: the switch and the channel, the request,
 // the report.
 func TestHostFiles(t *testing.T) {
+	forkLocked = false // upstream behaviour; TestForkLocked covers the fork's
+	t.Cleanup(func() { forkLocked = true })
 	dir := t.TempDir()
 	now := time.Unix(1_800_000_000, 0)
 	var asked Query
@@ -238,11 +240,21 @@ func TestHostFiles(t *testing.T) {
 	if _, ok := c.Requested(); ok {
 		t.Fatal("no request yet")
 	}
+	c.Check(context.Background()) // the channel changed: what was found is asked for again
 	if err := c.Request(); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.Requested(); !ok {
 		t.Fatal("the request is there for the host")
+	}
+	// It names the release the page shows: a host with an older copy of the index reads
+	// it again instead of calling its own version the latest.
+	var req map[string]string
+	if b, err := os.ReadFile(filepath.Join(dir, "update", "request")); err != nil || json.Unmarshal(b, &req) != nil {
+		t.Fatalf("request: %s %v", b, err)
+	}
+	if s := c.State(); !s.Available() || req["version"] != s.Latest.Version || req["at"] == "" {
+		t.Fatalf("the request names the release shown: %v, %+v", req, s.Latest)
 	}
 	if _, ok := c.Host(); ok {
 		t.Fatal("the host has not reported")
@@ -335,5 +347,23 @@ func TestRunRetriesAFailedCheck(t *testing.T) {
 			t.Fatalf("after %d checks: %+v", calls, c.State())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// AoiVPN fork: the panel never hands the host an update and never lets it update itself.
+func TestForkLocked(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir, "0.5.1.1-rc.11.aoi.1", nil, nil, time.Now)
+	if err := c.Request(); !errors.Is(err, ErrForkManual) {
+		t.Fatalf("request: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "update", "request")); !os.IsNotExist(err) {
+		t.Fatalf("no request file for the host: %v", err)
+	}
+	if err := c.SetPolicy(Policy{Auto: true, Channel: release.Beta}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "update", "policy.json")); string(b) != `{"auto":false,"channel":"beta"}` {
+		t.Fatalf("policy: %s", b)
 	}
 }

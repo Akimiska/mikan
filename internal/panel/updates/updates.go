@@ -60,6 +60,11 @@ var (
 	// ErrUnavailable: the panel runs without a data directory the host watches (tests,
 	// UI development).
 	ErrUnavailable = errors.New("updates_unavailable")
+	// ErrForkManual (AoiVPN fork): the host updater installs upstream's signed releases
+	// only (installer/src/release.rs: REPO + PUBLIC_KEY), so updating through the panel
+	// would replace the fork with plain upstream. The fork is deployed by hand
+	// (AGENT.md §5): the panel shows what upstream has, but never asks the host to update.
+	ErrForkManual = errors.New("update_fork_manual")
 	// ErrNoRelease: the repository has no release yet; the UI says so in its language.
 	ErrNoRelease = errors.New("no_release")
 )
@@ -272,6 +277,11 @@ func (s State) Available() bool {
 // SetPolicy tells the host whether its daily check may update and which channel it takes.
 // A channel other than the known ones is stable. A change of channel forgets what the
 // last check found on the other one.
+// forkLocked (AoiVPN fork) keeps the host updater off: no update requests, and the
+// policy file always says auto=false whatever the setting. Tests of upstream behaviour
+// turn it off.
+var forkLocked = true
+
 func (c *Checker) SetPolicy(p Policy) error {
 	if !release.ValidChannel(p.Channel) {
 		p.Channel = release.Stable
@@ -282,13 +292,25 @@ func (c *Checker) SetPolicy(p Policy) error {
 	}
 	c.policy = p
 	c.mu.Unlock()
+	if forkLocked {
+		p.Auto = false
+	}
 	data, _ := json.Marshal(p)
 	return c.write("policy.json", data)
 }
 
-// Request asks the host to update now.
+// Request asks the host to update now, to the release the page shows when it shows one: a
+// host whose copy of the release index is older (GitHub's cache, for minutes after a
+// release) reads it again instead of calling its own version the latest.
 func (c *Checker) Request() error {
-	data, _ := json.Marshal(map[string]string{"at": c.now().UTC().Format(time.RFC3339)})
+	if forkLocked {
+		return ErrForkManual
+	}
+	req := map[string]string{"at": c.now().UTC().Format(time.RFC3339)}
+	if s := c.State(); s.Available() {
+		req["version"] = s.Latest.Version
+	}
+	data, _ := json.Marshal(req)
 	return c.write("request", data)
 }
 

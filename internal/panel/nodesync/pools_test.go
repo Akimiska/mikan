@@ -29,7 +29,7 @@ func TestTrafficPoolsOnThePanel(t *testing.T) {
 	}
 	tariffs, _ := q.ListTariffs(ctx)
 	const limit = 1000
-	if err := q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: tariffs[1].ID, PoolID: pool.ID, TrafficLimit: limit}); err != nil {
+	if err := q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: tariffs[1].ID, PoolID: pool.ID, Mode: domain.PoolOwn, TrafficLimit: sql.NullInt64{Int64: limit, Valid: true}}); err != nil {
 		t.Fatal(err)
 	}
 	u, err := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
@@ -97,5 +97,53 @@ func TestTrafficPoolsOnThePanel(t *testing.T) {
 	ups, _ = q.ListUserPools(ctx, u.ID)
 	if ups[0].UsedUp+ups[0].UsedDown != 0 {
 		t.Fatalf("pool after the reset: %+v", ups[0])
+	}
+}
+
+// A group the user's tariff has in the main traffic goes to the node as counting there
+// (Main, with what is left of the main traffic for nodes that do not know Main), and its
+// traffic spends the main quota even when a node reports it under the group.
+func TestGroupInTheMainTraffic(t *testing.T) {
+	s, node, st, users, _ := setup(t)
+	ctx := context.Background()
+	q := st.Q
+	pool, err := q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "EU", CreatedAt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ins, _ := q.ListInbounds(ctx)
+	if err := q.SetInboundPool(ctx, db.SetInboundPoolParams{PoolID: sql.NullInt64{Int64: pool.ID, Valid: true}, ID: ins[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	tariffs, _ := q.ListTariffs(ctx)
+	u, err := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := int64(1000)
+	if u, err = users.Update(ctx, u.ID, domain.Patch{TrafficLimit: &limit}); err != nil {
+		t.Fatal(err)
+	}
+	slot, _ := q.GetSlot(ctx, u.SlotID.Int64)
+	key := strconv.FormatInt(pool.ID, 10)
+	_, ps, _, err := s.policies(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p nodeapi.Policy
+	for _, x := range ps {
+		if x.Slot == slot.Name {
+			p = x
+		}
+	}
+	if len(p.Pools) != 1 || p.Pools[0] != (nodeapi.PoolQuota{Pool: key, Remaining: 1000, Main: true}) {
+		t.Fatalf("the group in the main traffic: %+v", p.Pools)
+	}
+
+	node.batch = nodeapi.Counters{Epoch: "e1", Seq: 1, Pools: map[string]map[string]nodeapi.Traffic{slot.Name: {key: {Down: 300}}}}
+	s.pullCounters(ctx)
+	got, _ := q.GetUser(ctx, u.ID)
+	if got.UsedDown != 300 || got.TotalDown != 300 {
+		t.Fatalf("the group's traffic spends the main traffic: used %d total %d", got.UsedDown, got.TotalDown)
 	}
 }

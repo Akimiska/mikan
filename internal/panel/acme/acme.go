@@ -29,7 +29,7 @@ import (
 
 // Status is the panel's certificate as the admin panel shows it.
 type Status struct {
-	Kind       string    `json:"kind" enum:"self-signed,acme,custom" doc:"acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный"`
+	Kind       string    `json:"kind" enum:"self-signed,acme,custom,off" doc:"acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный, off — домен подписки не задан"`
 	Identifier string    `json:"identifier"`
 	NotAfter   time.Time `json:"not_after"`
 	// CA issued the certificate served (kind acme); WantCA is the one the next order goes to:
@@ -75,6 +75,11 @@ type Manager struct {
 	customMod time.Time
 	// journal keeps the latest orders, for the admin panel to list.
 	journal *journal
+	// sub: the certificate of the subscription domain (NewSub), apart from the panel's: none
+	// while the domain is unset, the panel's served then. ownChallenge: the challenge server
+	// is this manager's to close.
+	sub          bool
+	ownChallenge bool
 	// onChange hears of every change of Public: the local node gets that certificate with
 	// its state, which is sent again only on a change. announced is the last one told.
 	annMu     sync.Mutex
@@ -96,8 +101,20 @@ func New(dataDir string, holder *tlscert.Holder, fallback *tls.Certificate, set 
 	root := filepath.Join(dataDir, "tls", "acme")
 	m := &Manager{dir: root, iss: newIssuer(root, set), holder: holder, fallback: fallback,
 		set: set, log: log, now: now, wake: make(chan struct{}, 1), challenge: acmechallenge.New(listen), customDir: filepath.Join(dataDir, "tls", "custom"),
-		journal: newJournal(root)}
+		journal: newJournal(root), ownChallenge: true}
 	m.status.Store(&Status{Kind: "self-signed", WantCA: CALetsEncrypt, CheckedAt: now()})
+	return m
+}
+
+// NewSub looks after the certificate of the subscription domain (settings.KeySubDomain):
+// ordered from the panel's CA, answered on the panel's port 80 (challenge), or the admin's
+// own, each kept apart from the panel's in tls/sub. While the domain is unset there is
+// none, and the panel's certificate is served for every name.
+func NewSub(dataDir string, holder *tlscert.Holder, set *settings.Settings, challenge *acmechallenge.Server, log *slog.Logger, now func() time.Time) *Manager {
+	root := filepath.Join(dataDir, "tls", "sub", "acme")
+	m := &Manager{dir: root, iss: newIssuer(root, set), holder: holder, set: set, log: log, now: now, wake: make(chan struct{}, 1),
+		challenge: challenge, customDir: filepath.Join(dataDir, "tls", "sub", "custom"), journal: newJournal(root), sub: true}
+	m.status.Store(&Status{Kind: "off", WantCA: CALetsEncrypt, CheckedAt: now()})
 	return m
 }
 
@@ -247,7 +264,9 @@ func (m *Manager) Run(ctx context.Context) {
 	// served within half a minute, no restart.
 	watch := time.NewTicker(30 * time.Second)
 	defer watch.Stop()
-	defer m.challenge.Close()
+	if m.ownChallenge {
+		defer m.challenge.Close()
+	}
 	later := func(failed bool) {
 		d := checkEvery
 		if failed {
@@ -316,6 +335,9 @@ func (m *Manager) ClearCustom() error {
 }
 
 func (m *Manager) identifier(ctx context.Context) (string, error) {
+	if m.sub {
+		return m.set.String(ctx, settings.KeySubDomain)
+	}
 	d, err := m.set.String(ctx, settings.KeyDomain)
 	if err != nil || d != "" {
 		return d, err
@@ -393,6 +415,12 @@ func (m *Manager) settle(ctx context.Context) (id, ca string, order bool) {
 	}
 	ca = EffectiveCA(chosen, id)
 	st.WantCA = ca
+	if m.sub && id == "" {
+		// No subscription domain: nothing to order, nothing of its own to serve.
+		st.Kind = "off"
+		m.holder.Set(nil)
+		return id, ca, false
+	}
 	// The admin's own certificate wins while it is valid; an expired or broken one falls
 	// back to the rest, and the status says why.
 	m.customMod = tlscert.CustomModTime(m.customDir)

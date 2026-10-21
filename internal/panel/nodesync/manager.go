@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -91,6 +92,13 @@ type Manager struct {
 	// The nodes' last hellos (check.go).
 	helloMu sync.Mutex
 	hellos  map[int64]HelloView
+
+	// The panel's own addresses for the nodes' API locks (apilock.go), looked up at most
+	// every panelAddrsTTL; lookup is the resolver, which tests replace.
+	addrMu sync.Mutex
+	addrs  []string
+	addrAt time.Time
+	lookup func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type running struct {
@@ -393,6 +401,17 @@ func (m *Manager) SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, e
 		return nodeapi.SpeedTest{}, err
 	}
 	return c.SpeedTest(ctx)
+}
+
+// ServiceRegions asks the sites from the node what they make of its address.
+func (m *Manager) ServiceRegions(ctx context.Context, id int64) (nodeapi.ServiceRegions, error) {
+	c, err := clientOf[interface {
+		ServiceRegions(context.Context) (nodeapi.ServiceRegions, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.ServiceRegions{}, err
+	}
+	return c.ServiceRegions(ctx)
 }
 
 // clientOf returns a node's client as T: methods beyond Node are optional, and tests

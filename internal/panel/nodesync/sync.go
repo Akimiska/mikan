@@ -264,6 +264,12 @@ func (s *Syncer) desiredPin(ctx context.Context) (st nodeapi.DesiredState, pin s
 	st.Torrent = snap.torrent.Block()
 	st.Filters = snap.filters.State()
 	st.DNS = snap.exitDNS.State()
+	st.Detail = snap.detail
+	st.HTTPRedirect = n.HttpRedirect != 0 && n.Address != ""
+	st.APIAllow = s.apiAllow(ctx, n)
+	if n.SniRouter != 0 {
+		st.Router = sniRouter(st.Inbounds, n.Domain)
+	}
 	if n.FairShare != 0 && n.ChannelMbps.Valid {
 		st.Shaping = &nodeapi.Shaping{ChannelMbps: int(n.ChannelMbps.Int64)}
 	}
@@ -452,10 +458,10 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 			}
 		}
 	}
-	// The inbounds here each user's tariff leaves out, through the pools they are in.
+	// The inbounds here each user's tariff leaves out, through the server groups they are in.
 	shut := map[int64]map[int64]bool{}
 	for _, up := range snap.pools {
-		if !up.Excluded {
+		if up.Mode != domain.PoolClosed {
 			continue
 		}
 		for _, id := range inPool[up.PoolID] {
@@ -468,13 +474,21 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 	others := s.m.otherIPs(s.id, slotUser)
 	now := s.m.now()
 	grants := snap.grants
-	pools := userPoolQuotas(snap.pools, grants)
+	groupsHere := make([]int64, 0, len(inPool))
+	for id := range inPool {
+		groupsHere = append(groupsHere, id)
+	}
+	slices.Sort(groupsHere)
+	rows := map[int64][]db.UserPool{}
+	for _, up := range snap.pools {
+		rows[up.UserID] = append(rows[up.UserID], up)
+	}
 	for _, u := range snap.users {
 		names := slotsOf[u.ID]
 		sort.Strings(names)
 		for _, name := range names {
 			p := userPolicy(u, grants.Main(u.ID), name, seq, now, here, shut[u.ID], others[name])
-			p.Pools = pools[u.ID]
+			p.Pools = userPoolQuotas(u.ID, rows[u.ID], groupsHere, p.QuotaRemaining, grants)
 			p.TorrentExempt = snap.torrent.IsExempt(u.ID)
 			if !p.TorrentExempt {
 				// A user added to the exemptions after a catch is let in at once.
@@ -628,6 +642,9 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		}
 		// Each slot's own total, main and pools: what every bound device used.
 		if err := countSlots(ctx, q, c, owner); err != nil {
+			return err
+		}
+		if err := countSites(ctx, q, c, owner, now); err != nil {
 			return err
 		}
 		if c.Epoch != epoch {
@@ -821,7 +838,12 @@ func stateKey(st nodeapi.DesiredState) string {
 		F *nodeapi.Filters
 		H *nodeapi.Shaping
 		D *nodeapi.ExitDNS
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent, st.Filters, st.Shaping, st.DNS})
+		A []string
+		X bool
+		V bool
+		O *nodeapi.SNIRouter
+	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent, st.Filters, st.Shaping, st.DNS, st.APIAllow,
+		st.HTTPRedirect, st.Detail, st.Router})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -986,6 +1008,11 @@ func (s *Syncer) exitTo(ctx context.Context, src, id int64) (nodeapi.Exit, error
 	if err != nil {
 		return nodeapi.Exit{}, err
 	}
+	// Node to node is Citrus on both ends: the key exchange is post-quantum, said here
+	// rather than left to the core's default (mihomo's was the other way).
+	if ro, ok := c.Mihomo["reality-opts"].(map[string]any); ok {
+		ro["support-x25519mlkem768"] = true
+	}
 	raw, _ := json.Marshal(c.Mihomo)
 	return nodeapi.Exit{Name: nodeapi.ExitName(id), Proxy: raw}, nil
 }
@@ -1029,24 +1056,36 @@ func (m *Manager) Tunnel(ctx context.Context, id int64, addr string) (net.Conn, 
 	return c.Tunnel(ctx, addr)
 }
 
-// userPoolQuotas are the users' pool quotas with a limit: what is left of each, with the
-// pool's grants.
-func userPoolQuotas(rows []db.UserPool, grants domain.GrantsLeft) map[int64][]nodeapi.PoolQuota {
-	out := map[int64][]nodeapi.PoolQuota{}
-	for _, p := range rows {
-		if !p.TrafficLimit.Valid {
-			continue
+// userPoolQuotas are a user's quotas in the server groups that have inbounds on this node
+// (here): a group with a limit of its own gets what is left of it, with the group's
+// grants; a group in the main traffic is said to count there (Main), with what is left of
+// the main traffic for nodes that do not know Main. A group without a limit or closed is
+// not listed: it has no quota (a closed one is out of the slot's inbounds already).
+func userPoolQuotas(userID int64, rows []db.UserPool, here []int64, mainLeft int64, grants domain.GrantsLeft) []nodeapi.PoolQuota {
+	var out []nodeapi.PoolQuota
+	for _, id := range here {
+		p, mode := domain.UserPoolOf(rows, id)
+		pool := strconv.FormatInt(id, 10)
+		switch mode {
+		case domain.PoolOwn:
+			left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(userID, id))
+			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: left})
+		case domain.PoolMain:
+			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: mainLeft, Main: true})
 		}
-		left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(p.UserID, p.PoolID))
-		out[p.UserID] = append(out[p.UserID], nodeapi.PoolQuota{Pool: strconv.FormatInt(p.PoolID, 10), Remaining: left})
 	}
 	return out
 }
 
-// poolKey: which pools have a quota, not how much is left (the node counts that down).
+// poolKey: which groups have a quota and which count to the main traffic, not how much
+// is left (the node counts that down).
 func poolKey(ps []nodeapi.PoolQuota) []string {
 	out := make([]string, 0, len(ps))
 	for _, p := range ps {
+		if p.Main {
+			out = append(out, p.Pool+":main")
+			continue
+		}
 		out = append(out, p.Pool)
 	}
 	return out
@@ -1078,4 +1117,47 @@ func countSlots(ctx context.Context, q *db.Queries, c nodeapi.Counters, owner ma
 		return nil
 	}
 	return q.AddSlotsTraffic(ctx, p)
+}
+
+// countSites keeps a batch's bytes by site, by subscription and day. What a node could not
+// have sent (too many sites, a name past the DNS bound, a negative or absurd amount) is
+// dropped; the rest of the batch counts as ever.
+func countSites(ctx context.Context, q *db.Queries, c nodeapi.Counters, owner map[string]int64, now time.Time) error {
+	day := domain.SiteDay(now)
+	for slot, sites := range c.Sites {
+		uid, ok := owner[slot]
+		if !ok || len(sites) > domain.MaxSitesPerSlot {
+			continue
+		}
+		for site, t := range sites {
+			if site == "" || len(site) > 253 || t.Up < 0 || t.Down < 0 || t.Up > maxBytesPerSecond*86400 || t.Down > maxBytesPerSecond*86400 {
+				continue
+			}
+			if err := q.AddUserSite(ctx, db.AddUserSiteParams{Day: day, UserID: uid, Site: site, Up: t.Up, Down: t.Down}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// sniRouter is the node's SNI router for the inbounds marked for it: each by the names its
+// clients ask for, the first REALITY one taking any other name (it passes a stranger on to
+// its target, as on a port of its own). nil when no inbound is marked.
+func sniRouter(inbounds []nodeapi.Inbound, nodeDomain string) *nodeapi.SNIRouter {
+	r := &nodeapi.SNIRouter{}
+	for _, in := range inbounds {
+		t, err := proto.Parse(string(in.Config))
+		if err != nil || !proto.SNI443(t) || !proto.CanSNI443(t) {
+			continue
+		}
+		r.Routes = append(r.Routes, nodeapi.SNIRoute{Inbound: in.Name, Names: proto.SNINames(t, nodeDomain)})
+		if r.Default == "" && proto.Reality(t) {
+			r.Default = in.Name
+		}
+	}
+	if len(r.Routes) == 0 {
+		return nil
+	}
+	return r
 }

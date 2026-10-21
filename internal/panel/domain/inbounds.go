@@ -99,7 +99,8 @@ type InboundPatch struct {
 	Fingerprint *string
 	Obfs        *string
 	XHTTP       *proto.XHTTPTuning // the whole XHTTP tuning, as the form shows it
-	Client      *ClientEndpoint    // replaces all three
+	Client      *ClientEndpoint    // replaces all of it, the CDN included
+	SNI443      *bool              // behind the node's SNI router on 443
 	DisplayName *string
 	// What only the node uses.
 	Listen     *string
@@ -117,7 +118,7 @@ type InboundPatch struct {
 
 // EditsTemplate: the patch changes the listener's template.
 func (p InboundPatch) EditsTemplate() bool {
-	return p.Config != nil || p.Dest != nil || p.Fingerprint != nil || p.Obfs != nil || p.XHTTP != nil || p.Client != nil
+	return p.Config != nil || p.Dest != nil || p.Fingerprint != nil || p.Obfs != nil || p.XHTTP != nil || p.Client != nil || p.SNI443 != nil
 }
 
 // ForClients: the patch changes what clients get.
@@ -131,6 +132,8 @@ type ClientEndpoint struct {
 	Server string
 	Port   int
 	SNI    string
+	Host   string     // HTTP Host of WebSocket and XHTTP
+	CDN    *proto.CDN // the apps reach the node through a CDN; nil: not
 }
 
 // Create adds an inbound: a preset's with fresh keys, or a custom template.
@@ -417,12 +420,22 @@ func editTemplate(config string, p InboundPatch) (string, error) {
 	if p.Obfs != nil {
 		edits = append(edits, templateEdit{"obfs", func(t proto.Template) error { return proto.SetObfs(t, *p.Obfs, secure.Token(24)) }})
 	}
+	if p.SNI443 != nil {
+		edits = append(edits, templateEdit{"sni443", func(t proto.Template) error { return proto.SetSNI443(t, *p.SNI443) }})
+	}
 	if p.XHTTP != nil {
 		edits = append(edits, templateEdit{"xhttp", func(t proto.Template) error { return proto.SetXHTTP(t, *p.XHTTP) }})
 	}
 	if c := p.Client; c != nil {
 		edits = append(edits, templateEdit{"client", func(t proto.Template) error {
-			return proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI))
+			if err := proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI), strings.TrimSpace(c.Host)); err != nil {
+				return err
+			}
+			if c.CDN != nil && strings.TrimSpace(c.Server) == "" {
+				// The apps connect to the CDN's domain: without it they would go to the node.
+				return &proto.Error{Code: "cdn_server_needed", Field: "mikan.client.server"}
+			}
+			return proto.SetCDN(t, c.CDN)
 		}})
 	}
 	for _, e := range edits {
@@ -649,4 +662,49 @@ func FreeName(existing []db.Inbound, base string) string {
 		name = base + "-" + strconv.Itoa(i)
 	}
 	return name
+}
+
+// ExitConflictError is an inbound a bulk exit change cannot take, and why (a cascade
+// refusal, as with UseExit).
+type ExitConflictError struct {
+	Inbound string
+	Err     error
+}
+
+func (e *ExitConflictError) Error() string { return e.Inbound + ": " + e.Err.Error() }
+func (e *ExitConflictError) Unwrap() error { return e.Err }
+
+// SetExits sends the inbounds ids out the same way: straight out, through their node's
+// WARP or through node exit, all of them or none. An inbound on exit itself, or one whose
+// chain would come back, refuses the whole change by its name.
+func (s *Inbounds) SetExits(ctx context.Context, ids []int64, outbound string, exit int64) ([]db.Inbound, error) {
+	var rows []db.Inbound
+	err := s.st.Tx(ctx, func(q *db.Queries) error {
+		rows = rows[:0]
+		for _, id := range ids {
+			in, err := q.GetInbound(ctx, id)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrUnknownInbound
+			}
+			if err != nil {
+				return err
+			}
+			p := db.SetInboundExitParams{Outbound: outbound, ID: id}
+			if outbound == "node" {
+				if err := UseExit(ctx, q, in.NodeID, exit, s.now(), s.host); err != nil {
+					return &ExitConflictError{Inbound: in.Name, Err: err}
+				}
+				p.Outbound, p.ExitNodeID = "direct", sql.NullInt64{Int64: exit, Valid: true}
+			}
+			if err := q.SetInboundExit(ctx, p); err != nil {
+				return err
+			}
+			if in, err = q.GetInbound(ctx, id); err != nil {
+				return err
+			}
+			rows = append(rows, in)
+		}
+		return nil
+	})
+	return rows, err
 }

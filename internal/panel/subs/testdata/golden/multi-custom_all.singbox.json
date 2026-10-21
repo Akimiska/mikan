@@ -358,6 +358,24 @@
         "outbound": "direct"
       },
       {
+        "domain_suffix": [
+          "sub.aoimusic.ru"
+        ],
+        "outbound": "Прокси"
+      },
+      {
+        "domain_suffix": [
+          "panel.aoimusic.ru"
+        ],
+        "outbound": "Прокси"
+      },
+      {
+        "domain_suffix": [
+          "vpn.aoimusic.ru"
+        ],
+        "outbound": "Прокси"
+      },
+      {
         "ip_is_private": true,
         "outbound": "direct"
       },

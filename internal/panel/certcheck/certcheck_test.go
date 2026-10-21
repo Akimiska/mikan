@@ -286,3 +286,60 @@ func TestOrder(t *testing.T) {
 		t.Fatalf("%+v", cs)
 	}
 }
+
+// The subscription domain is checked on its own name and port: its certificate, a proxy in
+// front of the panel that answers with another one, the panel's served while its own is
+// missing, its records and its order.
+func TestSubDomain(t *testing.T) {
+	p := newPKI(t)
+	own := []netip.Addr{netip.MustParseAddr("198.51.100.7")}
+	panel := p.leaf(t, "admin.example.com", time.Now().Add(60*24*time.Hour), false)
+	sub := p.leaf(t, "sub.example.com", time.Now().Add(60*24*time.Hour), false)
+	proxy := p.leaf(t, "admin.example.com", time.Now().Add(60*24*time.Hour), false) // a proxy's certbot copy
+	dns := fakeDNS{"admin.example.com": own, "sub.example.com": own}
+	for _, c := range []struct {
+		name         string
+		served       tls.Certificate
+		expected     *x509.Certificate
+		status, code string
+		fix          string
+	}{
+		{"its own certificate", sub, sub.Leaf, OK, "served_ok", ""},
+		{"a proxy in front answers with another", proxy, sub.Leaf, Fail, "served_foreign", ""},
+		{"a proxy in front, none of its own yet", proxy, nil, Fail, "served_foreign", ""},
+		{"none of its own yet: the panel's", panel, nil, Fail, "sub_served_wrong_host", FixRenewSub},
+	} {
+		port := serve(t, c.served)
+		in := Input{Domain: "admin.example.com", Host: "admin.example.com", Own: own, Expected: panel.Leaf,
+			Sub: &Sub{Domain: "sub.example.com", Port: port, Expected: c.expected, Status: acme.Status{Kind: "acme", CA: acme.CALetsEncrypt, WantCA: acme.CALetsEncrypt}}}
+		r := checker(p, dns).Run(context.Background(), in)
+		got := find(t, r, "sub_served")
+		if got.Status != c.status || got.Code != c.code || got.Params["domain"] != "sub.example.com" {
+			t.Errorf("%s: %s %s %v", c.name, got.Status, got.Code, got.Params)
+		}
+		if (got.CertFix == nil && c.fix != "") || (got.CertFix != nil && got.CertFix.Action != c.fix) {
+			t.Errorf("%s: fix %+v", c.name, got.CertFix)
+		}
+	}
+
+	in := Input{Domain: "admin.example.com", Host: "admin.example.com", Own: own,
+		Sub: &Sub{Domain: "sub.example.com", Port: serve(t, sub), Status: acme.Status{Kind: "self-signed", Error: acme.CodePort80Busy, WantCA: acme.CALetsEncrypt}}}
+	r := checker(p, fakeDNS{"admin.example.com": own, "sub.example.com": {netip.MustParseAddr("203.0.113.9")}}).Run(context.Background(), in)
+	if got := find(t, r, "sub_dns"); got.Code != "dns_elsewhere" || got.Params["domain"] != "sub.example.com" {
+		t.Errorf("sub dns: %+v", got)
+	}
+	if got := find(t, r, "sub_acme"); got.Code != "acme_error" || got.CertFix == nil || got.CertFix.Action != FixRenewSub {
+		t.Errorf("sub order: %+v", got)
+	}
+	if got := find(t, r, "dns"); got.Code != "dns_ok" {
+		t.Errorf("the panel's own records: %+v", got)
+	}
+
+	// Without a subscription domain nothing of it is checked.
+	r = checker(p, dns).Run(context.Background(), Input{Domain: "admin.example.com", Host: "admin.example.com", Own: own})
+	for _, c := range r.Checks {
+		if strings.HasPrefix(c.ID, "sub_") {
+			t.Errorf("checked without a subscription domain: %+v", c)
+		}
+	}
+}

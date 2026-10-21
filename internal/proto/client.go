@@ -1,7 +1,6 @@
 package proto
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/url"
@@ -50,7 +49,7 @@ func ValidFingerprint(s string) bool { return KnownFingerprint(s) || fingerprint
 // UsesFingerprint says whether clients of t dial through uTLS, so a fingerprint applies.
 func UsesFingerprint(t Template) bool {
 	switch t.Type() {
-	case "vless", "vmess", "trojan": // REALITY or the node certificate, never plain
+	case "vless", "trojan": // REALITY or the node certificate, never plain
 		return t.section("reality-config") != nil || t.Ext().TLS == "node"
 	case "anytls", "trusttunnel":
 		return true
@@ -76,10 +75,10 @@ func ClientSNI(t Template) bool {
 }
 
 // SetClientEndpoint writes where clients connect when it is not the node itself, e.g. a
-// TCP proxy (nginx stream, HAProxy) in front of an inbound on 127.0.0.1. An empty server
-// or SNI, or port 0, removes that override: the node's address, the inbound's port and
-// the usual TLS name apply again.
-func SetClientEndpoint(t Template, server string, port int, sni string) error {
+// TCP proxy (nginx stream, HAProxy) in front of an inbound on 127.0.0.1, or a CDN. An
+// empty server, SNI or host, or port 0, removes that override: the node's address, the
+// inbound's port, the usual TLS name and the server's HTTP host apply again.
+func SetClientEndpoint(t Template, server string, port int, sni, host string) error {
 	switch {
 	case server != "" && !hostname.Valid(server):
 		return fail("config_client_server", extKey+".client.server")
@@ -87,11 +86,25 @@ func SetClientEndpoint(t Template, server string, port int, sni string) error {
 		return fail("config_client_port", extKey+".client.port")
 	case sni != "" && (!hostname.Name(sni) || !ClientSNI(t)):
 		return fail("config_client_sni", extKey+".client.sni")
+	case host != "" && (!hostname.Name(host) || !ClientHost(t)):
+		return fail("config_client_host", extKey+".client.host")
 	}
 	setClient(t, "server", server)
 	setClient(t, "port", port)
 	setClient(t, "sni", sni)
+	setClient(t, "host", host)
 	return nil
+}
+
+// ClientHost says whether clients of t send an HTTP Host the admin may change: VLESS and
+// Trojan over WebSocket or XHTTP.
+func ClientHost(t Template) bool {
+	switch t.Type() {
+	case "vless", "trojan":
+		tr := transport(t)
+		return tr == "ws" || tr == "xhttp"
+	}
+	return false
 }
 
 // setClient writes one key of mikan.client; an empty value removes it, and with it the
@@ -195,9 +208,9 @@ func (c *clientBuilder) fingerprint() string {
 	return DefaultFingerprint
 }
 
-// sniKey: vless and vmess call the TLS name "servername", everything else "sni".
+// sniKey: vless calls the TLS name "servername", everything else "sni".
 func (c *clientBuilder) sniKey() string {
-	if typ := c.t.Type(); typ == "vless" || typ == "vmess" {
+	if c.t.Type() == "vless" {
 		return "servername"
 	}
 	return "sni"
@@ -217,7 +230,13 @@ func (c *clientBuilder) security() error {
 		c.y["tls"] = true
 		c.y[c.sniKey()] = sni
 		c.y["client-fingerprint"] = c.fingerprint()
-		c.y["reality-opts"] = map[string]any{"public-key": pbk, "short-id": sid}
+		opts := map[string]any{"public-key": pbk, "short-id": sid}
+		// A server that requires the post-quantum key exchange lets in only clients that
+		// offer it, and mihomo does only when told.
+		if r["require-x25519mlkem768"] == true {
+			opts["support-x25519mlkem768"] = true
+		}
+		c.y["reality-opts"] = opts
 		for k, v := range map[string]string{"security": "reality", "sni": sni, "fp": c.fingerprint(), "pbk": pbk, "sid": sid} {
 			c.q.Set(k, v)
 		}
@@ -232,7 +251,7 @@ func (c *clientBuilder) security() error {
 	}
 	typ := c.t.Type()
 	switch typ {
-	case "vless", "vmess", "trojan", "anytls":
+	case "vless", "trojan", "anytls":
 		c.y["tls"] = true
 		c.y["client-fingerprint"] = c.fingerprint()
 		c.q.Set("security", "tls")
@@ -247,7 +266,8 @@ func (c *clientBuilder) security() error {
 		c.y[c.sniKey()] = sni
 		c.q.Set("sni", sni)
 	}
-	if c.in.PinSHA256 != "" {
+	// Through a CDN the apps see its certificate, never the node's.
+	if c.in.PinSHA256 != "" && c.ext.CDN == nil {
 		// A self-signed certificate is pinned. Links carry the pin where the app reads
 		// one — Hysteria2's pinSHA256, Xray's pcs (pinnedPeerCertSha256) — next to the
 		// insecure flag they need to accept a certificate without a CA at all.
@@ -260,8 +280,9 @@ func (c *clientBuilder) security() error {
 		case "tuic":
 			c.q.Set("allow_insecure", "1") // the TUIC link scheme has no pin
 		default:
-			c.q.Set("allowInsecure", "1")
-			c.q.Set("insecure", "1")
+			// AoiVPN fork (82f5f1c): Xray-core ≥26.1 removed allowInsecure in favour of pcs
+			// (pinnedPeerCertSha256); fresh clients (Happ) reject the link and one broken
+			// vless outbound drops the WHOLE config. pcs alone is the pinned-cert check.
 			c.q.Set("pcs", c.in.PinSHA256)
 		}
 	}
@@ -270,7 +291,7 @@ func (c *clientBuilder) security() error {
 
 func (c *clientBuilder) transport() {
 	typ := c.t.Type()
-	if typ != "vless" && typ != "vmess" && typ != "trojan" {
+	if typ != "vless" && typ != "trojan" {
 		return
 	}
 	switch transport(c.t) {
@@ -282,6 +303,10 @@ func (c *clientBuilder) transport() {
 				opts[k] = v
 				c.q.Set(k, v)
 			}
+		}
+		if h := c.ext.Client.Host; h != "" {
+			opts["host"] = h
+			c.q.Set("host", h)
 		}
 		// Padding, session and uplink settings must match on both ends: a client on the
 		// defaults gets "400 invalid xpadding" from a node with its own x-padding-bytes.
@@ -302,6 +327,12 @@ func (c *clientBuilder) transport() {
 					}
 				}
 				opts["reuse-settings"], extra["xmux"] = reuse, link
+			}
+			// The apps' own upload, over the server's (a CDN that passes only GET).
+			for _, k := range xhttpClientUplink {
+				if v := scalar(cl[k.mihomo]); v != "" {
+					opts[k.mihomo], extra[k.xray] = v, v
+				}
 			}
 			if v := scalar(cl["sc-min-posts-interval-ms"]); v != "" {
 				opts["sc-min-posts-interval-ms"], extra["scMinPostsIntervalMs"] = v, v
@@ -330,15 +361,20 @@ func (c *clientBuilder) transport() {
 		c.q.Set("mode", "gun")
 	case "ws":
 		path := c.t.str("ws-path")
-		c.y["network"], c.y["ws-opts"] = "ws", map[string]any{"path": path}
+		opts := map[string]any{"path": path}
 		c.q.Set("type", "ws")
 		c.q.Set("path", path)
+		if h := c.ext.Client.Host; h != "" {
+			opts["headers"] = map[string]any{"Host": h}
+			c.q.Set("host", h)
+		}
+		c.y["network"], c.y["ws-opts"] = "ws", opts
 	default:
 		c.y["network"] = "tcp"
 		c.q.Set("type", "tcp")
 	}
-	// mihomo carries UDP over VLESS/VMess/Trojan streams, but not over XHTTP in v1.19.31.
-	c.y["udp"] = transport(c.t) != "xhttp"
+	// UDP goes over every VLESS/Trojan transport, XHTTP too, to the Citrus server.
+	c.y["udp"] = true
 }
 
 func (c *clientBuilder) finish() (Client, error) {
@@ -361,16 +397,6 @@ func (c *clientBuilder) finish() (Client, error) {
 			c.q.Set("flow", c.ext.Flow)
 		}
 		return Client{c.y, "vless://" + s.UUID + "@" + c.addr() + "?" + c.q.Encode() + "#" + name}, nil
-	case "vmess":
-		c.y["uuid"], c.y["alterId"], c.y["cipher"] = s.UUID, 0, "auto"
-		link := map[string]string{"v": "2", "ps": c.in.Name, "add": c.host, "port": strconv.Itoa(c.port), "id": s.UUID, "aid": "0", "scy": "auto",
-			"net": c.q.Get("type"), "type": "none", "path": c.q.Get("path"), "tls": c.q.Get("security"), "sni": c.q.Get("sni"), "fp": c.q.Get("fp"),
-			"pbk": c.q.Get("pbk"), "sid": c.q.Get("sid"), "pcs": c.q.Get("pcs")}
-		if link["net"] == "grpc" {
-			link["path"] = c.q.Get("serviceName")
-		}
-		b, _ := json.Marshal(link)
-		return Client{c.y, "vmess://" + base64.StdEncoding.EncodeToString(b)}, nil
 	case "trojan":
 		c.y["password"] = s.Secret
 		return Client{c.y, "trojan://" + url.PathEscape(s.Secret) + "@" + c.addr() + "?" + c.q.Encode() + "#" + name}, nil

@@ -23,6 +23,9 @@ type Endpoint struct {
 	Host      string // IP or domain the client connects to
 	SNI       string // TLS server name for Hysteria2/TUIC; empty for IP-only nodes
 	PinSHA256 string // hex SHA-256 of the node's self-signed Hysteria2/TUIC certificate
+	// SNIRouter: the node shares its 443 between the inbounds marked for it, which clients
+	// reach on 443.
+	SNIRouter bool
 }
 
 // Node is one server in the subscription.
@@ -202,6 +205,15 @@ func build(p Profile) ([]proxy, error) {
 				p.skip(in, err)
 				continue
 			}
+			// AoiVPN fork: shadowsocks is off the subscription by the owner's decision
+			// (ea9a6da). Its inbounds may still live in the panel; they are not served.
+			if pt, _ := t["type"].(string); pt == "shadowsocks" {
+				continue
+			}
+			spec := in.Port
+			if n.Endpoint.SNIRouter && proto.SNI443(t) {
+				port, spec = 443, "443"
+			}
 			base := domain.ProxyName(in)
 			// A name the admin typed is used as is; preset names get the node's flag.
 			if prefix := NodePrefix(n.Name); multi && in.DisplayName == "" && prefix != "" {
@@ -212,7 +224,7 @@ func build(p Profile) ([]proxy, error) {
 			for i := 2; used[name]; i++ {
 				name = base + " " + strconv.Itoa(i)
 			}
-			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: in.Port,
+			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: spec,
 				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot})
 			if err != nil {
 				p.skip(in, err)
@@ -358,7 +370,15 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 		},
 	}
 	// The panel and the nodes stay out of the tunnel whatever the admin's rules say.
-	rules := append(directRules(p.Direct), "GEOIP,LAN,DIRECT,no-resolve")
+	// AoiVPN fork (ea9a6da): the control domains go THROUGH the tunnel, ahead of every
+	// GEOSITE/GEOIP-ru rule — otherwise ".ru → DIRECT" sends the subscription update over
+	// RU DNS/TSPU and the app fails with "Failed host lookup: sub.aoimusic.ru". They come
+	// right after directRules: templates cut the rules at len(directRules(p.Direct)).
+	rules := append(directRules(p.Direct),
+		"DOMAIN-SUFFIX,sub.aoimusic.ru,"+g.Main,
+		"DOMAIN-SUFFIX,panel.aoimusic.ru,"+g.Main,
+		"DOMAIN-SUFFIX,vpn.aoimusic.ru,"+g.Main,
+		"GEOIP,LAN,DIRECT,no-resolve")
 	tune := p.Routes.Tune
 	if tune.BlockQUIC {
 		rules = append(rules, "AND,((NETWORK,UDP),(DST-PORT,443)),REJECT")
@@ -403,7 +423,11 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 		}
 		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + dnsGroup, "https://8.8.8.8/dns-query#" + dnsGroup}
 		dns["proxy-server-nameserver"] = slices.Clone(defaultNameservers)
-		dns["nameserver-policy"] = map[string]any{"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"}}
+		// AoiVPN fork (ea9a6da): the control domains resolve through the tunnel, not RU DNS.
+		dns["nameserver-policy"] = map[string]any{
+			"+.aoimusic.ru":       []string{"https://1.1.1.1/dns-query#" + dnsGroup},
+			"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"},
+		}
 	}
 	p.Routes.DNS.apply(dns)
 	if tune.RealIP {
@@ -415,10 +439,10 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 			"sniff": map[string]any{"HTTP": map[string]any{"ports": []any{80, "8080-8880"}}, "TLS": map[string]any{"ports": []any{443, 8443}},
 				"QUIC": map[string]any{"ports": []any{443, 8443}}}}
 	}
-	// mihomo skips a rule whose group can't carry UDP (XHTTP picked by hand or by url-test)
-	// and sends what falls through to DIRECT: past the tunnel, from the real address. REJECT
-	// makes such apps fall back to TCP instead. In the "blocked" mode the rest goes direct
-	// by design; its tunnel rules get their own REJECT twins (blockedRules).
+	// mihomo skips a rule whose group can't carry UDP (a proxy with udp off, picked by hand
+	// or by url-test) and sends what falls through to DIRECT: past the tunnel, from the real
+	// address. REJECT makes such apps fall back to TCP instead. In the "blocked" mode the
+	// rest goes direct by design; its tunnel rules get their own REJECT twins (blockedRules).
 	last := []string{"MATCH," + g.Main, "MATCH,REJECT"}
 	if r == RoutingBlocked {
 		last = []string{"MATCH,DIRECT"}

@@ -56,6 +56,7 @@ var botRPC = map[string]rpcRule{
 	"Unlink":        rule("users:write", nil, []int{0}),
 	"Unbind":        rule("users:write", nil, []int{0}),
 	"Reissue":       rule("users:write", nil, []int{0}),
+	"TagCampaign":   rule("users:write", []int{0}, nil),
 	// The shop: what is on offer, and what makes a payment or a subscription.
 	"Shop.Config": rule("", nil, nil), "Shop.Offers": rule("", nil, nil), "Shop.AddonName": rule("", nil, nil),
 	"Shop.TrialTariff":    rule("", nil, nil),
@@ -66,9 +67,18 @@ var botRPC = map[string]rpcRule{
 	"Shop.FreeOffer":      rule("", []int{0}, nil),
 	"Shop.Invoice":        {perm: "billing:invoice", tgField: 0},
 	"Shop.PackageInvoice": {perm: "billing:invoice", tgField: 0},
+	"Shop.DeviceOfferFor": rule("", nil, []int{0}),
+	"Shop.DeviceInvoice":  {perm: "billing:invoice", tgField: 0},
 	"Shop.TrialInvoice":   rule("billing:invoice", []int{0}, nil),
 	"Shop.Trial":          rule("billing:invoice", []int{0}, nil),
 	"Shop.FreePlan":       rule("billing:invoice", []int{0}, nil),
+	"Shop.BalanceOf":      rule("users:read", []int{0}, nil),
+	"Shop.BalanceHistory": rule("users:read", []int{0}, nil),
+	"Shop.TopupDraft":     rule("users:read", []int{0}, nil),
+	"Shop.StartTopup":     rule("billing:invoice", []int{0}, nil),
+	"Shop.SetTopupAmount": rule("billing:invoice", []int{0}, nil),
+	"Shop.CancelTopup":    rule("billing:invoice", []int{0}, nil),
+	"Shop.SubmitTopup":    rule("billing:invoice", []int{0}, nil),
 }
 
 // talkWindow: how long an account counts as talking to the bot after its last message.

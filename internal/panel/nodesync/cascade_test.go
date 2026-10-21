@@ -85,6 +85,9 @@ func TestCascadeChain(t *testing.T) {
 	if proxy["type"] != "vless" || proxy["server"] != "198.51.100.20" || proxy["reality-opts"] == nil {
 		t.Fatalf("A's way to B: %v", proxy)
 	}
+	if ro, _ := proxy["reality-opts"].(map[string]any); ro["support-x25519mlkem768"] != true {
+		t.Fatalf("the relay's key exchange must be post-quantum: %v", ro)
+	}
 	db_, _ := b.desired(ctx)
 	if db_.Relay == nil || len(db_.Relay.Users) != 1 || db_.Relay.Users[0].Name != domain.RelayUserName(a.id) ||
 		len(db_.Exits) != 1 || db_.Exits[0].Inbounds[0] != nodeapi.RelayListener {

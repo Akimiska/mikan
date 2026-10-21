@@ -47,6 +47,8 @@ dns:
     - https://1.1.1.1/dns-query#VPN
     - https://8.8.8.8/dns-query#VPN
   nameserver-policy:
+    +.aoimusic.ru:
+      - https://1.1.1.1/dns-query#VPN
     geosite:category-ru:
       - 77.88.8.8
       - 77.88.8.1
@@ -67,7 +69,7 @@ proxies:
       short-id: a1b2c3d4
     servername: www.example.com
     tls: true
-    udp: false
+    udp: true
     uuid: 0b4ddc4c-7c4f-4a36-9d62-6f1a44b8c4e1
     xhttp-opts:
       mode: stream-one
@@ -124,6 +126,9 @@ proxy-groups:
 rules:
   - IP-CIDR,203.0.113.7/32,DIRECT,no-resolve
   - DOMAIN,vpn.example.com,DIRECT
+  - DOMAIN-SUFFIX,sub.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,panel.aoimusic.ru,VPN
+  - DOMAIN-SUFFIX,vpn.aoimusic.ru,VPN
   - GEOIP,LAN,DIRECT,no-resolve
   - RULE-SET,mikan-blocked,VPN
   - RULE-SET,mikan-blocked,REJECT

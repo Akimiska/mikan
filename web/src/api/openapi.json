@@ -502,6 +502,29 @@
         ],
         "type": "object"
       },
+      "AdjustBalanceInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "delta": {
+            "description": "На сколько изменить, в копейках (сотых) валюты; минус — списать",
+            "format": "int64",
+            "maximum": 1000000000,
+            "minimum": -1000000000,
+            "type": "integer"
+          },
+          "note": {
+            "description": "За что: видит клиент в истории баланса",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "delta",
+          "note"
+        ],
+        "type": "object"
+      },
       "AdminView": {
         "additionalProperties": false,
         "properties": {
@@ -582,11 +605,33 @@
         },
         "type": "object"
       },
-      "ApplyPoolsOutputBody": {
+      "ApplyTariffInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "description": "Лимит устройств (докупленные остаются сверху) и как он считается",
+            "type": "boolean"
+          },
+          "groups": {
+            "description": "Группы серверов: режимы и лимиты",
+            "type": "boolean"
+          },
+          "speed": {
+            "description": "Скорость",
+            "type": "boolean"
+          },
+          "traffic": {
+            "description": "Трафик за период и когда он обнуляется",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "ApplyTariffOutputBody": {
         "additionalProperties": false,
         "properties": {
           "applied": {
-            "description": "У скольких клиентов тарифа обновлены лимиты пулов",
+            "description": "Скольким подпискам тарифа применены его части",
             "format": "int64",
             "type": "integer"
           }
@@ -841,6 +886,221 @@
         ],
         "type": "object"
       },
+      "BalanceGroupView": {
+        "additionalProperties": false,
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/BalanceNodeView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "group",
+          "nodes"
+        ],
+        "type": "object"
+      },
+      "BalanceNodeView": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity": {
+            "description": "Мест для клиентов; null — без ограничения",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "clients": {
+            "description": "Сколько действующих клиентов закреплено за нодой",
+            "format": "int64",
+            "type": "integer"
+          },
+          "full": {
+            "description": "Мест не осталось: новые клиенты группы идут на наименее загруженную ноду",
+            "type": "boolean"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "clients",
+          "capacity",
+          "full"
+        ],
+        "type": "object"
+      },
+      "BalanceOpView": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "+ пришло, − ушло",
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "topup",
+              "spend",
+              "refund",
+              "adjust"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "payment_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "amount",
+          "kind",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "BalanceSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR",
+              "UAH",
+              "BYN",
+              "KZT",
+              "UZS",
+              "USDT"
+            ],
+            "type": "string"
+          },
+          "details": {
+            "description": "Как перевести деньги: показывается клиенту перед скриншотом",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "max": {
+            "description": "Наибольшее пополнение в копейках (сотых); 0 — без границы",
+            "format": "int64",
+            "type": "integer"
+          },
+          "min": {
+            "description": "Наименьшее пополнение в копейках (сотых); 0 — без границы",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rate": {
+            "description": "Сколько рублей стоит единица валюты баланса; для RUB — 1",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "currency",
+          "rate",
+          "details",
+          "min",
+          "max"
+        ],
+        "type": "object"
+      },
+      "BalanceSettingsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "enum": [
+              "RUB",
+              "USD",
+              "EUR",
+              "UAH",
+              "BYN",
+              "KZT",
+              "UZS",
+              "USDT"
+            ],
+            "type": "string"
+          },
+          "details": {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "max": {
+            "format": "int64",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min": {
+            "format": "int64",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rate": {
+            "format": "double",
+            "maximum": 1000000,
+            "minimum": 0.0001,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "BalanceView": {
+        "additionalProperties": false,
+        "properties": {
+          "balance": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "ops": {
+            "items": {
+              "$ref": "#/components/schemas/BalanceOpView"
+            },
+            "type": "array"
+          },
+          "tg_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tg_id",
+          "balance",
+          "currency",
+          "ops"
+        ],
+        "type": "object"
+      },
       "BotSlotInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1029,6 +1289,71 @@
         ],
         "type": "object"
       },
+      "CampaignView": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "description": "В архиве: ссылка больше не метит новых людей, статистика остаётся",
+            "type": "boolean"
+          },
+          "bought": {
+            "description": "Сколько из них купили тариф или платный пробный период",
+            "format": "int64",
+            "type": "integer"
+          },
+          "came": {
+            "description": "Сколько человек пришло по ссылке за период",
+            "format": "int64",
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "link": {
+            "description": "Ссылка на бота с меткой; пусто, пока бот не запущен",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "renewed": {
+            "description": "Сколько из них продлили",
+            "format": "int64",
+            "type": "integer"
+          },
+          "revenue_rub": {
+            "description": "Копейки",
+            "format": "int64",
+            "type": "integer"
+          },
+          "revenue_stars": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "archived",
+          "created_at",
+          "link",
+          "came",
+          "bought",
+          "renewed",
+          "revenue_stars",
+          "revenue_rub"
+        ],
+        "type": "object"
+      },
       "CascadeExit": {
         "additionalProperties": false,
         "properties": {
@@ -1187,7 +1512,7 @@
             "$ref": "#/components/schemas/CertFix"
           },
           "id": {
-            "description": "Что проверено: served, compat, dns, port80, acme, node_cert, node_port",
+            "description": "Что проверено: served, compat, dns, port80, acme, sub_served, sub_dns, sub_acme, node_cert, node_port",
             "type": "string"
           },
           "node": {
@@ -1228,6 +1553,7 @@
             "enum": [
               "renew",
               "renew_node",
+              "renew_sub",
               "use_zerossl",
               "update_node",
               "copy"
@@ -1415,9 +1741,37 @@
         ],
         "type": "object"
       },
+      "ClientCDN": {
+        "additionalProperties": false,
+        "properties": {
+          "header": {
+            "description": "Заголовок с настоящим адресом клиента: CF-Connecting-IP, X-Forwarded-For, X-Real-IP; пусто — нода видит адреса CDN",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "trusted": {
+            "description": "Сети CDN, чьему заголовку нода верит: CIDR, адреса, cloudflare, private, loopback",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "ClientEndpoint": {
         "additionalProperties": false,
         "properties": {
+          "cdn": {
+            "$ref": "#/components/schemas/ClientCDN",
+            "description": "Клиенты ходят через CDN; нет — напрямую или через TCP-прокси"
+          },
+          "host": {
+            "description": "HTTP Host у клиентов (WebSocket, XHTTP); пусто — как на сервере",
+            "maxLength": 253,
+            "type": "string"
+          },
           "port": {
             "description": "Порт для клиентов; 0 — порт подключения",
             "format": "int64",
@@ -1498,6 +1852,33 @@
           "promo_button",
           "channel"
         ],
+        "type": "object"
+      },
+      "CopyInboundInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "dest": {
+            "description": "REALITY: другой сайт маскировки, host:port; пусто — тот же",
+            "maxLength": 255,
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Нода копии; по умолчанию — та же",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "port": {
+            "description": "Порт копии; пусто — тот же, а если он занят — первый свободный",
+            "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
+            "type": "string"
+          },
+          "server_name": {
+            "description": "SNI для dest, если это IP",
+            "maxLength": 253,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "CreateAPIKeyInputBody": {
@@ -1593,6 +1974,25 @@
         ],
         "type": "object"
       },
+      "CreateCampaignInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Метка в ссылке: латиница, цифры, _ и -; пусто — случайная",
+            "maxLength": 32,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
       "CreateFolderInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1661,6 +2061,8 @@
               "vless_tls_xhttp",
               "vless_tls_vision",
               "vless_tls_ws",
+              "vless_cdn_xhttp",
+              "vless_cdn_xhttp_get",
               "anytls",
               "vless_reality_xhttp_pq",
               "trusttunnel",
@@ -1871,6 +2273,23 @@
         "required": [
           "match",
           "servers"
+        ],
+        "type": "object"
+      },
+      "DecideTopupInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "approve": {
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Почему отклонено: увидит клиент",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "required": [
+          "approve"
         ],
         "type": "object"
       },
@@ -2243,6 +2662,44 @@
         },
         "type": "object"
       },
+      "ExtraDevices": {
+        "additionalProperties": false,
+        "properties": {
+          "max": {
+            "description": "Сколько устройств подписка может докупить; 0 — докупки нет",
+            "format": "int64",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "price_rub": {
+            "description": "Цена одного устройства в копейках; null — не за рубли",
+            "format": "int64",
+            "maximum": 100000000,
+            "minimum": 100,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "price_stars": {
+            "description": "Цена одного устройства в Stars; null — не за Stars",
+            "format": "int64",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "price_stars",
+          "price_rub",
+          "max"
+        ],
+        "type": "object"
+      },
       "FiltersView": {
         "additionalProperties": false,
         "properties": {
@@ -2307,6 +2764,80 @@
           "color",
           "emoji",
           "users"
+        ],
+        "type": "object"
+      },
+      "GeoAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "description": "ISO 3166-1 alpha-2",
+            "type": "string"
+          },
+          "error": {
+            "enum": [
+              "timeout",
+              "limited",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "type": "object"
+      },
+      "GeoCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "agree": {
+            "description": "Все ответившие базы согласны",
+            "type": "boolean"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/GeoAnswer"
+            },
+            "type": "array"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cached": {
+            "type": "boolean"
+          },
+          "country": {
+            "description": "Что говорит большинство баз",
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "cached",
+          "answers",
+          "agree"
+        ],
+        "type": "object"
+      },
+      "GeoInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "description": "IP или домен сервера",
+            "maxLength": 253,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host"
         ],
         "type": "object"
       },
@@ -2389,7 +2920,7 @@
             "type": "string"
           },
           "pool_id": {
-            "description": "Пул трафика; не передан — основной трафик",
+            "description": "Группа серверов; не передана — основной трафик",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -2462,9 +2993,11 @@
             "type": "integer"
           },
           "source": {
+            "description": "purchase — куплен, admin — начислен вручную, gift — подарок тарифа к оплате",
             "enum": [
               "purchase",
-              "admin"
+              "admin",
+              "gift"
             ],
             "type": "string"
           }
@@ -2482,6 +3015,71 @@
           "package_name",
           "note",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "GroupInTariff": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "main",
+              "own",
+              "unlimited",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "tariff_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "description": "Байты за период; только с mode=own",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tariff_id",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "GroupInboundsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "inbound_ids": {
+            "description": "Все подключения группы: перечисленные переходят в неё из других групп, остальные её подключения возвращаются к основным серверам",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "inbound_ids"
+        ],
+        "type": "object"
+      },
+      "GroupTariffsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "tariffs": {
+            "description": "Тарифы, в которых группа меняется; остальные тарифы держат её как раньше. Закрытие и открытие группы действует сразу на клиентов тарифа",
+            "items": {
+              "$ref": "#/components/schemas/GroupInTariff"
+            },
+            "maxItems": 200,
+            "type": "array"
+          }
+        },
+        "required": [
+          "tariffs"
         ],
         "type": "object"
       },
@@ -2707,9 +3305,17 @@
             "description": "Панель сама меняет сайт маскировки REALITY, если он перестал подходить (и включено в настройках)",
             "type": "boolean"
           },
+          "cdn_possible": {
+            "description": "Можно ли поставить подключение за CDN: VLESS или Trojan на сертификате ноды по XHTTP, WebSocket или gRPC",
+            "type": "boolean"
+          },
           "client": {
             "$ref": "#/components/schemas/ClientEndpoint",
             "description": "Куда подключаются клиенты, если не к ноде напрямую (mikan.client в шаблоне)"
+          },
+          "client_host": {
+            "description": "Можно ли задать клиентам свой HTTP Host: VLESS и Trojan по WebSocket и XHTTP",
+            "type": "boolean"
           },
           "client_sni": {
             "description": "Можно ли задать клиентам свой SNI: у REALITY имя задаёт сайт маскировки",
@@ -2798,6 +3404,14 @@
             "description": "Один ключ на всех: учёт, лимиты и отключение по пользователям не работают",
             "type": "boolean"
           },
+          "sni443": {
+            "description": "Подключение делит порт 443 ноды с другими по имени TLS (SNI-роутер ноды); клиенты подключаются на 443",
+            "type": "boolean"
+          },
+          "sni443_possible": {
+            "description": "Можно ли поставить за SNI-роутер: VLESS, Trojan или AnyTLS по TCP с TLS или REALITY",
+            "type": "boolean"
+          },
           "status": {
             "enum": [
               "ok",
@@ -2848,7 +3462,11 @@
           "auto",
           "outbound",
           "client",
-          "client_sni"
+          "client_sni",
+          "client_host",
+          "cdn_possible",
+          "sni443",
+          "sni443_possible"
         ],
         "type": "object"
       },
@@ -3774,6 +4392,25 @@
             "description": "host:port API ноды; пусто у своей ноды",
             "type": "string"
           },
+          "api_allow": {
+            "description": "Сети и адреса, которые админ добавил к адресам панели",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "api_lock_error": {
+            "description": "Почему на сервере ноды нет правила файрвола для API",
+            "type": "string"
+          },
+          "api_lockdown": {
+            "description": "API ноды отвечает только адресам панели",
+            "type": "boolean"
+          },
+          "balance_group": {
+            "description": "Группа балансировки; пусто — вне групп",
+            "type": "string"
+          },
           "behind": {
             "description": "Нода старее панели",
             "type": "boolean"
@@ -3781,6 +4418,14 @@
           "can_update": {
             "description": "Панель может обновить ноду сама: удалённая, отвечает, версия 0.5.0.2 или новее; старую обновляют один раз вручную командой mikan update на её сервере",
             "type": "boolean"
+          },
+          "capacity": {
+            "description": "Мест для клиентов в группе; null — без ограничения",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "certificate": {
             "$ref": "#/components/schemas/NodeCertView"
@@ -3863,6 +4508,10 @@
             "description": "Адрес для клиентов",
             "type": "string"
           },
+          "http_redirect": {
+            "description": "HTTP на порту 80 получает 301 на https",
+            "type": "boolean"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -3911,6 +4560,18 @@
             "description": "Публичное имя для канала состояния; пустое — нода скрыта из списка",
             "type": "string"
           },
+          "redirect_error": {
+            "description": "Почему нода не смогла занять порт 80",
+            "type": "string"
+          },
+          "router_error": {
+            "description": "Почему нода не смогла занять порт 443",
+            "type": "string"
+          },
+          "sni_router": {
+            "description": "Порт 443 ноды делят подключения по имени TLS (SNI-роутер)",
+            "type": "boolean"
+          },
           "status": {
             "enum": [
               "ok",
@@ -3956,6 +4617,12 @@
           "behind",
           "can_update",
           "fair_share",
+          "balance_group",
+          "http_redirect",
+          "sni_router",
+          "api_lockdown",
+          "api_allow",
+          "capacity",
           "channel_mbps"
         ],
         "type": "object"
@@ -4393,7 +5060,7 @@
             "type": "boolean"
           },
           "pool_id": {
-            "description": "Пул трафика; не передан — основной трафик",
+            "description": "Группа серверов; не передана — основной трафик",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -4414,6 +5081,15 @@
           "sort": {
             "format": "int64",
             "type": "integer"
+          },
+          "tariffs": {
+            "description": "Тарифы, которым продаётся пакет; не переданы или пусто — всем, к квоте которых он подходит",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "type": "array"
           }
         },
         "required": [
@@ -4455,7 +5131,7 @@
             "type": "boolean"
           },
           "pool_id": {
-            "description": "Пул трафика; null — основной трафик",
+            "description": "Группа серверов; null — основной трафик",
             "format": "int64",
             "type": [
               "integer",
@@ -4481,6 +5157,14 @@
           "sort": {
             "format": "int64",
             "type": "integer"
+          },
+          "tariffs": {
+            "description": "Тарифы, которым продаётся пакет; пусто — всем, к квоте которых он подходит",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -4493,7 +5177,8 @@
           "price_stars",
           "price_rub",
           "on_sale",
-          "sort"
+          "sort",
+          "tariffs"
         ],
         "type": "object"
       },
@@ -4964,6 +5649,20 @@
         },
         "type": "object"
       },
+      "PatchCampaignInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "PatchFiltersInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5021,7 +5720,7 @@
           },
           "client": {
             "$ref": "#/components/schemas/ClientEndpoint",
-            "description": "Куда подключаются клиенты: адрес, порт и SNI прокси перед нодой; заменяет все три"
+            "description": "Куда подключаются клиенты: адрес, порт, SNI и Host прокси или CDN перед нодой; заменяет всё сразу"
           },
           "config": {
             "description": "Шаблон листенера (YAML)",
@@ -5088,6 +5787,10 @@
             "maxLength": 253,
             "type": "string"
           },
+          "sni443": {
+            "description": "Поставить за SNI-роутер ноды на 443 (true) или вернуть на свой порт (false)",
+            "type": "boolean"
+          },
           "xhttp": {
             "$ref": "#/components/schemas/XHTTPTuning",
             "description": "Тонкая настройка XHTTP целиком: пустое поле — значение ядра по умолчанию"
@@ -5122,6 +5825,18 @@
       "PatchNodeInputBody": {
         "additionalProperties": false,
         "properties": {
+          "api_allow": {
+            "description": "Ещё сети или адреса (203.0.113.5, 198.51.100.0/24), с которых панель ходит к ноде",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "api_lockdown": {
+            "description": "API ноды только с адресов панели; не для ноды панели",
+            "type": "boolean"
+          },
           "channel_mbps": {
             "description": "Ширина канала ноды, Мбит/с в каждую сторону",
             "format": "int64",
@@ -5144,6 +5859,10 @@
             "maxLength": 253,
             "type": "string"
           },
+          "http_redirect": {
+            "description": "Отвечать на HTTP (порт 80) редиректом 301 на https; не для ноды панели",
+            "type": "boolean"
+          },
           "name": {
             "maxLength": 200,
             "type": "string"
@@ -5152,6 +5871,10 @@
             "description": "Публичное имя ноды; пустое — не публиковать её в канале",
             "maxLength": 80,
             "type": "string"
+          },
+          "sni_router": {
+            "description": "SNI-роутер на 443: подключения с отметкой «через общий 443» слушают на loopback за ним",
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -5162,7 +5885,14 @@
           "allow_new": {
             "type": "boolean"
           },
+          "balance": {
+            "$ref": "#/components/schemas/BalanceSettingsBody"
+          },
           "enabled": {
+            "type": "boolean"
+          },
+          "extra_devices_keep": {
+            "description": "Докупленные устройства остаются при продлении (true) или до конца срока (false)",
             "type": "boolean"
           },
           "free_condition": {
@@ -5318,6 +6048,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "site_template": {
+            "enum": [
+              "",
+              "maintenance",
+              "cats"
+            ],
+            "type": "string"
+          },
           "sub_announce": {
             "description": "До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов",
             "maxLength": 1000,
@@ -5328,12 +6066,24 @@
             "maxLength": 200,
             "type": "string"
           },
+          "sub_domain": {
+            "description": "Домен для ссылок подписки, отдельный от домена панели; пусто — убрать. Старые ссылки продолжают работать",
+            "maxLength": 253,
+            "type": "string"
+          },
           "sub_group_auto": {
             "maxLength": 200,
             "type": "string"
           },
           "sub_group_main": {
             "maxLength": 200,
+            "type": "string"
+          },
+          "sub_inactive_server": {
+            "type": "boolean"
+          },
+          "sub_inactive_text": {
+            "maxLength": 120,
             "type": "string"
           },
           "sub_port": {
@@ -5571,8 +6321,16 @@
             "$ref": "#/components/schemas/PaymentSettingsViewAvailableStruct",
             "description": "Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"
           },
+          "balance": {
+            "$ref": "#/components/schemas/BalanceSettings",
+            "description": "Внутренний баланс клиентов с пополнением по скриншоту"
+          },
           "enabled": {
             "description": "Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются",
+            "type": "boolean"
+          },
+          "extra_devices_keep": {
+            "description": "Докупленные устройства остаются при продлении, и продление стоит дороже на их цену; иначе они действуют до конца срока",
             "type": "boolean"
           },
           "free_condition": {
@@ -5645,6 +6403,8 @@
           "free_tariff_id",
           "free_condition",
           "free_plans",
+          "extra_devices_keep",
+          "balance",
           "available",
           "on_sale"
         ],
@@ -5660,13 +6420,18 @@
             },
             "type": "array"
           },
+          "balance": {
+            "description": "Баланс включён и настроен",
+            "type": "boolean"
+          },
           "stars": {
             "type": "boolean"
           }
         },
         "required": [
           "stars",
-          "addons"
+          "addons",
+          "balance"
         ],
         "type": "object"
       },
@@ -5678,10 +6443,6 @@
             "type": "integer"
           },
           "currency": {
-            "enum": [
-              "XTR",
-              "RUB"
-            ],
             "type": "string"
           },
           "total": {
@@ -5700,7 +6461,7 @@
         "additionalProperties": false,
         "properties": {
           "amount": {
-            "description": "Stars или копейки",
+            "description": "Stars или копейки (сотые) валюты",
             "format": "int64",
             "type": "integer"
           },
@@ -5713,10 +6474,7 @@
             "type": "string"
           },
           "currency": {
-            "enum": [
-              "XTR",
-              "RUB"
-            ],
+            "description": "XTR, RUB или валюта баланса",
             "type": "string"
           },
           "error": {
@@ -5732,12 +6490,13 @@
             "type": "integer"
           },
           "kind": {
-            "description": "package — пакет трафика: tariff_name — название пакета; trial — платный пробный период",
+            "description": "package — пакет трафика: tariff_name — название пакета; trial — платный пробный период; device — докупленное устройство",
             "enum": [
               "new",
               "renew",
               "package",
-              "trial"
+              "trial",
+              "device"
             ],
             "type": "string"
           },
@@ -5746,7 +6505,7 @@
             "type": "string"
           },
           "provider": {
-            "description": "stars или addon:\u003cid\u003e — адаптер маркетплейса",
+            "description": "stars, balance (с баланса клиента) или addon:\u003cid\u003e — адаптер маркетплейса",
             "type": "string"
           },
           "refunded_at": {
@@ -5837,34 +6596,6 @@
         ],
         "type": "object"
       },
-      "PoolLimit": {
-        "additionalProperties": false,
-        "properties": {
-          "excluded": {
-            "description": "Пул закрыт: его подключений нет в подписке, ноды их не пускают, пакеты трафика пула не продаются; traffic_limit тогда не важен",
-            "type": "boolean"
-          },
-          "pool_id": {
-            "format": "int64",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "traffic_limit": {
-            "description": "Байты; null — без лимита",
-            "format": "int64",
-            "minimum": 1,
-            "type": [
-              "integer",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "pool_id",
-          "traffic_limit"
-        ],
-        "type": "object"
-      },
       "PoolPatchInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -5879,6 +6610,37 @@
         ],
         "type": "object"
       },
+      "PoolSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "description": "main — входит, трафик считается в основной; own — входит со своим лимитом traffic_limit; unlimited — входит без лимита, отдельно от основного; closed — не входит: подключений группы нет в подписке, ноды их не пускают, пакеты группы не продаются",
+            "enum": [
+              "main",
+              "own",
+              "unlimited",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "pool_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "traffic_limit": {
+            "description": "Байты за период; только с mode=own",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pool_id",
+          "mode"
+        ],
+        "type": "object"
+      },
       "PoolView": {
         "additionalProperties": false,
         "properties": {
@@ -5886,8 +6648,16 @@
             "format": "int64",
             "type": "integer"
           },
+          "inbound_ids": {
+            "description": "Подключения группы",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "inbounds": {
-            "description": "Подключения, которые считаются в этот пул",
+            "description": "Имена подключений группы",
             "items": {
               "type": "string"
             },
@@ -5900,7 +6670,8 @@
         "required": [
           "id",
           "name",
-          "inbounds"
+          "inbounds",
+          "inbound_ids"
         ],
         "type": "object"
       },
@@ -6407,6 +7178,25 @@
         ],
         "type": "object"
       },
+      "PutTrafficDetailInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "format": "int64",
+            "maximum": 90,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "days"
+        ],
+        "type": "object"
+      },
       "ReachCheck": {
         "additionalProperties": false,
         "properties": {
@@ -6617,6 +7407,41 @@
         "required": [
           "recovery_codes"
         ],
+        "type": "object"
+      },
+      "RedistributeOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "moved": {
+            "description": "Сколько клиентов распределится заново при следующем обновлении подписки",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "moved"
+        ],
+        "type": "object"
+      },
+      "RegionAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "type": "string"
+          },
+          "error": {
+            "description": "unreachable — сайт не ответил, unknown — ответ не разобрать, no_ip — у ноды нет адреса этого семейства",
+            "enum": [
+              "unreachable",
+              "unknown",
+              "no_ip"
+            ],
+            "type": "string"
+          },
+          "open": {
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "ReissueRules": {
@@ -7122,6 +7947,59 @@
         },
         "type": "object"
       },
+      "ServiceRegion": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "description": "Ответ — пускает ли сайт адрес (open), а не страна",
+            "type": "boolean"
+          },
+          "service": {
+            "description": "google, google_search, youtube, youtube_premium, youtube_music, netflix, chatgpt, cloudflare, prime_video, deezer, apple, steam, playstation, tiktok, ookla, jetbrains, bing, reddit",
+            "type": "string"
+          },
+          "v4": {
+            "$ref": "#/components/schemas/RegionAnswer"
+          },
+          "v6": {
+            "$ref": "#/components/schemas/RegionAnswer"
+          }
+        },
+        "required": [
+          "service",
+          "access",
+          "v4",
+          "v6"
+        ],
+        "type": "object"
+      },
+      "ServiceRegions": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ipv4": {
+            "description": "Адрес ноды, как его видит Cloudflare",
+            "type": "string"
+          },
+          "ipv6": {
+            "type": "string"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceRegion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "at",
+          "services"
+        ],
+        "type": "object"
+      },
       "SessionView": {
         "additionalProperties": false,
         "properties": {
@@ -7153,6 +8031,63 @@
           "user_agent",
           "created_at",
           "last_seen_at"
+        ],
+        "type": "object"
+      },
+      "SetExitsInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "exit_node_id": {
+            "description": "Для outbound=node: через какую ноду",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "ids": {
+            "description": "Подключения",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "outbound": {
+            "description": "Выход в интернет: напрямую, через WARP своей ноды или через другую ноду",
+            "enum": [
+              "direct",
+              "warp",
+              "node"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ids",
+          "outbound"
+        ],
+        "type": "object"
+      },
+      "SetNodeBalanceInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity": {
+            "description": "Мест для клиентов; не передано — без ограничения",
+            "format": "int64",
+            "maximum": 1000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "group": {
+            "description": "Группа балансировки; пусто — нода вне групп, её получают все",
+            "maxLength": 40,
+            "type": "string"
+          }
+        },
+        "required": [
+          "group"
         ],
         "type": "object"
       },
@@ -7285,6 +8220,19 @@
             },
             "type": "array"
           },
+          "site_own": {
+            "description": "В data/panel/www есть своя страница: шаблон не действует",
+            "type": "boolean"
+          },
+          "site_template": {
+            "description": "Первая страница по адресу панели для посторонних: пусто — ответ 404, maintenance — технические работы, cats — котики-кликер",
+            "enum": [
+              "",
+              "maintenance",
+              "cats"
+            ],
+            "type": "string"
+          },
           "sub_announce": {
             "description": "Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title",
             "type": "string"
@@ -7296,12 +8244,28 @@
           "sub_base_url": {
             "type": "string"
           },
+          "sub_certificate": {
+            "$ref": "#/components/schemas/Status",
+            "description": "Сертификат домена подписки: kind off — домен не задан"
+          },
+          "sub_domain": {
+            "description": "Свой домен для ссылок подписки; пусто — адрес панели",
+            "type": "string"
+          },
           "sub_group_auto": {
             "description": "Группа автовыбора самого быстрого подключения",
             "type": "string"
           },
           "sub_group_main": {
             "description": "Главная группа в Clash-приложениях",
+            "type": "string"
+          },
+          "sub_inactive_server": {
+            "description": "Подписка, которая не может подключиться (кончился срок или трафик, отключена), получает вместо серверов одну запись с объяснением",
+            "type": "boolean"
+          },
+          "sub_inactive_text": {
+            "description": "Свой текст этой записи; пусто — свой по причине. Переменные как в названии подписки",
             "type": "string"
           },
           "sub_port": {
@@ -7361,10 +8325,15 @@
           "sub_announce",
           "sub_announce_url",
           "app_branding",
+          "sub_inactive_server",
+          "sub_inactive_text",
+          "site_template",
+          "site_own",
           "brand_accent",
           "brand_logo_url",
           "public_host",
           "domain",
+          "sub_domain",
           "panel_port",
           "sub_port",
           "quiet_hour_utc",
@@ -7398,6 +8367,29 @@
           "happ_provider_id",
           "happ_hide_settings",
           "happ_crypt"
+        ],
+        "type": "object"
+      },
+      "SiteBytes": {
+        "additionalProperties": false,
+        "properties": {
+          "down": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "site": {
+            "description": "Домен второго уровня или адрес; * — остальные сайты",
+            "type": "string"
+          },
+          "up": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "site",
+          "up",
+          "down"
         ],
         "type": "object"
       },
@@ -7613,11 +8605,12 @@
             "type": "string"
           },
           "kind": {
-            "description": "acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный",
+            "description": "acme — выдан центром сертификации автоматически (ca), custom — свой, self-signed — временный самоподписанный, off — домен подписки не задан",
             "enum": [
               "self-signed",
               "acme",
-              "custom"
+              "custom",
+              "off"
             ],
             "type": "string"
           },
@@ -8071,6 +9064,19 @@
             "minimum": 0,
             "type": "integer"
           },
+          "extra_devices": {
+            "$ref": "#/components/schemas/ExtraDevices",
+            "description": "Докупка устройств; не передана — без изменений (у нового тарифа — нет). Нужен лимит устройств"
+          },
+          "gifts": {
+            "description": "Пакеты трафика в подарок при каждой оплате тарифа; каждый должен добавлять к квоте, которую тариф даёт: к основному трафику с лимитом или к группе со своим лимитом. Не передан — без изменений",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
           "name": {
             "maxLength": 60,
             "minLength": 1,
@@ -8081,9 +9087,9 @@
             "type": "boolean"
           },
           "pools": {
-            "description": "Лимиты пулов трафика; не передан — без изменений",
+            "description": "Как тариф держит группы серверов; не названная группа — в основном трафике. Не передан — без изменений",
             "items": {
-              "$ref": "#/components/schemas/PoolLimit"
+              "$ref": "#/components/schemas/PoolSetting"
             },
             "maxItems": 100,
             "type": "array"
@@ -8182,6 +9188,18 @@
             "format": "int64",
             "type": "integer"
           },
+          "extra_devices": {
+            "$ref": "#/components/schemas/ExtraDevices",
+            "description": "Докупка устройств в боте и Mini App: цена одного и сколько можно докупить"
+          },
+          "gifts": {
+            "description": "Пакеты трафика в подарок при каждой оплате тарифа: покупке и продлении",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -8194,9 +9212,9 @@
             "type": "boolean"
           },
           "pools": {
-            "description": "Лимиты пулов трафика и закрытые пулы; пул не в списке — без лимита. Лимиты действуют на новых пользователей и при продлении или смене тарифа; закрытие и открытие пула действуют сразу на всех пользователей тарифа: при открытии на них ставится лимит тарифа, ручной лимит пользователя затирается",
+            "description": "Как тариф держит каждую группу серверов; группа без настройки тарифа — в основном трафике. Режим и лимит действуют на новых клиентов, при продлении, смене тарифа и по «Применить к выданным подпискам»; закрытие и открытие группы действует сразу на всех клиентов тарифа",
             "items": {
-              "$ref": "#/components/schemas/PoolLimit"
+              "$ref": "#/components/schemas/PoolSetting"
             },
             "type": "array"
           },
@@ -8239,6 +9257,11 @@
               "null"
             ]
           },
+          "subscribers": {
+            "description": "Сколько подписок выдано на этом тарифе",
+            "format": "int64",
+            "type": "integer"
+          },
           "terms": {
             "description": "Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub",
             "items": {
@@ -8271,7 +9294,10 @@
           "price_rub",
           "on_sale",
           "terms",
+          "extra_devices",
           "pools",
+          "gifts",
+          "subscribers",
           "sort"
         ],
         "type": "object"
@@ -8626,6 +9652,89 @@
         ],
         "type": "object"
       },
+      "TopupView": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "В копейках (сотых) валюты",
+            "format": "int64",
+            "type": "integer"
+          },
+          "balance": {
+            "description": "Баланс аккаунта сейчас",
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "photo": {
+            "description": "Есть скриншот: GET /api/v1/topups/{id}/photo",
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "tg_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tg_username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tg_id",
+          "amount",
+          "currency",
+          "status",
+          "photo",
+          "created_at",
+          "balance"
+        ],
+        "type": "object"
+      },
+      "TopupsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TopupView"
+            },
+            "type": "array"
+          },
+          "pending": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "pending"
+        ],
+        "type": "object"
+      },
       "TorrentHitView": {
         "additionalProperties": false,
         "properties": {
@@ -8829,6 +9938,25 @@
         "required": [
           "secret",
           "uri"
+        ],
+        "type": "object"
+      },
+      "TrafficDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "description": "Сколько дней хранить",
+            "format": "int64",
+            "type": "integer"
+          },
+          "enabled": {
+            "description": "Ноды считают трафик подписок по сайтам",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "days"
         ],
         "type": "object"
       },
@@ -9103,18 +10231,23 @@
       "UserPoolView": {
         "additionalProperties": false,
         "properties": {
-          "excluded": {
-            "description": "Пул закрыт для пользователя: его подключений нет в подписке, ноды их не пускают",
-            "type": "boolean"
-          },
           "exhausted": {
-            "description": "Лимит пула и его пакеты исчерпаны: подключения пула не работают до сброса",
+            "description": "Свой лимит группы и её пакеты исчерпаны: подключения группы не работают до сброса",
             "type": "boolean"
           },
           "extra": {
-            "description": "Байты, оставшиеся в пакетах трафика пула: тратятся после лимита",
+            "description": "Байты, оставшиеся в пакетах трафика группы: тратятся после лимита",
             "format": "int64",
             "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "main",
+              "own",
+              "unlimited",
+              "closed"
+            ],
+            "type": "string"
           },
           "name": {
             "type": "string"
@@ -9124,7 +10257,7 @@
             "type": "integer"
           },
           "traffic_limit": {
-            "description": "Байты за период; null — без лимита",
+            "description": "Байты за период с mode=own; иначе null",
             "format": "int64",
             "type": [
               "integer",
@@ -9143,12 +10276,12 @@
         "required": [
           "pool_id",
           "name",
+          "mode",
           "traffic_limit",
           "used_up",
           "used_down",
           "extra",
-          "exhausted",
-          "excluded"
+          "exhausted"
         ],
         "type": "object"
       },
@@ -9156,8 +10289,9 @@
         "additionalProperties": false,
         "properties": {
           "pools": {
+            "description": "Группы, которые меняются; остальные остаются как есть",
             "items": {
-              "$ref": "#/components/schemas/PoolLimit"
+              "$ref": "#/components/schemas/PoolSetting"
             },
             "maxItems": 100,
             "type": "array"
@@ -9165,6 +10299,30 @@
         },
         "required": [
           "pools"
+        ],
+        "type": "object"
+      },
+      "UserSitesOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SiteBytes"
+            },
+            "type": "array"
+          },
+          "keep_days": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "keep_days",
+          "items"
         ],
         "type": "object"
       },
@@ -9589,6 +10747,35 @@
       "XHTTPTuning": {
         "additionalProperties": false,
         "properties": {
+          "client_uplink_chunk_size": {
+            "description": "Размер куска отправки у приложений, байт: число или диапазон",
+            "type": "string"
+          },
+          "client_uplink_data_key": {
+            "description": "Имя заголовка или cookie с данными у приложений; должно совпасть с серверным",
+            "type": "string"
+          },
+          "client_uplink_data_placement": {
+            "description": "Где приложения везут данные отправки вместо серверного; сервер должен принимать их там же (его auto принимает всё)",
+            "enum": [
+              "",
+              "body",
+              "header",
+              "cookie"
+            ],
+            "type": "string"
+          },
+          "client_uplink_http_method": {
+            "description": "Метод отправки у приложений вместо серверного; GET — только packet-up",
+            "enum": [
+              "",
+              "POST",
+              "PUT",
+              "PATCH",
+              "GET"
+            ],
+            "type": "string"
+          },
           "mode": {
             "description": "Режим XHTTP; пусто — по умолчанию",
             "enum": [
@@ -9677,11 +10864,13 @@
             "type": "string"
           },
           "uplink_http_method": {
+            "description": "Метод отправки; GET — для CDN, которые не пропускают POST: только packet-up. Нода принимает отправку любым методом",
             "enum": [
               "",
               "POST",
               "PUT",
-              "PATCH"
+              "PATCH",
+              "GET"
             ],
             "type": "string"
           },
@@ -10779,6 +11968,354 @@
         ]
       }
     },
+    "/api/v1/balance": {
+      "get": {
+        "operationId": "list-balance",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BalanceGroupView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Группы балансировки и загрузка их нод",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/balance/{group}/redistribute": {
+      "post": {
+        "operationId": "redistribute-balance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedistributeOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Распределить клиентов группы заново: каждый попадёт на самую свободную ноду при следующем обновлении подписки",
+        "tags": [
+          "node"
+        ]
+      }
+    },
+    "/api/v1/balances/{tg_id}": {
+      "get": {
+        "operationId": "get-balance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tg_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Баланс Telegram-аккаунта и история",
+        "tags": [
+          "payments"
+        ]
+      }
+    },
+    "/api/v1/balances/{tg_id}/adjust": {
+      "post": {
+        "operationId": "adjust-balance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tg_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjustBalanceInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Изменить баланс вручную",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/campaigns": {
+      "get": {
+        "operationId": "list-campaigns",
+        "parameters": [
+          {
+            "description": "За сколько дней статистика; 0 — за всё время",
+            "explode": false,
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "description": "За сколько дней статистика; 0 — за всё время",
+              "format": "int64",
+              "maximum": 3650,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CampaignView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Рекламные кампании и их статистика",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "post": {
+        "operationId": "create-campaign",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCampaignInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Создать кампанию: ссылку на бота с меткой",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{id}": {
+      "delete": {
+        "operationId": "delete-campaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Удалить кампанию: пришедшие по ней люди перестают к ней относиться",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "patch": {
+        "operationId": "update-campaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchCampaignInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Переименовать кампанию или убрать в архив",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/api/v1/exit-dns": {
       "get": {
         "operationId": "get-exit-dns",
@@ -11443,6 +12980,50 @@
         ]
       }
     },
+    "/api/v1/inbounds/exit": {
+      "post": {
+        "operationId": "set-inbound-exits",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetExitsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InboundView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Выход в интернет для нескольких подключений разом: напрямую, через WARP или через ноду",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
     "/api/v1/inbounds/scan-targets": {
       "post": {
         "operationId": "scan-targets",
@@ -11612,6 +13193,59 @@
           }
         },
         "summary": "Изменить подключение",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/inbounds/{id}/copy": {
+      "post": {
+        "operationId": "copy-inbound",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyInboundInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Скопировать подключение: те же настройки с новыми ключами, на ту же или другую ноду",
         "tags": [
           "inbounds"
         ]
@@ -12158,6 +13792,59 @@
         "x-session-only": true
       }
     },
+    "/api/v1/nodes/{id}/balance": {
+      "put": {
+        "operationId": "set-node-balance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetNodeBalanceInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Группа балансировки ноды и сколько клиентов она принимает",
+        "tags": [
+          "node"
+        ]
+      }
+    },
     "/api/v1/nodes/{id}/cascade": {
       "get": {
         "operationId": "get-node-cascade",
@@ -12515,6 +14202,50 @@
         ]
       }
     },
+    "/api/v1/nodes/{id}/geo": {
+      "post": {
+        "description": "Адрес ноды уходит в публичные геобазы (MaxMind, ipinfo.io, IP2Location и другие); каждая отвечает, в какой стране он для неё.",
+        "operationId": "check-node-geo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoCheck"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Страна IP ноды по геобазам",
+        "tags": [
+          "node"
+        ]
+      }
+    },
     "/api/v1/nodes/{id}/key": {
       "post": {
         "operationId": "rekey-node",
@@ -12557,6 +14288,50 @@
           "node"
         ],
         "x-session-only": true
+      }
+    },
+    "/api/v1/nodes/{id}/regions": {
+      "post": {
+        "description": "Нода сама открывает Google, YouTube, Netflix, ChatGPT и другие сайты по IPv4 и IPv6 и читает, какую страну они ей дают или пускают ли её. Около 10 секунд; на ноде одна проверка за раз (409 regions_busy).",
+        "operationId": "check-node-regions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceRegions"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Регион ноды в сервисах",
+        "tags": [
+          "node"
+        ]
       }
     },
     "/api/v1/nodes/{id}/restart": {
@@ -13239,7 +15014,7 @@
             "in": "query",
             "name": "provider",
             "schema": {
-              "pattern": "^(stars|addon:[a-z0-9][a-z0-9-]{0,31})?$",
+              "pattern": "^(stars|balance|addon:[a-z0-9][a-z0-9-]{0,31})?$",
               "type": "string"
             }
           },
@@ -13495,7 +15270,7 @@
             "description": "Error"
           }
         },
-        "summary": "Пулы трафика",
+        "summary": "Группы серверов",
         "tags": [
           "inbounds"
         ]
@@ -13534,7 +15309,7 @@
             "description": "Error"
           }
         },
-        "summary": "Создать пул трафика",
+        "summary": "Создать группу серверов",
         "tags": [
           "inbounds"
         ]
@@ -13570,7 +15345,7 @@
             "description": "Error"
           }
         },
-        "summary": "Удалить пул: его подключения вернутся в основной трафик; пока в нём есть оплаченный трафик, пул остаётся",
+        "summary": "Удалить группу серверов: её подключения вернутся к основным серверам; пока в ней есть оплаченный трафик, группа остаётся",
         "tags": [
           "inbounds"
         ]
@@ -13621,7 +15396,113 @@
             "description": "Error"
           }
         },
-        "summary": "Переименовать пул",
+        "summary": "Переименовать группу серверов",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/pools/{id}/inbounds": {
+      "put": {
+        "operationId": "set-pool-inbounds",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupInboundsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Подключения группы серверов",
+        "tags": [
+          "inbounds"
+        ]
+      }
+    },
+    "/api/v1/pools/{id}/tariffs": {
+      "put": {
+        "operationId": "set-pool-tariffs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupTariffsInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Как тарифы держат группу серверов",
         "tags": [
           "inbounds"
         ]
@@ -14276,6 +16157,102 @@
           }
         },
         "summary": "Профиль Clash с этой маршрутизацией, без сохранения",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/sub-certificate": {
+      "delete": {
+        "operationId": "clear-sub-certificate",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Убрать свой сертификат домена подписки: вернётся автоматический",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      },
+      "put": {
+        "operationId": "set-sub-certificate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Поставить свой сертификат домену подписки",
+        "tags": [
+          "settings"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/settings/sub-certificate/renew": {
+      "post": {
+        "operationId": "renew-sub-certificate",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Получить сертификат домена подписки сейчас: ждёт до 90 с и отвечает тем, что вышло",
         "tags": [
           "settings"
         ]
@@ -15228,6 +17205,48 @@
         ]
       }
     },
+    "/api/v1/system/geo": {
+      "post": {
+        "description": "Адрес сервера уходит в публичные геобазы.",
+        "operationId": "check-geo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeoInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoCheck"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Страна IP любого сервера по геобазам",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/v1/system/reach": {
       "post": {
         "description": "Зонды Globalping в домашних и мобильных сетях России и в дата-центрах подключаются к портам, контроль из Европы. Адрес сервера уходит в Globalping.",
@@ -15463,9 +17482,9 @@
         ]
       }
     },
-    "/api/v1/tariffs/{id}/apply-pools": {
+    "/api/v1/tariffs/{id}/apply": {
       "post": {
-        "operationId": "apply-tariff-pools",
+        "operationId": "apply-tariff",
         "parameters": [
           {
             "in": "path",
@@ -15478,12 +17497,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyTariffInputBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplyPoolsOutputBody"
+                  "$ref": "#/components/schemas/ApplyTariffOutputBody"
                 }
               }
             },
@@ -15500,7 +17529,7 @@
             "description": "Error"
           }
         },
-        "summary": "Применить лимиты пулов тарифа к уже выданным подпискам: свои лимиты пулов у клиентов заменятся, израсходованное останется",
+        "summary": "Применить тариф к уже выданным подпискам: выбранные части тарифа заменят свои значения клиентов, срок и израсходованное останутся",
         "tags": [
           "tariffs"
         ]
@@ -15892,6 +17921,175 @@
         ]
       }
     },
+    "/api/v1/topups": {
+      "get": {
+        "operationId": "list-topups",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                ""
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopupsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Заявки на пополнение баланса",
+        "tags": [
+          "payments"
+        ]
+      }
+    },
+    "/api/v1/topups/{id}/decide": {
+      "post": {
+        "operationId": "decide-topup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideTopupInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopupView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Одобрить или отклонить пополнение",
+        "tags": [
+          "payments"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/topups/{id}/photo": {
+      "get": {
+        "operationId": "get-topup-photo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {}
+            },
+            "description": "Картинка",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Скриншот перевода",
+        "tags": [
+          "payments"
+        ]
+      }
+    },
     "/api/v1/torrent": {
       "get": {
         "operationId": "get-torrent",
@@ -16030,6 +18228,77 @@
         "summary": "Пойманные торренты",
         "tags": [
           "torrent"
+        ]
+      }
+    },
+    "/api/v1/traffic-detail": {
+      "get": {
+        "operationId": "get-traffic-detail",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficDetailView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Детализация трафика по сайтам",
+        "tags": [
+          "filters"
+        ]
+      },
+      "put": {
+        "description": "Ноды получают её со своим состоянием; ноды старше неё не считают.",
+        "operationId": "put-traffic-detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutTrafficDetailInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficDetailView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Включить или выключить детализацию по сайтам",
+        "tags": [
+          "filters"
         ]
       }
     },
@@ -17087,7 +19356,7 @@
             "description": "Error"
           }
         },
-        "summary": "Пулы трафика пользователя",
+        "summary": "Группы серверов пользователя",
         "tags": [
           "users"
         ]
@@ -17141,7 +19410,7 @@
             "description": "Error"
           }
         },
-        "summary": "Лимиты пулов пользователя",
+        "summary": "Как подписка пользователя держит группы серверов",
         "tags": [
           "users"
         ]
@@ -17228,6 +19497,61 @@
           }
         },
         "summary": "Сбросить трафик",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/sites": {
+      "get": {
+        "operationId": "user-sites",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "default": 7,
+              "format": "int64",
+              "maximum": 90,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSitesOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Куда ходит подписка: трафик по сайтам",
         "tags": [
           "users"
         ]

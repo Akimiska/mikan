@@ -136,7 +136,7 @@ func TestMihomoProfile(t *testing.T) {
 	if len(cfg.Proxies) != 4 || len(cfg.Groups) != 1 || cfg.Groups[0].Name != "VPN" {
 		t.Fatalf("profile: %s", raw)
 	}
-	wantRules := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "DOMAIN,vpn.example.com,DIRECT", "GEOIP,LAN,DIRECT,no-resolve", "MATCH,VPN", "MATCH,REJECT"}
+	wantRules := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "DOMAIN,vpn.example.com,DIRECT", "DOMAIN-SUFFIX,sub.aoimusic.ru,VPN", "DOMAIN-SUFFIX,panel.aoimusic.ru,VPN", "DOMAIN-SUFFIX,vpn.aoimusic.ru,VPN", "GEOIP,LAN,DIRECT,no-resolve", "MATCH,VPN", "MATCH,REJECT"}
 	if strings.Join(cfg.Rules, "|") != strings.Join(wantRules, "|") {
 		t.Fatalf("rules: %v", cfg.Rules)
 	}
@@ -222,7 +222,7 @@ func TestRouting(t *testing.T) {
 	}
 
 	ru := render(Groups{}, RoutingRUDirect)
-	want := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "GEOIP,LAN,DIRECT,no-resolve", "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT", "MATCH,VPN", "MATCH,REJECT"}
+	want := []string{"IP-CIDR,203.0.113.7/32,DIRECT,no-resolve", "DOMAIN-SUFFIX,sub.aoimusic.ru,VPN", "DOMAIN-SUFFIX,panel.aoimusic.ru,VPN", "DOMAIN-SUFFIX,vpn.aoimusic.ru,VPN", "GEOIP,LAN,DIRECT,no-resolve", "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT", "MATCH,VPN", "MATCH,REJECT"}
 	if strings.Join(ru.Rules, "|") != strings.Join(want, "|") {
 		t.Fatalf("ru_direct rules: %v", ru.Rules)
 	}

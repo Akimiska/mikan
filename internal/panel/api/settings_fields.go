@@ -50,6 +50,7 @@ var settingFields = []settingField{
 	// Where clients are sent, and what they are told to trust.
 	text("public_host", settings.KeyPublicHost, true, func(b *patchSettingsBody) *string { return b.PublicHost }),
 	text("domain", settings.KeyDomain, true, func(b *patchSettingsBody) *string { return b.Domain }),
+	text("sub_domain", settings.KeySubDomain, true, func(b *patchSettingsBody) *string { return b.SubDomain }),
 	value("sub_port", settings.KeySubPort, true, func(b *patchSettingsBody) *int { return b.SubPort }),
 	custom("sub_rules", true, func(b *patchSettingsBody) *string { return b.SubRules }, func(ctx context.Context, set *settings.Settings, v string) error {
 		return settings.Set(ctx, set, settings.KeyRules, strings.TrimRight(v, " \n\r\t"))
@@ -68,6 +69,9 @@ var settingFields = []settingField{
 	text("sub_public_base", settings.KeySubPublicBase, true, func(b *patchSettingsBody) *string { return b.SubPublicBase }),
 	// What every subscriber's app shows: text, links and the logo it downloads.
 	text("sub_title", settings.KeySubTitle, true, func(b *patchSettingsBody) *string { return b.SubTitle }),
+	value("sub_inactive_server", settings.KeyInactiveServer, true, func(b *patchSettingsBody) *bool { return b.InactiveServer }),
+	text("sub_inactive_text", settings.KeyInactiveText, true, func(b *patchSettingsBody) *string { return b.InactiveText }),
+	text("site_template", settings.KeySiteTemplate, true, func(b *patchSettingsBody) *string { return b.SiteTemplate }),
 	text("sub_announce", settings.KeyAnnounce, true, func(b *patchSettingsBody) *string { return b.Announce }),
 	text("sub_announce_url", settings.KeyAnnounceURL, true, func(b *patchSettingsBody) *string { return b.AnnounceURL }),
 	value("app_branding", settings.KeyAppBranding, true, func(b *patchSettingsBody) *bool { return b.AppBranding }),

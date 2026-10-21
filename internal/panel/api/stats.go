@@ -9,6 +9,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -125,7 +126,7 @@ func (h *handlers) serverTraffic(ctx context.Context, in *rangeInput) (*trafficO
 			return nil, err
 		}
 		for _, r := range rows {
-			out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Day*86400, 0).UTC(), Up: r.Up, Down: r.Down})
+			out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Day * 86400), Up: r.Up, Down: r.Down})
 		}
 		return out, nil
 	}
@@ -134,7 +135,7 @@ func (h *handlers) serverTraffic(ctx context.Context, in *rangeInput) (*trafficO
 		return nil, err
 	}
 	for _, r := range rows {
-		out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Hour*3600, 0).UTC(), Up: r.Up, Down: r.Down})
+		out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Hour * 3600), Up: r.Up, Down: r.Down})
 	}
 	return out, nil
 }

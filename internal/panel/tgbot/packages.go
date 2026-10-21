@@ -84,6 +84,9 @@ func (w *words) payButtons(data string, stars, rub int64, av billing.Available, 
 	if rub <= 0 {
 		return rows
 	}
+	if av.Balance.On() {
+		rows = append(rows, []tgate.Button{{Text: fmt.Sprintf(w.payBalance, w.price(av.Balance.FromRub(rub), av.Balance.Currency)), CallbackData: data + "b"}})
+	}
 	// Cards first: YooKassa, then CryptoBot, then the rest by id. Those two keep the words
 	// buyers knew them by; the others go by their own names.
 	ids := slices.Clone(av.Addons)
@@ -133,6 +136,9 @@ func (b *Bot) trafficInvoice(ctx context.Context, w *words, chat, userID int64, 
 		return html.EscapeString(msg), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
 	}
 	text := fmt.Sprintf(w.invoice, html.EscapeString(p.TariffName), html.EscapeString(w.price(p.Amount, p.Currency)), w.payPackage)
+	if p.Provider == billing.Balance {
+		return w.balancePaidScreen(p.Amount, p.Currency)
+	}
 	return text, &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
 }
 

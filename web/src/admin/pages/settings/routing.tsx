@@ -1,12 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { Eye, Search } from "lucide-react";
+import { useEffect, useState } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../../api/client";
-import { useNodes } from "../../../api/hooks";
-import { Disclosure, FormActions, WithPreview } from "../../../components/layout";
+import { useExitDns, useNodes } from "../../../api/hooks";
+import { SaveBar } from "../../../components/layout";
+import { Drawer } from "../../../components/overlay";
 import { SwitchRow } from "../../../components/switch";
-import { Button, ErrorState, Field, Pill, Segmented, Skeleton } from "../../../components/ui";
+import { Button, EmptyState, ErrorState, Field, Pill, Segmented, Skeleton } from "../../../components/ui";
 import { t, useLocale } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
+import { ExitDnsFields, exitDnsDraftOf, useSaveExitDns, type ExitDnsDraft } from "./exit-dns";
 import { RulesEditor } from "./rules";
 import { useSaveSettings } from "./shared";
 import { TemplateCard } from "./template";
@@ -14,7 +17,10 @@ import { TemplateCard } from "./template";
 type Routes = Schemas["Routes"];
 type DNS = NonNullable<Routes["dns"]>;
 type List = NonNullable<Routes["lists"]>[number];
-type View = "simple" | "yaml";
+
+/** The parts of the routing, each in the section's menu; "yaml" is the own Clash profile. */
+export const ROUTING_PARTS = ["mode", "lists", "rules", "dns", "advanced", "yaml"] as const;
+export type RoutingPart = (typeof ROUTING_PARTS)[number];
 
 // As many own lists as the server takes (subs.MaxLists).
 const MAX_LISTS = 30;
@@ -33,16 +39,16 @@ const TARGETS = [
   { id: "block", label: "settings.routesBlock" },
 ] as const;
 
-// Ready DNS sets for the advanced part (GitHub issue #70): the panel's own is the empty one.
+// Ready DNS sets for the device (GitHub issue #70): the panel's own is the empty one.
 const DNS_PRESETS: { id: string; dns: DNS }[] = [
   { id: "panel", dns: {} },
   // AoiVPN fork: the main group is renamed "AoiVPN" — "#PROXY" points at nothing and DNS
-  // leaks the region; the preset must follow the real group name.
+  // leaks the region; the presets must follow the real group name.
   { id: "tunnel", dns: { nameserver: ["https://1.1.1.1/dns-query#AoiVPN", "https://8.8.8.8/dns-query#AoiVPN"], proxy_server_nameserver: ["1.1.1.1", "8.8.8.8"] } },
   {
     id: "ruYandex",
     dns: {
-      nameserver: ["https://1.1.1.1/dns-query#PROXY", "https://8.8.8.8/dns-query#PROXY"],
+      nameserver: ["https://1.1.1.1/dns-query#AoiVPN", "https://8.8.8.8/dns-query#AoiVPN"],
       proxy_server_nameserver: ["77.88.8.8", "1.1.1.1"],
       policy: [
         { match: "+.ru", servers: ["https://77.88.8.8/dns-query"] },
@@ -79,65 +85,150 @@ function parsePolicy(text: string): NonNullable<DNS["policy"]> {
   });
 }
 const policyText = (p: DNS["policy"]) => (p ?? []).map((x) => `${x.match}: ${x.servers.join(", ")}`).join("\n");
+const dnsTextOf = (dns: DNS | undefined) => ({ nameserver: (dns?.nameserver ?? []).join("\n"), proxy: (dns?.proxy_server_nameserver ?? []).join("\n"), policy: policyText(dns?.policy) });
 
-/** The routing of Clash profiles: the mode, the services, the apps past the tunnel and DNS, with the profile it makes. */
-export function RoutingSection({ s, view, onView }: { s: Schemas["SettingsView"]; view: View; onView: (v: View) => void }) {
+/** The part a refusal of the server names, so a save from another part shows where it went wrong. */
+function partOf(fields: Record<string, string>): RoutingPart | null {
+  if (fields.sub_rules) return "rules";
+  if (fields.sub_routes === t("errors.api.routes_servers")) return "advanced";
+  if (fields.sub_routes) return "lists";
+  return null;
+}
+
+function Card({ title, sub, aside, children, i = 1 }: { title: string; sub?: string; aside?: React.ReactNode; children: React.ReactNode; i?: number }) {
+  return (
+    <section className="card glass reveal" style={{ "--i": i } as React.CSSProperties}>
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{title}</h2>
+          {sub ? <div className="card-sub">{sub}</div> : null}
+        </div>
+        {aside}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The routing of the subscriptions, a part at a time: the mode and the services, the own
+ * lists and the apps past the tunnel, the own rules, DNS on the device and at the exit, the
+ * server groups and fine tuning, the own Clash profile. One draft for all of it, saved from
+ * one bar; the profile a client gets opens beside it on demand.
+ */
+export function RoutingSection({ s, part, onPart }: { s: Schemas["SettingsView"]; part: RoutingPart; onPart: (p: RoutingPart) => void }) {
   const save = useSaveSettings();
-  const nodes = useNodes();
-  const locale = useLocale();
-  const catalog = useQuery({ queryKey: ["routes-catalog"], queryFn: ({ signal }) => unwrap(api.GET("/api/v1/settings/routes/catalog", { signal })), staleTime: Infinity });
-  const { draft, setDraft, dirty, reset } = useDraft({ mode: s.sub_routing, routes: s.sub_routes, rules: s.sub_rules });
+  const exitQ = useExitDns();
+  const saveExit = useSaveExitDns();
+  const { draft, setDraft, dirty: routingDirty, reset } = useDraft({ mode: s.sub_routing, routes: s.sub_routes, rules: s.sub_rules });
+  const exit = useDraft<ExitDnsDraft | null>(exitQ.data ? exitDnsDraftOf(exitQ.data) : null);
   const routes = draft.routes;
   const setRoutes = (f: (r: Routes) => Routes) => setDraft((d) => ({ ...d, routes: tidy(f(d.routes)) }));
-  const dnsTextOf = (dns: DNS | undefined) => ({ nameserver: (dns?.nameserver ?? []).join("\n"), proxy: (dns?.proxy_server_nameserver ?? []).join("\n"), policy: policyText(dns?.policy) });
-  const [dnsText, setDnsText] = useState(() => dnsTextOf(routes.dns));
   // The DNS fields keep their own text, so they are put back with the rest.
+  const [dnsText, setDnsText] = useState(() => dnsTextOf(routes.dns));
+  const [preview, setPreview] = useState(false);
+  const [yaml, setYaml] = useState(s.sub_template);
+  const dirty = routingDirty || exit.dirty;
   const discard = () => {
     reset();
+    exit.reset();
     setDnsText(dnsTextOf(s.sub_routes.dns));
   };
-  const setDns = (dns: DNS) => {
-    setRoutes((r) => ({ ...r, dns }));
-    setDnsText(dnsTextOf(dns));
+  const submit = () => {
+    if (routingDirty) {
+      save.mutate(
+        { sub_routing: draft.mode, sub_routes: draft.routes, sub_rules: draft.rules },
+        {
+          onError: (e) => {
+            const p = e instanceof ApiError ? partOf(e.fields) : null;
+            if (p && p !== part) onPart(p);
+          },
+        },
+      );
+    }
+    if (exit.dirty && exit.draft) {
+      saveExit.mutate(exit.draft, { onError: () => part !== "dns" && onPart("dns") });
+    }
   };
-  const editDns = (k: keyof typeof dnsText) => (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const next = { ...dnsText, [k]: e.target.value };
-    setDnsText(next);
-    setRoutes((r) => ({ ...r, dns: { nameserver: lines(next.nameserver), proxy_server_nameserver: lines(next.proxy), policy: parsePolicy(next.policy) } }));
-  };
-  const setService = (id: string, target: string) =>
-    setRoutes((r) => {
-      const services = { ...(r.services ?? {}) };
-      if (target) services[id] = target;
-      else delete services[id];
-      return { ...r, services };
-    });
-  const toggleDirect = (id: string) =>
-    setRoutes((r) => {
-      const has = (r.direct ?? []).includes(id);
-      return { ...r, direct: has ? (r.direct ?? []).filter((x) => x !== id) : [...(r.direct ?? []), id] };
-    });
-  const setList = (i: number, patch: Partial<List>) => setRoutes((r) => ({ ...r, lists: (r.lists ?? []).map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
-  const addList = () =>
-    setRoutes((r) => ({ ...r, lists: [...(r.lists ?? []), { name: `list-${(r.lists?.length ?? 0) + 1}`, url: "", behavior: "classical", format: "yaml", target: "vpn" }] }));
-  const dropList = (i: number) => setRoutes((r) => ({ ...r, lists: (r.lists ?? []).filter((_, j) => j !== i) }));
-  const servers = routes.servers ?? {};
-  const setServers = (patch: Partial<NonNullable<Routes["servers"]>>) => setRoutes((r) => ({ ...r, servers: { ...(r.servers ?? {}), ...patch } }));
-  const tune = routes.tune ?? {};
-  const setTune = (patch: Partial<NonNullable<Routes["tune"]>>) => setRoutes((r) => ({ ...r, tune: { ...(r.tune ?? {}), ...patch } }));
   const apiErr = save.error instanceof ApiError ? save.error : null;
   const errors = apiErr?.fields ?? {};
-  const error = errors.sub_routes;
-  const badLine = errors.sub_rules && typeof apiErr?.values.sub_rules === "number" ? apiErr.values.sub_rules : 0;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    save.mutate({ sub_routing: draft.mode, sub_routes: draft.routes, sub_rules: draft.rules });
-  };
+  const starter = () => unwrap(api.POST("/api/v1/settings/routes/preview", { body: { sub_routing: draft.mode, sub_routes: draft.routes, starter: true } })).then((r) => r.profile);
+  const live = s.sub_template.trim() !== "";
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">{live ? <Pill tone="warn">{t("settings.routesYamlOn")}</Pill> : null}</div>
+        <Button size="sm" onClick={() => setPreview(true)} aria-haspopup="dialog">
+          <Eye size={16} aria-hidden /> {t("settings.routesShowProfile")}
+        </Button>
+      </div>
+      {live && part !== "yaml" ? <div className="banner info">{t("settings.routesYamlLive")}</div> : null}
+
+      {part === "mode" ? <ModePart mode={draft.mode} setMode={(mode) => setDraft((d) => ({ ...d, mode }))} routes={routes} setRoutes={setRoutes} /> : null}
+      {part === "lists" ? <ListsPart routes={routes} setRoutes={setRoutes} error={errors.sub_routes === t("errors.api.routes_servers") ? undefined : errors.sub_routes} /> : null}
+      {part === "rules" ? (
+        <Card title={t("settings.rules")} sub={t("settings.routingPartsSub.rules")}>
+          <RulesEditor
+            value={draft.rules}
+            onChange={(f) => setDraft((d) => ({ ...d, rules: f(d.rules) }))}
+            error={errors.sub_rules}
+            badLine={errors.sub_rules && typeof apiErr?.values.sub_rules === "number" ? apiErr.values.sub_rules : 0}
+            targets={s.rule_targets}
+          />
+        </Card>
+      ) : null}
+      {part === "dns" ? (
+        <>
+          <Card title={t("settings.routesDnsDevice")} sub={t("settings.routesDnsDeviceSub")}>
+            <DeviceDns
+              text={dnsText}
+              onPreset={(dns) => {
+                setRoutes((r) => ({ ...r, dns }));
+                setDnsText(dnsTextOf(dns));
+              }}
+              onText={(next) => {
+                setDnsText(next);
+                setRoutes((r) => ({ ...r, dns: { nameserver: lines(next.nameserver), proxy_server_nameserver: lines(next.proxy), policy: parsePolicy(next.policy) } }));
+              }}
+            />
+          </Card>
+          <Card title={t("settings.exitDns.title")} sub={t("settings.exitDns.lead")} i={2}>
+            {exitQ.isError ? <ErrorState text={errorText(exitQ.error)} onRetry={() => void exitQ.refetch()} /> : null}
+            {exitQ.data && exit.draft ? (
+              <ExitDnsFields v={exitQ.data} draft={exit.draft} setDraft={(f) => exit.setDraft((d) => (d ? f(d) : d))} error={saveExit.error} />
+            ) : exitQ.isPending ? (
+              <Skeleton className="h-32 w-full rounded-2xl" />
+            ) : null}
+          </Card>
+        </>
+      ) : null}
+      {part === "advanced" ? <AdvancedPart routes={routes} setRoutes={setRoutes} error={errors.sub_routes === t("errors.api.routes_servers") ? errors.sub_routes : undefined} /> : null}
+      {part === "yaml" ? <TemplateCard s={s} text={yaml} setText={setYaml} starter={starter} /> : null}
+
+      {part !== "yaml" ? <p className="px-1 text-xs text-[var(--ink-500)]">{t("settings.routesNote")}</p> : null}
+
+      <SaveBar dirty={dirty} saving={save.isPending || saveExit.isPending} onSave={submit} onReset={discard} />
+
+      <Drawer open={preview} onOpenChange={setPreview} title={t("settings.routesPreview")}>
+        <div className="pt-4">
+          {preview ? <PreviewCard mode={draft.mode} routes={draft.routes} rules={part === "yaml" ? undefined : draft.rules} template={part === "yaml" ? yaml : undefined} /> : null}
+        </div>
+      </Drawer>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ parts */
+
+type SetRoutes = (f: (r: Routes) => Routes) => void;
+
+function useTargetSelect() {
+  const nodes = useNodes();
   const nodeName = (n: { id: number; name: string; local: boolean }) => t("settings.routesOnServer", { name: n.name || (n.local ? t("settings.routesThisServer") : `#${n.id}`) });
-  const routed = Object.keys(routes.services ?? {}).length + (routes.direct ?? []).length + (routes.lists ?? []).length;
-  const targetSelect = (id: string, value: string, onChange: (v: string) => void, follow = true, label?: string) => (
-    <select id={id} className="input max-w-[220px]" value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
-      {TARGETS.filter((x) => follow || x.id).map((x) => (
+  return (id: string, value: string, onChange: (v: string) => void, opts: { follow?: boolean; label?: string; className?: string } = {}) => (
+    <select id={id} className={opts.className ?? "input max-w-[220px]"} value={value} onChange={(e) => onChange(e.target.value)} aria-label={opts.label}>
+      {TARGETS.filter((x) => opts.follow !== false || x.id).map((x) => (
         <option key={x.id} value={x.id}>
           {t(x.label)}
         </option>
@@ -153,199 +244,228 @@ export function RoutingSection({ s, view, onView }: { s: Schemas["SettingsView"]
       ) : null}
     </select>
   );
-  // Simple settings or an own YAML: one choice of how the routing is set, above either.
-  const views = (
-    <div className="flex flex-wrap items-center gap-3">
-      <Segmented
-        label={t("settings.routesView")}
-        value={view}
-        onChange={onView}
-        options={[
-          { value: "simple", label: t("settings.routesViewSimple") },
-          { value: "yaml", label: t("settings.routesViewYaml") },
-        ]}
-      />
-      {s.sub_template.trim() ? <Pill tone="warn">{t("settings.routesYamlOn")}</Pill> : null}
-    </div>
-  );
-  // The own profile's text lives here, so switching between the simple mode and it keeps it.
-  const [yaml, setYaml] = useState(s.sub_template);
-  const starter = () => unwrap(api.POST("/api/v1/settings/routes/preview", { body: { sub_routing: draft.mode, sub_routes: draft.routes, starter: true } })).then((r) => r.profile);
-  if (view === "yaml") {
-    return (
-      <WithPreview title={t("settings.routesPreview")} preview={(bare) => <PreviewCard mode={draft.mode} routes={draft.routes} template={yaml} bare={bare} />}>
-        {views}
-        <TemplateCard s={s} text={yaml} setText={setYaml} starter={starter} />
-      </WithPreview>
-    );
-  }
+}
+
+function useCatalog() {
+  return useQuery({ queryKey: ["routes-catalog"], queryFn: ({ signal }) => unwrap(api.GET("/api/v1/settings/routes/catalog", { signal })), staleTime: Infinity });
+}
+
+/** The mode, then each service as a tile with where it goes; the ones set apart stand out. */
+function ModePart({ mode, setMode, routes, setRoutes }: { mode: Schemas["SettingsView"]["sub_routing"]; setMode: (m: Schemas["SettingsView"]["sub_routing"]) => void; routes: Routes; setRoutes: SetRoutes }) {
+  const catalog = useCatalog();
+  const locale = useLocale();
+  const targetSelect = useTargetSelect();
+  const [q, setQ] = useState("");
+  const services = catalog.data?.services ?? [];
+  const nameOf = (svc: (typeof services)[number]) => (locale === "en" ? svc.name_en : svc.name);
+  const shown = services.filter((svc) => !q.trim() || nameOf(svc).toLowerCase().includes(q.trim().toLowerCase()) || svc.id.includes(q.trim().toLowerCase()));
+  const set = Object.keys(routes.services ?? {}).length;
+  const setService = (id: string, target: string) =>
+    setRoutes((r) => {
+      const next = { ...(r.services ?? {}) };
+      if (target) next[id] = target;
+      else delete next[id];
+      return { ...r, services: next };
+    });
   return (
-    <WithPreview title={t("settings.routesPreview")} preview={(bare) => <PreviewCard mode={draft.mode} routes={draft.routes} rules={draft.rules} bare={bare} />}>
-      {views}
-      {s.sub_template.trim() ? <div className="banner info">{t("settings.routesYamlLive")}</div> : null}
-        <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
-          <form onSubmit={submit} noValidate>
-            <div className="card-head">
-              <div>
-                <h2 className="card-title">{t("settings.routes")}</h2>
-                <div className="card-sub">{t("settings.routesSub")}</div>
+    <>
+      <Card title={t("settings.routing")} sub={t("settings.routingHint")}>
+        <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t("settings.routing")}>
+          {MODES.map((m) => (
+            <button key={m.id} type="button" role="radio" aria-checked={mode === m.id} className="opt" onClick={() => setMode(m.id)}>
+              <span className="font-semibold">{t(m.title)}</span>
+              <span className="text-xs text-[var(--ink-500)]">{t(m.sub)}</span>
+            </button>
+          ))}
+        </div>
+      </Card>
+      <Card title={t("settings.routesServices")} sub={t("settings.routesServicesHint")} i={2} aside={set ? <Pill tone="off">{t("settings.routesChanged", { n: set })}</Pill> : null}>
+        <div className="mb-3 flex items-center gap-2">
+          <div className="relative w-full max-w-[320px]">
+            <Search size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-[var(--ink-400)]" aria-hidden />
+            <input className="input w-full pl-9" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("settings.routesSearch")} aria-label={t("settings.routesSearch")} />
+          </div>
+        </div>
+        {catalog.isError ? <ErrorState text={errorText(catalog.error)} onRetry={() => void catalog.refetch()} /> : null}
+        {catalog.isPending ? (
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-[88px] w-full rounded-2xl" />
+            ))}
+          </div>
+        ) : null}
+        {catalog.data && !shown.length ? <EmptyState icon={Search} search title={t("settings.routesSearchEmpty")} text={t("settings.routesSearchEmptyText")} /> : null}
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {shown.map((svc) => {
+            const id = `s-svc-${svc.id}`;
+            const value = routes.services?.[svc.id] ?? "";
+            return (
+              <div key={svc.id} className="panel-soft flex flex-col gap-2 p-3" style={value ? { borderColor: "var(--mikan-400)" } : undefined}>
+                <label htmlFor={id} className="flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--ink-900)]">
+                  <span className="text-lg leading-none" aria-hidden>
+                    {svc.icon}
+                  </span>
+                  <span className="truncate">{nameOf(svc)}</span>
+                </label>
+                {targetSelect(id, value, (v) => setService(svc.id, v), { className: "input h-9 w-full text-[13px]" })}
               </div>
-              {routed ? <Pill tone="off">{t("settings.routesCount", { n: routed })}</Pill> : null}
-            </div>
+            );
+          })}
+        </div>
+      </Card>
+    </>
+  );
+}
 
-            <Field label={t("settings.routing")} hint={t("settings.routingHint")}>
-              <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t("settings.routing")}>
-                {MODES.map((m) => (
-                  <button key={m.id} type="button" role="radio" aria-checked={draft.mode === m.id} className="opt" onClick={() => setDraft((d) => ({ ...d, mode: m.id }))}>
-                    <span className="font-semibold">{t(m.title)}</span>
-                    <span className="text-xs text-[var(--ink-500)]">{t(m.sub)}</span>
-                  </button>
-                ))}
-              </div>
-            </Field>
-
-            <Field label={t("settings.routesServices")} hint={t("settings.routesServicesHint")}>
-              {catalog.isError ? <ErrorState text={errorText(catalog.error)} onRetry={() => void catalog.refetch()} /> : null}
-              {catalog.isPending ? (
-                <div className="flex flex-col gap-2" aria-busy="true">
-                  {[0, 1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-9 w-full rounded-xl" />
-                  ))}
-                </div>
-              ) : null}
-              <div className="flex flex-col divide-y divide-[var(--hairline)]">
-                {(catalog.data?.services ?? []).map((svc) => {
-                  const id = `s-svc-${svc.id}`;
-                  return (
-                    <div key={svc.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                      <label htmlFor={id} className="flex min-w-0 items-center gap-2 text-sm">
-                        <span aria-hidden>{svc.icon}</span>
-                        <span className="truncate">{locale === "en" ? svc.name_en : svc.name}</span>
-                      </label>
-                      {targetSelect(id, routes.services?.[svc.id] ?? "", (v) => setService(svc.id, v))}
-                    </div>
-                  );
-                })}
-              </div>
-            </Field>
-
-            <Field label={t("settings.routesLists")} hint={t("settings.routesListsHint")}>
-              <div className="flex flex-col gap-3">
-                {(routes.lists ?? []).map((l, i) => (
-                  <div key={i} className="panel-soft grid gap-2 p-3 sm:grid-cols-[140px_minmax(0,1fr)]">
-                    <input className="input mono" value={l.name} onChange={(e) => setList(i, { name: e.target.value.toLowerCase() })} maxLength={32} aria-label={t("settings.routesListName")} placeholder="whitelist" />
-                    <input className="input mono" value={l.url} onChange={(e) => setList(i, { url: e.target.value.trim() })} maxLength={500} inputMode="url" autoComplete="off" spellCheck={false} aria-label={t("settings.routesListUrl")} placeholder="https://raw.githubusercontent.com/…/list.yaml" />
-                    <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
-                      <select className="input max-w-[170px]" value={l.behavior} onChange={(e) => setList(i, { behavior: e.target.value })} aria-label={t("settings.routesListBehavior")}>
-                        <option value="classical">{t("settings.routesListClassical")}</option>
-                        <option value="domain">{t("settings.routesListDomain")}</option>
-                        <option value="ipcidr">{t("settings.routesListIP")}</option>
-                      </select>
-                      <select className="input max-w-[110px]" value={l.format} onChange={(e) => setList(i, { format: e.target.value })} aria-label={t("settings.routesListFormat")}>
-                        <option value="yaml">YAML</option>
-                        <option value="text">TXT</option>
-                        <option value="mrs">MRS</option>
-                      </select>
-                      {targetSelect(`s-list-${i}`, l.target, (v) => setList(i, { target: v }), false, t("settings.routesListTarget"))}
-                      <Button variant="ghost" onClick={() => dropList(i)} aria-label={t("settings.routesListRemoveNamed", { name: l.name })}>
-                        {t("settings.routesListRemove")}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                <div>
-                  <Button variant="ghost" onClick={addList} disabled={(routes.lists?.length ?? 0) >= MAX_LISTS}>
-                    + {t("settings.routesListAdd")}
-                  </Button>
-                </div>
-              </div>
-            </Field>
-
-            <Field label={t("settings.routesApps")} hint={t("settings.routesAppsHint")}>
-              <div className="flex flex-col gap-2">
-                {(catalog.data?.direct ?? []).map((d) => (
-                  <label key={d.id} className="flex items-start gap-2 text-sm">
-                    <input type="checkbox" className="check mt-0.5 shrink-0" checked={(routes.direct ?? []).includes(d.id)} onChange={() => toggleDirect(d.id)} />
-                    <span>{locale === "en" ? d.name_en : d.name}</span>
-                  </label>
-                ))}
-              </div>
-            </Field>
-
-            <Field label={t("settings.rules")}>
-              <RulesEditor value={draft.rules} onChange={(f) => setDraft((d) => ({ ...d, rules: f(d.rules) }))} error={errors.sub_rules} badLine={badLine} targets={s.rule_targets} />
-            </Field>
-
-            {/* AoiVPN fork: the subscription is flat (one select group), the server-choice
-                controls render nothing — hidden so the admin does not tune a dead knob. */}
-            <div hidden>
-              <Disclosure title={t("settings.routesServers")} sub={t("settings.routesServersSub")}>
-              <Field label={t("settings.routesAutoKind")} hint={t(servers.auto === "fallback" ? "settings.routesAutoFallbackHint" : "settings.routesAutoFastestHint")}>
-                <Segmented
-                  label={t("settings.routesAutoKind")}
-                  value={servers.auto === "fallback" ? "fallback" : "fastest"}
-                  onChange={(v) => setServers({ auto: v === "fallback" ? "fallback" : undefined })}
-                  options={[
-                    { value: "fastest", label: t("settings.routesAutoFastest") },
-                    { value: "fallback", label: t("settings.routesAutoFallback") },
-                  ]}
-                />
-              </Field>
-              <Field label={t("settings.routesInterval")} htmlFor="s-interval" hint={t("settings.routesIntervalHint")}>
-                <select id="s-interval" className="input max-w-[280px]" value={servers.interval ?? 0} onChange={(e) => setServers({ interval: Number(e.target.value) || undefined })}>
-                  {[...new Set([0, 60, 120, 600, 1800, servers.interval ?? 0])].map((n) => (
-                    <option key={n} value={n}>
-                      {n ? t("settings.routesIntervalSec", { n }) : t("settings.routesIntervalDefault")}
-                    </option>
-                  ))}
+/** The own rule lists by link, and the apps that go past the tunnel. */
+function ListsPart({ routes, setRoutes, error }: { routes: Routes; setRoutes: SetRoutes; error?: string }) {
+  const catalog = useCatalog();
+  const locale = useLocale();
+  const targetSelect = useTargetSelect();
+  const setList = (i: number, patch: Partial<List>) => setRoutes((r) => ({ ...r, lists: (r.lists ?? []).map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
+  const addList = () => setRoutes((r) => ({ ...r, lists: [...(r.lists ?? []), { name: `list-${(r.lists?.length ?? 0) + 1}`, url: "", behavior: "classical", format: "yaml", target: "vpn" }] }));
+  const dropList = (i: number) => setRoutes((r) => ({ ...r, lists: (r.lists ?? []).filter((_, j) => j !== i) }));
+  const toggleDirect = (id: string) =>
+    setRoutes((r) => {
+      const has = (r.direct ?? []).includes(id);
+      return { ...r, direct: has ? (r.direct ?? []).filter((x) => x !== id) : [...(r.direct ?? []), id] };
+    });
+  const lists = routes.lists ?? [];
+  return (
+    <>
+      <Card title={t("settings.routesLists")} sub={t("settings.routesListsHint")}>
+        <div className="flex flex-col gap-3">
+          {lists.map((l, i) => (
+            <div key={i} className="panel-soft grid gap-2 p-3 sm:grid-cols-[160px_minmax(0,1fr)]">
+              <input className="input mono" value={l.name} onChange={(e) => setList(i, { name: e.target.value.toLowerCase() })} maxLength={32} aria-label={t("settings.routesListName")} placeholder="whitelist" />
+              <input className="input mono" value={l.url} onChange={(e) => setList(i, { url: e.target.value.trim() })} maxLength={500} inputMode="url" autoComplete="off" spellCheck={false} aria-label={t("settings.routesListUrl")} placeholder="https://raw.githubusercontent.com/…/list.yaml" />
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+                <select className="input max-w-[170px]" value={l.behavior} onChange={(e) => setList(i, { behavior: e.target.value })} aria-label={t("settings.routesListBehavior")}>
+                  <option value="classical">{t("settings.routesListClassical")}</option>
+                  <option value="domain">{t("settings.routesListDomain")}</option>
+                  <option value="ipcidr">{t("settings.routesListIP")}</option>
                 </select>
-              </Field>
-              <SwitchRow label={t("settings.routesCountries")} sub={t("settings.routesCountriesSub")} checked={!servers.no_countries} onChange={(v) => setServers({ no_countries: v ? undefined : true })} />
-              </Disclosure>
-            </div>
-
-            <Disclosure title={t("settings.routesTune")} sub={t("common.forExperts")}>
-              <SwitchRow label={t("settings.routesQuic")} sub={t("settings.routesQuicSub")} checked={!!tune.block_quic} onChange={(v) => setTune({ block_quic: v || undefined })} />
-              <SwitchRow label={t("settings.routesSniffer")} sub={t("settings.routesSnifferSub")} checked={!!tune.sniffer} onChange={(v) => setTune({ sniffer: v || undefined })} />
-              <SwitchRow label={t("settings.routesRealIP")} sub={t("settings.routesRealIPSub")} checked={!!tune.real_ip} onChange={(v) => setTune({ real_ip: v || undefined })} />
-            </Disclosure>
-
-            <Disclosure title={t("settings.routesDns")} sub={t("common.forExperts")}>
-              <p className="text-xs text-[var(--ink-500)]">{t("settings.routesDnsHint")}</p>
-              <div className="my-3 flex flex-wrap gap-2" role="group" aria-label={t("settings.routesDnsPresets")}>
-                {DNS_PRESETS.map((p) => (
-                  <button key={p.id} type="button" className="chip-btn" onClick={() => setDns(p.dns)}>
-                    {t(`settings.routesDnsPreset.${p.id}` as "settings.routesDnsPreset.panel")}
-                  </button>
-                ))}
+                <select className="input max-w-[110px]" value={l.format} onChange={(e) => setList(i, { format: e.target.value })} aria-label={t("settings.routesListFormat")}>
+                  <option value="yaml">YAML</option>
+                  <option value="text">TXT</option>
+                  <option value="mrs">MRS</option>
+                </select>
+                {targetSelect(`s-list-${i}`, l.target, (v) => setList(i, { target: v }), { follow: false, label: t("settings.routesListTarget") })}
+                <Button variant="ghost" className="ml-auto" onClick={() => dropList(i)} aria-label={t("settings.routesListRemoveNamed", { name: l.name })}>
+                  {t("settings.routesListRemove")}
+                </Button>
               </div>
-              <Field label={t("settings.routesDnsServers")} htmlFor="s-dns-ns" hint={t("settings.routesDnsServersHint")}>
-                <textarea id="s-dns-ns" className="input mono min-h-[72px]" value={dnsText.nameserver} onChange={editDns("nameserver")} spellCheck={false} placeholder="https://1.1.1.1/dns-query#PROXY" />
-              </Field>
-              <Field label={t("settings.routesDnsProxy")} htmlFor="s-dns-proxy" hint={t("settings.routesDnsProxyHint")}>
-                <textarea id="s-dns-proxy" className="input mono min-h-[56px]" value={dnsText.proxy} onChange={editDns("proxy")} spellCheck={false} placeholder="1.1.1.1" />
-              </Field>
-              <Field label={t("settings.routesDnsPolicy")} htmlFor="s-dns-policy" hint={t("settings.routesDnsPolicyHint")}>
-                <textarea id="s-dns-policy" className="input mono min-h-[72px]" value={dnsText.policy} onChange={editDns("policy")} spellCheck={false} placeholder="+.cn: https://dns.alidns.com/dns-query" />
-              </Field>
-            </Disclosure>
+            </div>
+          ))}
+          {!lists.length ? <p className="text-[13px] text-[var(--ink-500)]">{t("settings.routesListsEmpty")}</p> : null}
+          <div>
+            <Button variant="ghost" onClick={addList} disabled={lists.length >= MAX_LISTS}>
+              + {t("settings.routesListAdd")}
+            </Button>
+          </div>
+          {error ? (
+            <p className="text-xs text-[var(--berry-600)]" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </Card>
+      <Card title={t("settings.routesApps")} sub={t("settings.routesAppsHint")} i={2}>
+        {catalog.isError ? <ErrorState text={errorText(catalog.error)} onRetry={() => void catalog.refetch()} /> : null}
+        {catalog.isPending ? <Skeleton className="h-40 w-full rounded-2xl" /> : null}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(catalog.data?.direct ?? []).map((d) => {
+            const on = (routes.direct ?? []).includes(d.id);
+            return (
+              <label key={d.id} className="panel-soft flex cursor-pointer items-start gap-3 p-3 text-sm" style={on ? { borderColor: "var(--mikan-400)" } : undefined}>
+                <input type="checkbox" className="check mt-0.5 shrink-0" checked={on} onChange={() => toggleDirect(d.id)} />
+                <span>{locale === "en" ? d.name_en : d.name}</span>
+              </label>
+            );
+          })}
+        </div>
+      </Card>
+    </>
+  );
+}
 
-            {error ? (
-              <p className="mt-3 text-xs text-[var(--berry-600)]" role="alert">
-                {error}
-              </p>
-            ) : null}
-            <p className="mt-3 text-xs text-[var(--ink-500)]">{t("settings.routesNote")}</p>
-            <FormActions dirty={dirty} saving={save.isPending} onReset={discard} />
-          </form>
-        </section>
-    </WithPreview>
+/** The DNS of the device's Clash profile: a ready set or the servers as mihomo writes them. */
+function DeviceDns({ text, onPreset, onText }: { text: ReturnType<typeof dnsTextOf>; onPreset: (dns: DNS) => void; onText: (t: ReturnType<typeof dnsTextOf>) => void }) {
+  const edit = (k: keyof typeof text) => (e: React.ChangeEvent<HTMLTextAreaElement>) => onText({ ...text, [k]: e.target.value });
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label={t("settings.routesDnsPresets")}>
+        {DNS_PRESETS.map((p) => (
+          <button key={p.id} type="button" className="chip-btn" onClick={() => onPreset(p.dns)}>
+            {t(`settings.routesDnsPreset.${p.id}` as "settings.routesDnsPreset.panel")}
+          </button>
+        ))}
+      </div>
+      <Field label={t("settings.routesDnsServers")} htmlFor="s-dns-ns" hint={t("settings.routesDnsHint")}>
+        <textarea id="s-dns-ns" className="input mono min-h-[72px]" value={text.nameserver} onChange={edit("nameserver")} spellCheck={false} placeholder="https://1.1.1.1/dns-query#PROXY" />
+      </Field>
+      <Field label={t("settings.routesDnsProxy")} htmlFor="s-dns-proxy" hint={t("settings.routesDnsProxyHint")}>
+        <textarea id="s-dns-proxy" className="input mono min-h-[56px]" value={text.proxy} onChange={edit("proxy")} spellCheck={false} placeholder="1.1.1.1" />
+      </Field>
+      <Field label={t("settings.routesDnsPolicy")} htmlFor="s-dns-policy" hint={t("settings.routesDnsPolicyHint")}>
+        <textarea id="s-dns-policy" className="input mono min-h-[72px]" value={text.policy} onChange={edit("policy")} spellCheck={false} placeholder="+.cn: https://dns.alidns.com/dns-query" />
+      </Field>
+    </>
+  );
+}
+
+/** How the server groups look in the apps, and the switches for experts. */
+function AdvancedPart({ routes, setRoutes, error }: { routes: Routes; setRoutes: SetRoutes; error?: string }) {
+  const servers = routes.servers ?? {};
+  const setServers = (patch: Partial<NonNullable<Routes["servers"]>>) => setRoutes((r) => ({ ...r, servers: { ...(r.servers ?? {}), ...patch } }));
+  const tune = routes.tune ?? {};
+  const setTune = (patch: Partial<NonNullable<Routes["tune"]>>) => setRoutes((r) => ({ ...r, tune: { ...(r.tune ?? {}), ...patch } }));
+  return (
+    <>
+      {/* AoiVPN fork: the subscription is flat (one select group), the server-choice
+          controls render nothing — hidden so the admin does not tune a dead knob. */}
+      <div hidden>
+        <Card title={t("settings.routesServers")} sub={t("settings.routesServersSub")}>
+          <Field label={t("settings.routesAutoKind")} hint={t(servers.auto === "fallback" ? "settings.routesAutoFallbackHint" : "settings.routesAutoFastestHint")}>
+            <Segmented
+              label={t("settings.routesAutoKind")}
+              value={servers.auto === "fallback" ? "fallback" : "fastest"}
+              onChange={(v) => setServers({ auto: v === "fallback" ? "fallback" : undefined })}
+              options={[
+                { value: "fastest", label: t("settings.routesAutoFastest") },
+                { value: "fallback", label: t("settings.routesAutoFallback") },
+              ]}
+            />
+          </Field>
+          <Field label={t("settings.routesInterval")} htmlFor="s-interval" hint={t("settings.routesIntervalHint")}>
+            <select id="s-interval" className="input max-w-[280px]" value={servers.interval ?? 0} onChange={(e) => setServers({ interval: Number(e.target.value) || undefined })}>
+              {[...new Set([0, 60, 120, 600, 1800, servers.interval ?? 0])].map((n) => (
+                <option key={n} value={n}>
+                  {n ? t("settings.routesIntervalSec", { n }) : t("settings.routesIntervalDefault")}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <SwitchRow label={t("settings.routesCountries")} sub={t("settings.routesCountriesSub")} checked={!servers.no_countries} onChange={(v) => setServers({ no_countries: v ? undefined : true })} />
+          {error ? (
+            <p className="mt-3 text-xs text-[var(--berry-600)]" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </Card>
+      </div>
+      <Card title={t("settings.routesTune")} sub={t("common.forExperts")} i={2}>
+        <SwitchRow label={t("settings.routesQuic")} sub={t("settings.routesQuicSub")} checked={!!tune.block_quic} onChange={(v) => setTune({ block_quic: v || undefined })} />
+        <SwitchRow label={t("settings.routesSniffer")} sub={t("settings.routesSnifferSub")} checked={!!tune.sniffer} onChange={(v) => setTune({ sniffer: v || undefined })} />
+        <SwitchRow label={t("settings.routesRealIP")} sub={t("settings.routesRealIPSub")} checked={!!tune.real_ip} onChange={(v) => setTune({ real_ip: v || undefined })} />
+      </Card>
+    </>
   );
 }
 
 // The profile a user with every connection gets, before anything is saved: the unsaved
-// rules too.
-function PreviewCard({ mode, routes, rules, template, bare }: { mode: Schemas["SettingsView"]["sub_routing"]; routes: Routes; rules?: string; template?: string; bare?: boolean }) {
+// rules too, or the own profile being edited.
+function PreviewCard({ mode, routes, rules, template }: { mode: Schemas["SettingsView"]["sub_routing"]; routes: Routes; rules?: string; template?: string }) {
   const preview = useMutation({
     mutationFn: () =>
       unwrap(
@@ -354,18 +474,12 @@ function PreviewCard({ mode, routes, rules, template, bare }: { mode: Schemas["S
         }),
       ),
   });
+  // Shown at once when the panel opens; the button asks again after more changes.
+  const { mutate } = preview;
+  useEffect(() => mutate(), [mutate]);
   return (
-    <section className={bare ? undefined : "card glass reveal"} style={{ "--i": 2 } as React.CSSProperties}>
-      {bare ? (
-        <p className="mb-3 text-[13px] text-[var(--ink-500)]">{t("settings.routesPreviewSub")}</p>
-      ) : (
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.routesPreview")}</h2>
-            <div className="card-sub">{t("settings.routesPreviewSub")}</div>
-          </div>
-        </div>
-      )}
+    <section>
+      <p className="mb-3 text-[13px] text-[var(--ink-500)]">{t("settings.routesPreviewSub")}</p>
       <Button variant="ghost" loading={preview.isPending} onClick={() => preview.mutate()}>
         {preview.data ? t("settings.routesPreviewAgain") : t("settings.routesPreviewShow")}
       </Button>

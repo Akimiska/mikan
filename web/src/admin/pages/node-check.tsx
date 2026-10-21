@@ -13,6 +13,7 @@ import { getLocale, t, tMaybe } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { ago, bytes } from "../../lib/format";
 import { nodeLabel } from "../../lib/node-label";
+import { NodeGeoCheck } from "./geo-check";
 
 type Node = Schemas["NodeInfo"];
 type Item = Schemas["CheckItem"];
@@ -273,6 +274,7 @@ export function NodeCheckDrawer({ node, onClose, actions }: { node: Node | null;
           ) : null}
         </div>
         {node ? <RussiaCheck node={node} /> : null}
+        {node ? <NodeGeoCheck node={node} /> : null}
       </div>
     </Drawer>
   );
@@ -329,7 +331,7 @@ function reachMark(p: ReachPort): { status: Status; text: string } {
   return { status: "fail", text: t("reach.closed") };
 }
 
-function countryName(code: string): string {
+export function countryName(code: string): string {
   try {
     return new Intl.DisplayNames([getLocale()], { type: "region" }).of(code) ?? code;
   } catch {

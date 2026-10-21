@@ -3,6 +3,8 @@ package domain
 import (
 	"database/sql"
 	"time"
+
+	"mikan/internal/panel/store"
 )
 
 // A billing day (1–31) ends every term on that day of the month: "+1 month" moves the
@@ -66,7 +68,7 @@ func tariffExpiry(now time.Time, t durationTariff) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	if t.billingDay.Valid {
-		return sql.NullInt64{Int64: AddMonths(now, TermMonths(t.days), t.billingDay).Unix(), Valid: true}
+		return sql.NullInt64{Int64: store.ClampUnix(AddMonths(now, TermMonths(t.days), t.billingDay).Unix()), Valid: true}
 	}
 	return expiry(now.Unix(), t.days)
 }

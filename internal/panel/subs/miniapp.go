@@ -155,7 +155,8 @@ type shopRequest struct {
 	TariffID  int64  `json:"tariff_id"`
 	TermDays  *int64 `json:"term_days"` // the tariff's term; absent: its first
 	PackageID int64  `json:"package_id"`
-	Trial     bool   `json:"trial"` // the priced trial, for an account without a subscription
+	Device    bool   `json:"device"` // one more device for the subscription
+	Trial     bool   `json:"trial"`  // the priced trial, for an account without a subscription
 	Provider  string `json:"provider"`
 	Token     string `json:"token"`
 	PromoCode string `json:"promo_code"`
@@ -194,6 +195,8 @@ func (h *Handler) miniAppShop(w http.ResponseWriter, r *http.Request, rest strin
 	var err error
 	if in.Trial {
 		p, err = h.shop.TrialInvoice(ctx, tgID, billing.AdapterOf(in.Provider))
+	} else if in.Device {
+		p, err = h.shop.DeviceInvoice(ctx, billing.DeviceRequest{TgID: tgID, UserID: userID, Provider: billing.AdapterOf(in.Provider)})
 	} else if in.PackageID != 0 {
 		p, err = h.shop.PackageInvoice(ctx, billing.PackageRequest{TgID: tgID, UserID: userID, PackageID: in.PackageID, Provider: billing.AdapterOf(in.Provider), PromoCode: in.PromoCode})
 	} else {
@@ -247,6 +250,10 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		Stars int64  `json:"stars,omitempty"`
 		Rub   int64  `json:"rub,omitempty"`
 		Terms []term `json:"terms"`
+		// Groups and Gifts say what the tariff is made of: its server groups as it has them,
+		// and the packages it gives with every payment.
+		Groups []offerGroup `json:"groups,omitempty"`
+		Gifts  []string     `json:"gifts,omitempty"`
 	}
 	// Marketplace adapters take rubles; the buyer sees each by its own name.
 	type addon struct {
@@ -263,6 +270,8 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		Trial *offer `json:"trial,omitempty"`
 		// Free is the free plan this account may take now, if any.
 		Free *freeOffer `json:"free,omitempty"`
+		// Device is one more device for the subscription on screen, if it may buy one.
+		Device *offer `json:"device,omitempty"`
 	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 		Providers: map[string]bool{billing.Stars: av.Stars}}
 	if fo, ok := h.shop.FreeOffer(ctx, tgID); ok {
@@ -271,11 +280,22 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 	if to, _, ok := h.shop.TrialOffer(ctx, tgID); ok {
 		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Note: to.Tariff.Description, Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
 	}
+	if userID != 0 {
+		if do, _, ok, _ := h.shop.DeviceOfferFor(ctx, userID); ok {
+			out.Device = &offer{ID: userID, Name: billing.DescribeDevice(cfg.Lang), Description: billing.DescribeDeviceOffer(do, cfg.Lang), Stars: do.Stars, Rub: do.Rub, Terms: []term{}}
+		}
+	}
 	for _, id := range av.Addons {
 		out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
 	}
 	for _, o := range offers {
 		v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.DescribeOffer(o, cfg.Lang), Note: o.Tariff.Description, Stars: o.Stars, Rub: o.Rub}
+		for _, g := range o.Groups {
+			v.Groups = append(v.Groups, offerGroup{Name: g.Name, Mode: g.Mode, Limit: g.Limit})
+		}
+		for _, g := range o.Gifts {
+			v.Gifts = append(v.Gifts, billing.DescribePackage(g.Package, g.Pool, cfg.Lang))
+		}
 		for _, t := range o.Terms {
 			v.Terms = append(v.Terms, term{Days: t.Days, Label: billing.TermLabel(o.Tariff, t.Days, cfg.Lang),
 				Description: billing.Describe(o.Tariff, t.Days, cfg.Lang), Stars: t.Stars, Rub: t.Rub})
@@ -283,6 +303,14 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		out.Offers = append(out.Offers, v)
 	}
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// offerGroup is a server group of a tariff on sale, as the Mini App lists it: its mode
+// (main, own, unlimited, closed) and, with own, its limit in bytes.
+type offerGroup struct {
+	Name  string `json:"name"`
+	Mode  string `json:"mode"`
+	Limit int64  `json:"limit,omitempty"`
 }
 
 // freeOffer is the free plan in "shop": what it gives, and the channel it asks the account

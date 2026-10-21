@@ -276,7 +276,7 @@ func (s *Service) addonClient(ctx context.Context, id string) (*addons.Client, A
 // from providers that advertise refunds, so Mikan can return money without issuing service
 // for a discount that is no longer reserved.
 func (s *Service) validatePromoProvider(ctx context.Context, provider string) error {
-	if provider == Stars {
+	if provider == Stars || provider == Balance {
 		return nil
 	}
 	id := AddonID(provider)

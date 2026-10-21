@@ -1,5 +1,5 @@
-//! Backups and restore. A backup is a tar.gz of what mikan keeps in /opt/mikan: .env,
-//! compose.yaml, a consistent copy of the panel's database, its certificates and the node's
+//! Backups and restore. A backup is a tar.gz of what mikan keeps in /opt/mikan: config.json
+//! and secrets/ (.env on a server set up before them), compose.yaml, a consistent copy of the panel's database, its certificates and the node's
 //! data. It holds every secret of the server, so it is born private: the directory is 0700
 //! and the archive is created 0600 before tar writes a byte into it.
 //!
@@ -17,7 +17,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 
 use crate::clock::Utc;
-use crate::envfile::EnvFile;
+use crate::config::{self, Config};
 use crate::lock::{self, Wait};
 use crate::ops::Install;
 use crate::panelfs::{self, Dir};
@@ -26,7 +26,7 @@ use crate::{DIR, docker, setup, signals, system};
 /// The kinds of archive mikan makes on its own; the admin's are "mikan".
 pub const PRE_UPDATE: &str = "pre-update";
 /// An update that moves SQLite to PostgreSQL: the archives with the original SQLite. A
-/// failed move leaves .env on PostgreSQL, so its retries are "pre-update" and can never
+/// failed move leaves the settings on PostgreSQL, so its retries are "pre-update" and can never
 /// rotate these away.
 pub const PRE_POSTGRES: &str = "pre-postgres";
 const PRE_RESTORE: &str = "pre-restore";
@@ -86,7 +86,7 @@ fn ensure_room(root: &Path, postgres: bool) -> Result<()> {
 
 /// What a restore may put back, below /opt/mikan: the settings, and the data of the panel
 /// and the node. Anything else in an archive is not a mikan backup.
-const TOP: [&str; 2] = [".env", "compose.yaml"];
+const TOP: [&str; 4] = [config::FILE, config::SECRETS, config::LEGACY, "compose.yaml"];
 
 /// The backups' directory, private.
 fn backups_dir(root: &Path) -> Result<PathBuf> {
@@ -216,9 +216,9 @@ pub fn backup_as(kind: &str, say: &mut dyn FnMut(&str)) -> Result<PathBuf> {
     let install = Install::load()?;
     let root = Path::new(DIR);
     let dir = backups_dir(root)?;
-    let postgres = !install.node && install.env.get("MIKAN_DATABASE_URL").is_some();
+    let postgres = !install.node && install.config.get("MIKAN_DATABASE_URL").is_some();
     ensure_room(root, postgres)?;
-    let mut members: Vec<String> = TOP.iter().map(|s| (*s).to_owned()).collect();
+    let mut members: Vec<String> = TOP.iter().filter(|m| exists(root, m)).map(|s| (*s).to_owned()).collect();
     let panel = if install.node {
         None
     } else {
@@ -374,26 +374,35 @@ fn verify_tree(dir: &Path, depth: usize) -> Result<()> {
 /// What an unpacked archive puts back: (where it is, where it goes below /opt/mikan).
 fn plan(stage: &Path) -> Result<Vec<(PathBuf, &'static str)>> {
     let items = plan_items(stage);
-    if !items.iter().any(|(_, r)| *r == ".env") {
-        bail!("the archive has no .env: it is not a mikan backup");
+    if !items.iter().any(|(_, r)| *r == config::FILE || *r == config::LEGACY) {
+        bail!("the archive has no settings (config.json or .env): it is not a mikan backup");
     }
     Ok(items)
 }
 
-/// What an archive without .env puts back: the panel's PostgreSQL dump alone, as the panel
+/// What an archive without settings puts back: the panel's PostgreSQL dump alone, as the panel
 /// sends it to Telegram. The server's settings, certificates, adapters and node data stay
 /// as they are.
 fn plan_database(stage: &Path) -> Result<Vec<(PathBuf, &'static str)>> {
     let items: Vec<_> = plan_items(stage).into_iter().filter(|(_, r)| *r == RESTORE_DUMP).collect();
     if items.is_empty() {
-        bail!("the archive has neither .env nor the panel's PostgreSQL dump: it is not a mikan backup");
+        bail!("the archive has neither settings nor the panel's PostgreSQL dump: it is not a mikan backup");
     }
     Ok(items)
 }
 
 fn plan_items(stage: &Path) -> Vec<(PathBuf, &'static str)> {
     let mut items = Vec::new();
-    for rel in [".env", "compose.yaml", "data/panel/tls", "data/node", "addons/state.json", "data/panel/addons"] {
+    for rel in [
+        config::FILE,
+        config::SECRETS,
+        config::LEGACY,
+        "compose.yaml",
+        "data/panel/tls",
+        "data/node",
+        "addons/state.json",
+        "data/panel/addons",
+    ] {
         if fs::symlink_metadata(stage.join(rel)).is_ok() {
             items.push((stage.join(rel), rel));
         }
@@ -419,7 +428,7 @@ fn plan_items(stage: &Path) -> Vec<(PathBuf, &'static str)> {
 /// password, and an image runs the database it was made for). A server that went back to
 /// SQLite (an update that could not move it) keeps its compose file and takes only an
 /// SQLite database: a PostgreSQL dump needs the move first.
-fn fit_to_panel(items: &mut Vec<(PathBuf, &'static str)>, archived: &mut EnvFile, current: &EnvFile) -> Result<()> {
+fn fit_to_panel(items: &mut Vec<(PathBuf, &'static str)>, archived: &mut Config, current: &Config) -> Result<()> {
     for key in ["MIKAN_DATABASE_URL", "MIKAN_POSTGRES_PASSWORD", "MIKAN_IMAGE", "MIKAN_VERSION"] {
         match current.get(key) {
             Some(v) => archived.set(key, v)?,
@@ -452,7 +461,7 @@ fn fit_to_panel(items: &mut Vec<(PathBuf, &'static str)>, archived: &mut EnvFile
 /// Fits what a node's archive puts back to this server: the image stays the one this
 /// server runs. The archive may be somebody else's file, and its MIKAN_IMAGE would run
 /// whatever image it names, outside the signed releases.
-fn fit_to_node(archived: &mut EnvFile, current: &EnvFile) -> Result<()> {
+fn fit_to_node(archived: &mut Config, current: &Config) -> Result<()> {
     for key in ["MIKAN_IMAGE", "MIKAN_VERSION"] {
         match current.get(key) {
             Some(v) => archived.set(key, v)?,
@@ -515,14 +524,16 @@ fn swap(root: &Path, items: &[(PathBuf, &str)]) -> Result<()> {
 /// --no-db-snapshot`).
 pub fn archive_stopped(root: &Path, kind: &str, dump: bool) -> Result<PathBuf> {
     let dir = backups_dir(root)?;
-    let postgres = EnvFile::load(root.join(".env"))?.get("MIKAN_DATABASE_URL").is_some();
+    let postgres = Config::load(root)?.get("MIKAN_DATABASE_URL").is_some();
     let pg = dump && postgres;
     ensure_room(root, pg)?;
     if pg {
         dump_postgres(&Dir::open(root, "data/panel", false)?.context("data/panel is missing")?)?;
     }
     let members: Vec<String> = [
-        ".env",
+        config::FILE,
+        config::SECRETS,
+        config::LEGACY,
         "compose.yaml",
         SQLITE,
         SQLITE_WAL,
@@ -572,7 +583,7 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
     let _lock = lock::acquire(Wait::Block, say)?;
     let install = Install::load()?;
     let root = Path::new(DIR);
-    let postgres = !install.node && install.env.get("MIKAN_DATABASE_URL").is_some();
+    let postgres = !install.node && install.config.get("MIKAN_DATABASE_URL").is_some();
     if !file.is_file() {
         bail!("no file {}", file.display());
     }
@@ -584,9 +595,9 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
     let stage = Stage::new(root)?;
     extract(file, &stage.0)?;
     verify_tree(&stage.0, 0)?;
-    let items = if fs::symlink_metadata(stage.0.join(".env")).is_ok() {
+    let items = if config::installed(&stage.0) {
         let mut items = plan(&stage.0)?;
-        let mut archived = EnvFile::load(stage.0.join(".env"))?;
+        let mut archived = Config::load(&stage.0)?;
         if (archived.get("MIKAN_MODE") == Some("node")) != install.node {
             bail!(
                 "the backup is a {}'s, this server is a {}",
@@ -595,11 +606,20 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
             );
         }
         if install.node {
-            fit_to_node(&mut archived, &install.env)?;
+            fit_to_node(&mut archived, &install.config)?;
         } else {
-            fit_to_panel(&mut items, &mut archived, &install.env)?;
+            fit_to_panel(&mut items, &mut archived, &install.config)?;
         }
+        // Whatever form the archive keeps them in, they go back in both: the secrets as files
+        // for the current compose.yaml, and .env for the moment between the swap and the start
+        // (an SQLite server's older compose.yaml reads only it); .env goes once mikan runs.
         archived.save()?;
+        archived.write_legacy()?;
+        let keep_compose = items.iter().any(|(_, r)| *r == "compose.yaml");
+        let mut items = plan(&stage.0)?;
+        if !keep_compose {
+            items.retain(|(_, r)| *r != "compose.yaml");
+        }
         items
     } else {
         if !postgres {
@@ -659,13 +679,13 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
     let started = (|| -> Result<()> {
         if postgres {
             // The backup may carry the compose file of an older mikan: it gets the current one.
-            docker::ensure_compose(root, false)?;
+            docker::ensure_compose(root, &Config::load(root)?)?;
             panelfs::layout(root, true)?;
             docker::postgres_ready()?;
             let source = if items.iter().any(|(_, r)| *r == RESTORE_DUMP) { RESTORE_DUMP } else { SQLITE };
             docker::database(&["restore", &format!("/{source}")])?;
         } else if install.node {
-            docker::ensure_compose(root, true)?;
+            docker::ensure_compose(root, &Config::load(root)?)?;
             panelfs::layout(root, false)?;
         } else {
             // Back on SQLite with the compose file it went back to, which may mount all of
@@ -689,6 +709,13 @@ pub fn restore(file: &Path, no_db_snapshot: bool, say: &mut dyn FnMut(&str)) -> 
             snap.display(),
             snap.display()
         )));
+    }
+    // The containers run on config.json and secrets/: .env, put back for the swap, goes.
+    // An SQLite server keeps it, as its compose.yaml reads it.
+    if (postgres || install.node)
+        && let Err(e) = Config::load(root).and_then(|mut c| c.retire_legacy())
+    {
+        say(&format!("Remove {} by hand: {e:#}", root.join(config::LEGACY).display()));
     }
     if !install.node {
         crate::addon::resume(say)?;
@@ -824,8 +851,9 @@ mod tests {
     // signed releases.
     #[test]
     fn a_node_archive_keeps_the_image() {
-        let mut archived = EnvFile::from_text("x", "MIKAN_MODE=node\nMIKAN_IMAGE=evil.example/x\nMIKAN_VERSION=9.9.9\nNODE_PORT=1\n");
-        let current = EnvFile::from_text("x", "MIKAN_MODE=node\nMIKAN_IMAGE=ghcr.io/miroshka000/mikan@sha256:aa\nMIKAN_VERSION=0.5.0.5\n");
+        let mut archived = Config::from_env_text("x", "MIKAN_MODE=node\nMIKAN_IMAGE=evil.example/x\nMIKAN_VERSION=9.9.9\nNODE_PORT=1\n");
+        let current =
+            Config::from_env_text("x", "MIKAN_MODE=node\nMIKAN_IMAGE=ghcr.io/miroshka000/mikan@sha256:aa\nMIKAN_VERSION=0.5.0.5\n");
         fit_to_node(&mut archived, &current).unwrap();
         assert_eq!(archived.get("MIKAN_IMAGE"), current.get("MIKAN_IMAGE"));
         assert_eq!(archived.get("MIKAN_VERSION"), current.get("MIKAN_VERSION"));
@@ -844,12 +872,12 @@ mod tests {
         );
         file(&d, "compose.yaml", "archived compose");
         file(&d, "data/panel/backup.dump", "pgdump");
-        let current = EnvFile::from_text(
+        let current = Config::from_env_text(
             "x",
             "MIKAN_IMAGE=live\nMIKAN_VERSION=0.5.0.1\nMIKAN_POSTGRES_PASSWORD=live\nMIKAN_DATABASE_URL=postgresql://mikan:live@localhost/mikan?host=/run/postgresql\n",
         );
         let mut items = plan(&d).unwrap();
-        let mut archived = EnvFile::load(d.join(".env")).unwrap();
+        let mut archived = Config::load(&d).unwrap();
         fit_to_panel(&mut items, &mut archived, &current).unwrap();
         for key in ["MIKAN_IMAGE", "MIKAN_VERSION", "MIKAN_POSTGRES_PASSWORD", "MIKAN_DATABASE_URL"] {
             assert_eq!(archived.get(key), current.get(key), "{key}");
@@ -858,32 +886,32 @@ mod tests {
         assert!(items.iter().any(|(_, r)| *r == "compose.yaml") && items.iter().any(|(_, r)| *r == RESTORE_DUMP));
 
         // back on SQLite, with the password of a volume an update initialized
-        let sqlite = EnvFile::from_text("x", "MIKAN_IMAGE=old\nMIKAN_VERSION=0.4.4\nMIKAN_POSTGRES_PASSWORD=kept\n");
-        let mut archived = EnvFile::load(d.join(".env")).unwrap();
+        let sqlite = Config::from_env_text("x", "MIKAN_IMAGE=old\nMIKAN_VERSION=0.4.4\nMIKAN_POSTGRES_PASSWORD=kept\n");
+        let mut archived = Config::load(&d).unwrap();
         let err = fit_to_panel(&mut plan(&d).unwrap(), &mut archived, &sqlite).unwrap_err();
         assert!(format!("{err}").contains("mikan update first"), "{err}");
         fs::remove_file(d.join("data/panel/backup.dump")).unwrap();
         file(&d, "data/panel/backup.db", "sqlite copy");
         let mut items = plan(&d).unwrap();
-        let mut archived = EnvFile::load(d.join(".env")).unwrap();
+        let mut archived = Config::load(&d).unwrap();
         fit_to_panel(&mut items, &mut archived, &sqlite).unwrap();
         assert_eq!((archived.get("MIKAN_DATABASE_URL"), archived.get("MIKAN_POSTGRES_PASSWORD")), (None, Some("kept")));
         assert_eq!(archived.get("MIKAN_IMAGE"), Some("old"));
         assert!(!items.iter().any(|(_, r)| *r == "compose.yaml"), "its own compose file stays");
         assert!(items.iter().any(|(_, r)| *r == SQLITE));
         // the same SQLite backup on a panel of 0.5.0.x moves; on 0.5.1.0 it is refused
-        let mut archived = EnvFile::load(d.join(".env")).unwrap();
+        let mut archived = Config::load(&d).unwrap();
         fit_to_panel(&mut plan(&d).unwrap(), &mut archived, &current).unwrap();
-        let newer = EnvFile::from_text(
+        let newer = Config::from_env_text(
             "x",
             "MIKAN_IMAGE=live\nMIKAN_VERSION=0.5.1.0\nMIKAN_POSTGRES_PASSWORD=live\nMIKAN_DATABASE_URL=postgresql://mikan:live@localhost/mikan?host=/run/postgresql\n",
         );
-        let mut archived = EnvFile::load(d.join(".env")).unwrap();
+        let mut archived = Config::load(&d).unwrap();
         let err = fit_to_panel(&mut plan(&d).unwrap(), &mut archived, &newer).unwrap_err();
         assert!(format!("{err}").contains(crate::release::LAST_SQLITE_MOVE), "{err}");
         // no database at all
         fs::remove_file(d.join("data/panel/backup.db")).unwrap();
-        assert!(fit_to_panel(&mut plan(&d).unwrap(), &mut EnvFile::load(d.join(".env")).unwrap(), &current).is_err());
+        assert!(fit_to_panel(&mut plan(&d).unwrap(), &mut Config::load(&d).unwrap(), &current).is_err());
         fs::remove_dir_all(&d).unwrap();
     }
 

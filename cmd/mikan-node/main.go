@@ -95,8 +95,14 @@ func run() error {
 	}
 	go serve(ln)
 	log.Info("node started", "version", version, "socket", sock)
+	// The state from before the restart comes back behind the API, which answers already.
+	go eng.Restore()
 	// A remote node also serves the Node API over TCP to its panel (see nodetls).
-	if raw := os.Getenv("MIKAN_NODE_JOIN"); raw != "" {
+	raw, err := config.Secret("MIKAN_NODE_JOIN")
+	if err != nil {
+		return err
+	}
+	if raw != "" {
 		key, err := nodetls.DecodeKey(raw)
 		if err != nil {
 			return fmt.Errorf("MIKAN_NODE_JOIN: %w", err)
@@ -109,7 +115,8 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		go serve(tls.NewListener(tcp, cfg))
+		// With the panel's API lock on, strangers are closed before the TLS handshake.
+		go serve(tls.NewListener(eng.APIListener(tcp), cfg))
 		log.Info("node api for the panel", "port", key.Port)
 		go helloLoop(ctx, key, dataDir, log)
 	}
@@ -122,6 +129,7 @@ func run() error {
 			if err := eng.PersistCounters(); err != nil {
 				log.Error("persist counters", "err", err)
 			}
+			eng.TickAPILock()
 		case <-ctx.Done():
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

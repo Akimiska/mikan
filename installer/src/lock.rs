@@ -1,6 +1,6 @@
 //! One lock for everything that changes the server: an update (the daily timer's, the
 //! panel's button, the admin's), the payment adapters, a backup, a restore, an install.
-//! Two of them at once would rewrite .env and the containers under each other.
+//! Two of them at once would rewrite the settings and the containers under each other.
 //!
 //! The lock is an flock on a file in /run, so a crash or a kill frees it; a command that
 //! needs the lock inside another that holds it (an update that backs up first) takes it

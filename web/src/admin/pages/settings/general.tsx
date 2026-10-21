@@ -235,12 +235,14 @@ export function UpdatesCard() {
       />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="font-semibold">{t("settings.forkVersion", { v: v.current })}</span>
+        {/* AoiVPN fork: the release index is the original's; its version is compared with the
+            fork's base, and the update itself is a merge into the fork, not this button. */}
         {v.available ? (
-          <Pill tone="warn">{t("settings.updatesOut", { v: v.latest })}</Pill>
+          <Pill tone="warn">{t("settings.forkUpstreamNew", { v: v.latest })}</Pill>
         ) : v.unreachable && v.newest ? (
           <Pill tone="warn">{t("settings.updatesOut", { v: v.newest })}</Pill>
         ) : v.latest ? (
-          <Pill tone="ok">{t("settings.updatesLatest")}</Pill>
+          <Pill tone="ok">{t("settings.forkUpstreamSame", { v: v.latest })}</Pill>
         ) : (
           <Pill tone="off">{v.error === "no_release" ? t("settings.updatesNoRelease") : v.checked_at ? t("settings.updatesUnknown") : t("settings.updatesNever")}</Pill>
         )}
@@ -251,13 +253,16 @@ export function UpdatesCard() {
       {v.available && v.newest && !v.unreachable ? (
         <p className="mt-2 text-xs text-[var(--ink-500)]">{t("settings.updatesHop", { v: v.latest, newest: v.newest })}</p>
       ) : null}
-      {v.available && notes ? (
+      {notes && v.latest ? (
         <div className="panel-soft mt-4 p-3">
-          <div className="mb-2 text-xs font-semibold text-[var(--ink-500)]">{t("settings.updatesChanges", { v: v.latest })}</div>
+          <div className="mb-2 text-xs font-semibold text-[var(--ink-500)]">
+            {t("settings.forkUpstreamNotes", { v: v.latest })}
+            {v.published ? <span className="font-normal"> · {ago(v.published)}</span> : null}
+          </div>
           <NotesList key={v.latest} lines={notes.split("\n").filter((l) => l.trim())} />
         </div>
       ) : null}
-      {v.available || waiting ? (
+      {waiting ? (
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button variant="primary" loading={request.isPending || (waiting && !stale)} disabled={waiting} onClick={() => setConfirm(true)}>
             {waiting ? t("settings.updatesWaiting") : t("settings.updatesNow", { v: v.latest })}

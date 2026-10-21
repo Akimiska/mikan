@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"mikan/internal/panel/aoiapp"
 	"net"
 	"net/http"
 	"net/netip"
@@ -554,6 +555,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	subHandler.SetShop(p.Billing)
 	subHandler.SetPromo(promos)
 	subHandler.SetPages(pages)
+	subHandler.SetApp(aoiapp.New(aoiapp.Deps{Store: st, Billing: p.Billing, SubBase: subBase, Now: o.Now, Log: o.Log, TrustProxy: o.TrustProxy}))
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)

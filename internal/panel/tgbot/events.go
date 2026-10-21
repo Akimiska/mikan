@@ -75,6 +75,9 @@ func gone(err error) bool {
 // HandleEvent sends what an event of the panel asks the bot to say. An error leaves the
 // event unacknowledged, to come again.
 func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
+	if e.TgID < 0 {
+		return nil // AoiVPN fork: a synthetic account of the AoiVPN app (aoiapp) has no chat
+	}
 	switch e.Type {
 	case events.PaymentPaid, events.PaymentRefunded:
 		var p events.Payment

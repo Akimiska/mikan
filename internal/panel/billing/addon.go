@@ -328,6 +328,9 @@ func (s *Service) openAddonInvoice(ctx context.Context, p db.Payment, descriptio
 			ret = u
 		}
 	}
+	if u := returnURL(ctx); u != "" { // AoiVPN fork: an app purchase goes back to the app
+		ret = u
+	}
 	if s.d.SubBase != nil {
 		sub = s.d.SubBase(ctx)
 	}

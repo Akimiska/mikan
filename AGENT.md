@@ -125,6 +125,12 @@ merge — обязательный чек-лист из §6.
 
 ---
 
+### 3.6 API приложения AoiVPN (`internal/panel/aoiapp/`, с 0.5.1.1-rc.11.aoi.2)
+- Замена `/api/app/*` легаси-бота (тот же формат ответов, AoiVPN 0.3.0 не меняется): `<sub path>/app/{plans,pay,subscription,subscriptions,order,core-report,test-sub}`; nginx на NL маппит `sub.aoimusic.ru/api/app/*` сюда (на переключении, этап 7 плана `docs/vpn-bot-to-mikan-migration.md` в монорепо).
+- Свои таблицы `aoi_*` (+ sequence `aoi_app_tg_seq`) создаёт сам пакет (`CREATE … IF NOT EXISTS`), **не** goose-миграции — номера апстрима не конфликтуют.
+- App-установка = синтетический отрицательный tg_id (`-(7e9+n)`; легаси-боты ≈ −5.5e9 переносятся как есть). Точки сшивки: `subs.Handler.SetApp` + маршрут `token == "app"` (handler.go), `billing.WithReturnURL` (aoi_return.go + 3 строки в `openAddonInvoice`), `tgbot.HandleEvent` пропускает `TgID < 0`, `panel.go` — `SetApp(aoiapp.New(...))`. При мерже проверить: `grep -n "AoiVPN fork" internal/panel/{subs/handler.go,billing/addon.go,tgbot/events.go}`.
+- Тариф приложения — `MIKAN_AOI_APP_TARIFF` (по умолчанию 3 «Стандарт»), возврат после оплаты — `MIKAN_AOI_APP_RETURN_URL` (по умолчанию `https://vpn.aoimusic.ru/app-pay-return.html`).
+
 ## 4. Брендинг (правила с 18.10.2026)
 
 По TRADEMARK.md апстрима имя «mikan», логотип и маскот НЕ входят в GPL-лицензию —

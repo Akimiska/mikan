@@ -111,6 +111,7 @@ type Handler struct {
 	log        *slog.Logger
 	logged     sync.Map // what has been logged lately → when, so a standing fault is one line an hour
 	promoLimit promoLimiter
+	app        http.Handler // AoiVPN fork: the app's API at <sub path>/app/ (aoiapp); nil: none
 }
 
 // Telegram is the bot's part in subscriptions: the page's "Open in Telegram" link and the
@@ -146,6 +147,9 @@ func (h *Handler) warn(key, msg string, args ...any) {
 // SetShop takes payments: the providers' webhooks under /pay/ and the Mini App's shop.
 func (h *Handler) SetShop(s *billing.Service) { h.shop = s }
 func (h *Handler) SetPromo(s *promo.Service)  { h.promos = s }
+
+// SetApp serves the AoiVPN app's API at <sub path>/app/ (AoiVPN fork).
+func (h *Handler) SetApp(a http.Handler) { h.app = a }
 
 // SetBalancer keeps each client on one node of every balance group.
 func (h *Handler) SetBalancer(b *domain.Balancer) { h.balance = b }
@@ -186,6 +190,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token, rest, _ := strings.Cut(p, "/")
 	if token == "tg" && h.tg != nil {
 		h.miniApp(w, r, rest)
+		return
+	}
+	if token == "app" && h.app != nil { // AoiVPN fork
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/" + rest
+		h.app.ServeHTTP(w, r2)
 		return
 	}
 	if token == "pay" && h.shop != nil {

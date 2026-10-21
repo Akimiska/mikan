@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
 	"mikan/internal/panel/store/db"
 )
 
-type feed struct {
+// pulled is what a pull of the feed (GET /events) answers.
+type pulled struct {
 	Events []events.Event `json:"events"`
 }
 
@@ -27,20 +29,20 @@ func TestEvents(t *testing.T) {
 	emit := func(typ string, user int64) {
 		t.Helper()
 		err := s.d.Store.Tx(ctx, func(q *db.Queries) error {
-			return events.Emit(ctx, q, time.Unix(1_800_000_000, 0), typ, user, 555, map[string]int64{"user": user}, "")
+			return feed.Emit(ctx, q, time.Unix(1_800_000_000, 0), typ, user, 555, map[string]int64{"user": user}, "")
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		hub.Kick()
 	}
-	read := func(token, query string) (int, feed) {
+	read := func(token, query string) (int, pulled) {
 		t.Helper()
 		r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:41990/panel/v2/events"+query, nil)
 		r.Header.Set("Authorization", "Bearer "+token)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
-		var f feed
+		var f pulled
 		_ = json.Unmarshal(w.Body.Bytes(), &f)
 		return w.Code, f
 	}
@@ -88,7 +90,7 @@ func TestEvents(t *testing.T) {
 	}
 
 	// a long poll returns as soon as something comes
-	done := make(chan feed)
+	done := make(chan pulled)
 	go func() {
 		_, f := read(newToken, "?wait=20")
 		done <- f
@@ -126,7 +128,7 @@ func TestEmitDedupe(t *testing.T) {
 	ctx := context.Background()
 	for range 2 {
 		if err := s.d.Store.Tx(ctx, func(q *db.Queries) error {
-			return events.Emit(ctx, q, time.Unix(1, 0), "user.expiring", 7, 0, map[string]int{"days": 3}, "user.expiring:7:3d:1")
+			return feed.Emit(ctx, q, time.Unix(1, 0), "user.expiring", 7, 0, map[string]int{"days": 3}, "user.expiring:7:3d:1")
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +138,7 @@ func TestEmitDedupe(t *testing.T) {
 		t.Fatalf("%d events, %v", len(evs), err)
 	}
 	// Retention drops a week-old event.
-	if n, err := events.Prune(ctx, s.d.Store.Q, time.Unix(1, 0).Add(events.Retention+time.Second)); err != nil || n != 1 {
+	if n, err := feed.Prune(ctx, s.d.Store.Q, time.Unix(1, 0).Add(events.Retention+time.Second)); err != nil || n != 1 {
 		t.Fatalf("pruned %d, %v", n, err)
 	}
 }

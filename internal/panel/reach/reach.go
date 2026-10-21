@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/netip"
@@ -33,6 +32,8 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/httpjson"
+	"mikan/internal/netaddr"
 	"mikan/internal/nodeapi"
 	"mikan/internal/textutil"
 )
@@ -156,21 +157,15 @@ func New(base string, hc *http.Client, now func() time.Time) *Client {
 func CanonHost(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	if a, err := netip.ParseAddr(strings.Trim(s, "[]")); err == nil {
-		a = a.Unmap()
-		if a.Zone() != "" || !a.IsGlobalUnicast() || a.IsPrivate() || isShared(a) {
+		if a.Zone() != "" || !netaddr.IsPublic(a) {
 			return "", false
 		}
-		return a.String(), true
+		return a.Unmap().String(), true
 	}
 	if d, ok := nodeapi.CanonDomain(s); ok && d == strings.ToLower(s) && strings.Contains(d, ".") {
 		return d, true
 	}
 	return "", false
-}
-
-// isShared: 100.64.0.0/10, the carrier's NAT, is not anyone's server.
-func isShared(a netip.Addr) bool {
-	return netip.MustParsePrefix("100.64.0.0/10").Contains(a)
 }
 
 // CheckTCP checks ports of host from Russia and from the control.
@@ -300,27 +295,32 @@ func (c *Client) start(ctx context.Context, host string, port int, locs any) (st
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.hc.Do(req)
+	var out struct {
+		ID string `json:"id"`
+	}
+	err = httpjson.Do(c.hc, req, 1<<16, &out)
+	var se *httpjson.StatusError
+	if errors.As(err, &se) {
+		// Globalping says why in the body.
+		var refused struct {
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(se.Body, &refused)
+		switch {
+		case se.Code == http.StatusTooManyRequests:
+			return "", ErrLimited
+		case se.Code == http.StatusUnprocessableEntity && refused.Error.Type == "no_probes_found":
+			return "", ErrNoProbes
+		}
+		return "", fmt.Errorf("globalping: status %d: %s", se.Code, textutil.Clip(refused.Error.Message, 200))
+	}
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	var out struct {
-		ID    string `json:"id"`
-		Error struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&out)
-	switch {
-	case resp.StatusCode == http.StatusTooManyRequests:
-		return "", ErrLimited
-	case resp.StatusCode == http.StatusUnprocessableEntity && out.Error.Type == "no_probes_found":
-		return "", ErrNoProbes
-	case resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK:
-		return "", fmt.Errorf("globalping: status %d: %s", resp.StatusCode, textutil.Clip(out.Error.Message, 200))
-	case !validID(out.ID):
+	if !validID(out.ID) {
 		return "", errors.New("globalping: no measurement id")
 	}
 	return out.ID, nil
@@ -389,14 +389,6 @@ func (c *Client) get(ctx context.Context, id string) ([]answer, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		return nil, false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("globalping: status %d", resp.StatusCode)
-	}
 	var m struct {
 		Status  string `json:"status"`
 		Results []struct {
@@ -417,7 +409,10 @@ func (c *Client) get(ctx context.Context, id string) ([]answer, bool, error) {
 			} `json:"result"`
 		} `json:"results"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&m); err != nil {
+	if err := httpjson.Do(c.hc, req, 1<<20, &m); err != nil {
+		if code := httpjson.Code(err); code != 0 {
+			return nil, false, fmt.Errorf("globalping: status %d", code)
+		}
 		return nil, false, err
 	}
 	out := make([]answer, 0, len(m.Results))

@@ -6,24 +6,25 @@ import (
 	"errors"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
 )
 
 // What the free plan asks of an account (Config.FreeCondition).
 const (
-	FreeNoCondition = ""
-	FreeChannel     = "channel" // a subscription to the bot's channel
+	FreeNoCondition = model.FreeNoCondition
+	FreeChannel     = model.FreeChannel // a subscription to the bot's channel
 )
 
 var (
 	// ErrFreeOff: the admin offers no free plan, its tariff is gone, or it asks for the
 	// bot's channel while none is set up.
-	ErrFreeOff = errors.New("free_off")
+	ErrFreeOff = model.ErrFreeOff
 	// ErrFreeActive: the account's previous free subscription has not ended yet.
-	ErrFreeActive = errors.New("free_active")
+	ErrFreeActive = model.ErrFreeActive
 	// ErrFreeChannel: the free plan is for the bot's channel's members, and the account is
 	// not one.
-	ErrFreeChannel = errors.New("free_channel")
+	ErrFreeChannel = model.ErrFreeChannel
 )
 
 // FreeTariff is the tariff the free plan gives, when the admin offers one.
@@ -145,12 +146,7 @@ func (s *Service) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 		return q.SetFreePlanUser(ctx, db.SetFreePlanUserParams{UserID: sql.NullInt64{Int64: u.ID, Valid: true},
 			TariffID: sql.NullInt64{Int64: t.ID, Valid: true}, CreatedAt: now.Unix(), TgID: tgID})
 	}
-	err := s.d.Store.Tx(ctx, run)
-	if errors.Is(err, domain.ErrNoSlots) {
-		if err = s.d.Users.RefillSlots(ctx); err == nil {
-			err = s.d.Store.Tx(ctx, run)
-		}
-	}
+	err := s.d.Users.WithSlots(ctx, func() error { return s.d.Store.Tx(ctx, run) })
 	if err != nil {
 		return db.User{}, err
 	}

@@ -1,10 +1,10 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Globe, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
 import { api, ApiError, errorText, unwrap, type Inbound, type Schemas } from "../../../api/client";
 import { qk } from "../../../api/hooks";
 import { useToast } from "../../../components/toast";
+import { FloatingBar } from "../../../components/layout";
 import { Button } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { nodeLabel } from "../../../lib/node-label";
@@ -40,53 +40,41 @@ export function ExitBar({ chosen, nodes, clear }: { chosen: Inbound[]; nodes: No
   const on = new Set(chosen.map((i) => i.node_id));
   const exits = nodes.filter((x) => !on.has(x.id));
   return (
-    <AnimatePresence>
-      {n > 0 ? (
-        <motion.div
-          className="bulk-bar glass-strong"
-          role="region"
-          aria-label={t("inbounds.exitBulk.label")}
-          initial={{ opacity: 0, y: 24 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 24 }}
-          transition={{ type: "spring", stiffness: 420, damping: 32 }}
-        >
-          <span className="num mr-2 font-semibold whitespace-nowrap">{t("inbounds.exitBulk.selected", { n })}</span>
-          <Menu.Root>
-            <Menu.Trigger asChild>
-              <Button size="sm" loading={set.isPending} disabled={set.isPending}>
-                <Globe size={16} aria-hidden />
-                <span>{t("inbounds.outbound")}</span>
-              </Button>
-            </Menu.Trigger>
-            <Menu.Portal>
-              <Menu.Content className="menu glass-strong max-h-[60vh] overflow-y-auto" side="top" align="center" sideOffset={8}>
-                <Menu.Item className="menu-item" onSelect={() => run({ outbound: "direct" })}>
-                  {t("inbounds.outboundDirect")}
-                </Menu.Item>
-                <Menu.Item className="menu-item" onSelect={() => run({ outbound: "warp" })}>
-                  {t("inbounds.exitBulk.warp")}
-                </Menu.Item>
-                {exits.length > 0 ? (
-                  <>
-                    <Menu.Separator className="menu-sep" />
-                    <Menu.Label className="px-3 py-1 text-xs text-[var(--ink-500)]">{t("inbounds.outboundNode")}</Menu.Label>
-                    {exits.map((x) => (
-                      <Menu.Item key={x.id} className="menu-item" disabled={!x.enabled} onSelect={() => run({ outbound: "node", exit_node_id: x.id })}>
-                        <span className="min-w-0 flex-1 truncate">{nodeLabel(x)}</span>
-                        {x.enabled ? null : <span className="text-xs text-[var(--ink-500)]">{t("nodes.disabled")}</span>}
-                      </Menu.Item>
-                    ))}
-                  </>
-                ) : null}
-              </Menu.Content>
-            </Menu.Portal>
-          </Menu.Root>
-          <button type="button" className="icon-btn" aria-label={t("inbounds.exitBulk.clear")} disabled={set.isPending} onClick={clear}>
-            <X size={16} />
-          </button>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+    <FloatingBar open={n > 0} className="bulk-bar" label={t("inbounds.exitBulk.label")}>
+      <span className="num mr-2 font-semibold whitespace-nowrap">{t("inbounds.exitBulk.selected", { n })}</span>
+      <Menu.Root>
+        <Menu.Trigger asChild>
+          <Button size="sm" loading={set.isPending} disabled={set.isPending}>
+            <Globe size={16} aria-hidden />
+            <span>{t("inbounds.outbound")}</span>
+          </Button>
+        </Menu.Trigger>
+        <Menu.Portal>
+          <Menu.Content className="menu glass-strong max-h-[60vh] overflow-y-auto" side="top" align="center" sideOffset={8}>
+            <Menu.Item className="menu-item" onSelect={() => run({ outbound: "direct" })}>
+              {t("inbounds.outboundDirect")}
+            </Menu.Item>
+            <Menu.Item className="menu-item" onSelect={() => run({ outbound: "warp" })}>
+              {t("inbounds.exitBulk.warp")}
+            </Menu.Item>
+            {exits.length > 0 ? (
+              <>
+                <Menu.Separator className="menu-sep" />
+                <Menu.Label className="px-3 py-1 text-xs text-[var(--ink-500)]">{t("inbounds.outboundNode")}</Menu.Label>
+                {exits.map((x) => (
+                  <Menu.Item key={x.id} className="menu-item" disabled={!x.enabled} onSelect={() => run({ outbound: "node", exit_node_id: x.id })}>
+                    <span className="min-w-0 flex-1 truncate">{nodeLabel(x)}</span>
+                    {x.enabled ? null : <span className="text-xs text-[var(--ink-500)]">{t("nodes.disabled")}</span>}
+                  </Menu.Item>
+                ))}
+              </>
+            ) : null}
+          </Menu.Content>
+        </Menu.Portal>
+      </Menu.Root>
+      <button type="button" className="icon-btn" aria-label={t("inbounds.exitBulk.clear")} disabled={set.isPending} onClick={clear}>
+        <X size={16} />
+      </button>
+    </FloatingBar>
   );
 }

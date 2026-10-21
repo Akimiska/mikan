@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/pace"
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/events"
 	"mikan/internal/panel/store/db"
@@ -19,8 +20,8 @@ import (
 //   - the same cursor (addon_cursors), which moves only when the addon answered 2xx, so a
 //     batch that was not taken is sent again, whole, and delivery stays at least once;
 //   - the same permission (events: an addon without it is sent nothing) and the same filter:
-//     the bot.* events only to the addon that holds the bot, and only the types the addon
-//     named in its /v2/info (events), or all of them when it named none;
+//     only the types the addon named in its /v2/info (events), or all of them when it named
+//     none;
 //   - batches of at most pushBatch events, in id order, one batch in flight per addon.
 //
 // A batch that fails (the addon does not answer or answers anything but 2xx) is sent again
@@ -85,7 +86,7 @@ func (s *Server) RunPush(ctx context.Context) {
 		wg      sync.WaitGroup
 	)
 	defer wg.Wait()
-	scan := func() {
+	scan := func(ctx context.Context) {
 		st, err := s.d.Addons.State()
 		if err != nil {
 			return
@@ -115,22 +116,19 @@ func (s *Server) RunPush(ctx context.Context) {
 			}()
 		}
 	}
-	scan()
-	t := time.NewTicker(tune.scan)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			scan()
-		}
-	}
+	scan(ctx)
+	pace.Tick(ctx, tune.scan, scan)
 }
 
 // pushTo sends the feed to one addon until it stops being a target or ctx ends.
 func (s *Server) pushTo(ctx context.Context, id string, tune pushTune) {
-	pause := time.Duration(0) // how long the next failure waits: 0 after a success
+	backoff := pace.Backoff{Base: tune.first, Max: tune.max}
+	fails := 0 // failures in a row: 0 after a success
+	// failed counts a failure and gives how long it waits.
+	failed := func() time.Duration {
+		fails++
+		return backoff.Next(fails - 1)
+	}
 	for ctx.Err() == nil {
 		tgt, ok := s.pushTarget(ctx, id)
 		if !ok {
@@ -139,8 +137,7 @@ func (s *Server) pushTo(ctx context.Context, id string, tune pushTune) {
 		cursor, err := s.d.Store.Q.GetAddonCursor(ctx, id)
 		if err != nil {
 			s.d.Log.Warn("addons push: cursor", "addon", id, "err", err)
-			pause = nextPause(pause, tune)
-			if !s.pushWait(ctx, id, pause) {
+			if !s.pushWait(ctx, id, failed()) {
 				return
 			}
 			continue
@@ -149,13 +146,12 @@ func (s *Server) pushTo(ctx context.Context, id string, tune pushTune) {
 		// Waits up to a second for something new: the round then asks again whether the
 		// addon is still there, which is how a worker notices its addon stopping.
 		rows, err := longPoll(ctx, s.d.Hub, time.Second, func() ([]db.AddonEvent, error) {
-			return s.d.Store.Q.ListAddonEvents(ctx, db.ListAddonEventsParams{After: cursor, Types: tgt.types, BotToo: holder, Lim: pushBatch})
+			return s.d.Store.Q.ListAddonEvents(ctx, db.ListAddonEventsParams{After: cursor, Types: tgt.types, Lim: pushBatch})
 		})
 		if err != nil {
 			if ctx.Err() == nil {
 				s.d.Log.Warn("addons push: events", "addon", id, "err", err)
-				pause = nextPause(pause, tune)
-				if !s.pushWait(ctx, id, pause) {
+				if !s.pushWait(ctx, id, failed()) {
 					return
 				}
 			}
@@ -178,7 +174,7 @@ func (s *Server) pushTo(ctx context.Context, id string, tune pushTune) {
 			if ctx.Err() != nil {
 				return
 			}
-			pause = nextPause(pause, tune)
+			pause := failed()
 			s.d.Log.Warn("addons push: the addon did not take its events, trying again", "addon", id, "after", pause, "err", err)
 			if !s.pushWait(ctx, id, pause) {
 				return
@@ -188,22 +184,13 @@ func (s *Server) pushTo(ctx context.Context, id string, tune pushTune) {
 		// Only now: a batch the addon did not take is still ahead of the cursor.
 		if err := s.d.Store.Q.AckAddonEvents(ctx, db.AckAddonEventsParams{AddonID: id, LastID: rows[len(rows)-1].ID, UpdatedAt: s.d.Now().Unix()}); err != nil {
 			s.d.Log.Warn("addons push: cursor not moved, the batch is sent again", "addon", id, "err", err)
-			pause = nextPause(pause, tune)
-			if !s.pushWait(ctx, id, pause) {
+			if !s.pushWait(ctx, id, failed()) {
 				return
 			}
 			continue
 		}
-		pause = 0
+		fails = 0
 	}
-}
-
-// nextPause doubles the pause from the first to the longest.
-func nextPause(pause time.Duration, tune pushTune) time.Duration {
-	if pause == 0 {
-		return tune.first
-	}
-	return min(2*pause, tune.max)
 }
 
 // pushWait sleeps for d in short slices and says whether the worker goes on: not when ctx
@@ -216,12 +203,8 @@ func (s *Server) pushWait(ctx context.Context, id string, d time.Duration) bool 
 		if left <= 0 {
 			return true
 		}
-		t := time.NewTimer(min(left, time.Second))
-		select {
-		case <-ctx.Done():
-			t.Stop()
+		if !pace.Sleep(ctx, min(left, time.Second)) {
 			return false
-		case <-t.C:
 		}
 		if _, ok := s.pushTarget(ctx, id); !ok {
 			return false

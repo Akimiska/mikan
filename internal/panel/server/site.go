@@ -64,11 +64,7 @@ func builtIn(w http.ResponseWriter, r *http.Request, name string, template func(
 		return true
 	}
 	plain(w.Header())
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	if r.Method != http.MethodHead {
-		_, _ = w.Write(page)
-	}
+	frontpage.Write(w, r, page)
 	return true
 }
 

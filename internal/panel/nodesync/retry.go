@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/pace"
 )
 
 const (
@@ -13,6 +14,8 @@ const (
 	// A failure that keeps repeating is logged again after this long, not at every attempt.
 	retryRelog = 10 * time.Minute
 )
+
+var retryPace = pace.Backoff{Base: retryFirst, Max: retryMax}
 
 // retry paces the attempts at a node that does not take them: the pause doubles from five
 // seconds to ten minutes, and the same error is logged once, not at every attempt for as
@@ -33,11 +36,7 @@ func (r *retry) unreachable(now time.Time) bool { return r.down && r.waiting(now
 // fail records a failed attempt and says whether it is worth a log line.
 func (r *retry) fail(now time.Time, err error) bool {
 	r.n++
-	d := retryMax
-	if r.n <= 8 {
-		d = min(retryFirst<<(r.n-1), retryMax)
-	}
-	r.until = now.Add(d)
+	r.until = now.Add(retryPace.Next(r.n - 1))
 	r.down = errors.Is(err, nodeapi.ErrUnavailable)
 	if msg := err.Error(); msg != r.err || now.Sub(r.logged) >= retryRelog {
 		r.err, r.logged = msg, now

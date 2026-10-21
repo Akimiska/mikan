@@ -10,6 +10,7 @@ import (
 
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/store/db"
@@ -252,8 +253,8 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 		Terms []term `json:"terms"`
 		// Groups and Gifts say what the tariff is made of: its server groups as it has them,
 		// and the packages it gives with every payment.
-		Groups []offerGroup `json:"groups,omitempty"`
-		Gifts  []string     `json:"gifts,omitempty"`
+		Groups []billing.OfferGroup `json:"groups,omitempty"`
+		Gifts  []string             `json:"gifts,omitempty"`
 	}
 	// Marketplace adapters take rubles; the buyer sees each by its own name.
 	type addon struct {
@@ -275,42 +276,33 @@ func (h *Handler) miniAppOffers(ctx context.Context, w http.ResponseWriter, tgID
 	}{AllowNew: h.shop.Config(ctx).AllowNew, Offers: []offer{}, Packages: packages, Addons: []addon{},
 		Providers: map[string]bool{billing.Stars: av.Stars}}
 	if fo, ok := h.shop.FreeOffer(ctx, tgID); ok {
-		out.Free = &freeOffer{Name: fo.Tariff.Name, Description: billing.Describe(fo.Tariff, fo.Tariff.DurationDays, cfg.Lang), Channel: fo.Channel}
+		out.Free = &freeOffer{Name: fo.Tariff.Name, Description: model.Describe(model.Tariff(fo.Tariff), fo.Tariff.DurationDays, cfg.Lang), Channel: fo.Channel}
 	}
 	if to, _, ok := h.shop.TrialOffer(ctx, tgID); ok {
-		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: billing.Describe(to.Tariff, to.Tariff.DurationDays, cfg.Lang), Note: to.Tariff.Description, Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
+		out.Trial = &offer{ID: to.Tariff.ID, Name: to.Tariff.Name, Description: model.Describe(model.Tariff(to.Tariff), to.Tariff.DurationDays, cfg.Lang), Note: to.Tariff.Description, Stars: to.Stars, Rub: to.Rub, Terms: []term{}}
 	}
 	if userID != 0 {
 		if do, _, ok, _ := h.shop.DeviceOfferFor(ctx, userID); ok {
-			out.Device = &offer{ID: userID, Name: billing.DescribeDevice(cfg.Lang), Description: billing.DescribeDeviceOffer(do, cfg.Lang), Stars: do.Stars, Rub: do.Rub, Terms: []term{}}
+			out.Device = &offer{ID: userID, Name: model.DescribeDevice(cfg.Lang), Description: model.DescribeDeviceOffer(do.Model(), cfg.Lang), Stars: do.Stars, Rub: do.Rub, Terms: []term{}}
 		}
 	}
 	for _, id := range av.Addons {
 		out.Addons = append(out.Addons, addon{Provider: billing.AddonPrefix + id, Name: h.shop.AddonName(ctx, id, cfg.Lang)})
 	}
 	for _, o := range offers {
-		v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: billing.DescribeOffer(o, cfg.Lang), Note: o.Tariff.Description, Stars: o.Stars, Rub: o.Rub}
-		for _, g := range o.Groups {
-			v.Groups = append(v.Groups, offerGroup{Name: g.Name, Mode: g.Mode, Limit: g.Limit})
+		mo := o.Model()
+		v := offer{ID: o.Tariff.ID, Name: o.Tariff.Name, Description: model.DescribeOffer(mo, cfg.Lang), Note: o.Tariff.Description, Stars: o.Stars, Rub: o.Rub}
+		v.Groups = o.Groups
+		for _, g := range mo.Gifts {
+			v.Gifts = append(v.Gifts, model.DescribePackage(g.Package, g.Pool, cfg.Lang))
 		}
-		for _, g := range o.Gifts {
-			v.Gifts = append(v.Gifts, billing.DescribePackage(g.Package, g.Pool, cfg.Lang))
-		}
-		for _, t := range o.Terms {
-			v.Terms = append(v.Terms, term{Days: t.Days, Label: billing.TermLabel(o.Tariff, t.Days, cfg.Lang),
-				Description: billing.Describe(o.Tariff, t.Days, cfg.Lang), Stars: t.Stars, Rub: t.Rub})
+		for _, t := range mo.Terms {
+			v.Terms = append(v.Terms, term{Days: t.Days, Label: model.TermLabel(mo.Tariff, t.Days, cfg.Lang),
+				Description: model.Describe(mo.Tariff, t.Days, cfg.Lang), Stars: t.Stars, Rub: t.Rub})
 		}
 		out.Offers = append(out.Offers, v)
 	}
 	_ = json.NewEncoder(w).Encode(out)
-}
-
-// offerGroup is a server group of a tariff on sale, as the Mini App lists it: its mode
-// (main, own, unlimited, closed) and, with own, its limit in bytes.
-type offerGroup struct {
-	Name  string `json:"name"`
-	Mode  string `json:"mode"`
-	Limit int64  `json:"limit,omitempty"`
 }
 
 // freeOffer is the free plan in "shop": what it gives, and the channel it asks the account
@@ -539,19 +531,10 @@ func promoAttemptCode(err error) string {
 // is told it did not work, not that payment is off, and unexplained says nobody has logged
 // the cause yet (billing logs a provider's failure itself).
 func invoiceFailure(err error) (status int, code string, unexplained bool) {
-	for _, e := range []error{billing.ErrNotForSale, billing.ErrNewOff, billing.ErrTooManySubs, billing.ErrTooMany, billing.ErrNotYours,
-		billing.ErrTrialUsed, billing.ErrTrialOff} {
-		if errors.Is(err, e) {
-			return http.StatusConflict, e.Error(), false
-		}
+	if code, known := billing.Refusal(err); known {
+		return http.StatusConflict, code, false
 	}
-	if promoError(err) { // a code the buyer cannot use is told the same way everywhere
-		return http.StatusConflict, "promo_unavailable", false
-	}
-	switch {
-	case err == billing.ErrProviderOff:
-		return http.StatusConflict, billing.ErrProviderOff.Error(), false
-	case errors.Is(err, billing.ErrProviderOff): // the provider failed
+	if errors.Is(err, billing.ErrProviderOff) { // the provider failed
 		return http.StatusBadGateway, "invoice_failed", false
 	}
 	return http.StatusBadGateway, "invoice_failed", true

@@ -174,15 +174,12 @@ SELECT * FROM inbounds WHERE node_id = $1 ORDER BY id;
 SELECT * FROM inbounds WHERE id = $1;
 
 -- name: CreateInbound :one
-INSERT INTO inbounds (node_id, name, preset, port, enabled, settings, config, created_at, updated_at)
-VALUES ($1, $2, $3, $4, 1, '{}', $5, $6, $7)
+INSERT INTO inbounds (node_id, name, preset, port, enabled, config, created_at, updated_at)
+VALUES ($1, $2, $3, $4, 1, $5, $6, $7)
 RETURNING *;
 
 -- name: UpdateInbound :one
 UPDATE inbounds SET port = $1, enabled = $2, config = $3, display_name = $4, updated_at = $5 WHERE id = $6 RETURNING *;
-
--- name: SetInboundConfig :exec
-UPDATE inbounds SET config = $1 WHERE id = $2;
 
 -- name: DeleteInbound :exec
 DELETE FROM inbounds WHERE id = $1;

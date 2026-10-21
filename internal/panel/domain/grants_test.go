@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -222,7 +223,7 @@ func TestGrantsUnlimitedBase(t *testing.T) {
 	if got := e.left(g); got[0] != 50 {
 		t.Fatalf("unlimited user spent a grant: %d", got[0])
 	}
-	if TrafficLeft(sql.NullInt64{}, 1<<40, 50) != -1 {
+	if model.TrafficLeft(sql.NullInt64{}, 1<<40, 50) != -1 {
 		t.Fatal("unlimited quota must stay unlimited")
 	}
 }
@@ -343,7 +344,7 @@ func TestAdminGrant(t *testing.T) {
 		t.Fatal("the nodes must hear about the grant")
 	}
 	left := e.grantsLeft().Main(u.ID)
-	if State(u, left, *e.now) != StateActive || TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, left) != 2*GiB {
+	if State(u, left, *e.now) != StateActive || model.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, left) != 2*GiB {
 		t.Fatalf("after the grant: %s, left %d", State(u, left, *e.now), left)
 	}
 	bad := []struct {

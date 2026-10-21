@@ -9,6 +9,7 @@ import { useToast } from "../../../components/toast";
 import { Field } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { fieldErrors, onFormError } from "../../../lib/fields";
+import { splitList } from "../../../lib/list";
 
 export type ExitDnsInfo = Schemas["ExitDNSInfo"];
 type Resolver = ExitDnsInfo["resolver"];
@@ -16,12 +17,6 @@ export type ExitDnsDraft = { sniff: boolean; resolver: Resolver; servers: string
 
 const RESOLVERS: Resolver[] = ["host", "cloudflare", "google", "quad9", "custom"];
 
-// One server a line (commas also split); the panel puts them in their canonical form.
-const lines = (s: string) =>
-  s
-    .split(/[\n,]+/)
-    .map((x) => x.trim())
-    .filter(Boolean);
 
 export const exitDnsDraftOf = (v: ExitDnsInfo): ExitDnsDraft => ({ sniff: v.sniff, resolver: v.resolver, servers: v.servers.join("\n") });
 
@@ -30,7 +25,7 @@ export function useSaveExitDns() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (d: ExitDnsDraft) => unwrap(api.PUT("/api/v1/exit-dns", { body: { sniff: d.sniff, resolver: d.resolver, servers: lines(d.servers) } })),
+    mutationFn: (d: ExitDnsDraft) => unwrap(api.PUT("/api/v1/exit-dns", { body: { sniff: d.sniff, resolver: d.resolver, servers: splitList(d.servers) } })),
     onSuccess: (nv) => {
       qc.setQueryData(qk.exitDns, nv);
       toast.ok(t("settings.exitDns.saved"));

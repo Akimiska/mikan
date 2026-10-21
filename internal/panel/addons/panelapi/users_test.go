@@ -125,7 +125,7 @@ func (e *usersEnv) audit() []db.AuditLog {
 // feed is the grants told to addons; the users the tests make are told too (user.created).
 func (e *usersEnv) feed() []db.AddonEvent {
 	e.t.Helper()
-	rows, err := e.s.d.Store.Q.ListAddonEvents(context.Background(), db.ListAddonEventsParams{BotToo: true, Lim: 100})
+	rows, err := e.s.d.Store.Q.ListAddonEvents(context.Background(), db.ListAddonEventsParams{Lim: 100})
 	if err != nil {
 		e.t.Fatal(err)
 	}

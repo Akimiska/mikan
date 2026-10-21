@@ -34,6 +34,8 @@ import (
 
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/tgate"
+	"mikan/internal/textutil"
+	"mikan/internal/tgapi"
 )
 
 const (
@@ -79,7 +81,7 @@ var (
 // Bot is the part of the Telegram gateway the backups use (tgate.Gateway): no screens of
 // the bot, only its token, route and the admin's chat.
 type Bot interface {
-	InfrastructureClient(ctx context.Context) (*tgate.Client, error)
+	InfrastructureClient(ctx context.Context) (*tgapi.Client, error)
 	InfrastructureAdminChat(ctx context.Context) (int64, bool, error)
 }
 
@@ -272,7 +274,7 @@ func (s *Service) Send(ctx context.Context) (State, error) {
 // Code is the error code State keeps for err: never pg_dump's or Telegram's own text, which
 // may name hosts, ports and databases.
 func Code(err error) string {
-	var ae *tgate.APIError
+	var ae *tgapi.APIError
 	for _, known := range []error{ErrNoChat, ErrNoPassword, ErrTooBig, ErrBusy, ErrDump, ErrUnavailable} {
 		if errors.Is(err, known) {
 			return known.Error()
@@ -281,7 +283,7 @@ func Code(err error) string {
 	switch {
 	case errors.Is(err, tgate.ErrOff):
 		return "bot_off"
-	case errors.Is(err, tgate.ErrUnreachable), errors.As(err, &ae), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, tgapi.ErrUnreachable), errors.As(err, &ae), errors.Is(err, context.DeadlineExceeded):
 		return "tg_unreachable"
 	}
 	return "backup_failed"
@@ -326,7 +328,7 @@ func (s *Service) send(ctx context.Context, now time.Time) (int64, error) {
 	host := safeName(s.name(ctx))
 	name := "mikan-" + host + "-" + now.Format("20060102-1504") + ".tar.gz.age"
 	caption := fmt.Sprintf("mikan · %s · %s UTC · %s\n\nage -d -o mikan.tar.gz %s\nmikan restore mikan.tar.gz",
-		host, now.Format("2006-01-02 15:04"), sizeText(size), name)
+		host, now.Format("2006-01-02 15:04"), textutil.Size(size, "en"), name)
 	if _, err := client.SendDocument(ctx, chat, name, f, size, caption); err != nil {
 		return 0, err
 	}
@@ -363,7 +365,7 @@ func Make(ctx context.Context, dump Dumper, dir, password string, now time.Time)
 	if err != nil {
 		return "", 0, err
 	}
-	if fi.Size() > tgate.MaxDocument-packOverhead {
+	if fi.Size() > tgapi.MaxDocument-packOverhead {
 		return "", 0, ErrTooBig
 	}
 	r, err := age.NewScryptRecipient(password)
@@ -402,7 +404,7 @@ func Make(ctx context.Context, dump Dumper, dir, password string, now time.Time)
 	if err != nil {
 		return "", 0, err
 	}
-	if st.Size() > tgate.MaxDocument {
+	if st.Size() > tgapi.MaxDocument {
 		os.Remove(path)
 		return "", 0, ErrTooBig
 	}
@@ -445,14 +447,4 @@ func safeName(s string) string {
 		return "panel"
 	}
 	return s
-}
-
-func sizeText(n int64) string {
-	switch {
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%d KB", n>>10)
-	}
-	return fmt.Sprintf("%d B", n)
 }

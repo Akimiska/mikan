@@ -65,7 +65,7 @@ func TestTopup(t *testing.T) {
 	if _, balance, err := e.s.DecideTopup(ctx, second.ID, false, 1, "no transfer"); err != nil || balance != 2500 {
 		t.Fatalf("reject: %d %v", balance, err)
 	}
-	evs, _ := e.st.Q.ListAddonEvents(ctx, db.ListAddonEventsParams{BotToo: true, Lim: 100})
+	evs, _ := e.st.Q.ListAddonEvents(ctx, db.ListAddonEventsParams{Lim: 100})
 	var topups int
 	for _, ev := range evs {
 		if ev.Type == "balance.topup" && ev.TgID.Int64 == 555 {

@@ -50,7 +50,7 @@ type importRunInput struct {
 		Username string `json:"username,omitempty" maxLength:"200"`
 		Password string `json:"password,omitempty" maxLength:"500"`
 		Token    string `json:"token,omitempty" maxLength:"4096"`
-		TariffID int64  `json:"tariff_id" minimum:"1" doc:"Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа"`
+		TariffID int64  `json:"tariff_id" minimum:"1" doc:"Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и группы серверов — из тарифа"`
 	}
 }
 
@@ -120,7 +120,7 @@ func (h *handlers) importRun(ctx context.Context, in *importRunInput) (*importSt
 	b := in.Body
 	src := importSource{Kind: b.Kind, URL: b.URL, Username: b.Username, Password: b.Password, Token: b.Token}
 	if _, err := h.d.Store.Q.GetTariff(ctx, b.TariffID); err != nil {
-		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "tariff_not_found"})
+		return nil, fieldErr("body.tariff_id", "tariff_not_found")
 	}
 	// Marzban's and PasarGuard's links are checked with one secret: users of the other one
 	// on top would turn the first one's links off without a word.
@@ -185,7 +185,7 @@ func (h *handlers) updateLegacy(ctx context.Context, in *patchLegacyInput) (*leg
 			}
 			first, _, _ := strings.Cut(p, "/")
 			if !legacyPath.MatchString(p) || first == paths.Admin || first == paths.Sub {
-				return nil, huma.Error422UnprocessableEntity("legacy_path_invalid", &huma.ErrorDetail{Location: "body.path", Message: "legacy_path_invalid"})
+				return nil, fieldErr("body.path", "legacy_path_invalid")
 			}
 		}
 		b.Path = &p

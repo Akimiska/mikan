@@ -40,6 +40,23 @@ func (q *Queries) AddBalanceOp(ctx context.Context, arg AddBalanceOpParams) erro
 	return err
 }
 
+const balanceMoneyHeld = `-- name: BalanceMoneyHeld :one
+SELECT CAST(EXISTS (SELECT 1 FROM balances WHERE amount > 0)
+    OR EXISTS (SELECT 1 FROM topups WHERE status IN ('draft', 'pending') AND amount > 0)
+    OR EXISTS (SELECT 1 FROM payments WHERE provider = 'balance' AND status IN ('pending', 'paid', 'applied')) AS BOOLEAN)
+  AS held
+`
+
+// Money the balances hold in the currency of the config: a balance above zero, a top-up not
+// decided yet, or a balance payment that may still be refunded onto a balance. The currency
+// cannot change under it: the sums carry no currency of their own.
+func (q *Queries) BalanceMoneyHeld(ctx context.Context) (bool, error) {
+	row := q.db.QueryRowContext(ctx, balanceMoneyHeld)
+	var held bool
+	err := row.Scan(&held)
+	return held, err
+}
+
 const balanceOpOfPayment = `-- name: BalanceOpOfPayment :one
 SELECT id, tg_id, amount, kind, payment_id, topup_id, admin_id, note, created_at FROM balance_ops WHERE payment_id = $1 AND kind = $2 LIMIT 1
 `
@@ -283,16 +300,19 @@ func (q *Queries) ListBalanceOps(ctx context.Context, arg ListBalanceOpsParams) 
 
 const listTopups = `-- name: ListTopups :many
 SELECT id, tg_id, amount, currency, photo, status, created_at, decided_at, admin_id, reason FROM topups WHERE status <> 'draft' AND ($1::text = '' OR status = $1::text)
-ORDER BY id DESC LIMIT $2
+  AND ($2::bigint = 0 OR id < $2::bigint)
+ORDER BY id DESC LIMIT $3
 `
 
 type ListTopupsParams struct {
 	Status string
+	Before int64
 	Lim    int32
 }
 
+// before: the page after the one that ended with that id; 0: the first.
 func (q *Queries) ListTopups(ctx context.Context, arg ListTopupsParams) ([]Topup, error) {
-	rows, err := q.db.QueryContext(ctx, listTopups, arg.Status, arg.Lim)
+	rows, err := q.db.QueryContext(ctx, listTopups, arg.Status, arg.Before, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

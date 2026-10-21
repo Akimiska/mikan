@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,6 +20,7 @@ import (
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/release"
 )
 
 // The marketplace of protocol 2: the admin approves exactly the permissions shown, the grant
@@ -42,8 +42,8 @@ func TestMarketplaceGrants(t *testing.T) {
 		switch r.URL.Path {
 		case "/index.json":
 			_, _ = w.Write(data)
-		case "/index.json.sig":
-			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data)))
+		case "/index.json" + release.SigSuffix:
+			_, _ = io.WriteString(w, release.SignIn(release.CatalogContext, data, priv))
 		default:
 			http.NotFound(w, r)
 		}
@@ -52,7 +52,7 @@ func TestMarketplaceGrants(t *testing.T) {
 
 	dir := t.TempDir()
 	h := newHarness(t, func(o *Options) { o.DataDir, o.AddonsCatalog = dir, catalog.URL+"/index.json" })
-	h.p.Addons.SetKey(pub)
+	h.p.Addons.SetKeys(pub, pub)
 	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
 		t.Fatalf("login: %d", resp.StatusCode)
 	}

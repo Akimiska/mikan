@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -22,9 +21,7 @@ func (h *handlers) community(ctx context.Context) *addons.Community {
 	if h.d.Addons == nil {
 		return nil
 	}
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	c, err := h.d.Addons.Community(cctx)
+	c, err := h.d.Addons.Community(ctx)
 	if err != nil {
 		h.d.Log.Warn("addons: community index", "err", err)
 		return nil

@@ -81,11 +81,13 @@ func (q *Queries) CountPromoCodes(ctx context.Context) (int64, error) {
 }
 
 const countPromoRedemptions = `-- name: CountPromoRedemptions :one
-SELECT COUNT(*) FROM promo_redemptions
+SELECT COUNT(*) FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
+WHERE $1::text = '' OR strpos(lower(c.code), lower($1::text)) > 0
+  OR CAST(r.user_id AS TEXT) = $1::text OR CAST(r.tg_id AS TEXT) = $1::text
 `
 
-func (q *Queries) CountPromoRedemptions(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countPromoRedemptions)
+func (q *Queries) CountPromoRedemptions(ctx context.Context, q_ string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPromoRedemptions, q_)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -109,9 +111,10 @@ func (q *Queries) CountPromoUser(ctx context.Context, arg CountPromoUserParams) 
 }
 
 const countUserPaidPayments = `-- name: CountUserPaidPayments :one
-SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied')
+SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied','refunded')
 `
 
+// What the account paid for, a payment refunded since included: it was a purchase.
 func (q *Queries) CountUserPaidPayments(ctx context.Context, tgID int64) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countUserPaidPayments, tgID)
 	var count int64
@@ -120,7 +123,7 @@ func (q *Queries) CountUserPaidPayments(ctx context.Context, tgID int64) (int64,
 }
 
 const countUserPaidPaymentsExcept = `-- name: CountUserPaidPaymentsExcept :one
-SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied') AND id <> $2 AND kind <> 'trial'
+SELECT COUNT(*) FROM payments WHERE tg_id=$1 AND status IN ('paid','applied','refunded') AND id <> $2 AND kind <> 'trial'
 `
 
 type CountUserPaidPaymentsExceptParams struct {
@@ -598,10 +601,13 @@ func (q *Queries) ListPromoRedemptionsByTgWithCode(ctx context.Context, arg List
 
 const listPromoRedemptionsWithCode = `-- name: ListPromoRedemptionsWithCode :many
 SELECT r.id, r.promo_id, r.user_id, r.tg_id, r.payment_id, r.status, r.refund_started_at, r.redeemed_at, r.expires_at, r.days, r.bytes, r.discount_amount, r.original_amount, r.final_amount, r.currency, r.note, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
-ORDER BY r.id DESC LIMIT CAST($2 AS BIGINT) OFFSET CAST($1 AS BIGINT)
+WHERE $1::text = '' OR strpos(lower(c.code), lower($1::text)) > 0
+  OR CAST(r.user_id AS TEXT) = $1::text OR CAST(r.tg_id AS TEXT) = $1::text
+ORDER BY r.id DESC LIMIT CAST($3 AS BIGINT) OFFSET CAST($2 AS BIGINT)
 `
 
 type ListPromoRedemptionsWithCodeParams struct {
+	Q         string
 	RowOffset int64
 	Lim       int64
 }
@@ -626,8 +632,9 @@ type ListPromoRedemptionsWithCodeRow struct {
 	Code            string
 }
 
+// q: a part of the code (any case), or the client's id or Telegram id whole; ”: every one.
 func (q *Queries) ListPromoRedemptionsWithCode(ctx context.Context, arg ListPromoRedemptionsWithCodeParams) ([]ListPromoRedemptionsWithCodeRow, error) {
-	rows, err := q.db.QueryContext(ctx, listPromoRedemptionsWithCode, arg.RowOffset, arg.Lim)
+	rows, err := q.db.QueryContext(ctx, listPromoRedemptionsWithCode, arg.Q, arg.RowOffset, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

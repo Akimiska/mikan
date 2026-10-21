@@ -27,7 +27,6 @@ export function ServersTree({
   aside,
   nodeHint = t("pools.wholeNode"),
   nodeDisabled,
-  disabled,
 }: {
   nodes: NodeInbounds[];
   nodeState: (id: number, list: Inbound[]) => NodeState;
@@ -39,18 +38,17 @@ export function ServersTree({
   nodeHint?: string;
   /** A node whose own checkbox has nothing to take. */
   nodeDisabled?: (id: number, list: Inbound[]) => boolean;
-  disabled?: boolean;
 }) {
   const all = useNodes();
   return (
     <div className="flex flex-col gap-2">
       {nodes.map(([id, list]) => {
         const node = all.data?.find((n) => n.id === id);
-        const label = node ? nodeLabel(node) : String(id);
+        const label = node ? nodeLabel(node) : `#${id}`;
         const state = nodeState(id, list);
         const off = nodeDisabled?.(id, list) ?? false;
         return (
-          <fieldset key={id} className="panel-soft px-3 py-2" disabled={disabled}>
+          <fieldset key={id} className="panel-soft px-3 py-2">
             <legend className="sr-only">{label}</legend>
             <label className={`flex items-center gap-2 py-1.5 text-[13px] font-semibold ${off ? "text-[var(--ink-400)]" : ""}`}>
               <input
@@ -101,12 +99,6 @@ export function serversDraftOf(s: Tariff["servers"] | undefined): ServersDraft {
 
 export function serversBody(d: ServersDraft): Schemas["ServersBody"] {
   return d.all ? { all: true } : { all: false, nodes: [...d.nodes], inbounds: [...d.inbounds] };
-}
-
-/** Whether the tariff includes protocol i. */
-export function serversHas(s: { all: boolean; nodes: Set<number> | number[]; inbounds: Set<number> | number[] }, i: Inbound): boolean {
-  const has = (x: Set<number> | number[], id: number) => (x instanceof Set ? x.has(id) : x.includes(id));
-  return s.all || has(s.nodes, i.node_id) || has(s.inbounds, i.id);
 }
 
 /** The tariff's chosen servers in a tree: a node ticked is whole, a protocol ticked alone is

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/server"
 )
@@ -26,7 +27,7 @@ func (s *Service) Webhook() http.Handler {
 		case legacyYooKassa, legacyCryptoBot:
 			addon = provider
 		}
-		ok = ok && AddonID(AddonPrefix+addon) != ""
+		ok = ok && model.AddonID(AddonPrefix+addon) != ""
 		want, err := s.WebhookToken(r.Context())
 		if r.Method != http.MethodPost || !ok || err != nil || !secure.Equal(token, want) {
 			http.NotFound(w, r)

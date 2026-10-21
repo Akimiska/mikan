@@ -34,7 +34,7 @@ type putExitDNSInput struct{ Body ExitDNSView }
 func (h *handlers) registerExitDNS() {
 	tags := []string{"nodes"}
 	huma.Register(h.api, huma.Operation{OperationID: "get-exit-dns", Method: http.MethodGet, Path: "/api/v1/exit-dns", Summary: "DNS на выходе", Tags: tags}, h.getExitDNS)
-	huma.Register(h.api, huma.Operation{OperationID: "update-exit-dns", Method: http.MethodPut, Path: "/api/v1/exit-dns", Summary: "Настроить DNS на выходе", Description: "Ноды получают настройку со своим состоянием; ноды старше неё её не применяют.", Tags: tags}, h.updateExitDNS)
+	huma.Register(h.api, huma.Operation{OperationID: "update-exit-dns", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPut, Path: "/api/v1/exit-dns", Summary: "Настроить DNS на выходе", Description: "Ноды получают настройку со своим состоянием; ноды старше неё её не применяют.", Tags: tags}, h.updateExitDNS)
 }
 
 func exitDNSInfo(c exitdns.Config) ExitDNSInfo {

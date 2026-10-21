@@ -3,14 +3,13 @@ package domain
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/proto"
+	"mikan/internal/textutil"
 )
 
 // Seed creates the default inbounds, tariffs and slot pool on a fresh install.
@@ -35,19 +34,6 @@ func Seed(ctx context.Context, st *store.Store, now time.Time) error {
 			}
 		}
 	}
-	// Inbounds created by mikan ≤ 0.1.2 carry per-preset settings; give them a template.
-	for _, in := range inbounds {
-		if in.Config != "" {
-			continue
-		}
-		t, err := proto.FromPreset(in.Preset, []byte(in.Settings))
-		if err != nil {
-			return fmt.Errorf("inbound %s: %w", in.Name, err)
-		}
-		if err := st.Q.SetInboundConfig(ctx, db.SetInboundConfigParams{Config: proto.Marshal(t), ID: in.ID}); err != nil {
-			return err
-		}
-	}
 	if n, err := st.Q.CountTariffs(ctx); err != nil {
 		return err
 	} else if n == 0 {
@@ -55,12 +41,7 @@ func Seed(ctx context.Context, st *store.Store, now time.Time) error {
 		if err != nil {
 			return err
 		}
-		name := func(ru, en string) string {
-			if lang == "en" {
-				return en
-			}
-			return ru
-		}
+		name := textutil.Lang(lang).Pick
 		defaults := []db.CreateTariffParams{
 			{Name: name("Пробный", "Trial"), TrafficLimit: nullInt(5 * GiB), DurationDays: 3, DeviceLimit: nullInt(1), ResetStrategy: "none", Sort: 1},
 			{Name: name("Стандарт", "Standard"), TrafficLimit: nullInt(150 * GiB), DurationDays: 30, DeviceLimit: nullInt(3), ResetStrategy: "period", Sort: 2},

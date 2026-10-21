@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
-	"mikan/internal/panel/tgate"
+	"mikan/internal/pace"
+	"mikan/internal/panel/settings"
+	"mikan/internal/textutil"
+	"mikan/internal/tgapi"
 )
 
 // deliveryTarget says where a queued message goes and how it is sent. The value is stored in
@@ -17,6 +21,9 @@ type deliveryTarget string
 const (
 	// targetAdmin is a private message to the chat connected as the infrastructure admin.
 	targetAdmin deliveryTarget = "admin"
+	// targetNotice is one to the same chat that the alerts' settings do not switch off: the
+	// admin's own notices (a support operator came in, a top-up waits), queued by Notify.
+	targetNotice deliveryTarget = "notice"
 	// targetSummary is the one public status message in the channel: sent once, pinned, then
 	// edited in place.
 	targetSummary deliveryTarget = "summary"
@@ -33,13 +40,14 @@ const (
 	// maxDeliveryAttempts is how many times a message is tried before it is given up.
 	maxDeliveryAttempts = 8
 	// retryBaseDelay is the wait after the first failure; it doubles with each attempt, up to
-	// retryMaxShift doublings and retryMaxDelay.
+	// retryMaxDelay.
 	retryBaseDelay = 5 * time.Second
-	retryMaxShift  = 10
 	retryMaxDelay  = time.Hour
 	// maxPending is how many queued messages are kept; the oldest go first.
 	maxPending = 200
 )
+
+var retryBackoff = pace.Backoff{Base: retryBaseDelay, Max: retryMaxDelay}
 
 type delivery struct {
 	Key           string         `json:"key"`
@@ -51,57 +59,74 @@ type delivery struct {
 	NextAttemptAt int64          `json:"next_attempt_at,omitempty"`
 }
 
-// sender is the Telegram client's calls the queue makes (*tgate.Client): a test hands the
+// sender is the Telegram client's calls the queue makes (*tgapi.Client): a test hands the
 // delivery a fake and no network.
 type sender interface {
-	Send(ctx context.Context, chat int64, text string, kb *tgate.Keyboard, silent bool) (tgate.Message, error)
-	SendTo(ctx context.Context, chat string, text string, silent bool) (tgate.Message, error)
+	Send(ctx context.Context, chat int64, text string, kb *tgapi.Keyboard, silent bool) (tgapi.Message, error)
+	SendTo(ctx context.Context, chat string, text string, silent bool) (tgapi.Message, error)
 	EditTo(ctx context.Context, chat string, msg int64, text string) error
 	PinTo(ctx context.Context, chat string, msg int64) error
 }
 
 // startDelivery runs Telegram calls separately from health sampling. State is merged only
 // after the network calls finish, so a slow Telegram API never delays the next monitor round.
+// One delivery runs at a time: asked for while one runs, it runs once more when that one is
+// done, so what was queued meanwhile does not wait for the next round.
 func (m *Monitor) startDelivery(ctx context.Context) {
 	m.dispatchMu.Lock()
 	if m.dispatching {
+		m.again = true
 		m.dispatchMu.Unlock()
 		return
 	}
 	m.dispatching = true
 	m.dispatchMu.Unlock()
 	m.delivering.Go(func() {
-		defer func() { m.dispatchMu.Lock(); m.dispatching = false; m.dispatchMu.Unlock() }()
-		m.roundMu.Lock()
-		st, err := m.load(ctx)
-		m.roundMu.Unlock()
-		if err != nil {
-			m.logError("infrastructure alerts: load delivery queue", err)
-			return
-		}
-		before := append([]delivery(nil), st.Pending...)
-		if len(before) == 0 {
-			return
-		}
-		cfg := m.config(ctx)
-		m.deliver(ctx, &st, cfg)
-		m.roundMu.Lock()
-		defer m.roundMu.Unlock()
-		latest, err := m.load(ctx)
-		if err != nil {
-			m.logError("infrastructure alerts: reload delivery queue", err)
-			return
-		}
-		latest.Pending = mergeDeliveryResults(latest.Pending, before, st.Pending)
-		if latest.PublicTarget == st.PublicTarget {
-			latest.PublicMessage = st.PublicMessage
-			latest.PublicPinned = st.PublicPinned
-			latest.PublicPinAttempted = st.PublicPinAttempted
-		}
-		if err := m.save(ctx, latest); err != nil {
-			m.logError("infrastructure alerts: save delivery queue", err)
+		for {
+			m.deliveryPass(ctx)
+			m.dispatchMu.Lock()
+			again := m.again
+			m.again, m.dispatching = false, again
+			m.dispatchMu.Unlock()
+			if !again {
+				return
+			}
 		}
 	})
+}
+
+// deliveryPass makes one pass over the queue as it is in the database and merges the result
+// into what the database holds by then.
+func (m *Monitor) deliveryPass(ctx context.Context) {
+	m.roundMu.Lock()
+	st, err := m.load(ctx)
+	m.roundMu.Unlock()
+	if err != nil {
+		m.logError("infrastructure alerts: load delivery queue", err)
+		return
+	}
+	before := append([]delivery(nil), st.Pending...)
+	if len(before) == 0 {
+		return
+	}
+	cfg := m.config(ctx)
+	m.deliver(ctx, &st, cfg)
+	m.roundMu.Lock()
+	defer m.roundMu.Unlock()
+	latest, err := m.load(ctx)
+	if err != nil {
+		m.logError("infrastructure alerts: reload delivery queue", err)
+		return
+	}
+	latest.Pending = mergeDeliveryResults(latest.Pending, before, st.Pending)
+	if latest.PublicTarget == st.PublicTarget {
+		latest.PublicMessage = st.PublicMessage
+		latest.PublicPinned = st.PublicPinned
+		latest.PublicPinAttempted = st.PublicPinAttempted
+	}
+	if err := m.save(ctx, latest); err != nil {
+		m.logError("infrastructure alerts: save delivery queue", err)
+	}
 }
 
 func mergeDeliveryResults(latest, before, after []delivery) []delivery {
@@ -206,6 +231,11 @@ func (m *Monitor) sendPending(ctx context.Context, st *persistentState, cfg Aler
 				continue
 			}
 			err = sendAdmin(ctx, client, adminID, d.Text)
+		case targetNotice:
+			if !adminSet {
+				continue
+			}
+			err = sendAdmin(ctx, client, adminID, d.Text)
 		case targetSummary:
 			if !cfg.PublicEnabled || !cfg.PublicSummary {
 				continue
@@ -219,6 +249,7 @@ func (m *Monitor) sendPending(ctx context.Context, st *persistentState, cfg Aler
 		}
 		if err != nil {
 			if permanentTelegramError(err) {
+				m.refuse(ctx, d.Target, err)
 				continue
 			}
 			if retryDelivery(&d, now, err) {
@@ -230,6 +261,68 @@ func (m *Monitor) sendPending(ctx context.Context, st *persistentState, cfg Aler
 		}
 	}
 	st.Pending = keep
+}
+
+// KeyRefused keeps the last message Telegram refused for good (a 4xx: the admin blocked the
+// bot, the chat or the channel is gone or took the bot's rights): the Telegram page tells
+// the admin, who would hear of it nowhere else.
+const KeyRefused = "infra_alerts_refused"
+
+// Refused is KeyRefused's value.
+type Refused struct {
+	At     int64  `json:"at"`
+	Target string `json:"target"`
+	Error  string `json:"error"`
+}
+
+// refuse notes a message Telegram refused for good: logged once an hour for a target and an
+// error, and kept for the Telegram page (KeyRefused).
+func (m *Monitor) refuse(ctx context.Context, target deliveryTarget, err error) {
+	key, now := string(target)+"|"+err.Error(), m.now()
+	m.refusedMu.Lock()
+	last, seen := m.refusedAt[key]
+	fresh := !seen || now.Sub(last) >= time.Hour
+	if fresh {
+		if m.refusedAt == nil {
+			m.refusedAt = map[string]time.Time{}
+		}
+		m.refusedAt[key] = now
+	}
+	m.refusedMu.Unlock()
+	if !fresh {
+		return
+	}
+	if m.log != nil {
+		m.log.Warn("infrastructure alerts: Telegram refused a message for good, it is dropped", "target", target, "err", err)
+	}
+	if m.settings != nil {
+		if serr := settings.Set(ctx, m.settings, KeyRefused, Refused{At: now.Unix(), Target: string(target), Error: textutil.Clip(err.Error(), 300)}); serr != nil {
+			m.logError("infrastructure alerts: keep the refusal", serr)
+		}
+	}
+}
+
+// Notify puts a notice to the admin's chat (targetNotice) in the alerts' own queue and sends
+// it at once: the queue is kept in the database, so a restart right after loses nothing, and
+// a message Telegram did not take is tried again for a day. A notice with the key of one that
+// still waits is not queued twice; with "" each is a message of its own.
+func (m *Monitor) Notify(ctx context.Context, key, text string) {
+	if key == "" {
+		key = strconv.FormatInt(m.now().UnixNano(), 36) + "." + strconv.FormatInt(m.notices.Add(1), 36)
+	}
+	ctx = context.WithoutCancel(ctx)
+	m.roundMu.Lock()
+	st, err := m.load(ctx)
+	if err == nil {
+		st.Pending = appendPending(st.Pending, delivery{Key: "notice/" + key, Target: targetNotice, Text: text, CreatedAt: m.now().Unix()})
+		err = m.save(ctx, st)
+	}
+	m.roundMu.Unlock()
+	if err != nil {
+		m.logError("infrastructure alerts: queue a notice", err)
+		return
+	}
+	m.startDelivery(ctx)
 }
 
 func sendAdmin(ctx context.Context, c sender, chat int64, text string) error {
@@ -254,7 +347,7 @@ func (m *Monitor) sendSummary(ctx context.Context, st *persistentState, cfg Aler
 	defer cancel()
 	var err error
 	if st.PublicMessage == 0 {
-		var msg tgate.Message
+		var msg tgapi.Message
 		msg, err = client.SendTo(ctx, cfg.PublicChannel, text, true)
 		if err == nil {
 			st.PublicMessage = msg.MessageID
@@ -267,7 +360,7 @@ func (m *Monitor) sendSummary(ctx context.Context, st *persistentState, cfg Aler
 	}
 	if err == nil {
 		err = client.EditTo(ctx, cfg.PublicChannel, st.PublicMessage, text)
-		var ae *tgate.APIError
+		var ae *tgapi.APIError
 		if errors.As(err, &ae) && strings.Contains(strings.ToLower(ae.Description), "message to edit not found") {
 			st.PublicMessage, st.PublicPinned, st.PublicPinAttempted = 0, false, false
 		}
@@ -308,8 +401,8 @@ func retryDelivery(d *delivery, now int64, err error) bool {
 	if d.Attempts >= maxDeliveryAttempts || d.CreatedAt != 0 && now-d.CreatedAt > int64(deliveryMaxAge/time.Second) {
 		return false
 	}
-	delay := retryBaseDelay * time.Duration(1<<min(d.Attempts-1, retryMaxShift))
-	var ae *tgate.APIError
+	delay := retryBackoff.Next(d.Attempts - 1)
+	var ae *tgapi.APIError
 	if errors.As(err, &ae) && ae.Code == 429 && ae.RetryAfter > delay {
 		delay = ae.RetryAfter
 	}
@@ -321,6 +414,6 @@ func retryDelivery(d *delivery, now int64, err error) bool {
 }
 
 func permanentTelegramError(err error) bool {
-	var ae *tgate.APIError
+	var ae *tgapi.APIError
 	return errors.As(err, &ae) && ae.Code >= 400 && ae.Code < 500 && ae.Code != 429
 }

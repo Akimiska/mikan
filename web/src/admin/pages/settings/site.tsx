@@ -2,6 +2,7 @@ import { Check, ExternalLink, FileCode2, Gamepad2, Wrench, XCircle } from "lucid
 import type { Schemas } from "../../../api/client";
 import { useSaveSettings } from "./shared";
 import { t } from "../../../i18n";
+import { CardHead } from "../../../components/layout";
 
 type Site = Schemas["SettingsView"]["site_template"];
 
@@ -21,12 +22,7 @@ export function SiteCard({ s }: { s: Schemas["SettingsView"] }) {
   const root = s.admin_url ? new URL("/", s.admin_url).toString() : "";
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.site.title")}</h2>
-          <div className="card-sub">{t("settings.site.sub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("settings.site.title")} sub={t("settings.site.sub")} />
       {s.site_own ? (
         <div className="banner info mb-3" role="status">
           <FileCode2 size={18} className="shrink-0" aria-hidden />

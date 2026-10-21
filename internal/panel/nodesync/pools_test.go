@@ -49,21 +49,7 @@ func TestTrafficPoolsOnThePanel(t *testing.T) {
 		}
 	}
 	slot, _ := q.GetSlot(ctx, u.SlotID.Int64)
-	policy := func() nodeapi.Policy {
-		t.Helper()
-		_, ps, _, err := s.policies(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, p := range ps {
-			if p.Slot == slot.Name {
-				return p
-			}
-		}
-		t.Fatal("no policy")
-		return nodeapi.Policy{}
-	}
-	if p := policy(); len(p.Pools) != 1 || p.Pools[0] != (nodeapi.PoolQuota{Pool: key, Remaining: limit}) {
+	if p := policyOf(t, s, u.ID); len(p.Pools) != 1 || p.Pools[0] != (nodeapi.PoolQuota{Pool: key, Remaining: limit}) {
 		t.Fatalf("pool quota: %+v", p.Pools)
 	}
 
@@ -77,7 +63,7 @@ func TestTrafficPoolsOnThePanel(t *testing.T) {
 		t.Fatalf("main %d/%d total %d/%d pool %d/%d", got.UsedUp, got.UsedDown, got.TotalUp, got.TotalDown, ups[0].UsedUp, ups[0].UsedDown)
 	}
 	// The pool is used up: the node gets 0 left, the user may still get in elsewhere.
-	if p := policy(); p.Pools[0].Remaining != 0 || !p.Allowed {
+	if p := policyOf(t, s, u.ID); p.Pools[0].Remaining != 0 || !p.Allowed {
 		t.Fatalf("after the pool ran out: %+v", p)
 	}
 	// The main quota running out keeps the user in for the pool.
@@ -87,7 +73,7 @@ func TestTrafficPoolsOnThePanel(t *testing.T) {
 	}
 	s.m.PoliciesChanged() // a change outside the API is picked up by the next upkeep
 
-	if p := policy(); !p.Allowed || p.QuotaRemaining != 0 {
+	if p := policyOf(t, s, u.ID); !p.Allowed || p.QuotaRemaining != 0 {
 		t.Fatalf("main quota out: %+v", p)
 	}
 	// A reset of the main traffic resets the pools.
@@ -126,16 +112,7 @@ func TestGroupInTheMainTraffic(t *testing.T) {
 	}
 	slot, _ := q.GetSlot(ctx, u.SlotID.Int64)
 	key := strconv.FormatInt(pool.ID, 10)
-	_, ps, _, err := s.policies(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var p nodeapi.Policy
-	for _, x := range ps {
-		if x.Slot == slot.Name {
-			p = x
-		}
-	}
+	p := policyOf(t, s, u.ID)
 	if len(p.Pools) != 1 || p.Pools[0] != (nodeapi.PoolQuota{Pool: key, Remaining: 1000, Main: true}) {
 		t.Fatalf("the group in the main traffic: %+v", p.Pools)
 	}

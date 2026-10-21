@@ -62,14 +62,6 @@ func outbounds(st nodeapi.DesiredState) ([]any, error) {
 	return out, nil
 }
 
-// buildConfig renders the mihomo config as JSON, which mihomo's YAML parser accepts.
-// log-level warning keeps per-connection lines out of mihomo's own output; the ones that
-// still come through are dropped by pumpLogs.
-//
-// A listener that does not pass the checks is left out and reported in rejected (not OK,
-// with the reason): one broken inbound must not stop the node from taking every other
-// change of the state, new users and policies included. What the whole state needs, the
-// outbounds, is an error as before.
 // speaksHTTP says whether listener l is VLESS or Trojan on an HTTP transport (WebSocket, gRPC,
 // XHTTP): the ones that answer any request of a browser (Citrus' fallback-page).
 func speaksHTTP(l map[string]any) bool {
@@ -82,8 +74,16 @@ func speaksHTTP(l map[string]any) bool {
 	return ws != "" || grpc != "" || xhttp && l["type"] == "vless"
 }
 
-// buildConfig renders st with cert, the node's certificate, and front, the file of the
-// node's front page ("" none) that its inbounds on an HTTP transport give strangers.
+// buildConfig renders the core's config for st as JSON, which the core's YAML parser
+// accepts, with cert, the node's certificate, and front, the file of the node's front page
+// ("" none) that its inbounds on an HTTP transport give strangers. log-level warning keeps
+// per-connection lines out of the core's own output; the ones that still come through are
+// dropped by pumpLogs.
+//
+// A listener that does not pass the checks is left out and reported in rejected (not OK,
+// with the reason): one broken inbound must not stop the node from taking every other
+// change of the state, new users and policies included. What the whole state needs, the
+// outbounds, is an error as before.
 func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool, front string) (raw []byte, rejected []nodeapi.ListenerStatus, err error) {
 	listeners := make([]map[string]any, 0, len(st.Inbounds)+1)
 	keep := func(name string, l map[string]any, err error) {
@@ -167,11 +167,7 @@ func userListeners(st nodeapi.DesiredState) map[string]bool {
 	return out
 }
 
-// template reads the inbound's listener template; states saved by mikan ≤ 0.1.2 carry
-// a preset with its settings instead.
+// template reads the inbound's listener template.
 func template(in nodeapi.Inbound) (proto.Template, error) {
-	if len(in.Config) > 0 {
-		return proto.FromJSON(in.Config)
-	}
-	return proto.FromPreset(in.Preset, in.Settings)
+	return proto.FromJSON(in.Config)
 }

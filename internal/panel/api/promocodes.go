@@ -58,7 +58,7 @@ type PromoBody struct {
 	MinOrder          int64   `json:"min_order" minimum:"0" doc:"Минимальная сумма заказа в минимальных единицах оплаты: RUB — копейки, XTR — Stars"`
 	MaxDiscount       int64   `json:"max_discount" minimum:"0" doc:"Максимальная скидка в минимальных единицах оплаты: RUB — копейки, XTR — Stars"`
 	TariffIDs         []int64 `json:"tariff_ids"`
-	PoolID            *int64  `json:"pool_id,omitempty" minimum:"1" doc:"Пул для бонусного трафика; без значения — основной трафик"`
+	PoolID            *int64  `json:"pool_id,omitempty" minimum:"1" doc:"Группа серверов для бонусного трафика; без значения — основной трафик"`
 	FirstPurchaseOnly bool    `json:"first_purchase_only"`
 	NewUsersOnly      bool    `json:"new_users_only"`
 	Enabled           bool    `json:"enabled"`
@@ -75,8 +75,9 @@ type promoListOutput struct {
 }
 type promoOneOutput struct{ Body PromoCodeView }
 type promoRedemptionsInput struct {
-	Limit  int64 `query:"limit" minimum:"1" maximum:"200" default:"50"`
-	Offset int64 `query:"offset" minimum:"0" default:"0"`
+	Limit  int64  `query:"limit" minimum:"1" maximum:"200" default:"50"`
+	Offset int64  `query:"offset" minimum:"0" default:"0"`
+	Q      string `query:"q" maxLength:"64" doc:"Часть кода (без учёта регистра) или ID клиента либо его Telegram ID целиком"`
 }
 type PromoRedemptionView struct {
 	ID             int64      `json:"id"`
@@ -351,11 +352,13 @@ func (h *handlers) deletePromocode(ctx context.Context, in *struct {
 	return &struct{}{}, nil
 }
 func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemptionsInput) (*promoRedemptionsOutput, error) {
-	xs, e := h.d.Store.Q.ListPromoRedemptionsWithCode(ctx, db.ListPromoRedemptionsWithCodeParams{Lim: in.Limit, RowOffset: in.Offset})
+	// The search goes to the database: a filter of the loaded page alone found only part.
+	q := strings.TrimSpace(in.Q)
+	xs, e := h.d.Store.Q.ListPromoRedemptionsWithCode(ctx, db.ListPromoRedemptionsWithCodeParams{Q: q, Lim: in.Limit, RowOffset: in.Offset})
 	if e != nil {
 		return nil, e
 	}
-	n, e := h.d.Store.Q.CountPromoRedemptions(ctx)
+	n, e := h.d.Store.Q.CountPromoRedemptions(ctx, q)
 	if e != nil {
 		return nil, e
 	}

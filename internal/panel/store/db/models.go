@@ -195,7 +195,6 @@ type Inbound struct {
 	Preset      string
 	Port        string
 	Enabled     int64
-	Settings    string
 	CreatedAt   int64
 	UpdatedAt   int64
 	DisplayName string
@@ -501,6 +500,7 @@ type SupportGrant struct {
 	LastIp          string
 	RevokedAt       sql.NullInt64
 	EndedNotedAt    sql.NullInt64
+	Extended        bool
 }
 
 type Tariff struct {
@@ -569,6 +569,11 @@ type TgChat struct {
 	UpdatedAt  int64
 	CampaignID sql.NullInt64
 	CampaignAt sql.NullInt64
+}
+
+type TgClient struct {
+	TgID  int64
+	Since int64
 }
 
 type TgLink struct {

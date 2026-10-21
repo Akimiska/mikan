@@ -7,7 +7,7 @@ import { qk, useUpdates } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
 import { QueryBoundary, StaleNotice } from "../../../components/query";
 import { useToast } from "../../../components/toast";
-import { Disclosure, FormActions } from "../../../components/layout";
+import { CardHead, Disclosure, FormActions } from "../../../components/layout";
 import { Button, Field, Pill, Skeleton } from "../../../components/ui";
 import { SwitchRow } from "../../../components/switch";
 import { getLocale, LOCALES, t } from "../../../i18n";
@@ -17,26 +17,24 @@ import { inlineMarkdown } from "../../../lib/inline-md";
 import { ago, utcHourLabel } from "../../../lib/format";
 import { useSaveSettings } from "./shared";
 
+const serviceForm = (s: Schemas["SettingsView"]) => ({ brand: s.brand, public_host: s.public_host, domain: s.domain, support_url: s.support_url, quiet_hour_utc: s.quiet_hour_utc });
+
 /** What the service is called, where it lives and where its people ask for help: the first things to fill in. */
 export function ServiceCard({ s }: { s: Schemas["SettingsView"] }) {
   const save = useSaveSettings();
   // Saving another card replaces `s`: what is typed here stays.
-  const { draft: form, setDraft: setForm, dirty, reset } = useDraft({ brand: s.brand, public_host: s.public_host, domain: s.domain, support_url: s.support_url, quiet_hour_utc: s.quiet_hour_utc });
+  const { draft: form, setDraft: setForm, dirty, reset } = useDraft(serviceForm(s));
   const errors = fieldErrors(save.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    save.mutate({ brand: form.brand, public_host: form.public_host, domain: form.domain, support_url: form.support_url, quiet_hour_utc: form.quiet_hour_utc });
+    // The server trims what it keeps: the draft takes it back, or the card stayed unsaved.
+    save.mutate({ brand: form.brand, public_host: form.public_host, domain: form.domain, support_url: form.support_url, quiet_hour_utc: form.quiet_hour_utc }, { onSuccess: (v) => setForm(serviceForm(v)) });
   };
   const set = (k: "brand" | "public_host" | "domain" | "support_url") => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
   return (
     <section className="card glass reveal">
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.service")}</h2>
-            <div className="card-sub">{t("settings.serviceSub")}</div>
-          </div>
-        </div>
+        <CardHead title={t("settings.service")} sub={t("settings.serviceSub")} />
         <Field label={t("settings.brand")} htmlFor="s-brand" hint={t("settings.brandHint")} error={errors.brand}>
           <input id="s-brand" className="input" value={form.brand} onChange={set("brand")} maxLength={40} aria-invalid={!!errors.brand} />
         </Field>
@@ -78,12 +76,7 @@ export function LanguageCard({ s }: { s: Schemas["SettingsView"] }) {
   const current = (save.isPending && save.variables.default_lang) || s.default_lang;
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.lang")}</h2>
-          <div className="card-sub">{t("settings.langSub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("settings.lang")} sub={t("settings.langSub")} />
       <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t("settings.lang")} aria-busy={save.isPending}>
         {options.map((o) => (
           <button
@@ -120,12 +113,7 @@ export function AutoCard({ s }: { s: Schemas["SettingsView"] }) {
   const [warn, setWarn] = useState<(typeof risky)[number] | null>(null);
   return (
     <section className="card glass reveal" style={{ "--i": 3 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.auto")}</h2>
-          <div className="card-sub">{t("settings.autoSub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("settings.auto")} sub={t("settings.autoSub")} />
       <ul className="row-list">
         {rows.map((r) => (
           <li key={r.key}>
@@ -202,38 +190,16 @@ export function UpdatesCard() {
   const put = (d: Schemas["UpdatesView"]) => qc.setQueryData(qk.updates, d);
   const fail = (e: unknown) => toast.error(errorText(e));
   const check = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/updates/check")), onSuccess: put, onError: fail });
-  const auto = useMutation({
-    mutationFn: (v: boolean) => unwrap(api.PATCH("/api/v1/updates", { body: { auto: v } })),
+  // The card's switches save at once, each its own field of one PATCH.
+  const patch = useMutation({
+    mutationFn: (body: Schemas["PatchUpdatesInputBody"]) => unwrap(api.PATCH("/api/v1/updates", { body })),
     onSuccess: (d) => {
       put(d);
       toast.ok(t("settings.saved"));
     },
     onError: fail,
   });
-  const channel = useMutation({
-    mutationFn: (beta: boolean) => unwrap(api.PATCH("/api/v1/updates", { body: { channel: beta ? "beta" : "stable" } })),
-    onSuccess: (d) => {
-      put(d);
-      toast.ok(t("settings.saved"));
-    },
-    onError: fail,
-  });
-  const follow = useMutation({
-    mutationFn: (v: boolean) => unwrap(api.PATCH("/api/v1/updates", { body: { nodes_follow: v } })),
-    onSuccess: (d) => {
-      put(d);
-      toast.ok(t("settings.saved"));
-    },
-    onError: fail,
-  });
-  const goals = useMutation({
-    mutationFn: (v: boolean) => unwrap(api.PATCH("/api/v1/updates", { body: { show_goals: v } })),
-    onSuccess: (d) => {
-      put(d);
-      toast.ok(t("settings.saved"));
-    },
-    onError: fail,
-  });
+  const saving = (k: keyof Schemas["PatchUpdatesInputBody"]) => patch.isPending && patch.variables?.[k] !== undefined;
   const request = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/updates/request")),
     onSuccess: (d) => {
@@ -260,15 +226,13 @@ export function UpdatesCard() {
   return (
     <section id="updates" className="card glass reveal">
       {u.isError ? <StaleNotice onRetry={() => void u.refetch()} retrying={u.isFetching} /> : null}
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.updates")}</h2>
-          <div className="card-sub">{t("settings.updatesSub")}</div>
-        </div>
-        <Button size="sm" loading={check.isPending} onClick={() => check.mutate()}>
+      <CardHead
+        title={t("settings.updates")}
+        sub={t("settings.updatesSub")}
+        aside={<Button size="sm" loading={check.isPending} onClick={() => check.mutate()}>
           <RefreshCw size={16} aria-hidden /> {t("settings.updatesCheck")}
-        </Button>
-      </div>
+        </Button>}
+      />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="font-semibold">mikan {v.current}</span>
         {v.available ? (
@@ -311,16 +275,16 @@ export function UpdatesCard() {
       ) : null}
       <ul className="row-list mt-4 border-t border-[var(--hairline)]">
         <li>
-          <SwitchRow label={t("settings.updatesAuto")} sub={t("settings.updatesAutoSub")} checked={v.auto} disabled={auto.isPending} onChange={(on) => auto.mutate(on)} />
+          <SwitchRow label={t("settings.updatesAuto")} sub={t("settings.updatesAutoSub")} checked={v.auto} disabled={saving("auto")} onChange={(on) => patch.mutate({ auto: on })} />
         </li>
         <li>
-          <SwitchRow label={t("settings.updatesNodes")} sub={t("settings.updatesNodesSub")} checked={v.nodes_follow} disabled={follow.isPending} onChange={(on) => follow.mutate(on)} />
+          <SwitchRow label={t("settings.updatesNodes")} sub={t("settings.updatesNodesSub")} checked={v.nodes_follow} disabled={saving("nodes_follow")} onChange={(on) => patch.mutate({ nodes_follow: on })} />
         </li>
         <li>
-          <SwitchRow label={t("settings.updatesBeta")} sub={t("settings.updatesBetaSub")} checked={v.channel === "beta"} disabled={channel.isPending} onChange={(on) => channel.mutate(on)} />
+          <SwitchRow label={t("settings.updatesBeta")} sub={t("settings.updatesBetaSub")} checked={v.channel === "beta"} disabled={saving("channel")} onChange={(on) => patch.mutate({ channel: on ? "beta" : "stable" })} />
         </li>
         <li>
-          <SwitchRow label={t("settings.updatesGoals")} sub={t("settings.updatesGoalsSub")} checked={v.show_goals} disabled={goals.isPending} onChange={(on) => goals.mutate(on)} />
+          <SwitchRow label={t("settings.updatesGoals")} sub={t("settings.updatesGoalsSub")} checked={v.show_goals} disabled={saving("show_goals")} onChange={(on) => patch.mutate({ show_goals: on })} />
         </li>
       </ul>
       <Confirm

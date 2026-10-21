@@ -4,17 +4,19 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/pace"
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/autotune"
 	"mikan/internal/panel/nodesync"
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
-	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/updates"
+	"mikan/internal/tgapi"
 )
 
 // roundInterval is how often the monitor samples. Node health arrives every five seconds.
@@ -53,7 +55,7 @@ type Telegram interface {
 	PolledInfrastructure(ctx context.Context) bool
 	InfrastructureEnabled(ctx context.Context) bool
 	InfrastructureAdminChat(ctx context.Context) (int64, bool, error)
-	InfrastructureClient(ctx context.Context) (*tgate.Client, error)
+	InfrastructureClient(ctx context.Context) (*tgapi.Client, error)
 }
 
 type Monitor struct {
@@ -71,11 +73,17 @@ type Monitor struct {
 	world       *world // under roundMu
 	dispatchMu  sync.Mutex
 	dispatching bool
+	again       bool // a delivery was asked for while one ran (startDelivery)
 	// delivering is the delivery started by a round: Run waits for it before it returns,
 	// so it never works on a database the panel has closed.
 	delivering sync.WaitGroup
 	// stored is the state's text as last read or written (under roundMu).
 	stored storedState
+	// notices counts the notices queued without a key of their own (Notify).
+	notices atomic.Int64
+	// refusedAt is when each refusal was last logged (refuse).
+	refusedMu sync.Mutex
+	refusedAt map[string]time.Time
 }
 
 func New(st *store.Store, set *settings.Settings, runtime Runtime, tuner Tuner, cert CertificateSource, updates UpdateSource,
@@ -88,17 +96,8 @@ func New(st *store.Store, set *settings.Settings, runtime Runtime, tuner Tuner, 
 func (m *Monitor) WatchNodeUpdates(src NodeUpdateSource) { m.nodeUpdates = src }
 
 func (m *Monitor) Run(ctx context.Context) {
-	t := time.NewTicker(roundInterval)
-	defer t.Stop()
 	defer m.delivering.Wait()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			m.round(ctx)
-		}
-	}
+	pace.Tick(ctx, roundInterval, m.round)
 }
 
 func (m *Monitor) config(ctx context.Context) AlertsConfig {

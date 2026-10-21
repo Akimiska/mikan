@@ -26,6 +26,7 @@ import (
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/storetest"
 	"mikan/internal/panel/tgate"
+	"mikan/internal/tgapi"
 )
 
 const password = "correct horse battery staple"
@@ -121,7 +122,7 @@ func TestMakeRefusesATooBigDumpFirst(t *testing.T) {
 			return err
 		}
 		defer f.Close()
-		return f.Truncate(tgate.MaxDocument) // sparse: no 50 MB written
+		return f.Truncate(tgapi.MaxDocument) // sparse: no 50 MB written
 	}
 	if _, _, err := Make(context.Background(), big, dir, password, time.Now()); !errors.Is(err, ErrTooBig) {
 		t.Fatalf("a 50 MB dump: %v", err)
@@ -158,11 +159,11 @@ func TestMakeGivesTheDumpADeadline(t *testing.T) {
 }
 
 type fakeBot struct {
-	client *tgate.Client
+	client *tgapi.Client
 	chat   int64
 }
 
-func (b fakeBot) InfrastructureClient(context.Context) (*tgate.Client, error) {
+func (b fakeBot) InfrastructureClient(context.Context) (*tgapi.Client, error) {
 	if b.client == nil {
 		return nil, tgate.ErrOff
 	}
@@ -180,9 +181,9 @@ type sent struct {
 }
 
 // fakeTelegram answers sendDocument and keeps what it got.
-func fakeTelegram(t *testing.T) (*tgate.Client, func() []sent) {
+func fakeTelegram(t *testing.T) (*tgapi.Client, func() []sent) {
 	api, got := fakeAPI(t)
-	return tgate.NewClient(api, "123:abc", nil), got
+	return tgapi.NewClient(api, "123:abc", nil), got
 }
 
 // fakeAPI is fakeTelegram's Bot API at its address.
@@ -422,8 +423,8 @@ func TestCode(t *testing.T) {
 		ErrNoChat:                     "no_admin_chat",
 		ErrTooBig:                     "backup_too_big",
 		tgate.ErrOff:                  "bot_off",
-		tgate.ErrUnreachable:          "tg_unreachable",
-		&tgate.APIError{Code: 400}:    "tg_unreachable",
+		tgapi.ErrUnreachable:          "tg_unreachable",
+		&tgapi.APIError{Code: 400}:    "tg_unreachable",
 		errors.New("pg: host x:5432"): "backup_failed",
 	} {
 		if got := Code(err); got != want {

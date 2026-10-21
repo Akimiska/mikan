@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"testing"
 
-	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 )
@@ -33,25 +32,11 @@ func TestTariffServersOnTheNode(t *testing.T) {
 		}
 		s.m.PoliciesChanged() // what the API says after the tariff's servers change
 	}
-	policies := func() map[int64]nodeapi.Policy {
-		t.Helper()
-		_, ps, owners, err := s.policies(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := map[int64]nodeapi.Policy{}
-		for _, p := range ps {
-			out[owners[p.Slot]] = p
-		}
-		return out
-	}
-
 	choose(cheap.ID, domain.ServersInput{Inbounds: []int64{ins[1].ID}})
-	ps := policies()
-	if p := ps[a.ID]; !p.Allowed || !slices.Equal(p.Inbounds, []string{ins[1].Name}) {
+	if p := policyOf(t, s, a.ID); !p.Allowed || !slices.Equal(p.Inbounds, []string{ins[1].Name}) {
 		t.Fatalf("the tariff's one inbound here: %+v", p)
 	}
-	if p := ps[b.ID]; !p.Allowed || len(p.Inbounds) != 0 {
+	if p := policyOf(t, s, b.ID); !p.Allowed || len(p.Inbounds) != 0 {
 		t.Fatalf("a tariff with every server keeps the list empty: %+v", p)
 	}
 
@@ -62,7 +47,7 @@ func TestTariffServersOnTheNode(t *testing.T) {
 			all = append(all, in.Name)
 		}
 	}
-	if p := policies()[a.ID]; !p.Allowed || len(p.Inbounds) != len(all) {
+	if p := policyOf(t, s, a.ID); !p.Allowed || len(p.Inbounds) != len(all) {
 		t.Fatalf("the node whole: %+v, want %v", p, all)
 	}
 
@@ -71,7 +56,7 @@ func TestTariffServersOnTheNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	choose(cheap.ID, domain.ServersInput{Nodes: []int64{other.ID}})
-	if p := policies()[a.ID]; p.Allowed {
+	if p := policyOf(t, s, a.ID); p.Allowed {
 		t.Fatalf("a tariff with nothing here: the node turns its clients away: %+v", p)
 	}
 	// An archived tariff keeps its subscribers to the end of their term, and its servers with them.
@@ -79,7 +64,7 @@ func TestTariffServersOnTheNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.m.PoliciesChanged()
-	if p := policies()[a.ID]; p.Allowed {
+	if p := policyOf(t, s, a.ID); p.Allowed {
 		t.Fatalf("an archived tariff lets its clients in everywhere: %+v", p)
 	}
 
@@ -88,7 +73,7 @@ func TestTariffServersOnTheNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.m.PoliciesChanged()
-	if p := policies()[a.ID]; !p.Allowed || !slices.Equal(p.Inbounds, []string{ins[0].Name}) {
+	if p := policyOf(t, s, a.ID); !p.Allowed || !slices.Equal(p.Inbounds, []string{ins[0].Name}) {
 		t.Fatalf("the client's own protocols stay over the tariff's: %+v", p)
 	}
 }

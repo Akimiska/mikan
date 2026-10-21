@@ -28,9 +28,6 @@ type CDN struct {
 	Trusted []string `json:"trusted,omitempty" yaml:"trusted,omitempty"`
 }
 
-// CDNHeaders are the headers the form offers; another valid name may be typed.
-var CDNHeaders = []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP", "True-Client-IP"}
-
 // TrustedCloudflare names Cloudflare's networks in CDN.Trusted.
 const TrustedCloudflare = "cloudflare"
 

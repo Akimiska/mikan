@@ -137,10 +137,6 @@ type Inbound struct {
 	Listen string          `json:"listen"`
 	Port   string          `json:"port"`             // "443" or a range "20000-20100"
 	Config json.RawMessage `json:"config,omitempty"` // proto.Template as JSON
-	// Preset and Settings are the format of mikan ≤ 0.1.2; the node still reads them
-	// from a saved state, the panel no longer sends them.
-	Preset   string          `json:"preset,omitempty"`
-	Settings json.RawMessage `json:"settings,omitempty"`
 	// Pool is the traffic pool the inbound counts to ("" = the main quota): its own
 	// limit per user, separate from the rest (GitHub issue #6).
 	Pool string `json:"pool,omitempty"`
@@ -214,7 +210,7 @@ const (
 type Counters struct {
 	Epoch string                        `json:"epoch"`
 	Seq   int64                         `json:"seq"`
-	Slots map[string]Traffic            `json:"slots"`           // outside every pool
+	Slots map[string]Traffic            `json:"slots"`           // the main traffic: outside every group, and the groups in it
 	Pools map[string]map[string]Traffic `json:"pools,omitempty"` // slot → pool → traffic
 	// Sites are the slots' bytes by site (DesiredState.Detail): slot → site → traffic, a
 	// part of the batch like the rest. Nodes older than it send none.

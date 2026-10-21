@@ -20,7 +20,7 @@ import (
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/tgapi"
 )
 
 // The Bot API proxy: the addon that holds the bot (permission bot, chosen by the admin) runs
@@ -42,13 +42,13 @@ const (
 	maxBuffered = 2000           // updates kept for an addon that does not read them
 	keepUpdates = 24 * time.Hour // as long as Telegram keeps them itself
 	maxCall     = 1 << 20        // a call that carries no file
-	maxUpload   = tgate.MaxDocument + 1<<20
+	maxUpload   = tgapi.MaxDocument + 1<<20
 )
 
 // Telegram is the gateway as the proxy needs it.
 type Telegram interface {
-	Client() *tgate.Client
-	Outbox() *tgate.Outbox
+	Client() *tgapi.Client
+	Outbox() *tgapi.Outbox
 }
 
 // direct calls carry no message to a chat: they go to Telegram at once.
@@ -113,7 +113,7 @@ type BotSlot struct {
 
 func (s *Server) BotSlot() *BotSlot { return &BotSlot{s: s} }
 
-func (b *BotSlot) Update(ctx context.Context, up tgate.Update) error {
+func (b *BotSlot) Update(ctx context.Context, up tgapi.Update) error {
 	n, err := b.s.d.Store.Q.CountAddonUpdates(ctx)
 	if err != nil {
 		return err
@@ -218,8 +218,8 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tg := s.d.Telegram
-	var cl *tgate.Client
-	var out *tgate.Outbox
+	var cl *tgapi.Client
+	var out *tgapi.Outbox
 	if tg != nil {
 		cl, out = tg.Client(), tg.Outbox()
 	}
@@ -242,7 +242,7 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 		answer []byte
 	)
 	done := make(chan error, 1)
-	out.Do(chat, r.Header.Get("X-Mikan-Priority"), func(ctx context.Context, c *tgate.Client) error {
+	out.Do(chat, r.Header.Get("X-Mikan-Priority"), func(ctx context.Context, c *tgapi.Client) error {
 		var err error
 		code, answer, err = c.Forward(ctx, method, ct, body)
 		return err
@@ -256,7 +256,7 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 
 // answer passes Telegram's answer on; a way to Telegram that failed is a 502.
 func (s *Server) answer(w http.ResponseWriter, code int, answer []byte, err error) {
-	var ae *tgate.APIError
+	var ae *tgapi.APIError
 	if err != nil && !errors.As(err, &ae) || code == 0 {
 		tgFail(w, http.StatusBadGateway, "Bad Gateway: Telegram is out of reach")
 		return

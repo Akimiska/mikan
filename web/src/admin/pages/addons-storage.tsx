@@ -117,7 +117,7 @@ function StorageDrawer({ open, onOpenChange, unlimited, limit, fallback }: { ope
           </div>
         ) : null}
         {free && error ? (
-          <div className="banner bad" role="alert">
+          <div className="banner err" role="alert">
             {error}
           </div>
         ) : null}

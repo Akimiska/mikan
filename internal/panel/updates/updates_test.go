@@ -101,7 +101,7 @@ func (r *releases) index(entries ...string) {
 }
 
 func (r *releases) source(pub ed25519.PublicKey) Source {
-	return fetch(r.srv.URL+"/updates/index.json", r.srv.URL+"/latest/manifest.json", pub, r.srv.Client())
+	return fetch(r.srv.URL+"/updates/index.json", r.srv.URL+"/latest/manifest.json", []ed25519.PublicKey{pub}, r.srv.Client())
 }
 
 // The index chooses the release, the release's own manifest is what the panel believes,
@@ -307,7 +307,7 @@ func TestFetchAsksAgainOnAMismatchedPair(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	f, err := fetch(srv.URL+"/index.json", srv.URL+"/manifest.json", pub, srv.Client())(context.Background(), Query{Current: "0.3.8"})
+	f, err := fetch(srv.URL+"/index.json", srv.URL+"/manifest.json", []ed25519.PublicKey{pub}, srv.Client())(context.Background(), Query{Current: "0.3.8"})
 	if err != nil || f.Manifest.Version != "0.3.10" || manifestGets != 2 {
 		t.Fatalf("%+v %v after %d manifest requests", f, err, manifestGets)
 	}

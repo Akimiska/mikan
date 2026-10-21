@@ -2,15 +2,14 @@ package tgbot
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"strconv"
 	"strings"
 
-	"mikan/internal/panel/billing"
 	"mikan/internal/panel/events"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/panel/model"
+	"mikan/internal/tgapi"
 )
 
 // The account's balance and its top-ups by hand. Callback data: bl the balance, bt a
@@ -22,27 +21,27 @@ import (
 var topupSteps = []int64{100, 300, 500, 1000}
 
 // balanceOn: the balance takes top-ups and pays now.
-func (b *Bot) balanceOn(ctx context.Context) (billing.BalanceConfig, bool) {
+func (b *Bot) balanceOn(ctx context.Context) (model.BalanceConfig, bool) {
 	c := b.d.Backend.Shop().Config(ctx).Balance
 	return c, c.Enabled && c.On()
 }
 
 // balanceButton is the menu's entry, with what is on the balance.
-func (b *Bot) balanceButton(ctx context.Context, w *words, chat int64) (tgate.Button, bool) {
+func (b *Bot) balanceButton(ctx context.Context, w *words, chat int64) (tgapi.Button, bool) {
 	c, ok := b.balanceOn(ctx)
 	if !ok {
-		return tgate.Button{}, false
+		return tgapi.Button{}, false
 	}
 	n, _ := b.d.Backend.Shop().BalanceOf(ctx, chat)
-	return tgate.Button{Text: fmt.Sprintf(w.balanceButton, w.price(n, c.Currency)), CallbackData: "bl"}, true
+	return tgapi.Button{Text: fmt.Sprintf(w.balanceButton, w.price(n, c.Currency)), CallbackData: "bl"}, true
 }
 
 // balanceScreen draws bl, bt and ba.
-func (b *Bot) balanceScreen(ctx context.Context, w *words, chat int64, cmd, notice string) (string, *tgate.Keyboard) {
-	home := []tgate.Button{{Text: w.back, CallbackData: "m"}}
+func (b *Bot) balanceScreen(ctx context.Context, w *words, chat int64, cmd, notice string) (string, *tgapi.Keyboard) {
+	home := []tgapi.Button{{Text: w.back, CallbackData: "m"}}
 	c, ok := b.balanceOn(ctx)
 	if !ok {
-		return html.EscapeString(w.balanceOff), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{home}}
+		return html.EscapeString(w.balanceOff), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{home}}
 	}
 	shop := b.d.Backend.Shop()
 	lines := []string{}
@@ -50,29 +49,29 @@ func (b *Bot) balanceScreen(ctx context.Context, w *words, chat int64, cmd, noti
 		lines = append(lines, html.EscapeString(notice), "")
 	}
 	if t, ok := shop.TopupDraft(ctx, chat); ok && cmd != "bl" {
-		cancel := []tgate.Button{{Text: w.cancel, CallbackData: "bx"}}
+		cancel := []tgapi.Button{{Text: w.cancel, CallbackData: "bx"}}
 		if t.Amount == 0 {
 			lines = append(lines, "<b>"+html.EscapeString(w.topupTitle)+"</b>", "", html.EscapeString(w.topupAmountAsk))
 			if c.Min > 0 || c.Max > 0 {
 				lines = append(lines, html.EscapeString(w.topupBounds(c)))
 			}
-			var row []tgate.Button
+			var row []tgapi.Button
 			for _, step := range topupSteps {
 				amount := step * 100
 				if c.Min > 0 && amount < c.Min || c.Max > 0 && amount > c.Max {
 					continue
 				}
-				row = append(row, tgate.Button{Text: w.price(amount, c.Currency), CallbackData: "ba:" + strconv.FormatInt(amount, 10)})
+				row = append(row, tgapi.Button{Text: w.price(amount, c.Currency), CallbackData: "ba:" + strconv.FormatInt(amount, 10)})
 			}
-			rows := [][]tgate.Button{}
+			rows := [][]tgapi.Button{}
 			if len(row) > 0 {
 				rows = append(rows, row)
 			}
-			return strings.Join(lines, "\n"), &tgate.Keyboard{InlineKeyboard: append(rows, cancel)}
+			return strings.Join(lines, "\n"), &tgapi.Keyboard{InlineKeyboard: append(rows, cancel)}
 		}
 		lines = append(lines, "<b>"+html.EscapeString(fmt.Sprintf(w.topupPay, w.price(t.Amount, t.Currency)))+"</b>", "",
 			html.EscapeString(c.Details), "", html.EscapeString(w.topupShot))
-		return strings.Join(lines, "\n"), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{cancel}}
+		return strings.Join(lines, "\n"), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{cancel}}
 	}
 	n, _ := shop.BalanceOf(ctx, chat)
 	lines = append(lines, "<b>"+html.EscapeString(fmt.Sprintf(w.balanceTitle, w.price(n, c.Currency)))+"</b>")
@@ -95,7 +94,7 @@ func (b *Bot) balanceScreen(ctx context.Context, w *words, chat int64, cmd, noti
 		}
 	}
 	lines = append(lines, "", html.EscapeString(w.balanceHint))
-	return strings.Join(lines, "\n"), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.topupButton, CallbackData: "bt"}}, home}}
+	return strings.Join(lines, "\n"), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: w.topupButton, CallbackData: "bt"}}, home}}
 }
 
 // balanceAct does what bt, ba and bx change, before their screen is drawn.
@@ -129,7 +128,7 @@ func (b *Bot) balanceAct(ctx context.Context, chat int64, cmd, arg string) (scre
 
 // topupMessage takes a message for an open top-up: its amount, or the screenshot. ok is
 // false when there is none, or the message is neither: the chat goes on as usual.
-func (b *Bot) topupMessage(ctx context.Context, w *words, m *tgate.Message) (notice string, ok bool) {
+func (b *Bot) topupMessage(ctx context.Context, w *words, m *tgapi.Message) (notice string, ok bool) {
 	chat := m.Chat.ID
 	shop := b.d.Backend.Shop()
 	t, open := shop.TopupDraft(ctx, chat)
@@ -183,7 +182,7 @@ func parseAmount(s string) (int64, bool) {
 
 // freshScreen sends screen as a new menu message, the previous one removed.
 func (b *Bot) freshScreen(chat int64, screen, notice string) {
-	b.d.Outbox.Reply(chat, "menu:"+strconv.FormatInt(chat, 10), 2, func(ctx context.Context, c *tgate.Client) error {
+	b.d.Outbox.Reply(chat, "menu:"+strconv.FormatInt(chat, 10), 2, func(ctx context.Context, c *tgapi.Client) error {
 		text, kb := b.screen(ctx, b.config(ctx), chat, screen, notice)
 		sent, err := c.Send(ctx, chat, text, kb, false)
 		if err != nil {
@@ -202,7 +201,7 @@ func (b *Bot) freshScreen(chat int64, screen, notice string) {
 func (b *Bot) topupDecided(ctx context.Context, chat int64, t events.Topup) {
 	w := wordsFor(b.lang(ctx))
 	text := fmt.Sprintf(w.topupApproved, w.price(t.Amount, t.Currency), w.price(t.Balance, t.Currency))
-	if t.Status != billing.TopupApproved {
+	if t.Status != model.TopupApproved {
 		text = fmt.Sprintf(w.topupRejected, w.price(t.Amount, t.Currency))
 		if t.Reason != "" {
 			text += "\n" + t.Reason
@@ -213,25 +212,27 @@ func (b *Bot) topupDecided(ctx context.Context, chat int64, t events.Topup) {
 
 // balancePaidScreen is the screen of a payment the balance paid at once: payment.paid
 // follows with what it gave.
-func (w *words) balancePaidScreen(amount int64, currency string) (string, *tgate.Keyboard) {
-	return html.EscapeString(fmt.Sprintf(w.balancePaid, w.price(amount, currency))), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.back, CallbackData: "m"}}}}
+func (w *words) balancePaidScreen(amount int64, currency string) (string, *tgapi.Keyboard) {
+	return html.EscapeString(fmt.Sprintf(w.balancePaid, w.price(amount, currency))), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: w.back, CallbackData: "m"}}}}
 }
 
+// topupError is what the account is told for a refusal of a top-up (model.Refusal).
 func (w *words) topupError(err error) string {
-	switch {
-	case errors.Is(err, billing.ErrTopupAmount):
+	code, _ := model.Refusal(err)
+	switch code {
+	case model.ErrTopupAmount.Error():
 		return w.topupBad
-	case errors.Is(err, billing.ErrTopupMany):
+	case model.ErrTopupMany.Error():
 		return w.topupMany
-	case errors.Is(err, billing.ErrBalanceOff):
+	case model.ErrBalanceOff.Error():
 		return w.balanceOff
-	case errors.Is(err, billing.ErrTopupNone):
+	case model.ErrTopupNone.Error():
 		return w.topupNone
 	}
 	return w.payUnavailable
 }
 
-func (w *words) topupBounds(c billing.BalanceConfig) string {
+func (w *words) topupBounds(c model.BalanceConfig) string {
 	switch {
 	case c.Min > 0 && c.Max > 0:
 		return fmt.Sprintf(w.topupFromTo, w.price(c.Min, c.Currency), w.price(c.Max, c.Currency))
@@ -243,11 +244,11 @@ func (w *words) topupBounds(c billing.BalanceConfig) string {
 
 func (w *words) balanceOp(kind string) string {
 	switch kind {
-	case billing.OpTopup:
+	case model.OpTopup:
 		return w.opTopup
-	case billing.OpSpend:
+	case model.OpSpend:
 		return w.opSpend
-	case billing.OpRefund:
+	case model.OpRefund:
 		return w.opRefund
 	}
 	return w.opAdjust

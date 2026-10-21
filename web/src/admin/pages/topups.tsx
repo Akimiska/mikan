@@ -1,6 +1,6 @@
 // Top-ups of the accounts' balances by hand: each request with its screenshot, approved or
 // rejected by the admin; the balance itself is set up on Payments → Methods.
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ImageOff, Wallet, X } from "lucide-react";
 import { useState } from "react";
 import { api, basePath, errorText, unwrap, type Schemas } from "../../api/client";
@@ -10,39 +10,39 @@ import { useToast } from "../../components/toast";
 import { Button, EmptyState, Field, Pill, Segmented, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { ago, money } from "../../lib/format";
+import { pagedItems } from "../../lib/paging";
+import { CardHead } from "../../components/layout";
 
 type Topup = Schemas["TopupView"];
 type Filter = "pending" | "approved" | "rejected" | "";
 
 const topupsKey = (status: Filter) => ["topups", status] as const;
 const TONE = { pending: "warn", approved: "ok", rejected: "bad" } as const;
+// A page of requests; the next one starts after the last id shown.
+const PAGE = 50;
 
 export function TopupsSection() {
   const [status, setStatus] = useState<Filter>("pending");
-  const list = useQuery({
+  const list = useInfiniteQuery({
     queryKey: topupsKey(status),
-    queryFn: () => unwrap(api.GET("/api/v1/topups", { params: { query: { status, limit: 100 } } })),
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) => unwrap(api.GET("/api/v1/topups", { params: { query: { status, before: pageParam || undefined, limit: PAGE } }, signal })),
+    getNextPageParam: (last) => (last.items.length === PAGE ? last.items[last.items.length - 1]!.id : undefined),
     placeholderData: keepPreviousData,
     refetchInterval: status === "pending" ? 15_000 : false,
   });
+  const pending = list.data?.pages[0]?.pending;
   const [rejecting, setRejecting] = useState<Topup | null>(null);
   return (
     <section className="card glass reveal" aria-labelledby="topups-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="topups-title">
-            {t("topups.title")}
-          </h2>
-          <div className="card-sub">{t("topups.sub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("topups.title")} sub={t("topups.sub")} id="topups-title" />
       <div className="mb-4 max-w-full overflow-x-auto">
         <Segmented
           label={t("topups.filter")}
           value={status}
           onChange={(v) => setStatus(v as Filter)}
           options={[
-            { value: "pending", label: list.data?.pending ? `${t("topups.status.pending")} · ${list.data.pending}` : t("topups.status.pending") },
+            { value: "pending", label: pending ? `${t("topups.status.pending")} · ${pending}` : t("topups.status.pending") },
             { value: "approved", label: t("topups.status.approved") },
             { value: "rejected", label: t("topups.status.rejected") },
             { value: "", label: t("topups.all") },
@@ -59,17 +59,25 @@ export function TopupsSection() {
           </div>
         }
       >
-        {(v) =>
-          v.items.length === 0 ? (
+        {(v) => {
+          const items = pagedItems(v.pages);
+          return items.length === 0 ? (
             <EmptyState icon={Wallet} title={status === "pending" ? t("topups.emptyPending") : t("topups.empty")} text={t("topups.emptyText")} />
           ) : (
-            <ul className="grid gap-3 md:grid-cols-2">
-              {v.items.map((tp) => (
-                <TopupCard key={tp.id} tp={tp} onReject={() => setRejecting(tp)} />
-              ))}
-            </ul>
-          )
-        }
+            <>
+              <ul className="grid gap-3 md:grid-cols-2">
+                {items.map((tp) => (
+                  <TopupCard key={tp.id} tp={tp} onReject={() => setRejecting(tp)} />
+                ))}
+              </ul>
+              {list.hasNextPage ? (
+                <Button className="mt-3" size="sm" loading={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                  {t("payments.more")}
+                </Button>
+              ) : null}
+            </>
+          );
+        }}
       </QueryBoundary>
       <RejectDialog tp={rejecting} onClose={() => setRejecting(null)} />
     </section>

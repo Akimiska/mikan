@@ -33,11 +33,20 @@ func newFixture(t *testing.T, changelog string) *fixture {
 		t.Fatal(err)
 	}
 	t.Setenv("RELEASE_SIGNING_KEY", string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})))
+	trust(t, pub)
 	f := &fixture{t: t, pub: pub, priv: private, dir: t.TempDir()}
 	f.write("CHANGELOG.md", changelog)
 	f.write("mikan-x86_64", "installer x86_64")
 	f.write("mikan-aarch64", "installer aarch64")
 	return f
+}
+
+// trust makes keys the release keys the tool trusts for the test.
+func trust(t *testing.T, keys ...ed25519.PublicKey) {
+	t.Helper()
+	was := trustedKeys
+	trustedKeys = func() []ed25519.PublicKey { return keys }
+	t.Cleanup(func() { trustedKeys = was })
 }
 
 func (f *fixture) write(name, content string) string {

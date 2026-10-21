@@ -19,6 +19,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -512,7 +513,7 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 		switch u.ResetStrategy {
 		case "month_start":
 			// Monthly on the billing day, or the 1st without one.
-			monthStart := domain.MonthPeriodStart(now, u.BillingDay).Unix()
+			monthStart := model.MonthPeriodStart(now, u.BillingDay).Unix()
 			if start >= monthStart {
 				continue
 			}

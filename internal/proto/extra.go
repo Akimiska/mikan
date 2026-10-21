@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"mikan/internal/netaddr"
 )
 
 // Protocols of mihomo's newer cores; only Clash apps (mihomo) and a few others speak them.
@@ -65,7 +67,7 @@ func validateExtra(t Template, o Options) error {
 			return fail("jls_upstream", "jls-upstream.addr")
 		}
 		// The node forwards every unauthenticated packet there: never an internal service.
-		if !o.AnyDest && !PublicHost(host) {
+		if !o.AnyDest && !netaddr.PublicHost(host) {
 			return fail("jls_upstream_private", "jls-upstream.addr")
 		}
 		if net.ParseIP(host) != nil && str(up["sni"]) == "" {
@@ -192,7 +194,7 @@ func (c *clientBuilder) finishExtra() (Client, bool) {
 		return Client{Mihomo: c.y}, true
 	case "shadowsocks":
 		cipher, key := c.t.str("cipher"), c.t.str("password")
-		if ssMultiUser(c.t) {
+		if ssMultiUser(c.t) && !c.in.SSOneKey {
 			key += ":" + ssUserKey(cipher, s.Secret)
 		}
 		// UDP goes inside the TCP stream (UDP over TCP, v2): the listener has no UDP port.

@@ -10,6 +10,7 @@ import (
 
 	"mikan/internal/nodehello"
 	"mikan/internal/nodetls"
+	"mikan/internal/pace"
 	"mikan/internal/panel/config"
 )
 
@@ -24,10 +25,8 @@ func helloLoop(ctx context.Context, key nodetls.Key, dataDir string, log *slog.L
 	started := time.Now().UTC()
 	hc := nodehello.Client()
 	for i, pause := range helloPause {
-		select {
-		case <-ctx.Done():
+		if !pace.Sleep(ctx, pause) {
 			return
-		case <-time.After(pause):
 		}
 		r := nodehello.Send(ctx, key, hc, time.Now())
 		final := nodehello.Final(r) || i == len(helloPause)-1

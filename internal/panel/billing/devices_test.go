@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/settings"
@@ -35,7 +36,7 @@ func (e *env) buyDevice(user int64, charge string) db.Payment {
 }
 
 // A device bought until the term ends: the limit grows by one up to the tariff's cap, a
-// refund takes it back, and a renewal starts again from the tariff's limit.
+// refund takes it back, and an early renewal keeps it only until that term is over.
 func TestExtraDeviceForTheTerm(t *testing.T) {
 	e, u := deviceEnv(t)
 	ctx := context.Background()
@@ -72,9 +73,21 @@ func TestExtraDeviceForTheTerm(t *testing.T) {
 	}
 	must(t, e.s.PreCheckout(ctx, 555, renew.Payload, "XTR", renew.Amount))
 	must(t, e.s.StarsPaid(ctx, 555, renew.Payload, "ch-r", "XTR", renew.Amount))
+	// An early renewal: the place stays to the end of the term it was bought for.
 	got, _ = e.st.Q.GetUser(ctx, u.ID)
-	if got.DeviceLimit.Int64 != 3 || got.ExtraDevices != 0 {
-		t.Fatalf("the new term starts from the tariff: %v %d", got.DeviceLimit, got.ExtraDevices)
+	if got.DeviceLimit.Int64 != 4 || got.ExtraDevices != 1 || got.ExtraDevicesUntil != u.ExpiresAt || got.ExpiresAt.Int64 <= u.ExpiresAt.Int64 {
+		t.Fatalf("an early renewal: limit %v extra %d until %v, term %v → %v", got.DeviceLimit, got.ExtraDevices, got.ExtraDevicesUntil, u.ExpiresAt, got.ExpiresAt)
+	}
+	// That term is over: the maintenance takes the place back, the new term goes on with the tariff's limit.
+	clock := func() time.Time { return e.now }
+	devices := domain.NewDevices(e.st, domain.NewPool(e.st, clock), noChanges{}, clock)
+	e.now = time.Unix(u.ExpiresAt.Int64, 0)
+	if n, err := devices.ExpireExtra(ctx); err != nil || n != 1 {
+		t.Fatalf("expire: %d %v", n, err)
+	}
+	got, _ = e.st.Q.GetUser(ctx, u.ID)
+	if got.DeviceLimit.Int64 != 3 || got.ExtraDevices != 0 || got.ExtraDevicesUntil.Valid {
+		t.Fatalf("the new term starts from the tariff: %v %d %v", got.DeviceLimit, got.ExtraDevices, got.ExtraDevicesUntil)
 	}
 }
 

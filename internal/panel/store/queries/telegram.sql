@@ -15,8 +15,18 @@ UPDATE tg_chats SET current = $1 WHERE tg_id = $2;
 UPDATE tg_chats SET blocked = $1 WHERE tg_id = $2;
 
 -- name: LinkTg :exec
-INSERT INTO tg_links (user_id, tg_id, created_at) VALUES ($1, $2, $3)
-ON CONFLICT (user_id) DO UPDATE SET tg_id = excluded.tg_id, created_at = excluded.created_at;
+-- The account is a client from now on, whatever happens to the link (tg_clients).
+WITH linked AS (
+  INSERT INTO tg_links (user_id, tg_id, created_at) VALUES ($1, $2, $3)
+  ON CONFLICT (user_id) DO UPDATE SET tg_id = excluded.tg_id, created_at = excluded.created_at
+  RETURNING tg_id, created_at
+)
+INSERT INTO tg_clients (tg_id, since) SELECT tg_id, created_at FROM linked
+ON CONFLICT (tg_id) DO NOTHING;
+
+-- name: WasClient :one
+-- Whether the account ever had a subscription linked, now or before.
+SELECT EXISTS (SELECT 1 FROM tg_clients WHERE tg_id = $1);
 
 -- name: UnlinkTg :exec
 DELETE FROM tg_links WHERE user_id = $1;
@@ -50,3 +60,7 @@ DELETE FROM tg_notices WHERE sent_at < $1;
 
 -- name: CountTgLinks :one
 SELECT COUNT(*) FROM tg_links;
+
+-- name: LockTgLinks :exec
+-- The subscriptions of one Telegram account are linked one transaction at a time.
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-tg-links:' || CAST(sqlc.arg(tg_id) AS BIGINT), 0));

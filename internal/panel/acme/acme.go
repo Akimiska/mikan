@@ -12,7 +12,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"log/slog"
-	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,6 +21,7 @@ import (
 
 	"mikan/internal/acmechallenge"
 	"mikan/internal/hostname"
+	"mikan/internal/netaddr"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/settings"
@@ -468,12 +469,13 @@ func (m *Manager) useFallback() {
 	}
 }
 
-// isPrivate reports identifiers a CA can never validate: private and loopback IPs, and
-// what is not a DNS name, such as docker service names in test setups.
+// isPrivate reports identifiers a CA can never validate: an IP that is not public (a
+// carrier's NAT and Tailscale's 100.64.0.0/10 too: the CA cannot reach it), and what is not
+// a DNS name, such as docker service names in test setups.
 func isPrivate(id string) bool {
-	ip := net.ParseIP(id)
-	if ip == nil {
+	a, err := netip.ParseAddr(id)
+	if err != nil {
 		return !hostname.Name(id) || hostname.Reserved(id)
 	}
-	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
+	return !netaddr.IsPublic(a)
 }

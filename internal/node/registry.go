@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/pace"
 )
 
 // Registry holds the panel's view of each slot on this node: its policy, its devices, its
@@ -33,6 +34,9 @@ type Registry struct {
 	epoch   string
 	seq     int64
 	pending *nodeapi.Counters
+	// replays are what the counters file held uncut when the node went down, each the batch
+	// the next cut would have been then, oldest first: sent before any new one (restore).
+	replays []*nodeapi.Counters
 
 	torrentCfg atomic.Pointer[nodeapi.TorrentBlock] // nil: the torrent blocker is off
 	torrent    torrents
@@ -79,7 +83,7 @@ type slot struct {
 
 	mu          sync.Mutex
 	allowed     bool
-	exhausted   bool            // the main quota: inbounds outside every pool
+	exhausted   bool            // the main quota: inbounds outside every group, and the groups that count to it (mode main)
 	budget      int64           // the main quota left when the panel last sent it
 	budgetGen   int64           // moves with every quota the panel sends
 	inbounds    map[string]bool // nil = all
@@ -230,11 +234,7 @@ func (r *Registry) SetPolicies(epoch string, list []nodeapi.Policy) {
 			}
 			if p.QuotaRemaining >= 0 {
 				// Bytes the panel has not seen yet as of BaseSeq still count against the quota.
-				after := s.up.Load() + s.down.Load()
-				if r.pending != nil && (epoch != r.epoch || r.pending.Seq > p.BaseSeq) {
-					t := r.pending.Slots[s.name]
-					after += t.Up + t.Down
-				}
+				after := s.up.Load() + s.down.Load() + r.unseen(epoch, p.BaseSeq, func(c *nodeapi.Counters) nodeapi.Traffic { return c.Slots[s.name] })
 				rem := p.QuotaRemaining - after
 				s.remaining.Store(rem)
 				s.quotaOn.Store(true)
@@ -262,11 +262,7 @@ func (r *Registry) SetPolicies(epoch string, list []nodeapi.Policy) {
 					continue
 				}
 				b := s.poolLocked(pq.Pool)
-				after := b.up.Load() + b.down.Load()
-				if r.pending != nil && (epoch != r.epoch || r.pending.Seq > p.BaseSeq) {
-					t := r.pending.Pools[s.name][pq.Pool]
-					after += t.Up + t.Down
-				}
+				after := b.up.Load() + b.down.Load() + r.unseen(epoch, p.BaseSeq, func(c *nodeapi.Counters) nodeapi.Traffic { return c.Pools[s.name][pq.Pool] })
 				rem := pq.Remaining - after
 				b.remaining.Store(rem)
 				b.quotaOn.Store(true)
@@ -290,18 +286,11 @@ func (r *Registry) SetShaping(s *nodeapi.Shaping) {
 // Run takes in the core's counters, keeps the core's list of whom to turn away up to date
 // (bans run out by themselves) and works the fair share out, every second until ctx ends.
 func (r *Registry) Run(ctx context.Context) {
-	t := time.NewTicker(shareEvery)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			r.drain()
-			r.shaper.share()
-			r.reconcile()
-		case <-ctx.Done():
-			return
-		}
-	}
+	pace.Tick(ctx, shareEvery, func(context.Context) {
+		r.drain()
+		r.shaper.share()
+		r.reconcile()
+	})
 }
 
 func (r *Registry) lookup(key string) *slot {
@@ -606,12 +595,31 @@ func (s *slot) exhaust() {
 	s.mu.Unlock()
 }
 
+// unseen is the bytes of the batches the panel has not stored as of baseSeq (of the epoch
+// the policies came with): the outstanding one and the replay of a restart. get picks the
+// traffic of one slot or pool from a batch. The caller holds batchMu.
+func (r *Registry) unseen(epoch string, baseSeq int64, get func(*nodeapi.Counters) nodeapi.Traffic) int64 {
+	var n int64
+	for _, b := range append([]*nodeapi.Counters{r.pending}, r.replays...) {
+		if b != nil && (epoch != r.epoch || b.Seq > baseSeq) {
+			t := get(b)
+			n += t.Up + t.Down
+		}
+	}
+	return n
+}
+
 // Counters returns the outstanding batch, cutting a new one if the previous was acked.
 func (r *Registry) Counters() nodeapi.Counters {
 	r.batchMu.Lock()
 	defer r.batchMu.Unlock()
 	r.drain()
 	r.reconcile()
+	// What the file held when the node went down goes out first, as the batch it would have
+	// been (restore).
+	if r.pending == nil && len(r.replays) > 0 {
+		r.pending, r.replays = r.replays[0], r.replays[1:]
+	}
 	r.mu.Lock()
 	all := make([]*slot, 0, len(r.byName)+len(r.retired))
 	for _, s := range r.byName {
@@ -716,12 +724,14 @@ type counterState struct {
 	Current map[string]nodeapi.Traffic `json:"current"`
 	// CurrentPools: the same for traffic pools, slot → pool.
 	CurrentPools map[string]map[string]nodeapi.Traffic `json:"current_pools,omitempty"`
+	// Replays are the batches of an earlier restart not sent yet (Registry.replays).
+	Replays []*nodeapi.Counters `json:"replays,omitempty"`
 }
 
 func (r *Registry) snapshot() counterState {
 	r.batchMu.Lock()
 	defer r.batchMu.Unlock()
-	st := counterState{Epoch: r.epoch, Seq: r.seq, Pending: r.pending, Current: map[string]nodeapi.Traffic{}}
+	st := counterState{Epoch: r.epoch, Seq: r.seq, Pending: r.pending, Current: map[string]nodeapi.Traffic{}, Replays: r.replays}
 	r.mu.RLock()
 	for _, s := range append(r.retired[:len(r.retired):len(r.retired)], values(r.byName)...) {
 		if up, down := s.up.Load(), s.down.Load(); up != 0 || down != 0 {
@@ -747,7 +757,8 @@ func (r *Registry) snapshot() counterState {
 	return st
 }
 
-// restore adds persisted counters to the current slots; unknown slots are kept as retired.
+// restore takes the persisted counters back: the batch that was outstanding, and the bytes
+// no batch had taken yet as a batch of their own (replay).
 func (r *Registry) restore(st counterState) {
 	r.batchMu.Lock()
 	defer r.batchMu.Unlock()
@@ -757,30 +768,19 @@ func (r *Registry) restore(st counterState) {
 	// be thrown away as a duplicate. A pending batch keeps its own seq: the panel treats
 	// it as the duplicate or the news it is.
 	r.epoch, r.seq, r.pending = st.Epoch, st.Seq+seqAfterCrash, st.Pending
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for name, t := range st.Current {
-		s := r.byName[name]
-		if s == nil {
-			s = newSlot(name, "")
-			r.retired = append(r.retired, s)
+	// The bytes the file counted that no batch had taken go out as the batch the next cut would
+	// have been, seq+1: the node may have cut and the panel stored that one before the node
+	// went down, and then the panel drops this as the duplicate it is; else it counts them
+	// once. Put back on the slots, they would come again in a batch the panel takes, after the
+	// one that held them already, and be counted twice.
+	// A restart before an earlier one's replays went out keeps them, in order.
+	r.replays = st.Replays
+	if len(st.Current) > 0 || len(st.CurrentPools) > 0 {
+		slots := st.Current
+		if slots == nil {
+			slots = map[string]nodeapi.Traffic{}
 		}
-		s.up.Add(t.Up)
-		s.down.Add(t.Down)
-	}
-	for name, pools := range st.CurrentPools {
-		s := r.byName[name]
-		if s == nil {
-			s = newSlot(name, "")
-			r.retired = append(r.retired, s)
-		}
-		s.mu.Lock()
-		for pool, t := range pools {
-			b := s.poolLocked(pool)
-			b.up.Add(t.Up)
-			b.down.Add(t.Down)
-		}
-		s.mu.Unlock()
+		r.replays = append(r.replays, &nodeapi.Counters{Epoch: st.Epoch, Seq: st.Seq + 1, Slots: slots, Pools: st.CurrentPools})
 	}
 }
 

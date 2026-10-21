@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/pace"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/warp"
@@ -160,16 +162,16 @@ func (s *Syncer) run(ctx context.Context) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		every(ctx, 2*time.Second, s.pullCounters)
+		pace.Tick(ctx, 2*time.Second, s.pullCounters)
 	}()
 	go func() {
 		defer wg.Done()
-		every(ctx, torrentPullEvery, s.pullTorrents)
+		pace.Tick(ctx, torrentPullEvery, s.pullTorrents)
 	}()
 	go func() {
 		defer wg.Done()
 		s.refreshHealth(ctx)
-		every(ctx, 5*time.Second, s.refreshHealth)
+		pace.Tick(ctx, 5*time.Second, s.refreshHealth)
 	}()
 	s.applyState(ctx)
 	for {
@@ -180,28 +182,10 @@ func (s *Syncer) run(ctx context.Context) {
 			s.applyState(ctx)
 		case <-s.policiesDirty:
 			// Coalesce bursts (bulk actions) into one push.
-			t := time.NewTimer(150 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				t.Stop()
+			if !pace.Sleep(ctx, 150*time.Millisecond) {
 				return
-			case <-t.C:
 			}
 			s.pushPolicies(ctx, true)
-		}
-	}
-}
-
-// every calls fn on a ticker until ctx ends.
-func every(ctx context.Context, d time.Duration, fn func(context.Context)) {
-	t := time.NewTicker(d)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			fn(ctx)
 		}
 	}
 }
@@ -511,11 +495,12 @@ func (s *Syncer) policiesFrom(snap *snapshot) (epoch string, out []nodeapi.Polic
 // the user may connect to (the card's protocols or the tariff's servers) and shut the
 // inbounds here the user's tariff leaves out (a closed group).
 func userPolicy(u db.User, grants int64, name string, seq int64, now time.Time, here []db.Inbound, access domain.Access, shut map[int64]bool, otherIPs []string) nodeapi.Policy {
-	// A user whose main traffic ran out still gets in: the node turns away the inbounds
-	// outside every pool (QuotaRemaining 0) and keeps the pools that have traffic left.
+	// A user whose main traffic ran out still gets in: the node turns away the inbounds that
+	// count to it (outside every group, or in one in the main traffic; QuotaRemaining 0) and
+	// keeps the groups with traffic of their own left.
 	state := domain.State(u, grants, now)
 	p := nodeapi.Policy{Slot: name, Allowed: domain.CanConnect(state) || state == domain.StateLimited, BaseSeq: seq, OtherIPs: otherIPs,
-		QuotaRemaining: domain.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants)}
+		QuotaRemaining: model.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants)}
 	if u.DeviceLimit.Valid {
 		p.DeviceLimit = int(u.DeviceLimit.Int64)
 	}
@@ -825,40 +810,40 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 	}
 }
 
+// stateKey is what the node holds of st besides the policies: the whole state, the
+// revision, the counters' epoch and the policies left out, so a field added to the state is
+// in the key without being named here (a list of the fields forgot some before).
 func stateKey(st nodeapi.DesiredState) string {
-	raw, _ := json.Marshal(struct {
-		I []nodeapi.Inbound
-		S []nodeapi.Slot
-		T *nodeapi.TLSFiles
-		P int
-		W *nodeapi.Warp
-		R *nodeapi.Relay
-		E []nodeapi.Exit
-		B *nodeapi.TorrentBlock
-		F *nodeapi.Filters
-		H *nodeapi.Shaping
-		D *nodeapi.ExitDNS
-		A []string
-		X bool
-		V bool
-		O *nodeapi.SNIRouter
-		G string
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Torrent, st.Filters, st.Shaping, st.DNS, st.APIAllow,
-		st.HTTPRedirect, st.Detail, st.Router, st.FrontPage})
+	st.Revision, st.Epoch, st.Policies = 0, "", nil
+	raw, _ := json.Marshal(st)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
 
-// policyKey ignores QuotaRemaining/BaseSeq: they change with every byte and the node
-// tracks consumption itself between pushes.
+// policyKey is the policies whole, but for what changes with every byte, which the node
+// tracks itself between pushes: the quotas left (only whether there is one) and their base.
 func policyKey(ps []nodeapi.Policy) string {
 	h := sha256.New()
 	for _, p := range ps {
-		raw, _ := json.Marshal([]any{p.Slot, p.Allowed, p.Inbounds, p.DeviceLimit, p.QuotaRemaining < 0, p.OtherIPs, poolKey(p.Pools),
-			p.TorrentExempt, p.BannedUntil, p.SpeedMbps, p.Group})
+		p.QuotaRemaining, p.BaseSeq = limited(p.QuotaRemaining), 0
+		pools := make([]nodeapi.PoolQuota, len(p.Pools))
+		for i, q := range p.Pools {
+			q.Remaining = limited(q.Remaining)
+			pools[i] = q
+		}
+		p.Pools = pools
+		raw, _ := json.Marshal(p)
 		h.Write(raw)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// limited is what a key keeps of a quota left: -1 for none, 0 for one.
+func limited(n int64) int64 {
+	if n < 0 {
+		return -1
+	}
+	return 0
 }
 
 // warp is the node's WARP outbound, nil when it has none or it is off. Inbounds set to
@@ -895,15 +880,11 @@ func (s *Syncer) warp(ctx context.Context, n db.Node, inbounds []db.Inbound) (*n
 // Warp asks the node how it reaches the internet through WARP; force skips the node's
 // minute-old answer.
 func (m *Manager) Warp(ctx context.Context, id int64, force bool) (nodeapi.WarpStatus, error) {
-	s, ok := m.Syncer(id)
-	if !ok {
-		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
-	}
-	c, ok := s.node.(interface {
+	c, err := clientOf[interface {
 		Warp(ctx context.Context, force bool) (nodeapi.WarpStatus, error)
-	})
-	if !ok {
-		return nodeapi.WarpStatus{}, nodeapi.ErrUnavailable
+	}](m, id)
+	if err != nil {
+		return nodeapi.WarpStatus{}, err
 	}
 	return c.Warp(ctx, force)
 }
@@ -1028,15 +1009,11 @@ func unreachableExit(id int64) json.RawMessage {
 
 // Probe asks the node how it reaches the internet through one of its outbounds.
 func (m *Manager) Probe(ctx context.Context, id int64, proxy string) (nodeapi.ProbeResult, error) {
-	s, ok := m.Syncer(id)
-	if !ok {
-		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
-	}
-	c, ok := s.node.(interface {
+	c, err := clientOf[interface {
 		Probe(ctx context.Context, proxy string) (nodeapi.ProbeResult, error)
-	})
-	if !ok {
-		return nodeapi.ProbeResult{}, nodeapi.ErrUnavailable
+	}](m, id)
+	if err != nil {
+		return nodeapi.ProbeResult{}, err
 	}
 	return c.Probe(ctx, proxy)
 }
@@ -1044,15 +1021,11 @@ func (m *Manager) Probe(ctx context.Context, id int64, proxy string) (nodeapi.Pr
 // Tunnel opens a stream to addr through node id: the bot reaches Telegram this way when
 // the panel's own server cannot. The node lets through only nodeapi.TunnelHosts.
 func (m *Manager) Tunnel(ctx context.Context, id int64, addr string) (net.Conn, error) {
-	s, ok := m.Syncer(id)
-	if !ok {
-		return nil, nodeapi.ErrUnavailable
-	}
-	c, ok := s.node.(interface {
+	c, err := clientOf[interface {
 		Tunnel(ctx context.Context, addr string) (net.Conn, error)
-	})
-	if !ok {
-		return nil, nodeapi.ErrUnavailable
+	}](m, id)
+	if err != nil {
+		return nil, err
 	}
 	return c.Tunnel(ctx, addr)
 }
@@ -1069,25 +1042,11 @@ func userPoolQuotas(userID int64, rows []db.UserPool, here []int64, mainLeft int
 		pool := strconv.FormatInt(id, 10)
 		switch mode {
 		case domain.PoolOwn:
-			left := domain.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(userID, id))
+			left := model.TrafficLeft(p.TrafficLimit, p.UsedUp+p.UsedDown, grants.Pool(userID, id))
 			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: left})
 		case domain.PoolMain:
 			out = append(out, nodeapi.PoolQuota{Pool: pool, Remaining: mainLeft, Main: true})
 		}
-	}
-	return out
-}
-
-// poolKey: which groups have a quota and which count to the main traffic, not how much
-// is left (the node counts that down).
-func poolKey(ps []nodeapi.PoolQuota) []string {
-	out := make([]string, 0, len(ps))
-	for _, p := range ps {
-		if p.Main {
-			out = append(out, p.Pool+":main")
-			continue
-		}
-		out = append(out, p.Pool)
 	}
 	return out
 }

@@ -1,5 +1,7 @@
 package tgate
 
+import "mikan/internal/textutil"
+
 // The gateway's own words, in the bot's language: to the admin about its chat and the
 // token, and the reason a Stars payment is refused before it is made. The bot's screens
 // have theirs in tgbot.
@@ -24,9 +26,5 @@ var en = words{
 	payStale:        "The invoice is out of date. Open the bot's menu and pay again.",
 }
 
-func wordsFor(lang string) *words {
-	if lang == "en" {
-		return &en
-	}
-	return &ru
-}
+// wordsFor is the words of lang (textutil.Lang: English for "en", Russian for anything else).
+func wordsFor(lang string) *words { return textutil.ByLang(lang, &ru, &en) }

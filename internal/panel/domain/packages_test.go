@@ -21,6 +21,8 @@ func TestPackagesCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	servePool(t, e.ctx, e.st.Q, pool.ID)
+	servePool(t, e.ctx, e.st.Q, other.ID)
 	stars := sql.NullInt64{Int64: 50, Valid: true}
 	ok := PackageInput{Name: " +50 GB ", Bytes: 50 * GiB, Lifetime: LifetimeUsed, PriceStars: stars, OnSale: true}
 	main, err := pk.Create(e.ctx, ok)
@@ -79,7 +81,7 @@ func TestPackagesCatalog(t *testing.T) {
 	}
 	ids := func() []int64 {
 		t.Helper()
-		ps, err := PackagesFor(e.ctx, e.st.Q, e.u.ID)
+		ps, err := PackagesFor(e.ctx, e.st.Q, e.u.ID, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -61,21 +61,20 @@ func (f *frontPage) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 // set makes kind the page (frontpage.Templates) over tlsState, the node's certificate;
-// either missing turns the page off. It says whether the page is on.
-func (f *frontPage) set(kind string, tlsState *nodeapi.TLSFiles) bool {
+// either missing, or a certificate that does not load, turns the page off (on says which).
+func (f *frontPage) set(kind string, tlsState *nodeapi.TLSFiles) {
 	page := frontpage.Page(kind)
 	if page == nil || tlsState == nil || tlsState.CertPEM == "" {
 		f.page.Store(nil)
-		return false
+		return
 	}
 	cert, err := tls.X509KeyPair([]byte(tlsState.CertPEM), []byte(tlsState.KeyPEM))
 	if err != nil {
 		f.page.Store(nil)
-		return false
+		return
 	}
 	f.cert.Store(&cert)
 	f.page.Store(&page)
-	return true
 }
 
 // on says whether the page is on.
@@ -87,11 +86,6 @@ func (f *frontPage) take(c net.Conn, hello []byte) {
 	if f.ln.push(rc) {
 		<-rc.done
 	}
-}
-
-func (f *frontPage) close() {
-	_ = f.srv.Close()
-	_ = f.ln.Close()
 }
 
 // handover is a listener whose connections come from inside the process.

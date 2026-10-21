@@ -89,6 +89,61 @@ func (q *Queries) AddTariffPool(ctx context.Context, arg AddTariffPoolParams) er
 	return err
 }
 
+const applyTariffLimits = `-- name: ApplyTariffLimits :exec
+UPDATE users u SET
+  traffic_limit  = CASE WHEN $1::BOOLEAN THEN t.traffic_limit ELSE u.traffic_limit END,
+  reset_strategy = CASE WHEN $1::BOOLEAN THEN t.reset_strategy ELSE u.reset_strategy END,
+  device_limit   = CASE WHEN $2::BOOLEAN THEN t.device_limit + u.extra_devices ELSE u.device_limit END,
+  device_mode    = CASE WHEN $2::BOOLEAN THEN t.device_mode ELSE u.device_mode END,
+  speed_limit    = CASE WHEN $3::BOOLEAN THEN t.speed_limit ELSE u.speed_limit END,
+  updated_at     = $4::BIGINT
+FROM tariffs t
+WHERE t.id = $5::BIGINT AND u.tariff_id = t.id
+`
+
+type ApplyTariffLimitsParams struct {
+	Traffic  bool
+	Devices  bool
+	Speed    bool
+	Now      int64
+	TariffID int64
+}
+
+// The users of a tariff take its values of the chosen parts now (ApplyTariffToAll), each
+// only the columns of its part: the traffic per period and its reset, the device limit (with
+// the devices bought on top, an unlimited one staying unlimited) and how it counts, the
+// speed. What they used and their terms stay.
+func (q *Queries) ApplyTariffLimits(ctx context.Context, arg ApplyTariffLimitsParams) error {
+	_, err := q.db.ExecContext(ctx, applyTariffLimits,
+		arg.Traffic,
+		arg.Devices,
+		arg.Speed,
+		arg.Now,
+		arg.TariffID,
+	)
+	return err
+}
+
+const applyTariffUsersPools = `-- name: ApplyTariffUsersPools :exec
+WITH reset AS (
+  UPDATE user_pools up SET mode = 'main', traffic_limit = NULL
+  FROM users u WHERE up.user_id = u.id AND u.tariff_id = $1::BIGINT
+  RETURNING up.user_id
+)
+INSERT INTO user_pools (user_id, pool_id, mode, traffic_limit)
+SELECT u.id, tp.pool_id, tp.mode, tp.traffic_limit
+FROM users u JOIN tariff_pools tp ON tp.tariff_id = u.tariff_id
+WHERE u.tariff_id = $1::BIGINT AND tp.mode <> 'main'
+ON CONFLICT (user_id, pool_id) DO UPDATE SET mode = excluded.mode, traffic_limit = excluded.traffic_limit
+`
+
+// The users of a tariff take the modes of its groups (ApplyTariffPools for all of them):
+// every group back in the main traffic first, then the tariff's rows that are not.
+func (q *Queries) ApplyTariffUsersPools(ctx context.Context, tariffID int64) error {
+	_, err := q.db.ExecContext(ctx, applyTariffUsersPools, tariffID)
+	return err
+}
+
 const clearPackageTariffs = `-- name: ClearPackageTariffs :exec
 DELETE FROM package_tariffs WHERE package_id = $1
 `
@@ -789,6 +844,51 @@ func (q *Queries) SetUserPool(ctx context.Context, arg SetUserPoolParams) error 
 		arg.TrafficLimit,
 	)
 	return err
+}
+
+const tariffsLeftWithoutServers = `-- name: TariffsLeftWithoutServers :many
+SELECT t.id, t.name FROM tariffs t
+WHERE t.chosen_servers = 1
+  AND NOT EXISTS (SELECT 1 FROM tariff_nodes tn WHERE tn.tariff_id = t.id AND tn.node_id <> $1::BIGINT)
+  AND NOT EXISTS (SELECT 1 FROM tariff_inbounds ti JOIN inbounds i ON i.id = ti.inbound_id
+                  WHERE ti.tariff_id = t.id AND i.id <> $2::BIGINT AND i.node_id <> $1::BIGINT)
+ORDER BY t.id
+`
+
+type TariffsLeftWithoutServersParams struct {
+	NodeID    int64
+	InboundID int64
+}
+
+type TariffsLeftWithoutServersRow struct {
+	ID   int64
+	Name string
+}
+
+// The tariffs that choose their servers and would have none left without node node_id, or
+// without inbound inbound_id (0: none of either): what a deletion must not do to them, since
+// their users would be left with no server and no word of it.
+func (q *Queries) TariffsLeftWithoutServers(ctx context.Context, arg TariffsLeftWithoutServersParams) ([]TariffsLeftWithoutServersRow, error) {
+	rows, err := q.db.QueryContext(ctx, tariffsLeftWithoutServers, arg.NodeID, arg.InboundID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TariffsLeftWithoutServersRow{}
+	for rows.Next() {
+		var i TariffsLeftWithoutServersRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const userPoolModes = `-- name: UserPoolModes :many

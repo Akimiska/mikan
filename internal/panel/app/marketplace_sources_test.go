@@ -19,6 +19,7 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/release"
 )
 
 // A lab for the third-party sources: the panel in development mode (a source on 127.0.0.1 is
@@ -67,12 +68,12 @@ func newSrcLab(t *testing.T) *srcLab {
 		switch {
 		case r.URL.Path == "/index.json":
 			_, _ = w.Write(data)
-		case r.URL.Path == "/index.json.sig":
-			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data)))
+		case r.URL.Path == "/index.json"+release.SigSuffix:
+			_, _ = io.WriteString(w, release.SignIn(release.CatalogContext, data, priv))
 		case r.URL.Path == "/community/index.json" && registry != nil:
 			_, _ = w.Write(registry)
-		case r.URL.Path == "/community/index.json.sig" && registry != nil:
-			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, registry)))
+		case r.URL.Path == "/community/index.json"+release.SigSuffix && registry != nil:
+			_, _ = io.WriteString(w, release.SignIn(release.CommunityContext, registry, priv))
 		default:
 			http.NotFound(w, r)
 		}
@@ -84,7 +85,7 @@ func newSrcLab(t *testing.T) *srcLab {
 	l.h = newHarness(t, func(o *Options) {
 		o.DataDir, o.AddonsCatalog, o.AddonsCommunity, o.Dev = l.dir, catalog.URL+"/index.json", l.registryURL, true
 	})
-	l.h.p.Addons.SetKey(pub)
+	l.h.p.Addons.SetKeys(pub, pub)
 	if resp, _ := l.h.login(password, ""); resp.StatusCode != http.StatusOK {
 		t.Fatalf("login: %d", resp.StatusCode)
 	}

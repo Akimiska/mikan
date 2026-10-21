@@ -178,8 +178,8 @@ export function Shop({
                     {g.name}: {groupText(g)}
                   </span>
                 ))}
-                {o.gifts?.map((what) => (
-                  <span key={what} className="flex items-center gap-1.5">
+                {o.gifts?.map((what, i) => (
+                  <span key={i} className="flex items-center gap-1.5">
                     <Gift size={13} className="shrink-0 text-[var(--mikan-600)]" aria-hidden />
                     {t("sub.shopGift", { what })}
                   </span>
@@ -314,8 +314,6 @@ export function FreePlan({
   );
 }
 
-/** The price a list shows: rubles when sold for them, else Stars; "from" the cheapest term
- * of a plan sold for several. */
 /** How a plan has a group, in words: "included", "50 GB of its own", "unlimited", "not included". */
 function groupText(g: OfferGroup): string {
   switch (g.mode) {
@@ -330,6 +328,8 @@ function groupText(g: OfferGroup): string {
   }
 }
 
+/** The price a list shows: rubles when sold for them, else Stars; "from" the cheapest term
+ * of a plan sold for several. */
 function listPrice(o: Offer): string {
   const terms = o.terms && o.terms.length > 1 ? o.terms : [o];
   const rub = Math.min(...terms.map((x) => x.rub || Infinity));

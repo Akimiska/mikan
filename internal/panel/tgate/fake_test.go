@@ -16,12 +16,13 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/storetest"
+	"mikan/internal/tgapi"
 )
 
 // fakeTelegram is the Bot API for tests: it hands out queued updates and records calls.
 type fakeTelegram struct {
 	mu      sync.Mutex
-	updates []Update // not yet confirmed by an offset past them, as at Telegram
+	updates []tgapi.Update // not yet confirmed by an offset past them, as at Telegram
 	seq     int64
 	offsets []int64 // the offset of each getUpdates
 	calls   []call
@@ -43,7 +44,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ok := func(result any) { _ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
 	switch method {
 	case "getMe":
-		ok(User{ID: 1, IsBot: true, FirstName: "Mikan", Username: "mikan_test_bot"})
+		ok(tgapi.User{ID: 1, IsBot: true, FirstName: "Mikan", Username: "mikan_test_bot"})
 		return
 	case "getUpdates":
 		f.mu.Lock()
@@ -68,7 +69,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			f.updates = keep
-			ups := append([]Update(nil), keep...)
+			ups := append([]tgapi.Update(nil), keep...)
 			f.mu.Unlock()
 			if len(ups) > 0 {
 				ok(ups)
@@ -76,7 +77,7 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		ok([]Update{})
+		ok([]tgapi.Update{})
 		return
 	}
 	f.mu.Lock()
@@ -94,13 +95,13 @@ func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "createInvoiceLink":
 		ok("https://t.me/$inv" + strconv.FormatInt(id, 10))
 	case "sendMessage":
-		ok(Message{MessageID: 1000 + id, Chat: Chat{ID: int64(chat), Type: "private"}})
+		ok(tgapi.Message{MessageID: 1000 + id, Chat: tgapi.Chat{ID: int64(chat), Type: "private"}})
 	default:
 		ok(true)
 	}
 }
 
-func (f *fakeTelegram) push(u Update) {
+func (f *fakeTelegram) push(u tgapi.Update) {
 	f.mu.Lock()
 	f.seq++
 	u.UpdateID = 1000 + f.seq
@@ -169,12 +170,12 @@ func text(c call) string { s, _ := c.body["text"].(string); return s }
 // it does in the bot, sent through the gateway's outbox.
 type screens struct{ e *env }
 
-func (s screens) Update(_ context.Context, up Update) error {
+func (s screens) Update(_ context.Context, up tgapi.Update) error {
 	if up.Message == nil {
 		return nil
 	}
 	chat := up.Message.Chat.ID
-	s.e.gate.Outbox().Reply(chat, "", 1, func(ctx context.Context, c *Client) error {
+	s.e.gate.Outbox().Reply(chat, "", 1, func(ctx context.Context, c *tgapi.Client) error {
 		_, err := c.Send(ctx, chat, "menu", nil, false)
 		return err
 	})
@@ -206,6 +207,8 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 	t.Helper()
 	return start(t, true, with...)
 }
+
+var fast = tgapi.Limits{Total: 1000, Bulk: 1000, PerChat: 1000, Burst: 1000, Workers: 1, MaxTries: 3}
 
 func start(t *testing.T, withScreens bool, with ...func(e *env, d *Deps)) *env {
 	t.Helper()
@@ -248,5 +251,5 @@ func start(t *testing.T, withScreens bool, with ...func(e *env, d *Deps)) *env {
 // say sends a message from a Telegram user.
 func (e *env) say(from int64, s string) {
 	e.msgID++
-	e.tg.push(Update{Message: &Message{MessageID: e.msgID, From: &User{ID: from, FirstName: "Anna", Username: "anna"}, Chat: Chat{ID: from, Type: "private"}, Text: s}})
+	e.tg.push(tgapi.Update{Message: &tgapi.Message{MessageID: e.msgID, From: &tgapi.User{ID: from, FirstName: "Anna", Username: "anna"}, Chat: tgapi.Chat{ID: from, Type: "private"}, Text: s}})
 }

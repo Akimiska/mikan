@@ -3,10 +3,8 @@ package acme
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/mail"
@@ -14,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/httpjson"
 	"mikan/internal/panel/settings"
 )
 
@@ -125,7 +124,8 @@ func zeroSSLEAB(ctx context.Context, client *http.Client, email string) (EAB, er
 			Type string `json:"type"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out); err != nil {
+	// ZeroSSL words a refusal in the body too: the status is read with it.
+	if err := httpjson.Decode(resp.Body, 64<<10, &out); err != nil {
 		return EAB{}, fmt.Errorf("%w: HTTP %d, %v", ErrZeroSSLEAB, resp.StatusCode, err)
 	}
 	// acme.sh, which has used this API for years, reads only the two fields: they are what

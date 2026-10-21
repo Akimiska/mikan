@@ -1,12 +1,13 @@
 // Package support is the panel's "support access": a temporary, revocable access the admin
 // opens for whoever helps them, so that they need to give out neither the password nor SSH.
 //
-// A grant has a level (view, change, terminal), a lifetime of 2, 6 or 24 hours and a token
-// (ms_ + 40 base62) shown once; only its hash is kept. One grant is live at a time. The
-// operator uses it in a browser (one entry per link, a session bound to the grant) or with
-// "Authorization: Bearer ms_..." (for as long as the grant lives). The API layer (internal/
-// panel/api, support.go) decides what a grant lets through; this package keeps the grants,
-// their journal lines and the admin's notices.
+// A grant has a level (view, change, terminal), the extended mode or not on top of a level
+// that writes, a lifetime of 2, 6 or 24 hours and a token (ms_ + 40 base62) shown once; only
+// its hash is kept. One grant is live at a time. The operator uses it in a browser (one entry
+// per link, a session bound to the grant) or with "Authorization: Bearer ms_..." (for as
+// long as the grant lives). The API layer (internal/panel/api, support.go) decides what a
+// grant lets through; this package keeps the grants, their journal lines and the admin's
+// notices.
 package support
 
 import (
@@ -185,9 +186,12 @@ type CreateInput struct {
 	Hours      int
 	Level      string
 	ShowPeople bool
-	Targets    []string // terminal level only
-	Note       string
-	IP         string
+	// Extended: the operations only the admin's own session may otherwise call (change and
+	// terminal levels only; the API asks for the password, as for a terminal).
+	Extended bool
+	Targets  []string // terminal level only
+	Note     string
+	IP       string
 }
 
 type Created struct {
@@ -211,6 +215,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 	if err != nil {
 		return Created{}, err
 	}
+	// The mode adds writes: a grant that only reads has none to add.
+	if in.Extended && !Writes(in.Level) {
+		return Created{}, &FieldError{"extended", "support_extended_level"}
+	}
 	note := strings.TrimSpace(in.Note)
 	if len([]rune(note)) > MaxNote {
 		return Created{}, &FieldError{"note", "note_too_long"}
@@ -228,7 +236,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 		}
 		gone = ended
 		g, err := q.CreateSupportGrant(ctx, db.CreateSupportGrantParams{
-			TokenHash: HashToken(token), AdminID: in.AdminID, Level: in.Level, ShowPeople: in.ShowPeople,
+			TokenHash: HashToken(token), AdminID: in.AdminID, Level: in.Level, ShowPeople: in.ShowPeople, Extended: in.Extended,
 			TerminalTargets: targets, Note: note, CreatedAt: now.Unix(), ExpiresAt: now.Add(time.Duration(in.Hours) * time.Hour).Unix(),
 		})
 		if err != nil {
@@ -237,7 +245,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 		out = Created{Grant: g, Token: token}
 		return audit.Write(ctx, q, now, audit.Entry{AdminID: in.AdminID, Action: "support.grant", TargetType: audit.TargetSupportGrant,
 			TargetID: strconv.FormatInt(g.ID, 10), IP: in.IP,
-			Details: map[string]any{"level": g.Level, "hours": in.Hours, "show_people": g.ShowPeople, "terminal_targets": g.TerminalTargets, "note": g.Note}})
+			Details: map[string]any{"level": g.Level, "hours": in.Hours, "show_people": g.ShowPeople, "extended": g.Extended, "terminal_targets": g.TerminalTargets, "note": g.Note}})
 	})
 	if err != nil {
 		return Created{}, err

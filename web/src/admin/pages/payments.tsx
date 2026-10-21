@@ -8,7 +8,7 @@ import { Confirm } from "../../components/overlay";
 import { useToast } from "../../components/toast";
 import { QueryBoundary } from "../../components/query";
 import { Switch, SwitchRow } from "../../components/switch";
-import { FormActions } from "../../components/layout";
+import { CardHead, FormActions } from "../../components/layout";
 import { Tabs } from "../../components/tabs";
 import { Button, EmptyState, Field, PageHeader, Pill, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
@@ -170,14 +170,7 @@ function History() {
   const totals = list.data?.pages[0]?.totals ?? [];
   return (
     <section className="card glass reveal min-w-0">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("payments.history")}</h2>
-          <div className="card-sub">
-            {totals.length ? totals.map((x) => t("payments.total", { n: num(x.count), sum: money(x.total, x.currency) })).join(" · ") : t("payments.noTotals")}
-          </div>
-        </div>
-      </div>
+      <CardHead title={t("payments.history")} sub={totals.length ? totals.map((x) => t("payments.total", { n: num(x.count), sum: money(x.total, x.currency) })).join(" · ") : t("payments.noTotals")} />
       <div className="mb-4 flex flex-wrap gap-2">
         <select className="input max-w-[200px]" value={status} onChange={(e) => setStatus(e.target.value as Status | "")} aria-label={t("payments.status")}>
           <option value="">{t("payments.allStatuses")}</option>
@@ -229,7 +222,7 @@ function History() {
         open={!!refund}
         onOpenChange={(v) => !v && setRefund(null)}
         title={t("payments.refundTitle", { sum: refund ? money(refund.amount, refund.currency) : "" })}
-        text={t("payments.refundText")}
+        text={t(refund?.provider === "stars" ? "payments.refundText" : refund?.provider === "balance" ? "payments.refundBalanceText" : "payments.refundAddonText")}
         confirm={t("payments.refund")}
         danger
         loading={doRefund.isPending}
@@ -239,7 +232,7 @@ function History() {
         open={!!byHand}
         onOpenChange={(v) => !v && setByHand(null)}
         title={t("payments.byHandTitle", { sum: byHand ? money(byHand.amount, byHand.currency) : "" })}
-        text={t("payments.byHandText")}
+        text={t(byHand?.status === "applied" ? "payments.byHandAppliedText" : "payments.byHandText")}
         confirm={t("payments.byHand")}
         loading={doByHand.isPending}
         onConfirm={() => byHand && doByHand.mutate(byHand.id)}
@@ -275,14 +268,18 @@ function PaymentRow({ p, provider, onRefund, onByHand }: { p: Payment; provider:
           </div>
         ) : null}
       </div>
-      {p.provider === "stars" && (p.status === "applied" || p.status === "paid") ? (
-        <Button size="sm" variant="ghost" onClick={onRefund}>
-          <Undo2 size={16} aria-hidden /> {t("payments.refund")}
-        </Button>
-      ) : p.provider !== "stars" && p.status === "paid" ? (
-        <Button size="sm" variant="ghost" onClick={onByHand}>
-          <HandCoins size={16} aria-hidden /> {t("payments.byHand")}
-        </Button>
+      {p.status === "applied" || p.status === "paid" ? (
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {/* Stars and the balance give the money back from here; an adapter does when it can. */}
+          <Button size="sm" variant="ghost" onClick={onRefund}>
+            <Undo2 size={16} aria-hidden /> {t("payments.refund")}
+          </Button>
+          {p.provider.startsWith("addon:") ? (
+            <Button size="sm" variant="ghost" onClick={onByHand}>
+              <HandCoins size={16} aria-hidden /> {t("payments.byHand")}
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </li>
   );
@@ -311,7 +308,7 @@ function StarsCard({ s }: { s: Settings }) {
   return (
     <section className="card glass reveal">
       <form onSubmit={submit} noValidate>
-        {save.error ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        {save.error ? <div className="banner err mb-4" role="alert">{errorText(save.error)}</div> : null}
         <Provider title={t("payments.providers.stars")} sub={t("payments.starsSub")} on={stars} onChange={setStars} live={s.available.stars} selling={s.enabled} offline={s.enabled && stars && !s.available.stars ? t("payments.starsBotOff") : ""} />
         <FormActions dirty={dirty} saving={save.isPending} onReset={reset} />
       </form>
@@ -353,22 +350,26 @@ function AddonMethodsCard() {
   );
 }
 
+/** The rules' form as the settings hold them. A save puts the draft back to it: "199,50"
+ * typed is 199.5 there, and the form would stay unsaved after the save. */
+const rulesForm = (s: Settings) => ({
+  allowNew: s.allow_new,
+  resetTraffic: s.renew_resets_traffic,
+  keepDevices: s.extra_devices_keep,
+  trial: s.trial_tariff_id ?? 0,
+  trialStars: s.trial_stars ? String(s.trial_stars) : "",
+  trialRub: s.trial_rub ? String(s.trial_rub / 100) : "",
+  free: s.free_tariff_id ?? 0,
+  freeCondition: s.free_condition,
+});
+
 /** Who may buy, what a renewal does to the traffic, the free trial and the free plan. */
 function RulesCard({ s }: { s: Settings }) {
   const tariffs = useTariffs();
   const save = useSavePayments();
   // The free plan's channel condition needs the bot's channel (Telegram → Menu and texts).
   const hasChannel = !!useTelegram().data?.config.channel.chat;
-  const { draft: form, setDraft: setForm, dirty, reset } = useDraft({
-    allowNew: s.allow_new,
-    resetTraffic: s.renew_resets_traffic,
-    keepDevices: s.extra_devices_keep,
-    trial: s.trial_tariff_id ?? 0,
-    trialStars: s.trial_stars ? String(s.trial_stars) : "",
-    trialRub: s.trial_rub ? String(s.trial_rub / 100) : "",
-    free: s.free_tariff_id ?? 0,
-    freeCondition: s.free_condition,
-  });
+  const { draft: form, setDraft: setForm, dirty, reset } = useDraft(rulesForm(s));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -380,29 +381,27 @@ function RulesCard({ s }: { s: Settings }) {
     if (form.trialRub.trim() && !isKopecks(rubN)) errs.trial_rub = t("tariffs.errRub");
     setErrors(errs);
     if (Object.keys(errs).length) return;
-    save.mutate({
-      allow_new: form.allowNew,
-      renew_resets_traffic: form.resetTraffic,
-      extra_devices_keep: form.keepDevices,
-      trial_tariff_id: form.trial,
-      // No trial, no price: a price left in the hidden fields does not come back later.
-      trial_stars: form.trial && form.trialStars.trim() ? starsN : 0,
-      trial_rub: form.trial && form.trialRub.trim() ? rubN : 0,
-      free_tariff_id: form.free,
-      // Sent only when changed: a channel removed from the bot since does not block saving the rest.
-      ...(form.freeCondition !== s.free_condition ? { free_condition: form.freeCondition } : {}),
-    });
+    save.mutate(
+      {
+        allow_new: form.allowNew,
+        renew_resets_traffic: form.resetTraffic,
+        extra_devices_keep: form.keepDevices,
+        trial_tariff_id: form.trial,
+        // No trial, no price: a price left in the hidden fields does not come back later.
+        trial_stars: form.trial && form.trialStars.trim() ? starsN : 0,
+        trial_rub: form.trial && form.trialRub.trim() ? rubN : 0,
+        free_tariff_id: form.free,
+        // Sent only when changed: a channel removed from the bot since does not block saving the rest.
+        ...(form.freeCondition !== s.free_condition ? { free_condition: form.freeCondition } : {}),
+      },
+      { onSuccess: (v) => setForm(rulesForm(v)) },
+    );
   };
   return (
     <section className="card glass reveal">
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("payments.tabs.rules")}</h2>
-            <div className="card-sub">{t("payments.settingsSub")}</div>
-          </div>
-        </div>
-        {save.error ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        <CardHead title={t("payments.tabs.rules")} sub={t("payments.settingsSub")} />
+        {save.error ? <div className="banner err mb-4" role="alert">{errorText(save.error)}</div> : null}
         <div className="row-list">
           <SwitchRow label={t("payments.allowNew")} sub={t("payments.allowNewSub")} checked={form.allowNew} onChange={(v) => setForm((f) => ({ ...f, allowNew: v }))} />
           <SwitchRow
@@ -514,21 +513,23 @@ function hundredths(text: string): number | null {
 
 const units = (n: number) => (n ? String(n / 100).replace(".", ",") : "");
 
+/** The balance's form as the settings hold it. */
+const balanceForm = (b: Settings["balance"]) => ({
+  enabled: b.enabled,
+  currency: b.currency as BalanceCurrency,
+  rate: String(b.rate || 1).replace(".", ","),
+  details: b.details,
+  min: units(b.min),
+  max: units(b.max),
+});
+
 /**
  * The accounts' balance: topped up by a transfer and a screenshot the admin checks, then it
  * pays like any method at the tariffs' ruble prices, in its own currency at the admin's rate.
  */
 function BalanceCard({ s }: { s: Settings }) {
   const save = useSavePayments();
-  const b = s.balance;
-  const { draft: form, setDraft: setForm, dirty, reset } = useDraft({
-    enabled: b.enabled,
-    currency: b.currency as BalanceCurrency,
-    rate: String(b.rate || 1).replace(".", ","),
-    details: b.details,
-    min: units(b.min),
-    max: units(b.max),
-  });
+  const { draft: form, setDraft: setForm, dirty, reset } = useDraft(balanceForm(s.balance));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => {
     setForm((f) => ({ ...f, [k]: v }));
@@ -547,12 +548,16 @@ function BalanceCard({ s }: { s: Settings }) {
     if (form.enabled && !form.details.trim()) next.details = t("payments.balance.detailsErr");
     setErrors(next);
     if (Object.keys(next).length) return;
-    save.mutate({ balance: { enabled: form.enabled, currency: form.currency, rate: form.currency === "RUB" ? 1 : rate, details: form.details.trim(), min: min ?? 0, max: max ?? 0 } });
+    // The draft takes what the server keeps ("500.50" is 500,5 there), or the card stayed unsaved.
+    save.mutate(
+      { balance: { enabled: form.enabled, currency: form.currency, rate: form.currency === "RUB" ? 1 : rate, details: form.details.trim(), min: min ?? 0, max: max ?? 0 } },
+      { onSuccess: (v) => setForm(balanceForm(v.balance)) },
+    );
   };
   return (
     <section className="card glass reveal lg:col-span-2">
       <form onSubmit={submit} noValidate>
-        {save.error ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        {save.error ? <div className="banner err mb-4" role="alert">{errorText(save.error)}</div> : null}
         <Provider
           title={t("payments.balance.title")}
           sub={t("payments.balance.sub")}

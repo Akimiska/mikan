@@ -7,40 +7,23 @@ import (
 	"time"
 
 	"mikan/internal/panel/support"
+	"mikan/internal/textutil"
 )
 
 // supportNoticeTimeout bounds one message to the admin: a slow Telegram holds nothing else.
 const supportNoticeTimeout = 15 * time.Second
 
 // tellAdminOfSupport tells the admin, in the chat connected for the panel's alerts, that a
-// support operator came in or that the access ended. It does nothing without the bot or the
-// chat: the journal has the lines anyway. The message goes out on the gateway's own
-// goroutine, so the request that caused it does not wait for Telegram.
+// support operator came in or that the access ended. The alerts' queue takes it (Notify): kept
+// in the database and tried again for a day, since the admin learns of an operator's entry
+// and of a terminal only through that chat. Without the bot or the chat nothing goes: the
+// journal has the lines anyway.
 func (p *Panel) tellAdminOfSupport(ctx context.Context, n support.Notice) {
-	g := p.Gateway
-	if g == nil {
+	if p.Gateway == nil || p.Alerts == nil {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	g.Go(func() {
-		ctx, cancel := context.WithTimeout(ctx, supportNoticeTimeout)
-		defer cancel()
-		if !g.InfrastructureEnabled(ctx) {
-			return
-		}
-		chat, ok, err := g.InfrastructureAdminChat(ctx)
-		if err != nil || !ok {
-			return
-		}
-		client, err := g.InfrastructureClient(ctx)
-		if err != nil {
-			p.log.Warn("support notice: no bot client", "err", err)
-			return
-		}
-		if _, err := client.Send(ctx, chat, supportNoticeText(g.Lang(ctx), n), nil, false); err != nil {
-			p.log.Warn("support notice: not delivered", "err", err)
-		}
-	})
+	p.Alerts.Notify(ctx, "", supportNoticeText(p.Gateway.Lang(ctx), n))
 }
 
 // terminalNoticeText tells the admin that support opened a terminal on a server, or closed
@@ -71,7 +54,7 @@ func terminalNoticeText(ru bool, n support.Notice) string {
 // supportNoticeText is the message in Telegram HTML. It names the level, the time and the
 // admin's own note; never a token.
 func supportNoticeText(lang string, n support.Notice) string {
-	ru := lang != "en"
+	ru := !textutil.Lang(lang).En()
 	if n.Terminal != "" {
 		return terminalNoticeText(ru, n)
 	}

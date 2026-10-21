@@ -45,6 +45,10 @@ func SetTariffGifts(ctx context.Context, q *db.Queries, t db.Tariff, ids []int64
 	if err != nil {
 		return err
 	}
+	serves, err := TariffGroups(ctx, q, t)
+	if err != nil {
+		return err
+	}
 	seen := map[int64]bool{}
 	for _, id := range ids {
 		if seen[id] {
@@ -59,7 +63,7 @@ func SetTariffGifts(ctx context.Context, q *db.Queries, t db.Tariff, ids []int64
 			return err
 		case p.Archived != 0:
 			return fieldErr("gifts", "package_archived")
-		case !PackageForTariff(t, pools, p):
+		case !PackageForTariff(t, pools, p, serves):
 			return fieldErr("gifts", "gift_not_fit")
 		}
 		if err := q.AddTariffGift(ctx, db.AddTariffGiftParams{TariffID: t.ID, PackageID: id}); err != nil {
@@ -67,6 +71,21 @@ func SetTariffGifts(ctx context.Context, q *db.Queries, t db.Tariff, ids []int64
 		}
 	}
 	return nil
+}
+
+// RecheckTariffGifts checks the gifts tariff t has against what it gives now, on q's
+// transaction: a change of its groups, its servers or its main traffic, or of a package,
+// may leave a gift adding to no quota. The refusal is SetTariffGifts'.
+func RecheckTariffGifts(ctx context.Context, q *db.Queries, t db.Tariff) error {
+	rows, err := q.ListTariffGifts(ctx, t.ID)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.PackageID)
+	}
+	return SetTariffGifts(ctx, q, t, ids)
 }
 
 // GrantGifts gives u the gifts of tariff tariffID for payment paymentID on q's transaction,
@@ -82,13 +101,17 @@ func GrantGifts(ctx context.Context, q *db.Queries, u db.User, tariffID, payment
 	if err != nil {
 		return nil, err
 	}
+	reach, err := UserGroups(ctx, q, u)
+	if err != nil {
+		return nil, err
+	}
 	var out []db.TrafficGrant
 	for _, gf := range gifts {
 		p, err := q.GetTrafficPackage(ctx, gf.PackageID)
 		if err != nil {
 			return out, err
 		}
-		if p.Archived != 0 || !PackageFits(u, pools, p, nil) {
+		if p.Archived != 0 || !PackageFits(u, pools, p, nil, reach) {
 			continue
 		}
 		g, err := GrantTx(ctx, q, u, GiftOf(p, paymentID), now)

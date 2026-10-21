@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
 )
 
@@ -20,9 +21,9 @@ import (
 
 // Lifetimes of packages and grants.
 const (
-	LifetimeUsed   = "used"   // until used up
-	LifetimePeriod = "period" // until the end of the traffic period it was given in
-	LifetimeDays   = "days"   // N days from when it was given
+	LifetimeUsed   = model.LifetimeUsed   // until used up
+	LifetimePeriod = model.LifetimePeriod // until the end of the traffic period it was given in
+	LifetimeDays   = model.LifetimeDays   // N days from when it was given
 )
 
 // Sources of grants.
@@ -34,7 +35,7 @@ const (
 
 // Limits of a package or a grant.
 const (
-	GiB            = int64(1) << 30
+	GiB            = model.GiB
 	MinGrantBytes  = GiB
 	MaxGrantBytes  = 100 << 40
 	MaxGrantDays   = 3650
@@ -47,15 +48,6 @@ type FieldError struct{ Field, Code string }
 func (e *FieldError) Error() string { return e.Field + ": " + e.Code }
 
 func fieldErr(field, code string) error { return &FieldError{Field: field, Code: code} }
-
-// TrafficLeft is what the user may still use of a quota: the base limit's rest plus the
-// active grants. -1: unlimited (no limit), which never touches grants.
-func TrafficLeft(limit sql.NullInt64, used, grants int64) int64 {
-	if !limit.Valid {
-		return -1
-	}
-	return max(0, limit.Int64-used) + max(0, grants)
-}
 
 // Overflow is the part of n new bytes past the base quota, used being what the period
 // counted before them: that part is taken from the grants.

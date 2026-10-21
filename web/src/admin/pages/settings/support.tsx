@@ -19,9 +19,10 @@ import { getLocale, t } from "../../../i18n";
 import { useCopy } from "../../../lib/copy";
 import { fieldErrors } from "../../../lib/fields";
 import { ago, bytes, time, timeLeft } from "../../../lib/format";
-import { nodeLabel, serverName } from "../../../lib/node-label";
+import { nodeLabel, serverName, useServers } from "../../../lib/node-label";
 import { useNow } from "../../../lib/now";
 import { useSaveSettings } from "./shared";
+import { CardHead } from "../../../components/layout";
 
 /** The support desk's bot: it gives the code, and the panel hands it the link. */
 const SUPPORT_BOT = "https://t.me/MikanSup_bot";
@@ -44,15 +45,7 @@ export function SupportCard() {
   const off = grants.data?.off ?? "";
   return (
     <section id="support" className="card glass reveal" aria-labelledby="support-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="support-title">
-            {t("support.card.title")}
-          </h2>
-          <div className="card-sub">{t("support.card.sub")}</div>
-        </div>
-        {grants.data ? live ? <Pill tone="ok">{t("support.card.open")}</Pill> : <Pill tone="off">{off ? t("support.switch.offPill") : t("support.card.closed")}</Pill> : null}
-      </div>
+      <CardHead title={t("support.card.title")} sub={t("support.card.sub")} aside={grants.data ? live ? <Pill tone="ok">{t("support.card.open")}</Pill> : <Pill tone="off">{off ? t("support.switch.offPill") : t("support.card.closed")}</Pill> : null} id="support-title" />
       {grants.data ? <AccessSwitch off={off} live={live} /> : null}
       {off ? null : <Scope />}
       <QueryBoundary query={grants} pending={<Skeleton style={{ height: 112, borderRadius: 16 }} />} wrap={(state) => <div>{state}</div>}>
@@ -129,8 +122,8 @@ function AccessSwitch({ off, live }: { off: string; live: boolean }) {
 
 /** What the person can and cannot do, said before anything is opened. */
 function Scope() {
-  const can = ["can1", "can2", "can3", "can4"] as const;
-  const cannot = ["cannot1", "cannot2", "cannot3", "cannot4"] as const;
+  const can = ["can1", "can2", "can3", "can4", "can5"] as const;
+  const cannot = ["cannot1", "cannot2", "cannot3", "cannot4", "cannot5"] as const;
   return (
     <div className="mb-4 grid gap-3 sm:grid-cols-2">
       <div className="panel-soft p-3">
@@ -204,6 +197,12 @@ function ActiveGrant({ g, onReplace, onRevoked }: { g: SupportGrant; onReplace: 
         </dd>
         <dt className="text-[var(--ink-500)]">{t("support.card.people")}</dt>
         <dd className="font-medium">{g.show_people ? t("support.card.peopleShown") : t("support.card.peopleHidden")}</dd>
+        {g.extended ? (
+          <>
+            <dt className="text-[var(--ink-500)]">{t("support.card.mode")}</dt>
+            <dd className="font-medium text-[var(--honey-600)]">{t("support.extended")}</dd>
+          </>
+        ) : null}
         {g.level === "terminal" ? (
           <>
             <dt className="text-[var(--ink-500)]">{t("support.card.servers")}</dt>
@@ -278,7 +277,7 @@ function actionText(a: SupportAction, names: { id: number; name: string }[]): st
   const d = detailsOf(a);
   switch (a.action) {
     case "support.grant":
-      return t("support.journal.grant", { level: t(`support.level.${(str(d.level) || "view") as Level}`), hours: num(d.hours) });
+      return t(d.extended === true ? "support.journal.grantExtended" : "support.journal.grant", { level: t(`support.level.${(str(d.level) || "view") as Level}`), hours: num(d.hours) });
     case "support.enter":
       return t("support.journal.enter", { via: str(d.via) === "api" ? t("support.journal.viaApi") : t("support.journal.viaBrowser") });
     case "support.revoke":
@@ -352,12 +351,12 @@ const codeOK = (v: string) => /^[A-Z0-9]{8}$/.test(normCode(v));
 
 function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; replacing: boolean; onClose: () => void; onMade: (ticket: number) => void }) {
   const qc = useQueryClient();
-  const nodes = useNodes();
   const me = useQuery(meQuery);
   const totp = !!me.data?.admin.totp_enabled;
   const [hours, setHours] = useState<Hours>(2);
   const [level, setLevel] = useState<Level>("view");
   const [people, setPeople] = useState(false);
+  const [extendedOn, setExtended] = useState(false);
   const [note, setNote] = useState("");
   const [targets, setTargets] = useState<string[]>([]);
   const [password, setPassword] = useState("");
@@ -365,7 +364,11 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
   const [ticketCode, setTicketCode] = useState("");
   const [understood, setUnderstood] = useState(false);
   const terminal = level === "terminal";
-  const servers = [{ id: "panel", label: t("diag.serverPanel") }, ...(nodes.data ?? []).filter((n) => !n.local).map((n) => ({ id: `node:${n.id}`, label: nodeLabel(n) }))];
+  // The mode adds writes: a view access has none to add.
+  const extended = extendedOn && level !== "view";
+  // A root shell, and the admin's own operations, take the password.
+  const reauth = terminal || extended;
+  const servers = useServers();
   const create = useMutation({
     mutationFn: () =>
       unwrap(
@@ -375,8 +378,10 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
             hours,
             level,
             show_people: people,
+            extended: extended || undefined,
             note: note.trim() || undefined,
-            ...(terminal ? { terminal_targets: targets, password, totp: code || undefined } : {}),
+            ...(terminal ? { terminal_targets: targets } : {}),
+            ...(reauth ? { password, totp: code || undefined } : {}),
           },
         }),
       ),
@@ -390,6 +395,7 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
     setHours(2);
     setLevel("view");
     setPeople(false);
+    setExtended(false);
     setNote("");
     setTargets([]);
     setPassword("");
@@ -399,7 +405,7 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
     create.reset();
   };
   const errors = fieldErrors(create.error);
-  const ready = codeOK(ticketCode) && (!terminal || (targets.length > 0 && !!password && (!totp || code.length === 6) && understood));
+  const ready = codeOK(ticketCode) && (!terminal || (targets.length > 0 && understood)) && (!reauth || (!!password && (!totp || code.length === 6)));
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (ready && !create.isPending) create.mutate();
@@ -409,6 +415,18 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
     onClose();
   };
   const toggle = (id: string) => setTargets((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  const reauthFields = (
+    <>
+      <Field label={t("login.password")} htmlFor="support-pw" hint={t("support.form.passwordHint")} error={errors.password}>
+        <input id="support-pw" type="password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-invalid={!!errors.password} />
+      </Field>
+      {totp ? (
+        <Field label={t("settings.totpCode")} htmlFor="support-totp" error={errors.totp}>
+          <input id="support-totp" className="input mono max-w-[160px] tracking-[0.2em]" inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.trim())} autoComplete="one-time-code" aria-invalid={!!errors.totp} />
+        </Field>
+      ) : null}
+    </>
+  );
   return (
     <Drawer
       open={open}
@@ -461,6 +479,17 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
           <Segmented<Level> label={t("support.form.level")} value={level} onChange={setLevel} options={LEVELS.map((l) => ({ value: l, label: t(`support.level.${l}`) }))} />
         </Field>
         <SwitchRow className="mb-4" label={t("support.form.people")} sub={people ? t("support.form.peopleOn") : t("support.form.peopleOff")} warn={people} checked={people} onChange={setPeople} />
+        {level !== "view" ? (
+          <SwitchRow
+            className="mb-4"
+            label={t("support.form.extended")}
+            sub={extended ? t("support.form.extendedOn") : t("support.form.extendedOff")}
+            warn={extended}
+            checked={extended}
+            onChange={setExtended}
+          />
+        ) : null}
+        {extended && !terminal ? reauthFields : null}
         <Field label={t("support.form.note")} htmlFor="support-note" hint={t("support.form.noteHint")} error={errors.note}>
           <input id="support-note" className="input" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} autoComplete="off" aria-invalid={!!errors.note} />
         </Field>
@@ -481,14 +510,7 @@ function GrantDrawer({ open, replacing, onClose, onMade }: { open: boolean; repl
                 ))}
               </div>
             </Field>
-            <Field label={t("login.password")} htmlFor="support-pw" hint={t("support.form.passwordHint")} error={errors.password}>
-              <input id="support-pw" type="password" className="input" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" aria-invalid={!!errors.password} />
-            </Field>
-            {totp ? (
-              <Field label={t("settings.totpCode")} htmlFor="support-totp" error={errors.totp}>
-                <input id="support-totp" className="input mono max-w-[160px] tracking-[0.2em]" inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.trim())} autoComplete="one-time-code" aria-invalid={!!errors.totp} />
-              </Field>
-            ) : null}
+            {reauthFields}
             <label className="flex items-start gap-2 text-[13px] text-[var(--ink-700)]">
               <input type="checkbox" className="check mt-0.5 shrink-0" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
               <span>{t("support.form.understood")}</span>
@@ -509,7 +531,7 @@ function RecordingsDrawer({ state, onChange }: { state: { source: string; name?:
   const nodes = useNodes();
   const source = state?.source ?? "panel";
   const name = state?.name;
-  const servers = [{ id: "panel", label: t("diag.serverPanel") }, ...(nodes.data ?? []).filter((n) => !n.local).map((n) => ({ id: `node:${n.id}`, label: nodeLabel(n) }))];
+  const servers = useServers();
   const list = useQuery({
     queryKey: supportKey.recordings(source),
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/support/recordings", { params: { query: { source } }, signal })),

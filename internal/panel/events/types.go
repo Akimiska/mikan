@@ -34,17 +34,6 @@ const (
 	BalanceTopup = "balance.topup"
 )
 
-// The bot's own messages (deprecated), written after the commit by tgbot.Notifications and
-// carrying a whole payment and a whole subscription (so only the addon that holds the bot
-// reads them). They stay for one release so the bot builds released before PaymentPaid,
-// PaymentRefunded and TrialNotGiven carried what the bot needs keep working; the bot addon
-// built with this panel does not read them.
-const (
-	BotPaid          = "bot.paid"
-	BotRefunded      = "bot.refunded"
-	BotTrialNotGiven = "bot.trial_not_given"
-)
-
 // Payment is the data of PaymentPaid and PaymentRefunded: enough to thank, notify or count,
 // nothing of the provider's secrets. The envelope's user_id is the subscription the payment
 // gave to (0 on a refund when it is gone), tg_id the buyer.
@@ -135,6 +124,7 @@ const (
 	UnboundByBan        = "ban"
 	UnboundIdle         = "idle"    // not seen for 90 days
 	UnboundReissue      = "reissue" // the subscription got a new link
+	UnboundLimit        = "limit"   // the limit fell: a place bought for a term ended, or was refunded
 )
 
 // Node is the data of NodeDown and NodeUp. Not tied to a subscriber: no user_id and no tg_id.
@@ -167,7 +157,7 @@ type Doc struct {
 	Data  any
 }
 
-// Docs lists every event type the panel emits (the deprecated BotPaid, BotRefunded and
+// Docs lists every event type the panel emits.
 // BotTrialNotGiven are for the bot addon alone and not listed).
 var Docs = []Doc{
 	{PaymentPaid, "A payment was applied: the subscription is made or extended, or the package credited.",

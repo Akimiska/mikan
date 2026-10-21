@@ -1,15 +1,15 @@
 package subs
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/textutil"
 )
 
 // TitleMax bounds a filled title or announcement: apps show one line.
@@ -23,15 +23,15 @@ const (
 	indentMax     = 40 // spaces a line of the announcement may start with
 )
 
-// msk is the zone dates are written in, as the bot writes them: most users live there.
-var msk = time.FixedZone("MSK", 3*60*60)
+// msk is the zone dates are written in, the bot's too (textutil.Zone).
+var msk = textutil.Zone
 
 // titleValues are the variables for one user. A term or limit that is not set reads "∞".
 // bound is the devices bound to the user, -1 when they were not counted (see wantsDevices).
 func titleValues(u db.User, grants int64, bound int64, cfg Config, now time.Time) map[string]string {
-	en := cfg.Lang == "en"
+	en := textutil.Lang(cfg.Lang).En()
 	v := map[string]string{"brand": cfg.Brand, "name": u.Name, "date": "∞", "days": "∞",
-		"used": sizeText(u.UsedUp+u.UsedDown, en), "left": "∞", "total": "∞", "devices": devicesText(u, bound, en), "tariff": ""}
+		"used": textutil.Size(u.UsedUp+u.UsedDown, cfg.Lang), "left": "∞", "total": "∞", "devices": devicesText(u, bound, en), "tariff": ""}
 	if u.TariffID.Valid {
 		v["tariff"] = cfg.Tariffs[u.TariffID.Int64]
 	}
@@ -45,12 +45,12 @@ func titleValues(u db.User, grants int64, bound int64, cfg Config, now time.Time
 		v["days"] = strconv.FormatInt(days, 10)
 	}
 	if u.TrafficLimit.Valid && u.TrafficLimit.Int64 > 0 {
-		v["left"] = sizeText(domain.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants), en)
+		v["left"] = textutil.Size(model.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants), cfg.Lang)
 		total := u.TrafficLimit.Int64
 		if grants > 0 {
 			total = max(total, u.UsedUp+u.UsedDown) + grants
 		}
-		v["total"] = sizeText(total, en)
+		v["total"] = textutil.Size(total, cfg.Lang)
 	}
 	return v
 }
@@ -70,7 +70,7 @@ func wantsDevices(texts ...string) bool {
 // writes it, "up to 3 at once", and no limit at all "∞".
 func devicesText(u db.User, bound int64, en bool) string {
 	switch {
-	case u.DeviceLimit.Valid && (bound < 0 || !domain.BindsDevices(u.DeviceMode)):
+	case u.DeviceLimit.Valid && (bound < 0 || !model.BindsDevices(u.DeviceMode)):
 		if en {
 			return "up to " + strconv.FormatInt(u.DeviceLimit.Int64, 10) + " at once"
 		}
@@ -92,7 +92,7 @@ func fillTitle(s string, vars map[string]string) string {
 			return ' '
 		}
 		return r
-	}, fillVars(s, vars))
+	}, textutil.Fill(s, vars, nil))
 	return cut(line, TitleMax)
 }
 
@@ -118,7 +118,7 @@ func fillAppAnnounce(s string, vars map[string]string, ua string) string {
 
 // fillLines fills s and keeps at most maxLines lines, with their indents, and maxRunes letters.
 func fillLines(s string, vars map[string]string, maxLines, maxRunes int) string {
-	lines := strings.Split(strings.ReplaceAll(fillVars(s, vars), "\r\n", "\n"), "\n")
+	lines := strings.Split(strings.ReplaceAll(textutil.Fill(s, vars, nil), "\r\n", "\n"), "\n")
 	if len(lines) > maxLines {
 		lines = lines[:maxLines]
 	}
@@ -145,32 +145,6 @@ func cutText(s string, n int) string {
 	return string([]rune(s)[:n])
 }
 
-// fillVars puts the user's values in place of the variables, in one pass.
-func fillVars(s string, vars map[string]string) string {
-	var out strings.Builder
-	rest := s
-	for {
-		i := strings.IndexByte(rest, '{')
-		if i < 0 {
-			break
-		}
-		j := strings.IndexByte(rest[i:], '}')
-		if j < 0 {
-			break
-		}
-		if v, ok := vars[rest[i+1:i+j]]; ok {
-			out.WriteString(rest[:i])
-			out.WriteString(v)
-			rest = rest[i+j+1:]
-			continue
-		}
-		out.WriteString(rest[:i+1])
-		rest = rest[i+1:]
-	}
-	out.WriteString(rest)
-	return out.String()
-}
-
 // profileTitle is the name the apps show for the profile: the title filled for the user,
 // the brand when there is none or it fills to nothing (just {name} of a user without one).
 func profileTitle(cfg Config, vars map[string]string) string {
@@ -195,22 +169,4 @@ func fileName(title string) string {
 		return "mikan"
 	}
 	return name
-}
-
-// sizeText writes bytes the way the bot does: 12,5 ГБ or 12.5 GB.
-func sizeText(n int64, en bool) string {
-	units, sep := []string{"Б", "КБ", "МБ", "ГБ", "ТБ"}, ","
-	if en {
-		units, sep = []string{"B", "KB", "MB", "GB", "TB"}, "."
-	}
-	v, i := float64(max(n, 0)), 0
-	for v >= 1024 && i < len(units)-1 {
-		v /= 1024
-		i++
-	}
-	s := fmt.Sprintf("%.0f", v)
-	if i > 0 && v < 100 {
-		s = strings.Replace(strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0"), ".", sep, 1)
-	}
-	return s + " " + units[i]
 }

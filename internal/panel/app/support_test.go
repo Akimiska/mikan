@@ -26,6 +26,7 @@ import (
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/support"
 	"mikan/internal/panel/tgate"
+	"mikan/internal/proto"
 	"mikan/internal/release"
 )
 
@@ -80,6 +81,7 @@ type grantReply struct {
 		ID              int64    `json:"id"`
 		Level           string   `json:"level"`
 		ShowPeople      bool     `json:"show_people"`
+		Extended        bool     `json:"extended"`
 		TerminalTargets []string `json:"terminal_targets"`
 		Status          string   `json:"status"`
 	} `json:"grant"`
@@ -592,6 +594,93 @@ func TestSupportTerminalGrant(t *testing.T) {
 	}
 }
 
+// What outlasts a grant or moves money (a node's key, its address, the payment details, the
+// bot, the page every subscriber opens) is closed to a change access, by operation and by
+// field, and open in the extended mode, which takes the password like a terminal; what no
+// operator reaches stays closed in it.
+func TestSupportExtendedMode(t *testing.T) {
+	s := newSupportHarness(t)
+	var node int64
+	if err := s.st.DB.QueryRow("INSERT INTO nodes(name,address,public_host,created_at,updated_at) VALUES('remote','198.51.100.7:9000','198.51.100.7',1,1) RETURNING id").Scan(&node); err != nil {
+		t.Fatal(err)
+	}
+	nodePath := "/nodes/" + idOf(node)
+	g, code, out := s.grant(map[string]any{"hours": 2, "level": "change"})
+	if code != http.StatusCreated || g.Grant.Extended {
+		t.Fatalf("change grant: %d %s", code, out)
+	}
+	op := s.newOperator()
+	if resp, body := op.enter(g.Token); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"extended":false`) {
+		t.Fatalf("enter: %d %s", resp.StatusCode, body)
+	}
+	extendedOnly := []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/nodes", map[string]any{"name": "mine", "host": "203.0.113.50"}},
+		{http.MethodPost, nodePath + "/key", nil},
+		{http.MethodPatch, "/payments/settings", map[string]any{}},
+		{http.MethodPost, "/balances/42/adjust", map[string]any{"amount": 100}},
+		{http.MethodPut, "/telegram/bot-addon", map[string]any{}},
+		{http.MethodPut, "/exit-dns", map[string]any{}},
+		{http.MethodPut, "/sub-page", map[string]any{}},
+		// By field: the rest of the endpoint stays the operator's.
+		{http.MethodPatch, nodePath, map[string]any{"name": "remote", "host": "198.51.100.8", "domain": ""}},
+		{http.MethodPatch, nodePath, map[string]any{"name": "remote", "host": "198.51.100.7", "domain": "evil.example"}},
+		{http.MethodPatch, "/settings", map[string]any{"sub_title": "Mine"}},
+	}
+	for _, c := range extendedOnly {
+		if resp, body := op.write(c.method, c.path, c.body); resp.StatusCode != http.StatusForbidden || detail(body) != "support_extended" {
+			t.Errorf("change %s %s: %d %s, want 403 support_extended", c.method, c.path, resp.StatusCode, body)
+		}
+	}
+	// The node's form sends its address and domain as they are: that edit goes through.
+	if resp, body := op.write(http.MethodPatch, nodePath, map[string]any{"name": "remote", "host": "198.51.100.7", "domain": "", "enabled": false}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("change edits a node: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := op.write(http.MethodPost, "/system/restart", map[string]any{}); detail(body) == "support_extended" || detail(body) == "support_denied" {
+		t.Fatalf("a restart is the change level's: %d %s", resp.StatusCode, body)
+	}
+
+	// The mode takes the password, and a level that writes.
+	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "change", "extended": true}); code != http.StatusUnprocessableEntity || !strings.Contains(string(out), "wrong_password") {
+		t.Fatalf("extended without the password: %d %s", code, out)
+	}
+	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "view", "extended": true, "password": password}); code != http.StatusUnprocessableEntity || !strings.Contains(string(out), "support_extended_level") {
+		t.Fatalf("extended view: %d %s", code, out)
+	}
+	g, code, out = s.grant(map[string]any{"hours": 2, "level": "change", "extended": true, "password": password})
+	if code != http.StatusCreated || !g.Grant.Extended {
+		t.Fatalf("extended grant: %d %s", code, out)
+	}
+	ext := s.newOperator()
+	if resp, body := ext.enter(g.Token); resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"extended":true`) {
+		t.Fatalf("enter extended: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := ext.write(http.MethodPatch, nodePath, map[string]any{"name": "remote", "host": "198.51.100.8", "domain": ""}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("extended moves a node: %d %s", resp.StatusCode, body)
+	}
+	var host string
+	if err := s.st.DB.QueryRow("SELECT public_host FROM nodes WHERE id = $1", node).Scan(&host); err != nil || host != "198.51.100.8" {
+		t.Fatalf("node host %q %v", host, err)
+	}
+	if resp, body := ext.write(http.MethodPatch, "/settings", map[string]any{"sub_title": "Support"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("extended writes a session field: %d %s", resp.StatusCode, body)
+	}
+	// Past the gate: a node without a host is the form's own refusal, not the gate's.
+	if resp, body := ext.write(http.MethodPost, "/nodes", map[string]any{"name": "x"}); resp.StatusCode == http.StatusForbidden {
+		t.Fatalf("extended adds a node: %d %s", resp.StatusCode, body)
+	}
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPatch, "/telegram"}, {http.MethodGet, "/audit"}, {http.MethodGet, "/support/grants"}, {http.MethodPost, "/support/grants"},
+		{http.MethodPost, "/settings/reset-admin-path"}, {http.MethodGet, "/api-keys"}, {http.MethodPost, "/auth/password"},
+	} {
+		if resp, body := ext.write(c.method, c.path, map[string]any{}); resp.StatusCode != http.StatusForbidden || detail(body) != "support_denied" {
+			t.Errorf("extended %s %s: %d %s, want 403 support_denied", c.method, c.path, resp.StatusCode, body)
+		}
+	}
+}
+
 // The panel's secrets stay out of an operator's answers at any level; the people stay out
 // unless the admin let the operator see them.
 func TestSupportOperatorSeesNoSecretsAndMaybeNoPeople(t *testing.T) {
@@ -1074,5 +1163,65 @@ func TestSupportAccessWithoutABot(t *testing.T) {
 	s := newSupportHarness(t, func(o *Options) { o.SupportBot = nil })
 	if _, code, out := s.grant(map[string]any{"hours": 2, "level": "view"}); code != http.StatusServiceUnavailable || !strings.Contains(string(out), "support_bot_down") {
 		t.Errorf("no bot: %d %s", code, out)
+	}
+}
+
+// An operator gets a protocol's server key as hidden, and a template it saves or checks
+// with the key still hidden keeps the saved key.
+func TestSupportOperatorEditsAHiddenTemplate(t *testing.T) {
+	s := newSupportHarness(t)
+	g, code, out := s.grant(map[string]any{"hours": 2, "level": "change"})
+	if code != http.StatusCreated {
+		t.Fatalf("grant: %d %s", code, out)
+	}
+	op := s.newOperator()
+	if resp, body := op.enter(g.Token); resp.StatusCode != http.StatusOK {
+		t.Fatalf("enter: %d %s", resp.StatusCode, body)
+	}
+	var id int64
+	var saved string
+	if err := s.st.DB.QueryRow("SELECT id, config FROM inbounds WHERE config LIKE '%private-key%' ORDER BY id LIMIT 1").Scan(&id, &saved); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := op.do(http.MethodGet, "/inbounds", nil, nil)
+	var list []struct {
+		ID     int64  `json:"id"`
+		NodeID int64  `json:"node_id"`
+		Config string `json:"config"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &list) != nil {
+		t.Fatalf("inbounds: %d %s", resp.StatusCode, body)
+	}
+	shown := ""
+	var node int64
+	for _, in := range list {
+		if in.ID == id {
+			shown, node = in.Config, in.NodeID
+		}
+	}
+	if !strings.Contains(shown, "<hidden>") || shown == saved {
+		t.Fatalf("the operator's template: %q", shown)
+	}
+	if resp, body := op.write(http.MethodPost, "/inbounds/validate", map[string]any{"config": shown, "node_id": node, "inbound_id": id}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("check with the key hidden: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := op.write(http.MethodPatch, "/inbounds/"+idOf(id), map[string]any{"config": shown}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("save with the key hidden: %d %s", resp.StatusCode, body)
+	}
+	var now string
+	if err := s.st.DB.QueryRow("SELECT config FROM inbounds WHERE id = $1", id).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	key := func(src string) string {
+		t.Helper()
+		tpl, err := proto.Parse(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		k, _ := tpl["reality-config"].(map[string]any)["private-key"].(string)
+		return k
+	}
+	if key(now) == "" || key(now) != key(saved) {
+		t.Fatalf("the saved key: %q, was %q", key(now), key(saved))
 	}
 }

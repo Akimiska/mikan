@@ -86,7 +86,9 @@ func (w *maskWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func (w *maskWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// finish sends what was held: the JSON masked, anything else as it is.
+// finish sends what was held: the JSON masked, anything else as it is. No answer that is
+// not JSON names a person: the metrics hold no user, the pictures are the page's own, and a
+// transfer's screenshot refuses such a reader itself (topupPhoto).
 func (w *maskWriter) finish() {
 	if !w.hold {
 		return

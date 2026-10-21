@@ -14,6 +14,7 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 )
@@ -70,8 +71,8 @@ func TestPaidTrialIsBoughtOnce(t *testing.T) {
 	if taken, _ := e.st.Q.HasTrial(ctx, 911); !taken {
 		t.Fatal("the paid trial did not take the account's trial")
 	}
-	if e.tg.told() != 1 {
-		t.Fatalf("the buyer was told %d times", e.tg.told())
+	if paid := e.told(events.PaymentPaid); len(paid) != 1 {
+		t.Fatalf("the buyer was told %d times", len(paid))
 	}
 	if _, _, ok := e.s.TrialOffer(ctx, 911); ok {
 		t.Fatal("the trial is offered again after it was bought")
@@ -197,7 +198,7 @@ func TestPaidTrialPaidTwice(t *testing.T) {
 		t.Fatalf("refunds %v", refunds)
 	}
 	// Told once, about the money and not about a subscription: there is none.
-	if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].p.ID != second.ID || notes[0].u.ID != 0 || notes[0].disabled {
+	if notes := e.told(events.PaymentRefunded); len(notes) != 1 || notes[0].PaymentID != second.ID || notes[0].UserID != 0 || notes[0].Disabled {
 		t.Fatalf("the buyer was told %+v", notes)
 	}
 	if links, err := e.st.Q.ListTgLinksOf(ctx, 916); err != nil || len(links) != 1 {
@@ -263,7 +264,7 @@ func TestPaidTrialBothPaidBeforeApply(t *testing.T) {
 			if e.users() != users+1 {
 				t.Fatalf("two paid trials made %d subscriptions", e.users()-users)
 			}
-			if refunds := e.tg.refundNotes(); len(refunds) != 1 {
+			if refunds := e.told(events.PaymentRefunded); len(refunds) != 1 {
 				t.Fatalf("the buyer was told of %d refunds", len(refunds))
 			}
 		})
@@ -320,9 +321,7 @@ func TestPaidTrialThroughAnyAdapter(t *testing.T) {
 			// The reconcile pass and a repeated report leave it alone: told once.
 			e.s.Reconcile(ctx)
 			must(t, e.s.Apply(ctx, p.ID))
-			e.tg.mu.Lock()
-			told := len(e.tg.notGiven)
-			e.tg.mu.Unlock()
+			told := len(e.told(events.TrialNotGiven))
 			if told != 1 || e.payment(p.ID).Error != TrialRefundByHand || len(fa.refundCalls) != 0 {
 				t.Fatalf("after another pass: told %d times, %+v", told, e.payment(p.ID))
 			}
@@ -332,7 +331,7 @@ func TestPaidTrialThroughAnyAdapter(t *testing.T) {
 			if got.Status != "refunded" || !got.RefundedAt.Valid || got.Error != "" {
 				t.Fatalf("refunded by hand: %+v", got)
 			}
-			if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].p.ID != p.ID || notes[0].u.ID != 0 {
+			if notes := e.told(events.PaymentRefunded); len(notes) != 1 || notes[0].PaymentID != p.ID || notes[0].UserID != 0 {
 				t.Fatalf("the buyer was told %+v", notes)
 			}
 			if err := e.s.RefundedByHand(ctx, p.ID); !errors.Is(err, ErrNotRefunable) {
@@ -514,7 +513,7 @@ func TestPaidTrialRefundReportedMeanwhile(t *testing.T) {
 	if got := e.payment(p.ID); got.Status != "refunded" || !got.RefundedAt.Valid || got.Error != "" {
 		t.Fatalf("the trial refunded meanwhile: %+v", got)
 	}
-	if notes := e.tg.refundNotes(); len(notes) != 1 || notes[0].p.ID != p.ID || notes[0].u.ID != 0 {
+	if notes := e.told(events.PaymentRefunded); len(notes) != 1 || notes[0].PaymentID != p.ID || notes[0].UserID != 0 {
 		t.Fatalf("the buyer was told %+v", notes)
 	}
 }

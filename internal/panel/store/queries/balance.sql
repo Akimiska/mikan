@@ -42,7 +42,9 @@ SELECT * FROM topups WHERE id = $1;
 UPDATE topups SET status = $1, decided_at = $2, admin_id = $3, reason = $4 WHERE id = $5 AND status = 'pending';
 
 -- name: ListTopups :many
+-- before: the page after the one that ended with that id; 0: the first.
 SELECT * FROM topups WHERE status <> 'draft' AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text)
+  AND (sqlc.arg(before)::bigint = 0 OR id < sqlc.arg(before)::bigint)
 ORDER BY id DESC LIMIT sqlc.arg(lim);
 
 -- name: CountPendingTopups :one
@@ -50,3 +52,12 @@ SELECT count(*) FROM topups WHERE status = 'pending';
 
 -- name: PendingTopupsOf :one
 SELECT count(*) FROM topups WHERE tg_id = $1 AND status = 'pending';
+
+-- name: BalanceMoneyHeld :one
+-- Money the balances hold in the currency of the config: a balance above zero, a top-up not
+-- decided yet, or a balance payment that may still be refunded onto a balance. The currency
+-- cannot change under it: the sums carry no currency of their own.
+SELECT CAST(EXISTS (SELECT 1 FROM balances WHERE amount > 0)
+    OR EXISTS (SELECT 1 FROM topups WHERE status IN ('draft', 'pending') AND amount > 0)
+    OR EXISTS (SELECT 1 FROM payments WHERE provider = 'balance' AND status IN ('pending', 'paid', 'applied')) AS BOOLEAN)
+  AS held;

@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Button, Pill } from "../components/ui";
 import { t, tMaybe } from "../i18n";
 import { DEVICE_NAME_MAX, desktopOS, deviceDetails, deviceLabel, reportedName } from "../lib/devices";
-import { ago, bytes, dateShort, time } from "../lib/format";
+import { ago, bytes, dateShort, period, time } from "../lib/format";
 import { postJSON } from "./net";
 import type { Device, Info } from "./types";
 
@@ -80,12 +80,6 @@ function RenameForm({ d, subURL, onDone }: { d: Device; subURL: string; onDone: 
 }
 
 /** The unbind window in words: "сутки", "неделю", "10 дней". */
-function period(days: number): string {
-  if (days === 1) return t("sub.periodDay");
-  if (days === 7) return t("sub.periodWeek");
-  if (days === 30) return t("sub.periodMonth");
-  return t("sub.periodDays", { n: days });
-}
 
 /** A pause in hours, whole days as days. */
 function pause(hours: number): string {

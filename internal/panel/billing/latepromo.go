@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/store/db"
 )
@@ -42,12 +43,16 @@ func (s *Service) refundCharge(ctx context.Context, p db.Payment, externalID, ke
 			return errors.New("cannot refund a Stars payment: Telegram bot is unavailable")
 		}
 		return tg.RefundStars(ctx, p.TgID, externalID)
-	case AddonID(p.Provider) != "":
-		cl, cfg, err := s.addonClient(ctx, AddonID(p.Provider))
+	case model.AddonID(p.Provider) != "":
+		cl, cfg, err := s.addonClient(ctx, model.AddonID(p.Provider))
 		if err != nil {
 			return err
 		}
 		return cl.Refund(ctx, cfg.Values, externalID, p.Amount, key)
+	case p.Provider == Balance:
+		// The money goes back on the balance, on the transaction that marks the payment
+		// refunded (refundToBalance).
+		return nil
 	default:
 		return errors.New("cannot refund a payment from this provider")
 	}
@@ -56,8 +61,8 @@ func (s *Service) refundCharge(ctx context.Context, p db.Payment, externalID, ke
 // refundLatePromoPayment serializes late-payment refunds within the panel process and
 // reloads persistent state after taking the lock so webhook and reconciliation cannot
 // both refund the same invoice. Addon refunds also carry a stable provider idempotency key
-// to cover retries after a process restart.
-func (s *Service) refundLatePromoPayment(ctx context.Context, paymentID int64, externalID string, refund func(db.Payment) error) (bool, error) {
+// to cover retries after a process restart (refundPromoPayment).
+func (s *Service) refundLatePromoPayment(ctx context.Context, paymentID int64, externalID string) (bool, error) {
 	unlock := s.lockPromoRefund(paymentID)
 	defer unlock()
 
@@ -101,7 +106,7 @@ func (s *Service) refundLatePromoPayment(ctx context.Context, paymentID int64, e
 		// makes retry after a crashed process safe once the lease expires.
 		return true, nil
 	}
-	if err := refund(pay); err != nil {
+	if err := s.refundPromoPayment(ctx, pay, externalID); err != nil {
 		_ = s.markLatePromoRefundFailed(ctx, paymentID, err)
 		_ = s.d.Store.Q.ReleaseLatePromoRefundClaim(ctx, sql.NullInt64{Int64: paymentID, Valid: true})
 		return true, err

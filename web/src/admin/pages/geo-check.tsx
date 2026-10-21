@@ -11,6 +11,7 @@ import { countryName, StatusMark } from "./node-check";
 import { ServerPicks, useServerPicks } from "./server-picks";
 import { useNodes } from "../../api/hooks";
 import { nodeLabel } from "../../lib/node-label";
+import { CardHead } from "../../components/layout";
 
 type Geo = Schemas["GeoCheck"];
 type Node = Schemas["NodeInfo"];
@@ -209,14 +210,7 @@ function RegionsCard() {
   const id = picked ?? list[0]?.id ?? null;
   return (
     <section className="card glass reveal mt-4" aria-labelledby="diag-regions-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="diag-regions-title">
-            {t("geo.services.title")}
-          </h2>
-          <div className="card-sub">{t("geo.services.lead")}</div>
-        </div>
-      </div>
+      <CardHead title={t("geo.services.title")} sub={t("geo.services.lead")} id="diag-regions-title" />
       {nodes.isPending ? (
         <Skeleton style={{ height: 40, borderRadius: 12 }} />
       ) : list.length === 0 ? (
@@ -252,14 +246,7 @@ function GeoBasesCard() {
   };
   return (
     <section className="card glass reveal" aria-labelledby="diag-geo-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="diag-geo-title">
-            {t("geo.title")}
-          </h2>
-          <div className="card-sub">{t("geo.lead")}</div>
-        </div>
-      </div>
+      <CardHead title={t("geo.title")} sub={t("geo.lead")} id="diag-geo-title" />
       <form className="flex flex-wrap items-start gap-x-4 gap-y-1" onSubmit={submit} noValidate>
         <Field label={t("diag.reach.host")} htmlFor="geo-host">
           <input

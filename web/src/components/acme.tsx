@@ -1,13 +1,14 @@
 // Public certificates in plain words: why one was not issued and what to do, and the
 // "Check the certificate" drawer with a button or a command for every finding.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Copy, Info, RefreshCw, XCircle } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, Copy, Info, LoaderCircle, RefreshCw, ShieldCheck, Stethoscope, XCircle } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, errorText, unwrap, type Schemas } from "../api/client";
 import { qk } from "../api/hooks";
-import { getLocale, t, tMaybe } from "../i18n";
+import { t, tMaybe } from "../i18n";
 import { useCopy } from "../lib/copy";
-import { certUntil } from "./cert-drawer";
+import { dateTime } from "../lib/format";
+import { CertDrawer, certUntil, type CertInfo } from "./cert-drawer";
 import { Drawer } from "./overlay";
 import { useToast } from "./toast";
 import { Button, ErrorState, Pill, Skeleton } from "./ui";
@@ -28,7 +29,141 @@ export function caName(ca?: string): string {
 }
 
 function when(iso?: string): string {
-  return iso ? new Date(iso).toLocaleString(getLocale(), { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "";
+  return iso ? dateTime(iso) : "";
+}
+
+/** The toast after "Get now": why the certificate was not issued, still being ordered, or got. */
+export function renewToast(toast: { ok: (text: string) => void; error: (text: string) => void }, st: { error?: string; ordering?: boolean } | undefined) {
+  if (st?.error) toast.error(tMaybe(`errors.acme.${st.error}`) ?? t("errors.acme.acme_failed"));
+  else if (st?.ordering) toast.ok(t("certs.stillRunning"));
+  else toast.ok(t("certs.got"));
+}
+
+type CertStatus = Schemas["Status"];
+
+/** A certificate of the panel's (its own address, the subscriptions' domain) in one line; none
+ * is what the line says without a public or an own one. */
+export function certLine(c: CertStatus, none: string): string {
+  if (c.kind === "custom") return t("settings.certCustom", { names: (c.names ?? []).join(", "), until: certUntil(c.not_after) });
+  if (c.kind === "acme") return t("certs.issued", { ca: caName(c.ca), id: c.identifier, until: when(c.not_after) });
+  return none;
+}
+
+/** Its mark: an own certificate, a public one, or pending (none yet, the self-signed one). */
+export function CertPill({ c, pending }: { c: CertStatus; pending: string }) {
+  if (c.kind === "custom") return <Pill tone="ok">{t("settings.certOwn")}</Pill>;
+  if (c.kind === "acme") return <Pill tone="ok">{t("settings.certValid")}</Pill>;
+  return <Pill tone="warn">{pending}</Pill>;
+}
+
+/**
+ * Under a certificate's head: how its order goes or why it failed, the attempts, and the
+ * buttons to get it now, check it, or put an own one in. renew answers the status the
+ * settings keep under field; an order still running is asked about again in 15 s, as is a
+ * certificate the server puts back after an own one is removed.
+ */
+export function CertStatusBlock({
+  c,
+  field,
+  renew,
+  save,
+  clear,
+  drawer,
+  note,
+  switching,
+  canRenew = true,
+  onUseZeroSSL,
+}: {
+  c: CertStatus;
+  field: "certificate" | "sub_certificate";
+  renew: () => Promise<CertStatus>;
+  save: (cert: string, key: string) => Promise<Schemas["SettingsView"]>;
+  clear: () => Promise<unknown>;
+  drawer: { title: string; meta?: string; lead: string; clearLabel: string; clearText: string };
+  note?: string;
+  switching?: string;
+  canRenew?: boolean;
+  onUseZeroSSL?: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [own, setOwn] = useState(false);
+  const [checking, setChecking] = useState(false);
+  // The outcome of "Get now" shows here, under the button, not only as a toast.
+  const [outcome, setOutcome] = useState<"got" | "running" | null>(null);
+  const later = () => window.setTimeout(() => void qc.invalidateQueries({ queryKey: qk.settings }), 15_000);
+  const order = useMutation({
+    mutationFn: renew,
+    onMutate: () => setOutcome(null),
+    onSuccess: (st) => {
+      qc.setQueryData<Schemas["SettingsView"]>(qk.settings, (old) => (old ? { ...old, [field]: st } : old));
+      setOutcome(st.ordering ? "running" : st.error ? null : "got");
+      if (st.ordering) later();
+    },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  const custom = c.kind === "custom";
+  // The own certificate as the drawer shows it; a broken one is shown by its error.
+  const current: CertInfo | null = custom ? { names: c.names, issuer: c.issuer, not_after: c.not_after, trusted: c.trusted } : c.error?.startsWith("custom_") ? { error: c.error } : null;
+  const failed = !!c.error && !c.error.startsWith("custom_") && c.error !== "no_public_host";
+  return (
+    <>
+      {c.ordering || order.isPending ? (
+        <p className="mb-3 flex items-center gap-2 text-[13px] text-[var(--ink-600)]" role="status">
+          <LoaderCircle size={16} className="spin" aria-hidden /> {t("certs.ordering")}
+        </p>
+      ) : c.error ? (
+        c.error.startsWith("custom_") ? (
+          <p className="mb-3 text-[13px] text-[var(--berry-600)]" role="alert">
+            {tMaybe(`errors.acme.${c.error}`) ?? c.error}
+          </p>
+        ) : (
+          <AcmeProblem code={c.error} detail={c.error_detail} holder={c.holder} retryAt={c.retry_at} host={c.identifier} className="mb-3" />
+        )
+      ) : outcome ? (
+        <p className="mb-3 text-[13px] text-[var(--leaf-700)]" role="status">
+          {outcome === "got" ? t("certs.got") : t("certs.stillRunning")}
+        </p>
+      ) : switching ? (
+        <p className="mb-3 text-[13px] text-[var(--ink-600)]" role="status">
+          {switching}
+        </p>
+      ) : null}
+      {note ? <p className="mb-3 text-xs text-[var(--ink-500)]">{note}</p> : null}
+      <AcmeAttempts attempts={c.attempts} className="mb-3" />
+      <div className="flex flex-wrap gap-2">
+        {!custom && canRenew ? (
+          <Button size="sm" loading={order.isPending} disabled={order.isPending || c.ordering} onClick={() => order.mutate()}>
+            <RefreshCw size={16} aria-hidden /> {failed ? t("certs.retry") : t("certs.getNow")}
+          </Button>
+        ) : null}
+        <Button size="sm" onClick={() => setChecking(true)}>
+          <Stethoscope size={16} aria-hidden /> {t("certs.check")}
+        </Button>
+        <Button size="sm" onClick={() => setOwn(true)}>
+          <ShieldCheck size={16} aria-hidden /> {custom ? t("settings.certReplace") : t("settings.certOwnButton")}
+        </Button>
+      </div>
+      <CertCheckDrawer open={checking} onClose={() => setChecking(false)} onUseZeroSSL={onUseZeroSSL} />
+      <CertDrawer
+        open={own}
+        onClose={() => setOwn(false)}
+        title={drawer.title}
+        meta={drawer.meta}
+        lead={drawer.lead}
+        current={current}
+        save={(cert, key) => save(cert, key).then((v) => qc.setQueryData(qk.settings, v))}
+        clear={() =>
+          clear().then(() => {
+            void qc.invalidateQueries({ queryKey: qk.settings });
+            later();
+          })
+        }
+        clearLabel={drawer.clearLabel}
+        clearText={drawer.clearText}
+      />
+    </>
+  );
 }
 
 /** Why a certificate was not issued: the text for the code, the program on port 80, when the
@@ -169,9 +304,7 @@ export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean
   const renew = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/settings/certificate/renew")),
     onSuccess: (st) => {
-      if (st.error) toast.error(tMaybe(`errors.acme.${st.error}`) ?? t("errors.acme.acme_failed"));
-      else if (st.ordering) toast.ok(t("certs.stillRunning"));
-      else toast.ok(t("certs.got"));
+      renewToast(toast, st);
       after();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -179,9 +312,7 @@ export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean
   const renewSub = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/settings/sub-certificate/renew")),
     onSuccess: (st) => {
-      if (st.error) toast.error(tMaybe(`errors.acme.${st.error}`) ?? t("errors.acme.acme_failed"));
-      else if (st.ordering) toast.ok(t("certs.stillRunning"));
-      else toast.ok(t("certs.got"));
+      renewToast(toast, st);
       after();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -189,10 +320,7 @@ export function CertCheckDrawer({ open, onClose, onUseZeroSSL }: { open: boolean
   const renewNode = useMutation({
     mutationFn: (id: number) => unwrap(api.POST("/api/v1/nodes/{id}/certificate/renew", { params: { path: { id } } })),
     onSuccess: (v) => {
-      const err = v.acme?.error;
-      if (err) toast.error(tMaybe(`errors.acme.${err}`) ?? t("errors.acme.acme_failed"));
-      else if (v.acme?.ordering) toast.ok(t("certs.stillRunning"));
-      else toast.ok(t("certs.got"));
+      renewToast(toast, v.acme);
       after();
     },
     onError: (e) => toast.error(errorText(e)),

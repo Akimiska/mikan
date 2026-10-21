@@ -13,17 +13,16 @@ import (
 	"sync"
 	"time"
 
-	"mikan/internal/panel/domain"
-	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/panel/model"
+	"mikan/internal/tgapi"
 )
 
 // Deps is what the bot's screens need: the panel's data and the way to Telegram.
 type Deps struct {
 	Backend Backend
 	// Client and Outbox send what the bot says; the outbox paces it by Telegram's limits.
-	Client *tgate.Client
-	Outbox *tgate.Outbox
+	Client *tgapi.Client
+	Outbox *tgapi.Outbox
 	// Go runs f as work the bot's caller waits for before it stops; what must not hold up
 	// the update loop goes through it.
 	Go  func(f func())
@@ -64,7 +63,8 @@ func (b *Bot) Started(ctx context.Context) error {
 
 // Update takes a message or a press in a private chat, the flood guard passed. It is
 // answered, or dropped, as it comes: what the screens cannot do is answered in the chat.
-func (b *Bot) Update(ctx context.Context, up tgate.Update) {
+func (b *Bot) Update(ctx context.Context, up tgapi.Update) {
+	ctx = withOffersMemo(ctx)
 	switch {
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil:
 		if cmd, _, _ := strings.Cut(up.CallbackQuery.Data, ":"); cmd == "ta" || cmd == "tx" {
@@ -77,10 +77,7 @@ func (b *Bot) Update(ctx context.Context, up tgate.Update) {
 	}
 }
 
-var (
-	linkInText  = regexp.MustCompile(`https?://\S+`)
-	nativeToken = regexp.MustCompile(`^[A-Za-z0-9]{24}$`)
-)
+var linkInText = regexp.MustCompile(`https?://\S+`)
 
 // maxLinksRead: how many addresses of one message are looked at, so that a long list is
 // not a hundred database lookups.
@@ -88,13 +85,13 @@ const maxLinksRead = 3
 
 // onMessage: /start (with a code from a subscription page), a subscription link, or
 // anything else — every message brings the main menu back to the bottom of the chat.
-func (b *Bot) onMessage(ctx context.Context, m *tgate.Message) {
+func (b *Bot) onMessage(ctx context.Context, m *tgapi.Message) {
 	chat := m.Chat.ID
 	cfg := b.config(ctx)
 	w := wordsFor(cfg.Lang)
 	if cfg.CleanChat {
 		id := m.MessageID
-		b.d.Outbox.Reply(chat, "", 1, func(ctx context.Context, c *tgate.Client) error { return c.Delete(ctx, chat, id) })
+		b.d.Outbox.Reply(chat, "", 1, func(ctx context.Context, c *tgapi.Client) error { return c.Delete(ctx, chat, id) })
 	}
 	var notice string
 	text := strings.TrimSpace(m.Text)
@@ -106,9 +103,9 @@ func (b *Bot) onMessage(ctx context.Context, m *tgate.Message) {
 		return
 	}
 	switch {
-	case strings.HasPrefix(text, "/start "+domain.CampaignPrefix):
+	case strings.HasPrefix(text, "/start "+model.CampaignPrefix):
 		// An ad's link: the account counts to the campaign, the menu greets it as usual.
-		code := strings.TrimSpace(strings.TrimPrefix(text, "/start "+domain.CampaignPrefix))
+		code := strings.TrimSpace(strings.TrimPrefix(text, "/start "+model.CampaignPrefix))
 		if _, err := b.d.Backend.TagCampaign(ctx, chat, code); err != nil {
 			b.d.Log.Warn("telegram: campaign", "err", err)
 		}
@@ -123,12 +120,12 @@ func (b *Bot) onMessage(ctx context.Context, m *tgate.Message) {
 // freshMenu sends the main menu as a new message and removes the previous one, so the
 // chat keeps a single menu at the bottom. Several messages in a row get one new menu.
 func (b *Bot) freshMenu(chat int64, notice string) {
-	b.d.Outbox.Reply(chat, "menu:"+strconv.FormatInt(chat, 10), 2, func(ctx context.Context, c *tgate.Client) error {
+	b.d.Outbox.Reply(chat, "menu:"+strconv.FormatInt(chat, 10), 2, func(ctx context.Context, c *tgapi.Client) error {
 		return b.sendMenu(ctx, c, chat, notice)
 	})
 }
 
-func (b *Bot) sendMenu(ctx context.Context, c *tgate.Client, chat int64, notice string) error {
+func (b *Bot) sendMenu(ctx context.Context, c *tgapi.Client, chat int64, notice string) error {
 	text, kb := b.screen(ctx, b.config(ctx), chat, "m", notice)
 	sent, err := c.Send(ctx, chat, text, kb, false)
 	if err != nil {
@@ -150,15 +147,15 @@ func (b *Bot) answer(ctx context.Context, id string) {
 // onPress edits the menu message in place: the chat never fills up with menus. The
 // spinner on the button stops at once; the screen is drawn when the chat's turn comes,
 // and a newer tap on the same menu replaces a screen not yet drawn.
-func (b *Bot) onPress(ctx context.Context, q *tgate.CallbackQuery) {
+func (b *Bot) onPress(ctx context.Context, q *tgapi.CallbackQuery) {
 	chat, msg := q.Message.Chat.ID, q.Message.MessageID
 	b.answer(ctx, q.ID)
 	// What a tap changes happens now, only its screen may wait.
 	data, notice := b.act(ctx, chat, q.Data)
-	b.d.Outbox.Reply(chat, "edit:"+strconv.FormatInt(chat, 10)+":"+strconv.FormatInt(msg, 10), 1, func(ctx context.Context, c *tgate.Client) error {
+	b.d.Outbox.Reply(chat, "edit:"+strconv.FormatInt(chat, 10)+":"+strconv.FormatInt(msg, 10), 1, func(ctx context.Context, c *tgapi.Client) error {
 		text, kb := b.screen(ctx, b.config(ctx), chat, data, notice)
 		if err := c.Edit(ctx, chat, msg, text, kb); err != nil {
-			var ae *tgate.APIError
+			var ae *tgapi.APIError
 			if errors.As(err, &ae) && ae.Code == 429 {
 				return err
 			}
@@ -173,7 +170,7 @@ func (b *Bot) onPress(ctx context.Context, q *tgate.CallbackQuery) {
 func (b *Bot) linkByCode(ctx context.Context, w *words, chat int64, name, code string) string {
 	id, err := b.d.Backend.UserOfCode(ctx, code)
 	switch {
-	case errors.Is(err, tgate.ErrLinkExpired):
+	case errors.Is(err, model.ErrLinkExpired):
 		return w.linkExpired
 	case err != nil:
 		return w.linkInvalid
@@ -216,7 +213,7 @@ func (b *Bot) link(ctx context.Context, w *words, chat int64, name string, userI
 	case res.Status == LinkAlready:
 		return fmt.Sprintf(w.alreadyLinked, res.User.Name)
 	case res.Status == LinkLimit:
-		return fmt.Sprintf(w.linkLimit, tgate.MaxLinks)
+		return fmt.Sprintf(w.linkLimit, model.MaxLinks)
 	case res.Status == LinkTaken:
 		return b.askOwner(ctx, w, chat, name, res.User, res.Owner)
 	}
@@ -224,7 +221,7 @@ func (b *Bot) link(ctx context.Context, w *words, chat int64, name string, userI
 }
 
 // who is how a Telegram account is named to the owner of a subscription it asks for.
-func who(u *tgate.User) string {
+func who(u *tgapi.User) string {
 	switch {
 	case u == nil:
 		return "?"
@@ -253,7 +250,7 @@ func refusedKey(userID, chat int64) string {
 }
 
 // askOwner sends the subscription's owner the question and tells the one who asked to wait.
-func (b *Bot) askOwner(ctx context.Context, w *words, chat int64, name string, u db.User, owner int64) string {
+func (b *Bot) askOwner(ctx context.Context, w *words, chat int64, name string, u model.User, owner int64) string {
 	now := b.d.Now()
 	b.mu.Lock()
 	t, open := b.transfers[u.ID]
@@ -276,8 +273,8 @@ func (b *Bot) askOwner(ctx context.Context, w *words, chat int64, name string, u
 	b.mu.Unlock()
 	text := html.EscapeString(fmt.Sprintf(w.transferAsk, u.Name, name))
 	data := strconv.FormatInt(u.ID, 10) + ":" + strconv.FormatInt(chat, 10)
-	kb := &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: w.transferAllow, CallbackData: "ta:" + data}, {Text: w.transferDeny, CallbackData: "tx:" + data}}}}
-	b.d.Outbox.Notice(owner, func(ctx context.Context, c *tgate.Client) error {
+	kb := &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: w.transferAllow, CallbackData: "ta:" + data}, {Text: w.transferDeny, CallbackData: "tx:" + data}}}}
+	b.d.Outbox.Notice(owner, func(ctx context.Context, c *tgapi.Client) error {
 		_, err := c.Send(ctx, owner, text, kb, false)
 		return err
 	}, func(err error) {
@@ -292,7 +289,7 @@ func (b *Bot) askOwner(ctx context.Context, w *words, chat int64, name string, u
 
 // onTransfer is the owner's answer to askOwner. It counts only from the owner's own chat,
 // for the very request that is open, and while it is.
-func (b *Bot) onTransfer(ctx context.Context, q *tgate.CallbackQuery) {
+func (b *Bot) onTransfer(ctx context.Context, q *tgapi.CallbackQuery) {
 	chat, msg := q.Message.Chat.ID, q.Message.MessageID
 	b.answer(ctx, q.ID)
 	cmd, arg, _ := strings.Cut(q.Data, ":")
@@ -301,12 +298,12 @@ func (b *Bot) onTransfer(ctx context.Context, q *tgate.CallbackQuery) {
 	to, _ := strconv.ParseInt(toStr, 10, 64)
 	w := wordsFor(b.lang(ctx))
 	say := func(text string) { // the question's message becomes the answer, without buttons
-		b.d.Outbox.Reply(chat, "edit:"+strconv.FormatInt(chat, 10)+":"+strconv.FormatInt(msg, 10), 1, func(ctx context.Context, c *tgate.Client) error {
+		b.d.Outbox.Reply(chat, "edit:"+strconv.FormatInt(chat, 10)+":"+strconv.FormatInt(msg, 10), 1, func(ctx context.Context, c *tgapi.Client) error {
 			return c.Edit(ctx, chat, msg, html.EscapeString(text), nil)
 		})
 	}
 	tell := func(to int64, text string) {
-		b.d.Outbox.Notice(to, func(ctx context.Context, c *tgate.Client) error {
+		b.d.Outbox.Notice(to, func(ctx context.Context, c *tgapi.Client) error {
 			_, err := c.Send(ctx, to, html.EscapeString(text), nil, false)
 			return err
 		}, nil)
@@ -344,9 +341,9 @@ func (b *Bot) onTransfer(ctx context.Context, q *tgate.CallbackQuery) {
 		return
 	}
 	switch err := b.d.Backend.Transfer(ctx, userID, to); {
-	case errors.Is(err, ErrLinkLimit):
+	case errors.Is(err, model.ErrLinkLimit):
 		say(w.transferStale)
-		tell(to, fmt.Sprintf(w.linkLimit, tgate.MaxLinks))
+		tell(to, fmt.Sprintf(w.linkLimit, model.MaxLinks))
 		return
 	case err != nil:
 		say(w.transferStale)
@@ -357,11 +354,11 @@ func (b *Bot) onTransfer(ctx context.Context, q *tgate.CallbackQuery) {
 }
 
 // subs are the chat's subscriptions and the one it shows.
-func (b *Bot) subs(ctx context.Context, chat int64) ([]db.User, db.User, bool) {
+func (b *Bot) subs(ctx context.Context, chat int64) ([]model.User, model.User, bool) {
 	acc, err := b.d.Backend.Context(ctx, chat)
 	list := acc.Links
 	if err != nil || len(list) == 0 {
-		return nil, db.User{}, false
+		return nil, model.User{}, false
 	}
 	cur := list[0]
 	if acc.HasChat {
@@ -375,12 +372,12 @@ func (b *Bot) subs(ctx context.Context, chat int64) ([]db.User, db.User, bool) {
 }
 
 func (b *Bot) miniAppURL(ctx context.Context, cfg Config) string {
-	return miniAppURL(ctx, b.d.Backend, cfg)
+	return MiniAppURL(ctx, b.d.Backend, cfg)
 }
 
-// miniAppURL is where the Mini App opens while the admin keeps its button on; "" when
+// MiniAppURL is where the Mini App opens while the admin keeps its button on; "" when
 // Telegram could not load it.
-func miniAppURL(ctx context.Context, be Backend, cfg Config) string {
+func MiniAppURL(ctx context.Context, be Backend, cfg Config) string {
 	if !cfg.MiniApp {
 		return ""
 	}

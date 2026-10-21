@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"mikan/internal/panel/store/db"
+	"mikan/internal/textutil"
 )
 
 func TestOperatorHeadersWithoutBranding(t *testing.T) {
@@ -116,7 +117,8 @@ func TestPageURL(t *testing.T) {
 	}
 }
 
-func TestValidLink(t *testing.T) {
+// The links the apps open: https with a host, and tg:// for the links that allow it.
+func TestAppLinks(t *testing.T) {
 	for _, c := range []struct {
 		s      string
 		tg, ok bool
@@ -130,8 +132,12 @@ func TestValidLink(t *testing.T) {
 		{"http://t.me/news", true, false},
 		{"javascript:alert(1)", true, false},
 	} {
-		if ValidLink(c.s, c.tg) != c.ok {
-			t.Errorf("ValidLink(%q, %v) = %v", c.s, c.tg, !c.ok)
+		rules := LogoLinks
+		if c.tg {
+			rules = AppLinks
+		}
+		if textutil.ValidLink(c.s, rules) != c.ok {
+			t.Errorf("%q with tg=%v: %v", c.s, c.tg, !c.ok)
 		}
 	}
 }

@@ -20,9 +20,11 @@ import (
 	"sync"
 	"time"
 
+	"mikan/internal/netaddr"
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 )
@@ -46,7 +48,7 @@ type Deps struct {
 	Settings *settings.Settings
 	Telegram Telegram
 	SubBase  func(ctx context.Context) string
-	// Bot serves the bot's screens running as an addon (tgbot.RPCHandler): POST
+	// Bot serves the bot's screens running as an addon (botpanel.RPCHandler): POST
 	// /panel/v2/bot/{method}, for the addon that holds the bot. nil: not served.
 	Bot http.Handler
 	// Users are the rules the grants of users:grant go through (days, traffic: the admin's
@@ -133,7 +135,15 @@ func New(d Deps) *Server {
 			if c, _ := CallerOf(r.Context()); !s.guardRPC(w, r, c) {
 				return
 			}
-			d.Bot.ServeHTTP(w, r)
+			// What a code or an address named, the guard lets Link take (botrpc.go).
+			rec := &recorder{header: http.Header{}, status: http.StatusOK}
+			d.Bot.ServeHTTP(rec, r)
+			s.talk.noteNamed(r.PathValue("method"), rec.body.Bytes())
+			for k, v := range rec.header {
+				w.Header()[k] = v
+			}
+			w.WriteHeader(rec.status)
+			_, _ = w.Write(rec.body.Bytes())
 		})
 	}
 	return s
@@ -300,7 +310,7 @@ func Loopback(addr string) bool {
 // unprivileged port, as the host gives out.
 func Bridge(addr string) bool {
 	ap, err := netip.ParseAddrPort(addr)
-	return err == nil && ap.Addr().Is4() && ap.Addr().IsPrivate() && ap.Port() >= 1024
+	return err == nil && ap.Addr().Is4() && netaddr.Classify(ap.Addr()) == netaddr.Private && ap.Port() >= 1024
 }
 
 // wanted is what the host's state asks to be listened on: the loopback address for the
@@ -396,7 +406,7 @@ func (s *Server) Run(ctx context.Context) {
 		case <-prune.C:
 			s.pruneKV(ctx)
 			s.pruneUpdates(ctx)
-			if _, err := events.Prune(ctx, s.d.Store.Q, s.d.Now()); err != nil && ctx.Err() == nil {
+			if _, err := feed.Prune(ctx, s.d.Store.Q, s.d.Now()); err != nil && ctx.Err() == nil {
 				s.d.Log.Warn("addons api: prune events", "err", err)
 			}
 		}

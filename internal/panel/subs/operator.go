@@ -9,8 +9,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/textutil"
 )
 
 // AppBrand is the brand the apps that read operator headers show in place of their own:
@@ -58,7 +59,7 @@ func OperatorHeaders(h http.Header, u db.User, cfg Config, page, botURL string, 
 	user := cut(u.Name, userNameMax)
 	limit := int64(0)
 	// Branding shows the limit as places taken; the online mode has no places.
-	if cfg.Binding && u.DeviceLimit.Valid && domain.BindsDevices(u.DeviceMode) {
+	if cfg.Binding && u.DeviceLimit.Valid && model.BindsDevices(u.DeviceMode) {
 		limit = u.DeviceLimit.Int64
 	}
 	// ClashFest decodes "base64:" values; SlothClash takes UTF-8 as sent.
@@ -91,24 +92,12 @@ func OperatorHeaders(h http.Header, u db.User, cfg Config, page, botURL string, 
 	}
 }
 
-// ValidLink says whether s is a link the apps open: https with a host, or tg://, without
-// spaces or control characters.
-func ValidLink(s string, tg bool) bool {
-	if strings.ContainsFunc(s, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
-		return false
-	}
-	u, err := url.Parse(s)
-	if err != nil {
-		return false
-	}
-	switch u.Scheme {
-	case "https":
-		return u.Host != ""
-	case "tg":
-		return tg && (u.Host != "" || u.Opaque != "")
-	}
-	return false
-}
+// The links the apps open from a subscription's headers: https with a host, or tg:// for a
+// support or announcement link; a logo is a picture, https alone.
+var (
+	AppLinks  = textutil.LinkRules{TG: true, Opaque: true}
+	LogoLinks = textutil.LinkRules{}
+)
 
 // BotURL is the bot's address without a start code: the apps keep headers for days, and
 // a code ties a subscription to whoever opens it first.

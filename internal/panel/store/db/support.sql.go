@@ -13,9 +13,9 @@ import (
 )
 
 const createSupportGrant = `-- name: CreateSupportGrant :one
-INSERT INTO support_grants (token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at
+INSERT INTO support_grants (token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, extended)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at, extended
 `
 
 type CreateSupportGrantParams struct {
@@ -27,6 +27,7 @@ type CreateSupportGrantParams struct {
 	Note            string
 	CreatedAt       int64
 	ExpiresAt       int64
+	Extended        bool
 }
 
 func (q *Queries) CreateSupportGrant(ctx context.Context, arg CreateSupportGrantParams) (SupportGrant, error) {
@@ -39,6 +40,7 @@ func (q *Queries) CreateSupportGrant(ctx context.Context, arg CreateSupportGrant
 		arg.Note,
 		arg.CreatedAt,
 		arg.ExpiresAt,
+		arg.Extended,
 	)
 	var i SupportGrant
 	err := row.Scan(
@@ -57,6 +59,7 @@ func (q *Queries) CreateSupportGrant(ctx context.Context, arg CreateSupportGrant
 		&i.LastIp,
 		&i.RevokedAt,
 		&i.EndedNotedAt,
+		&i.Extended,
 	)
 	return i, err
 }
@@ -96,7 +99,7 @@ func (q *Queries) EnterSupportGrant(ctx context.Context, arg EnterSupportGrantPa
 const expireSupportGrants = `-- name: ExpireSupportGrants :many
 UPDATE support_grants SET ended_noted_at = $1
 WHERE revoked_at IS NULL AND ended_noted_at IS NULL AND expires_at <= $1
-RETURNING id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at
+RETURNING id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at, extended
 `
 
 // Grants whose time ran out and whose end nobody wrote down yet.
@@ -125,6 +128,7 @@ func (q *Queries) ExpireSupportGrants(ctx context.Context, now sql.NullInt64) ([
 			&i.LastIp,
 			&i.RevokedAt,
 			&i.EndedNotedAt,
+			&i.Extended,
 		); err != nil {
 			return nil, err
 		}
@@ -140,7 +144,7 @@ func (q *Queries) ExpireSupportGrants(ctx context.Context, now sql.NullInt64) ([
 }
 
 const getSupportGrant = `-- name: GetSupportGrant :one
-SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at FROM support_grants WHERE id = $1
+SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at, extended FROM support_grants WHERE id = $1
 `
 
 func (q *Queries) GetSupportGrant(ctx context.Context, id int64) (SupportGrant, error) {
@@ -162,12 +166,13 @@ func (q *Queries) GetSupportGrant(ctx context.Context, id int64) (SupportGrant, 
 		&i.LastIp,
 		&i.RevokedAt,
 		&i.EndedNotedAt,
+		&i.Extended,
 	)
 	return i, err
 }
 
 const getSupportGrantByHash = `-- name: GetSupportGrantByHash :one
-SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at FROM support_grants WHERE token_hash = $1
+SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at, extended FROM support_grants WHERE token_hash = $1
 `
 
 func (q *Queries) GetSupportGrantByHash(ctx context.Context, tokenHash string) (SupportGrant, error) {
@@ -189,12 +194,13 @@ func (q *Queries) GetSupportGrantByHash(ctx context.Context, tokenHash string) (
 		&i.LastIp,
 		&i.RevokedAt,
 		&i.EndedNotedAt,
+		&i.Extended,
 	)
 	return i, err
 }
 
 const latestSupportGrant = `-- name: LatestSupportGrant :one
-SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at FROM support_grants ORDER BY id DESC LIMIT 1
+SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at, extended FROM support_grants ORDER BY id DESC LIMIT 1
 `
 
 func (q *Queries) LatestSupportGrant(ctx context.Context) (SupportGrant, error) {
@@ -216,12 +222,13 @@ func (q *Queries) LatestSupportGrant(ctx context.Context) (SupportGrant, error) 
 		&i.LastIp,
 		&i.RevokedAt,
 		&i.EndedNotedAt,
+		&i.Extended,
 	)
 	return i, err
 }
 
 const liveSupportGrants = `-- name: LiveSupportGrants :many
-SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at FROM support_grants WHERE revoked_at IS NULL AND expires_at > $1 ORDER BY id
+SELECT id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at, extended FROM support_grants WHERE revoked_at IS NULL AND expires_at > $1 ORDER BY id
 `
 
 func (q *Queries) LiveSupportGrants(ctx context.Context, expiresAt int64) ([]SupportGrant, error) {
@@ -249,6 +256,7 @@ func (q *Queries) LiveSupportGrants(ctx context.Context, expiresAt int64) ([]Sup
 			&i.LastIp,
 			&i.RevokedAt,
 			&i.EndedNotedAt,
+			&i.Extended,
 		); err != nil {
 			return nil, err
 		}
@@ -279,7 +287,7 @@ func (q *Queries) PruneSupportGrants(ctx context.Context, revokedAt sql.NullInt6
 const revokeSupportGrant = `-- name: RevokeSupportGrant :one
 UPDATE support_grants SET revoked_at = $1, ended_noted_at = $1
 WHERE id = $2 AND revoked_at IS NULL AND expires_at > $1
-RETURNING id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at
+RETURNING id, token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, entered_at, operator_seen_at, last_used_at, last_ip, revoked_at, ended_noted_at, extended
 `
 
 type RevokeSupportGrantParams struct {
@@ -307,6 +315,7 @@ func (q *Queries) RevokeSupportGrant(ctx context.Context, arg RevokeSupportGrant
 		&i.LastIp,
 		&i.RevokedAt,
 		&i.EndedNotedAt,
+		&i.Extended,
 	)
 	return i, err
 }

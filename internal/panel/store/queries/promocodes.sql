@@ -57,13 +57,14 @@ UPDATE promo_codes SET used_count=used_count+1 WHERE id=sqlc.arg(id);
 UPDATE promo_codes SET used_count=CASE WHEN used_count>0 THEN used_count-1 ELSE 0 END WHERE id=sqlc.arg(id);
 
 -- name: CountUserPaidPayments :one
-SELECT COUNT(*) FROM payments WHERE tg_id=sqlc.arg(tg_id) AND status IN ('paid','applied');
+-- What the account paid for, a payment refunded since included: it was a purchase.
+SELECT COUNT(*) FROM payments WHERE tg_id=sqlc.arg(tg_id) AND status IN ('paid','applied','refunded');
 
 -- name: CountUserPaidPaymentsExcept :one
 -- The same, apart from the trial's own payments: whether the account paid for anything
 -- besides the trial being applied. Another trial payment paid meanwhile does not count:
 -- TakeTrial gives the trial to one of them and the other goes back.
-SELECT COUNT(*) FROM payments WHERE tg_id=sqlc.arg(tg_id) AND status IN ('paid','applied') AND id <> sqlc.arg(id) AND kind <> 'trial';
+SELECT COUNT(*) FROM payments WHERE tg_id=sqlc.arg(tg_id) AND status IN ('paid','applied','refunded') AND id <> sqlc.arg(id) AND kind <> 'trial';
 
 -- name: CountPromoUser :one
 SELECT COUNT(*) FROM promo_redemptions WHERE promo_id=sqlc.arg(promo_id) AND (tg_id=sqlc.arg(tg_id) OR user_id=sqlc.arg(user_id)) AND status IN ('reserved','applied');
@@ -77,11 +78,16 @@ VALUES (sqlc.arg(promo_id),sqlc.narg(user_id),sqlc.arg(tg_id),sqlc.narg(payment_
 SELECT * FROM promo_redemptions WHERE payment_id=sqlc.arg(payment_id);
 
 -- name: ListPromoRedemptionsWithCode :many
+-- q: a part of the code (any case), or the client's id or Telegram id whole; '': every one.
 SELECT r.*, c.code FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
+WHERE sqlc.arg(q)::text = '' OR strpos(lower(c.code), lower(sqlc.arg(q)::text)) > 0
+  OR CAST(r.user_id AS TEXT) = sqlc.arg(q)::text OR CAST(r.tg_id AS TEXT) = sqlc.arg(q)::text
 ORDER BY r.id DESC LIMIT CAST(sqlc.arg(lim) AS BIGINT) OFFSET CAST(sqlc.arg(row_offset) AS BIGINT);
 
 -- name: CountPromoRedemptions :one
-SELECT COUNT(*) FROM promo_redemptions;
+SELECT COUNT(*) FROM promo_redemptions r JOIN promo_codes c ON c.id=r.promo_id
+WHERE sqlc.arg(q)::text = '' OR strpos(lower(c.code), lower(sqlc.arg(q)::text)) > 0
+  OR CAST(r.user_id AS TEXT) = sqlc.arg(q)::text OR CAST(r.tg_id AS TEXT) = sqlc.arg(q)::text;
 
 -- name: MarkPromoApplied :execrows
 UPDATE promo_redemptions SET status='applied', user_id=COALESCE(sqlc.narg(user_id),user_id) WHERE id=sqlc.arg(id) AND status IN ('reserved','released');

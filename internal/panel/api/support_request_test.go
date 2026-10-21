@@ -81,7 +81,7 @@ func TestSupportFromRequest(t *testing.T) {
 	check("wrong token", req(withBearer(support.NewToken())), false)
 
 	g, _, _ := h.supportFromRequest(req(withBearer(c.Token)))
-	ctxTerm := withSupportGrant(ctx, g, "api")
+	ctxTerm := withSupportGrant(ctx, g)
 	if !supportTerminalAllowed(ctxTerm, "panel") || !supportTerminalAllowed(ctxTerm, support.NodeTarget(node.ID)) || supportTerminalAllowed(ctxTerm, "node:9999") {
 		t.Error("terminal targets of the grant")
 	}

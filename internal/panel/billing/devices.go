@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -17,11 +17,11 @@ import (
 // on with every renewal, which is then priced with them (on).
 
 // KindDevice is a payment for one more device.
-const KindDevice = "device"
+const KindDevice = model.KindDevice
 
 var (
-	ErrDevicesUnlimited = errors.New("devices_unlimited") // the subscription has no device limit
-	ErrDevicesMax       = errors.New("devices_max")       // as many bought as the tariff allows
+	ErrDevicesUnlimited = model.ErrDevicesUnlimited // the subscription has no device limit
+	ErrDevicesMax       = model.ErrDevicesMax       // as many bought as the tariff allows
 )
 
 // DeviceOffer is one more device for a subscription, with the prices the available
@@ -114,14 +114,14 @@ func (s *Service) DeviceInvoice(ctx context.Context, req DeviceRequest) (db.Paym
 	}
 	defer unlock()
 	lang, _ := s.d.Settings.Lang(ctx)
-	title := DescribeDevice(lang)
+	title := model.DescribeDevice(lang)
 	now := s.d.Now()
 	userID := sql.NullInt64{Int64: req.UserID, Valid: true}
 	tariffID := sql.NullInt64{Int64: t.ID, Valid: true}
 	pay, open, err := s.newPayment(ctx, req.TgID, now,
 		func(q *db.Queries) ([]db.Payment, error) {
 			return q.FindOpenPayments(ctx, db.FindOpenPaymentsParams{TgID: req.TgID, TariffID: tariffID, Provider: req.Provider, Kind: KindDevice,
-				UserID: req.UserID, Since: now.Add(-invoiceReuse).Unix()})
+				UserID: req.UserID, Since: now.Add(-invoiceReuse).Unix(), RepeatSince: now.Add(-balanceRepeat).Unix()})
 		},
 		func(q *db.Queries, existing db.Payment) (bool, error) { return existing.Amount == amount, nil },
 		func(q *db.Queries) (db.Payment, error) {
@@ -131,29 +131,7 @@ func (s *Service) DeviceInvoice(ctx context.Context, req DeviceRequest) (db.Paym
 	if err != nil || open {
 		return pay, err
 	}
-	return s.openPayment(ctx, pay, title, DescribeDeviceOffer(o, lang))
-}
-
-// DescribeDevice names the purchase: "+1 device".
-func DescribeDevice(lang string) string {
-	if lang == "en" {
-		return "+1 device"
-	}
-	return "+1 устройство"
-}
-
-// DescribeDeviceOffer says what one more device gives and for how long.
-func DescribeDeviceOffer(o DeviceOffer, lang string) string {
-	en := lang == "en"
-	switch {
-	case o.Keep && en:
-		return fmt.Sprintf("One more device for the subscription: %d in all. It stays with renewals.", o.Limit+1)
-	case o.Keep:
-		return fmt.Sprintf("Ещё одно устройство к подписке: всего %d. Остаётся при продлении.", o.Limit+1)
-	case en:
-		return fmt.Sprintf("One more device for the subscription: %d in all, until the term ends.", o.Limit+1)
-	}
-	return fmt.Sprintf("Ещё одно устройство к подписке: всего %d, до конца срока.", o.Limit+1)
+	return s.openPayment(ctx, pay, title, model.DescribeDeviceOffer(o.Model(), lang))
 }
 
 // deviceOnSale: the device of a payment can still be bought (Telegram's pre-checkout).
@@ -189,15 +167,10 @@ func (s *Service) applyDevice(ctx context.Context, q *db.Queries, pay db.Payment
 	return q.AddUserExtraDevice(ctx, db.AddUserExtraDeviceParams{Until: until, UpdatedAt: s.d.Now().Unix(), ID: u.ID})
 }
 
-// renewalExtra is what a renewal of u costs on top of its term when bought devices stay
-// with renewals: their price each, per term.
-func renewalExtra(cfg Config, u db.User, t db.Tariff, av Available, provider string) int64 {
-	if !cfg.ExtraDevicesKeep || u.ExtraDevices <= 0 || !u.TariffID.Valid || u.TariffID.Int64 != t.ID {
-		return 0
+// plus is a price with more on top; no price stays none.
+func plus(price sql.NullInt64, more int64) sql.NullInt64 {
+	if price.Valid {
+		price.Int64 += more
 	}
-	each, _, ok := av.price(provider, t.DevicePriceStars, t.DevicePriceRub)
-	if !ok {
-		return 0
-	}
-	return each * u.ExtraDevices
+	return price
 }

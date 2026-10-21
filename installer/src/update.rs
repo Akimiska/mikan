@@ -1543,7 +1543,7 @@ mod tests {
         let key = signer.verifying_key();
         // from a version, towards upto: what the hop is and what comes after it
         let hop = |current: &str, upto: &str, channel: Channel| {
-            release::find_upto_with(current, upto_channel(channel, upto), upto, &key, &fetch)
+            release::find_upto_with(current, upto_channel(channel, upto), upto, &[key], &fetch)
                 .map(|f| (f.manifest.version, f.newest, f.unreachable))
         };
         let step = |current: &str, upto: &str| hop(current, upto, Channel::Stable).unwrap();
@@ -1594,17 +1594,17 @@ mod tests {
         files.insert(latest.clone(), manifest);
         files.insert(format!("{latest}.sig"), sig);
         let fetch = |url: &str, _: u64| -> Result<Option<Vec<u8>>> { Ok(files.get(url).cloned()) };
-        let got = release::find_upto_with("0.5.0.1", Channel::Stable, "0.5.0.2", &key, &fetch).unwrap();
+        let got = release::find_upto_with("0.5.0.1", Channel::Stable, "0.5.0.2", &[key], &fetch).unwrap();
         assert_eq!(got.manifest.version, "0.5.0.2");
         assert!(got.fallback.is_some() && got.newest.is_none());
         for upto in ["0.5.0.3", "0.5.0.1.1", "0.6.0.0"] {
-            let err = release::find_upto_with("0.5.0.1", Channel::Stable, upto, &key, &fetch).unwrap_err();
+            let err = release::find_upto_with("0.5.0.1", Channel::Stable, upto, &[key], &fetch).unwrap_err();
             assert!(format!("{err:#}").contains("not the mikan"), "{upto}: {err:#}");
         }
         // an index that is there but says nothing of the release is a refusal, not a reason to look elsewhere
         let files = signed_files(&signer, &["0.5.0.2"], r#"{"schema":1,"releases":[]}"#);
         let fetch = |url: &str, _: u64| -> Result<Option<Vec<u8>>> { Ok(files.get(url).cloned()) };
-        assert!(release::find_upto_with("0.5.0.1", Channel::Stable, "0.5.0.2", &key, &fetch).is_err());
+        assert!(release::find_upto_with("0.5.0.1", Channel::Stable, "0.5.0.2", &[key], &fetch).is_err());
     }
 
     // The panel writes the channel; only the two exact words get through, and nothing the
@@ -1704,7 +1704,7 @@ mod tests {
             let mut current = "0.4.4".to_owned();
             let mut went = Vec::new();
             for hop in 0.. {
-                let found = release::find_with(Some(&current), Channel::Stable, &signer.verifying_key(), &fetch).unwrap();
+                let found = release::find_with(Some(&current), Channel::Stable, &[signer.verifying_key()], &fetch).unwrap();
                 assert!(found.fallback.is_none(), "{:?}", found.fallback);
                 if !release::newer(&found.manifest.version, &current) {
                     return (went, After::Done);

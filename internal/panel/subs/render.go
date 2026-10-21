@@ -15,6 +15,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/proto"
+	"mikan/internal/textutil"
 )
 
 // Endpoint describes how clients reach one node.
@@ -34,6 +35,8 @@ type Node struct {
 	// leading flag (or the whole name) prefixes proxy names.
 	Name     string
 	Endpoint Endpoint
+	// SSOneKey: the node is older than the Shadowsocks-2022 key per user (proto.ClientInput).
+	SSOneKey bool
 }
 
 // Groups are the proxy-group names Clash-family apps show; the admin can rename them.
@@ -88,7 +91,7 @@ func (g Groups) WithDefaults(lang string) Groups {
 	}
 	if g.Auto == "" {
 		g.Auto = "Авто"
-		if lang == "en" {
+		if textutil.Lang(lang).En() {
 			g.Auto = "Auto"
 		}
 	}
@@ -133,8 +136,13 @@ type Profile struct {
 	Skip     func(in db.Inbound, err error)
 	Slot     db.Slot
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
-	Nodes    []Node       // enabled nodes in display order; inbounds of other nodes are skipped
-	Direct   []string     // hosts that bypass the tunnel: the panel and every node
+	// What profile read on the way, for the subscription's page (info) to build on rather than
+	// read again: every inbound, the user's access and grants left.
+	all    []db.Inbound
+	access domain.Access
+	grants domain.GrantsLeft
+	Nodes  []Node   // enabled nodes in display order; inbounds of other nodes are skipped
+	Direct []string // hosts that bypass the tunnel: the panel and every node
 	// Fingerprint is the panel's default uTLS profile (proto.ClientInput.Fingerprint).
 	Fingerprint string
 	// Rules are the admin's own Clash rules (ServedRules), before the built-in routing.
@@ -176,9 +184,9 @@ func build(p Profile) ([]proxy, error) {
 			if in.NodeID != n.ID {
 				continue
 			}
-			port, err := firstPort(in.Port)
-			if err != nil {
-				p.skip(in, err)
+			port := domain.FirstPort(in.Port)
+			if port == 0 {
+				p.skip(in, fmt.Errorf("bad port %q", in.Port))
 				continue
 			}
 			t, err := parseTemplate(in.Config)
@@ -202,7 +210,7 @@ func build(p Profile) ([]proxy, error) {
 				name = base + " " + strconv.Itoa(i)
 			}
 			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: spec,
-				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot})
+				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot, SSOneKey: n.SSOneKey})
 			if err != nil {
 				p.skip(in, err)
 				continue
@@ -218,16 +226,6 @@ func (p Profile) skip(in db.Inbound, err error) {
 	if p.Skip != nil {
 		p.Skip(in, err)
 	}
-}
-
-func firstPort(spec string) (int, error) {
-	head, _, _ := strings.Cut(spec, ",")
-	head, _, _ = strings.Cut(head, "-")
-	p, err := strconv.Atoi(strings.TrimSpace(head))
-	if err != nil || p <= 0 || p > 65535 {
-		return 0, fmt.Errorf("bad port %q", spec)
-	}
-	return p, nil
 }
 
 // URIs renders one share link per inbound.

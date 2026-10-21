@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"mikan/internal/release"
 )
 
 const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -28,7 +29,7 @@ func signed(t *testing.T, c any) ([]byte, string, ed25519.PublicKey) {
 		t.Fatal(err)
 	}
 	data, _ := json.Marshal(c)
-	return data, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data)), pub
+	return data, release.SignIn(release.CatalogContext, data, priv), pub
 }
 
 // The catalog is trusted only with a good signature, and only what this panel can run

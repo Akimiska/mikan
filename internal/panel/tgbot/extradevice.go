@@ -6,17 +6,15 @@ import (
 	"html"
 	"strings"
 
-	"mikan/internal/panel/billing"
-	"mikan/internal/panel/store"
-	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/panel/model"
+	"mikan/internal/tgapi"
 )
 
 // One more device for the shown subscription. Callback data: e the offer, ep:<p> pay for
 // it (<p> as in the shop).
 
 // deviceOffer is one more device for the subscription; ok is false when there is none.
-func (b *Bot) deviceOffer(ctx context.Context, userID int64) (billing.DeviceOffer, billing.Available, bool) {
+func (b *Bot) deviceOffer(ctx context.Context, userID int64) (model.DeviceOffer, model.Available, bool) {
 	o, av, ok, err := b.d.Backend.Shop().DeviceOfferFor(ctx, userID)
 	if err != nil && !ok {
 		return o, av, false
@@ -25,14 +23,14 @@ func (b *Bot) deviceOffer(ctx context.Context, userID int64) (billing.DeviceOffe
 }
 
 // extraDevice draws the screens of buying one more device for subscription u.
-func (b *Bot) extraDevice(ctx context.Context, w *words, chat int64, u db.User, cmd, arg, notice string) (string, *tgate.Keyboard) {
-	back := []tgate.Button{{Text: w.back, CallbackData: "s"}}
+func (b *Bot) extraDevice(ctx context.Context, w *words, chat int64, u model.User, cmd, arg, notice string) (string, *tgapi.Keyboard) {
+	back := []tgapi.Button{{Text: w.back, CallbackData: "s"}}
 	if cmd == "ep" {
-		return b.deviceInvoice(ctx, w, chat, u.ID, arg, []tgate.Button{{Text: w.back, CallbackData: "e"}})
+		return b.deviceInvoice(ctx, w, chat, u.ID, arg, []tgapi.Button{{Text: w.back, CallbackData: "e"}})
 	}
 	o, av, ok := b.deviceOffer(ctx, u.ID)
 	if !ok {
-		return html.EscapeString(w.deviceGone), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
+		return html.EscapeString(w.deviceGone), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{back}}
 	}
 	lines := []string{"<b>" + html.EscapeString(fmt.Sprintf(w.deviceTitle, u.Name)) + "</b>", "",
 		html.EscapeString(fmt.Sprintf(w.deviceNow, o.Limit, o.Limit+1))}
@@ -40,7 +38,7 @@ func (b *Bot) extraDevice(ctx context.Context, w *words, chat int64, u db.User, 
 	case o.Keep:
 		lines = append(lines, html.EscapeString(w.deviceKeep))
 	case o.Expiry.Valid:
-		lines = append(lines, html.EscapeString(fmt.Sprintf(w.deviceUntil, w.date(store.Time(o.Expiry.Int64)))))
+		lines = append(lines, html.EscapeString(fmt.Sprintf(w.deviceUntil, w.date(model.Time(o.Expiry.Int64)))))
 	}
 	if left := o.Max - o.Extra; left > 0 {
 		lines = append(lines, html.EscapeString(fmt.Sprintf(w.deviceLeft, left)))
@@ -49,27 +47,27 @@ func (b *Bot) extraDevice(ctx context.Context, w *words, chat int64, u db.User, 
 		lines = append([]string{html.EscapeString(notice), ""}, lines...)
 	}
 	lines = append(lines, "", w.payHow)
-	return strings.Join(lines, "\n"), &tgate.Keyboard{InlineKeyboard: append(w.payButtons("ep:", o.Stars, o.Rub, av, b.addonName(ctx)), back)}
+	return strings.Join(lines, "\n"), &tgapi.Keyboard{InlineKeyboard: append(w.payButtons("ep:", o.Stars, o.Rub, av, b.addonName(ctx)), back)}
 }
 
 // deviceInvoice opens the invoice for one more device; like shopInvoice it runs off the
 // update loop.
-func (b *Bot) deviceInvoice(ctx context.Context, w *words, chat, userID int64, code string, back []tgate.Button) (string, *tgate.Keyboard) {
+func (b *Bot) deviceInvoice(ctx context.Context, w *words, chat, userID int64, code string, back []tgapi.Button) (string, *tgapi.Keyboard) {
 	provider, ok := providerOf(code)
 	if !ok {
-		return html.EscapeString(w.payUnavailable), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
+		return html.EscapeString(w.payUnavailable), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{back}}
 	}
-	p, err := b.d.Backend.Shop().DeviceInvoice(ctx, billing.DeviceRequest{TgID: chat, UserID: userID, Provider: provider})
+	p, err := b.d.Backend.Shop().DeviceInvoice(ctx, model.DeviceRequest{TgID: chat, UserID: userID, Provider: provider})
 	if err != nil {
 		msg := w.payError(err)
 		if msg == w.notForSale {
 			msg = w.deviceGone
 		}
-		return html.EscapeString(msg), &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{back}}
+		return html.EscapeString(msg), &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{back}}
 	}
 	text := fmt.Sprintf(w.invoice, html.EscapeString(p.TariffName), html.EscapeString(w.price(p.Amount, p.Currency)), w.payDevice)
-	if p.Provider == billing.Balance {
+	if p.Provider == model.Balance {
 		return w.balancePaidScreen(p.Amount, p.Currency)
 	}
-	return text, &tgate.Keyboard{InlineKeyboard: [][]tgate.Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
+	return text, &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
 }

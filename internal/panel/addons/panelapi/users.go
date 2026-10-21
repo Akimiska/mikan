@@ -16,6 +16,8 @@ import (
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -287,7 +289,7 @@ func (s *Server) userGet(w http.ResponseWriter, r *http.Request) {
 	}
 	card := userCard{userBrief: b, PackagesLeft: grants.Main(id), Devices: bound}
 	card.Traffic = trafficView{Used: u.UsedUp + u.UsedDown, Limit: store.Int64Ptr(u.TrafficLimit)}
-	if left := domain.TrafficLeft(u.TrafficLimit, card.Traffic.Used, grants.Main(id)); left >= 0 {
+	if left := model.TrafficLeft(u.TrafficLimit, card.Traffic.Used, grants.Main(id)); left >= 0 {
 		card.Traffic.Left = &left
 	}
 	switch l, err := q.TgLinkOfUser(ctx, id); {
@@ -468,7 +470,7 @@ func (s *Server) userGrant(w http.ResponseWriter, r *http.Request) {
 		}
 		// The reason is the admin's: the feed is read by every addon that holds events, so it carries
 		// what was given and to whom (as payments do), not why.
-		return events.Emit(ctx, q, now, events.UserGranted, id, tg, events.Granted{Days: days, Bytes: bytes, PoolID: pool, Addon: c.ID}, "user.granted:"+c.ID+":"+in.Key)
+		return feed.Emit(ctx, q, now, events.UserGranted, id, tg, events.Granted{Days: days, Bytes: bytes, PoolID: pool, Addon: c.ID}, "user.granted:"+c.ID+":"+in.Key)
 	})
 	var fe *domain.FieldError
 	switch {

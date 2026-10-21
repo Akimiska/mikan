@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, Check } from "lucide-react";
 import { useState } from "react";
 import { api, errorText, unwrap, type User } from "../../../api/client";
-import { qk, useFilters } from "../../../api/hooks";
+import { qk, useFilters, useTrafficDetail } from "../../../api/hooks";
 import { useToast } from "../../../components/toast";
 import { Bar, Button, Segmented, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
@@ -23,6 +23,7 @@ export function SitesSection({ u }: { u: User }) {
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/sites", { params: { path: { id: u.id }, query: { days } }, signal })),
   });
   const filters = useFilters();
+  const detail = useTrafficDetail();
   const qc = useQueryClient();
   const toast = useToast();
   const blocked = new Set(filters.data?.egress.enabled ? filters.data.egress.domains : []);
@@ -40,7 +41,10 @@ export function SitesSection({ u }: { u: User }) {
     onError: (e) => toast.error(errorText(e)),
   });
   const v = sites.data;
-  if (v && !v.enabled && v.items.length === 0) return null;
+  // Whether the section is there is known before its skeleton: with the counting off it
+  // shows only what was counted before, so it waits for the list instead of appearing and
+  // going away.
+  if (v ? !v.enabled && v.items.length === 0 : detail.data?.enabled !== true) return null;
   const top = v?.items[0] ? v.items[0].up + v.items[0].down : 0;
   return (
     <Section title={t("userDrawer.sites.title")} aside={v?.enabled === false ? t("userDrawer.sites.off") : undefined}>

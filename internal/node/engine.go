@@ -35,6 +35,7 @@ import (
 	"mikan/internal/fsutil"
 	"mikan/internal/hostchan"
 	"mikan/internal/logbuf"
+	"mikan/internal/netaddr"
 	"mikan/internal/nodeapi"
 	"mikan/internal/proto"
 	"mikan/internal/scan"
@@ -476,7 +477,7 @@ func (e *Engine) TargetAllowed(dest string) bool {
 	if err != nil || host == "" {
 		return false
 	}
-	if e.allowPrivate || proto.PublicHost(host) {
+	if e.allowPrivate || netaddr.PublicHost(host) {
 		return true
 	}
 	e.mu.Lock()

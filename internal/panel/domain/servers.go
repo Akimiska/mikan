@@ -169,6 +169,54 @@ func (a Access) Allows(in db.Inbound) bool {
 	return a.servers.Has(in)
 }
 
+// Usable says whether the client may connect to in now: it is on and the access allows it.
+func (a Access) Usable(in db.Inbound) bool { return in.Enabled != 0 && a.Allows(in) }
+
+// Groups are the server groups the access reaches: those with a protocol of ins the client
+// may connect to now. A package or a gift of a group outside them is traffic the client has
+// nothing to spend on, and a group's page shows nothing of one it cannot reach.
+func (a Access) Groups(ins []db.Inbound) map[int64]bool {
+	out := map[int64]bool{}
+	for _, in := range ins {
+		if in.PoolID.Valid && a.Usable(in) {
+			out[in.PoolID.Int64] = true
+		}
+	}
+	return out
+}
+
+// Groups are the server groups the servers serve: those with a protocol of ins that is on
+// and among them. What a tariff can give a package or a gift of.
+func (s Servers) Groups(ins []db.Inbound) map[int64]bool {
+	return Access{servers: s}.Groups(ins)
+}
+
+// UserGroups are the server groups u reaches (Access.Groups), read from q.
+func UserGroups(ctx context.Context, q *db.Queries, u db.User) (map[int64]bool, error) {
+	servers, err := TariffServers(ctx, q, u.TariffID)
+	if err != nil {
+		return nil, err
+	}
+	ins, err := q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return AccessOf(u, servers).Groups(ins), nil
+}
+
+// TariffGroups are the server groups the servers of tariff t serve (Servers.Groups).
+func TariffGroups(ctx context.Context, q *db.Queries, t db.Tariff) (map[int64]bool, error) {
+	servers, err := TariffServers(ctx, q, sql.NullInt64{Int64: t.ID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	ins, err := q.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return servers.Groups(ins), nil
+}
+
 // Everything says whether the client may connect to every inbound.
 func (a Access) Everything() bool { return a.own == nil && a.servers.All }
 

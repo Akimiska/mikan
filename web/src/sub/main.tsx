@@ -275,13 +275,23 @@ function SubPage() {
     ) : null;
 
   // The packages on sale for this subscription, for the traffic block's "buy more": the main
-  // traffic's and each group's; it scrolls to them.
+  // traffic's and each group's. It moves to them, so only while the shop block that holds them
+  // is on; the keyboard and the screen reader go there too: the section's heading takes the focus.
   const onSale = packages && packages.token === token ? (packages.data.packages ?? []) : [];
-  const buy = tgMode && onSale.length
+  const shopOn = config.blocks.some((b) => b.type === "shop" && b.on);
+  const buy = tgMode && onSale.length && shopOn
     ? {
         main: onSale.some((o) => !o.pool),
         pools: new Set(onSale.flatMap((o) => (o.pool ? [o.pool] : []))),
-        go: () => document.getElementById("sub-packages")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }),
+        go: () => {
+          const el = document.getElementById("sub-packages");
+          if (!el) return;
+          el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+          const head = el.querySelector<HTMLElement>("h2");
+          if (!head) return;
+          head.tabIndex = -1;
+          head.focus({ preventScroll: true });
+        },
       }
     : undefined;
 

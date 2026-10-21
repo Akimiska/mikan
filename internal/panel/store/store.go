@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
-	"math/rand/v2"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 
+	"mikan/internal/pace"
 	"mikan/internal/panel/config"
 	"mikan/internal/panel/store/db"
 )
@@ -194,20 +194,16 @@ const startupWait = 60 * time.Second
 
 func waitReady(ctx context.Context, conn *sql.DB) error {
 	deadline := time.Now().Add(startupWait)
-	delay := 250 * time.Millisecond
-	for {
+	pause := pace.Backoff{Base: 250 * time.Millisecond, Max: 5 * time.Second}
+	for attempt := 0; ; attempt++ {
 		err := conn.PingContext(ctx)
+		delay := pause.Next(attempt)
 		if err == nil || !notReady(err) || time.Now().Add(delay).After(deadline) {
 			return err
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if !pace.Sleep(ctx, delay) {
 			return errors.Join(ctx.Err(), err)
-		case <-timer.C:
 		}
-		delay = min(2*delay, 5*time.Second)
 	}
 }
 
@@ -309,6 +305,10 @@ func (s *Store) Close() error {
 // last attempt starts within about three seconds at most.
 const txAttempts = 16
 
+// conflictWindow is the longest a retry waits after a conflict, by the attempt: it doubles
+// from 5 ms to a quarter of a second, and the wait is a random part of it (retry).
+var conflictWindow = pace.Backoff{Base: 5 * time.Millisecond, Max: 250 * time.Millisecond}
+
 // Tx preserves read/check/write invariants (quotas, payments, ports, slot numbers) with
 // serializable transactions. Callbacks only change database state: a serialization
 // conflict retries the whole callback, never just its final statement.
@@ -334,13 +334,8 @@ func (s *Store) retry(ctx context.Context, level sql.IsolationLevel, fn func(q *
 		// Exponential backoff with full jitter: writers that collided together must not
 		// all come back together, or the same conflict repeats until the attempts run out.
 		s.conflicts.Add(1)
-		window := min(5*time.Millisecond<<attempt, 250*time.Millisecond)
-		timer := time.NewTimer(rand.N(window) + time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if !pace.Sleep(ctx, pace.Jitter(conflictWindow.Next(attempt))+time.Millisecond) {
 			return ctx.Err()
-		case <-timer.C:
 		}
 	}
 }

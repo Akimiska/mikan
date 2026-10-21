@@ -21,6 +21,7 @@ import (
 	"mikan/internal/panel/server"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/support"
+	"mikan/internal/textutil"
 )
 
 // The support terminal. The operator of a grant of the terminal level opens a WebSocket to
@@ -230,7 +231,7 @@ func (h *handlers) terminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := server.ClientIP(r.Header, r.RemoteAddr, h.d.TrustProxy)
 	// What a request through the middleware carries: who it is for the audit, and the grant.
-	rctx := withSupportGrant(context.WithValue(r.Context(), keyClient, client{IP: ip, UserAgent: r.UserAgent()}), g, via)
+	rctx := withSupportGrant(context.WithValue(r.Context(), keyClient, client{IP: ip, UserAgent: r.UserAgent()}), g)
 	if !supportTerminalAllowed(rctx, target) {
 		writeProblem(w, http.StatusForbidden, "terminal_not_allowed")
 		return
@@ -418,14 +419,7 @@ func writeWS(ctx context.Context, c *websocket.Conn, v any) {
 
 func closeWS(c *websocket.Conn, code websocket.StatusCode, reason string) error {
 	// A close reason is at most 123 bytes.
-	return c.Close(code, textClip(reason, 100))
-}
-
-func textClip(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
+	return c.Close(code, textutil.Clip(reason, 100))
 }
 
 // ---- recordings ---------------------------------------------------------------------
@@ -465,7 +459,7 @@ func (h *handlers) recordingSource(ctx context.Context, source string) (terminal
 }
 
 func (h *handlers) listRecordings(ctx context.Context, in *recordingsInput) (*recordingsOutput, error) {
-	if err := requireSession(ctx, "source"); err != nil {
+	if err := requireOwner(ctx, "source"); err != nil {
 		return nil, err
 	}
 	src, err := h.recordingSource(ctx, in.Source)
@@ -495,7 +489,7 @@ func (h *handlers) listRecordings(ctx context.Context, in *recordingsInput) (*re
 }
 
 func (h *handlers) getRecording(ctx context.Context, in *recordingInput) (*recordingOutput, error) {
-	if err := requireSession(ctx, "name"); err != nil {
+	if err := requireOwner(ctx, "name"); err != nil {
 		return nil, err
 	}
 	if !hostchan.ValidRecordingName(in.Name) {

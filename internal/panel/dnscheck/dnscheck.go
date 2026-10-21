@@ -6,7 +6,6 @@ package dnscheck
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +15,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"mikan/internal/httpjson"
+	"mikan/internal/netaddr"
 )
 
 // Resolvers are the public DNS-over-HTTPS resolvers asked in turn (JSON API).
@@ -112,14 +114,6 @@ func (c *Checker) doh(ctx context.Context, base, name, typ string) ([]netip.Addr
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/dns-json")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: HTTP %d", base, resp.StatusCode)
-	}
 	var ans struct {
 		Status int `json:"Status"`
 		Answer []struct {
@@ -127,7 +121,8 @@ func (c *Checker) doh(ctx context.Context, base, name, typ string) ([]netip.Addr
 			Data string `json:"data"`
 		} `json:"Answer"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&ans); err != nil {
+	// An answer of a few records; one that does not end is no answer.
+	if err := httpjson.Do(c.HTTP, req, 64<<10, &ans); err != nil {
 		return nil, fmt.Errorf("%s: %w", base, err)
 	}
 	// 0: found, 3: no such name; anything else (SERVFAIL…) says nothing.
@@ -179,7 +174,7 @@ func Own(host string) []netip.Addr {
 		if err != nil {
 			continue
 		}
-		if ip := p.Addr().Unmap(); ip.IsGlobalUnicast() && !ip.IsPrivate() && !slices.Contains(out, ip) {
+		if ip := p.Addr().Unmap(); netaddr.IsPublic(ip) && !slices.Contains(out, ip) {
 			out = append(out, ip)
 		}
 	}

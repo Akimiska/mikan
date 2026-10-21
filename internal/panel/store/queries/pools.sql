@@ -148,3 +148,43 @@ INSERT INTO tariff_nodes (tariff_id, node_id) VALUES ($1, $2) ON CONFLICT DO NOT
 
 -- name: AddTariffInbound :exec
 INSERT INTO tariff_inbounds (tariff_id, inbound_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+
+-- name: ApplyTariffLimits :exec
+-- The users of a tariff take its values of the chosen parts now (ApplyTariffToAll), each
+-- only the columns of its part: the traffic per period and its reset, the device limit (with
+-- the devices bought on top, an unlimited one staying unlimited) and how it counts, the
+-- speed. What they used and their terms stay.
+UPDATE users u SET
+  traffic_limit  = CASE WHEN sqlc.arg(traffic)::BOOLEAN THEN t.traffic_limit ELSE u.traffic_limit END,
+  reset_strategy = CASE WHEN sqlc.arg(traffic)::BOOLEAN THEN t.reset_strategy ELSE u.reset_strategy END,
+  device_limit   = CASE WHEN sqlc.arg(devices)::BOOLEAN THEN t.device_limit + u.extra_devices ELSE u.device_limit END,
+  device_mode    = CASE WHEN sqlc.arg(devices)::BOOLEAN THEN t.device_mode ELSE u.device_mode END,
+  speed_limit    = CASE WHEN sqlc.arg(speed)::BOOLEAN THEN t.speed_limit ELSE u.speed_limit END,
+  updated_at     = sqlc.arg(now)::BIGINT
+FROM tariffs t
+WHERE t.id = sqlc.arg(tariff_id)::BIGINT AND u.tariff_id = t.id;
+
+-- name: ApplyTariffUsersPools :exec
+-- The users of a tariff take the modes of its groups (ApplyTariffPools for all of them):
+-- every group back in the main traffic first, then the tariff's rows that are not.
+WITH reset AS (
+  UPDATE user_pools up SET mode = 'main', traffic_limit = NULL
+  FROM users u WHERE up.user_id = u.id AND u.tariff_id = sqlc.arg(tariff_id)::BIGINT
+  RETURNING up.user_id
+)
+INSERT INTO user_pools (user_id, pool_id, mode, traffic_limit)
+SELECT u.id, tp.pool_id, tp.mode, tp.traffic_limit
+FROM users u JOIN tariff_pools tp ON tp.tariff_id = u.tariff_id
+WHERE u.tariff_id = sqlc.arg(tariff_id)::BIGINT AND tp.mode <> 'main'
+ON CONFLICT (user_id, pool_id) DO UPDATE SET mode = excluded.mode, traffic_limit = excluded.traffic_limit;
+
+-- name: TariffsLeftWithoutServers :many
+-- The tariffs that choose their servers and would have none left without node node_id, or
+-- without inbound inbound_id (0: none of either): what a deletion must not do to them, since
+-- their users would be left with no server and no word of it.
+SELECT t.id, t.name FROM tariffs t
+WHERE t.chosen_servers = 1
+  AND NOT EXISTS (SELECT 1 FROM tariff_nodes tn WHERE tn.tariff_id = t.id AND tn.node_id <> sqlc.arg(node_id)::BIGINT)
+  AND NOT EXISTS (SELECT 1 FROM tariff_inbounds ti JOIN inbounds i ON i.id = ti.inbound_id
+                  WHERE ti.tariff_id = t.id AND i.id <> sqlc.arg(inbound_id)::BIGINT AND i.node_id <> sqlc.arg(node_id)::BIGINT)
+ORDER BY t.id;

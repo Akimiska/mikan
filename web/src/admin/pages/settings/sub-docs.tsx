@@ -7,7 +7,7 @@ import { api, errorText, unwrap, type Schemas } from "../../../api/client";
 import { qk } from "../../../api/hooks";
 import { Confirm, Drawer, DrawerFooter } from "../../../components/overlay";
 import { QueryBoundary } from "../../../components/query";
-import { Switch } from "../../../components/switch";
+import { SwitchRow } from "../../../components/switch";
 import { useToast } from "../../../components/toast";
 import { Button, Field, Pill, Segmented, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
@@ -15,6 +15,7 @@ import { same } from "../../../lib/draft";
 import { fieldErrors } from "../../../lib/fields";
 import { Markdown } from "../../../lib/markdown";
 import { PLATFORMS } from "../../../sub/page";
+import { CardHead } from "../../../components/layout";
 
 type SubDoc = Schemas["SubDocView"];
 type Body = Schemas["SubDocBody"];
@@ -66,17 +67,15 @@ export function DocsSection({ announce }: { announce: (text: string) => void }) 
 
   return (
     <section className="card glass">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.page.docs")}</h2>
-          <div className="card-sub">{t("settings.page.docsSub")}</div>
-        </div>
-        {items.length ? (
+      <CardHead
+        title={t("settings.page.docs")}
+        sub={t("settings.page.docsSub")}
+        aside={items.length ? (
           <Button size="sm" variant="primary" onClick={() => setEditing("new")} disabled={items.length >= MAX_DOCS}>
             <Plus size={16} aria-hidden /> {t("settings.page.docNew")}
           </Button>
         ) : null}
-      </div>
+      />
       <QueryBoundary
         query={docs}
         pending={
@@ -206,13 +205,7 @@ function DocEditor({ doc, onClose }: { doc: SubDoc | null; onClose: () => void }
               ))}
             </select>
           </Field>
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium">{t("settings.page.docPublish")}</div>
-              <div className="mt-1 text-xs text-[var(--ink-500)]">{t("settings.page.docPublishHint")}</div>
-            </div>
-            <Switch checked={form.published} label={t("settings.page.docPublish")} onChange={(published) => setForm({ ...form, published })} />
-          </div>
+          <SwitchRow className="mb-4 py-0" label={t("settings.page.docPublish")} sub={t("settings.page.docPublishHint")} checked={form.published} onChange={(published) => setForm({ ...form, published })} />
           <div className="field">
             <div className="flex items-center justify-between gap-2">
               <label htmlFor="doc-body" className="text-[13px] font-medium text-[var(--ink-700)]">

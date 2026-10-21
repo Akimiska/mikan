@@ -14,6 +14,7 @@ import { useCopy } from "../../lib/copy";
 import { ago, bytes } from "../../lib/format";
 import { nodeLabel } from "../../lib/node-label";
 import { NodeGeoCheck } from "./geo-check";
+import { CardHead } from "../../components/layout";
 
 type Node = Schemas["NodeInfo"];
 type Item = Schemas["CheckItem"];
@@ -591,14 +592,7 @@ export function ServerCheckCard() {
   const check = useMutation({ mutationFn: () => unwrap(api.POST("/api/v1/system/check")) });
   return (
     <section className="card glass reveal" aria-labelledby="server-check-title">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title" id="server-check-title">
-            {t("nodeCheck.server.title")}
-          </h2>
-          <div className="card-sub">{t("nodeCheck.server.lead")}</div>
-        </div>
-      </div>
+      <CardHead title={t("nodeCheck.server.title")} sub={t("nodeCheck.server.lead")} id="server-check-title" />
       <div aria-live="polite" aria-busy={check.isPending}>
         {check.isPending ? (
           <CheckSkeleton />

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { TrafficPoint } from "../api/client";
 import { t } from "../i18n";
 import { bytes, dateShort, time } from "../lib/format";
@@ -79,9 +79,19 @@ const W = 720;
 const H = 248;
 const PAD = { l: 60, r: 8, t: 12, b: 28 };
 
-export function TrafficChart({ points, range }: { points: TrafficPoint[]; range: Range }) {
+export function TrafficChart({
+  points,
+  range,
+  stale,
+}: {
+  points: TrafficPoint[];
+  range: Range;
+  /** The points are another period's, kept while this one loads: the chart is dimmed and offers no values. */
+  stale?: boolean;
+}) {
   const [hover, setHover] = useState<number | null>(null);
   const ref = useRef<SVGSVGElement>(null);
+  const summaryId = useId();
   const g = useMemo(() => {
     const n = points.length;
     const max = niceMax(Math.max(1, ...points.map((p) => p.down), ...points.map((p) => p.up)) * 1.08);
@@ -97,18 +107,56 @@ export function TrafficChart({ points, range }: { points: TrafficPoint[]; range:
 
   const onMove = (e: React.PointerEvent) => {
     const r = ref.current?.getBoundingClientRect();
-    if (!r || g.n < 2) return;
+    if (stale || !r || g.n < 2) return;
     const px = ((e.clientX - r.left) * W) / r.width;
     const i = Math.round(((px - PAD.l) / (W - PAD.l - PAD.r)) * (g.n - 1));
     setHover(Math.max(0, Math.min(g.n - 1, i)));
   };
 
-  const hp = hover !== null ? points[hover] : undefined;
+  // The keys walk the points the way a slider's walk its values, and the point's numbers are the slider's text.
+  const last = Math.max(0, g.n - 1);
+  const cur = Math.min(hover ?? last, last);
+  const onKey = (e: React.KeyboardEvent) => {
+    if (stale || e.altKey || e.ctrlKey || e.metaKey) return;
+    const move: Record<string, (i: number) => number> = {
+      ArrowLeft: (i) => i - 1,
+      ArrowDown: (i) => i - 1,
+      ArrowRight: (i) => i + 1,
+      ArrowUp: (i) => i + 1,
+      PageDown: (i) => i - 10,
+      PageUp: (i) => i + 10,
+      Home: () => 0,
+      End: () => last,
+    };
+    const to = move[e.key];
+    if (!to) return;
+    e.preventDefault();
+    // From the latest state, so keys that arrive faster than the redraw each count.
+    setHover((h) => Math.max(0, Math.min(last, to(Math.min(h ?? last, last)))));
+  };
+
+  const hp = !stale && hover !== null ? points[hover] : undefined;
+  const at = points[cur];
   const scale = ref.current ? ref.current.getBoundingClientRect().width / W : 1;
+  const summary = stale ? undefined : t("chart.summary", { down: bytes(points.reduce((a, p) => a + p.down, 0)), up: bytes(points.reduce((a, p) => a + p.up, 0)) });
 
   return (
-    <div className="relative" style={{ margin: "0 -4px" }}>
-      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible" role="img" aria-label={t("chart.label")}>
+    <div
+      className={stale ? "relative opacity-50 transition-opacity" : "relative transition-opacity"}
+      style={{ margin: "0 -4px" }}
+      role="slider"
+      tabIndex={0}
+      aria-label={t("chart.label")}
+      aria-describedby={summary ? summaryId : undefined}
+      aria-valuemin={0}
+      aria-valuemax={last}
+      aria-valuenow={cur}
+      aria-valuetext={!stale && at ? `${label(at.t)}: ${t("chart.down")} ${bytes(at.down)}, ${t("chart.up")} ${bytes(at.up)}` : undefined}
+      aria-busy={stale || undefined}
+      onKeyDown={onKey}
+      onBlur={() => setHover(null)}
+    >
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible" aria-hidden>
         <defs>
           <linearGradient id="g-down" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0" style={{ stopColor: "var(--mikan-500)", stopOpacity: 0.24 }} />
@@ -169,6 +217,11 @@ export function TrafficChart({ points, range }: { points: TrafficPoint[]; range:
             <span className="num">{bytes(hp.up)}</span>
           </div>
         </div>
+      ) : null}
+      {summary ? (
+        <span id={summaryId} className="sr-only">
+          {summary}
+        </span>
       ) : null}
     </div>
   );

@@ -13,6 +13,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -187,8 +188,8 @@ func (h *handlers) listTariffs(ctx context.Context, _ *struct{}) (*tariffsOutput
 	return out, nil
 }
 
-// createTariff and updateTariff write the tariff and its pool limits in one transaction: a
-// refused pool list leaves the tariff, and the limits it had, as they were.
+// createTariff and updateTariff write the tariff, its server groups, its servers and its gifts
+// in one transaction: a refused part leaves the tariff, and what it had, as it was.
 func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOutput, error) {
 	b := in.Body
 	terms, err := b.terms(nil)
@@ -292,7 +293,7 @@ func setTariffMode(ctx context.Context, q *db.Queries, t *db.Tariff, mode string
 		return nil
 	}
 	if !domain.ValidDeviceMode(mode) {
-		return huma.Error422UnprocessableEntity("bad_device_mode", &huma.ErrorDetail{Location: "body.device_mode", Message: "bad_device_mode"})
+		return fieldErr("body.device_mode", "bad_device_mode")
 	}
 	if err := q.SetTariffDeviceMode(ctx, db.SetTariffDeviceModeParams{DeviceMode: mode, ID: t.ID}); err != nil {
 		return err
@@ -360,17 +361,13 @@ func setTariffContents(ctx context.Context, q *db.Queries, t db.Tariff, b tariff
 			return err
 		}
 	}
-	gifts := b.Gifts
-	if gifts == nil {
-		rows, err := q.ListTariffGifts(ctx, t.ID)
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			gifts = append(gifts, r.PackageID)
-		}
+	var err error
+	if b.Gifts != nil {
+		err = domain.SetTariffGifts(ctx, q, t, b.Gifts)
+	} else {
+		err = domain.RecheckTariffGifts(ctx, q, t)
 	}
-	if err := domain.SetTariffGifts(ctx, q, t, gifts); err != nil {
+	if err != nil {
 		return mapDomainErr(err)
 	}
 	return nil
@@ -425,9 +422,8 @@ func (c catalogExtras) fill(v *TariffView, rows []db.TariffPool) {
 // too many lines is refused under the field's name, like the other checks of the body.
 func cleanDescription(s string) (string, error) {
 	out, err := domain.CleanDescription(s)
-	var fe *domain.FieldError
-	if errors.As(err, &fe) {
-		return "", fieldErr("body."+fe.Field, fe.Code)
+	if fe, ok := fieldFromDomain(err); ok {
+		return "", fe
 	}
 	return out, err
 }
@@ -464,7 +460,7 @@ func (b tariffBody) terms(kept []domain.Term) ([]domain.Term, error) {
 	for i, t := range terms {
 		key := t.Days
 		if b.BillingDay != nil && t.Days > 0 {
-			key = int64(domain.TermMonths(t.Days))
+			key = int64(model.TermMonths(t.Days))
 		}
 		if seen[key] {
 			return nil, fieldErr(at(i, "days"), "term_days_repeat")

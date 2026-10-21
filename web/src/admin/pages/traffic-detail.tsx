@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { api, errorText, unwrap } from "../../api/client";
-import { FormActions } from "../../components/layout";
+import { CardHead, FormActions } from "../../components/layout";
 import { SwitchRow } from "../../components/switch";
 import { useToast } from "../../components/toast";
 import { Field, Skeleton } from "../../components/ui";
@@ -16,7 +16,7 @@ export function TrafficDetailCard() {
   if (!q.data) {
     return q.isError ? (
       <section className="card glass">
-        <div className="banner err">{errorText(q.error)}</div>
+        <div className="banner err" role="alert">{errorText(q.error)}</div>
       </section>
     ) : (
       <Skeleton style={{ height: 160, borderRadius: 20 }} />
@@ -47,12 +47,7 @@ function DetailForm({ v }: { v: { enabled: boolean; days: number } }) {
   return (
     <section className="card glass reveal">
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.detail.title")}</h2>
-            <div className="card-sub">{t("settings.detail.sub")}</div>
-          </div>
-        </div>
+        <CardHead title={t("settings.detail.title")} sub={t("settings.detail.sub")} />
         <SwitchRow label={t("settings.detail.on")} sub={t("settings.detail.onSub")} checked={draft.enabled} onChange={(on) => setDraft((d) => ({ ...d, enabled: on }))} />
         <Field label={t("settings.detail.keep")} htmlFor="detail-days" hint={t("settings.detail.keepHint")} error={bad ? t("settings.detail.keepHint") : undefined}>
           <input id="detail-days" className="input max-w-[120px]" inputMode="numeric" value={draft.days} onChange={(e) => setDraft((d) => ({ ...d, days: e.target.value }))} aria-invalid={bad} />

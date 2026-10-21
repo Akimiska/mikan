@@ -2121,6 +2121,10 @@
             "minLength": 8,
             "type": "string"
           },
+          "extended": {
+            "description": "Расширенный режим, уровни change и terminal: ещё и ключи нод, адрес и домен ноды, свои сертификаты и WireGuard, оплата и балансы, бот, аддоны не из каталога mikan. Нужен пароль",
+            "type": "boolean"
+          },
           "hours": {
             "description": "Срок доступа в часах",
             "enum": [
@@ -2145,7 +2149,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Пароль админа: нужен для уровня terminal",
+            "description": "Пароль админа: нужен для уровня terminal и для расширенного режима",
             "maxLength": 256,
             "type": "string"
           },
@@ -2162,7 +2166,7 @@
             "type": "array"
           },
           "totp": {
-            "description": "Код из приложения, если включена 2FA: нужен для уровня terminal",
+            "description": "Код из приложения, если включена 2FA: нужен для уровня terminal и для расширенного режима",
             "maxLength": 16,
             "type": "string"
           }
@@ -2981,7 +2985,7 @@
             ]
           },
           "pool_id": {
-            "description": "Пул трафика; null — основной трафик",
+            "description": "Группа серверов; null — основной трафик",
             "format": "int64",
             "type": [
               "integer",
@@ -3222,7 +3226,7 @@
             "type": "string"
           },
           "tariff_id": {
-            "description": "Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа",
+            "description": "Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и группы серверов — из тарифа",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -3384,7 +3388,7 @@
             "type": "string"
           },
           "pool_id": {
-            "description": "Пул трафика, в который считается подключение; нет — основной трафик",
+            "description": "Группа серверов подключения: какой трафик оно тратит; нет — основной трафик",
             "format": "int64",
             "type": "integer"
           },
@@ -4505,7 +4509,7 @@
             "type": "boolean"
           },
           "front_page": {
-            "description": "Заглушка на домене ноды через общий порт 443: пусто — нет, maintenance — технические работы, cats — котики-кликер",
+            "description": "Заглушка для посторонних: её отдают протоколы VLESS и Trojan с XHTTP, WebSocket или gRPC на чужие запросы вместо пустого 404, а с общим портом 443 и домен ноды; пусто — нет, maintenance — технические работы, cats — котики-кликер",
             "enum": [
               "",
               "maintenance",
@@ -4518,7 +4522,7 @@
             "description": "Последний hello ноды после запуска: достучалась ли панель в ответ"
           },
           "host": {
-            "description": "Адрес для клиентов",
+            "description": "Адрес для клиентов: домен ноды, без него server_host",
             "type": "string"
           },
           "http_redirect": {
@@ -4581,6 +4585,10 @@
             "description": "Почему нода не смогла занять порт 443",
             "type": "string"
           },
+          "server_host": {
+            "description": "IP или имя сервера, как его задали: по нему панель ходит в API ноды; пусто у своей ноды",
+            "type": "string"
+          },
           "sni_router": {
             "description": "Порт 443 ноды делят подключения по имени TLS (SNI-роутер)",
             "type": "boolean"
@@ -4615,6 +4623,7 @@
           "local",
           "address",
           "host",
+          "server_host",
           "domain",
           "public_name",
           "enabled",
@@ -5787,7 +5796,7 @@
             "type": "string"
           },
           "pool_id": {
-            "description": "Пул трафика; 0 — основной трафик",
+            "description": "Группа серверов; 0 — без группы, основной трафик",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -5870,7 +5879,7 @@
             "type": "boolean"
           },
           "front_page": {
-            "description": "Заглушка на домене ноды и на запросах без имени через общий порт 443: настоящий сертификат ноды, TLS 1.2+, HSTS; пусто — нет",
+            "description": "Заглушка для посторонних: протоколы с XHTTP, WebSocket или gRPC отдают её на чужие запросы вместо пустого 404, общий порт 443 — на домене ноды и на запросах без имени (сертификат ноды, TLS 1.2+, HSTS); пусто — нет",
             "enum": [
               "",
               "maintenance",
@@ -6831,7 +6840,7 @@
             "type": "integer"
           },
           "pool_id": {
-            "description": "Пул для бонусного трафика; без значения — основной трафик",
+            "description": "Группа серверов для бонусного трафика; без значения — основной трафик",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -7438,6 +7447,27 @@
         },
         "required": [
           "moved"
+        ],
+        "type": "object"
+      },
+      "Refused": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "target",
+          "error"
         ],
         "type": "object"
       },
@@ -8886,6 +8916,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "extended": {
+            "description": "Расширенный режим: ещё и то, что иначе может только сессия админа: ключи нод, адрес и домен ноды, свои сертификаты и WireGuard, оплата и балансы, бот, аддоны не из каталога mikan",
+            "type": "boolean"
+          },
           "id": {
             "format": "int64",
             "type": "integer"
@@ -8945,6 +8979,7 @@
           "id",
           "level",
           "show_people",
+          "extended",
           "terminal_targets",
           "note",
           "status",
@@ -9016,6 +9051,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "extended": {
+            "description": "Расширенный режим: ещё и то, что иначе может только сессия админа",
+            "type": "boolean"
+          },
           "level": {
             "enum": [
               "view",
@@ -9051,6 +9090,7 @@
           "level",
           "expires_at",
           "show_people",
+          "extended",
           "panel_version",
           "release_key",
           "nodes",
@@ -9530,6 +9570,10 @@
           },
           "admin_chat_set": {
             "type": "boolean"
+          },
+          "alerts_refused": {
+            "$ref": "#/components/schemas/Refused",
+            "description": "Последнее уведомление, которое Telegram отверг насовсем (бот заблокирован, чат или канал недоступен): оно не доставлено и не повторяется"
           },
           "bot": {
             "$ref": "#/components/schemas/TelegramBot"
@@ -10644,6 +10688,12 @@
           "config": {
             "maxLength": 65536,
             "type": "string"
+          },
+          "inbound_id": {
+            "description": "Подключение, чей шаблон проверяется: скрытые от читателя секреты (\u003chidden\u003e) берутся из него",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
           },
           "node_id": {
             "format": "int64",
@@ -12462,7 +12512,8 @@
         "summary": "Настроить DNS на выходе",
         "tags": [
           "nodes"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/filters": {
@@ -15268,7 +15319,7 @@
             "description": "Error"
           }
         },
-        "summary": "Вернуть Stars покупателю",
+        "summary": "Вернуть деньги покупателю: Stars, на баланс или через способ оплаты, если он умеет",
         "tags": [
           "payments"
         ],
@@ -15277,7 +15328,7 @@
     },
     "/api/v1/payments/{id}/refunded-by-hand": {
       "post": {
-        "description": "Оплата через способ оплаты из маркетплейса, оплаченная, но не применённая (например, пробный период, который уже нельзя выдать): админ вернул деньги в кабинете платёжной системы, платёж становится возвращённым, покупателю приходит сообщение. Stars возвращаются через refund.",
+        "description": "Оплата через способ оплаты из маркетплейса: админ вернул деньги в кабинете платёжной системы (или прошёл чарджбэк). Платёж становится возвращённым, выданное им снимается, покупателю приходит сообщение. Stars и баланс возвращаются через refund.",
         "operationId": "mark-payment-refunded",
         "parameters": [
           {
@@ -15740,6 +15791,17 @@
               "format": "int64",
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Часть кода (без учёта регистра) или ID клиента либо его Telegram ID целиком",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Часть кода (без учёта регистра) или ID клиента либо его Telegram ID целиком",
+              "maxLength": 64,
+              "type": "string"
             }
           }
         ],
@@ -16970,7 +17032,7 @@
         "x-session-only": true
       },
       "post": {
-        "description": "Только для официальной поддержки: панель проверяет код из обращения у бота поддержки, открывает доступ и сама передаёт ссылку боту, админу она не показывается. Одновременно активен один доступ: новый отзывает прежний. Уровень terminal требует пароль и код 2FA.",
+        "description": "Только для официальной поддержки: панель проверяет код из обращения у бота поддержки, открывает доступ и сама передаёт ссылку боту, админу она не показывается. Одновременно активен один доступ: новый отзывает прежний. Уровень terminal и расширенный режим требуют пароль и код 2FA.",
         "operationId": "create-support-grant",
         "requestBody": {
           "content": {
@@ -18018,6 +18080,18 @@
             }
           },
           {
+            "description": "Следующая страница: заявки старше этой (id последней показанной)",
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "Следующая страница: заявки старше этой (id последней показанной)",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
             "explode": false,
             "in": "query",
             "name": "limit",
@@ -18377,7 +18451,8 @@
         "summary": "Включить или выключить детализацию по сайтам",
         "tags": [
           "filters"
-        ]
+        ],
+        "x-session-only": true
       }
     },
     "/api/v1/updates": {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"mikan/internal/panel/tgate"
+	"mikan/internal/tgapi"
 )
 
 // The admin's Markdown becomes the bot's HTML; what is not Markdown stays as typed.
@@ -118,7 +118,7 @@ func TestMarkdownBalanced(t *testing.T) {
 		if err := balanced(out); err != "" {
 			t.Fatalf("%q -> %q: %s", in, out, err)
 		}
-		if utf8.RuneCountInString(tgate.PlainText(out)) > utf8.RuneCountInString(in) {
+		if utf8.RuneCountInString(tgapi.PlainText(out)) > utf8.RuneCountInString(in) {
 			t.Fatalf("%q -> %q: the text grew", in, out)
 		}
 	}
@@ -175,11 +175,11 @@ func TestRenderVariables(t *testing.T) {
 func TestMarkdownLength(t *testing.T) {
 	in := strings.Repeat("**ab** _cd_ `ef` [gh](https://e.com) ", 100)
 	out := render(in, nil)
-	if n, m := utf8.RuneCountInString(tgate.PlainText(out)), utf8.RuneCountInString(in); n >= m {
+	if n, m := utf8.RuneCountInString(tgapi.PlainText(out)), utf8.RuneCountInString(in); n >= m {
 		t.Fatalf("the text grew: %d letters from %d", n, m)
 	}
 	long := strings.Repeat("я", maxText)
-	if got := tgate.PlainText(render(long, nil)); got != long {
+	if got := tgapi.PlainText(render(long, nil)); got != long {
 		t.Fatal("a long plain text changed")
 	}
 }

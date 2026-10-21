@@ -60,7 +60,7 @@ func (h *handlers) setAddonStorage(ctx context.Context, in *addonStorageInput) (
 	case in.Body.Unlimited:
 		mib = 0
 	case mib < 1:
-		return nil, huma.Error422UnprocessableEntity("limit_required", &huma.ErrorDetail{Location: "body.limit_mib", Message: "limit_required"})
+		return nil, fieldErr("body.limit_mib", "limit_required")
 	}
 	if err := settings.Set(ctx, h.d.Settings, panelapi.KVLimitKey, mib); err != nil {
 		return nil, err

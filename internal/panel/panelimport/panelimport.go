@@ -23,10 +23,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -35,7 +33,8 @@ import (
 	"syscall"
 	"time"
 
-	"mikan/internal/proto"
+	"mikan/internal/httpjson"
+	"mikan/internal/netaddr"
 )
 
 // Kind is the panel users come from.
@@ -159,15 +158,17 @@ var imdsV6 = netip.MustParseAddr("fd00:ec2::254")
 // old panel often runs on this server or next to it. Link-local (the metadata service),
 // the AWS IPv6 metadata address, unspecified, multicast and broadcast are not.
 func AddressOK(a netip.Addr) bool {
-	a = proto.Unwrap4(a)
-	return !(a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() || a.IsMulticast() ||
-		a == netip.AddrFrom4([4]byte{255, 255, 255, 255}) || a == imdsV6)
+	switch netaddr.Classify(a) {
+	case netaddr.LinkLocal, netaddr.Unspecified, netaddr.Multicast, netaddr.Broadcast, netaddr.Invalid:
+		return false
+	}
+	return netaddr.Unwrap(a) != imdsV6
 }
 
 // privateOK says whether plain http may go to a: loopback or a private address.
 func privateOK(a netip.Addr) bool {
-	a = a.Unmap()
-	return a.IsLoopback() || a.IsPrivate()
+	k := netaddr.Classify(a)
+	return k == netaddr.Loopback || k == netaddr.Private
 }
 
 // Fetch lists the old panel's users, within FetchTimeout.
@@ -228,25 +229,23 @@ func plainOnly(hc *http.Client) *http.Client {
 func getJSON(ctx context.Context, hc *http.Client, req *http.Request, out any) error {
 	req = req.WithContext(ctx)
 	req.Header.Set("Accept", "application/json")
-	resp, err := hc.Do(req)
-	if err != nil {
+	err := httpjson.Do(hc, req, maxPageBytes, out)
+	var se *httpjson.StatusError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &se) && se.Code >= 300 && se.Code < 400:
+		return fmt.Errorf("%w: %s answered %d to %s", ErrRedirect, req.URL.Host, se.Code, se.Header.Get("Location"))
+	case errors.As(err, &se) && (se.Code == http.StatusUnauthorized || se.Code == http.StatusForbidden):
+		return ErrAuth
+	case errors.As(err, &se) && se.Code == http.StatusNotFound:
+		return errNotFound
+	case errors.As(err, &se):
+		return fmt.Errorf("%w: HTTP %d from %s", ErrAnswer, se.Code, req.URL.Path)
+	case httpjson.Unreachable(err):
 		return transportError(ctx, err)
 	}
-	defer resp.Body.Close()
-	switch {
-	case resp.StatusCode >= 300 && resp.StatusCode < 400:
-		return fmt.Errorf("%w: %s answered %d to %s", ErrRedirect, req.URL.Host, resp.StatusCode, resp.Header.Get("Location"))
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return ErrAuth
-	case resp.StatusCode == http.StatusNotFound:
-		return errNotFound
-	case resp.StatusCode != http.StatusOK:
-		return fmt.Errorf("%w: HTTP %d from %s", ErrAnswer, resp.StatusCode, req.URL.Path)
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxPageBytes)).Decode(out); err != nil {
-		return fmt.Errorf("%w: %v", ErrAnswer, err)
-	}
-	return nil
+	return fmt.Errorf("%w: %v", ErrAnswer, err)
 }
 
 // errNotFound: an endpoint the old panel does not have (an older version).

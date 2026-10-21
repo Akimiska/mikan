@@ -14,6 +14,7 @@ export function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: bool
   const qc = useQueryClient();
   const toast = useToast();
   const validate = useValidate();
+  const { reset: resetValidate } = validate;
   const [preset, setPreset] = useState<string>("vless_reality_xhttp");
   const [port, setPort] = useState("");
   const [config, setConfig] = useState("");
@@ -23,10 +24,9 @@ export function AddDrawer({ open, onOpenChange, nodeId, nodeName }: { open: bool
       setPort("");
       setErrors({});
       setConfig(t("inbounds.customSkeleton"));
-      validate.reset();
+      resetValidate();
     }
-    // `validate` changes identity on every render; reset only when the drawer opens.
-  }, [open]);
+  }, [open, resetValidate]);
   const editConfig = (v: string) => {
     setConfig(v);
     setErrors(({ config: _, ...rest }) => rest);

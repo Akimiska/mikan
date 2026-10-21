@@ -263,10 +263,10 @@ func (h *handlers) reauth(ctx context.Context, admin db.Admin, password, code st
 			return err
 		}
 		if !ok {
-			return huma.Error422UnprocessableEntity("wrong_password", &huma.ErrorDetail{Location: "body.password", Message: "wrong_password"})
+			return fieldErr("body.password", "wrong_password")
 		}
 		if admin.TotpSecret.Valid && !h.d.TOTP.Validate(admin.ID, admin.TotpSecret.String, code, now) {
-			return huma.Error422UnprocessableEntity("invalid_totp", &huma.ErrorDetail{Location: "body.totp", Message: "invalid_totp"})
+			return fieldErr("body.totp", "invalid_totp")
 		}
 		return nil
 	})
@@ -315,7 +315,7 @@ func (h *handlers) changePassword(ctx context.Context, in *passwordInput) (*stru
 	if err := h.guarded(admin, func(time.Time) error {
 		ok, err := h.verifyPassword(ctx, in.Body.Current, admin.PasswordHash)
 		if err == nil && !ok {
-			err = huma.Error422UnprocessableEntity("wrong_password", &huma.ErrorDetail{Location: "body.current", Message: "wrong_password"})
+			err = fieldErr("body.current", "wrong_password")
 		}
 		return err
 	}); err != nil {
@@ -384,7 +384,7 @@ func (h *handlers) totpEnable(ctx context.Context, in *totpCodeInput) (*recovery
 		return nil, huma.Error409Conflict("totp_setup_expired")
 	}
 	if !h.d.TOTP.Validate(sess.AdminID, p.secret, in.Body.Code, now) {
-		return nil, huma.Error422UnprocessableEntity("invalid_totp", &huma.ErrorDetail{Location: "body.code", Message: "invalid_totp"})
+		return nil, fieldErr("body.code", "invalid_totp")
 	}
 	plain, stored := auth.NewRecoveryCodes(10)
 	if err := h.d.Store.Q.SetAdminTOTP(ctx, db.SetAdminTOTPParams{
@@ -418,7 +418,7 @@ func (h *handlers) totpDisable(ctx context.Context, in *totpDisableInput) (*stru
 			return err
 		}
 		if !ok || !h.d.TOTP.Validate(admin.ID, admin.TotpSecret.String, in.Body.Code, now) {
-			return huma.Error422UnprocessableEntity("invalid_credentials", &huma.ErrorDetail{Location: "body", Message: "invalid_password_or_code"})
+			return fieldErr("body", "invalid_password_or_code")
 		}
 		return nil
 	}); err != nil {

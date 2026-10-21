@@ -1383,7 +1383,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Вернуть Stars покупателю */
+        /** Вернуть деньги покупателю: Stars, на баланс или через способ оплаты, если он умеет */
         post: operations["refund-payment"];
         delete?: never;
         options?: never;
@@ -1402,7 +1402,7 @@ export interface paths {
         put?: never;
         /**
          * Отметить, что деньги возвращены вручную
-         * @description Оплата через способ оплаты из маркетплейса, оплаченная, но не применённая (например, пробный период, который уже нельзя выдать): админ вернул деньги в кабинете платёжной системы, платёж становится возвращённым, покупателю приходит сообщение. Stars возвращаются через refund.
+         * @description Оплата через способ оплаты из маркетплейса: админ вернул деньги в кабинете платёжной системы (или прошёл чарджбэк). Платёж становится возвращённым, выданное им снимается, покупателю приходит сообщение. Stars и баланс возвращаются через refund.
          */
         post: operations["mark-payment-refunded"];
         delete?: never;
@@ -1917,7 +1917,7 @@ export interface paths {
         put?: never;
         /**
          * Открыть доступ для поддержки
-         * @description Только для официальной поддержки: панель проверяет код из обращения у бота поддержки, открывает доступ и сама передаёт ссылку боту, админу она не показывается. Одновременно активен один доступ: новый отзывает прежний. Уровень terminal требует пароль и код 2FA.
+         * @description Только для официальной поддержки: панель проверяет код из обращения у бота поддержки, открывает доступ и сама передаёт ссылку боту, админу она не показывается. Одновременно активен один доступ: новый отзывает прежний. Уровень terminal и расширенный режим требуют пароль и код 2FA.
          */
         post: operations["create-support-grant"];
         delete?: never;
@@ -3579,6 +3579,8 @@ export interface components {
         CreateSupportGrantInputBody: {
             /** @description Одноразовый код из обращения в боте поддержки: без него доступ не открывается */
             code: string;
+            /** @description Расширенный режим, уровни change и terminal: ещё и ключи нод, адрес и домен ноды, свои сертификаты и WireGuard, оплата и балансы, бот, аддоны не из каталога mikan. Нужен пароль */
+            extended?: boolean;
             /**
              * Format: int64
              * @description Срок доступа в часах
@@ -3589,13 +3591,13 @@ export interface components {
             level: "view" | "change" | "terminal";
             /** @description Пометка для себя, например номер обращения */
             note?: string;
-            /** @description Пароль админа: нужен для уровня terminal */
+            /** @description Пароль админа: нужен для уровня terminal и для расширенного режима */
             password?: string;
             /** @description Показывать оператору имена, Telegram и ссылки подписчиков */
             show_people?: boolean;
             /** @description Уровень terminal: где разрешён терминал, panel и/или node:<id>. Полный доступ к этим серверам */
             terminal_targets?: string[];
-            /** @description Код из приложения, если включена 2FA: нужен для уровня terminal */
+            /** @description Код из приложения, если включена 2FA: нужен для уровня terminal и для расширенного режима */
             totp?: string;
         };
         CreateSupportGrantOutputBody: {
@@ -3883,7 +3885,7 @@ export interface components {
             payment_id: number | null;
             /**
              * Format: int64
-             * @description Пул трафика; null — основной трафик
+             * @description Группа серверов; null — основной трафик
              */
             pool_id: number | null;
             /** Format: int64 */
@@ -3954,7 +3956,7 @@ export interface components {
             password?: string;
             /**
              * Format: int64
-             * @description Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и пулы — из тарифа
+             * @description Тариф, на котором появятся пользователи; лимит, срок и устройства берутся из старой панели, сброс трафика, протоколы и группы серверов — из тарифа
              */
             tariff_id: number;
             token?: string;
@@ -4022,7 +4024,7 @@ export interface components {
             outbound: "direct" | "warp" | "node";
             /**
              * Format: int64
-             * @description Пул трафика, в который считается подключение; нет — основной трафик
+             * @description Группа серверов подключения: какой трафик оно тратит; нет — основной трафик
              */
             pool_id?: number;
             port: string;
@@ -4444,13 +4446,13 @@ export interface components {
             /** @description Канал ноды делится поровну между теми, кто сейчас качает */
             fair_share: boolean;
             /**
-             * @description Заглушка на домене ноды через общий порт 443: пусто — нет, maintenance — технические работы, cats — котики-кликер
+             * @description Заглушка для посторонних: её отдают протоколы VLESS и Trojan с XHTTP, WebSocket или gRPC на чужие запросы вместо пустого 404, а с общим портом 443 и домен ноды; пусто — нет, maintenance — технические работы, cats — котики-кликер
              * @enum {string}
              */
             front_page: "" | "maintenance" | "cats";
             /** @description Последний hello ноды после запуска: достучалась ли панель в ответ */
             hello?: components["schemas"]["NodeHello"];
-            /** @description Адрес для клиентов */
+            /** @description Адрес для клиентов: домен ноды, без него server_host */
             host: string;
             /** @description HTTP на порту 80 получает 301 на https */
             http_redirect: boolean;
@@ -4486,6 +4488,8 @@ export interface components {
             redirect_error?: string;
             /** @description Почему нода не смогла занять порт 443 */
             router_error?: string;
+            /** @description IP или имя сервера, как его задали: по нему панель ходит в API ноды; пусто у своей ноды */
+            server_host: string;
             /** @description Порт 443 ноды делят подключения по имени TLS (SNI-роутер) */
             sni_router: boolean;
             /** @enum {string} */
@@ -4898,7 +4902,7 @@ export interface components {
             outbound?: "direct" | "warp" | "node";
             /**
              * Format: int64
-             * @description Пул трафика; 0 — основной трафик
+             * @description Группа серверов; 0 — без группы, основной трафик
              */
             pool_id?: number;
             port?: string;
@@ -4931,7 +4935,7 @@ export interface components {
             /** @description Делить канал ноды поровну между теми, кто сейчас качает; нужен channel_mbps */
             fair_share?: boolean;
             /**
-             * @description Заглушка на домене ноды и на запросах без имени через общий порт 443: настоящий сертификат ноды, TLS 1.2+, HSTS; пусто — нет
+             * @description Заглушка для посторонних: протоколы с XHTTP, WebSocket или gRPC отдают её на чужие запросы вместо пустого 404, общий порт 443 — на домене ноды и на запросах без имени (сертификат ноды, TLS 1.2+, HSTS); пусто — нет
              * @enum {string}
              */
             front_page?: "" | "maintenance" | "cats";
@@ -5330,7 +5334,7 @@ export interface components {
             per_user_limit: number;
             /**
              * Format: int64
-             * @description Пул для бонусного трафика; без значения — основной трафик
+             * @description Группа серверов для бонусного трафика; без значения — основной трафик
              */
             pool_id?: number;
             /**
@@ -5528,6 +5532,12 @@ export interface components {
              * @description Сколько клиентов распределится заново при следующем обновлении подписки
              */
             moved: number;
+        };
+        Refused: {
+            /** Format: int64 */
+            at: number;
+            error: string;
+            target: string;
         };
         RegionAnswer: {
             country?: string;
@@ -6046,6 +6056,8 @@ export interface components {
             entered_at: string | null;
             /** Format: date-time */
             expires_at: string;
+            /** @description Расширенный режим: ещё и то, что иначе может только сессия админа: ключи нод, адрес и домен ноды, свои сертификаты и WireGuard, оплата и балансы, бот, аддоны не из каталога mikan */
+            extended: boolean;
             /** Format: int64 */
             id: number;
             /** @description Адрес, с которого оператор был в последний раз */
@@ -6091,6 +6103,8 @@ export interface components {
             csrf_token?: string;
             /** Format: date-time */
             expires_at: string;
+            /** @description Расширенный режим: ещё и то, что иначе может только сессия админа */
+            extended: boolean;
             /** @enum {string} */
             level: "view" | "change" | "terminal";
             nodes: components["schemas"]["SupportNode"][];
@@ -6299,6 +6313,8 @@ export interface components {
              */
             accounts: number;
             admin_chat_set: boolean;
+            /** @description Последнее уведомление, которое Telegram отверг насовсем (бот заблокирован, чат или канал недоступен): оно не доставлено и не повторяется */
+            alerts_refused?: components["schemas"]["Refused"];
             bot?: components["schemas"]["TelegramBot"];
             /** @description Последняя рассылка с запуска панели */
             broadcast?: components["schemas"]["TelegramBroadcast"];
@@ -6731,6 +6747,11 @@ export interface components {
         };
         ValidateInboundInputBody: {
             config: string;
+            /**
+             * Format: int64
+             * @description Подключение, чей шаблон проверяется: скрытые от читателя секреты (<hidden>) берутся из него
+             */
+            inbound_id?: number;
             /** Format: int64 */
             node_id?: number;
             port?: string;
@@ -10373,6 +10394,8 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description Часть кода (без учёта регистра) или ID клиента либо его Telegram ID целиком */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -12204,6 +12227,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: "pending" | "approved" | "rejected" | "";
+                /** @description Следующая страница: заявки старше этой (id последней показанной) */
+                before?: number;
                 limit?: number;
             };
             header?: never;

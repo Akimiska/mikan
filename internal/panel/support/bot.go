@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,10 +24,10 @@ import (
 // DefaultBotURL is the official support bot's listener.
 const DefaultBotURL = "https://vpn.aurausa.me:8790"
 
-// CodeLen is the length of the code the bot gives.
-const CodeLen = 8
+// codeLen is the length of the code the bot gives.
+const codeLen = 8
 
-var codeRe = regexp.MustCompile(`^[A-Z0-9]{8}$`)
+var codeRe = regexp.MustCompile(`^[A-Z0-9]{` + strconv.Itoa(codeLen) + `}$`)
 
 // NormCode is a code as typed: spaces and dashes dropped, upper case. ok is false for anything
 // that is not a code.

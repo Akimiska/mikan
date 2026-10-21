@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/settings"
+	"mikan/internal/tgapi"
 )
 
 func TestInfrastructureAdminLinkIsOneTime(t *testing.T) {
@@ -97,8 +98,8 @@ func TestGatewayWithoutScreens(t *testing.T) {
 		return false
 	})
 	e.say(777, "привет")
-	e.tg.push(Update{Message: &Message{MessageID: 9, From: &User{ID: 777}, Chat: Chat{ID: 777, Type: "private"},
-		SuccessfulPayment: &SuccessfulPayment{Currency: "XTR", TotalAmount: 10, InvoicePayload: "p", ChargeID: "ch1"}}})
+	e.tg.push(tgapi.Update{Message: &tgapi.Message{MessageID: 9, From: &tgapi.User{ID: 777}, Chat: tgapi.Chat{ID: 777, Type: "private"},
+		SuccessfulPayment: &tgapi.SuccessfulPayment{Currency: "XTR", TotalAmount: 10, InvoicePayload: "p", ChargeID: "ch1"}}})
 	until(t, "the payment is taken", func() bool { return paid.Load() == 1 })
 	until(t, "every update is acknowledged", func() bool {
 		rec, ok, _ := settings.Get[offsetRecord](e.ctx, e.set, KeyOffset)

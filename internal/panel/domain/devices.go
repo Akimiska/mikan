@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -53,18 +55,14 @@ const MaxDevices = 50
 const (
 	// DeviceModeBound: the devices bound to the subscription by their ids are the places
 	// of the limit; a new one is refused when they are all taken.
-	DeviceModeBound = "bound"
+	DeviceModeBound = model.DeviceModeBound
 	// DeviceModeOnline: any number of devices may bind, and only the ones online at once
 	// count; the nodes enforce it (Policy.DeviceLimit).
-	DeviceModeOnline = "online"
+	DeviceModeOnline = model.DeviceModeOnline
 )
 
 // ValidDeviceMode says whether s is a mode the panel takes.
 func ValidDeviceMode(s string) bool { return s == DeviceModeBound || s == DeviceModeOnline }
-
-// BindsDevices says whether the device limit of a user with this mode is the number of
-// bound devices; in the online mode it is not.
-func BindsDevices(mode string) bool { return mode != DeviceModeOnline }
 
 // setDeviceMode gives u the mode, written down only when it differs: a user takes the
 // tariff's mode with its other limits, and that is the same one nearly always.
@@ -86,11 +84,11 @@ func setDeviceMode(ctx context.Context, q *db.Queries, u *db.User, mode string, 
 const DeviceIdle = 90 * 24 * time.Hour
 
 var (
-	ErrDeviceLimit    = errors.New("device_limit")    // the user's places are taken
-	ErrNoHWID         = errors.New("no_hwid")         // the app sends no device id and one is required
-	ErrUnbindCooldown = errors.New("unbind_cooldown") // the subscriber used up the unbinds the admin's rules allow for now
-	ErrDeviceBanned   = errors.New("device_banned")   // the admin banned this device from the subscription
-	ErrBanShared      = errors.New("device_no_hwid")  // the shared place of apps without an id cannot be banned
+	ErrDeviceLimit    = errors.New("device_limit")   // the user's places are taken
+	ErrNoHWID         = errors.New("no_hwid")        // the app sends no device id and one is required
+	ErrUnbindCooldown = model.ErrUnbindCooldown      // the subscriber used up the unbinds the admin's rules allow for now
+	ErrDeviceBanned   = errors.New("device_banned")  // the admin banned this device from the subscription
+	ErrBanShared      = errors.New("device_no_hwid") // the shared place of apps without an id cannot be banned
 )
 
 func NewDevices(st *store.Store, pool *Pool, changes Changes, now func() time.Time) *Devices {
@@ -121,14 +119,14 @@ func (d *Devices) Bind(ctx context.Context, u db.User, in DeviceInfo, requireHWI
 	if hwid == "" && requireHWID {
 		return db.Slot{}, ErrNoHWID
 	}
-	slot, created, err := d.bind(ctx, u, hwid, in)
-	if errors.Is(err, ErrNoSlots) {
-		if err := d.pool.Refill(ctx, RefillBatch); err != nil {
-			return db.Slot{}, err
-		}
-		d.changes.SlotsChanged()
+	var (
+		slot    db.Slot
+		created bool
+	)
+	err := withSlots(ctx, d.pool, d.changes, func() (err error) {
 		slot, created, err = d.bind(ctx, u, hwid, in)
-	}
+		return err
+	})
 	if err != nil {
 		return db.Slot{}, err
 	}
@@ -245,7 +243,7 @@ func (d *Devices) bind(ctx context.Context, u db.User, hwid string, in DeviceInf
 // transaction; once per device and type (a device's id is never given again). The device's own
 // id (the HWID) stays out of it. by is how it was unbound (events.UnboundBy*).
 func emitDevice(ctx context.Context, q *db.Queries, now time.Time, typ string, userID int64, dev db.BoundDevice, by string) error {
-	return events.Emit(ctx, q, now, typ, userID, 0, events.Device{DeviceID: dev.ID, Label: DeviceLabel(dev), Shared: dev.Hwid == "", By: by},
+	return feed.Emit(ctx, q, now, typ, userID, 0, events.Device{DeviceID: dev.ID, Label: DeviceLabel(dev), Shared: dev.Hwid == "", By: by},
 		typ+":"+strconv.FormatInt(dev.ID, 10))
 }
 
@@ -259,14 +257,7 @@ func (d *Devices) Unbind(ctx context.Context, userID, deviceID int64, bySubscrib
 	if err != nil {
 		return err
 	}
-	err = d.unbind(ctx, rules, userID, deviceID, bySubscriber)
-	if errors.Is(err, ErrNoSlots) {
-		if err := d.pool.Refill(ctx, RefillBatch); err != nil {
-			return err
-		}
-		d.changes.SlotsChanged()
-		err = d.unbind(ctx, rules, userID, deviceID, bySubscriber)
-	}
+	err = withSlots(ctx, d.pool, d.changes, func() error { return d.unbind(ctx, rules, userID, deviceID, bySubscriber) })
 	if err == nil {
 		d.hub.Kick()
 		d.changes.PoliciesChanged()
@@ -493,4 +484,61 @@ func burnDevices(ctx context.Context, q *db.Queries, userID, now int64) error {
 		}
 	}
 	return q.DeleteBoundDevicesOf(ctx, userID)
+}
+
+// TrimBound unbinds the devices of userID past limit (nil: unlimited), the last bound
+// first, on q's transaction: a limit that fell (a place bought for a term ended, or was
+// refunded) does not leave more devices bound than it allows. It says how many went; the
+// caller pushes the policies (PoliciesChanged) and kicks the events after the commit.
+func TrimBound(ctx context.Context, q *db.Queries, userID int64, limit sql.NullInt64, now time.Time) (int, error) {
+	if !limit.Valid {
+		return 0, nil
+	}
+	devs, err := q.ListBoundDevices(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := len(devs) - 1; i >= 0 && int64(i) >= limit.Int64; i-- {
+		dev := devs[i]
+		// The shared place is the user's own slot: only the record goes.
+		if dev.Hwid != "" {
+			if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, ID: dev.SlotID}); err != nil {
+				return n, err
+			}
+		}
+		if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
+			return n, err
+		}
+		if err := emitDevice(ctx, q, now, events.DeviceUnbound, userID, dev, events.UnboundLimit); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// ExpireExtra takes back the places bought until the end of a term that is over, and the
+// devices bound past the limit they leave. It says how many subscriptions lost places.
+func (d *Devices) ExpireExtra(ctx context.Context) (int, error) {
+	now := d.now()
+	n := 0
+	err := d.st.Tx(ctx, func(q *db.Queries) error {
+		rows, err := q.ExpireExtraDevices(ctx, now.Unix())
+		if err != nil {
+			return err
+		}
+		n = len(rows)
+		for _, r := range rows {
+			if _, err := TrimBound(ctx, q, r.ID, r.DeviceLimit, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err == nil && n > 0 {
+		d.hub.Kick()
+		d.changes.PoliciesChanged()
+	}
+	return n, err
 }

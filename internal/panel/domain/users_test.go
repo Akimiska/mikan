@@ -33,6 +33,16 @@ func setup(t *testing.T, now *time.Time) (*store.Store, *Users, *changes) {
 	return st, NewUsers(st, NewPool(st, clock), ch, clock), ch
 }
 
+// servePool is storetest.ServePool for a test.
+func servePool(t *testing.T, ctx context.Context, q *db.Queries, poolID int64) db.Inbound {
+	t.Helper()
+	in, err := storetest.ServePool(ctx, q, poolID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return in
+}
+
 func TestState(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	at := func(d time.Duration) sql.NullInt64 { return sql.NullInt64{Int64: now.Add(d).Unix(), Valid: true} }

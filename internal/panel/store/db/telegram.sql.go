@@ -128,8 +128,13 @@ func (q *Queries) GetTgLink(ctx context.Context, userID int64) (TgLink, error) {
 }
 
 const linkTg = `-- name: LinkTg :exec
-INSERT INTO tg_links (user_id, tg_id, created_at) VALUES ($1, $2, $3)
-ON CONFLICT (user_id) DO UPDATE SET tg_id = excluded.tg_id, created_at = excluded.created_at
+WITH linked AS (
+  INSERT INTO tg_links (user_id, tg_id, created_at) VALUES ($1, $2, $3)
+  ON CONFLICT (user_id) DO UPDATE SET tg_id = excluded.tg_id, created_at = excluded.created_at
+  RETURNING tg_id, created_at
+)
+INSERT INTO tg_clients (tg_id, since) SELECT tg_id, created_at FROM linked
+ON CONFLICT (tg_id) DO NOTHING
 `
 
 type LinkTgParams struct {
@@ -138,6 +143,7 @@ type LinkTgParams struct {
 	CreatedAt int64
 }
 
+// The account is a client from now on, whatever happens to the link (tg_clients).
 func (q *Queries) LinkTg(ctx context.Context, arg LinkTgParams) error {
 	_, err := q.db.ExecContext(ctx, linkTg, arg.UserID, arg.TgID, arg.CreatedAt)
 	return err
@@ -201,6 +207,16 @@ func (q *Queries) ListTgLinksOf(ctx context.Context, tgID int64) ([]User, error)
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockTgLinks = `-- name: LockTgLinks :exec
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-tg-links:' || CAST($1 AS BIGINT), 0))
+`
+
+// The subscriptions of one Telegram account are linked one transaction at a time.
+func (q *Queries) LockTgLinks(ctx context.Context, tgID int64) error {
+	_, err := q.db.ExecContext(ctx, lockTgLinks, tgID)
+	return err
 }
 
 const pruneTgNotices = `-- name: PruneTgNotices :exec
@@ -303,4 +319,16 @@ func (q *Queries) UpsertTgChat(ctx context.Context, arg UpsertTgChatParams) erro
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const wasClient = `-- name: WasClient :one
+SELECT EXISTS (SELECT 1 FROM tg_clients WHERE tg_id = $1)
+`
+
+// Whether the account ever had a subscription linked, now or before.
+func (q *Queries) WasClient(ctx context.Context, tgID int64) (bool, error) {
+	row := q.db.QueryRowContext(ctx, wasClient, tgID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

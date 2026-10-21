@@ -16,13 +16,14 @@ import (
 
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/addons/panelapi"
+	"mikan/internal/panel/botpanel"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/store/storetest"
 	"mikan/internal/panel/tgate"
-	"mikan/internal/panel/tgbot"
 )
 
 // telegram is Telegram for the panel's gateway: it hands out the updates pushed into it
@@ -120,10 +121,10 @@ func TestAddonEndToEnd(t *testing.T) {
 
 	gate := tgate.New(tgate.Deps{Store: st, Settings: set, API: tgSrv.URL, Log: log, Now: now})
 	subBase := func(context.Context) string { return "https://vpn.example.com:21355/sub" }
-	backend := &tgbot.Local{Store: st, Settings: set, Gateway: gate, SubBase: subBase, Now: now, MiniApp: func() bool { return false }}
+	backend := &botpanel.Local{Store: st, Settings: set, Gateway: gate, SubBase: subBase, Now: now, MiniApp: func() bool { return false }}
 	hub := events.NewHub()
 	api := panelapi.New(panelapi.Deps{Addons: addons.New(dir, "", "dev", log, now), Store: st, Hub: hub, Log: log, Now: now,
-		Telegram: gate, Settings: set, SubBase: subBase, Bot: tgbot.RPCHandler(backend)})
+		Telegram: gate, Settings: set, SubBase: subBase, Bot: botpanel.RPCHandler(backend)})
 	gate.SetHandler(api.BotSlot())
 	apiSrv := httptest.NewServer(api)
 	defer apiSrv.Close()
@@ -160,8 +161,7 @@ func TestAddonEndToEnd(t *testing.T) {
 	})
 	_ = said
 
-	// A payment message comes as an event; the bot tells the buyer, once: the deprecated bot.*
-	// twin of the same payment, which the panel still writes, is not read.
+	// A payment message comes as an event; the bot tells the buyer, once.
 	u, err := domain.NewUsers(st, domain.NewPool(st, now), noChanges{}, now).Create(ctx, domain.CreateInput{Name: "Anna", TariffID: firstTariff(t, st.Q)})
 	if err != nil {
 		t.Fatal(err)
@@ -171,12 +171,11 @@ func TestAddonEndToEnd(t *testing.T) {
 	}
 	emit := func(typ string, data any) {
 		t.Helper()
-		if err := st.Tx(ctx, func(q *db.Queries) error { return events.Emit(ctx, q, now(), typ, u.ID, 555, data, typ+":1") }); err != nil {
+		if err := st.Tx(ctx, func(q *db.Queries) error { return feed.Emit(ctx, q, now(), typ, u.ID, 555, data, typ+":1") }); err != nil {
 			t.Fatal(err)
 		}
 		hub.Kick()
 	}
-	pay := db.Payment{ID: 1, TgID: 555, Kind: "new", Provider: "stars", Amount: 100, Currency: "XTR", TariffName: "Month", Status: "applied"}
 	told := func(s []string) (n int) {
 		for _, m := range s {
 			if strings.HasPrefix(m, "sendMessage: ") && strings.Contains(m, "готова") {
@@ -185,7 +184,6 @@ func TestAddonEndToEnd(t *testing.T) {
 		}
 		return n
 	}
-	emit(events.BotPaid, tgbot.PaymentMessage{Payment: pay, User: u, Created: true})
 	emit(events.PaymentPaid, events.Payment{PaymentID: 1, Kind: "new", Provider: "stars", Amount: 100, Currency: "XTR", TariffName: "Month", Created: true})
 	until("the payment message", func(s []string) bool { return told(s) > 0 })
 	time.Sleep(500 * time.Millisecond)

@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"mikan/internal/release"
 )
 
 func communityDoc(addons []map[string]any, revoked []map[string]any) []byte {
@@ -50,7 +52,7 @@ func TestParseCommunity(t *testing.T) {
 	data := communityDoc([]map[string]any{communityAddon("hello", "github.com/Author/hello", "b"), communityAddon("hello", "github.com/Other/hello", "c"),
 		signedA, pay, tagged, lan, badRepo, badKey, newer, tg, evil, alsoBad},
 		[]map[string]any{{"repo": "github.com/Bad/evil", "reason": "stolen code\n<b>", "at": "2026-10-14"}, {"id": "Bad Id", "reason": "x", "at": "2026-10-14"}})
-	sig := base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data))
+	sig := release.SignIn(release.CommunityContext, data, priv)
 	c, err := ParseCommunity(data, sig, pub, "0.5.1.0")
 	if err != nil {
 		t.Fatal(err)
@@ -88,14 +90,14 @@ func TestManagerCommunityCaches(t *testing.T) {
 		switch r.URL.Path {
 		case "/index.json":
 			_, _ = w.Write(data)
-		case "/index.json.sig":
-			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data)))
+		case "/index.json" + release.SigSuffix:
+			_, _ = io.WriteString(w, release.SignIn(release.CommunityContext, data, priv))
 		}
 	}))
 	defer srv.Close()
 	now := time.Unix(1000, 0)
 	m := New("", "", "dev", slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return now })
-	m.SetKey(pub)
+	m.SetKeys(pub, pub)
 	if m.CommunityKnown() != nil {
 		t.Fatal("nothing known before the first fetch")
 	}

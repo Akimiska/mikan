@@ -64,6 +64,33 @@ func backend(t *testing.T) (port string, hits chan backendHit) {
 	return port, hits
 }
 
+// helloTo starts a TLS ClientHello for name on a new connection to addr. The handshake cannot
+// finish (the backend speaks no TLS): only the ClientHello counts, so it is started and left.
+func helloTo(t *testing.T, addr, name string) net.Conn {
+	t.Helper()
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = tls.Client(c, &tls.Config{ServerName: name, InsecureSkipVerify: true}).Handshake() }()
+	return c
+}
+
+// hitBy waits for the backend to get the ClientHello that c sent: the client address in the
+// PROXY header, a TLS record after it. what names the case in a failure.
+func hitBy(t *testing.T, hits chan backendHit, c net.Conn, what string) {
+	t.Helper()
+	select {
+	case h := <-hits:
+		want, _ := netip.ParseAddrPort(c.LocalAddr().String())
+		if h.src != want || h.first != 0x16 {
+			t.Fatalf("%s: the backend got src %v first %#x, want %v and a TLS record", what, h.src, h.first, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s: nothing reached the backend", what)
+	}
+}
+
 // The router hands a ClientHello to the inbound its name routes to, with the client's
 // address in a PROXY v2 header the core reads, the ClientHello whole after it; another
 // name goes to the default inbound; with none, it is closed.
@@ -79,34 +106,11 @@ func TestSNIRouter(t *testing.T) {
 		map[string]string{"a": aPort, "b": bPort})
 	go r.serve(nil)
 	defer r.close()
-	hello := func(name string) net.Conn {
-		t.Helper()
-		c, err := net.Dial("tcp", ln.Addr().String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		// The handshake cannot finish (the backend speaks no TLS): only the ClientHello
-		// counts, so it is started and left.
-		go func() { _ = tls.Client(c, &tls.Config{ServerName: name, InsecureSkipVerify: true}).Handshake() }()
-		return c
-	}
-	wait := func(hits chan backendHit, c net.Conn) {
-		t.Helper()
-		select {
-		case h := <-hits:
-			want, _ := netip.ParseAddrPort(c.LocalAddr().String())
-			if h.src != want || h.first != 0x16 {
-				t.Fatalf("backend got src %v first %#x, want %v and a TLS record", h.src, h.first, want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("nothing reached the backend")
-		}
-	}
-	c := hello("a.example.com")
-	wait(aHits, c)
+	c := helloTo(t, ln.Addr().String(), "a.example.com")
+	hitBy(t, aHits, c, "a routed name")
 	c.Close()
-	c = hello("unknown.example.org")
-	wait(bHits, c)
+	c = helloTo(t, ln.Addr().String(), "unknown.example.org")
+	hitBy(t, bHits, c, "the default inbound")
 	c.Close()
 
 	r.set(&nodeapi.SNIRouter{Routes: []nodeapi.SNIRoute{{Inbound: "a", Names: []string{"a.example.com"}}}}, map[string]string{"a": aPort})
@@ -166,8 +170,8 @@ func TestFrontPageOnTheRouter(t *testing.T) {
 		t.Fatal(err)
 	}
 	front := newFrontPage()
-	defer front.close()
-	if !front.set("cats", &nodeapi.TLSFiles{CertPEM: certPEM, KeyPEM: keyPEM}) {
+	defer func() { _ = front.srv.Close(); _ = front.ln.Close() }()
+	if front.set("cats", &nodeapi.TLSFiles{CertPEM: certPEM, KeyPEM: keyPEM}); !front.on() {
 		t.Fatal("the page does not take the node's certificate")
 	}
 	r := &sniRouter{ln: ln, log: slog.New(slog.DiscardHandler), front: front}
@@ -209,31 +213,14 @@ func TestFrontPageOnTheRouter(t *testing.T) {
 		t.Fatal("TLS 1.1 is let in")
 	}
 
-	hello := func(name string) net.Conn {
-		t.Helper()
-		c, err := net.Dial("tcp", ln.Addr().String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		go func() { _ = tls.Client(c, &tls.Config{ServerName: name, InsecureSkipVerify: true}).Handshake() }()
-		return c
-	}
-	reached := func(what string) {
-		t.Helper()
-		select {
-		case <-aHits:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("%s: the inbound got nothing", what)
-		}
-	}
-	c := hello("a.example.com")
-	reached("a routed name")
+	c := helloTo(t, ln.Addr().String(), "a.example.com")
+	hitBy(t, aHits, c, "a routed name")
 	c.Close()
-	c = hello("other.example.org")
-	reached("any other name")
+	c = helloTo(t, ln.Addr().String(), "other.example.org")
+	hitBy(t, aHits, c, "any other name")
 	c.Close()
 	front.set("", nil)
-	c = hello("node.example.com")
-	reached("the page off")
+	c = helloTo(t, ln.Addr().String(), "node.example.com")
+	hitBy(t, aHits, c, "the page off")
 	c.Close()
 }

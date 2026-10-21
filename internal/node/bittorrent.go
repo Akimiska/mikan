@@ -8,19 +8,10 @@ import (
 	"mikan/internal/nodeapi"
 )
 
-// The torrent blocker's patterns. Each is a fixed shape BitTorrent itself defines, so
-// other traffic does not match by chance: a false catch bans a paying user. Encrypted
-// BitTorrent (MSE/PE) is noise to these and goes through. The core's BitTorrent sniffer
-// recognises the peer wire handshake and the UDP side; the HTTP tracker is the node's.
-
-var (
-	btProtocol = []byte("\x13BitTorrent protocol") // BEP 3: the peer wire handshake
-	dhtQuery   = []byte("d1:ad2:id20:")            // BEP 5: a query, keys in bencode order
-	dhtReply   = []byte("d1:rd2:id20:")            // and a reply
-)
-
-// udpTrackerMagic opens a UDP tracker's connect request (BEP 15).
-const udpTrackerMagic = 0x41727101980
+// The torrent blocker: the core's BitTorrent sniffer recognises the peer wire handshake
+// and the UDP side (DHT, uTP, the UDP tracker); the HTTP tracker requests are the node's own
+// check below. A false catch bans a paying user, so each shape is one BitTorrent itself
+// defines. Encrypted BitTorrent (MSE/PE) is noise to these and goes through.
 
 // torrentTCP says what BitTorrent the first bytes of a TCP stream are, "" when none.
 func torrentTCP(b []byte) string {

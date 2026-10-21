@@ -7,7 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"mikan/internal/panel/tgate"
+	"mikan/internal/textutil"
 )
 
 // The Markdown of the admin's texts (welcome, menu, pages, notices, broadcasts), turned
@@ -238,7 +238,7 @@ func codeSpan(s string, i int) (end int, inner string, ok bool) {
 	return 0, "", false
 }
 
-// link reads [label](href) at s[i]: one line, an href without spaces that safeLink takes.
+// link reads [label](href) at s[i]: one line, an href without spaces that textLinks take.
 // An optional "title" after the address is dropped.
 func link(s string, i int) (end int, label, href string, ok bool) {
 	depth := 0
@@ -274,20 +274,15 @@ func link(s string, i int) (end int, label, href string, ok bool) {
 		}
 		dest = dest[:sp]
 	}
-	if strings.TrimSpace(label) == "" || !safeLink(dest) {
+	if strings.TrimSpace(label) == "" || !textutil.ValidLink(dest, textLinks) {
 		return 0, "", "", false
 	}
 	return j + 2 + k + 1, label, dest, true
 }
 
-// safeLink: what a link of the admin's text may open — web pages and Telegram links, as
+// textLinks are what a link of the admin's text may open: web pages and Telegram links, as
 // the menu's buttons, and plain http.
-func safeLink(s string) bool {
-	if strings.HasPrefix(strings.ToLower(s), "http://") {
-		s = "https://" + s[len("http://"):]
-	}
-	return len(s) <= 2048 && tgate.SafeURL(s)
-}
+var textLinks = textutil.LinkRules{HTTP: true, TG: true, MaxLen: 2048}
 
 // emphasis reads a mark at s[i] with its closing pair, CommonMark's way: the opening one
 // leans on the text after it, the closing one on the text before; "_" does not work

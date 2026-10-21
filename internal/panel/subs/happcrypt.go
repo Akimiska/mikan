@@ -13,7 +13,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -23,6 +22,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
+
+	"mikan/internal/httpjson"
 )
 
 // A Happ crypt link (happ://crypt5/…) carries the subscription address so that the app
@@ -216,18 +217,13 @@ func (l *HappLinks) fromAPI(ctx context.Context, source string) (string, error) 
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := l.Client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("happ crypt service: %d", resp.StatusCode)
-	}
 	var out struct {
 		Link string `json:"encrypted_link"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out); err != nil {
+	if err := httpjson.Do(l.Client, req, 64<<10, &out); err != nil {
+		if code := httpjson.Code(err); code != 0 {
+			return "", fmt.Errorf("happ crypt service: %d", code)
+		}
 		return "", err
 	}
 	if !strings.HasPrefix(out.Link, "happ://crypt") || strings.ContainsAny(out.Link, " \r\n\t\"'<>") {

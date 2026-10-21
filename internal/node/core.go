@@ -22,8 +22,6 @@ type core interface {
 	// when they were set): one pass of the core for all the changes the registry makes at
 	// once.
 	limits(set map[userKey]coreLimit, remove, fresh []userKey)
-	// closeUser closes the user's open connections on an inbound.
-	closeUser(inbound, user string)
 }
 
 type userStat struct {
@@ -89,10 +87,6 @@ func (citrus) limits(set map[userKey]coreLimit, remove, fresh []userKey) {
 	}
 	// The core refuses only negative numbers and empty names; the registry makes neither.
 	_ = users.SetLimits(ls, rm)
-}
-
-func (citrus) closeUser(inbound, user string) {
-	statistic.DefaultManager.CloseUserConnections(inbound, user)
 }
 
 // coreUser is the name the core knows the slot by on an inbound: TUIC users are their

@@ -239,17 +239,17 @@ func verify(args []string) error {
 	if err != nil {
 		return err
 	}
-	pub, err := release.Key(release.PublicKey)
-	if err != nil {
-		return err
-	}
-	m, err := release.Parse(data, string(sig), pub)
+	m, err := release.Parse(data, string(sig), trustedKeys()...)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("ok: %s %s\n", m.Version, m.Ref())
 	return nil
 }
+
+// trustedKeys are the release keys the builds trust (release.TrustedKeys); tests sign with keys
+// of their own.
+var trustedKeys = release.TrustedKeys
 
 func privateKey(pemText string) (ed25519.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(pemText))
@@ -264,5 +264,13 @@ func privateKey(pemText string) (ed25519.PrivateKey, error) {
 	if !ok {
 		return nil, errors.New("RELEASE_SIGNING_KEY: not an Ed25519 key")
 	}
-	return priv, nil
+	// What it signs is read only with one of the release keys: a key the builds do not trust
+	// would publish a release nobody can install.
+	pub := priv.Public().(ed25519.PublicKey)
+	for _, k := range trustedKeys() {
+		if k.Equal(pub) {
+			return priv, nil
+		}
+	}
+	return nil, errors.New("RELEASE_SIGNING_KEY: none of release.ReleaseKeys")
 }

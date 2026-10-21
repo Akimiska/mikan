@@ -99,19 +99,6 @@ func (t *Tuner) leftPorts(events []db.InboundEvent, node int64, network string, 
 	return left
 }
 
-func (t *Tuner) runBusy(ctx context.Context) {
-	tick := time.NewTicker(t.o.Busy)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-			t.MoveBusy(ctx)
-		}
-	}
-}
-
 // MoveBusy moves every inbound whose listener failed because another program holds its
 // port. It reads the nodes' last health, so it costs nothing while every listener is up.
 // A new port that is busy too fails on the node's next apply and is moved from in turn;

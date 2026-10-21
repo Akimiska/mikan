@@ -7,15 +7,16 @@ package ipgeo
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/netip"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"mikan/internal/httpjson"
+	"mikan/internal/netaddr"
 )
 
 const (
@@ -103,8 +104,7 @@ func newClient(hc *http.Client, services []service, now func() time.Time) *Clien
 
 // Public says whether a may be asked about.
 func Public(a netip.Addr) bool {
-	a = a.Unmap()
-	return a.Zone() == "" && a.IsGlobalUnicast() && !a.IsPrivate() && !netip.MustParsePrefix("100.64.0.0/10").Contains(a)
+	return a.Zone() == "" && netaddr.IsPublic(a)
 }
 
 // Lookup asks every base about a at once.
@@ -154,26 +154,16 @@ func (c *Client) ask(ctx context.Context, s service, a netip.Addr) GeoAnswer {
 	req.Header.Set("Accept", "application/json")
 	// Some bases refuse a request without a name.
 	req.Header.Set("User-Agent", "mikan-panel")
-	resp, err := c.hc.Do(req)
-	if err != nil {
-		ans.Error = ErrFailed
-		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
-			ans.Error = ErrTimeout
-		}
-		return ans
-	}
-	defer resp.Body.Close()
-	switch {
-	case resp.StatusCode == http.StatusTooManyRequests:
-		ans.Error = ErrLimited
-		return ans
-	case resp.StatusCode != http.StatusOK:
-		ans.Error = ErrFailed
-		return ans
-	}
 	var body any
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(&body); err != nil {
-		ans.Error = ErrFailed
+	if err := httpjson.Do(c.hc, req, maxBody, &body); err != nil {
+		switch {
+		case httpjson.Code(err) == http.StatusTooManyRequests:
+			ans.Error = ErrLimited
+		case ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded):
+			ans.Error = ErrTimeout
+		default:
+			ans.Error = ErrFailed
+		}
 		return ans
 	}
 	if code, ok := country(body, s.Path); ok {

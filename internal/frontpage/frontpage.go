@@ -27,9 +27,20 @@ func Page(name string) []byte {
 }
 
 // Serve answers "/" (and /index.html) with page, any other path with a plain 404, as a
-// small site of one page does.
+// small site of one page does (Write).
 func Serve(w http.ResponseWriter, r *http.Request, page []byte) {
 	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+		NotFound(w)
+		return
+	}
+	Write(w, r, page)
+}
+
+// Write answers r with page: GET and HEAD get it, any other method the plain 404, as
+// Citrus' fallback-page answers on a node: a site of one page takes no posts, and the panel's
+// address, a node's domain and its protocols' ports tell no stranger apart by how they answer.
+func Write(w http.ResponseWriter, r *http.Request, page []byte) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		NotFound(w)
 		return
 	}
@@ -40,7 +51,7 @@ func Serve(w http.ResponseWriter, r *http.Request, page []byte) {
 	}
 }
 
-// NotFound is a plain 404.
+// NotFound is a plain 404: the one of the panel's server, its sites and the nodes' pages.
 func NotFound(w http.ResponseWriter) {
 	h := w.Header()
 	h.Set("Content-Type", "text/plain; charset=utf-8")

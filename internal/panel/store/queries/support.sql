@@ -1,6 +1,6 @@
 -- name: CreateSupportGrant :one
-INSERT INTO support_grants (token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO support_grants (token_hash, admin_id, level, show_people, terminal_targets, note, created_at, expires_at, extended)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: GetSupportGrant :one

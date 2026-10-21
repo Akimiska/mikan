@@ -153,11 +153,14 @@ function Player({ cast, name }: { cast: Cast; name: string }) {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
     // pos is read once, when play starts; speed changes are picked up through the ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, apply, cast]);
 
   // Speed changes mid-play: the clock continues from where it is, at the new pace.
   useEffect(() => {
     run.current = { wall: performance.now(), from: pos };
+    // A new pace from the position of the moment; the position moving is not a new pace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speed]);
 
   const onReady = useCallback(

@@ -79,7 +79,8 @@ You can check whether this kind of help fits you for free: the AI in the bot ans
 The operator needs access to the panel, and you open and close it yourself: **Settings → Support**. How it works in detail: [Support access](/mikan/en/operations/support-access/).
 
 - Choose the duration: 2, 6 or 24 hours. You can revoke access earlier with one button.
-- Choose the level. **View** is read-only: the operator sees nodes, logs and diagnostics but changes nothing. **Change** also lets them edit nodes, certificates and addons, start updates and restarts. If the fix needs no changes, leave it on view.
+- Choose the level. **View** is read-only: the operator sees nodes, logs and diagnostics but changes nothing. **Change** also lets them edit settings, nodes and official addons, start updates and restarts. If the fix needs no changes, leave it on view.
+- The **extended mode** is a separate switch that takes your password: only with it can the operator issue a node's key, change a node's address or domain, set an own certificate, change payments, payment details and balances, hand the bot to an addon or install an addon from outside mikan's catalog. It is rarely needed, and we will say so when a fix cannot do without it.
 - The **Show client data** checkbox is off by default. Then the names and Telegram of subscribers are hidden, and subscription links and keys are masked. Turn it on only if the problem cannot be solved without it.
 - The access opens by a one-time code from the ticket: the panel checks the code with the bot and hands the access to it itself. The link is never shown to you, there is nothing to forward, and nobody else can be let in this way.
 - The support bot learns the secret address of your admin panel. When the support is over, you can press "Issue a new link" on the "Panel link" card.
@@ -91,7 +92,7 @@ Nobody gets into the panel without your button: the project has no standing acce
 
 ### What the operator can never do
 
-Even at the "Change" level these stay closed:
+Even at the "Change" level in the extended mode these stay closed:
 
 - the password and two-factor protection;
 - API keys and signing in with them;

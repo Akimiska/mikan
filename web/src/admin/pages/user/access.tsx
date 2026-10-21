@@ -5,14 +5,15 @@ import { api, errorText, unwrap, type Inbound, type User } from "../../../api/cl
 import { qk, useInbounds, useNodes, userActions, useTariffs, useUserMutation } from "../../../api/hooks";
 import { Confirm } from "../../../components/overlay";
 import { useToast } from "../../../components/toast";
-import { Button, QR } from "../../../components/ui";
+import { Button, ErrorState, QR, Skeleton } from "../../../components/ui";
 import { Switch } from "../../../components/switch";
 import { t } from "../../../i18n";
 import { useCopy } from "../../../lib/copy";
 import { useDraft } from "../../../lib/draft";
 import { nodeLabel } from "../../../lib/node-label";
 import { safeHref } from "../../../lib/url";
-import { byNode, serversHas } from "../servers-tree";
+import { serversHas } from "../sale-rules";
+import { byNode } from "../servers-tree";
 import { Section } from "./section";
 
 export function SubscriptionSection({ u, onReissue }: { u: User; onReissue: () => void }) {
@@ -195,6 +196,29 @@ export function ProtocolsSection({ u }: { u: User }) {
     send(same ? [] : [...next]);
   };
   const tree = byNode(all);
+  // Every list counts: without the tariff the base is every protocol, without the groups
+  // none is closed, and a switch flipped then would send a list of the wrong ones.
+  const failed = [inbounds, tariffs, groups].find((q) => q.data === undefined && q.isError);
+  const loading = inbounds.data === undefined || tariffs.data === undefined || groups.data === undefined;
+  if (failed || loading) {
+    return (
+      <Section title={t("userDrawer.protocols")}>
+        {failed ? (
+          <ErrorState text={errorText(failed.error)} onRetry={() => void failed.refetch()} />
+        ) : (
+          [0, 1].map((n) => (
+            <div key={n} className="flex items-center justify-between gap-3 py-2" aria-hidden>
+              <div className="min-w-0 flex-1">
+                <Skeleton style={{ width: 140 }} />
+                <Skeleton className="mt-1.5" style={{ width: 200 }} />
+              </div>
+              <Skeleton style={{ width: 36, height: 20, borderRadius: 999 }} />
+            </div>
+          ))
+        )}
+      </Section>
+    );
+  }
   return (
     <Section
       title={t("userDrawer.protocols")}
@@ -207,11 +231,19 @@ export function ProtocolsSection({ u }: { u: User }) {
       }
     >
       {own ? <p className="mb-1 text-xs text-[var(--honey-600)]">{t("servers.notAsTariff")}</p> : null}
+      {tree.length === 0 ? <p className="text-[13px] text-[var(--ink-500)]">{t("userDrawer.noProtocols")}</p> : null}
       {tree.map(([nodeId, list]) => {
         const node = nodes.data?.find((n) => n.id === nodeId);
+        // With more than one node the switches of one are a group named by it: two nodes
+        // of the same preset have switches of the same name.
+        const head = tree.length > 1 ? `proto-node-${u.id}-${nodeId}` : undefined;
         return (
-          <div key={nodeId}>
-            {tree.length > 1 ? <div className="pt-2 text-xs font-semibold text-[var(--ink-500)]">{node ? nodeLabel(node) : String(nodeId)}</div> : null}
+          <div key={nodeId} role={head ? "group" : undefined} aria-labelledby={head}>
+            {head ? (
+              <div id={head} className="pt-2 text-xs font-semibold text-[var(--ink-500)]">
+                {node ? nodeLabel(node) : `#${nodeId}`}
+              </div>
+            ) : null}
             {list.map((i) => {
               const group = closedBy(i);
               return (

@@ -13,6 +13,9 @@ import { bytes } from "../../lib/format";
 export function NodeTrafficDrawer({ node, onClose }: { node: { id: number; name: string } | null; onClose: () => void }) {
   const [range, setRange] = useState<Range>("24h");
   const traffic = useNodeTraffic(node?.id, range);
+  // Another period keeps the last one's points until it loads: cut into this period's steps
+  // they add up to nothing true (the dashboard's chart does the same).
+  const stale = traffic.isPlaceholderData;
   const points = useMemo(() => buckets(traffic.data?.points ?? [], range), [traffic.data, range]);
   const down = points.reduce((a, p) => a + p.down, 0);
   const up = points.reduce((a, p) => a + p.up, 0);
@@ -39,20 +42,29 @@ export function NodeTrafficDrawer({ node, onClose }: { node: { id: number; name:
             ]}
           />
         </div>
-        <div className="mt-4" aria-busy={traffic.isPlaceholderData}>
+        <div className="mt-4" aria-busy={stale}>
           <QueryBoundary query={traffic} pending={<Skeleton style={{ height: 220, borderRadius: 16 }} />}>
             {() => (
               <>
-                <TrafficChart points={points} range={range} />
-                <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-[var(--ink-500)]">
-                  <span>
-                    {t("chart.down")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(down)}</b>
-                  </span>
-                  <span>
-                    {t("chart.up")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(up)}</b>
-                  </span>
+                <TrafficChart points={points} range={range} stale={stale} />
+                <div className="mt-3 flex min-h-5 flex-wrap items-center gap-x-6 gap-y-2 text-[13px] text-[var(--ink-500)]">
+                  {stale ? (
+                    <>
+                      <Skeleton style={{ width: 112, height: 14 }} />
+                      <Skeleton style={{ width: 112, height: 14 }} />
+                    </>
+                  ) : (
+                    <>
+                      <span>
+                        {t("chart.down")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(down)}</b>
+                      </span>
+                      <span>
+                        {t("chart.up")} <b className="num font-semibold text-[var(--ink-900)]">{bytes(up)}</b>
+                      </span>
+                    </>
+                  )}
                 </div>
-                {down + up === 0 ? <p className="mt-4 text-[13px] text-[var(--ink-500)]">{t("nodeTraffic.empty")}</p> : null}
+                {!stale && down + up === 0 ? <p className="mt-4 text-[13px] text-[var(--ink-500)]">{t("nodeTraffic.empty")}</p> : null}
               </>
             )}
           </QueryBoundary>

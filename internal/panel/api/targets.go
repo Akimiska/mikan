@@ -82,7 +82,7 @@ func (h *handlers) scanTargets(ctx context.Context, in *scanTargetsInput) (*scan
 	found, err := h.targetDeps(node.ID).Scan(ctx, targets.ScanRequest{Node: node, SelfSteal: selfSteal})
 	var noIP *targets.NoIPError
 	if errors.As(err, &noIP) {
-		return nil, huma.Error422UnprocessableEntity("scan_no_ip")
+		return nil, refusal("scan_no_ip")
 	} else if err != nil {
 		return nil, err
 	}

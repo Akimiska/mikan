@@ -64,7 +64,7 @@ func TestExtraTypes(t *testing.T) {
 				t.Errorf("mieru listener: %v", l)
 			}
 			m := c.Mihomo
-			// mihomo 1.19.31 does not tell the node who sends UDP over Mieru: TCP only.
+			// The Citrus server knows who sends UDP over Mieru: UDP on.
 			if m["type"] != "mieru" || m["transport"] != "TCP" || m["username"] != "s000001" || m["password"] != "S3cr3t+/=" || m["udp"] != true {
 				t.Errorf("mieru client: %v", m)
 			}

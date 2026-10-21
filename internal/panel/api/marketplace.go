@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"sync"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -175,12 +176,19 @@ func (h *handlers) marketView(ctx context.Context) (MarketView, error) {
 			installed[id] = a
 		}
 	}
-	official := h.officialCatalog(ctx)
+	// The catalog and the registry at once; the sources after them, judged with the ids the
+	// registry lists.
+	var (
+		official *addons.Catalog
+		comm     *addons.Community
+		wg       sync.WaitGroup
+	)
+	wg.Go(func() { official = h.officialCatalog(ctx) })
+	wg.Go(func() { comm = h.community(ctx) })
+	wg.Wait()
 	if official == nil {
 		v.CatalogError = "catalog_unavailable"
 	}
-	// The registry first: the sources are judged with the ids it lists.
-	comm := h.community(ctx)
 	if comm == nil {
 		v.CommunityError = "community_unavailable"
 	}
@@ -333,9 +341,16 @@ func (h *handlers) installMarketplace(ctx context.Context, in *marketInstallInpu
 	if !addons.SamePermissions(in.Body.Permissions, e.Permissions) {
 		return nil, huma.Error409Conflict("permissions_changed")
 	}
-	// Code mikan has not looked at, at every install and every update: the admin says so.
-	if (src != nil || comm != nil) && !in.Body.Ack {
-		return nil, fieldErr("body.ack", "addon_not_confirmed")
+	// Code mikan has not looked at, at every install and every update: the admin says so, and
+	// a support operator only in the extended mode (such an addon may be given the
+	// subscribers, and it stays after the grant).
+	if src != nil || comm != nil {
+		if err := requireSession(ctx, "ack"); err != nil {
+			return nil, err
+		}
+		if !in.Body.Ack {
+			return nil, fieldErr("body.ack", "addon_not_confirmed")
+		}
 	}
 	// A permission the host does not know yet would make it drop the addon: mikan update first.
 	if !addons.HostTakes(st.HostVersion, e.Permissions) {
@@ -436,7 +451,7 @@ func (h *handlers) installExternal(ctx context.Context, in *marketExternalInput)
 	}
 	if !r.Valid() {
 		// What the fields above let through and the host would still refuse.
-		return nil, huma.Error422UnprocessableEntity("addon_request_invalid")
+		return nil, refusal("addon_request_invalid")
 	}
 	st, err := h.addonHost()
 	if err != nil {

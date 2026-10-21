@@ -112,7 +112,7 @@ merge — обязательный чек-лист из §6.
 
 - Telegram-identity в списке People + состояние `no_subscription` (`NULL expires_at` = «без подписки», не «active»): `2350e33`, `3284450`, `379d11f`, `371e95c` (openapi) — ✅ в main.
 - Версия форка в сайдбаре («AoiVPN · форк mikan X»), ручная проверка ядер протоколов нод: `23e1963`.
-- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` → тег образа + версия в сайдбаре. Схема с 21.10: **`<версия апстрима>.aoi.<N>`** через точку внутри pre-release (сейчас `0.5.1.1-rc.12.aoi.1`): по semver она новее своей базы rc.12 и старше rc.13/0.5.1.1, т.е. честно показывает, на каком апстриме форк. Новый мерж апстрима → база меняется, N=1; fork-релиз без мержа → N+1. НЕ через дефис (`rc.11-aoi.1`): `11-aoi` — буквенный идентификатор и обгонит любой числовой rc. Раньше форк «спешил» (0.5.1.3 при апстриме 0.5.1.1-rc.x) — это была защита от апдейтера, теперь её роль играет блокировка ниже.
+- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` → тег образа + версия в сайдбаре. Схема с 21.10: **`<версия апстрима>.aoi.<N>`** через точку внутри pre-release (сейчас `0.5.1.1-rc.12.aoi.2`): по semver она новее своей базы rc.12 и старше rc.13/0.5.1.1, т.е. честно показывает, на каком апстриме форк. Новый мерж апстрима → база меняется, N=1; fork-релиз без мержа → N+1. НЕ через дефис (`rc.11-aoi.1`): `11-aoi` — буквенный идентификатор и обгонит любой числовой rc. Раньше форк «спешил» (0.5.1.3 при апстриме 0.5.1.1-rc.x) — это была защита от апдейтера, теперь её роль играет блокировка ниже.
 - **Блокировка апдейтера** (`internal/panel/updates/updates.go`, `forkLocked`/`ErrForkManual`): панель показывает, что вышло у апстрима, но `Request()` не пишет файл-запрос для хоста (API → 409 `update_fork_manual`), а `policy.json` всегда `auto:false`. Тест `TestForkLocked`. Не удалять при мерже.
 - CI апстрима `goals.yml`/`pages.yml` (подписанный индекс релизов, сайт) в форке выключены условием `github.repository == 'Miroshka000/mikan'`.
 - Брендинг AoiVPN (логотип/название/favicon вместо mikan) — см. §4.
@@ -193,7 +193,7 @@ merge — обязательный чек-лист из §6.
    ```
    Golden-дифф: `git diff -- internal/panel/subs/testdata/golden/ | grep -E "^[+-].*name:"` — там не должны появиться Авто/страны/PROXY.
 5. **Живой smoke на SE после деплоя** (см. §1 curl): ровно 2 группы, DNS nameserver с `#<g.Main>`, обход-группа последняя.
-6. **Версия**: `FORK_VERSION` = `<апстрим>.aoi.<N>` (см. §3.4), задеплоить образ (`cd /opt/mikan && MIKAN_IMAGE=... docker compose up -d`), образы старых версий остаются локально для отката. Проверить, что `forkLocked` на месте (`grep -n forkLocked internal/panel/updates/updates.go`), `auto=false`, `nodes_follow_panel=false`.
+6. **Версия**: `FORK_VERSION` = `<апстрим>.aoi.<N>` (см. §3.4), задеплоить образ (`cd /opt/mikan && MIKAN_IMAGE=... docker compose up -d`), образы старых версий остаются локально для отката. Проверить, что `forkLocked` на месте (`grep -n forkLocked internal/panel/updates/updates.go` — 3 места: SetPolicy, Request, Host: с 22.10 панель не показывает отчёт хост-апдейтера «Не удалось обновить до …»), `auto=false`, `nodes_follow_panel=false`.
    Тесты пакетов с Postgres (`api`, `settings`, `app`, …) в CLI-окружении НЕ гонять (proot: initdb виснет) — `go build ./... && go vet` + тесты без БД + живой smoke.
 7. **Не жать «Обновить» в панели** и не включать auto-update: updater тянет upstream-релизы (installer/src/release.rs: REPO + PUBLIC_KEY upstream), обновление затрёт форк.
 

@@ -324,7 +324,9 @@ type HostStatus struct {
 
 func (c *Checker) Host() (HostStatus, bool) {
 	var s HostStatus
-	if c.dir == "" {
+	// AoiVPN fork: the host's updater is not how the fork is updated (the image is swapped by
+	// hand), so what it last reported — an attempt at an upstream release — only misleads.
+	if forkLocked || c.dir == "" {
 		return s, false
 	}
 	data, err := os.ReadFile(filepath.Join(c.dir, "status.json"))

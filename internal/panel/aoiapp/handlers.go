@@ -9,8 +9,10 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,8 +29,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// clientIP is the app's address. The API comes through the nginx in front of the public
+// address (MIKAN_AOI_APP_PROXY, NL by default): its X-Forwarded-For is taken from it alone,
+// without trusting the header panel-wide (MIKAN_TRUST_PROXY), where anyone reaching the
+// panel directly could forge it.
 func (h *Handler) clientIP(r *http.Request) string {
-	return server.ClientIP(r.Header, r.RemoteAddr, h.d.TrustProxy)
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return server.ClientIP(r.Header, r.RemoteAddr, h.d.TrustProxy || slices.Contains(h.proxies, host))
 }
 
 // serverTime is how the legacy bot wrote times: UTC without a zone.

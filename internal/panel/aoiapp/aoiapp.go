@@ -46,6 +46,8 @@ type Handler struct {
 	tariffID int64
 	// returnURL is where the buyer lands after paying (MIKAN_AOI_APP_RETURN_URL).
 	returnURL string
+	// proxies may say who the client is (X-Forwarded-For): MIKAN_AOI_APP_PROXY, comma-separated.
+	proxies []string
 
 	schemaMu sync.Mutex
 	schemaOK bool
@@ -77,6 +79,10 @@ func New(d Deps) *Handler {
 		payLimit: limiter{max: 10, window: time.Minute}, trialLimit: limiter{max: 3, window: time.Minute}}
 	if v, err := strconv.ParseInt(os.Getenv("MIKAN_AOI_APP_TARIFF"), 10, 64); err == nil && v > 0 {
 		h.tariffID = v
+	}
+	h.proxies = []string{"79.137.198.59"}
+	if v := strings.TrimSpace(os.Getenv("MIKAN_AOI_APP_PROXY")); v != "" {
+		h.proxies = strings.Split(strings.ReplaceAll(v, " ", ""), ",")
 	}
 	if v := strings.TrimSpace(os.Getenv("MIKAN_AOI_APP_RETURN_URL")); strings.HasPrefix(v, "https://") {
 		h.returnURL = v

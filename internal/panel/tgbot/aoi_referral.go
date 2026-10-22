@@ -84,25 +84,18 @@ func subName(u model.User) string {
 	return n
 }
 
-// aoiConnectRows (AoiVPN fork) are the connect screen's buttons: the subscription opened in
-// AoiVPN (or Happ) at once, then the AoiVPN downloads, always the latest release (the Aoi
-// backend redirects to the file). Telegram buttons open web links only, so "open" goes
-// through the subscription page: its #open=<app> starts the app with the subscription.
+// aoiConnectRows (AoiVPN fork) is the connect screen's main button: the subscription opened
+// in AoiVPN at once (the downloads are links in the text). Telegram buttons open web links
+// only, so it goes through the subscription page: its #open=<app> starts the app with it.
 func aoiConnectRows(w *words, subURL string) [][]tgapi.Button {
-	open, happ, android, windows := "⚡ Открыть в AoiVPN", "🍏 Открыть в Happ", "📥 AoiVPN для Android", "📥 AoiVPN для Windows"
+	if subURL == "" {
+		return nil
+	}
+	open := "⚡ Открыть в AoiVPN"
 	if w == &en {
-		open, happ, android, windows = "⚡ Open in AoiVPN", "🍏 Open in Happ", "📥 AoiVPN for Android", "📥 AoiVPN for Windows"
+		open = "⚡ Open in AoiVPN"
 	}
-	const base = "https://api.aoimusic.ru/api/version/download?platform=aoivpn"
-	var rows [][]tgapi.Button
-	if subURL != "" {
-		rows = append(rows, []tgapi.Button{{Text: open, URL: subURL + "#open=AoiVPN"}})
-	}
-	rows = append(rows, []tgapi.Button{{Text: android, URL: base}, {Text: windows, URL: base + "&os=windows"}})
-	if subURL != "" {
-		rows = append(rows, []tgapi.Button{{Text: happ, URL: subURL + "#open=Happ"}})
-	}
-	return rows
+	return [][]tgapi.Button{{{Text: open, URL: subURL + "#open=AoiVPN"}}}
 }
 
 // aoiVars (AoiVPN fork) adds what the legacy bot's cabinet showed: {until_full} is the end of

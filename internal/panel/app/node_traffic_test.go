@@ -123,3 +123,77 @@ func TestNodeTrafficEndpoints(t *testing.T) {
 		}
 	}
 }
+
+// What a node carried for other nodes' cascades shows next to its users' traffic and never
+// in it: the chart's points, the dashboard's shares and the card's last day carry it apart,
+// and the shares' total stays the users' (their source node counts those users).
+func TestNodeTrafficCascadeApart(t *testing.T) {
+	k := newKeyHarness(t)
+	ctx := t.Context()
+	var exit int64
+	if err := k.st.DB.QueryRowContext(ctx, "INSERT INTO nodes(name,address,created_at,updated_at) VALUES('Exit','198.51.100.9:40000',1,1) RETURNING id").Scan(&exit); err != nil {
+		t.Fatal(err)
+	}
+	hour, day := k.now.Unix()/3600, k.now.Unix()/86400
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{"INSERT INTO node_traffic_hourly(node_id,hour,up,down,relay_up,relay_down) VALUES ($1,$2,1,2,300,3000)", []any{exit, hour}},
+		{"INSERT INTO node_traffic_daily(node_id,day,up,down,relay_up,relay_down) VALUES ($1,$2,1,2,300,3000)", []any{exit, day}},
+		{"INSERT INTO node_traffic_hourly(node_id,hour,up,down) VALUES (1,$1,10,100)", []any{hour}},
+	} {
+		if _, err := k.st.DB.ExecContext(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp, body := k.asKey(k.read, http.MethodGet, "/nodes/"+idOf(exit)+"/traffic?range=24h", nil)
+	var chart struct {
+		Points []struct {
+			Up          int64 `json:"up"`
+			Down        int64 `json:"down"`
+			CascadeUp   int64 `json:"cascade_up"`
+			CascadeDown int64 `json:"cascade_down"`
+		} `json:"points"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &chart) != nil || len(chart.Points) != 1 {
+		t.Fatalf("chart: %d %s", resp.StatusCode, body)
+	}
+	if p := chart.Points[0]; p.Up != 1 || p.Down != 2 || p.CascadeUp != 300 || p.CascadeDown != 3000 {
+		t.Fatalf("the exit's hour: %+v", p)
+	}
+
+	_, body = k.asKey(k.read, http.MethodGet, "/stats/nodes?range=24h", nil)
+	var shares struct {
+		Items []struct {
+			ID      int64 `json:"id"`
+			Bytes   int64 `json:"bytes"`
+			Cascade int64 `json:"cascade"`
+		} `json:"items"`
+		Total int64 `json:"total"`
+	}
+	if json.Unmarshal(body, &shares) != nil || shares.Total != 113 {
+		t.Fatalf("the shares' total is the users': %s", body)
+	}
+	for _, it := range shares.Items {
+		if want := map[int64][2]int64{1: {110, 0}, exit: {3, 3300}}[it.ID]; it.Bytes != want[0] || it.Cascade != want[1] {
+			t.Errorf("node %d: bytes %d cascade %d, want %v", it.ID, it.Bytes, it.Cascade, want)
+		}
+	}
+
+	_, body = k.asKey(k.read, http.MethodGet, "/nodes", nil)
+	var nodes []struct {
+		ID         int64             `json:"id"`
+		Traffic24h int64             `json:"traffic_24h"`
+		Cascade24h int64             `json:"cascade_24h"`
+		Cascade    []json.RawMessage `json:"cascade"`
+	}
+	if json.Unmarshal(body, &nodes) != nil || len(nodes) != 2 {
+		t.Fatalf("nodes: %s", body)
+	}
+	for _, n := range nodes {
+		if want := map[int64][2]int64{1: {110, 0}, exit: {3, 3300}}[n.ID]; n.Traffic24h != want[0] || n.Cascade24h != want[1] || n.Cascade == nil {
+			t.Errorf("node %d: traffic %d cascade %d (open %v), want %v", n.ID, n.Traffic24h, n.Cascade24h, n.Cascade, want)
+		}
+	}
+}

@@ -352,11 +352,12 @@ func (h *Handler) serveProfile(w http.ResponseWriter, r *http.Request, u db.User
 		prof.Bypass = cfg.Bypass
 		prof.NodeOrder, prof.ProtoOrder = cfg.NodeOrder, cfg.ProtoOrder
 		prof.App, prof.Lang = app, cfg.Lang
-		body, err := h.clashProfile(prof, cfg)
+		body, ps, err := h.clashProfile(prof, cfg)
 		if err != nil {
 			h.profileFailed(w, u, cfg, format, err)
 			return
 		}
+		h.mikanGroups(w, r, u, prof, ps)
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 		// AoiVPN fork: inline, чтобы не скачивать в браузере; имя = бренд.
 		w.Header().Set("Content-Disposition", "inline; filename*=UTF-8''"+url.PathEscape(cfg.Brand))
@@ -372,30 +373,43 @@ func (h *Handler) serveProfile(w http.ResponseWriter, r *http.Request, u db.User
 		w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(fileName(profileTitle(cfg, vars)))+".json")
 		_, _ = w.Write(body)
 	default:
-		links, err := URIs(prof)
+		links, ps, err := uris(prof)
 		if err != nil {
 			h.profileFailed(w, u, cfg, format, err)
 			return
 		}
+		h.mikanGroups(w, r, u, prof, ps)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(links))))
 	}
 }
 
 // clashProfile is the Clash profile of prof: the admin's own (cfg.Template) when the app can
-// take it, the built-in one otherwise.
-func (h *Handler) clashProfile(prof Profile, cfg Config) ([]byte, error) {
-	if cfg.Template == "" || !prof.routable() {
-		return Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
+// take it, the built-in one otherwise; and the panel's proxies in it.
+func (h *Handler) clashProfile(prof Profile, cfg Config) ([]byte, []proxy, error) {
+	builtIn := func() ([]byte, []proxy, error) {
+		c, ps, err := mihomoConfig(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
+		if err != nil {
+			return nil, nil, err
+		}
+		body, err := marshalYAML(c)
+		return body, ps, err
 	}
-	body, err := Template(prof, cfg.Template)
+	if cfg.Template == "" || !prof.routable() {
+		return builtIn()
+	}
+	c, ps, err := templateConfig(prof, cfg.Template)
 	var te *TemplateError
 	if errors.As(err, &te) {
 		// Saved templates are checked; one that went bad must not leave apps without a profile.
 		h.warn("template/"+te.Code, "subscription: the own Clash profile does not render, the built-in one goes out", "err", err)
-		return Mihomo(prof, cfg.Groups.WithDefaults(cfg.Lang), cfg.Routing)
+		return builtIn()
 	}
-	return body, err
+	if err != nil {
+		return nil, nil, err
+	}
+	body, err := marshalYAML(c)
+	return body, ps, err
 }
 
 // profileFailed answers a profile that could not be made: with nothing for this app to

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +58,10 @@ type NodeInfo struct {
 	CheckedAt   *time.Time        `json:"checked_at,omitempty"`
 	// Traffic24h is what the node carried in the last day, both ways.
 	Traffic24h int64 `json:"traffic_24h" doc:"Сколько унесла нода за последние сутки (вверх и вниз вместе), байты; у только что добавленной ноды 0"`
+	// Cascade is the other nodes' cascades through this one: the relay's open connections
+	// by source node, and what it carried for them in the last day.
+	Cascade    []CascadeConns `json:"cascade" doc:"Открытые сейчас подключения каскада других нод через эту, по ноде-источнику; пусто без каскада и у нод до 0.5.1.1-rc.14"`
+	Cascade24h int64          `json:"cascade_24h" doc:"Сколько нода унесла за сутки для каскада других нод (вверх и вниз вместе), байты; в traffic_24h не входит: этих пользователей считает нода-источник"`
 	// Behind: the node runs an older version than the panel.
 	Behind bool `json:"behind" doc:"Нода старее панели"`
 	// CanUpdate: the panel can update the node itself (a remote node that answers and has
@@ -186,6 +192,7 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 	if v.APIAllow == nil {
 		v.APIAllow = []string{}
 	}
+	v.Cascade = []CascadeConns{}
 	if v.Local {
 		// The panel's own node is reached at the panel's address.
 		ep, _ := h.d.Settings.Endpoint(ctx)
@@ -224,6 +231,7 @@ func (h *handlers) viewNode(ctx context.Context, n db.Node, inbounds []db.Inboun
 	}
 	v.Status, v.Version, v.Conns = "ok", hv.Health.Version, hv.Health.Conns
 	v.Core = hv.Health.Core
+	v.Cascade = cascadeConns(hv.Relay)
 	v.CPUPercent, v.MemUsed, v.MemTotal = hv.Health.System.CPUPercent, hv.Health.System.MemUsed, hv.Health.System.MemTotal
 	if p := hv.Health.System.ProcCPUPercent; p > 0 {
 		v.ProcCPU = &p
@@ -263,10 +271,29 @@ func (h *handlers) listNodes(ctx context.Context, _ *struct{}) (*nodesOutput, er
 	out := &nodesOutput{Body: make([]NodeInfo, 0, len(nodes))}
 	for _, n := range nodes {
 		v := h.viewNode(ctx, n, inbounds)
-		v.Traffic24h = day[n.ID].Up + day[n.ID].Down
+		v.Traffic24h, v.Cascade24h = day[n.ID].users.Up+day[n.ID].users.Down, day[n.ID].relay.Up+day[n.ID].relay.Down
 		out.Body = append(out.Body, v)
 	}
 	return out, nil
+}
+
+// CascadeConns is how many connections one source node's cascade holds open through the node.
+type CascadeConns struct {
+	NodeID int64 `json:"node_id"`
+	Conns  int   `json:"conns"`
+}
+
+// cascadeConns are the relay's open connections by source node (HealthView.Relay), the
+// smallest id first; a name that is no relay user's is left out.
+func cascadeConns(relay map[string]int) []CascadeConns {
+	out := []CascadeConns{}
+	for name, n := range relay {
+		if id, ok := domain.RelaySource(name); ok && n > 0 {
+			out = append(out, CascadeConns{NodeID: id, Conns: n})
+		}
+	}
+	slices.SortFunc(out, func(a, b CascadeConns) int { return cmp.Compare(a.NodeID, b.NodeID) })
+	return out
 }
 
 func (h *handlers) createNode(ctx context.Context, in *createNodeInput) (*nodeKeyOutput, error) {
@@ -425,7 +452,7 @@ func (h *handlers) nodeInfo(ctx context.Context, id int64) (*nodeInfoOutput, err
 		return nil, err
 	}
 	v := h.viewNode(ctx, n, inbounds)
-	v.Traffic24h = day[n.ID].Up + day[n.ID].Down
+	v.Traffic24h, v.Cascade24h = day[n.ID].users.Up+day[n.ID].users.Down, day[n.ID].relay.Up+day[n.ID].relay.Down
 	return &nodeInfoOutput{Body: v}, nil
 }
 

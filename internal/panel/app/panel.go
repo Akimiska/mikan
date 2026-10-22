@@ -588,6 +588,19 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)
 	adminMux.Handle(addonpages.Prefix, addonPages)
+	// What a browser installs the panel as (Settings → General → App on this device).
+	adminMux.Handle("/manifest.webmanifest", server.Manifest(func(ctx context.Context) (server.ManifestInfo, error) {
+		name, err := set.String(ctx, settings.KeyPanelAppName)
+		if err != nil {
+			return server.ManifestInfo{}, err
+		}
+		brand, err := set.String(ctx, settings.KeyBrand)
+		if err != nil {
+			return server.ManifestInfo{}, err
+		}
+		lang, err := set.Lang(ctx)
+		return server.ManifestInfo{Name: server.AppName(name, brand), Lang: lang}, err
+	}))
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
 	p.server.SetLegacy(subHandler.Legacy())

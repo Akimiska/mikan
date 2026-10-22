@@ -15,17 +15,40 @@ import (
 )
 
 // Traffic by node: the bytes of the users' statistics, grouped by the node that carried
-// them (nodesync counts both on one transaction, so the nodes add up to the users).
+// them (nodesync counts both on one transaction, so the nodes add up to the users). Apart
+// from them, what a node's relay carried for the other nodes' cascades: the source node
+// counted those bytes for its users, so they are the exit's load and no total's.
 
 // NodeShare is what one node carried in a range.
 type NodeShare struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name" doc:"Имя ноды; у своей ноды панели может быть пустым"`
-	Local bool   `json:"local" doc:"Своя нода панели"`
-	Up    int64  `json:"up"`
-	Down  int64  `json:"down"`
-	Bytes int64  `json:"bytes" doc:"up + down"`
+	ID      int64  `json:"id"`
+	Name    string `json:"name" doc:"Имя ноды; у своей ноды панели может быть пустым"`
+	Local   bool   `json:"local" doc:"Своя нода панели"`
+	Up      int64  `json:"up"`
+	Down    int64  `json:"down"`
+	Bytes   int64  `json:"bytes" doc:"up + down"`
+	Cascade int64  `json:"cascade" doc:"Сколько нода унесла для каскада других нод (вверх и вниз вместе): их пользователей считает нода-источник, поэтому в bytes и total не входит"`
 }
+
+// NodeTrafficPoint is a node's hour or day: its users' bytes, and apart from them its
+// relay's for the other nodes' cascades.
+type NodeTrafficPoint struct {
+	T           time.Time `json:"t"`
+	Up          int64     `json:"up"`
+	Down        int64     `json:"down"`
+	CascadeUp   int64     `json:"cascade_up" doc:"Отдано для каскада других нод: в up не входит"`
+	CascadeDown int64     `json:"cascade_down" doc:"Скачано для каскада других нод: в down не входит"`
+}
+
+type nodeTrafficOutput struct {
+	Body struct {
+		Points []NodeTrafficPoint `json:"points"`
+	}
+}
+
+// carried is what a node carried in a range: its users' bytes, and apart from them its
+// relay's for the other nodes' cascades.
+type carried struct{ users, relay domain.Bytes }
 
 type nodeSharesOutput struct {
 	Body struct {
@@ -44,12 +67,12 @@ func (h *handlers) registerNodeTraffic() {
 		Tags:        []string{"stats"}}, h.nodeShares)
 }
 
-func (h *handlers) nodeTraffic(ctx context.Context, in *trafficInput) (*trafficOutput, error) {
+func (h *handlers) nodeTraffic(ctx context.Context, in *trafficInput) (*nodeTrafficOutput, error) {
 	if _, err := h.getNode(ctx, in.ID); err != nil {
 		return nil, err
 	}
-	out := &trafficOutput{}
-	out.Body.Points = []TrafficPoint{}
+	out := &nodeTrafficOutput{}
+	out.Body.Points = []NodeTrafficPoint{}
 	daily, since := trafficSince(h.d.Now(), in.Range)
 	if daily {
 		rows, err := h.d.Store.Q.NodeTrafficDaily(ctx, db.NodeTrafficDailyParams{NodeID: in.ID, Day: since})
@@ -57,7 +80,7 @@ func (h *handlers) nodeTraffic(ctx context.Context, in *trafficInput) (*trafficO
 			return nil, err
 		}
 		for _, r := range rows {
-			out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Day * 86400), Up: r.Up, Down: r.Down})
+			out.Body.Points = append(out.Body.Points, NodeTrafficPoint{T: store.Time(r.Day * 86400), Up: r.Up, Down: r.Down, CascadeUp: r.RelayUp, CascadeDown: r.RelayDown})
 		}
 		return out, nil
 	}
@@ -66,22 +89,22 @@ func (h *handlers) nodeTraffic(ctx context.Context, in *trafficInput) (*trafficO
 		return nil, err
 	}
 	for _, r := range rows {
-		out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Hour * 3600), Up: r.Up, Down: r.Down})
+		out.Body.Points = append(out.Body.Points, NodeTrafficPoint{T: store.Time(r.Hour * 3600), Up: r.Up, Down: r.Down, CascadeUp: r.RelayUp, CascadeDown: r.RelayDown})
 	}
 	return out, nil
 }
 
 // nodeBytes is what each node carried in a range, by node id.
-func (h *handlers) nodeBytes(ctx context.Context, rng string) (map[int64]domain.Bytes, error) {
+func (h *handlers) nodeBytes(ctx context.Context, rng string) (map[int64]carried, error) {
 	daily, since := trafficSince(h.d.Now(), rng)
-	out := map[int64]domain.Bytes{}
+	out := map[int64]carried{}
 	if daily {
 		rows, err := h.d.Store.Q.SumNodesTrafficDaily(ctx, since)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
-			out[r.NodeID] = domain.Bytes{Up: r.Up, Down: r.Down}
+			out[r.NodeID] = carried{users: domain.Bytes{Up: r.Up, Down: r.Down}, relay: domain.Bytes{Up: r.RelayUp, Down: r.RelayDown}}
 		}
 		return out, nil
 	}
@@ -90,7 +113,7 @@ func (h *handlers) nodeBytes(ctx context.Context, rng string) (map[int64]domain.
 		return nil, err
 	}
 	for _, r := range rows {
-		out[r.NodeID] = domain.Bytes{Up: r.Up, Down: r.Down}
+		out[r.NodeID] = carried{users: domain.Bytes{Up: r.Up, Down: r.Down}, relay: domain.Bytes{Up: r.RelayUp, Down: r.RelayDown}}
 	}
 	return out, nil
 }
@@ -107,8 +130,8 @@ func (h *handlers) nodeShares(ctx context.Context, in *rangeInput) (*nodeSharesO
 	out := &nodeSharesOutput{}
 	out.Body.Items = make([]NodeShare, 0, len(nodes))
 	for _, n := range nodes {
-		t := by[n.ID]
-		out.Body.Items = append(out.Body.Items, NodeShare{ID: n.ID, Name: n.Name, Local: n.Address == "", Up: t.Up, Down: t.Down, Bytes: t.Up + t.Down})
+		t, r := by[n.ID].users, by[n.ID].relay
+		out.Body.Items = append(out.Body.Items, NodeShare{ID: n.ID, Name: n.Name, Local: n.Address == "", Up: t.Up, Down: t.Down, Bytes: t.Up + t.Down, Cascade: r.Up + r.Down})
 		out.Body.Total += t.Up + t.Down
 	}
 	// Biggest first; equal ones keep the subscription's order (ListNodes already has it).

@@ -3,7 +3,7 @@ import * as Menu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Activity, ArrowDown, ArrowUp, ArrowUpCircle, Cloud, Copy, Gauge, KeyRound, LoaderCircle, MoreHorizontal, Pencil, RefreshCw, ShieldCheck, Stethoscope, Trash2, Waypoints } from "lucide-react";
 import { api, errorText, unwrap } from "../../../api/client";
-import { qk } from "../../../api/hooks";
+import { qk, useNodes } from "../../../api/hooks";
 import { AcmeAttempts, AcmeProblem, caName } from "../../../components/acme";
 import { certUntil } from "../../../components/cert-drawer";
 import { useToast } from "../../../components/toast";
@@ -110,6 +110,7 @@ export function NodeCard({
         <div>
           <dt className="text-xs text-[var(--ink-500)]">{t("nodes.conns")}</dt>
           <dd className="num">{n.status === "ok" ? num(n.conns) : "—"}</dd>
+          {n.status === "ok" ? <CascadeConnsLine cascade={n.cascade} /> : null}
         </div>
         <div>
           <dt className="text-xs text-[var(--ink-500)]">{t("nodes.cpu")}</dt>
@@ -146,6 +147,7 @@ export function NodeCard({
         <div className="col-span-2">
           <dt className="text-xs text-[var(--ink-500)]">{t("nodes.traffic24h")}</dt>
           <dd className="num">{bytes(n.traffic_24h)}</dd>
+          {n.cascade_24h > 0 ? <dd className="num mt-1 text-xs text-[var(--ink-500)]">{t("nodes.cascade24h", { bytes: bytes(n.cascade_24h) })}</dd> : null}
         </div>
         {!n.local ? (
           <div className="col-span-2">
@@ -232,6 +234,26 @@ export function NodeCard({
  * it, the panel's, or a pinned self-signed one, with why a public one is not there yet and
  * a button to get it now.
  */
+/** The other nodes' cascades through this one, open now: their sum, and by whom in the hint.
+ * The source counts these users and their traffic; here they are the node's load. */
+function CascadeConnsLine({ cascade }: { cascade: Node["cascade"] }) {
+  const nodes = useNodes();
+  const sum = cascade.reduce((a, c) => a + c.conns, 0);
+  if (sum === 0) return null;
+  const from = cascade
+    .map((c) => {
+      const src = nodes.data?.find((x) => x.id === c.node_id);
+      return `${src ? nodeLabel(src) : `#${c.node_id}`}: ${num(c.conns)}`;
+    })
+    .join(", ");
+  return (
+    <dd className="num mt-1 text-xs text-[var(--ink-500)]" title={t("nodes.cascadeFrom", { from })}>
+      {t("nodes.cascadeConns", { n: num(sum) })}
+      <span className="sr-only">. {t("nodes.cascadeFrom", { from })}</span>
+    </dd>
+  );
+}
+
 function NodeCertRow({ n }: { n: Node }) {
   const qc = useQueryClient();
   const toast = useToast();

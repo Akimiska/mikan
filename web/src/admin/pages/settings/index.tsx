@@ -9,6 +9,7 @@ import { PageHeader, Skeleton } from "../../../components/ui";
 import { t, type Key } from "../../../i18n";
 import { SETTINGS_PARTS, SETTINGS_TABS, type SettingsSearch } from "../../search";
 import { ClosedForSupport } from "../../support-closed";
+import { AppCard } from "./app";
 import { AuditCard } from "./audit";
 import { AutoCard, LanguageCard, ServiceCard, UpdatesCard } from "./general";
 import { ServerCheckCard } from "../node-check";
@@ -87,6 +88,7 @@ export function SettingsPage() {
                   <ServiceCard s={s} />
                   <LanguageCard s={s} />
                   <ThemeCard />
+                  <AppCard s={s} />
                 </>
               ) : tab === "subscription" ? (
                 <>

@@ -3321,6 +3321,12 @@ export interface components {
             /** Format: int64 */
             revenue_stars: number;
         };
+        CascadeConns: {
+            /** Format: int64 */
+            conns: number;
+            /** Format: int64 */
+            node_id: number;
+        };
         CascadeExit: {
             /** @description Подключения этой ноды, которые выходят через ту ноду */
             inbounds: string[];
@@ -4405,6 +4411,13 @@ export interface components {
              * @description Мест для клиентов в группе; null — без ограничения
              */
             capacity: number | null;
+            /** @description Открытые сейчас подключения каскада других нод через эту, по ноде-источнику; пусто без каскада и у нод до 0.5.1.1-rc.14 */
+            cascade: components["schemas"]["CascadeConns"][];
+            /**
+             * Format: int64
+             * @description Сколько нода унесла за сутки для каскада других нод (вверх и вниз вместе), байты; в traffic_24h не входит: этих пользователей считает нода-источник
+             */
+            cascade_24h: number;
             certificate?: components["schemas"]["NodeCertView"];
             /**
              * Format: int64
@@ -4519,6 +4532,11 @@ export interface components {
              * @description up + down
              */
             bytes: number;
+            /**
+             * Format: int64
+             * @description Сколько нода унесла для каскада других нод (вверх и вниз вместе): их пользователей считает нода-источник, поэтому в bytes и total не входит
+             */
+            cascade: number;
             /** Format: int64 */
             down: number;
             /** Format: int64 */
@@ -4584,6 +4602,27 @@ export interface components {
             not_after?: string;
             /** @description Ссылки закрепляют самоподписанный сертификат: в sing-box приложениях (SFA, SFI) протоколы ноды на TLS не появятся, TUIC без проверки сертификата */
             pinned: boolean;
+        };
+        NodeTrafficOutputBody: {
+            points: components["schemas"]["NodeTrafficPoint"][];
+        };
+        NodeTrafficPoint: {
+            /**
+             * Format: int64
+             * @description Скачано для каскада других нод: в down не входит
+             */
+            cascade_down: number;
+            /**
+             * Format: int64
+             * @description Отдано для каскада других нод: в up не входит
+             */
+            cascade_up: number;
+            /** Format: int64 */
+            down: number;
+            /** Format: date-time */
+            t: string;
+            /** Format: int64 */
+            up: number;
         };
         NodeView: {
             /** Format: date-time */
@@ -5018,6 +5057,8 @@ export interface components {
             /** @description happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать */
             happ_routing?: string;
             link_reissue?: components["schemas"]["ReissueRules"];
+            /** @description Пусто — по бренду */
+            panel_app_name?: string;
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
@@ -5146,7 +5187,7 @@ export interface components {
             free_plans: number;
             /**
              * Format: int64
-             * @description Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже
+             * @description Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась, и не пока идёт его пробный период; null: бесплатного тарифа нет. Работает и при выключенной продаже
              */
             free_tariff_id: number | null;
             /**
@@ -5829,6 +5870,8 @@ export interface components {
             happ_routing: string;
             /** @description Как часто подписчик может сменить свою ссылку подписки сам (бот и Mini App) */
             link_reissue: components["schemas"]["ReissueRules"];
+            /** @description Название панели, установленной как приложение (ярлык на рабочем столе, в меню, на главном экране); пусто — бренд, без бренда — mikan */
+            panel_app_name: string;
             /** Format: int64 */
             panel_port: number;
             public_host: string;
@@ -9608,7 +9651,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TrafficOutputBody"];
+                    "application/json": components["schemas"]["NodeTrafficOutputBody"];
                 };
             };
             /** @description Error */

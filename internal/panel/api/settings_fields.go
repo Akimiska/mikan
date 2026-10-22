@@ -107,6 +107,7 @@ var settingFields = []settingField{
 	text("acme_eab_hmac", settings.KeyACMEEABHMAC, true, func(b *patchSettingsBody) *string { return b.ACMEEABHMAC }),
 	// What a key may change: names, the default language, quiet hours, the automatic tuning.
 	text("brand", settings.KeyBrand, false, func(b *patchSettingsBody) *string { return b.Brand }),
+	text("panel_app_name", settings.KeyPanelAppName, false, func(b *patchSettingsBody) *string { return b.PanelAppName }),
 	text("sub_group_main", settings.KeyGroupMain, false, func(b *patchSettingsBody) *string { return b.SubGroupMain }),
 	text("sub_group_auto", settings.KeyGroupAuto, false, func(b *patchSettingsBody) *string { return b.SubGroupAuto }),
 	text("client_fingerprint", settings.KeyFingerprint, false, func(b *patchSettingsBody) *string { return b.Fingerprint }),

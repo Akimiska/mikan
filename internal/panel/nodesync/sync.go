@@ -90,6 +90,9 @@ type Syncer struct {
 	health atomic.Pointer[HealthView]
 	alive  liveness // what the addons were told of the node's health (liveness.go)
 	online atomic.Pointer[map[string]nodeapi.Online]
+	// relayOnline is the relay's open connections by source (the other nodes' cascades),
+	// a live view like online.
+	relayOnline atomic.Pointer[map[string]int]
 	// served is the pin of the certificate in the state the node last took ("" for a public
 	// one); nil until it took one from this panel process. Links follow it, not the
 	// certificate picked now: a node that has not got the new one yet keeps being pinned.
@@ -118,6 +121,9 @@ type HealthView struct {
 	// have moved since.
 	Ports     map[string]string
 	CheckedAt time.Time
+	// Relay is the relay's open connections by the source node's relay user, as of the
+	// last counters (the other nodes' cascades through this one); none from older nodes.
+	Relay map[string]int
 }
 
 // HostPorts is what the node reported as listening on its server in this check; nil when
@@ -134,6 +140,8 @@ func newSyncer(m *Manager, id int64, t Target) *Syncer {
 		policiesDirty: make(chan struct{}, 1), stateDirty: make(chan struct{}, 1)}
 	empty := map[string]nodeapi.Online{}
 	s.online.Store(&empty)
+	noRelay := map[string]int{}
+	s.relayOnline.Store(&noRelay)
 	s.health.Store(&HealthView{Error: "not checked yet"})
 	return s
 }
@@ -148,7 +156,11 @@ func signal(ch chan struct{}) {
 	}
 }
 
-func (s *Syncer) Health() HealthView { return *s.health.Load() }
+func (s *Syncer) Health() HealthView {
+	h := *s.health.Load()
+	h.Relay = *s.relayOnline.Load()
+	return h
+}
 
 // Online returns the node's live connection view keyed by slot name.
 func (s *Syncer) Online() map[string]nodeapi.Online { return *s.online.Load() }
@@ -541,6 +553,8 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		if s.counterFails++; s.counterFails >= failedPullsBlank {
 			none := map[string]nodeapi.Online{}
 			s.online.Store(&none)
+			noRelay := map[string]int{}
+			s.relayOnline.Store(&noRelay)
 		}
 		return
 	}
@@ -550,6 +564,11 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		online = map[string]nodeapi.Online{}
 	}
 	s.online.Store(&online)
+	relayOnline := c.RelayOnline
+	if relayOnline == nil {
+		relayOnline = map[string]int{}
+	}
+	s.relayOnline.Store(&relayOnline)
 
 	epoch, seq, err := s.countersPos(ctx)
 	if err != nil {
@@ -632,6 +651,17 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		if err := countSites(ctx, q, c, owner, now); err != nil {
 			return err
 		}
+		// What the relay carried for the other nodes' cascades is this node's load alone:
+		// the source nodes counted it for their users.
+		var relayUp, relayDown int64
+		for _, t := range c.Relay {
+			relayUp, relayDown = relayUp+t.Up, relayDown+t.Down
+		}
+		if relayUp != 0 || relayDown != 0 {
+			if err := q.AddNodeRelayTraffic(ctx, db.AddNodeRelayTrafficParams{NodeID: s.id, Hour: now.Unix() / 3600, Day: now.Unix() / 86400, Up: relayUp, Down: relayDown}); err != nil {
+				return err
+			}
+		}
 		if c.Epoch != epoch {
 			if err := q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("counters_epoch", s.id), Value: c.Epoch}); err != nil {
 				return err
@@ -708,6 +738,17 @@ func (s *Syncer) vet(c nodeapi.Counters, now time.Time) nodeapi.Counters {
 			}
 		}
 		c.Pools = pools
+	}
+	if len(c.Relay) > 0 {
+		relay := make(map[string]nodeapi.Traffic, len(c.Relay))
+		for src, t := range c.Relay {
+			if sane(t) {
+				relay[src] = t
+			} else {
+				dropped = append(dropped, nodeapi.RelayListener+"/"+src)
+			}
+		}
+		c.Relay = relay
 	}
 	if len(dropped) > 0 && now.Sub(s.vetLogged) >= time.Minute {
 		s.vetLogged = now

@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/diag"
+	"mikan/internal/netaddr"
 	"mikan/internal/nodeapi"
 	"mikan/internal/nodehello"
 	"mikan/internal/panel/domain"
@@ -23,6 +25,7 @@ import (
 	"mikan/internal/panel/nodeupdate"
 	"mikan/internal/panel/reach"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/proto"
 	"mikan/internal/release"
 )
 
@@ -313,28 +316,47 @@ const maxPortChecks = 10
 type tcpPort struct {
 	name string
 	port int
+	// listen is the address of its own the protocol listens on (domain.ListenPinsPort), ""
+	// for every address of the server.
+	listen string
 }
 
-// tcpPorts are the node's TCP ports clients and other nodes connect to: its enabled TCP
-// protocols and its relay. A range is checked at its first port.
-func (h *handlers) tcpPorts(ctx context.Context, id int64) []tcpPort {
-	var out []tcpPort
-	ins, err := h.d.Store.Q.ListNodeInbounds(ctx, id)
+// tcpPorts are the node's TCP ports clients and other nodes connect to (nodeTCPPorts).
+func (h *handlers) tcpPorts(ctx context.Context, n db.Node) []tcpPort {
+	ins, err := h.d.Store.Q.ListNodeInbounds(ctx, n.ID)
 	if err != nil {
 		return nil
 	}
+	relay := ""
+	if r, err := h.d.Store.Q.GetNodeRelay(ctx, n.ID); err == nil {
+		relay = r.Port
+	}
+	return nodeTCPPorts(n, ins, relay)
+}
+
+// nodeTCPPorts are the TCP ports of the node's enabled protocols and of its relay, a range at
+// its first port. The protocols behind the node's shared 443 listen on loopback behind its
+// router, so they are its port 443, once (nodesync.sniRouter takes the same ones).
+func nodeTCPPorts(n db.Node, ins []db.Inbound, relay string) []tcpPort {
+	var out []tcpPort
+	var routed []string
 	for _, in := range ins {
 		if in.Enabled == 0 || domain.InboundNetwork(in) != "tcp" {
 			continue
 		}
+		if t, err := proto.Parse(in.Config); err == nil && n.SniRouter != 0 && proto.SNI443(t) && proto.CanSNI443(t) {
+			routed = append(routed, in.Name)
+			continue
+		}
 		if p := domain.FirstPort(in.Port); p > 0 {
-			out = append(out, tcpPort{in.Name, p})
+			out = append(out, tcpPort{name: in.Name, port: p, listen: in.Listen})
 		}
 	}
-	if r, err := h.d.Store.Q.GetNodeRelay(ctx, id); err == nil {
-		if p := domain.FirstPort(r.Port); p > 0 {
-			out = append(out, tcpPort{"relay", p})
-		}
+	if len(routed) > 0 && !slices.ContainsFunc(out, func(p tcpPort) bool { return p.port == 443 && p.listen == "" }) {
+		out = append(out, tcpPort{name: strings.Join(routed, ", "), port: 443})
+	}
+	if p := domain.FirstPort(relay); p > 0 {
+		out = append(out, tcpPort{name: "relay", port: p})
 	}
 	if len(out) > maxPortChecks {
 		out = out[:maxPortChecks]
@@ -349,15 +371,30 @@ func (h *handlers) portItems(ctx context.Context, n db.Node) []CheckItem {
 	if err != nil {
 		return nil
 	}
-	ports := h.tcpPorts(ctx, n.ID)
+	return dialPorts(ctx, host, h.tcpPorts(ctx, n))
+}
+
+// dialPorts dial the ports at host. A protocol on an address of its own is dialed at it when
+// that one is public; on any other (127.0.0.1, a private network) a proxy of the server's own
+// stands in front of it, nginx or HAProxy, at a port the panel does not know, so it is not.
+func dialPorts(ctx context.Context, host string, ports []tcpPort) []CheckItem {
 	out := make([]CheckItem, len(ports))
 	var wg sync.WaitGroup
 	for i, p := range ports {
 		wg.Go(func() {
 			params := map[string]string{"name": p.name, "port": strconv.Itoa(p.port)}
+			at := host
+			if p.listen != "" {
+				if a, err := netip.ParseAddr(p.listen); err != nil || !netaddr.IsPublic(a) {
+					params["listen"] = p.listen
+					out[i] = CheckItem{ID: "port", Status: nodeapi.CheckSkip, Code: "behind_proxy", Params: params}
+					return
+				}
+				at = p.listen
+			}
 			c, cancel := context.WithTimeout(ctx, 4*time.Second)
 			defer cancel()
-			conn, err := (&net.Dialer{}).DialContext(c, "tcp", net.JoinHostPort(host, strconv.Itoa(p.port)))
+			conn, err := (&net.Dialer{}).DialContext(c, "tcp", net.JoinHostPort(at, strconv.Itoa(p.port)))
 			if err == nil {
 				conn.Close()
 				out[i] = CheckItem{ID: "port", Status: nodeapi.CheckOK, Params: params}
@@ -505,7 +542,7 @@ func (h *handlers) checkNodeRussia(ctx context.Context, in *nodeIDInput) (*russi
 		return nil, huma.Error409Conflict("reach_unavailable")
 	}
 	host := n.PublicHost
-	var ports []RussiaPort
+	api := 0
 	if n.Address == "" {
 		ep, err := h.d.Settings.Endpoint(ctx)
 		if err != nil {
@@ -513,18 +550,9 @@ func (h *handlers) checkNodeRussia(ctx context.Context, in *nodeIDInput) (*russi
 		}
 		host = ep.Host
 	} else if _, p, err := net.SplitHostPort(n.Address); err == nil {
-		if port, err := strconv.Atoi(p); err == nil {
-			ports = append(ports, RussiaPort{Port: port, Name: "api"})
-		}
+		api, _ = strconv.Atoi(p)
 	}
-	for _, p := range h.tcpPorts(ctx, n.ID) {
-		if len(ports) >= reach.MaxPorts {
-			break
-		}
-		if p.name != "relay" && !slices.ContainsFunc(ports, func(x RussiaPort) bool { return x.Port == p.port }) {
-			ports = append(ports, RussiaPort{Port: p.port, Name: p.name})
-		}
-	}
+	ports := russiaPorts(api, h.tcpPorts(ctx, n))
 	// A node by a private address is reached from nowhere else.
 	if _, ok := reach.CanonHost(host); !ok || len(ports) == 0 {
 		return nil, huma.Error409Conflict("reach_nothing")
@@ -540,6 +568,26 @@ func (h *handlers) checkNodeRussia(ctx context.Context, in *nodeIDInput) (*russi
 	// The node's address is the panel's business: a support operator sees the ports only.
 	res.Host = ""
 	return &russiaOutput{Body: RussiaView{ReachCheck: res, Names: ports}}, nil
+}
+
+// russiaPorts are what a check from Russia asks for: the API port (0 for none) and the ports
+// strangers reach, each once and up to the probe's limit. Not the relay, which is for the
+// other nodes, and not a port behind a proxy of the server's own, which strangers do not
+// reach where the protocol listens.
+func russiaPorts(api int, ports []tcpPort) []RussiaPort {
+	var out []RussiaPort
+	if api > 0 {
+		out = append(out, RussiaPort{Port: api, Name: "api"})
+	}
+	for _, p := range ports {
+		if len(out) >= reach.MaxPorts {
+			break
+		}
+		if p.name != "relay" && p.listen == "" && !slices.ContainsFunc(out, func(x RussiaPort) bool { return x.Port == p.port }) {
+			out = append(out, RussiaPort{Port: p.port, Name: p.name})
+		}
+	}
+	return out
 }
 
 // checkReach asks Globalping whether ports of any server open from Russia: a server to

@@ -69,6 +69,39 @@ func TestBotTrial(t *testing.T) {
 	}
 }
 
+// The trial and the free plan on one tariff, as in the report of 2026-10-22: the welcome
+// offers both, and once the trial is taken the free plan waits for it to end. The menu has no
+// button for it, and the welcome's button tapped after the trial makes no second subscription.
+func TestBotTrialThenFreePlan(t *testing.T) {
+	var svc *billing.Service
+	e := setup(t, func(e *env, d *wiring) {
+		svc = billing.New(billing.Deps{Store: e.st, Settings: e.set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, e.clock), noChanges{}, e.clock),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: e.clock, MaxLinks: model.MaxLinks})
+		d.Billing = svc
+	})
+	svc.SetTelegram(e.gate)
+	const visitor = 781
+	ts, _ := e.st.Q.ListTariffs(e.ctx)
+	if err := settings.Set(e.ctx, e.set, billing.KeyConfig, billing.Config{TrialTariffID: ts[0].ID, FreeTariffID: ts[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if welcome := buttons(e.start(visitor)); welcome["🎁 Попробовать бесплатно"] != "tr" || welcome["🎁 Бесплатный тариф"] != "fp" {
+		t.Fatalf("the welcome: %v", welcome)
+	}
+	if got := e.tap(visitor, "tr"); !strings.Contains(text(got), "Пробная подписка готова") {
+		t.Fatalf("the trial: %q", text(got))
+	}
+	if _, ok := buttons(e.start(visitor))["🎁 Бесплатный тариф"]; ok {
+		t.Fatal("the menu offers the free plan while the trial runs")
+	}
+	if again := e.tap(visitor, "fp"); !strings.Contains(text(again), "уже есть") {
+		t.Fatalf("the welcome's free plan after the trial: %q", text(again))
+	}
+	if links, _ := e.st.Q.ListTgLinksOf(e.ctx, visitor); len(links) != 1 || links[0].Source != domain.UserFromTrial {
+		t.Fatalf("links after the trial and the free plan: %+v", links)
+	}
+}
+
 // A paid trial that is not given (the account had its trial) and cannot be refunded by
 // the payment method: the buyer hears why and that the money comes back through support,
 // with the support link.

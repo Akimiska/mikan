@@ -173,6 +173,7 @@ type Profile struct {
 type proxy struct {
 	name string
 	node int64
+	pool int64 // the inbound's server group, 0: none (the main servers)
 	uri  string
 	yaml map[string]any
 }
@@ -239,7 +240,7 @@ func build(p Profile) ([]proxy, error) {
 				continue
 			}
 			used[name] = true
-			out = append(out, proxy{name: name, node: n.ID, uri: c.URI, yaml: c.Mihomo})
+			out = append(out, proxy{name: name, node: n.ID, pool: in.PoolID.Int64, uri: c.URI, yaml: c.Mihomo})
 		}
 	}
 	return out, nil
@@ -253,20 +254,28 @@ func (p Profile) skip(in db.Inbound, err error) {
 
 // URIs renders one share link per inbound.
 func URIs(p Profile) (string, error) {
+	links, _, err := uris(p)
+	return links, err
+}
+
+// uris are the share links of p and the proxies they are of.
+func uris(p Profile) (string, []proxy, error) {
 	ps, err := build(p)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	lines := make([]string, 0, len(ps))
+	in := make([]proxy, 0, len(ps))
 	for _, x := range ps {
 		if x.uri != "" { // the mihomo-only types have no share link
 			lines = append(lines, x.uri)
+			in = append(in, x)
 		}
 	}
 	if len(lines) == 0 {
-		return "", ErrNoProxies
+		return "", nil, ErrNoProxies
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n"), in, nil
 }
 
 // Mihomo renders a complete client profile.

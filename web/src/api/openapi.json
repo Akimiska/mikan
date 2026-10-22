@@ -1354,6 +1354,24 @@
         ],
         "type": "object"
       },
+      "CascadeConns": {
+        "additionalProperties": false,
+        "properties": {
+          "conns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "conns"
+        ],
+        "type": "object"
+      },
       "CascadeExit": {
         "additionalProperties": false,
         "properties": {
@@ -4440,6 +4458,18 @@
               "null"
             ]
           },
+          "cascade": {
+            "description": "Открытые сейчас подключения каскада других нод через эту, по ноде-источнику; пусто без каскада и у нод до 0.5.1.1-rc.14",
+            "items": {
+              "$ref": "#/components/schemas/CascadeConns"
+            },
+            "type": "array"
+          },
+          "cascade_24h": {
+            "description": "Сколько нода унесла за сутки для каскада других нод (вверх и вниз вместе), байты; в traffic_24h не входит: этих пользователей считает нода-источник",
+            "format": "int64",
+            "type": "integer"
+          },
           "certificate": {
             "$ref": "#/components/schemas/NodeCertView"
           },
@@ -4641,6 +4671,8 @@
           "mem_used",
           "mem_total",
           "traffic_24h",
+          "cascade",
+          "cascade_24h",
           "behind",
           "can_update",
           "fair_share",
@@ -4685,6 +4717,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "cascade": {
+            "description": "Сколько нода унесла для каскада других нод (вверх и вниз вместе): их пользователей считает нода-источник, поэтому в bytes и total не входит",
+            "format": "int64",
+            "type": "integer"
+          },
           "down": {
             "format": "int64",
             "type": "integer"
@@ -4712,7 +4749,8 @@
           "local",
           "up",
           "down",
-          "bytes"
+          "bytes",
+          "cascade"
         ],
         "type": "object"
       },
@@ -4858,6 +4896,56 @@
         "required": [
           "kind",
           "pinned"
+        ],
+        "type": "object"
+      },
+      "NodeTrafficOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/NodeTrafficPoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "type": "object"
+      },
+      "NodeTrafficPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "cascade_down": {
+            "description": "Скачано для каскада других нод: в down не входит",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cascade_up": {
+            "description": "Отдано для каскада других нод: в up не входит",
+            "format": "int64",
+            "type": "integer"
+          },
+          "down": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "t": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "up": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t",
+          "up",
+          "down",
+          "cascade_up",
+          "cascade_down"
         ],
         "type": "object"
       },
@@ -6075,6 +6163,11 @@
           "link_reissue": {
             "$ref": "#/components/schemas/ReissueRules"
           },
+          "panel_app_name": {
+            "description": "Пусто — по бренду",
+            "maxLength": 30,
+            "type": "string"
+          },
           "public_host": {
             "maxLength": 253,
             "type": "string"
@@ -6384,7 +6477,7 @@
             "type": "integer"
           },
           "free_tariff_id": {
-            "description": "Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже",
+            "description": "Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась, и не пока идёт его пробный период; null: бесплатного тарифа нет. Работает и при выключенной продаже",
             "format": "int64",
             "type": [
               "integer",
@@ -8321,6 +8414,10 @@
             "$ref": "#/components/schemas/ReissueRules",
             "description": "Как часто подписчик может сменить свою ссылку подписки сам (бот и Mini App)"
           },
+          "panel_app_name": {
+            "description": "Название панели, установленной как приложение (ярлык на рабочем столе, в меню, на главном экране); пусто — бренд, без бренда — mikan",
+            "type": "string"
+          },
           "panel_port": {
             "format": "int64",
             "type": "integer"
@@ -8440,6 +8537,7 @@
         },
         "required": [
           "brand",
+          "panel_app_name",
           "support_url",
           "sub_title",
           "sub_announce",
@@ -11099,7 +11197,7 @@
     }
   },
   "info": {
-    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n«Доступ для поддержки» (Настройки → Безопасность) даёт оператору временный токен `ms_…`: `Authorization: Bearer ms_…` или вход по ссылке в браузере (`POST /support/enter`). Уровень `view` только читает, `change` ещё и меняет; вход, ключи, сессии, журнал, секретные адреса и сам доступ закрыты всегда (403 `support_denied`). Без галочки «показывать подписчиков» имена, Telegram и ссылки скрыты. Кто он и до какого времени: `GET /support/whoami`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n## Подписка в приложениях\n\nСсылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: `profile-title` — название профиля (настройка `sub_title`, пусто — бренд), `announce` — строка над профилем или под его названием (`sub_announce`), `subscription-userinfo` — трафик и срок, `support-url`, `profile-web-page-url`. Настраиваются в `PATCH /api/v1/settings`.\n\nВ `sub_title` и `sub_announce` подставляются переменные каждого пользователя: `{brand}` — бренд, `{name}` — имя, `{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, `{total}` — лимит с пакетами, `{devices}` — привязанные устройства (`2/3`; без лимита `2`; `∞`, когда привязки нет и лимита тоже). Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`.",
+    "description": "REST API панели mikan. Все пути — под секретным адресом админки: https://\u003cпанель\u003e/\u003cсекретный путь\u003e/api/v1/…\n\nСкрипты и интеграции авторизуются ключом API (Настройки → API): заголовок `Authorization: Bearer mk_…`. Ключ «чтение» выполняет только GET и не получает ссылок подписок и секретных адресов; «полный» меняет данные, кроме входа, сессий, самих ключей и операций, где уходят деньги, ключи и адреса клиентов (они помечены «только сессия»).\n\nАдминка в браузере ходит с cookie сессии; изменяющие запросы тогда требуют заголовок `X-CSRF-Token` из `GET /auth/me`.\n\n«Доступ для поддержки» (Настройки → Безопасность) даёт оператору временный токен `ms_…`: `Authorization: Bearer ms_…` или вход по ссылке в браузере (`POST /support/enter`). Уровень `view` только читает, `change` ещё и меняет; вход, ключи, сессии, журнал, секретные адреса и сам доступ закрыты всегда (403 `support_denied`). Без галочки «показывать подписчиков» имена, Telegram и ссылки скрыты. Кто он и до какого времени: `GET /support/whoami`.\n\nОшибки — RFC 9457 (application/problem+json): `detail` — код ошибки, `errors[].message` — код по полю.\n\n## Подписка в приложениях\n\nСсылка подписки (`sub_url` пользователя) отдаёт конфиг и заголовки, которые читают приложения: `profile-title` — название профиля (настройка `sub_title`, пусто — бренд), `announce` — строка над профилем или под его названием (`sub_announce`), `subscription-userinfo` — трафик и срок, `support-url`, `profile-web-page-url`. Настраиваются в `PATCH /api/v1/settings`.\n\nПриложение Mikan, приславшее `X-Mikan-Features: groups`, получает ещё `X-Mikan-Groups`: `base64:` и JSON групп серверов подписки — `v` (1), `resets_at` (когда трафик периода начнётся заново, unix), `groups[]`: `id`, `name`, `mode` (`own` — свой лимит, `unlimited` — отдельно без лимита, `main` — общий трафик), `used`, `limit`, `extra` (осталось в пакетах группы), `left`, `state` (`active` или `exhausted` — лимит кончился, серверов группы нет в профиле) и `proxies` — имена серверов группы в этом же профиле (`null`, если имена не уместились: заголовок держится в 1,5 КБ). Закрытые для клиента группы не передаются. Другим приложениям ответ не меняется.\n\nВ `sub_title` и `sub_announce` подставляются переменные каждого пользователя: `{brand}` — бренд, `{name}` — имя, `{date}` — дата окончания (ДД.ММ.ГГГГ, МСК), `{days}` — дней осталось, `{used}` — израсходовано, `{left}` — осталось трафика, `{total}` — лимит с пакетами, `{devices}` — привязанные устройства (`2/3`; без лимита `2`; `∞`, когда привязки нет и лимита тоже). Без срока или лимита — `∞`. Неизвестное слово в фигурных скобках остаётся текстом. Если название после подстановки пустое, берётся бренд. Пример: `{brand} · до {date}`.",
     "title": "mikan",
     "version": "dev"
   },
@@ -14666,7 +14764,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrafficOutputBody"
+                  "$ref": "#/components/schemas/NodeTrafficOutputBody"
                 }
               }
             },

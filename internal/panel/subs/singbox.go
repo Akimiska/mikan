@@ -39,7 +39,7 @@ func SingBox(ctx context.Context, p Profile, g Groups, r Routing, src string) ([
 	var cfg map[string]any
 	var err error
 	if src != "" {
-		cfg, err = templateConfig(p, src)
+		cfg, _, err = templateConfig(p, src)
 	}
 	if src == "" || err != nil && !errors.Is(err, ErrNoProxies) {
 		cfg, _, err = mihomoConfig(p, g.WithDefaults(p.Lang), r)

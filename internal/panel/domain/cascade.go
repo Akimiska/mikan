@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"strconv"
+	"strings"
 	"time"
 
 	"mikan/internal/nodeapi"
@@ -199,6 +200,17 @@ func RelayUser(ctx context.Context, q *db.Queries, exit, src int64) (string, err
 
 // RelayUserName is how a source node shows in the relay's users.
 func RelayUserName(src int64) string { return "relay-" + strconv.FormatInt(src, 10) }
+
+// RelaySource is the source node a relay user (RelayUserName) stands for; false for any
+// other name.
+func RelaySource(name string) (int64, bool) {
+	rest, ok := strings.CutPrefix(name, "relay-")
+	id, err := strconv.ParseInt(rest, 10, 64)
+	if !ok || err != nil || id <= 0 || RelayUserName(id) != name {
+		return 0, false
+	}
+	return id, true
+}
 
 // MovedExit is an inbound or a relay that went out through a node being deleted, and where
 // it goes now: another node (To), or straight out (To 0) when none is left.

@@ -102,7 +102,8 @@ func TestSharedListeners(t *testing.T) {
 
 // The core counts each user of each inbound: the registry adds a slot's traffic up across
 // its inbounds, into the main quota or the inbound's traffic pool, and leaves the relay's
-// users (other nodes) and unknown users alone. TUIC knows its users by UUID.
+// users (other nodes, counted apart: TestRelayCountsApart) and unknown users out of the
+// slots. TUIC knows its users by UUID.
 func TestDrainAddsUpTheCoresCounters(t *testing.T) {
 	core := &fakeCore{}
 	r := NewRegistry("e1", 0, time.Minute, time.Now, core)
@@ -126,6 +127,54 @@ func TestDrainAddsUpTheCoresCounters(t *testing.T) {
 	r.SetSlots(nil)
 	if c := r.Counters(); c.Slots["s1"] != (nodeapi.Traffic{Up: 7, Down: 7}) {
 		t.Fatalf("the removed slot's last traffic: %v", c.Slots)
+	}
+}
+
+// The relay's traffic (the other nodes' cascades) goes in the batch apart, by source, and
+// none of it to a slot, not even to one of the same name; its open connections are a live
+// view of their own. An outstanding batch neither loses nor repeats it, relay bytes alone
+// make a batch, and what no batch took yet survives a restart.
+func TestRelayCountsApart(t *testing.T) {
+	core := &fakeCore{}
+	r := NewRegistry("e1", 0, time.Minute, time.Now, core)
+	r.SetSlots([]nodeapi.Slot{{Name: "s1", UUID: "AAAA-1"}})
+	r.SetInbounds(map[string]bool{"vless": false})
+	r.SetPolicies("e1", []nodeapi.Policy{{Slot: "s1", Allowed: true, QuotaRemaining: -1}})
+	core.moved("vless", "s1", 10, 100)
+	core.moved(nodeapi.RelayListener, "relay-2", 300, 3000)
+	core.moved(nodeapi.RelayListener, "s1", 5, 50)
+	core.online(nodeapi.RelayListener, "relay-2", "198.51.100.20", 3, time.Now())
+	c := r.Counters()
+	if c.Slots["s1"] != (nodeapi.Traffic{Up: 10, Down: 100}) || len(c.Slots) != 1 {
+		t.Fatalf("slots: %v", c.Slots)
+	}
+	if c.Relay["relay-2"] != (nodeapi.Traffic{Up: 300, Down: 3000}) || c.Relay["s1"] != (nodeapi.Traffic{Up: 5, Down: 50}) || len(c.Relay) != 2 {
+		t.Fatalf("relay: %v", c.Relay)
+	}
+	if c.RelayOnline["relay-2"] != 3 || len(c.RelayOnline) != 1 {
+		t.Fatalf("relay online: %v", c.RelayOnline)
+	}
+	if _, ok := c.Online["relay-2"]; ok {
+		t.Fatal("the relay among the users online")
+	}
+
+	core.moved(nodeapi.RelayListener, "relay-2", 1, 1)
+	if again := r.Counters(); again.Seq != c.Seq || again.Relay["relay-2"] != c.Relay["relay-2"] {
+		t.Fatalf("the outstanding batch: %+v", again)
+	}
+	r.Ack(c.Epoch, c.Seq)
+	next := r.Counters()
+	if next.Idle || next.Relay["relay-2"] != (nodeapi.Traffic{Up: 1, Down: 1}) || len(next.Slots) != 0 {
+		t.Fatalf("relay bytes alone: %+v", next)
+	}
+	r.Ack(next.Epoch, next.Seq)
+
+	core.moved(nodeapi.RelayListener, "relay-2", 9, 9)
+	r.drain()
+	after := NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{})
+	after.restore(r.snapshot())
+	if b := after.Counters(); b.Relay["relay-2"] != (nodeapi.Traffic{Up: 9, Down: 9}) {
+		t.Fatalf("after a restart: %+v", b)
 	}
 }
 

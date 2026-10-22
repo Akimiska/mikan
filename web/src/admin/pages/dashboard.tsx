@@ -349,7 +349,11 @@ function NodeTrafficCard() {
                 const pct = (n.bytes / total) * 100;
                 return (
                   <li key={n.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
-                    <span className="truncate text-[13px] font-medium">{nodeLabel(n)}</span>
+                    {/* What it carried for other nodes' cascades is its load, not its share: their source counts those users. */}
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] font-medium">{nodeLabel(n)}</span>
+                      {n.cascade > 0 ? <span className="num block text-xs text-[var(--ink-500)]">{t("dashboard.nodeCascade", { bytes: bytes(n.cascade) })}</span> : null}
+                    </span>
                     <span className="num text-right text-[13px] sm:order-3 sm:min-w-[132px]">
                       <b className="font-semibold">{bytes(n.bytes)}</b> <span className="text-[var(--ink-500)]">{percent(pct)}</span>
                     </span>

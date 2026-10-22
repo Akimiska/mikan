@@ -3321,6 +3321,12 @@ export interface components {
             /** Format: int64 */
             revenue_stars: number;
         };
+        CascadeConns: {
+            /** Format: int64 */
+            conns: number;
+            /** Format: int64 */
+            node_id: number;
+        };
         CascadeExit: {
             /** @description Подключения этой ноды, которые выходят через ту ноду */
             inbounds: string[];
@@ -4405,6 +4411,13 @@ export interface components {
              * @description Мест для клиентов в группе; null — без ограничения
              */
             capacity: number | null;
+            /** @description Открытые сейчас подключения каскада других нод через эту, по ноде-источнику; пусто без каскада и у нод до 0.5.1.1-rc.14 */
+            cascade: components["schemas"]["CascadeConns"][];
+            /**
+             * Format: int64
+             * @description Сколько нода унесла за сутки для каскада других нод (вверх и вниз вместе), байты; в traffic_24h не входит: этих пользователей считает нода-источник
+             */
+            cascade_24h: number;
             certificate?: components["schemas"]["NodeCertView"];
             /**
              * Format: int64
@@ -4517,6 +4530,11 @@ export interface components {
              * @description up + down
              */
             bytes: number;
+            /**
+             * Format: int64
+             * @description Сколько нода унесла для каскада других нод (вверх и вниз вместе): их пользователей считает нода-источник, поэтому в bytes и total не входит
+             */
+            cascade: number;
             /** Format: int64 */
             down: number;
             /** Format: int64 */
@@ -4582,6 +4600,27 @@ export interface components {
             not_after?: string;
             /** @description Ссылки закрепляют самоподписанный сертификат: в sing-box приложениях (SFA, SFI) протоколы ноды на TLS не появятся, TUIC без проверки сертификата */
             pinned: boolean;
+        };
+        NodeTrafficOutputBody: {
+            points: components["schemas"]["NodeTrafficPoint"][];
+        };
+        NodeTrafficPoint: {
+            /**
+             * Format: int64
+             * @description Скачано для каскада других нод: в down не входит
+             */
+            cascade_down: number;
+            /**
+             * Format: int64
+             * @description Отдано для каскада других нод: в up не входит
+             */
+            cascade_up: number;
+            /** Format: int64 */
+            down: number;
+            /** Format: date-time */
+            t: string;
+            /** Format: int64 */
+            up: number;
         };
         NodeView: {
             /** Format: date-time */
@@ -9600,7 +9639,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TrafficOutputBody"];
+                    "application/json": components["schemas"]["NodeTrafficOutputBody"];
                 };
             };
             /** @description Error */

@@ -1354,6 +1354,24 @@
         ],
         "type": "object"
       },
+      "CascadeConns": {
+        "additionalProperties": false,
+        "properties": {
+          "conns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "conns"
+        ],
+        "type": "object"
+      },
       "CascadeExit": {
         "additionalProperties": false,
         "properties": {
@@ -4439,6 +4457,18 @@
               "null"
             ]
           },
+          "cascade": {
+            "description": "Открытые сейчас подключения каскада других нод через эту, по ноде-источнику; пусто без каскада и у нод до 0.5.1.1-rc.14",
+            "items": {
+              "$ref": "#/components/schemas/CascadeConns"
+            },
+            "type": "array"
+          },
+          "cascade_24h": {
+            "description": "Сколько нода унесла за сутки для каскада других нод (вверх и вниз вместе), байты; в traffic_24h не входит: этих пользователей считает нода-источник",
+            "format": "int64",
+            "type": "integer"
+          },
           "certificate": {
             "$ref": "#/components/schemas/NodeCertView"
           },
@@ -4636,6 +4666,8 @@
           "mem_used",
           "mem_total",
           "traffic_24h",
+          "cascade",
+          "cascade_24h",
           "behind",
           "can_update",
           "fair_share",
@@ -4680,6 +4712,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "cascade": {
+            "description": "Сколько нода унесла для каскада других нод (вверх и вниз вместе): их пользователей считает нода-источник, поэтому в bytes и total не входит",
+            "format": "int64",
+            "type": "integer"
+          },
           "down": {
             "format": "int64",
             "type": "integer"
@@ -4707,7 +4744,8 @@
           "local",
           "up",
           "down",
-          "bytes"
+          "bytes",
+          "cascade"
         ],
         "type": "object"
       },
@@ -4853,6 +4891,56 @@
         "required": [
           "kind",
           "pinned"
+        ],
+        "type": "object"
+      },
+      "NodeTrafficOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/NodeTrafficPoint"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "points"
+        ],
+        "type": "object"
+      },
+      "NodeTrafficPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "cascade_down": {
+            "description": "Скачано для каскада других нод: в down не входит",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cascade_up": {
+            "description": "Отдано для каскада других нод: в up не входит",
+            "format": "int64",
+            "type": "integer"
+          },
+          "down": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "t": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "up": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "t",
+          "up",
+          "down",
+          "cascade_up",
+          "cascade_down"
         ],
         "type": "object"
       },
@@ -14645,7 +14733,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TrafficOutputBody"
+                  "$ref": "#/components/schemas/NodeTrafficOutputBody"
                 }
               }
             },

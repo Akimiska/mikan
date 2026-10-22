@@ -308,17 +308,21 @@ type NodeState struct {
 }
 
 type NodeTrafficDaily struct {
-	NodeID int64
-	Day    int64
-	Up     int64
-	Down   int64
+	NodeID    int64
+	Day       int64
+	Up        int64
+	Down      int64
+	RelayUp   int64
+	RelayDown int64
 }
 
 type NodeTrafficHourly struct {
-	NodeID int64
-	Hour   int64
-	Up     int64
-	Down   int64
+	NodeID    int64
+	Hour      int64
+	Up        int64
+	Down      int64
+	RelayUp   int64
+	RelayDown int64
 }
 
 type NodeWarp struct {

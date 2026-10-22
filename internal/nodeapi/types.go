@@ -214,8 +214,15 @@ type Counters struct {
 	Pools map[string]map[string]Traffic `json:"pools,omitempty"` // slot → pool → traffic
 	// Sites are the slots' bytes by site (DesiredState.Detail): slot → site → traffic, a
 	// part of the batch like the rest. Nodes older than it send none.
-	Sites  map[string]map[string]Traffic `json:"sites,omitempty"`
-	Online map[string]Online             `json:"online"` // live view, not part of the batch
+	Sites map[string]map[string]Traffic `json:"sites,omitempty"`
+	// Relay is what the node's relay carried for the other nodes' cascades, by the source
+	// node's relay user (relay-<id>): a part of the batch like the rest, which counts for
+	// this node's load alone, as the source node counted the same bytes for its users.
+	// Nodes older than it send none.
+	Relay  map[string]Traffic `json:"relay,omitempty"`
+	Online map[string]Online  `json:"online"` // live view, not part of the batch
+	// RelayOnline is the relay's open connections by source, a live view like Online.
+	RelayOnline map[string]int `json:"relay_online,omitempty"`
 	// Idle: no batch was cut because there was no traffic to report. There is nothing to
 	// store and nothing to acknowledge; only Online is of use. Nodes before 0.4.4 cut an
 	// empty batch instead, which must be acknowledged like any other.

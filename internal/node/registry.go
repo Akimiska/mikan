@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -18,7 +19,7 @@ import (
 // the registry adds them up across the inbounds of a slot and tells the core whom to keep
 // out.
 //
-// Lock order: batchMu → mu → slot.mu → limitMu.
+// Lock order: batchMu → mu → slot.mu → limitMu; relayMu after batchMu, never with mu.
 type Registry struct {
 	mu       sync.RWMutex
 	byKey    map[string]*slot // slot name and uuid → slot
@@ -37,6 +38,13 @@ type Registry struct {
 	// replays are what the counters file held uncut when the node went down, each the batch
 	// the next cut would have been then, oldest first: sent before any new one (restore).
 	replays []*nodeapi.Counters
+
+	// The relay (the other nodes' cascades), by the source node's relay user: the bytes no
+	// batch has taken yet, and the open connections as of the last drain. Taken after
+	// batchMu or on its own, never with mu held.
+	relayMu    sync.Mutex
+	relayBytes map[string]nodeapi.Traffic
+	relayConns map[string]int
 
 	torrentCfg atomic.Pointer[nodeapi.TorrentBlock] // nil: the torrent blocker is off
 	torrent    torrents
@@ -462,10 +470,21 @@ func (r *Registry) drain() {
 		conns int
 	}
 	online := map[*slot]*seen{}
+	relay, relayConns := map[string]nodeapi.Traffic{}, map[string]int{}
 	r.mu.RLock()
 	for _, st := range stats {
+		if st.Inbound == nodeapi.RelayListener {
+			// The other nodes' cascades: this node's load, not its users', whom the source
+			// node counts and holds to their limits.
+			t := relay[st.User]
+			relay[st.User] = nodeapi.Traffic{Up: t.Up + st.Up, Down: t.Down + st.Down}
+			if st.Conns > 0 {
+				relayConns[st.User] += int(st.Conns)
+			}
+			continue
+		}
 		if _, ok := r.inbounds[st.Inbound]; !ok {
-			continue // the relay, whose users are other nodes
+			continue // a listener with no users of the state's
 		}
 		s := r.byKey[st.User]
 		if s == nil {
@@ -497,6 +516,19 @@ func (r *Registry) drain() {
 	}
 	slots := values(r.byName)
 	r.mu.RUnlock()
+	r.relayMu.Lock()
+	for user, t := range relay {
+		if t.Up == 0 && t.Down == 0 {
+			continue
+		}
+		if r.relayBytes == nil {
+			r.relayBytes = map[string]nodeapi.Traffic{}
+		}
+		cur := r.relayBytes[user]
+		r.relayBytes[user] = nodeapi.Traffic{Up: cur.Up + t.Up, Down: cur.Down + t.Down}
+	}
+	r.relayConns = relayConns
+	r.relayMu.Unlock()
 	for _, s := range slots {
 		o := online[s]
 		s.mu.Lock()
@@ -668,10 +700,13 @@ func (r *Registry) Counters() nodeapi.Counters {
 			}
 			s.mu.Unlock()
 		}
+		r.relayMu.Lock()
+		b.Relay, r.relayBytes = r.relayBytes, nil
+		r.relayMu.Unlock()
 		// A batch without traffic is not cut: it would cost the panel a transaction every
 		// couple of seconds to learn nothing. The reply says Idle, so the panel keeps to
 		// the live view; an older panel takes it for the last batch again and drops it.
-		if len(b.Slots) > 0 || len(b.Pools) > 0 || len(b.Sites) > 0 {
+		if len(b.Slots) > 0 || len(b.Pools) > 0 || len(b.Sites) > 0 || len(b.Relay) > 0 {
 			r.seq = b.Seq
 			r.pending = b
 		} else {
@@ -689,6 +724,11 @@ func (r *Registry) Counters() nodeapi.Counters {
 			out.Online[s.name] = o
 		}
 	}
+	r.relayMu.Lock()
+	if len(r.relayConns) > 0 {
+		out.RelayOnline = maps.Clone(r.relayConns)
+	}
+	r.relayMu.Unlock()
 	return out
 }
 
@@ -724,6 +764,8 @@ type counterState struct {
 	Current map[string]nodeapi.Traffic `json:"current"`
 	// CurrentPools: the same for traffic pools, slot → pool.
 	CurrentPools map[string]map[string]nodeapi.Traffic `json:"current_pools,omitempty"`
+	// CurrentRelay: the same for the relay, by source (Registry.relayBytes).
+	CurrentRelay map[string]nodeapi.Traffic `json:"current_relay,omitempty"`
 	// Replays are the batches of an earlier restart not sent yet (Registry.replays).
 	Replays []*nodeapi.Counters `json:"replays,omitempty"`
 }
@@ -754,6 +796,11 @@ func (r *Registry) snapshot() counterState {
 		s.mu.Unlock()
 	}
 	r.mu.RUnlock()
+	r.relayMu.Lock()
+	if len(r.relayBytes) > 0 {
+		st.CurrentRelay = maps.Clone(r.relayBytes)
+	}
+	r.relayMu.Unlock()
 	return st
 }
 
@@ -775,12 +822,12 @@ func (r *Registry) restore(st counterState) {
 	// one that held them already, and be counted twice.
 	// A restart before an earlier one's replays went out keeps them, in order.
 	r.replays = st.Replays
-	if len(st.Current) > 0 || len(st.CurrentPools) > 0 {
+	if len(st.Current) > 0 || len(st.CurrentPools) > 0 || len(st.CurrentRelay) > 0 {
 		slots := st.Current
 		if slots == nil {
 			slots = map[string]nodeapi.Traffic{}
 		}
-		r.replays = append(r.replays, &nodeapi.Counters{Epoch: st.Epoch, Seq: st.Seq + 1, Slots: slots, Pools: st.CurrentPools})
+		r.replays = append(r.replays, &nodeapi.Counters{Epoch: st.Epoch, Seq: st.Seq + 1, Slots: slots, Pools: st.CurrentPools, Relay: st.CurrentRelay})
 	}
 }
 

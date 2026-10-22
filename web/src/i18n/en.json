@@ -671,6 +671,7 @@
     "nodeTrafficSub": "{total} in all",
     "nodeTrafficSince": "Per-node accounting runs since {date}: there is no data for the days before",
     "nodeTrafficEmpty": "No node carried anything in this period.",
+    "nodeCascade": "+{bytes} for other nodes' cascades",
     "attention": "Needs attention",
     "attentionSub": "expiring, over the limit or already expired",
     "allGood": "all good",
@@ -836,7 +837,13 @@
     "title": "Node traffic",
     "button": "Traffic",
     "empty": "The node carried nothing in this period.",
-    "note": "Counting by node began with the version that brought it: what a node carried before cannot be recovered."
+    "note": "Counting by node began with the version that brought it: what a node carried before cannot be recovered.",
+    "kind": "Whose traffic",
+    "own": "Its own",
+    "cascade": "Cascades",
+    "ownTotal": "Its own traffic in the period: {bytes}",
+    "cascadeTotal": "For other nodes' cascades in the period: {bytes}",
+    "cascadeNote": "Cascades: what the node carried for the users of other nodes it is the exit of. Their source node counts those users and their traffic, so it is not in the users' statistics or the panel's totals."
   },
   "userCreate": {
     "title": "New client",
@@ -2432,6 +2439,9 @@
     "emptyTitle": "No nodes yet",
     "emptyText": "The panel's own node appears here once it starts.",
     "traffic24h": "Traffic in 24 hours",
+    "cascade24h": "+{bytes} for other nodes' cascades",
+    "cascadeConns": "+{n} via cascades",
+    "cascadeFrom": "Cascades from: {from}",
     "localName": "Own node",
     "kindLocal": "Node on the panel's server",
     "kindRemote": "Remote node",
@@ -3711,7 +3721,8 @@
       "port": {
         "ok": "Open to the panel",
         "timeout": "No answer: the hoster's firewall or ufw closes the port",
-        "refused": "Closed: nothing listens on it"
+        "refused": "Closed: nothing listens on it",
+        "behind_proxy": "Listens on {listen} behind a proxy on the node's server (nginx, HAProxy): the panel does not dial this port from outside"
       },
       "relay": {
         "ok": "Port {port} listens",

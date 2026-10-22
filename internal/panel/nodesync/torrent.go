@@ -168,6 +168,9 @@ func (m *Manager) torrentConfig(ctx context.Context) (torrent.Config, error) {
 	if err != nil {
 		return torrent.Config{}, err
 	}
+	if cfg, err = withRuleClientsExempt(ctx, m.st.DB, cfg); err != nil {
+		return torrent.Config{}, err
+	}
 	m.tor, m.torChanges, m.torRead = cfg, changes, true
 	return cfg, nil
 }

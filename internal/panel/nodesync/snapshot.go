@@ -96,6 +96,9 @@ func (m *Manager) readSnapshot(ctx context.Context) (s *snapshot, err error) {
 	if s.torrent, err = torrent.Load(ctx, settings.New(q)); err != nil {
 		return nil, err
 	}
+	if s.torrent, err = withRuleClientsExempt(ctx, tx, s.torrent); err != nil {
+		return nil, err
+	}
 	if s.filters, err = filters.Load(ctx, settings.New(q)); err != nil {
 		return nil, err
 	}

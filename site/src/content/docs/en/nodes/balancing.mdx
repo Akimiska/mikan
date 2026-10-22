@@ -3,8 +3,8 @@ title: Load balancing
 description: 'Groups of nodes that share their clients: places on a node, keeping a client on one node and redistributing.'
 ---
 
-:::note[In beta 0.5.1.1]
-Balancing is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::note[New in 0.5.2.0]
+Balancing is new in 0.5.2.0.
 :::
 
 Usually a client gets the protocols of every node in the subscription. When you have several nodes in one country or at one provider, you can put them into a **group**: the group's clients are shared out between its nodes, each client is kept on one node of the group and sees only that one in the subscription. The load spreads over the servers instead of landing on the first one in the list.

@@ -45,7 +45,7 @@ Automatic fixes are off for a connection behind a proxy and can't be turned on:
 
 ## Through a CDN
 
-Beta 0.5.1.1 has presets of its own for a CDN and a **Behind a CDN** block with the client's real IP, see [Behind a CDN](/mikan/en/protocols/cdn/). Below is the way without them, on WebSocket.
+Since 0.5.2.0 a CDN has presets of its own and a **Behind a CDN** block with the client's real IP, see [Behind a CDN](/mikan/en/protocols/cdn/). Below is the way without them, on WebSocket.
 
 **VLESS · TLS · WebSocket** goes through a CDN (Cloudflare, Yandex Cloud CDN): clients connect to the CDN's address, and the CDN passes the connection to the node. Where the server's IP is blocked and the CDN's network is not, this can save the day.
 

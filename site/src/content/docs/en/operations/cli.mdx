@@ -22,14 +22,14 @@ Running `mikan` with no arguments opens a menu in the terminal: status, updates,
 
 `mikan doctor` works on a panel's server and on a node's server. It checks Docker and the containers, that the ports are listening, ufw rules for the node API port, the panel port and the protocol ports, time sync (`timedatectl` and the HTTP Date header from github.com, 30 s tolerance), DNS, outbound HTTPS to github.com and ghcr.io (needed for updates), disk (✗ under 500 MiB, ! under 2 GiB) and memory. On a node it also re-sends the hello to the panel and prints the result. Each line is marked ✓, ! or ✗ and has a fix line; if anything is ✗, the command exits with a non-zero code. `mikan status` suggests `mikan doctor` when something is wrong. This is the tool for when the panel cannot reach the node at all. The same set of checks for the panel's server is in the panel itself: the "Check server" button in **Settings → System**.
 
-The panel runs `mikan doctor` and `mikan restart` on its own server, and on a node's server over the node API, without SSH: it writes a request file into its data directory and a systemd unit (`mikan-doctor-request.path`, `mikan-restart-request.path`, installed by the installer and by `mikan update`) runs the command and returns the report. A server installed before 0.5.1.1 needs one `mikan update` for that. The logs of the panel and of the nodes are shown in the panel as well, with tokens, keys, passwords and subscription links cut out. All of it is on the [Diagnostics](/mikan/en/operations/diagnostics/) page.
+The panel runs `mikan doctor` and `mikan restart` on its own server, and on a node's server over the node API, without SSH: it writes a request file into its data directory and a systemd unit (`mikan-doctor-request.path`, `mikan-restart-request.path`, installed by the installer and by `mikan update`) runs the command and returns the report. A server installed before 0.5.2.0 needs one `mikan update` for that. The logs of the panel and of the nodes are shown in the panel as well, with tokens, keys, passwords and subscription links cut out. All of it is on the [Diagnostics](/mikan/en/operations/diagnostics/) page.
 
 `mikan support <code>` is for the case when the panel is down or the node is out of the panel's reach. Take the code from your support ticket, run the command as root: it collects the same report as `mikan doctor --json`, `mikan status` and the last 300 lines of the containers' logs, cuts the secrets out and sends one JSON document to the support desk (`MIKAN_SUPPORT_URL` points it elsewhere). The settings files (`config.json`, `secrets/`, and `.env` on older servers), keys and certificates are not read and not sent. `--dry-run` prints what would be sent and sends nothing.
 
 ## Settings files
 
-:::note[Secrets out of .env: beta 0.5.1.1]
-All of the server's settings used to be in `/opt/mikan/.env`. In beta 0.5.1.1 they are split, and nothing secret is in a container's environment any more: `docker inspect` and `/proc/<pid>/environ` show only the paths of files.
+:::note[Secrets out of .env: 0.5.2.0]
+All of the server's settings used to be in `/opt/mikan/.env`. Since 0.5.2.0 they are split, and nothing secret is in a container's environment any more: `docker inspect` and `/proc/<pid>/environ` show only the paths of files.
 :::
 
 | Path | What is there | Permissions |

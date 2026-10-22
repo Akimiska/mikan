@@ -9,7 +9,7 @@ description: Backups on the server and in Telegram, what they contain and how to
 mikan backup
 ```
 
-The archive `mikan-YYYYMMDD-HHMMSS.tar.gz` appears in `/opt/mikan/backups`. It holds `config.json` and `secrets/` (`.env` on a server set up before beta 0.5.1.1), `compose.yaml`, a consistent database snapshot, the panel's certificates, node data and payment adapter settings. All of the server's secrets are inside, so the folder is accessible only to root.
+The archive `mikan-YYYYMMDD-HHMMSS.tar.gz` appears in `/opt/mikan/backups`. It holds `config.json` and `secrets/` (`.env` on a server set up before 0.5.2.0), `compose.yaml`, a consistent database snapshot, the panel's certificates, node data and payment adapter settings. All of the server's secrets are inside, so the folder is accessible only to root.
 
 Before risky operations mikan makes backups by itself and keeps a few of the latest:
 

@@ -24,8 +24,8 @@ An addon from the registry runs as any unofficial addon: in its own container, o
 
 ## Permissions for addons that look after the servers
 
-:::note[In beta 0.5.1.1]
-The permissions `nodes:read`, `inbounds:read` and `inbounds:write` are new in beta 0.5.1.1 (rc.7), in protocol 2. An older panel does not run an addon that asks for them.
+:::note[New in 0.5.2.0]
+The permissions `nodes:read`, `inbounds:read` and `inbounds:write` are new in 0.5.2.0, in protocol 2. An older panel does not run an addon that asks for them.
 :::
 
 An addon that looks after the servers (for example, moves a blocked protocol to another port) asks for permissions in its description, and you approve them in the install window like any others. These three permissions give access to the panel's addon API (`/panel/v2`):

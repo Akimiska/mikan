@@ -5,7 +5,7 @@ description: Remote nodes, the connection key, server order, updating from the p
 
 import { Steps } from '@astrojs/starlight/components';
 
-A node accepts client connections, and a core runs inside it: mihomo, and in beta 0.5.1.1 Citrus. Citrus changes a protocol's users in place without reconnecting the others, counts traffic itself, cuts a quota to the byte and closes a user at once; the node keeps only what spans several protocols and nodes: devices, pools, the speed cap, the fair share of the channel. Citrus has no VMess, see [Protocol presets](/mikan/en/protocols/presets/#own-config). One node always runs on the panel's server ("Own node"), and the others are installed on other servers and connect to the panel with a key. In a subscription, each node looks like a separate group of servers.
+A node accepts client connections, and a core runs inside it: Citrus (mihomo before 0.5.2.0). Citrus changes a protocol's users in place without reconnecting the others, counts traffic itself, cuts a quota to the byte and closes a user at once; the node keeps only what spans several protocols and nodes: devices, pools, the speed cap, the fair share of the channel. Citrus has no VMess, see [Protocol presets](/mikan/en/protocols/presets/#own-config). One node always runs on the panel's server ("Own node"), and the others are installed on other servers and connect to the panel with a key. In a subscription, each node looks like a separate group of servers.
 
 ## Add a node
 
@@ -46,7 +46,7 @@ The card shows the state, address, how many protocols are running, connections, 
 
 The **Certificate** row shows which certificate is in use right now: a public one (with the authority and the expiry), the panel's, your own, or a self-signed one. If there is no public certificate yet, it says why in plain words. The "Get now" button requests it at once and waits up to 90 seconds for the result. More in [Node certificate](#node-certificate). Buttons:
 
-- **Configure**: name, address, domain, and the "Serves clients" switch. A node that is turned off does not accept connections and disappears from subscriptions. In beta 0.5.1.1 it also holds [load balancing](/mikan/en/nodes/balancing/), the [shared port 443](/mikan/en/nodes/shared-443/), "HTTP → HTTPS" and "Node API from the panel's IP only", see [Hardening a node](/mikan/en/nodes/hardening/).
+- **Configure**: name, address, domain, and the "Serves clients" switch. A node that is turned off does not accept connections and disappears from subscriptions. Since 0.5.2.0 it also holds [load balancing](/mikan/en/nodes/balancing/), the [shared port 443](/mikan/en/nodes/shared-443/), "HTTP → HTTPS" and "Node API from the panel's IP only", see [Hardening a node](/mikan/en/nodes/hardening/).
 - **Check node**: a full check with a list and hints, see [If a node does not connect](#if-a-node-does-not-connect).
 - **WARP**: exit to the internet through Cloudflare, see [WARP](/mikan/en/nodes/warp/).
 - **Cascade**: where the node sends other nodes' traffic, see [Cascades](/mikan/en/nodes/cascades/).
@@ -75,8 +75,8 @@ The order in which a certificate is chosen, the errors and the "Check the certif
 
 ## Deleting a node
 
-:::note[In beta 0.5.1.1]
-Moving the exit when a node is deleted is new in beta 0.5.1.1.
+:::note[New in 0.5.2.0]
+Moving the exit when a node is deleted is new in 0.5.2.0.
 :::
 
 Deleting a node leaves no broken protocols or cascades. Protocols and [cascades](/mikan/en/nodes/cascades/) that left to the internet through this node move to **another enabled node** (never the panel's own), and if there is none, they go straight out. The confirmation window says so. Before, a node that carried a cascade could not be deleted. One limit remains: a node the bot goes to Telegram through must first be switched in **Telegram → Connection → Way to Telegram**.
@@ -131,7 +131,7 @@ The result is cached for 2 minutes, and one check runs at a time.
 
 ### Country in the geo bases
 
-In beta 0.5.1.1 the end of the same window has a **Country in the geo bases** block and a "Check the geo bases" button. Sites and apps tell a client's country by geo bases, and the bases often disagree: if one puts the node's IP in another country, a service shows the wrong region or refuses. The panel asks ten public bases (MaxMind, ipinfo.io, IP2Location and others) and shows what each said. The ones that disagree are marked. The server's address goes to those bases, so the check runs only on the button. Any other server is checked in [Diagnostics](/mikan/en/operations/diagnostics/#geo-bases).
+Since 0.5.2.0 the end of the same window has a **Country in the geo bases** block and a "Check the geo bases" button. Sites and apps tell a client's country by geo bases, and the bases often disagree: if one puts the node's IP in another country, a service shows the wrong region or refuses. The panel asks ten public bases (MaxMind, ipinfo.io, IP2Location and others) and shows what each said. The ones that disagree are marked. The server's address goes to those bases, so the check runs only on the button. Any other server is checked in [Diagnostics](/mikan/en/operations/diagnostics/#geo-bases).
 
 ### If the panel cannot reach the node at all
 

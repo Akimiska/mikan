@@ -22,6 +22,9 @@ func TestDetectApp(t *testing.T) {
 		"mihomo ClashFest/1.2.0":               {Family: FamilyMihomo}, // a build off a release tag names no core
 		"clash.meta/v1.19.32 SlothClash/0.9.4": {Family: FamilyMihomo, Core: Version{1, 19, 32}},
 		"clash.meta/mihomo SlothClash/0.9.4":   {Family: FamilyMihomo},
+		"mihomo/1.19.32 Mikan/0.1.3":           {Family: FamilyMihomo, Core: Version{1, 19, 32}},
+		"mihomo/1.19.33 Kabosu/1.0.0":          {Family: FamilyMihomo, Core: Version{1, 19, 33}},
+		"kabosu/1.0.0":                         {Family: FamilyMihomo}, // a desktop app that names no core still gets Clash
 		"Happ/3.4.1":                           {Family: FamilyXray},
 		"v2rayNG/1.10.20":                      {Family: FamilyXray},
 		"INCY/2.1.0":                           {Family: FamilyXray},

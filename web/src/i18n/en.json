@@ -2326,7 +2326,8 @@
       "bestWindows": "Best for Windows: all traffic and routing",
       "tun": "Routing and TUN mode",
       "oneButton": "One button",
-      "allProtocols": "Every protocol and routing"
+      "allProtocols": "Every protocol and routing",
+      "everything": "All of the subscription: protocols, routing, server groups"
     },
     "howTo": "How to connect",
     "steps": {

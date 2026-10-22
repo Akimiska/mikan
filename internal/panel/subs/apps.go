@@ -16,7 +16,7 @@ import (
 type Family string
 
 const (
-	FamilyMihomo  Family = "mihomo"  // Koala Clash, SlothClash, FlClash, Clash Verge, Clash Meta for Android, ClashFest…
+	FamilyMihomo  Family = "mihomo"  // Mikan, Kabosu, Koala Clash, SlothClash, FlClash, Clash Verge, Clash Meta for Android, ClashFest…
 	FamilyXray    Family = "xray"    // Happ, v2RayTun, INCY, v2rayNG, v2rayN…
 	FamilySingBox Family = "singbox" // Hiddify, Karing, NekoBox, sing-box…
 	FamilyStash   Family = "stash"
@@ -111,7 +111,7 @@ func DetectApp(userAgent string) App {
 			a.Core = versionOf(m)
 		}
 		return a
-	case has("mihomo", "clash", "koala", "verge", "prizrak", "flowvy", "murge", "rabbit"):
+	case has("mihomo", "clash", "koala", "kabosu", "verge", "prizrak", "flowvy", "murge", "rabbit"):
 		a := App{Family: FamilyMihomo}
 		if m := mihomoVersion.FindStringSubmatch(ua); m != nil {
 			a.Core = versionOf(m)

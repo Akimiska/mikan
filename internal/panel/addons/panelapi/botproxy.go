@@ -237,19 +237,24 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 		tgFail(w, http.StatusBadRequest, "Bad Request: chat_id is required")
 		return
 	}
-	var (
-		code   int
-		answer []byte
-	)
-	done := make(chan error, 1)
-	out.Do(chat, r.Header.Get("X-Mikan-Priority"), func(ctx context.Context, c *tgapi.Client) error {
-		var err error
-		code, answer, err = c.Forward(ctx, method, ct, body)
-		return err
-	}, func(err error) { done <- err })
+	// AoiVPN fork: an identical call already queued or just sent is not sent again
+	// (aoi_dedupe.go): the addon's timeout must not turn into a second message.
+	key := dedupeKey(s, method, chat, body)
+	call, send := proxyCalls.join(key, time.Now())
+	if send {
+		var (
+			code   int
+			answer []byte
+		)
+		out.Do(chat, r.Header.Get("X-Mikan-Priority"), func(ctx context.Context, c *tgapi.Client) error {
+			var err error
+			code, answer, err = c.Forward(ctx, method, ct, body)
+			return err
+		}, func(err error) { proxyCalls.finish(key, call, code, answer, err, time.Now()) })
+	}
 	select {
-	case err := <-done:
-		s.answer(w, code, answer, err)
+	case <-call.done:
+		s.answer(w, call.code, call.answer, call.err)
 	case <-r.Context().Done():
 	}
 }

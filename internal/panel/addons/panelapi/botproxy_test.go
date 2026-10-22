@@ -243,7 +243,10 @@ func TestBotCalls(t *testing.T) {
 
 	// the bot off: a clear refusal
 	s.d.Telegram = gateway{}
-	if code, a := bot(s, botToken, "sendMessage", "application/json", []byte(send)); code != 502 || a.OK {
+	// AoiVPN fork: an identical call within a minute gets the first one's answer
+	// (aoi_dedupe.go), so the call that meets a Telegram out of reach is another one.
+	again := `{"chat_id":555,"text":"hi again"}`
+	if code, a := bot(s, botToken, "sendMessage", "application/json", []byte(again)); code != 502 || a.OK {
 		t.Fatalf("the bot off: %d %+v", code, a)
 	}
 }

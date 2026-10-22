@@ -220,7 +220,7 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 		for _, e := range c.Of(addons.KindPayment) {
 			a, ok := payments[e.ID]
 			v.Catalog = append(v.Catalog, AddonCatalogEntry{ID: e.ID, Name: e.Name, Description: e.Description, Version: e.Version, Homepage: e.Homepage,
-				Installed: ok, Update: ok && a.Digest != e.Digest})
+				Installed: ok, Update: ok && a.Digest != e.Digest && sameImage(a, e)})
 		}
 	}
 	available := h.d.Billing.Available(ctx).Addons

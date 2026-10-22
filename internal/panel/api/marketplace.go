@@ -147,7 +147,7 @@ func (h *handlers) grant(ctx context.Context, id string) (perms []string, versio
 // (nil for the official catalog) is installed, and one with another build is an update.
 func marketEntry(e addons.Entry, origin *MarketOrigin, a addons.Installed, here bool, granted []string) MarketEntry {
 	me := MarketEntry{ID: e.ID, Name: e.Name, Description: e.Description, Version: e.Version, Kind: e.Kind, Mode: e.Mode,
-		Permissions: listOrEmpty(e.Permissions), Homepage: e.Homepage, Installed: here, Update: here && a.Digest != e.Digest,
+		Permissions: listOrEmpty(e.Permissions), Homepage: e.Homepage, Installed: here, Update: here && a.Digest != e.Digest && sameImage(a, e),
 		Wider: here && !addons.Covers(granted, e.Permissions), Origin: origin}
 	if origin != nil {
 		me.Image, me.Digest = e.Image, e.Digest

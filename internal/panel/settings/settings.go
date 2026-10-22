@@ -86,6 +86,9 @@ const (
 	// Branding and support: the bot's and the subscription page's name and the support link.
 	KeyBrand      = "brand"
 	KeySupportURL = "support_url"
+	// KeyPanelAppName is the admin panel's name as an installed app (server.AppName): ""
+	// for the brand, "mikan" without one.
+	KeyPanelAppName = "panel_app_name"
 	// The announcement apps show over the profile (the announce and announce-url headers),
 	// for maintenance or news; empty: none.
 	KeyAnnounce    = "sub_announce"

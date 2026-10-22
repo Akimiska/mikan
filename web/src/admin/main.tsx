@@ -13,7 +13,13 @@ import { ErrorBoundary } from "../components/error-boundary";
 import { ToastProvider } from "../components/toast";
 import { initI18n } from "../i18n";
 import { adminDicts } from "../i18n/admin";
+import { registerWorker, watchInstall } from "../lib/pwa";
 import { createAppRouter } from "./router";
+
+// The panel as an installed app: the browser's install offer comes once per load, long before
+// Settings is opened. The worker only in a build: the dev server is not the panel's path.
+watchInstall();
+if (import.meta.env.PROD) window.addEventListener("load", registerWorker, { once: true });
 
 const queryClient = new QueryClient({
   defaultOptions: {

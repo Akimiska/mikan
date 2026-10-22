@@ -6158,6 +6158,11 @@
           "link_reissue": {
             "$ref": "#/components/schemas/ReissueRules"
           },
+          "panel_app_name": {
+            "description": "Пусто — по бренду",
+            "maxLength": 30,
+            "type": "string"
+          },
           "public_host": {
             "maxLength": 253,
             "type": "string"
@@ -8399,6 +8404,10 @@
             "$ref": "#/components/schemas/ReissueRules",
             "description": "Как часто подписчик может сменить свою ссылку подписки сам (бот и Mini App)"
           },
+          "panel_app_name": {
+            "description": "Название панели, установленной как приложение (ярлык на рабочем столе, в меню, на главном экране); пусто — бренд, без бренда — mikan",
+            "type": "string"
+          },
           "panel_port": {
             "format": "int64",
             "type": "integer"
@@ -8514,6 +8523,7 @@
         },
         "required": [
           "brand",
+          "panel_app_name",
           "support_url",
           "sub_title",
           "sub_announce",

@@ -5055,6 +5055,8 @@ export interface components {
             /** @description happ://routing/…, auto — собрать из маршрутизации; пусто — не отдавать */
             happ_routing?: string;
             link_reissue?: components["schemas"]["ReissueRules"];
+            /** @description Пусто — по бренду */
+            panel_app_name?: string;
             public_host?: string;
             /** Format: int64 */
             quiet_hour_utc?: number;
@@ -5864,6 +5866,8 @@ export interface components {
             happ_routing: string;
             /** @description Как часто подписчик может сменить свою ссылку подписки сам (бот и Mini App) */
             link_reissue: components["schemas"]["ReissueRules"];
+            /** @description Название панели, установленной как приложение (ярлык на рабочем столе, в меню, на главном экране); пусто — бренд, без бренда — mikan */
+            panel_app_name: string;
             /** Format: int64 */
             panel_port: number;
             public_host: string;

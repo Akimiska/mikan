@@ -26,6 +26,7 @@ import (
 
 type SettingsView struct {
 	Brand          string `json:"brand"`
+	PanelAppName   string `json:"panel_app_name" doc:"Название панели, установленной как приложение (ярлык на рабочем столе, в меню, на главном экране); пусто — бренд, без бренда — mikan"`
 	SupportURL     string `json:"support_url"`
 	SubTitle       string `json:"sub_title" doc:"Название подписки в приложениях (заголовок profile-title); пусто — бренд. Переменные: {brand} — бренд, {name} — имя пользователя, {date} — дата окончания (ДД.ММ.ГГГГ, МСК), {days} — дней осталось, {used} — израсходовано, {left} — осталось трафика, {total} — всего, {devices} — привязанные устройства (2/3); без срока или лимита — ∞"`
 	Announce       string `json:"sub_announce" doc:"Объявление над профилем в приложениях (заголовок announce): Happ и v2RayTun показывают его под названием подписки; пусто — нет. Те же переменные, что в sub_title"`
@@ -95,6 +96,7 @@ type patchSettingsInput struct {
 // schema keeps its name (PatchSettingsInputBody). settingFields says how each is written.
 type patchSettingsBody = struct {
 	Brand          *string              `json:"brand,omitempty" maxLength:"40"`
+	PanelAppName   *string              `json:"panel_app_name,omitempty" maxLength:"30" doc:"Пусто — по бренду"`
 	SupportURL     *string              `json:"support_url,omitempty" maxLength:"200" doc:"https://… или tg://…"`
 	SubTitle       *string              `json:"sub_title,omitempty" maxLength:"200" doc:"Переменные — см. SettingsView.sub_title"`
 	Announce       *string              `json:"sub_announce,omitempty" maxLength:"1000" doc:"До 10 строк: страница подписки и Mini App показывают их с переносами, приложения получают одну строку до 200 символов"`
@@ -171,6 +173,7 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 		}
 	}
 	get(settings.KeyBrand, &v.Brand)
+	get(settings.KeyPanelAppName, &v.PanelAppName)
 	get(settings.KeySupportURL, &v.SupportURL)
 	get(settings.KeySubTitle, &v.SubTitle)
 	get(settings.KeyAnnounce, &v.Announce)

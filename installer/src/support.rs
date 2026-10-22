@@ -249,8 +249,9 @@ mod tests {
             &[env_secret.to_owned()],
         );
         let all = serde_json::to_string(&p).unwrap();
-        for s in [SECRET, "hunter2hunter2", "u@h", env_secret] {
-            assert!(!all.contains(s), "{s} leaves: {all}");
+        // A failure names the secret by its place in the list: the test prints no secret either.
+        for (i, s) in [SECRET, "hunter2hunter2", "u@h", env_secret].into_iter().enumerate() {
+            assert!(!all.contains(s), "secret {i} leaves");
         }
         assert!(all.contains("level=WARN") && all.contains("/api/v1/users") && all.contains("mikan restart"), "too much is gone: {all}");
     }

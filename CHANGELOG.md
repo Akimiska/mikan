@@ -3,7 +3,7 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
-## 0.5.1.1
+## 0.5.2.0
 ### en
 - **API changes** (server groups and plans; for scripts and addons that call them): `POST /api/v1/tariffs/{id}/apply-pools` is gone, and `POST /api/v1/tariffs/{id}/apply` replaces it, with the flags `traffic`, `devices`, `speed` and `groups` (at least one; `groups` is what apply-pools did). The field `excluded` of `PoolSetting` (called `PoolLimit` before; the plan's `pools` and `PUT /api/v1/users/{id}/pools`) and of `UserPoolView` is gone: `mode` replaces it, one of `main`, `own`, `unlimited` and `closed`, and `traffic_limit` goes only with `own` (before: a limit, `null` for none, `excluded: true`; the update converts what exists). A plan's `pools` (`TariffView.pools`) now lists every group with its `mode`, not only the groups with a row of the plan, and a group that a plan's request leaves out is on the main traffic, where it used to be unlimited.
 - **Update the nodes together with the panel.** Migration 0043 stores the `max-time-difference` of a REALITY template in milliseconds, as the Citrus core reads it, and a node still on mihomo reads the same number as microseconds: a window of 60 s set by hand becomes 60 ms there, and REALITY clients whose clock is off by more are turned away until the node is updated. Only templates that set the value are touched.

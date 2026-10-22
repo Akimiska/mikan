@@ -72,8 +72,9 @@ export function InboundsPage() {
       />
       {multi && nodes.data ? (
         nodes.data.length <= 4 ? (
-          <div className="max-w-full overflow-x-auto">
-            <Segmented value={String(nodeId)} label={t("inbounds.node")} options={nodes.data.map((n) => ({ value: String(n.id), label: nodeLabel(n) }))} onChange={(v) => {
+          <div className="max-w-full">
+            {/* AoiVPN fork: seg-wrap — на телефоне флаг и название ноды в две строки, без обрезки и прокрутки */}
+            <Segmented className="seg-wrap" value={String(nodeId)} label={t("inbounds.node")} options={nodes.data.map((n) => ({ value: String(n.id), label: nodeLabel(n) }))} onChange={(v) => {
                 setNodeId(Number(v));
                 setSelected(new Set());
               }} />
@@ -126,7 +127,7 @@ export function InboundsPage() {
             ) : null}
             <div className="grid gap-4 lg:grid-cols-2">
               {inbounds.map((i, idx) => (
-                <section key={i.id} className={`card glass reveal flex flex-col${selected.has(i.id) ? " sel" : ""}`} style={{ "--i": idx } as React.CSSProperties}>
+                <section key={i.id} className={`card glass reveal flex min-w-0 flex-col${selected.has(i.id) ? " sel" : ""}`} style={{ "--i": idx } as React.CSSProperties}>
                   <div className="flex items-start justify-between gap-3">
                     <input type="checkbox" className="check mt-1 shrink-0" checked={selected.has(i.id)} onChange={() => toggle(i.id)} aria-label={t("inbounds.exitBulk.pick", { name: i.sub_name })} />
                     <div className="min-w-0 flex-1">
@@ -176,7 +177,8 @@ export function InboundsPage() {
                   ) : null}
                   <AutoInfo i={i} />
                   <div className="flex-1" aria-hidden />
-                  <div className="mt-4 flex gap-2 border-t border-[var(--hairline)] pt-4">
+                  {/* AoiVPN fork: flex-wrap — три кнопки не помещались в ряд на телефоне и распирали карточку за край экрана */}
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--hairline)] pt-4">
                     <Button size="sm" onClick={() => setEditing(i)}>
                       <Pencil size={16} aria-hidden /> {t("inbounds.configure")}
                     </Button>

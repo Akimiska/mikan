@@ -229,6 +229,10 @@
   .seg-block button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .seg button[aria-pressed="true"] { background: var(--raised); color: var(--ink-900); box-shadow: var(--shadow-sm); }
   .seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* AoiVPN fork: segments that may take two lines (a node's flag over its name) and share the
+     width — the fixed 28px height cut the second line off on a phone. */
+  .seg-wrap { display: flex; width: 100%; max-width: 560px; }
+  .seg-wrap button { flex: 1 1 0; min-width: 0; height: auto; min-height: 28px; padding: 4px 8px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
   .lang-switch button { padding: 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
   .metric { padding: 12px; border-radius: 16px; background: var(--surface-soft); border: 1px solid var(--hairline); }
   .metric-label { font-size: 12px; color: var(--ink-500); }

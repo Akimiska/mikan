@@ -257,7 +257,11 @@ func (h *handlers) runTerminal(rctx context.Context, c *websocket.Conn, g db.Sup
 	sctx, cancel := context.WithCancelCause(rctx)
 	defer cancel(nil)
 	sess := &terminalSession{grantID: g.ID, target: target, cancel: cancel}
+	// The server is let go before the operator hears why the session did not open: the closing
+	// handshake takes up to terminalCloseWait, and one who tries again at once must not find the
+	// failed session still holding the server (terminal_busy).
 	fail := func(code string) {
+		h.terms.remove(sess)
 		writeWS(rctx, c, map[string]any{"type": "error", "code": code})
 		_ = closeWS(c, websocket.StatusInternalError, code)
 	}

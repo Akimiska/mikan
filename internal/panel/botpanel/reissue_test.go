@@ -42,11 +42,16 @@ func TestBotReissuesTheLink(t *testing.T) {
 	}
 
 	// Someone else's tap with the same data changes nothing.
-	// Its answer is awaited, so that the next tap does not take it for its own.
+	// Its answer and its screen are awaited, so that the next tap does not take them for its
+	// own: the bot answers at once and draws the screen after (onPress).
 	e.later()
 	n = e.tg.count()
 	e.press(other, menu, "rn:"+uid)
-	e.tg.wait(t, n, "answerCallbackQuery")
+	e.tg.until(t, n, func(cs []call) bool {
+		_, answered := find(cs, "answerCallbackQuery")
+		_, drawn := find(cs, "editMessageText")
+		return answered && drawn
+	})
 	if u, _ := e.st.Q.GetUser(e.ctx, e.user.ID); u.SubToken != e.user.SubToken {
 		t.Fatal("another account reissued the link")
 	}

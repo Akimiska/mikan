@@ -74,7 +74,8 @@ func SamePermissions(a, b []string) bool {
 
 // permsSince is the host version that first knows a permission added after protocol 2 shipped:
 // an older host drops an entry that asks for one as unsound, so its addon would not run.
-var permsSince = map[string]string{"users:all": "0.5.1.0-rc.11", "users:grant": "0.5.1.0-rc.11"}
+var permsSince = map[string]string{"users:all": "0.5.1.0-rc.11", "users:grant": "0.5.1.0-rc.11",
+	"nodes:read": "0.5.1.1-rc.7", "inbounds:read": "0.5.1.1-rc.7", "inbounds:write": "0.5.1.1-rc.7"}
 
 // HostTakes says whether a host of this version runs an addon with these permissions. A host
 // that reports no release version (a development build) is taken to know them all.

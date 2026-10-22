@@ -3,7 +3,9 @@ package domain
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"mikan/internal/panel/store/db"
@@ -100,6 +102,61 @@ func termDays(t db.Tariff, term sql.NullInt64) int64 {
 		return term.Int64
 	}
 	return t.DurationDays
+}
+
+// carryOver is what is left of a term (left) when a renewal moves the subscription from
+// tariff from to tariff to, bought for days: the days left are worth what a day costs on
+// the old tariff, and buy as many days of the new one as that pays for at a day's price of
+// the term bought. A day is priced in rubles when both tariffs are sold for rubles, else in
+// Stars when both are. The old tariff's day is the one of its term as long as the term
+// bought, else of its first. With no price the two share (a tariff the admin gives and does
+// not sell), or the old tariff gone, the days stay as they are. Without this, a year of the cheapest tariff and a month of the dearest
+// would be a year and a month of the dearest (decided 2026-10-21).
+func carryOver(ctx context.Context, q *db.Queries, from int64, to db.Tariff, days int64, left time.Duration) (time.Duration, error) {
+	old, err := q.GetTariff(ctx, from)
+	if errors.Is(err, sql.ErrNoRows) {
+		return left, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	oldTerms, err := TermsOf(ctx, q, old)
+	if err != nil {
+		return 0, err
+	}
+	newTerms, err := TermsOf(ctx, q, to)
+	if err != nil {
+		return 0, err
+	}
+	bought, ok := FindTerm(newTerms, days)
+	if !ok {
+		bought = newTerms[0]
+	}
+	was, ok := FindTerm(oldTerms, days)
+	if !ok {
+		was = oldTerms[0]
+	}
+	oldDay, newDay, ok := dayPrices(was, bought)
+	if !ok || newDay <= 0 {
+		return left, nil
+	}
+	return time.Duration(float64(left) * oldDay / newDay), nil
+}
+
+// dayPrices are what a day of a and of b costs, in the currency both are sold for: rubles
+// first, then Stars. false: none they share.
+func dayPrices(a, b Term) (float64, float64, bool) {
+	if a.Days <= 0 || b.Days <= 0 {
+		return 0, 0, false
+	}
+	day := func(price sql.NullInt64, days int64) float64 { return float64(price.Int64) / float64(days) }
+	switch {
+	case a.PriceRub.Valid && b.PriceRub.Valid:
+		return day(a.PriceRub, a.Days), day(b.PriceRub, b.Days), true
+	case a.PriceStars.Valid && b.PriceStars.Valid:
+		return day(a.PriceStars, a.Days), day(b.PriceStars, b.Days), true
+	}
+	return 0, 0, false
 }
 
 // What a tariff's description may hold: it goes under the tariff's name in the bot and in

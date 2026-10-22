@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 )
@@ -31,7 +32,7 @@ type UnbindRules struct {
 }
 
 // ReturnNever: a device the subscriber unbound comes back only when the admin lets it.
-const ReturnNever = -1
+const ReturnNever = model.ReturnNever
 
 // foreverUnix is when a pause of ReturnNever ends: never, in practice (9999-12-31). A
 // pause rather than a ban: the admin's list tells it is the subscriber's unbind.
@@ -90,20 +91,16 @@ type UnbindState struct {
 	Next time.Time
 }
 
-// Left is how many unbinds the window still has room for; -1 without a limit, 0 when the
-// subscriber may not unbind at all.
-func (s UnbindState) Left() int {
-	switch {
-	case s.Rules.Off:
-		return 0
-	case s.Rules.Limit == 0:
-		return -1
-	}
-	return max(0, s.Rules.Limit-s.Used)
+// Left is how many unbinds the window still has room for (model.UnbindState.Left).
+func (s UnbindState) Left() int { return s.Model().Left() }
+
+// Model is the state as the bot reads it.
+func (s UnbindState) Model() model.UnbindState {
+	return model.UnbindState{Rules: model.UnbindRules(s.Rules), Used: s.Used, Next: s.Next}
 }
 
 // ErrUnbindOff: the admin unbinds the subscriber's devices, the subscriber does not.
-var ErrUnbindOff = errors.New("unbind_off")
+var ErrUnbindOff = model.ErrUnbindOff
 
 // ErrDeviceUnbound: the subscriber unbound this device a moment ago; it may bind again
 // at UnboundError.Until.
@@ -132,15 +129,11 @@ func unbindState(ctx context.Context, q *db.Queries, rules UnbindRules, userID i
 	if rules.Off || rules.Limit == 0 {
 		return st, nil
 	}
-	ats, err := q.ListUnbindsSince(ctx, db.ListUnbindsSinceParams{UserID: userID, At: now.Add(-rules.window()).Unix()})
-	if err != nil {
-		return st, err
-	}
-	st.Used = len(ats)
-	if st.Used >= rules.Limit {
-		st.Next = time.Unix(ats[st.Used-rules.Limit], 0).Add(rules.window()).UTC()
-	}
-	return st, nil
+	var err error
+	st.Used, st.Next, err = sliding(rules.Limit, rules.window(), now, func(since int64) ([]int64, error) {
+		return q.ListUnbindsSince(ctx, db.ListUnbindsSinceParams{UserID: userID, At: since})
+	})
+	return st, err
 }
 
 // holdUnbound keeps a device the subscriber unbound out for the rules' pause, as a ban
@@ -157,8 +150,9 @@ func holdUnbound(ctx context.Context, q *db.Queries, rules UnbindRules, userID i
 		Until: sql.NullInt64{Int64: until, Valid: true}})
 }
 
-// unbindKeep is how long unbinds are kept: the longest window there may be.
-const unbindKeep = (MaxUnbindDays + 1) * 24 * time.Hour
+// unbindKeep is how long unbinds and link reissues are kept: the longest window either may
+// have, whichever of the two allows the longer.
+const unbindKeep = (max(MaxUnbindDays, MaxReissueDays) + 1) * 24 * time.Hour
 
 // Prune drops the pauses that have ended and the unbinds and link reissues no window
 // reaches any more (the windows of both are at most a year long).

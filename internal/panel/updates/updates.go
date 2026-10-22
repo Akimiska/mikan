@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -28,6 +27,8 @@ import (
 	"time"
 
 	"mikan/internal/fsutil"
+	"mikan/internal/httpjson"
+	"mikan/internal/pace"
 	"mikan/internal/release"
 )
 
@@ -67,40 +68,32 @@ var (
 // Fetch looks in the signed release index at indexURL (its signature at indexURL + ".sig")
 // and fetches the manifest of the release it names; when the index cannot be had or
 // believed, it takes the manifest at latestURL, so a broken index never stops updates.
-// Every file is checked against the release key.
+// Every file is checked against the release keys (release.ReleaseKeys).
 func Fetch(indexURL, latestURL string) Source {
-	pub, err := release.Key(release.PublicKey)
-	if err != nil {
-		panic(err)
-	}
-	return fetch(indexURL, latestURL, pub, &http.Client{Timeout: 30 * time.Second})
+	return fetch(indexURL, latestURL, release.TrustedKeys(), &http.Client{Timeout: 30 * time.Second})
 }
 
-func fetch(indexURL, latestURL string, pub ed25519.PublicKey, client *http.Client) Source {
+func fetch(indexURL, latestURL string, keys []ed25519.PublicKey, client *http.Client) Source {
 	get := func(ctx context.Context, u string, limit int64) ([]byte, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, err
 		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusNotFound {
+		data, err := httpjson.Fetch(client, req, limit)
+		switch code := httpjson.Code(err); {
+		case code == http.StatusNotFound:
 			return nil, ErrNoRelease
+		case code != 0:
+			return nil, fmt.Errorf("GET %s: HTTP %d", u, code)
 		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("GET %s: %s", u, resp.Status)
-		}
-		return io.ReadAll(io.LimitReader(resp.Body, limit))
+		return data, err
 	}
 	signed := func(ctx context.Context, u string, parse func(data []byte, sig string) error) error {
-		return release.FetchSigned(ctx, get, u, 1<<20, parse)
+		return release.FetchSigned(ctx, get, u, ".sig", 1<<20, parse)
 	}
 	manifest := func(ctx context.Context, u string) (m release.Manifest, err error) {
 		err = signed(ctx, u, func(data []byte, sig string) (err error) {
-			m, err = release.Parse(data, sig, pub)
+			m, err = release.Parse(data, sig, keys...)
 			return err
 		})
 		return m, err
@@ -108,7 +101,7 @@ func fetch(indexURL, latestURL string, pub ed25519.PublicKey, client *http.Clien
 	fromIndex := func(ctx context.Context, q Query) (Found, error) {
 		var ix release.Index
 		err := signed(ctx, indexURL, func(data []byte, sig string) (err error) {
-			ix, err = release.ParseIndex(data, sig, pub)
+			ix, err = release.ParseIndex(data, sig, keys...)
 			return err
 		})
 		if err != nil {
@@ -194,19 +187,12 @@ func (c *Checker) Run(ctx context.Context) {
 	if c.source == nil {
 		return
 	}
-	t := time.NewTimer(firstCheck)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			next := checkEvery
-			// No release yet is an answer, not a failure.
-			if err := c.check(ctx); err != nil && !errors.Is(err, ErrNoRelease) {
-				next = retryAfter
-			}
-			t.Reset(next)
+	wait := firstCheck
+	for pace.Sleep(ctx, wait) {
+		wait = checkEvery
+		// No release yet is an answer, not a failure.
+		if err := c.check(ctx); err != nil && !errors.Is(err, ErrNoRelease) {
+			wait = retryAfter
 		}
 	}
 }
@@ -286,9 +272,15 @@ func (c *Checker) SetPolicy(p Policy) error {
 	return c.write("policy.json", data)
 }
 
-// Request asks the host to update now.
+// Request asks the host to update now, to the release the page shows when it shows one: a
+// host whose copy of the release index is older (GitHub's cache, for minutes after a
+// release) reads it again instead of calling its own version the latest.
 func (c *Checker) Request() error {
-	data, _ := json.Marshal(map[string]string{"at": c.now().UTC().Format(time.RFC3339)})
+	req := map[string]string{"at": c.now().UTC().Format(time.RFC3339)}
+	if s := c.State(); s.Available() {
+		req["version"] = s.Latest.Version
+	}
+	data, _ := json.Marshal(req)
 	return c.write("request", data)
 }
 

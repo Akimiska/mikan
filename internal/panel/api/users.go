@@ -73,8 +73,9 @@ type userEnv struct {
 
 func (h *handlers) userEnv(ctx context.Context) userEnv {
 	var e userEnv
-	// A subscription link is the user's credential: a read-only key does not get it.
-	if h.d.SubBase != nil && !hidesSecrets(ctx) {
+	// A subscription link is the user's credential: a read-only key does not get it, nor does
+	// a support operator the admin did not let see the subscribers.
+	if h.d.SubBase != nil && !hidesLinks(ctx) {
 		e.subBase = h.d.SubBase(ctx)
 	}
 	e.online = h.online()
@@ -111,7 +112,7 @@ func (h *handlers) viewUser(u db.User, slots []string, bound int64, grants domai
 		SpeedLimit: store.Int64Ptr(u.SpeedLimit), ResetStrategy: u.ResetStrategy, ExpiresAt: store.TimePtr(u.ExpiresAt),
 		BillingDay: store.Int64Ptr(u.BillingDay),
 		Inbounds:   domain.DecodeInbounds(u.Inbounds), OnlineAt: store.TimePtr(u.OnlineAt),
-		CreatedAt: time.Unix(u.CreatedAt, 0).UTC(), OnlineIPs: []string{}, BoundDevices: bound,
+		CreatedAt: store.Time(u.CreatedAt), OnlineIPs: []string{}, BoundDevices: bound,
 		Source: u.Source, FolderID: store.Int64Ptr(u.FolderID), Hidden: u.Hidden != 0,
 	}
 	if v.Inbounds == nil {
@@ -160,7 +161,7 @@ func (h *handlers) userSlots(ctx context.Context, ids []int64) (map[int64][]stri
 
 type listUsersInput struct {
 	State  string `query:"state" enum:"all,active,expiring,limited,expired,disabled,attention" default:"all" doc:"attention — исчерпан лимит, истекают и истекли, в этом порядке: одним запросом для обзора"`
-	Query  string `query:"q" maxLength:"100"`
+	Query  string `query:"q" maxLength:"100" doc:"Поиск по имени, контакту, заметке и меткам. Оператору поддержки без показа подписчиков закрыт: 403 support_denied"`
 	Folder string `query:"folder" maxLength:"20" default:"all" doc:"all — любая; none — вне папок; число — id папки"`
 	Source string `query:"source" enum:"all,admin,bot,trial,free,import" default:"all" doc:"Откуда пользователь, см. source у пользователя"`
 	Hidden string `query:"hidden" enum:"hide,show,only" default:"show" doc:"show — вместе со скрытыми (по умолчанию: скрытие касается только списка в панели); hide — без скрытых; only — только скрытые"`
@@ -309,17 +310,26 @@ func mapDomainErr(err error) error {
 	case errors.Is(err, domain.ErrNoSlots):
 		return huma.Error503ServiceUnavailable("no_free_slots")
 	case errors.Is(err, domain.ErrBadBillingDay):
-		return huma.Error422UnprocessableEntity("bad_billing_day", &huma.ErrorDetail{Location: "body.billing_day", Message: "bad_billing_day"})
+		return fieldErr("body.billing_day", "bad_billing_day")
 	case errors.Is(err, domain.ErrBadSpeedLimit):
-		return huma.Error422UnprocessableEntity("bad_speed_limit", &huma.ErrorDetail{Location: "body.speed_limit", Message: "bad_speed_limit"})
+		return fieldErr("body.speed_limit", "bad_speed_limit")
 	case errors.Is(err, domain.ErrBanShared):
-		return huma.Error422UnprocessableEntity("device_no_hwid")
+		return refusal("device_no_hwid")
 	}
-	var fe *domain.FieldError
-	if errors.As(err, &fe) {
-		return fieldErr("body."+fe.Field, fe.Code)
+	if fe, ok := fieldFromDomain(err); ok {
+		return fe
 	}
 	return err
+}
+
+// fieldFromDomain is the API's 422 of a field the domain refused (domain.FieldError), at
+// body.<field>; ok false for any other error.
+func fieldFromDomain(err error) (error, bool) {
+	var fe *domain.FieldError
+	if errors.As(err, &fe) {
+		return fieldErr("body."+fe.Field, fe.Code), true
+	}
+	return nil, false
 }
 
 // folderFilter is the list's folder parameter: any folder, none, or one folder.
@@ -383,6 +393,13 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 	// The filters stay in Go: the search lowercases as Go does (PostgreSQL's lower() follows
 	// the database's locale, and a C locale leaves Cyrillic as it is), and the states are
 	// domain.State. Only the page's users get their slots read.
+	//
+	// A search by name, contact, note or tag tells with its total and the ids it finds whether
+	// the text is in a subscriber, however the answer is masked: an operator who may not see
+	// the subscribers does not search them.
+	if strings.TrimSpace(in.Query) != "" && hidesPeople(ctx) {
+		return nil, huma.Error403Forbidden("support_denied")
+	}
 	users, err := h.d.Store.Q.ListUsers(ctx)
 	if err != nil {
 		return nil, err
@@ -514,7 +531,7 @@ func (h *handlers) userResult(ctx context.Context, u db.User, err error) (*userO
 func (h *handlers) createUser(ctx context.Context, in *createUserInput) (*userOutput, error) {
 	u, err := h.d.Users.Create(ctx, domain.CreateInput{Name: in.Body.Name, Contact: in.Body.Contact, Note: in.Body.Note, Tags: in.Body.Tags, TariffID: in.Body.TariffID, Source: domain.UserFromAdmin})
 	if errors.Is(err, domain.ErrNotFound) {
-		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "tariff_not_found"})
+		return nil, fieldErr("body.tariff_id", "tariff_not_found")
 	}
 	if err == nil {
 		h.audit(ctx, sessionOf(ctx).AdminID, "user.create", "user", strconv.FormatInt(u.ID, 10), map[string]any{"tariff_id": in.Body.TariffID})
@@ -530,7 +547,7 @@ func (h *handlers) getUser(ctx context.Context, in *userIDInput) (*userOutput, e
 			out.Body.Telegram = &TelegramLink{ID: l.TgID, Username: l.Username, Name: l.FirstName}
 		}
 		// An old link is a credential like the own one: not for a key that may only read.
-		if !hidesSecrets(ctx) {
+		if !hidesLinks(ctx) {
 			out.Body.Legacy = h.legacyLinks(ctx, u.ID)
 		}
 	}
@@ -539,6 +556,9 @@ func (h *handlers) getUser(ctx context.Context, in *userIDInput) (*userOutput, e
 
 func (h *handlers) updateUser(ctx context.Context, in *patchUserInput) (*userOutput, error) {
 	b := in.Body
+	if b.ExpiresAt != nil && (b.ExpiresAt.Year() < 0 || b.ExpiresAt.Year() > 9999) {
+		return nil, fieldErr("body.expires_at", "bad_expiry")
+	}
 	p := domain.Patch{
 		Name: b.Name, Contact: b.Contact, Note: b.Note, Tags: b.Tags, Disabled: b.Disabled,
 		TrafficLimit: b.TrafficLimit, ClearTrafficLimit: b.TrafficUnlimited,
@@ -590,7 +610,7 @@ func (h *handlers) deleteUser(ctx context.Context, in *userIDInput) (*struct{}, 
 func (h *handlers) extendUser(ctx context.Context, in *extendInput) (*userOutput, error) {
 	b := in.Body
 	if (b.Days > 0) == (b.Months > 0) {
-		return nil, huma.Error422UnprocessableEntity("extend_amount", &huma.ErrorDetail{Location: "body", Message: "extend_amount"})
+		return nil, fieldErr("body", "extend_amount")
 	}
 	var u db.User
 	var err error
@@ -657,7 +677,7 @@ func (h *handlers) boundDevices(ctx context.Context, in *userIDInput) (*boundDev
 	out := &boundDevicesOutput{Body: []BoundDeviceView{}}
 	for _, d := range devs {
 		out.Body = append(out.Body, BoundDeviceView{ID: d.ID, Name: d.Name, HWID: d.Hwid, OS: d.Os, OSVersion: d.OsVersion, Model: d.Model, App: d.App, LastIP: d.LastIp,
-			Online: len(env.liveIPs([]string{name[d.ID]})) > 0, CreatedAt: time.Unix(d.CreatedAt, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC(),
+			Online: len(env.liveIPs([]string{name[d.ID]})) > 0, CreatedAt: store.Time(d.CreatedAt), LastSeen: store.Time(d.LastSeen),
 			TrafficUp: traffic[d.ID].Up, TrafficDown: traffic[d.ID].Down})
 	}
 	return out, nil
@@ -725,7 +745,7 @@ func (h *handlers) banDevice(ctx context.Context, in *unbindInput) (*deviceBanOu
 		return nil, mapDomainErr(err)
 	}
 	h.audit(ctx, admin, "user.ban_device", "user", strconv.FormatInt(in.ID, 10), map[string]any{"device": in.Device, "ban": b.ID, "label": b.Label})
-	v := DeviceBanView{ID: b.ID, HWID: b.Hwid, Label: b.Label, BannedAt: time.Unix(b.BannedAt, 0).UTC()}
+	v := DeviceBanView{ID: b.ID, HWID: b.Hwid, Label: b.Label, BannedAt: store.Time(b.BannedAt)}
 	if b.AdminID.Valid {
 		if a, err := h.d.Store.Q.GetAdmin(ctx, b.AdminID.Int64); err == nil {
 			v.Admin = a.Username
@@ -744,9 +764,9 @@ func (h *handlers) deviceBans(ctx context.Context, in *userIDInput) (*deviceBans
 	}
 	out := &deviceBansOutput{Body: make([]DeviceBanView, 0, len(rows))}
 	for _, r := range rows {
-		v := DeviceBanView{ID: r.ID, HWID: r.Hwid, Label: r.Label, Admin: r.AdminName, BannedAt: time.Unix(r.BannedAt, 0).UTC()}
+		v := DeviceBanView{ID: r.ID, HWID: r.Hwid, Label: r.Label, Admin: r.AdminName, BannedAt: store.Time(r.BannedAt)}
 		if r.Until.Valid {
-			t := time.Unix(r.Until.Int64, 0).UTC()
+			t := store.Time(r.Until.Int64)
 			if domain.Forever(t) {
 				v.Forever = true
 			} else {
@@ -815,7 +835,7 @@ func (h *handlers) userTraffic(ctx context.Context, in *trafficInput) (*trafficO
 			return nil, err
 		}
 		for _, r := range rows {
-			out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Day*86400, 0).UTC(), Up: r.Up, Down: r.Down})
+			out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Day * 86400), Up: r.Up, Down: r.Down})
 		}
 		return out, nil
 	}
@@ -824,7 +844,7 @@ func (h *handlers) userTraffic(ctx context.Context, in *trafficInput) (*trafficO
 		return nil, err
 	}
 	for _, r := range rows {
-		out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Hour*3600, 0).UTC(), Up: r.Up, Down: r.Down})
+		out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Hour * 3600), Up: r.Up, Down: r.Down})
 	}
 	return out, nil
 }
@@ -844,7 +864,7 @@ func (h *handlers) userDevices(ctx context.Context, in *userIDInput) (*devicesOu
 	live := userEnv{online: h.online()}.liveIPs(slots)
 	out := &devicesOutput{Body: []DeviceView{}}
 	for _, d := range rows {
-		out.Body = append(out.Body, DeviceView{IP: d.Ip, FirstSeen: time.Unix(d.FirstSeen, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC(), Online: slices.Contains(live, d.Ip)})
+		out.Body = append(out.Body, DeviceView{IP: d.Ip, FirstSeen: store.Time(d.FirstSeen), LastSeen: store.Time(d.LastSeen), Online: slices.Contains(live, d.Ip)})
 	}
 	return out, nil
 }

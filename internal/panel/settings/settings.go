@@ -23,8 +23,12 @@ const (
 	KeyPanelPort  = "panel_port"
 	// KeySubPort is a port of its own for subscriptions; 0 or unset: the panel's port.
 	// The panel's port keeps serving subscriptions either way, for links handed out.
-	KeySubPort   = "sub_port"
-	KeyDomain    = "domain"
+	KeySubPort = "sub_port"
+	KeyDomain  = "domain"
+	// KeySubDomain is a domain of its own for subscription links, apart from the panel's:
+	// its own certificate (acme.NewSub), the panel's address keeps serving the links handed
+	// out before. Empty: the links are on the panel's address.
+	KeySubDomain = "sub_domain"
 	KeyACMEEmail = "acme_email"
 	// KeyACMECA is the certificate authority of the panel and its nodes (acme.ValidCA);
 	// unset: Let's Encrypt. KeyACMEEABKID and KeyACMEEABHMAC are Google Trust Services'
@@ -50,6 +54,9 @@ const (
 	// KeyWideScan lets the search for REALITY sites go past the node's /24 to the rest of
 	// its /16 (scan.Options.Wide): more candidates, and many more connections.
 	KeyWideScan = "wide_sni_scan"
+	// KeySupportAccess lets the admin open support access (internal/panel/support); off, no
+	// grant can be made and the live one ends.
+	KeySupportAccess = "support_access"
 	// Devices (domain.Devices): bind subscriptions to devices, on unless switched off;
 	// refuse apps that send no device id instead of seating them together, off by default.
 	KeyDeviceBinding = "device_binding"
@@ -79,12 +86,26 @@ const (
 	// Branding and support: the bot's and the subscription page's name and the support link.
 	KeyBrand      = "brand"
 	KeySupportURL = "support_url"
+	// KeyPanelAppName is the admin panel's name as an installed app (server.AppName): ""
+	// for the brand, "mikan" without one.
+	KeyPanelAppName = "panel_app_name"
 	// The announcement apps show over the profile (the announce and announce-url headers),
 	// for maintenance or news; empty: none.
 	KeyAnnounce    = "sub_announce"
 	KeyAnnounceURL = "sub_announce_url"
 	// KeySubTitle is the profile's name in the apps (subs.Config.Title); empty: the brand.
 	KeySubTitle = "sub_title"
+	// A subscription that cannot connect gets one notice in place of its servers
+	// (subs.Config.InactiveServer), with the admin's words or the built-in ones.
+	KeyInactiveServer = "sub_inactive_server"
+	// KeySiteTemplate is the built-in front page a stranger sees at the panel's address
+	// (frontpage.Templates); "" for none.
+	KeySiteTemplate = "site_template"
+	// KeyTrafficDetail: the nodes sum each subscription's bytes by site (user_sites), kept
+	// KeyTrafficDetailDays days.
+	KeyTrafficDetail     = "traffic_detail"
+	KeyTrafficDetailDays = "traffic_detail_days"
+	KeyInactiveText      = "sub_inactive_text"
 	// App branding: the brand, logo and accent colour go to the apps that read operator
 	// headers (subs.OperatorHeaders); off by default.
 	KeyAppBranding = "app_branding"
@@ -121,17 +142,20 @@ type Switch struct {
 
 // The panel's switches.
 var (
-	AutoPort      = Switch{KeyAutoPort, true}
-	AutoSNI       = Switch{KeyAutoSNI, true}
-	AnyPort       = Switch{KeyAnyPort, false}
-	WideScan      = Switch{KeyWideScan, false}
-	DeviceBinding = Switch{KeyDeviceBinding, true}
-	RequireHWID   = Switch{KeyRequireHWID, false}
-	AutoUpdate    = Switch{KeyAutoUpdate, false}
-	NodesFollow   = Switch{KeyNodesFollow, true}
-	ShowGoals     = Switch{KeyShowGoals, true}
-	AppBranding   = Switch{KeyAppBranding, false}
-	HappHide      = Switch{KeyHappHide, false}
+	AutoPort       = Switch{KeyAutoPort, true}
+	AutoSNI        = Switch{KeyAutoSNI, true}
+	AnyPort        = Switch{KeyAnyPort, false}
+	WideScan       = Switch{KeyWideScan, false}
+	DeviceBinding  = Switch{KeyDeviceBinding, true}
+	RequireHWID    = Switch{KeyRequireHWID, false}
+	AutoUpdate     = Switch{KeyAutoUpdate, false}
+	NodesFollow    = Switch{KeyNodesFollow, true}
+	ShowGoals      = Switch{KeyShowGoals, true}
+	AppBranding    = Switch{KeyAppBranding, false}
+	HappHide       = Switch{KeyHappHide, false}
+	InactiveServer = Switch{KeyInactiveServer, false}
+	TrafficDetail  = Switch{KeyTrafficDetail, false}
+	SupportAccess  = Switch{KeySupportAccess, true}
 )
 
 // ValidLang says whether s is a language of the panel.
@@ -336,11 +360,17 @@ func (e Endpoint) URL() string {
 	return "https://" + net.JoinHostPort(e.Host, strconv.Itoa(e.Port))
 }
 
-// SubEndpoint is where subscription links point: the subscription port when one is set.
+// SubEndpoint is where subscription links point: the subscription domain and port when
+// they are set.
 func (s *Settings) SubEndpoint(ctx context.Context) (Endpoint, error) {
 	ep, err := s.Endpoint(ctx)
 	if err != nil {
 		return ep, err
+	}
+	if d, err := s.String(ctx, KeySubDomain); err != nil {
+		return ep, err
+	} else if d != "" {
+		ep.Host = d
 	}
 	if p, _, err := Get[int](ctx, s, KeySubPort); err != nil {
 		return ep, err

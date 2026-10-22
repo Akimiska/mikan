@@ -21,7 +21,7 @@ const (
 
 func challengeNode(t *testing.T, addr string) *nodeapi.Client {
 	t.Helper()
-	e := &Engine{log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now), sys: newSysSampler(), Challenge: acmechallenge.New(addr)}
+	e := &Engine{log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{}), sys: newSysSampler(), Challenge: acmechallenge.New(addr)}
 	t.Cleanup(e.Challenge.Close)
 	sock := t.TempDir() + "/node.sock"
 	ln, err := net.Listen("unix", sock)

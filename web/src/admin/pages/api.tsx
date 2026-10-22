@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, Copy, KeyRound, Plus, Trash2 } from "lucide-react";
-import { lazy, Suspense, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { meQuery, qk } from "../../api/hooks";
+import { useSupportMode } from "../../api/support";
+import { ClosedForSupport } from "../support-closed";
 import { Confirm, Drawer, DrawerFooter } from "../../components/overlay";
 import { QueryBoundary } from "../../components/query";
 import { useToast } from "../../components/toast";
@@ -12,6 +14,7 @@ import { t } from "../../i18n";
 import { useCopy } from "../../lib/copy";
 import { fieldErrors } from "../../lib/fields";
 import { ago, dateShort } from "../../lib/format";
+import { CardHead } from "../../components/layout";
 
 // The reference parses the whole OpenAPI spec: loaded only when the page opens.
 const ApiReference = lazy(() => import("./api-reference"));
@@ -20,6 +23,8 @@ type APIKey = Schemas["APIKeyView"];
 type Scope = APIKey["scope"];
 
 export function ApiPage() {
+  // The keys are the admin's own: closed to a support operator, the reference stays open.
+  const operator = !!useSupportMode();
   return (
     <>
       <Link to="/settings" search={{ tab: "security" }} className="mb-2 inline-flex items-center gap-1 rounded-lg text-[13px] font-medium text-[var(--ink-500)] hover:text-[var(--ink-900)]">
@@ -27,7 +32,7 @@ export function ApiPage() {
       </Link>
       <PageHeader title={t("apiPage.title")} sub={t("apiPage.subtitle")} />
       <div className="flex flex-col gap-4">
-        <KeysCard />
+        {operator ? <ClosedForSupport /> : <KeysCard />}
         <Suspense fallback={<Skeleton style={{ height: 480, borderRadius: 20 }} />}>
           <ApiReference />
         </Suspense>
@@ -56,15 +61,13 @@ function KeysCard() {
   });
   return (
     <section className="card glass reveal">
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("apiPage.keys")}</h2>
-          <div className="card-sub">{t("apiPage.keysSub")}</div>
-        </div>
-        <Button size="sm" variant="primary" onClick={() => setAdding(true)}>
+      <CardHead
+        title={t("apiPage.keys")}
+        sub={t("apiPage.keysSub")}
+        aside={<Button size="sm" variant="primary" onClick={() => setAdding(true)}>
           <Plus size={16} aria-hidden /> {t("apiPage.newKey")}
-        </Button>
-      </div>
+        </Button>}
+      />
       <QueryBoundary query={keys} pending={<Skeleton style={{ height: 96 }} />}>
         {(list) =>
           list.length === 0 ? (
@@ -139,14 +142,20 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: qk.apiKeys });
       onOpenChange(false);
-      setName("");
-      setScope("read");
-      setDays(0);
-      setPassword("");
-      setCode("");
       onMade(r.key);
     },
   });
+  // Blank whenever the drawer opens or shuts, however it was closed: the admin's password and code
+  // stay in state no longer than the drawer, and a wider scope or a refusal from before is not carried over.
+  const { reset: resetCreate } = create;
+  useEffect(() => {
+    setName("");
+    setScope("read");
+    setDays(0);
+    setPassword("");
+    setCode("");
+    resetCreate();
+  }, [open, resetCreate]);
   const errors = fieldErrors(create.error);
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -155,10 +164,7 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
   return (
     <Drawer
       open={open}
-      onOpenChange={(v) => {
-        if (!v) create.reset();
-        onOpenChange(v);
-      }}
+      onOpenChange={onOpenChange}
       title={t("apiPage.newKey")}
       footer={
         <DrawerFooter form="new-key" onCancel={() => onOpenChange(false)} loading={create.isPending} disabled={!name.trim() || !password || (totp && code.length !== 6)}>
@@ -167,7 +173,7 @@ function NewKeyDrawer({ open, onOpenChange, onMade }: { open: boolean; onOpenCha
       }
     >
       <form id="new-key" onSubmit={submit} className="pt-5" noValidate>
-        {create.error && !Object.keys(errors).length ? <div className="banner err mb-4">{errorText(create.error)}</div> : null}
+        {create.error && !Object.keys(errors).length ? <div className="banner err mb-4" role="alert">{errorText(create.error)}</div> : null}
         <Field label={t("apiPage.name")} htmlFor="k-name" hint={t("apiPage.nameHint")} error={errors.name}>
           <input id="k-name" className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="billing-bot" autoComplete="off" aria-invalid={!!errors.name} />
         </Field>

@@ -10,6 +10,7 @@ import (
 
 	"mikan/internal/nodehello"
 	"mikan/internal/nodetls"
+	"mikan/internal/pace"
 	"mikan/internal/panel/config"
 )
 
@@ -24,10 +25,8 @@ func helloLoop(ctx context.Context, key nodetls.Key, dataDir string, log *slog.L
 	started := time.Now().UTC()
 	hc := nodehello.Client()
 	for i, pause := range helloPause {
-		select {
-		case <-ctx.Done():
+		if !pace.Sleep(ctx, pause) {
 			return
-		case <-time.After(pause):
 		}
 		r := nodehello.Send(ctx, key, hc, time.Now())
 		final := nodehello.Final(r) || i == len(helloPause)-1
@@ -51,7 +50,11 @@ func helloLoop(ctx context.Context, key nodetls.Key, dataDir string, log *slog.L
 func helloOnce() {
 	now := time.Now().UTC()
 	var s nodehello.Status
-	key, err := nodetls.DecodeKey(os.Getenv("MIKAN_NODE_JOIN"))
+	raw, err := config.Secret("MIKAN_NODE_JOIN")
+	var key nodetls.Key
+	if err == nil {
+		key, err = nodetls.DecodeKey(raw)
+	}
 	if err != nil {
 		s = nodehello.Status{Result: nodehello.Result{Code: nodehello.NoPanelURL, Error: err.Error()}}
 	} else {
@@ -63,6 +66,6 @@ func helloOnce() {
 	if err := nodehello.Write(envOr("MIKAN_DATA_DIR", config.DefaultDataDir), s); err != nil {
 		fmt.Fprintln(os.Stderr, "mikan-node: save the answer:", err)
 	}
-	raw, _ := json.Marshal(s)
-	fmt.Println(string(raw))
+	out, _ := json.Marshal(s)
+	fmt.Println(string(out))
 }

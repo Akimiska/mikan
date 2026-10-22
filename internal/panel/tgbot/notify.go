@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
-	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/panel/model"
+	"mikan/internal/textutil"
+	"mikan/internal/tgapi"
 )
 
 // night: automatic notices then come without a sound. Most users live on Moscow time;
 // a notice at 3 a.m. with a ring is how a bot gets reported as spam.
 func night(t time.Time) bool {
-	h := t.In(time.FixedZone("MSK", 3*60*60)).Hour()
+	h := t.In(textutil.Zone).Hour()
 	return h >= 22 || h < 9
 }
 
@@ -34,7 +35,7 @@ func noticeKind(typ string, days int) string {
 }
 
 // noticeMessage is a notice of kind about u, as the admin worded it, with its buttons.
-func (b *Bot) noticeMessage(ctx context.Context, cfg Config, w *words, u db.User, kind string, now time.Time) (string, *tgate.Keyboard) {
+func (b *Bot) noticeMessage(ctx context.Context, cfg Config, w *words, u model.User, kind string, now time.Time) (string, *tgapi.Keyboard) {
 	var tpl string
 	switch kind {
 	case "expire_3d", "expire_1d":
@@ -47,19 +48,19 @@ func (b *Bot) noticeMessage(ctx context.Context, cfg Config, w *words, u db.User
 		tpl = pick(cfg.Texts.TrafficEnd, w.trafficEnd)
 	}
 	text := render(tpl, b.vars(ctx, w, u, now))
-	var rows [][]tgate.Button
+	var rows [][]tgapi.Button
 	// Traffic running out: the packages there are for this subscription, a tap away.
 	if kind == "traffic_90" || kind == "traffic_100" {
 		if len(b.packageOffers(ctx, u.ID)) > 0 {
-			rows = append(rows, []tgate.Button{{Text: w.buyTraffic, CallbackData: "xu:" + strconv.FormatInt(u.ID, 10)}})
+			rows = append(rows, []tgapi.Button{{Text: w.buyTraffic, CallbackData: "xu:" + strconv.FormatInt(u.ID, 10)}})
 		}
 	}
 	if kind != "traffic_90" {
-		rows = append(rows, []tgate.Button{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}})
+		rows = append(rows, []tgapi.Button{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}})
 	}
-	var kb *tgate.Keyboard
+	var kb *tgapi.Keyboard
 	if len(rows) > 0 {
-		kb = &tgate.Keyboard{InlineKeyboard: rows}
+		kb = &tgapi.Keyboard{InlineKeyboard: rows}
 	}
 	return text, kb
 }

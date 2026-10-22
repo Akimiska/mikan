@@ -17,9 +17,9 @@ import (
 	"mikan/internal/panel/tgate"
 )
 
-// A node something still goes through is not deleted: the API names the inbounds and
-// the nodes that leave through it and the bot's route, and nothing changes until they
-// are switched away.
+// Deleting a node moves what left through it to another enabled remote node, never the
+// panel's own, or straight out; only the bot's route to Telegram keeps it, and then
+// nothing changes.
 func TestDeleteNodeInUse(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -63,33 +63,14 @@ func TestDeleteNodeInUse(t *testing.T) {
 	}
 
 	resp, body := h.do(http.MethodDelete, api+"/nodes/"+id(b.ID), nil, csrf)
-	for _, want := range []string{`"node_in_use"`, `"node_in_use_inbounds"`, `vless-xhttp (203.0.113.10)`, `"node_in_use_relays"`, `"value":"C"`, `"node_in_use_telegram"`} {
-		if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), want) {
-			t.Fatalf("B in use, no %s: %d %s", want, resp.StatusCode, body)
-		}
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), `"node_in_use_telegram"`) {
+		t.Fatalf("the bot goes through B: %d %s", resp.StatusCode, body)
 	}
 	if _, err := h.st.Q.GetNode(ctx, b.ID); err != nil {
 		t.Fatalf("B is gone: %v", err)
 	}
 	if after, _ := h.st.Q.GetInbound(ctx, x.ID); after.ExitNodeID.Int64 != b.ID {
-		t.Fatalf("the inbound lost its exit: %+v", after)
-	}
-
-	// One left is still one too many.
-	for _, step := range []struct {
-		path string
-		body map[string]any
-	}{
-		{inbound, map[string]any{"outbound": "direct"}},
-		{api + "/nodes/" + id(c.ID) + "/cascade", map[string]any{"outbound": "direct"}},
-	} {
-		if resp, body := h.do(http.MethodPatch, step.path, step.body, csrf); resp.StatusCode != http.StatusOK {
-			t.Fatalf("%s: %d %s", step.path, resp.StatusCode, body)
-		}
-	}
-	resp, body = h.do(http.MethodDelete, api+"/nodes/"+id(b.ID), nil, csrf)
-	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "node_in_use_telegram") || strings.Contains(string(body), "node_in_use_inbounds") {
-		t.Fatalf("only the bot left: %d %s", resp.StatusCode, body)
+		t.Fatalf("the refused delete moved the inbound: %+v", after)
 	}
 	if err := settings.Set(ctx, set, tgate.KeyRoute, tgate.Route{Mode: tgate.RouteDirect}); err != nil {
 		t.Fatal(err)
@@ -100,7 +81,75 @@ func TestDeleteNodeInUse(t *testing.T) {
 	if _, err := h.st.Q.GetNode(ctx, b.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("B is still there: %v", err)
 	}
+	// The panel's inbound moves to C, the one remote node left; C has no node but itself
+	// and the panel's left, so its cascade goes straight out.
+	if after, _ := h.st.Q.GetInbound(ctx, x.ID); after.ExitNodeID.Int64 != c.ID || after.Outbound != "direct" {
+		t.Fatalf("the inbound did not move to C: %+v", after)
+	}
+	relays, _ := h.st.Q.ListNodeRelays(ctx)
+	for _, r := range relays {
+		if r.NodeID == c.ID && r.ExitNodeID.Valid {
+			t.Fatalf("C still exits through %d", r.ExitNodeID.Int64)
+		}
+	}
 	if resp, _ := h.do(http.MethodDelete, api+"/nodes/1", nil, csrf); resp.StatusCode != http.StatusConflict {
 		t.Fatalf("the panel's own node: %d", resp.StatusCode)
+	}
+}
+
+// Several inbounds go out one way in one request; one that cannot (here: through its own
+// node) refuses the whole request by its name and nothing changes.
+func TestSetInboundExits(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if err := domain.Seed(ctx, h.st, h.now); err != nil {
+		t.Fatal(err)
+	}
+	set := settings.New(h.st.Q)
+	for k, v := range map[string]any{settings.KeyPublicHost: "203.0.113.10", settings.KeyPanelPort: 21355} {
+		if err := settings.Set(ctx, set, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	panel, _ := nodetls.Generate("mikan-panel", x509.ExtKeyUsageClientAuth, time.Now())
+	b, _, err := domain.AddNode(ctx, h.st, panel, domain.NodeInput{Name: "B", Host: "198.51.100.20", APIPort: 40000}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
+		t.Fatal("login")
+	}
+	csrf := map[string]string{"X-CSRF-Token": h.csrf}
+	api := "/" + adminPath + "/api/v1"
+	ins, _ := h.st.Q.ListInbounds(ctx)
+	if len(ins) < 2 {
+		t.Fatalf("seed: %d inbounds", len(ins))
+	}
+	ids := []int64{ins[0].ID, ins[1].ID}
+	if resp, body := h.do(http.MethodPost, api+"/inbounds/exit", map[string]any{"ids": ids, "outbound": "node", "exit_node_id": b.ID}, csrf); resp.StatusCode != http.StatusOK || strings.Count(string(body), `"exit_node_id":`+strconv.FormatInt(b.ID, 10)) != 2 {
+		t.Fatalf("via B: %d %s", resp.StatusCode, body)
+	}
+	if relays, _ := h.st.Q.ListNodeRelays(ctx); len(relays) == 0 {
+		t.Fatal("B got no relay")
+	}
+	resp, body := h.do(http.MethodPost, api+"/inbounds/exit", map[string]any{"ids": ids, "outbound": "node", "exit_node_id": ins[0].NodeID}, csrf)
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), `"exit_self"`) || !strings.Contains(string(body), ins[0].Name) {
+		t.Fatalf("through its own node: %d %s", resp.StatusCode, body)
+	}
+	for _, id := range ids {
+		if in, _ := h.st.Q.GetInbound(ctx, id); in.ExitNodeID.Int64 != b.ID {
+			t.Fatalf("a refused request changed %s: %+v", in.Name, in)
+		}
+	}
+	if resp, body := h.do(http.MethodPost, api+"/inbounds/exit", map[string]any{"ids": ids, "outbound": "direct"}, csrf); resp.StatusCode != http.StatusOK {
+		t.Fatalf("direct: %d %s", resp.StatusCode, body)
+	}
+	for _, id := range ids {
+		if in, _ := h.st.Q.GetInbound(ctx, id); in.ExitNodeID.Valid || in.Outbound != "direct" {
+			t.Fatalf("not direct: %+v", in)
+		}
+	}
+	if resp, _ := h.do(http.MethodPost, api+"/inbounds/exit", map[string]any{"ids": ids, "outbound": "node"}, csrf); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("node without a node: %d", resp.StatusCode)
 	}
 }

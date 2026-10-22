@@ -15,7 +15,7 @@ import (
 // address, a domain or a key in the raw errors.
 
 // publicNames are names everybody's report may show: the places every mikan reaches.
-var publicNames = []string{"github.com", "ghcr.io", "check-host.net", "api.telegram.org", "cloudflare.com"}
+var publicNames = []string{"github.com", "ghcr.io", "api.globalping.io", "api.telegram.org", "cloudflare.com"}
 
 var (
 	reportToken  = regexp.MustCompile(`[^\s"'(),;\[\]{}<>=]+`)

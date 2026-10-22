@@ -8,13 +8,14 @@ import (
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/store/db"
 )
 
 // KindTrial is a payment for the trial when the admin puts a price on it.
-const KindTrial = "trial"
+const KindTrial = model.KindTrial
 
 // TrialRefundByHand is the error of a paid trial that may not be given and whose payment
 // method cannot refund: the admin refunds it in the provider's dashboard and closes it with
@@ -23,12 +24,12 @@ const TrialRefundByHand = "trial_refund_manual"
 
 var (
 	// ErrTrialOff: the admin offers no trial, or its tariff is gone.
-	ErrTrialOff = errors.New("trial_off")
+	ErrTrialOff = model.ErrTrialOff
 	// ErrTrialUsed: this Telegram account took its trial already, or is a customer (it
 	// has a subscription or paid for one): a trial is for people who have not tried yet.
-	ErrTrialUsed = errors.New("trial_used")
+	ErrTrialUsed = model.ErrTrialUsed
 	// ErrTrialPaid: the trial has a price; it is bought with TrialInvoice.
-	ErrTrialPaid = errors.New("trial_paid")
+	ErrTrialPaid = model.ErrTrialPaid
 )
 
 // errTrialChanged: a trial payment that was to be refunded is in a state nobody expected.
@@ -69,7 +70,8 @@ func (s *Service) trialAllowed(ctx context.Context, q *db.Queries, tgID int64) (
 	if taken, err := q.HasTrial(ctx, tgID); err != nil || taken {
 		return false, err
 	}
-	if n, err := q.CountTgLinksOf(ctx, tgID); err != nil || n > 0 {
+	// Ever a client (a subscription the admin gave, unlinked since, included): no trial.
+	if was, err := q.WasClient(ctx, tgID); err != nil || was {
 		return false, err
 	}
 	n, err := q.CountUserPaidPayments(ctx, tgID)
@@ -86,7 +88,7 @@ func (s *Service) trialAllowedFor(ctx context.Context, q *db.Queries, pay db.Pay
 	if taken, err := q.HasTrial(ctx, pay.TgID); err != nil || taken {
 		return false, err
 	}
-	if n, err := q.CountTgLinksOf(ctx, pay.TgID); err != nil || n > 0 {
+	if was, err := q.WasClient(ctx, pay.TgID); err != nil || was {
 		return false, err
 	}
 	n, err := q.CountUserPaidPaymentsExcept(ctx, db.CountUserPaidPaymentsExceptParams{TgID: pay.TgID, ID: pay.ID})
@@ -135,12 +137,7 @@ func (s *Service) Trial(ctx context.Context, tgID int64) (db.User, error) {
 		// Told in the same transaction: never of a trial that rolled back.
 		return emitTrialStarted(ctx, q, now, u.ID, tgID, t.ID, 0)
 	}
-	err := s.d.Store.Tx(ctx, run)
-	if errors.Is(err, domain.ErrNoSlots) {
-		if err = s.d.Users.RefillSlots(ctx); err == nil {
-			err = s.d.Store.Tx(ctx, run)
-		}
-	}
+	err := s.d.Users.WithSlots(ctx, func() error { return s.d.Store.Tx(ctx, run) })
 	if err != nil {
 		return db.User{}, err
 	}
@@ -217,7 +214,7 @@ func (s *Service) TrialInvoice(ctx context.Context, tgID int64, provider string)
 	p, open, err := s.newPayment(ctx, tgID, now,
 		func(q *db.Queries) ([]db.Payment, error) {
 			return q.FindOpenPayments(ctx, db.FindOpenPaymentsParams{TgID: tgID, TariffID: tariffID, Provider: provider, Kind: KindTrial,
-				Since: now.Add(-invoiceReuse).Unix()})
+				Since: now.Add(-invoiceReuse).Unix(), RepeatSince: now.Add(-balanceRepeat).Unix()})
 		},
 		func(q *db.Queries, existing db.Payment) (bool, error) {
 			if err := eligible(q); err != nil {
@@ -236,7 +233,7 @@ func (s *Service) TrialInvoice(ctx context.Context, tgID int64, provider string)
 		return p, err
 	}
 	lang, _ := s.d.Settings.Lang(ctx)
-	return s.openPayment(ctx, p, t.Name, Describe(t, t.DurationDays, lang))
+	return s.openPayment(ctx, p, t.Name, model.Describe(model.Tariff(t), t.DurationDays, lang))
 }
 
 // applyTrial makes the paid trial on q's transaction: a subscription on the tariff and
@@ -325,6 +322,12 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 		if err != nil {
 			return err
 		}
+		if n == 1 {
+			// A trial paid from the balance gets its money back there (refundCharge).
+			if err := refundToBalance(ctx, q, cur, now.Unix()); err != nil {
+				return err
+			}
+		}
 		if n != 1 {
 			latest, err := q.GetPayment(ctx, cur.ID)
 			if err != nil {
@@ -346,11 +349,6 @@ func (s *Service) refundTrial(ctx context.Context, p db.Payment) error {
 	}
 	s.d.Events.Kick()
 	s.d.Log.Warn("billing: a paid trial the account may not take was refunded", "payment", cur.ID, "provider", cur.Provider, "tg", cur.TgID)
-	if n := s.notifier(); n != nil {
-		// Nothing was made for the payment, so the buyer hears only that it came back.
-		cur.Status, cur.RefundedAt = PaymentRefunded, refundedAt
-		n.Refunded(ctx, cur, db.User{}, false)
-	}
 	return nil
 }
 
@@ -374,9 +372,6 @@ func (s *Service) trialByHand(ctx context.Context, p db.Payment) error {
 	}
 	s.d.Events.Kick()
 	s.d.Log.Warn("billing: a paid trial the account may not take waits for a refund by hand", "payment", p.ID, "provider", p.Provider, "tg", p.TgID)
-	if n := s.notifier(); n != nil {
-		n.TrialNotGiven(ctx, p)
-	}
 	return nil
 }
 
@@ -384,14 +379,22 @@ func (s *Service) trialByHand(ctx context.Context, p db.Payment) error {
 // through an adapter but never applied (a trial that could not be given, a subscription
 // deleted since the invoice). It ends refunded, as a refund through the panel would, and
 // the buyer is told the money is back. Stars are refunded through the panel (Refund); a
-// payment applied, or in another state, is ErrNotRefunable.
+// payment applied, or in another state, is ErrNotRefunable. A payment from the balance is
+// refunded onto it (Refund): no dashboard holds that money. An adapter's payment that was
+// applied is RefundedOutside.
 func (s *Service) RefundedByHand(ctx context.Context, id int64) error {
 	p, err := s.d.Store.Q.GetPayment(ctx, id)
 	if err != nil {
 		return err
 	}
-	if p.Provider == Stars || p.Status != PaymentPaid {
+	if p.Provider == Stars || p.Provider == Balance || p.Status != PaymentPaid && (p.Status != PaymentApplied || model.AddonID(p.Provider) == "") {
 		return ErrNotRefunable
+	}
+	if p.Status == PaymentApplied {
+		// Refunded in the dashboard (or a chargeback) after it gave something: what it gave
+		// goes back with the money, as a refund through the panel would take it.
+		_, err := s.refunded(ctx, id)
+		return err
 	}
 	// Not while a trial's own refund runs (refundTrial takes the same turn).
 	unlock, _ := s.trialRefunds.lock(context.Background(), id)
@@ -417,9 +420,5 @@ func (s *Service) RefundedByHand(ctx context.Context, id int64) error {
 		}
 	}
 	s.d.Log.Info("billing: refunded by hand", "payment", id, "provider", p.Provider)
-	if n := s.notifier(); n != nil {
-		p.Status, p.RefundedAt, p.Error = PaymentRefunded, refundedAt, ""
-		n.Refunded(ctx, p, db.User{}, false)
-	}
 	return nil
 }

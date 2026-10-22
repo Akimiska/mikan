@@ -15,6 +15,11 @@ export type UserState = User["state"];
 const base = new URL("./", document.baseURI);
 export const basePath = base.pathname.replace(/\/$/, "");
 
+/** A WebSocket address of an API path (the terminal): the page's own origin and secret path. */
+export function wsUrl(path: string): string {
+  return base.origin.replace(/^http/, "ws") + basePath + path;
+}
+
 let csrfToken = "";
 export function setCsrf(token: string) {
   csrfToken = token;
@@ -24,6 +29,9 @@ export class ApiError extends Error {
   status: number;
   detail: string;
   fields: Record<string, string>;
+  /** The code the API sent for a field ("routes_servers"): what a form compares, not the text,
+   * which changes with the language and the translation. */
+  codes: Record<string, string>;
   /** The value the API sent with a field's error, such as the line of a bad rule. */
   values: Record<string, unknown>;
   /** Every detail's text in the API's order, several per field too (what a node is used by). */
@@ -37,6 +45,7 @@ export class ApiError extends Error {
     this.detail = b.detail ?? "";
     this.retryAfter = retryAfter;
     this.fields = {};
+    this.codes = {};
     this.values = {};
     this.messages = [];
     // The API sends codes ("port_in_use") with an optional value; texts live in i18n.
@@ -46,6 +55,7 @@ export class ApiError extends Error {
       if (!e.location) continue;
       const field = e.location.replace(/^body\./, "");
       this.fields[field] = text;
+      this.codes[field] = e.message ?? "";
       this.values[field] = e.value;
     }
   }
@@ -99,7 +109,8 @@ export function errorText(e: unknown): string {
   if (e.status === 0) return t("errors.network");
   if (e.status === 503 && e.detail === "no_free_slots") return t("errors.noSlots");
   if (e.status === 503) return t("errors.nodeDown");
-  if (e.status === 403) return t("errors.forbidden");
+  // A support operator is refused with a code that says why (read-only access, a closed part).
+  if (e.status === 403) return (e.detail ? tMaybe(`errors.api.${e.detail}`) : undefined) ?? t("errors.forbidden");
   if (e.status === 404) return t("errors.notFound");
   if (e.status === 400 || e.status === 409 || e.status === 422) return Object.values(e.fields)[0] || tMaybe(`errors.api.${e.detail}`) || t("errors.checkInput");
   if (e.status === 429) return t("errors.tooMany", { s: e.retryAfter || 60 });

@@ -5,7 +5,7 @@ description: What a subscriber sees at the link, which apps are supported on eac
 
 ## The subscription page
 
-A subscription link opened in a browser, or in Telegram as a Mini App, shows the subscription page: expiry, traffic, pools, devices and the "Connect a device" section. The platform is detected automatically, the first app in the tab is marked "Recommended", and the "Add" button opens the subscription straight in the app.
+A subscription link opened in a browser, or in Telegram as a Mini App, shows the subscription page: expiry, traffic, the "Separate limits" block (server groups with a limit of their own), devices and the "Connect a device" section. The platform is detected automatically, the first app in the tab is marked "Recommended", and the "Add" button opens the subscription straight in the app.
 
 Further down the page: a step-by-step "How to connect" guide, the link itself and a QR code for another device, the "Contact support" button (the link is set in **Settings → Subscription → Support**), "Open in Telegram", and a "My devices" section if device binding is on: there a device can be unbound or given a name of its own.
 
@@ -13,15 +13,15 @@ Further down the page: a step-by-step "How to connect" guide, the link itself an
 
 | Platform | Apps on the page |
 |---|---|
-| iPhone | Happ, Streisand, v2RayTun |
-| Android | Happ, ClashFest, INCY, v2RayTun, Hiddify |
-| Windows | Koala Clash, SlothClash, Hiddify, Clash Verge Rev |
-| Mac | Clash Verge Rev, SlothClash, Happ, Hiddify |
-| Linux | SlothClash, Clash Verge Rev, Hiddify |
+| iPhone | Happ, INCY, Streisand, v2RayTun |
+| Android | Mikan, Happ, ClashFest, INCY, v2RayTun, Hiddify |
+| Windows | Kabosu, Koala Clash, SlothClash, Hiddify, Clash Verge Rev |
+| Mac | Kabosu, Clash Verge Rev, SlothClash, Happ, Hiddify |
+| Linux | Kabosu, SlothClash, Clash Verge Rev, Hiddify |
 
 The subscription recognizes the app by its User-Agent header and serves the matching format:
 
-- **Clash apps on mihomo** (Koala Clash, Clash Verge, FlClash, ClashFest, SlothClash and others) and Stash get a Clash YAML profile with groups and routes.
+- **Clash apps on mihomo** (Mikan, Kabosu, Koala Clash, Clash Verge, FlClash, ClashFest, SlothClash and others) and Stash get a Clash YAML profile with groups and routes.
 - **Xray apps** (Happ, v2RayTun, INCY, v2rayNG) and **sing-box apps** (Hiddify, Karing) get a list of links.
 - A browser gets the subscription page.
 
@@ -39,8 +39,8 @@ Apps refresh the subscription hourly, which is how new ports and keys reach clie
 - **Support**: a Telegram or website link.
 - **Devices**: binding a subscription to devices, see [Plans and users](/mikan/en/billing/plans/#devices).
 - **Subscription port**: see [Domain and certificates](/mikan/en/start/domain/#subscription-port).
-- **A domain of its own for subscriptions** (beta 0.5.1.1): see [A domain of its own for subscriptions](/mikan/en/subscriptions/domain/).
-- **When a subscription does not work** (beta 0.5.1.1): an entry in place of the servers, see [below](#when-a-subscription-does-not-work).
+- **A domain of its own for subscriptions** (since 0.5.2.0): see [A domain of its own for subscriptions](/mikan/en/subscriptions/domain/).
+- **When a subscription does not work** (since 0.5.2.0): an entry in place of the servers, see [below](#when-a-subscription-does-not-work).
 
 ## Subscription name in apps
 
@@ -56,7 +56,7 @@ The **Subscription name in apps** field sets the profile name that Happ, v2RayTu
 | `{left}` | traffic left; ∞ if unlimited |
 | `{total}` | traffic limit including packages; ∞ if unlimited |
 | `{devices}` | how many devices are bound, "2/3" with a limit |
-| `{tariff}` | the user's plan name; empty if there is no plan (beta 0.5.1.1) |
+| `{tariff}` | the user's plan name; empty if there is no plan (since 0.5.2.0) |
 
 For example, `{brand} · until {date}` becomes "mikan · until 10.11.2026". An unknown word in curly braces is left as is, and the result is capped at 200 characters.
 
@@ -66,8 +66,8 @@ The **Announcement** and **Announcement link** (https:// or tg://) are shown ins
 
 ## When a subscription does not work
 
-:::note[In beta 0.5.1.1]
-The notice in place of the servers is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::note[New in 0.5.2.0]
+The notice in place of the servers is new in 0.5.2.0.
 :::
 
 When the term or traffic is over or the subscription is turned off, an app used to show every server, but none of them connected. Now **Settings → Subscription** has a **When a subscription does not work** card. The **Show a notice in place of the servers** switch replaces the list of servers with one entry that explains what happened and what to do.

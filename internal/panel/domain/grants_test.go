@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
@@ -183,7 +184,7 @@ func TestGrantsPoolAndMainApart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.st.Q.SetUserPoolLimit(e.ctx, db.SetUserPoolLimitParams{UserID: e.u.ID, PoolID: p.ID, TrafficLimit: sql.NullInt64{Int64: 10, Valid: true}}); err != nil {
+	if err := e.st.Q.SetUserPool(e.ctx, db.SetUserPoolParams{UserID: e.u.ID, PoolID: p.ID, Mode: PoolOwn, TrafficLimit: sql.NullInt64{Int64: 10, Valid: true}}); err != nil {
 		t.Fatal(err)
 	}
 	main := e.grant(0, 50, LifetimeUsed, 0)
@@ -205,7 +206,7 @@ func TestGrantsPoolAndMainApart(t *testing.T) {
 		t.Fatal("a pool past its base is exhausted only without grants")
 	}
 	// A pool without a limit never touches its grants.
-	if err := e.st.Q.SetUserPoolLimit(e.ctx, db.SetUserPoolLimitParams{UserID: e.u.ID, PoolID: p.ID}); err != nil {
+	if err := e.st.Q.SetUserPool(e.ctx, db.SetUserPoolParams{UserID: e.u.ID, PoolID: p.ID, Mode: PoolUnlimited}); err != nil {
 		t.Fatal(err)
 	}
 	e.countPool(p.ID, 1000)
@@ -222,7 +223,7 @@ func TestGrantsUnlimitedBase(t *testing.T) {
 	if got := e.left(g); got[0] != 50 {
 		t.Fatalf("unlimited user spent a grant: %d", got[0])
 	}
-	if TrafficLeft(sql.NullInt64{}, 1<<40, 50) != -1 {
+	if model.TrafficLeft(sql.NullInt64{}, 1<<40, 50) != -1 {
 		t.Fatal("unlimited quota must stay unlimited")
 	}
 }
@@ -343,7 +344,7 @@ func TestAdminGrant(t *testing.T) {
 		t.Fatal("the nodes must hear about the grant")
 	}
 	left := e.grantsLeft().Main(u.ID)
-	if State(u, left, *e.now) != StateActive || TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, left) != 2*GiB {
+	if State(u, left, *e.now) != StateActive || model.TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, left) != 2*GiB {
 		t.Fatalf("after the grant: %s, left %d", State(u, left, *e.now), left)
 	}
 	bad := []struct {

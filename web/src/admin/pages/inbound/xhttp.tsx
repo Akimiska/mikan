@@ -1,7 +1,7 @@
 import { TriangleAlert } from "lucide-react";
 import type { Schemas } from "../../../api/client";
 import { Field, Segmented } from "../../../components/ui";
-import { Switch } from "../../../components/switch";
+import { SwitchRow } from "../../../components/switch";
 import { t } from "../../../i18n";
 
 export type XHTTP = Schemas["XHTTPTuning"];
@@ -34,6 +34,10 @@ export const XHTTP_DEFAULT: XHTTP = {
   no_sse_header: false,
   session_table: "",
   session_length: "",
+  client_uplink_http_method: "",
+  client_uplink_data_placement: "",
+  client_uplink_data_key: "",
+  client_uplink_chunk_size: "",
 };
 
 /** The names both cores use when a placement has no key of its own. */
@@ -91,6 +95,8 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
   const strong =
     value.x_padding_obfs_mode ||
     value.uplink_http_method !== "" ||
+    value.client_uplink_http_method !== "" ||
+    value.client_uplink_data_placement !== "" ||
     !["", "path"].includes(value.session_placement ?? "") ||
     !["", "path"].includes(value.seq_placement ?? "") ||
     !["", "body"].includes(value.uplink_data_placement ?? "");
@@ -161,17 +167,13 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
 
       <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.padding")}</h3>
       {input("x_padding_bytes", "100-1000", t("inbounds.xhttp.paddingBytes"), t("inbounds.xhttp.rangeHint"))}
-      <div className="flex items-start justify-between gap-4 py-2">
-        <div className="min-w-0">
-          <div className="text-[13px] font-medium">{t("inbounds.xhttp.obfs")}</div>
-          <div className="mt-1 text-xs text-[var(--ink-500)]">{t("inbounds.xhttp.obfsHint")}</div>
-        </div>
-        <Switch
-          checked={!!value.x_padding_obfs_mode}
-          label={t("inbounds.xhttp.obfs")}
-          onChange={(v) => onChange({ ...value, x_padding_obfs_mode: v, x_padding_key: v && !value.x_padding_key ? token() : value.x_padding_key })}
-        />
-      </div>
+      <SwitchRow
+        className="py-2"
+        label={t("inbounds.xhttp.obfs")}
+        sub={t("inbounds.xhttp.obfsHint")}
+        checked={!!value.x_padding_obfs_mode}
+        onChange={(v) => onChange({ ...value, x_padding_obfs_mode: v, x_padding_key: v && !value.x_padding_key ? token() : value.x_padding_key })}
+      />
       {value.x_padding_obfs_mode ? (
         <div className="grid gap-x-3 sm:grid-cols-2">
           <Field label={t("inbounds.xhttp.placement")} htmlFor="x-placement">
@@ -197,15 +199,77 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
 
       <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.upload")}</h3>
       <div className="grid gap-x-3 sm:grid-cols-3">
-        <Field label={t("inbounds.xhttp.uplinkMethod")} htmlFor="x-uplink">
-          <select id="x-uplink" className="input" value={value.uplink_http_method} onChange={set("uplink_http_method")}>
+        <Field label={t("inbounds.xhttp.uplinkMethod")} htmlFor="x-uplink" hint={value.uplink_http_method === "GET" ? t("inbounds.xhttp.getHint") : undefined}>
+          <select
+            id="x-uplink"
+            className="input"
+            value={value.uplink_http_method}
+            onChange={(e) => {
+              const m = e.target.value as XHTTP["uplink_http_method"];
+              // A GET is an upload only in packet-up.
+              onChange({ ...value, uplink_http_method: m, mode: m === "GET" ? "packet-up" : value.mode });
+            }}
+          >
             <option value="">POST</option>
             <option value="PUT">PUT</option>
             <option value="PATCH">PATCH</option>
+            <option value="GET">GET</option>
           </select>
         </Field>
         {input("uplink_chunk_size", "", t("inbounds.xhttp.chunk"))}
         {input("sc_max_each_post_bytes", "1000000", t("inbounds.xhttp.maxPost"))}
+      </div>
+
+      <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.clientUpload")}</h3>
+      <p className="mb-2 text-xs text-[var(--ink-500)]">{t("inbounds.xhttp.clientUploadHint")}</p>
+      <div className="grid gap-x-3 sm:grid-cols-2">
+        <Field
+          label={t("inbounds.xhttp.uplinkMethod")}
+          htmlFor="x-client-uplink"
+          hint={value.client_uplink_http_method === "GET" ? t("inbounds.xhttp.getHint") : undefined}
+        >
+          <select
+            id="x-client-uplink"
+            className="input"
+            value={value.client_uplink_http_method ?? ""}
+            onChange={(e) => {
+              const m = e.target.value as XHTTP["client_uplink_http_method"];
+              onChange({ ...value, client_uplink_http_method: m, mode: m === "GET" ? "packet-up" : value.mode });
+            }}
+          >
+            <option value="">{t("inbounds.xhttp.asServer")}</option>
+            <option value="POST">POST</option>
+            <option value="PUT">PUT</option>
+            <option value="PATCH">PATCH</option>
+            <option value="GET">GET</option>
+          </select>
+        </Field>
+        <Field label={t("inbounds.xhttp.dataPlace")} htmlFor="x-client-placement">
+          <select
+            id="x-client-placement"
+            className="input"
+            value={value.client_uplink_data_placement ?? ""}
+            onChange={(e) => {
+              const v = e.target.value as XHTTP["client_uplink_data_placement"];
+              const named = v === "header" || v === "cookie";
+              onChange({
+                ...value,
+                client_uplink_data_placement: v,
+                mode: named ? "packet-up" : value.mode,
+                client_uplink_data_key: named && !value.client_uplink_data_key ? value.uplink_data_key || (v === "header" ? "X-Data" : "x_data") : value.client_uplink_data_key,
+              });
+            }}
+          >
+            <option value="">{t("inbounds.xhttp.asServer")}</option>
+            <option value="body">body</option>
+            <option value="header">header</option>
+            <option value="cookie">cookie</option>
+          </select>
+        </Field>
+        {value.client_uplink_data_placement === "header" || value.client_uplink_data_placement === "cookie"
+          ? input("client_uplink_data_key", value.client_uplink_data_placement === "header" ? "X-Data" : "x_data", t("inbounds.xhttp.key"), t("inbounds.xhttp.clientKeyHint"), false)
+          : null}
+        {input("client_uplink_chunk_size", value.uplink_chunk_size || "", t("inbounds.xhttp.chunk"), t("inbounds.xhttp.rangeHint"))}
       </div>
 
       <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.sessionGroup")}</h3>
@@ -244,13 +308,7 @@ export function XhttpTuning({ value, onChange, error }: { value: XHTTP; onChange
         {input("sc_stream_up_server_secs", "20-80", t("inbounds.xhttp.serverSecs"), t("inbounds.xhttp.serverSecsHint"))}
         {input("sc_max_buffered_posts", "30", t("inbounds.xhttp.bufferedPosts"), t("inbounds.xhttp.bufferedPostsHint"))}
       </div>
-      <div className="flex items-start justify-between gap-4 py-2">
-        <div className="min-w-0">
-          <div className="text-[13px] font-medium">{t("inbounds.xhttp.noSse")}</div>
-          <div className="mt-1 text-xs text-[var(--ink-500)]">{t("inbounds.xhttp.noSseHint")}</div>
-        </div>
-        <Switch checked={!!value.no_sse_header} label={t("inbounds.xhttp.noSse")} onChange={(v) => onChange({ ...value, no_sse_header: v })} />
-      </div>
+      <SwitchRow className="py-2" label={t("inbounds.xhttp.noSse")} sub={t("inbounds.xhttp.noSseHint")} checked={!!value.no_sse_header} onChange={(v) => onChange({ ...value, no_sse_header: v })} />
 
       <h3 className="mt-3 mb-1 text-[13px] font-semibold">{t("inbounds.xhttp.reuse")}</h3>
       <p className="mb-2 text-xs text-[var(--ink-500)]">{t("inbounds.xhttp.reuseHint")}</p>

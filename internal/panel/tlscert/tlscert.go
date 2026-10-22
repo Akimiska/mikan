@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -115,4 +116,32 @@ func PEM(dir string) (certPEM, keyPEM, pin string, err error) {
 		return "", "", "", errors.New("self.crt: no PEM block")
 	}
 	return string(c), string(k), nodetls.PinOfDER(block.Bytes), nil
+}
+
+// BySNI serves the subscription domain's certificate to clients that name that domain,
+// and the panel's to the rest, the domain's own clients included while it has none yet.
+type BySNI struct {
+	Panel, Sub *Holder
+	name       atomic.Pointer[string]
+}
+
+// SetName is the subscription domain now; "" when there is none.
+func (b *BySNI) SetName(name string) { b.name.Store(&name) }
+
+// Name is the subscription domain, "" when there is none.
+func (b *BySNI) Name() string {
+	if n := b.name.Load(); n != nil {
+		return *n
+	}
+	return ""
+}
+
+// Get is tls.Config.GetCertificate.
+func (b *BySNI) Get(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if n := b.Name(); n != "" && hello != nil && strings.EqualFold(strings.TrimSuffix(hello.ServerName, "."), n) {
+		if c, err := b.Sub.Get(hello); err == nil {
+			return c, nil
+		}
+	}
+	return b.Panel.Get(hello)
 }

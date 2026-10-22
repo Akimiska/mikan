@@ -54,7 +54,7 @@ export function Avatar({ name, seed, size }: { name: string; seed: number; size?
     .replace(/[«»"@()]/g, "")
     .trim()
     .split(/\s+/)
-    .map((w) => w[0] ?? "")
+    .map((w) => Array.from(w)[0] ?? "")
     .slice(0, 2)
     .join("")
     .toUpperCase();
@@ -66,11 +66,11 @@ export function Avatar({ name, seed, size }: { name: string; seed: number; size?
   );
 }
 
-export function Segmented<T extends string>({ value, options, onChange, label, block }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string; block?: boolean }) {
+export function Segmented<T extends string>({ value, options, onChange, label, block, disabled }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string; block?: boolean; disabled?: boolean }) {
   return (
     <div className={block ? "seg seg-block" : "seg"} role="group" aria-label={label}>
       {options.map((o) => (
-        <button key={o.value} type="button" aria-pressed={o.value === value} onClick={() => onChange(o.value)}>
+        <button key={o.value} type="button" aria-pressed={o.value === value} disabled={disabled} onClick={() => onChange(o.value)}>
           {o.label}
         </button>
       ))}
@@ -94,10 +94,12 @@ export function Bar({ pct, className, label }: { pct: number; className?: string
   );
 }
 
-export function Ring({ pct, label, sub, size = 112 }: { pct: number; label: ReactNode; sub: ReactNode; size?: number }) {
+export function Ring({ pct, label, sub, size = 112, unlimited }: { pct: number; label: ReactNode; sub: ReactNode; size?: number; unlimited?: boolean }) {
   const r = size / 2 - 8;
   const c = 2 * Math.PI * r;
-  const tone = pct >= 100 ? "bad" : pct >= 85 ? "warn" : "";
+  // With no limit there is nothing to run out of: the ring is full in the accent colour, never the red of a spent one.
+  const fill = unlimited ? 100 : Math.min(Math.max(pct, 0), 100);
+  const tone = unlimited ? "" : pct >= 100 ? "bad" : pct >= 85 ? "warn" : "";
   return (
     <div className={clsx("gauge", tone)} style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
@@ -111,7 +113,7 @@ export function Ring({ pct, label, sub, size = 112 }: { pct: number; label: Reac
           strokeWidth={10}
           strokeLinecap="round"
           strokeDasharray={c}
-          strokeDashoffset={c * (1 - Math.min(Math.max(pct, 0), 100) / 100)}
+          strokeDashoffset={c * (1 - fill / 100)}
         />
       </svg>
       <div className="gauge-label">

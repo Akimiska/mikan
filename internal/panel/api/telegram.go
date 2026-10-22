@@ -15,13 +15,16 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"mikan/internal/netaddr"
 	"mikan/internal/panel/addons/panelapi"
+	"mikan/internal/panel/botpanel"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/infraalerts"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
 	"mikan/internal/panel/tgbot"
+	"mikan/internal/tgapi"
 )
 
 // TelegramView is the bot as the admin panel shows it. The token itself never leaves
@@ -42,6 +45,7 @@ type TelegramView struct {
 	Route          TelegramRoute            `json:"route" doc:"Как бот ходит в Telegram"`
 	Infrastructure infraalerts.AlertsConfig `json:"infrastructure"`
 	AdminChatSet   bool                     `json:"admin_chat_set"`
+	AlertsRefused  *infraalerts.Refused     `json:"alerts_refused,omitempty" doc:"Последнее уведомление, которое Telegram отверг насовсем (бот заблокирован, чат или канал недоступен): оно не доставлено и не повторяется"`
 	ChannelError   string                   `json:"channel_error,omitempty" doc:"Почему бот не может проверить подписку на канал: channel_not_admin (бот не администратор канала), channel_not_found, unreachable или ответ Telegram. Пока ошибка есть, обязательная подписка никого не останавливает"`
 }
 
@@ -138,6 +142,10 @@ func (h *handlers) connectInfrastructureAdmin(ctx context.Context, _ *struct{}) 
 	if err != nil {
 		return nil, err
 	}
+	// A chat connected anew is the way out of what Telegram refused before.
+	if err := settings.Set(ctx, h.d.Settings, infraalerts.KeyRefused, infraalerts.Refused{}); err != nil {
+		return nil, err
+	}
 	out := &infrastructureConnectOutput{}
 	out.Body.URL = url
 	h.audit(ctx, sessionOf(ctx).AdminID, "telegram.infrastructure_connect", "telegram", "", nil)
@@ -182,7 +190,7 @@ func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 			v.TokenHint = id
 		}
 	}
-	if bot, ok, _ := settings.Get[tgate.User](ctx, h.d.Settings, tgate.KeyBot); ok && token != "" {
+	if bot, ok, _ := settings.Get[tgapi.User](ctx, h.d.Settings, tgate.KeyBot); ok && token != "" {
 		v.Bot = &TelegramBot{Username: bot.Username, Name: bot.FirstName}
 	}
 	if h.d.Gateway != nil {
@@ -208,6 +216,11 @@ func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 		if err != nil {
 			return v, err
 		}
+	}
+	if r, ok, err := settings.Get[infraalerts.Refused](ctx, h.d.Settings, infraalerts.KeyRefused); err != nil {
+		return v, err
+	} else if ok && r.At > 0 {
+		v.AlertsRefused = &r
 	}
 	route := tgate.Route{Mode: tgate.RouteDirect}
 	if h.d.Gateway != nil {
@@ -273,7 +286,7 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 	if err != nil {
 		return nil, err
 	}
-	var bot *tgate.User
+	var bot *tgapi.User
 	if b.Token != nil {
 		token = *b.Token
 		if token == "" {
@@ -284,7 +297,7 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 			}
 			// Through the route as it will be: a new route is proven by the token's check.
 			me, err := h.d.Gateway.CheckTokenVia(ctx, token, route)
-			var ae *tgate.APIError
+			var ae *tgapi.APIError
 			switch {
 			case errors.As(err, &ae) && (ae.Code == 401 || ae.Code == 404):
 				return nil, fieldErr("body.token", "tg_token_invalid")
@@ -403,12 +416,17 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 // an internal service is reached through a harmless-looking name. The name is looked up
 // here, and a name that cannot be is let through, the check made on route is the real one.
 func (h *handlers) proxyHostOK(ctx context.Context, host string) bool {
-	inside := func(a netip.Addr) bool {
-		a = a.Unmap()
-		return a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() || a.IsMulticast()
+	// Where no proxy is: the metadata address, no unicast address at all.
+	nowhere := func(a netip.Addr) bool {
+		switch netaddr.Classify(a) {
+		case netaddr.LinkLocal, netaddr.Unspecified, netaddr.Multicast, netaddr.Broadcast:
+			return true
+		}
+		return false
 	}
+	inside := func(a netip.Addr) bool { return nowhere(a) || netaddr.Classify(a) == netaddr.Loopback }
 	if a, err := netip.ParseAddr(host); err == nil {
-		return !(a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() || a.IsMulticast())
+		return !nowhere(a)
 	}
 	if strings.EqualFold(strings.TrimSuffix(host, "."), "localhost") {
 		return true
@@ -467,7 +485,7 @@ func (h *handlers) broadcast(ctx context.Context, in *broadcastInput) (*broadcas
 	switch {
 	case errors.Is(err, tgate.ErrOff):
 		return nil, huma.Error409Conflict("bot_off")
-	case errors.Is(err, tgbot.ErrBusy):
+	case errors.Is(err, botpanel.ErrBusy):
 		return nil, huma.Error409Conflict("broadcast_busy")
 	case err != nil:
 		return nil, err

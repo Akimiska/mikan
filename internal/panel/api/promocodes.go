@@ -58,7 +58,7 @@ type PromoBody struct {
 	MinOrder          int64   `json:"min_order" minimum:"0" doc:"Минимальная сумма заказа в минимальных единицах оплаты: RUB — копейки, XTR — Stars"`
 	MaxDiscount       int64   `json:"max_discount" minimum:"0" doc:"Максимальная скидка в минимальных единицах оплаты: RUB — копейки, XTR — Stars"`
 	TariffIDs         []int64 `json:"tariff_ids"`
-	PoolID            *int64  `json:"pool_id,omitempty" minimum:"1" doc:"Пул для бонусного трафика; без значения — основной трафик"`
+	PoolID            *int64  `json:"pool_id,omitempty" minimum:"1" doc:"Группа серверов для бонусного трафика; без значения — основной трафик"`
 	FirstPurchaseOnly bool    `json:"first_purchase_only"`
 	NewUsersOnly      bool    `json:"new_users_only"`
 	Enabled           bool    `json:"enabled"`
@@ -75,8 +75,9 @@ type promoListOutput struct {
 }
 type promoOneOutput struct{ Body PromoCodeView }
 type promoRedemptionsInput struct {
-	Limit  int64 `query:"limit" minimum:"1" maximum:"200" default:"50"`
-	Offset int64 `query:"offset" minimum:"0" default:"0"`
+	Limit  int64  `query:"limit" minimum:"1" maximum:"200" default:"50"`
+	Offset int64  `query:"offset" minimum:"0" default:"0"`
+	Q      string `query:"q" maxLength:"64" doc:"Часть кода (без учёта регистра) или ID клиента либо его Telegram ID целиком"`
 }
 type PromoRedemptionView struct {
 	ID             int64      `json:"id"`
@@ -122,13 +123,7 @@ func (h *handlers) registerPromocodes() {
 	huma.Register(h.api, huma.Operation{OperationID: "list-promocode-redemptions", Method: http.MethodGet, Path: "/api/v1/promocodes/redemptions", Summary: "История промокодов", Tags: tags}, h.listPromocodeRedemptions)
 	huma.Register(h.api, huma.Operation{OperationID: "promocode-stats", Method: http.MethodGet, Path: "/api/v1/promocodes/stats", Summary: "Статистика промокодов", Tags: tags}, h.promocodeStats)
 }
-func ts(v sql.NullInt64) *time.Time {
-	if !v.Valid {
-		return nil
-	}
-	t := time.Unix(v.Int64, 0)
-	return &t
-}
+
 func promoView(p db.PromoCode, now time.Time) PromoCodeView {
 	var ids []int64
 	_ = json.Unmarshal([]byte(p.TariffIds), &ids)
@@ -144,7 +139,7 @@ func promoView(p db.PromoCode, now time.Time) PromoCodeView {
 	} else if p.MaxUses.Valid && p.UsedCount >= p.MaxUses.Int64 {
 		st = "exhausted"
 	}
-	return PromoCodeView{ID: p.ID, Code: p.Code, Name: p.Name, Description: p.Description, Type: p.Type, Value: p.Value, Currency: p.Currency, StartsAt: ts(p.StartsAt), EndsAt: ts(p.EndsAt), PoolID: func() *int64 {
+	return PromoCodeView{ID: p.ID, Code: p.Code, Name: p.Name, Description: p.Description, Type: p.Type, Value: p.Value, Currency: p.Currency, StartsAt: store.TimePtr(p.StartsAt), EndsAt: store.TimePtr(p.EndsAt), PoolID: func() *int64 {
 		if p.PoolID.Valid {
 			v := p.PoolID.Int64
 			return &v
@@ -156,7 +151,7 @@ func promoView(p db.PromoCode, now time.Time) PromoCodeView {
 			return &x
 		}
 		return nil
-	}(), UsedCount: p.UsedCount, PerUserLimit: p.PerUserLimit, DiscountTtl: p.DiscountTtl, MinOrder: p.MinOrder, MaxDiscount: p.MaxDiscount, TariffIDs: ids, FirstPurchaseOnly: p.FirstPurchaseOnly != 0, NewUsersOnly: p.NewUsersOnly != 0, Enabled: p.Enabled != 0, Status: st, CreatedAt: time.Unix(p.CreatedAt, 0), CreatedBy: func() *int64 {
+	}(), UsedCount: p.UsedCount, PerUserLimit: p.PerUserLimit, DiscountTtl: p.DiscountTtl, MinOrder: p.MinOrder, MaxDiscount: p.MaxDiscount, TariffIDs: ids, FirstPurchaseOnly: p.FirstPurchaseOnly != 0, NewUsersOnly: p.NewUsersOnly != 0, Enabled: p.Enabled != 0, Status: st, CreatedAt: store.Time(p.CreatedAt), CreatedBy: func() *int64 {
 		if p.CreatedBy.Valid {
 			x := p.CreatedBy.Int64
 			return &x
@@ -357,11 +352,13 @@ func (h *handlers) deletePromocode(ctx context.Context, in *struct {
 	return &struct{}{}, nil
 }
 func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemptionsInput) (*promoRedemptionsOutput, error) {
-	xs, e := h.d.Store.Q.ListPromoRedemptionsWithCode(ctx, db.ListPromoRedemptionsWithCodeParams{Lim: in.Limit, RowOffset: in.Offset})
+	// The search goes to the database: a filter of the loaded page alone found only part.
+	q := strings.TrimSpace(in.Q)
+	xs, e := h.d.Store.Q.ListPromoRedemptionsWithCode(ctx, db.ListPromoRedemptionsWithCodeParams{Q: q, Lim: in.Limit, RowOffset: in.Offset})
 	if e != nil {
 		return nil, e
 	}
-	n, e := h.d.Store.Q.CountPromoRedemptions(ctx)
+	n, e := h.d.Store.Q.CountPromoRedemptions(ctx, q)
 	if e != nil {
 		return nil, e
 	}
@@ -382,7 +379,7 @@ func (h *handlers) listPromocodeRedemptions(ctx context.Context, in *promoRedemp
 				return &x
 			}
 			return nil
-		}(), Status: r.Status, RedeemedAt: time.Unix(r.RedeemedAt, 0), ExpiresAt: ts(r.ExpiresAt), Days: r.Days, Bytes: r.Bytes, DiscountAmount: r.DiscountAmount, OriginalAmount: r.OriginalAmount, FinalAmount: r.FinalAmount, Currency: r.Currency, Code: row.Code})
+		}(), Status: r.Status, RedeemedAt: store.Time(r.RedeemedAt), ExpiresAt: store.TimePtr(r.ExpiresAt), Days: r.Days, Bytes: r.Bytes, DiscountAmount: r.DiscountAmount, OriginalAmount: r.OriginalAmount, FinalAmount: r.FinalAmount, Currency: r.Currency, Code: row.Code})
 	}
 	return o, nil
 }

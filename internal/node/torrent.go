@@ -60,6 +60,7 @@ func (r *Registry) SetTorrent(cfg *nodeapi.TorrentBlock) {
 			s.localBan.Store(0)
 		}
 		r.mu.RUnlock()
+		r.reconcile()
 	}
 }
 
@@ -90,11 +91,8 @@ func (r *Registry) caught(s *slot, ip, inName, network, kind, dest string) {
 	if cfg.BanSeconds > 0 && !(network == "tcp" && kind == nodeapi.TorrentTracker) {
 		hit.BannedUntil = now.Unix() + cfg.BanSeconds
 		s.localBan.Store(now.Add(min(torrentLocalBan, time.Duration(cfg.BanSeconds)*time.Second)).Unix())
-		s.mu.Lock()
-		conns := s.connsLocked()
-		s.mu.Unlock()
-		// Called on the connection's own way in: close asynchronously.
-		go closeAll(conns)
+		// The core closes the slot's open connections and keeps it out until the ban ends.
+		r.reconcile()
 	}
 	t := &r.torrent
 	t.mu.Lock()

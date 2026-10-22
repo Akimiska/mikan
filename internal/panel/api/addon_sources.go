@@ -158,7 +158,9 @@ func (h *handlers) sourceBoard(ctx context.Context, st addons.State, official *a
 			srcs = append(srcs, addons.SourceEntries{ID: s.ID, Entries: doc.Entries})
 		}
 	}
-	claims, err := h.claimIDs(ctx, b, taken, srcs)
+	// An id the registry of community addons lists is not taken up by a source; a claim a
+	// source made before stays its own.
+	claims, err := h.claimIDs(ctx, b, taken, communityIDs(h.d.Addons.CommunityKnown()), srcs)
 	if err != nil {
 		return b, err
 	}
@@ -169,7 +171,7 @@ func (h *handlers) sourceBoard(ctx context.Context, st addons.State, official *a
 // claimIDs keeps the claims on ids: a source that lists an id nobody holds takes it, and keeps
 // it while it lists it (a source that cannot be read for now keeps what it had). The claims are
 // stored, so neither a restart nor a source added later changes who holds an id.
-func (h *handlers) claimIDs(ctx context.Context, b sourceBoard, taken map[string]bool, srcs []addons.SourceEntries) (map[string]int64, error) {
+func (h *handlers) claimIDs(ctx context.Context, b sourceBoard, taken, community map[string]bool, srcs []addons.SourceEntries) (map[string]int64, error) {
 	q := h.d.Store.Q
 	rows, err := q.ListAddonClaims(ctx)
 	if err != nil {
@@ -199,7 +201,7 @@ func (h *handlers) claimIDs(ctx context.Context, b sourceBoard, taken map[string
 	}
 	for _, s := range slices.SortedFunc(slices.Values(srcs), func(a, b addons.SourceEntries) int { return int(a.ID - b.ID) }) {
 		for _, e := range s.Entries {
-			if _, held := claims[e.ID]; held || taken[e.ID] {
+			if _, held := claims[e.ID]; held || taken[e.ID] || community[e.ID] {
 				continue
 			}
 			if _, installed := b.origins[e.ID]; installed {
@@ -244,7 +246,7 @@ func (b sourceBoard) originOf(addon string) (db.AddonSource, bool) {
 }
 
 func (b sourceBoard) mark(s db.AddonSource) *MarketOrigin {
-	return &MarketOrigin{ID: s.ID, Title: s.Title, Signed: s.Key != ""}
+	return &MarketOrigin{Kind: originSource, ID: s.ID, Title: s.Title, Signed: s.Key != ""}
 }
 
 // entriesOf is what the source offers: its entries under ids it holds.
@@ -261,6 +263,9 @@ func (b sourceBoard) entriesOf(s db.AddonSource) []addons.Entry {
 	}
 	return out
 }
+
+// errNotASource: no source holds the id; the install looks for it elsewhere.
+var errNotASource = errors.New("not a source's addon")
 
 // sourceErr is how a failed read of a source answers an install.
 func sourceErr(err error) error {
@@ -281,7 +286,14 @@ func (h *handlers) installSourceEntry(ctx context.Context, st addons.State, c ad
 	owner := board.owners[id]
 	src, ok := board.source(owner)
 	if owner == 0 || !ok {
-		return addons.Entry{}, nil, huma.Error404NotFound("addon_unknown")
+		return addons.Entry{}, nil, errNotASource
+	}
+	// mikan took the author's repository out of its registry: none of it installs from a source
+	// either. Without the registry at hand nothing is known against it.
+	if c := h.community(ctx); c != nil {
+		if _, out := c.RevokedFor("", src.Url); out {
+			return addons.Entry{}, nil, huma.Error409Conflict("addon_revoked")
+		}
 	}
 	state := h.d.Addons.RefreshSource(ctx, h.d.Store.Q, src, true, "")
 	if state.Err != nil {
@@ -320,10 +332,10 @@ func (h *handlers) sourcesView(ctx context.Context, st addons.State, c *addons.C
 }
 
 func sourceView(b sourceBoard, s db.AddonSource) SourceView {
-	sv := SourceView{ID: s.ID, URL: s.Url, Title: s.Title, Signed: s.Key != "", Fingerprint: addons.Fingerprint(s.Key), AddedAt: time.Unix(s.AddedAt, 0).UTC(),
+	sv := SourceView{ID: s.ID, URL: s.Url, Title: s.Title, Signed: s.Key != "", Fingerprint: addons.Fingerprint(s.Key), AddedAt: store.Time(s.AddedAt),
 		Error: s.Error, Skipped: []SourceSkipView{}, Installed: []string{}}
 	if s.FetchedAt > 0 {
-		t := time.Unix(s.FetchedAt, 0).UTC()
+		t := store.Time(s.FetchedAt)
 		sv.FetchedAt = &t
 	}
 	state, fetched := b.states[s.ID]
@@ -430,9 +442,10 @@ func (h *handlers) addSource(ctx context.Context, in *addSourceInput) (*sourcesO
 	}
 	// An id already taken is refused before anything is kept: the admin names the source
 	// that has the better claim to take it up with its author.
+	listed := communityIDs(h.community(ctx))
 	var taken []string
 	for _, e := range doc.Entries {
-		if _, held := board.owners[e.ID]; held {
+		if _, held := board.owners[e.ID]; held || listed[e.ID] {
 			taken = append(taken, e.ID)
 		}
 	}

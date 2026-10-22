@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { lazy, Suspense, useState, type FormEvent } from "react";
 import { ApiError, errorText, type Schemas } from "../../../api/client";
 import { useNodes } from "../../../api/hooks";
-import { FormActions } from "../../../components/layout";
+import { CardHead, FormActions } from "../../../components/layout";
 import { Button, Pill, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { useSaveSettings } from "./shared";
@@ -108,13 +108,7 @@ export function TemplateCard({ s, text, setText, starter }: { s: Schemas["Settin
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("settings.template")}</h2>
-            <div className="card-sub">{t("settings.templateSub")}</div>
-          </div>
-          <Pill tone={live ? "ok" : "off"}>{live ? t("settings.templateLive") : t("settings.templateOff")}</Pill>
-        </div>
+        <CardHead title={t("settings.template")} sub={t("settings.templateSub")} aside={<Pill tone={live ? "ok" : "off"}>{live ? t("settings.templateLive") : t("settings.templateOff")}</Pill>} />
         {!live ? <div className="banner mb-4">{t("settings.templateNotLive")}</div> : null}
         <div className="mb-3 flex flex-wrap gap-2">
           <Button variant="ghost" loading={fromSimple.isPending} onClick={() => fromSimple.mutate()}>

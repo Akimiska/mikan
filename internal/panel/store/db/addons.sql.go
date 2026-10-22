@@ -201,6 +201,15 @@ func (q *Queries) CountAddonUpdates(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const deleteAddonCommunity = `-- name: DeleteAddonCommunity :exec
+DELETE FROM addon_community WHERE addon_id = $1
+`
+
+func (q *Queries) DeleteAddonCommunity(ctx context.Context, addonID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAddonCommunity, addonID)
+	return err
+}
+
 const deleteAddonCursor = `-- name: DeleteAddonCursor :exec
 DELETE FROM addon_cursors WHERE addon_id = $1
 `
@@ -402,28 +411,48 @@ func (q *Queries) ListAddonClaims(ctx context.Context) ([]AddonIDClaim, error) {
 	return items, nil
 }
 
+const listAddonCommunity = `-- name: ListAddonCommunity :many
+SELECT addon_id, repo, key FROM addon_community ORDER BY addon_id
+`
+
+func (q *Queries) ListAddonCommunity(ctx context.Context) ([]AddonCommunity, error) {
+	rows, err := q.db.QueryContext(ctx, listAddonCommunity)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AddonCommunity{}
+	for rows.Next() {
+		var i AddonCommunity
+		if err := rows.Scan(&i.AddonID, &i.Repo, &i.Key); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAddonEvents = `-- name: ListAddonEvents :many
 SELECT id, type, user_id, tg_id, data, dedupe_key, created_at FROM addon_events
 WHERE id > $1::BIGINT
   AND (COALESCE(cardinality($2::TEXT[]), 0) = 0 OR type = ANY($2::TEXT[]))
-  AND ($3::BOOLEAN OR type NOT LIKE 'bot.%')
-ORDER BY id LIMIT $4::INT
+ORDER BY id LIMIT $3::INT
 `
 
 type ListAddonEventsParams struct {
-	After  int64
-	Types  []string
-	BotToo bool
-	Lim    int32
+	After int64
+	Types []string
+	Lim   int32
 }
 
 func (q *Queries) ListAddonEvents(ctx context.Context, arg ListAddonEventsParams) ([]AddonEvent, error) {
-	rows, err := q.db.QueryContext(ctx, listAddonEvents,
-		arg.After,
-		pq.Array(arg.Types),
-		arg.BotToo,
-		arg.Lim,
-	)
+	rows, err := q.db.QueryContext(ctx, listAddonEvents, arg.After, pq.Array(arg.Types), arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -764,6 +793,22 @@ type SetAddonSourceKeyParams struct {
 
 func (q *Queries) SetAddonSourceKey(ctx context.Context, arg SetAddonSourceKeyParams) error {
 	_, err := q.db.ExecContext(ctx, setAddonSourceKey, arg.ID, arg.Key)
+	return err
+}
+
+const upsertAddonCommunity = `-- name: UpsertAddonCommunity :exec
+INSERT INTO addon_community (addon_id, repo, key) VALUES ($1, $2, $3)
+ON CONFLICT (addon_id) DO UPDATE SET repo = EXCLUDED.repo, key = EXCLUDED.key
+`
+
+type UpsertAddonCommunityParams struct {
+	AddonID string
+	Repo    string
+	Key     string
+}
+
+func (q *Queries) UpsertAddonCommunity(ctx context.Context, arg UpsertAddonCommunityParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAddonCommunity, arg.AddonID, arg.Repo, arg.Key)
 	return err
 }
 

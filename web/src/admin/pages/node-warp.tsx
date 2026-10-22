@@ -86,7 +86,7 @@ function Setup({ nodeId }: { nodeId: number }) {
         ]}
       />
       <div className="mt-4">
-        {err && !Object.keys(fields).length ? <div className="banner err mb-4">{errorText(err)}</div> : null}
+        {err && !Object.keys(fields).length ? <div className="banner err mb-4" role="alert">{errorText(err)}</div> : null}
         {how === "register" ? (
           <>
             <p className="mb-3 text-xs text-[var(--ink-500)]">{t("warp.registerHint")}</p>
@@ -142,6 +142,8 @@ function Configured({ nodeId, w, onCheck, checking, onClose }: { nodeId: number;
       ),
     onSuccess: (v) => {
       qc.setQueryData(qk.warp(nodeId), v);
+      // The routes as the node keeps them (blank lines out): else the form stayed unsaved.
+      setDraft({ enabled: v.enabled, routes: v.routes.join("\n") });
       setLicense("");
       toast.ok(t("warp.saved"));
     },
@@ -203,7 +205,7 @@ function Configured({ nodeId, w, onCheck, checking, onClose }: { nodeId: number;
         </div>
       ) : null}
 
-      {save.error && !Object.keys(fields).length ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+      {save.error && !Object.keys(fields).length ? <div className="banner err mb-4" role="alert">{errorText(save.error)}</div> : null}
       <SwitchRow className="mb-4" label={t("warp.enabled")} sub={t("warp.enabledSub")} checked={enabled} onChange={setEnabled} />
 
       <dl className="mb-4 grid grid-cols-2 gap-3 text-xs">

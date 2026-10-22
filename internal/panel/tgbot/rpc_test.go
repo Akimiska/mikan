@@ -2,17 +2,25 @@ package tgbot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strings"
 	"testing"
 
-	"mikan/internal/panel/billing"
-	"mikan/internal/panel/domain"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/panel/model"
+)
+
+// The types of the RPC: its interfaces, and the context every method takes and the error it
+// may give, which do not cross as values.
+var (
+	backendType = reflect.TypeFor[Backend]()
+	shopType    = reflect.TypeFor[Shop]()
+	errorType   = reflect.TypeFor[error]()
+	contextType = reflect.TypeFor[context.Context]()
 )
 
 // Everything the screens get over the Panel API crosses as JSON whole: no field of the
@@ -70,54 +78,58 @@ func TestRPCTypesCrossWhole(t *testing.T) {
 	}
 }
 
-type stubBackend struct {
-	Backend
-	err error
-}
-
-func (s stubBackend) Owner(_ context.Context, userID int64) (int64, error)      { return userID * 10, s.err }
-func (s stubBackend) Shop() Shop                                                { return (*billing.Service)(nil) }
-func (s stubBackend) Member(context.Context, string, int64, bool) (bool, error) { return true, nil }
-
-// Errors the screens tell apart come back as themselves; only the interfaces' methods are
-// reachable; a panel that cannot be asked is an error, not a zero.
-func TestRPCErrorsAndMethods(t *testing.T) {
-	serve := func(b Backend) *Remote {
-		mux := http.NewServeMux()
-		mux.Handle("POST /bot/{method}", RPCHandler(b))
-		srv := httptest.NewServer(mux)
+// The addon's side of the RPC against a panel that answers as RPCHandler does: an error of a
+// code the model knows comes back as the model's error, so the screens tell it apart with
+// errors.Is; any other as an *RPCError with its code and text; the Panel API's refusal of an
+// account that is not talking to the bot as ErrNotTalking. A panel that answers what is not
+// an answer, or cannot be asked, is an error, not a zero.
+func TestRemoteErrors(t *testing.T) {
+	ctx := context.Background()
+	answer := func(status int, body string) *Remote {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/bot/Owner" || r.Header.Get("Authorization") != "Bearer t" {
+				t.Errorf("the call: %s %s %q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+			}
+			if args, _ := io.ReadAll(r.Body); string(args) != "[1]" {
+				t.Errorf("the arguments: %s", args)
+			}
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+		}))
 		t.Cleanup(srv.Close)
 		return NewRemote(srv.URL, "t", nil)
 	}
-	ctx := context.Background()
-	r := serve(stubBackend{})
-	if tg, err := r.Owner(ctx, 7); err != nil || tg != 70 {
+	if tg, err := answer(http.StatusOK, `{"results":[70]}`).Owner(ctx, 1); err != nil || tg != 70 {
 		t.Fatalf("Owner: %d %v", tg, err)
 	}
-	if in, err := r.Member(ctx, "@chan", 1, true); err != nil || !in {
-		t.Fatalf("Member: %v %v", in, err)
-	}
-	for _, want := range []error{ErrLinkLimit, domain.ErrNotFound, billing.ErrTrialUsed, tgate.ErrLinkExpired} {
-		_, err := serve(stubBackend{err: want}).Owner(ctx, 1)
-		if !errors.Is(err, want) {
-			t.Fatalf("%v came back as %v", want, err)
+	for code, want := range map[string]error{"no_rows": sql.ErrNoRows, "link_limit": model.ErrLinkLimit, "trial_used": model.ErrTrialUsed,
+		"promo_unavailable": model.ErrPromo, "deadline_exceeded": context.DeadlineExceeded} {
+		if _, err := answer(http.StatusOK, `{"error":{"code":"`+code+`","message":"x"}}`).Owner(ctx, 1); !errors.Is(err, want) {
+			t.Errorf("%s came back as %v", code, err)
 		}
 	}
-	other := errors.New("something else")
-	if _, err := serve(stubBackend{err: other}).Owner(ctx, 1); err == nil || errors.Is(err, ErrLinkLimit) || !strings.Contains(err.Error(), "something else") {
+	var crossed *RPCError
+	if _, err := answer(http.StatusOK, `{"error":{"code":"error","message":"something else"}}`).Owner(ctx, 1); !errors.As(err, &crossed) ||
+		crossed.Code != "error" || err.Error() != "something else" || errors.Is(err, model.ErrLinkLimit) {
 		t.Fatalf("another error: %v", err)
 	}
-	// Not a method of the interfaces: refused, whatever the backend has.
-	for _, m := range []string{"Shop", "Shop.Close", "store", "Owners", "String", "Notices", "NoticeSent", "NoticeDelivered", "PruneNotices", "BroadcastTargets"} {
-		if err := r.call(ctx, m, nil); err == nil || !strings.Contains(err.Error(), "no_method") && !strings.Contains(err.Error(), "no method") {
-			t.Fatalf("%s: %v", m, err)
+	if _, err := answer(http.StatusForbidden, `{"code":"not_talking","message":"no"}`).Owner(ctx, 1); !errors.Is(err, ErrNotTalking) {
+		t.Fatalf("not talking: %v", err)
+	}
+	for _, bad := range []struct {
+		status int
+		body   string
+	}{
+		{http.StatusInternalServerError, `{"code":"internal","message":"x"}`},
+		{http.StatusOK, `<html>bad gateway</html>`},
+		{http.StatusOK, `{"results":[]}`},
+		{http.StatusOK, `{"results":["seventy"]}`},
+	} {
+		if tg, err := answer(bad.status, bad.body).Owner(ctx, 1); err == nil {
+			t.Errorf("%d %s is an answer: %d", bad.status, bad.body, tg)
 		}
 	}
-	if err := r.call(ctx, "Owner", []any{1, 2}); err == nil {
-		t.Fatal("wrong arguments passed")
-	}
-	down := NewRemote("http://127.0.0.1:1", "t", nil)
-	if _, err := down.Owner(ctx, 1); err == nil {
+	if _, err := NewRemote("http://127.0.0.1:1", "t", nil).Owner(ctx, 1); err == nil {
 		t.Fatal("an unreachable panel is no error")
 	}
 }

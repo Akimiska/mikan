@@ -25,8 +25,10 @@ func LockPanel(ctx context.Context, dsn string) (release func() error, err error
 		conn.Close()
 		return nil, err
 	}
-	// Closing the pool ends the session, and the session's locks with it.
-	release = func() error { return errors.Join(c.Close(), conn.Close()) }
+	// Closing the pool ends the session, and the session's locks with it, but the server lets
+	// them go only after the client is gone: a migrate started right after would still find
+	// the guard taken.
+	closeAll := func() error { return errors.Join(c.Close(), conn.Close()) }
 	_, id, err := schemaLock(ctx, c, panelGuard)
 	var locked bool
 	if err == nil {
@@ -36,10 +38,14 @@ func LockPanel(ctx context.Context, dsn string) (release func() error, err error
 		err = errors.New("a database migrate or restore is running; start the panel after it ends")
 	}
 	if err != nil {
-		release()
+		closeAll()
 		return nil, err
 	}
-	return release, nil
+	// So the guard is given back before release returns.
+	return func() error {
+		_, err := c.ExecContext(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock_shared($1)", id)
+		return errors.Join(err, closeAll())
+	}, nil
 }
 
 // lockOffline takes the panel guard exclusively on c's session; unlock gives it back.

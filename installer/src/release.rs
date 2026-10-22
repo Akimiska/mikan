@@ -12,8 +12,23 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-/// The public half of the release signing key, the same as internal/release.PublicKey.
-pub const PUBLIC_KEY: &str = "Z3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8=";
+/// The public halves of the release keys, the same as internal/release.ReleaseKeys: a
+/// manifest or the release index signed by any of them is the project's. The first signs the
+/// releases now; the second is trusted ahead, so the releases can move to it and leave no
+/// installer behind.
+pub const RELEASE_KEYS: [&str; 2] = ["Z3wSIPBSaJxh5CsGO8eINI0aM0kyrQ46EcJSNeH85W8=", "J4DbLqhnFdx8ncEiF4BQOW1aucukNCCgMhcZ18pCWFw="];
+
+/// The public half of the official catalog's key (internal/release.CatalogKey). The catalog is
+/// signed in its context (CATALOG_CONTEXT), and its signature is published as SIG_SUFFIX.
+pub const CATALOG_KEY: &str = "Z4QfL07dI/IRReSe6Gr76UcxxPoy4i2GiClBv8RcNuo=";
+
+/// What a catalog's signature covers before its bytes (internal/release.CatalogContext): a
+/// signature made for another kind of document never passes for the catalog.
+pub const CATALOG_CONTEXT: &str = "mikan catalog v1\n";
+
+/// Names the signature in a context next to its file (internal/release.SigSuffix); a release's
+/// own (".sig") is over the bytes alone.
+pub const SIG_SUFFIX: &str = ".sig2";
 
 pub const REPO: &str = "Miroshka000/mikan";
 
@@ -72,11 +87,11 @@ pub fn latest() -> Result<Manifest> {
 
 /// GitHub's latest release, verified: what every updater read before the index, and what
 /// it falls back to.
-fn latest_with(key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Manifest> {
+fn latest_with(keys: &[VerifyingKey], fetch: Fetch<'_>) -> Result<Manifest> {
     let url = latest_url();
     let data = fetch(&url, 1 << 20).context("download the release manifest")?.context("no release is published yet")?;
     let sig = fetch(&format!("{url}.sig"), 4096).context("download the manifest's signature")?.context("the manifest has no signature")?;
-    let manifest = parse(&data, &String::from_utf8_lossy(&sig), key)?;
+    let manifest = parse(&data, &String::from_utf8_lossy(&sig), keys)?;
     // Its own record, not the index's: the index is published again with every beta, so
     // the latest stable release is often older than the index seen.
     if let Some(seen) = latest_seen() {
@@ -160,9 +175,9 @@ pub fn decode_index(data: &[u8]) -> Result<Vec<Entry>> {
         .collect())
 }
 
-/// Checks the signature over the index's exact bytes, then reads it.
-pub fn parse_index(data: &[u8], sig: &str, key: &VerifyingKey) -> Result<Vec<Entry>> {
-    verify(data, sig, key, "release index")?;
+/// Checks the signature over the index's exact bytes, by any of keys, then reads it.
+pub fn parse_index(data: &[u8], sig: &str, keys: &[VerifyingKey]) -> Result<Vec<Entry>> {
+    verify(data, sig, keys, "release index")?;
     decode_index(data)
 }
 
@@ -211,6 +226,16 @@ impl std::fmt::Display for Refused {
 
 impl std::error::Error for Refused {}
 
+/// Whether e is the index refusing the release asked for (not a failure to get it).
+pub fn refused(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Refused>().is_some()
+}
+
+#[cfg(test)]
+pub fn refused_for_test(why: &str) -> anyhow::Error {
+    Refused(why.to_owned()).into()
+}
+
 /// The release found for a server.
 #[derive(Debug)]
 pub struct Found {
@@ -229,14 +254,14 @@ pub struct Found {
 /// newest) on a channel: from the index, or GitHub's latest release when the index cannot
 /// be had or believed, so a broken index never stops an update.
 pub fn find(current: Option<&str>, channel: Channel) -> Result<Found> {
-    find_with(current, channel, &key()?, &crate::net::get_opt)
+    find_with(current, channel, &keys()?, &crate::net::get_opt)
 }
 
-pub fn find_with(current: Option<&str>, channel: Channel, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
-    match from_index(current.unwrap_or_default(), channel, None, key, fetch) {
+pub fn find_with(current: Option<&str>, channel: Channel, keys: &[VerifyingKey], fetch: Fetch<'_>) -> Result<Found> {
+    match from_index(current.unwrap_or_default(), channel, None, keys, fetch) {
         Ok(found) => Ok(found),
         Err(e) => {
-            let manifest = latest_with(key, fetch)?;
+            let manifest = latest_with(keys, fetch)?;
             Ok(Found { manifest, newest: None, unreachable: false, fallback: Some(format!("{e:#}")) })
         }
     }
@@ -250,16 +275,16 @@ pub fn find_with(current: Option<&str>, channel: Channel, key: &VerifyingKey, fe
 /// index says so, or the request is refused. Only when the index cannot be had or believed
 /// does GitHub's latest release answer, and only if it is upto itself.
 pub fn find_upto(current: &str, channel: Channel, upto: &str) -> Result<Found> {
-    find_upto_with(current, channel, upto, &key()?, &crate::net::get_opt)
+    find_upto_with(current, channel, upto, &keys()?, &crate::net::get_opt)
 }
 
-pub fn find_upto_with(current: &str, channel: Channel, upto: &str, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
-    match from_index(current, channel, Some(upto), key, fetch) {
+pub fn find_upto_with(current: &str, channel: Channel, upto: &str, keys: &[VerifyingKey], fetch: Fetch<'_>) -> Result<Found> {
+    match from_index(current, channel, Some(upto), keys, fetch) {
         Ok(found) => Ok(found),
         Err(e) if e.downcast_ref::<Refused>().is_some() => Err(e),
         Err(e) => {
             let why = format!("{e:#}");
-            let manifest = latest_with(key, fetch).with_context(|| format!("the release index is unavailable ({why})"))?;
+            let manifest = latest_with(keys, fetch).with_context(|| format!("the release index is unavailable ({why})"))?;
             if newer(&manifest.version, upto) || newer(upto, &manifest.version) {
                 bail!(
                     "the release index is unavailable ({why}) and the latest release is mikan {}, not the mikan {upto} that was asked for",
@@ -282,12 +307,12 @@ pub fn valid_version(v: &str) -> bool {
     v.len() <= 64 && semver(v).is_some()
 }
 
-fn from_index(current: &str, channel: Channel, upto: Option<&str>, key: &VerifyingKey, fetch: Fetch<'_>) -> Result<Found> {
+fn from_index(current: &str, channel: Channel, upto: Option<&str>, keys: &[VerifyingKey], fetch: Fetch<'_>) -> Result<Found> {
     let url = index_url();
     let data = fetch(&url, 1 << 20).context("download the release index")?.context("no release index is published")?;
     let sig =
         fetch(&format!("{url}.sig"), 4096).context("download the index's signature")?.context("the release index has no signature")?;
-    let mut entries = parse_index(&data, &String::from_utf8_lossy(&sig), key)?;
+    let mut entries = parse_index(&data, &String::from_utf8_lossy(&sig), keys)?;
     if let Some(seen) = index_seen() {
         not_older(seen, &data, "published", "the release index")?;
     }
@@ -313,7 +338,7 @@ fn from_index(current: &str, channel: Channel, upto: Option<&str>, key: &Verifyi
     let sig = fetch(&format!("{}.sig", entry.manifest), 4096)
         .with_context(|| format!("download {what}'s signature"))?
         .with_context(|| format!("{what} has no signature"))?;
-    let manifest = parse(&data, &String::from_utf8_lossy(&sig), key)?;
+    let manifest = parse(&data, &String::from_utf8_lossy(&sig), keys)?;
     if manifest.version != entry.version {
         bail!("the release index says {}, its manifest is of {}", entry.version, manifest.version);
     }
@@ -349,22 +374,47 @@ pub fn not_older(seen: &Path, doc: &[u8], field: &str, what: &str) -> Result<()>
     Ok(())
 }
 
-pub fn key() -> Result<VerifyingKey> {
-    let raw: [u8; 32] = STANDARD.decode(PUBLIC_KEY)?.try_into().map_err(|_| anyhow::anyhow!("bad release key"))?;
+fn decode_key(b64: &str) -> Result<VerifyingKey> {
+    let raw: [u8; 32] = STANDARD.decode(b64)?.try_into().map_err(|_| anyhow::anyhow!("bad public key"))?;
     Ok(VerifyingKey::from_bytes(&raw)?)
 }
 
-/// Checks a signature of the release key over exact bytes (the manifest, the marketplace's
-/// catalog); what names the file goes into the errors.
-pub fn verify(data: &[u8], sig: &str, key: &VerifyingKey, what: &str) -> Result<()> {
+/// The release keys (RELEASE_KEYS) decoded.
+pub fn keys() -> Result<Vec<VerifyingKey>> {
+    RELEASE_KEYS.iter().map(|k| decode_key(k)).collect()
+}
+
+/// The catalog's key (CATALOG_KEY) decoded.
+pub fn catalog_key() -> Result<VerifyingKey> {
+    decode_key(CATALOG_KEY)
+}
+
+fn signature(sig: &str, what: &str) -> Result<Signature> {
     let raw = STANDARD.decode(sig.trim()).with_context(|| format!("the {what}'s signature is not base64"))?;
-    let sig = Signature::from_slice(&raw).with_context(|| format!("the {what}'s signature is malformed"))?;
-    key.verify_strict(data, &sig).with_context(|| format!("the {what}'s signature does not match the release key"))
+    Signature::from_slice(&raw).with_context(|| format!("the {what}'s signature is malformed"))
+}
+
+/// Checks a signature of one of the release keys over exact bytes (the manifest, the release
+/// index); what names the file goes into the errors.
+pub fn verify(data: &[u8], sig: &str, keys: &[VerifyingKey], what: &str) -> Result<()> {
+    let sig = signature(sig, what)?;
+    if keys.iter().any(|k| k.verify_strict(data, &sig).is_ok()) {
+        return Ok(());
+    }
+    bail!("the {what}'s signature does not match the release keys")
+}
+
+/// Checks a signature of key made in context over data (the marketplace's catalog); what
+/// names the file goes into the errors.
+pub fn verify_in(context: &str, data: &[u8], sig: &str, key: &VerifyingKey, what: &str) -> Result<()> {
+    let sig = signature(sig, what)?;
+    let signed = [context.as_bytes(), data].concat();
+    key.verify_strict(&signed, &sig).with_context(|| format!("the {what}'s signature does not match its key"))
 }
 
 /// Checks the signature over the manifest's exact bytes, then what it says.
-pub fn parse(data: &[u8], sig: &str, key: &VerifyingKey) -> Result<Manifest> {
-    verify(data, sig, key, "manifest")?;
+pub fn parse(data: &[u8], sig: &str, keys: &[VerifyingKey]) -> Result<Manifest> {
+    verify(data, sig, keys, "manifest")?;
     let m: Manifest = serde_json::from_slice(data).context("the manifest is malformed")?;
     if semver(&m.version).is_none() {
         bail!("the manifest has a bad version {:?}", m.version);
@@ -522,20 +572,20 @@ mod tests {
         let key = signer.verifying_key();
         let data = manifest("0.3.9", "ghcr.io/miroshka000/mikan");
         let sig = STANDARD.encode(signer.sign(&data).to_bytes());
-        let m = parse(&data, &format!("{sig}\n"), &key).unwrap();
+        let m = parse(&data, &format!("{sig}\n"), &[key]).unwrap();
         assert_eq!(m.reference(), format!("ghcr.io/miroshka000/mikan@sha256:{}", "a".repeat(64)));
         assert_eq!(m.installer["x86_64"].sha256, "b".repeat(64));
 
         let mut tampered = data.clone();
         tampered[14] = b'8';
-        assert!(parse(&tampered, &sig, &key).is_err());
+        assert!(parse(&tampered, &sig, &[key]).is_err());
         let other = SigningKey::from_bytes(&[8; 32]).verifying_key();
-        assert!(parse(&data, &sig, &other).is_err());
-        assert!(parse(&data, "not base64!", &key).is_err());
+        assert!(parse(&data, &sig, &[other]).is_err());
+        assert!(parse(&data, "not base64!", &[key]).is_err());
 
         let docker_hub = manifest("0.3.9", "docker.io/someone/mikan");
         let sig = STANDARD.encode(signer.sign(&docker_hub).to_bytes());
-        assert!(parse(&docker_hub, &sig, &key).is_err());
+        assert!(parse(&docker_hub, &sig, &[key]).is_err());
     }
 
     // A later release adds a field to the signed manifest (a minimum version, a channel):
@@ -552,23 +602,23 @@ mod tests {
         );
         assert_ne!(extended, text);
         let sig = STANDARD.encode(signer.sign(extended.as_bytes()).to_bytes());
-        let m = parse(extended.as_bytes(), &sig, &key).expect("a manifest with new fields");
+        let m = parse(extended.as_bytes(), &sig, &[key]).expect("a manifest with new fields");
         assert_eq!(m.version, "0.4.4");
         assert!(m.installer.contains_key("x86_64"));
         assert_eq!(m.min_installer, "0.4.4");
         let malformed = extended.replace("\"min_installer\":\"0.4.4\"", "\"min_installer\":\"0.4.4.1.2\"");
         let sig = STANDARD.encode(signer.sign(malformed.as_bytes()).to_bytes());
-        assert!(parse(malformed.as_bytes(), &sig, &key).is_err());
+        assert!(parse(malformed.as_bytes(), &sig, &[key]).is_err());
         let future = extended.replace("\"min_installer\":\"0.4.4\"", "\"min_installer\":\"0.4.5.0\"");
         let sig = STANDARD.encode(signer.sign(future.as_bytes()).to_bytes());
-        assert!(parse(future.as_bytes(), &sig, &key).is_err());
+        assert!(parse(future.as_bytes(), &sig, &[key]).is_err());
     }
 
     #[test]
     fn only_the_projects_images_and_real_hashes() {
         let signer = SigningKey::from_bytes(&[7; 32]);
         let key = signer.verifying_key();
-        let accept = |data: &[u8]| parse(data, &STANDARD.encode(signer.sign(data).to_bytes()), &key).is_ok();
+        let accept = |data: &[u8]| parse(data, &STANDARD.encode(signer.sign(data).to_bytes()), &[key]).is_ok();
         assert!(accept(&manifest("0.4.4", "ghcr.io/miroshka000/mikan")));
         for bad in [
             "ghcr.io/someone-else/mikan",
@@ -585,11 +635,20 @@ mod tests {
         assert!(!accept(plain_http.as_bytes()));
     }
 
-    // The installer and the panel trust the same key.
+    // The installer and the panel trust the same keys, and a catalog's signature covers the
+    // same context.
     #[test]
     fn key_matches_the_panel() {
         let go = std::fs::read_to_string("../internal/release/release.go").unwrap();
-        assert!(go.contains(&format!("const PublicKey = \"{PUBLIC_KEY}\"")), "internal/release.PublicKey differs");
+        let listed: String = RELEASE_KEYS.iter().map(|k| format!("\t\"{k}\",\n")).collect();
+        assert!(go.contains(&format!("var ReleaseKeys = []string{{\n{listed}}}")), "internal/release.ReleaseKeys differs");
+        assert!(go.contains(&format!("CatalogKey   = \"{CATALOG_KEY}\"")), "internal/release.CatalogKey differs");
+        let signed = std::fs::read_to_string("../internal/release/signed.go").unwrap();
+        assert!(
+            signed.contains(&format!("CatalogContext = \"{}\"", CATALOG_CONTEXT.replace('\n', "\\n")))
+                && signed.contains(&format!("SigSuffix = \"{SIG_SUFFIX}\"")),
+            "internal/release.CatalogContext or SigSuffix differs"
+        );
         assert!(go.contains(&format!("const Repo = \"{REPO}\"")), "internal/release.Repo differs");
         let index = std::fs::read_to_string("../internal/release/index.go").unwrap();
         assert!(
@@ -603,20 +662,25 @@ mod tests {
             go.contains("/releases/latest/download/install.sh | sudo bash\"") && go.contains("\" -s -- --join \""),
             "internal/release.JoinCommand differs"
         );
-        key().unwrap();
+        assert_eq!(keys().unwrap().len(), RELEASE_KEYS.len());
+        catalog_key().unwrap();
     }
 
-    // install.sh checks the manifest's signature with this very key before it runs anything
-    // it downloaded: its PEM must be the release key, and the script must still parse.
+    // install.sh checks the manifest's signature with these very keys before it runs anything
+    // it downloaded: its lines must be the release keys, and the script must still parse.
     #[test]
     fn install_sh_carries_the_release_key() {
         let sh = include_str!("../install.sh");
-        let mut spki = vec![0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00];
-        spki.extend(STANDARD.decode(PUBLIC_KEY).unwrap());
-        assert!(
-            sh.contains(&format!("-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----", STANDARD.encode(spki))),
-            "install.sh has another key"
-        );
+        let lines: Vec<String> = RELEASE_KEYS
+            .iter()
+            .map(|k| {
+                let mut spki = vec![0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00];
+                spki.extend(STANDARD.decode(k).unwrap());
+                STANDARD.encode(spki)
+            })
+            .collect();
+        assert!(sh.contains(&format!("PUBKEYS='{}'", lines.join("\n"))), "install.sh has other keys");
+        assert!(sh.contains("-----BEGIN PUBLIC KEY-----") && sh.contains("-----END PUBLIC KEY-----"));
         assert!(sh.contains("pkeyutl -verify") && sh.contains("-rawin"));
         // the signature check comes before the installer is downloaded, and it is not optional
         let verify = sh.find("pkeyutl -verify").unwrap();
@@ -753,7 +817,7 @@ mod tests {
         }
         fn find(&self, current: Option<&str>, channel: Channel) -> Result<Found> {
             let fetch = |url: &str, _limit: u64| -> Result<Option<Vec<u8>>> { Ok(self.files.borrow().get(url).cloned()) };
-            find_with(current, channel, &self.signer.verifying_key(), &fetch)
+            find_with(current, channel, &[self.signer.verifying_key()], &fetch)
         }
     }
 

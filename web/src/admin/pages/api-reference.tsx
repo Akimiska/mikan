@@ -8,6 +8,7 @@ import rawSpec from "../../api/openapi.json";
 import { Button, EmptyState } from "../../components/ui";
 import { t, tMaybe } from "../../i18n";
 import { useCopy } from "../../lib/copy";
+import { CardHead } from "../../components/layout";
 
 type Schema = {
   $ref?: string;
@@ -88,12 +89,7 @@ export default function ApiReference() {
     <>
       <Intro />
       <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("apiPage.reference")}</h2>
-            <div className="card-sub">{t("apiPage.referenceSub", { n: ops.length })}</div>
-          </div>
-        </div>
+        <CardHead title={t("apiPage.reference")} sub={t("apiPage.referenceSub", { n: ops.length })} />
         <label className="search-field mb-4 flex max-w-[420px] items-center gap-2">
           <Search size={16} aria-hidden className="text-[var(--ink-400)]" />
           <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("apiPage.search")} aria-label={t("apiPage.search")} />
@@ -134,15 +130,13 @@ function Intro() {
   const updates = useUpdates();
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("apiPage.start")}</h2>
-          <div className="card-sub">{t("apiPage.startSub")}</div>
-        </div>
-        <Button size="sm" onClick={() => download(updates.data?.current)}>
+      <CardHead
+        title={t("apiPage.start")}
+        sub={t("apiPage.startSub")}
+        aside={<Button size="sm" onClick={() => download(updates.data?.current)}>
           <Download size={16} aria-hidden /> {t("apiPage.download")}
-        </Button>
-      </div>
+        </Button>}
+      />
       <div className="api-h">{t("apiPage.baseUrl")}</div>
       <CodeBlock code={base} label={t("apiPage.copyBase")} />
       <ul className="my-4 list-disc space-y-2 pl-5 text-[13px] text-[var(--ink-700)]">

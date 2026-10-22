@@ -17,9 +17,10 @@ import (
 
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/tgapi"
 )
 
 // fakeTelegram is the Bot API behind the gateway: it records what reached it.
@@ -57,12 +58,12 @@ func (f *fakeTelegram) last() fakeCall {
 }
 
 type gateway struct {
-	c   *tgate.Client
-	out *tgate.Outbox
+	c   *tgapi.Client
+	out *tgapi.Outbox
 }
 
-func (g gateway) Client() *tgate.Client { return g.c }
-func (g gateway) Outbox() *tgate.Outbox { return g.out }
+func (g gateway) Client() *tgapi.Client { return g.c }
+func (g gateway) Outbox() *tgapi.Outbox { return g.out }
 
 func proxyWorld(t *testing.T) (*Server, *fakeTelegram) {
 	t.Helper()
@@ -70,8 +71,8 @@ func proxyWorld(t *testing.T) (*Server, *fakeTelegram) {
 	tg := &fakeTelegram{}
 	srv := httptest.NewServer(tg)
 	t.Cleanup(srv.Close)
-	c := tgate.NewClient(srv.URL, "123:REAL", nil)
-	out := tgate.NewOutbox(c, tgate.Limits{Total: 1000, Bulk: 1000, PerChat: 1000, Burst: 1000, Workers: 2, MaxTries: 3}, time.Now, func(int64) {}, func(error) {})
+	c := tgapi.NewClient(srv.URL, "123:REAL", nil)
+	out := tgapi.NewOutbox(c, tgapi.Limits{Total: 1000, Bulk: 1000, PerChat: 1000, Burst: 1000, Workers: 2, MaxTries: 3}, time.Now, func(int64) {}, func(error) {})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go out.Run(ctx)
@@ -99,9 +100,9 @@ func bot(s *Server, token, method, ct string, body []byte) (int, tgAnswer) {
 	return w.Code, a
 }
 
-func update(id int64, text string) tgate.Update {
+func update(id int64, text string) tgapi.Update {
 	raw := []byte(`{"update_id":` + itoa64(id) + `,"message":{"message_id":1,"chat":{"id":555,"type":"private"},"text":"` + text + `","photo":[{"file_id":"x"}]}}`)
-	var up tgate.Update
+	var up tgapi.Update
 	_ = json.Unmarshal(raw, &up)
 	return up
 }
@@ -255,11 +256,13 @@ func TestBotRPCOnlyForTheHolder(t *testing.T) {
 		_, _ = io.WriteString(w, `{"results":["`+r.PathValue("method")+`"]}`)
 	})
 	s := New(d)
+	var header http.Header
 	call := func(token string) (int, string) {
 		r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:41990/panel/v2/bot/Config", strings.NewReader(`[]`))
 		r.Header.Set("Authorization", "Bearer "+token)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
+		header = w.Header()
 		return w.Code, w.Body.String()
 	}
 	if code, _ := call(botToken); code != http.StatusForbidden {
@@ -270,6 +273,10 @@ func TestBotRPCOnlyForTheHolder(t *testing.T) {
 	}
 	if code, body := call(botToken); code != 200 || !strings.Contains(body, "Config") {
 		t.Fatalf("the holder: %d %s", code, body)
+	}
+	// The answer is JSON whatever the handler set (this one sets nothing), and never sniffed.
+	if ct, sniff := header.Get("Content-Type"), header.Get("X-Content-Type-Options"); ct != "application/json" || sniff != "nosniff" {
+		t.Fatalf("the holder's answer: Content-Type %q, X-Content-Type-Options %q", ct, sniff)
 	}
 	if code, _ := call(strings.Repeat("k", 48)); code != http.StatusForbidden {
 		t.Fatalf("another addon with bot: %d", code)
@@ -358,9 +365,10 @@ func TestBotRPCRules(t *testing.T) {
 	}
 }
 
-// The bot's payment messages carry whole subscriptions: an addon that does not hold the bot
-// never reads them from the feed.
-func TestBotEventsOnlyForTheHolder(t *testing.T) {
+// Every addon with the events permission reads the same feed: the payment messages are
+// events like any other (payment.paid carries no subscription), and holding the bot changes
+// nothing of what is read.
+func TestEventsAlikeForEveryAddon(t *testing.T) {
 	s, _ := proxyWorld(t)
 	ctx := context.Background()
 	for id, perms := range map[string]string{"telegram": `["bot","events"]`, "fresh": `["events"]`} {
@@ -371,9 +379,9 @@ func TestBotEventsOnlyForTheHolder(t *testing.T) {
 	if err := settings.Set(ctx, s.d.Settings, SlotKey, "telegram"); err != nil {
 		t.Fatal(err)
 	}
-	for _, typ := range []string{"bot.paid", "payment.paid"} {
+	for _, typ := range []string{events.PaymentPaid, events.UserCreated} {
 		if err := s.d.Store.Tx(ctx, func(q *db.Queries) error {
-			return events.Emit(ctx, q, time.Unix(1, 0), typ, 1, 555, map[string]string{"sub_token": "secret"}, "")
+			return feed.Emit(ctx, q, time.Unix(1, 0), typ, 1, 555, map[string]string{"kind": "new"}, "")
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -383,7 +391,7 @@ func TestBotEventsOnlyForTheHolder(t *testing.T) {
 		r.Header.Set("Authorization", "Bearer "+token)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
-		var f feed
+		var f pulled
 		_ = json.Unmarshal(w.Body.Bytes(), &f)
 		var types []string
 		for _, e := range f.Events {
@@ -391,10 +399,10 @@ func TestBotEventsOnlyForTheHolder(t *testing.T) {
 		}
 		return types
 	}
-	if got := strings.Join(read(newToken), ","); got != "payment.paid" {
+	if got := strings.Join(read(newToken), ","); got != "payment.paid,user.created" {
 		t.Fatalf("an addon not holding the bot read %q", got)
 	}
-	if got := strings.Join(read(botToken), ","); got != "bot.paid,payment.paid" {
+	if got := strings.Join(read(botToken), ","); got != "payment.paid,user.created" {
 		t.Fatalf("the holder read %q", got)
 	}
 }

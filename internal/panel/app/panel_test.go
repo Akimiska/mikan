@@ -70,7 +70,9 @@ func newHarness(t *testing.T, with ...func(*Options)) *harness {
 		"apple-touch-icon.png": {Data: []byte("\x89PNG touch")},
 		"secret.txt":           {Data: []byte("not for the subscription path")},
 	}
-	opts := Options{Version: "test", Web: web, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return h.now }, Resolve: testResolve}
+	// No test reaches the real registry of community addons: a closed port answers at once.
+	opts := Options{Version: "test", Web: web, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return h.now }, Resolve: testResolve,
+		AddonsCommunity: "http://127.0.0.1:1/index.json"}
 	for _, f := range with {
 		f(&opts)
 	}

@@ -5,6 +5,8 @@ import (
 	"html"
 	"strings"
 	"time"
+
+	"mikan/internal/textutil"
 )
 
 // The bot's own words in both languages. The admin's texts replace the ones marked
@@ -37,13 +39,14 @@ type words struct {
 	menuApp string
 
 	// The shop.
-	buy, buyTitle, renewTitle, payHow, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew string
-	notForSale, payUnavailable, tooManyInvoices, paidNew, paidRenew                                                 string
-	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                     string
-	trialPaid, trialTitle                                                                                           string // the priced trial: its button with the price, its title over the ways to pay
-	trialNotGiven                                                                                                   string // a paid trial not given, its money back by hand
-	pickTerm, priceFrom                                                                                             string
-	poolOut                                                                                                         string // a traffic pool used up
+	balanceButton, balanceTitle, balanceHint, balanceOff, balanceLow, balancePaid, payBalance, topupButton, topupTitle, topupAmountAsk, topupFrom, topupTo, topupFromTo, topupPay, topupShot, topupSent, topupBad, topupMany, topupNone, topupCancelled, topupApproved, topupRejected, opTopup, opSpend, opRefund, opAdjust string
+	buy, buyAnother, buyTitle, renewTitle, payHow, carryOver, payStars, payCard, payCrypto, payAddon, payButton, invoice, payNew, payRenew                                                                                                                                                                                  string
+	notForSale, payUnavailable, tooManyInvoices, paidNew, paidRenew                                                                                                                                                                                                                                                         string
+	trial, trialDone, trialUsed, trialOff, trialOpen, trialFail                                                                                                                                                                                                                                                             string
+	trialPaid, trialTitle                                                                                                                                                                                                                                                                                                   string // the priced trial: its button with the price, its title over the ways to pay
+	trialNotGiven                                                                                                                                                                                                                                                                                                           string // a paid trial not given, its money back by hand
+	pickTerm, priceFrom                                                                                                                                                                                                                                                                                                     string
+	poolOut                                                                                                                                                                                                                                                                                                                 string // a traffic pool used up
 
 	// The channel a subscriber must join, and the free plan.
 	channelJoin, channelCheck, channelNotYet             string
@@ -51,6 +54,9 @@ type words struct {
 
 	// Traffic packages.
 	buyTraffic, trafficTitle, payPackage, packageGone, paidPackage, plusPackages string
+
+	// One more device.
+	buyDevice, deviceTitle, deviceNow, deviceKeep, deviceUntil, deviceLeft, payDevice, deviceGone, paidDevice, refundedDevice string
 
 	// A refund takes back what the payment gave.
 	refundedNew, refundedRenew, refundedPackage, refundedGone string
@@ -112,8 +118,9 @@ var ru = words{
 	commands: "Главное меню",
 	menuApp:  "Подписка",
 
-	buy: "🛒 Купить подписку", buyTitle: "Выберите тариф", renewTitle: "Продление подписки «%s»: выберите тариф",
-	payHow: "Как оплатить?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Картой или СБП — %s", payCrypto: "🪙 Криптовалютой — %s", payAddon: "💳 %s — %s", payButton: "Оплатить %s",
+	balanceButton: "💰 Баланс: %s", balanceTitle: "💰 На балансе %s", balanceHint: "Баланс пополняется переводом: нажмите «Пополнить», укажите сумму и пришлите скриншот перевода. После проверки деньги появятся на балансе, ими можно оплатить подписку, продление и докупки.", balanceOff: "Баланс сейчас недоступен.", balanceLow: "На балансе не хватает денег. Пополните его в меню «💰 Баланс».", balancePaid: "✅ Оплачено с баланса: %s. Сейчас придёт сообщение о покупке.", payBalance: "💰 С баланса · %s", topupButton: "➕ Пополнить", topupTitle: "Пополнение баланса", topupAmountAsk: "Выберите сумму или напишите её сообщением, например 750.", topupFrom: "Сумма от %s.", topupTo: "Сумма до %s.", topupFromTo: "Сумма от %s до %s.", topupPay: "Переведите %s", topupShot: "Затем пришлите сюда скриншот перевода одной картинкой.", topupSent: "📨 Заявка на %s отправлена. Мы проверим перевод и пополним баланс, об этом придёт сообщение.", topupBad: "Такую сумму не принять: проверьте границы.", topupMany: "Уже есть заявки на проверке. Дождитесь ответа.", topupNone: "Заявка не найдена, начните пополнение заново.", topupCancelled: "Пополнение отменено.", topupApproved: "✅ Баланс пополнен на %s. Теперь на нём %s.", topupRejected: "❌ Пополнение на %s отклонено.", opTopup: "пополнение", opSpend: "оплата", opRefund: "возврат", opAdjust: "изменено администратором",
+	buy: "🛒 Купить подписку", buyAnother: "➕ Ещё одна подписка", buyTitle: "Выберите тариф", renewTitle: "Продление подписки «%s»: выберите тариф",
+	payHow: "Как оплатить?", carryOver: "При переходе на другой тариф оставшиеся дни пересчитаются по цене нового: сколько стоили, на столько и продлится.", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Картой или СБП — %s", payCrypto: "🪙 Криптовалютой — %s", payAddon: "💳 %s — %s", payButton: "Оплатить %s",
 	invoice:         "Счёт: «%s» — %s.\n\nОплатите по кнопке ниже: %s сразу после оплаты, бот пришлёт сообщение.",
 	payNew:          "подписка будет готова",
 	payRenew:        "подписка продлится",
@@ -150,6 +157,17 @@ var ru = words{
 	packageGone:  "Этот пакет больше не продаётся.",
 	paidPackage:  "✅ Оплата получена — пакет «%s» начислен на подписку «%s».",
 	plusPackages: "%s + пакеты %s",
+
+	buyDevice:      "📱 Докупить устройство",
+	deviceTitle:    "Ещё одно устройство для подписки «%s»",
+	deviceNow:      "Сейчас устройств: %d, станет %d.",
+	deviceKeep:     "Устройство останется и при продлении: продление будет дороже на его цену.",
+	deviceUntil:    "Устройство действует до конца срока: %s.",
+	deviceLeft:     "Можно докупить ещё: %d.",
+	payDevice:      "устройство добавится",
+	deviceGone:     "Докупить устройство сейчас нельзя.",
+	paidDevice:     "✅ Оплата получена — к подписке «%s» добавлено устройство, теперь их %d.",
+	refundedDevice: "↩️ Платёж за устройство возвращён. Подписка «%s»: устройств %d.",
 
 	refundedNew:     "↩️ Платёж за тариф «%s» возвращён. Подписка «%s» отключена.",
 	refundedRenew:   "↩️ Платёж за продление «%s» возвращён. Срок подписки «%s» уменьшен. Окончание: %s.",
@@ -213,8 +231,9 @@ var en = words{
 	commands: "Main menu",
 	menuApp:  "Subscription",
 
-	buy: "🛒 Buy a subscription", buyTitle: "Pick a plan", renewTitle: "Renew subscription “%s”: pick a plan",
-	payHow: "How would you like to pay?", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Card or SBP — %s", payCrypto: "🪙 Crypto — %s", payAddon: "💳 %s — %s", payButton: "Pay %s",
+	balanceButton: "💰 Balance: %s", balanceTitle: "💰 Your balance is %s", balanceHint: "The balance is topped up by a transfer: press “Top up”, give the amount and send a screenshot of the transfer. Once checked, the money is on the balance and pays for a subscription, a renewal and extras.", balanceOff: "The balance is not available now.", balanceLow: "The balance is not enough. Top it up in “💰 Balance”.", balancePaid: "✅ Paid from the balance: %s. A message about the purchase comes next.", payBalance: "💰 From the balance · %s", topupButton: "➕ Top up", topupTitle: "Top up the balance", topupAmountAsk: "Pick an amount or write it in a message, e.g. 750.", topupFrom: "From %s.", topupTo: "Up to %s.", topupFromTo: "From %s to %s.", topupPay: "Transfer %s", topupShot: "Then send a screenshot of the transfer here, as one picture.", topupSent: "📨 The request for %s is sent. We check the transfer and top up the balance; a message comes then.", topupBad: "This amount cannot be taken: check the bounds.", topupMany: "Requests are being checked already. Wait for the answer.", topupNone: "The request is not found, start the top-up again.", topupCancelled: "The top-up is cancelled.", topupApproved: "✅ The balance is topped up with %s. It is %s now.", topupRejected: "❌ The top-up of %s is declined.", opTopup: "top-up", opSpend: "payment", opRefund: "refund", opAdjust: "changed by the admin",
+	buy: "🛒 Buy a subscription", buyAnother: "➕ Another subscription", buyTitle: "Pick a plan", renewTitle: "Renew subscription “%s”: pick a plan",
+	payHow: "How would you like to pay?", carryOver: "Moving to another plan turns the days left into days of the new one at its price: what they cost, it lasts.", payStars: "⭐ Telegram Stars — %s", payCard: "💳 Card or SBP — %s", payCrypto: "🪙 Crypto — %s", payAddon: "💳 %s — %s", payButton: "Pay %s",
 	invoice:         "Invoice: “%s” — %s.\n\nPay with the button below: the %s as soon as it is paid, and the bot will message you.",
 	payNew:          "subscription is ready",
 	payRenew:        "subscription is renewed",
@@ -252,18 +271,25 @@ var en = words{
 	paidPackage:  "✅ Payment received — package “%s” is added to subscription “%s”.",
 	plusPackages: "%s + packages %s",
 
+	buyDevice:      "📱 Buy one more device",
+	deviceTitle:    "One more device for subscription “%s”",
+	deviceNow:      "Devices now: %d, then %d.",
+	deviceKeep:     "The device stays with renewals: they cost its price more.",
+	deviceUntil:    "The device lasts until the term ends: %s.",
+	deviceLeft:     "You can buy %d more.",
+	payDevice:      "the device is added",
+	deviceGone:     "One more device cannot be bought now.",
+	paidDevice:     "✅ Payment received — a device is added to subscription “%s”, %d in all now.",
+	refundedDevice: "↩️ The payment for a device is refunded. Subscription “%s”: %d devices.",
+
 	refundedNew:     "↩️ The payment for plan “%s” is refunded. Subscription “%s” is turned off.",
 	refundedRenew:   "↩️ The payment for the renewal “%s” is refunded. The term of subscription “%s” is shortened. Ends: %s.",
 	refundedPackage: "↩️ The payment for package “%s” is refunded. Its traffic is taken off subscription “%s”.",
 	refundedGone:    "↩️ The payment for “%s” is refunded.",
 }
 
-func wordsFor(lang string) *words {
-	if lang == "en" {
-		return &en
-	}
-	return &ru
-}
+// wordsFor is the words of lang (textutil.Lang: English for "en", Russian for anything else).
+func wordsFor(lang string) *words { return textutil.ByLang(lang, &ru, &en) }
 
 // render turns an admin's (or built-in) text into the bot's HTML: its Markdown becomes
 // formatting (markdown.go), the rest is escaped, and the {variables} are filled in. A
@@ -276,31 +302,8 @@ func render(text string, vars map[string]string) string {
 func Render(text string, vars map[string]string) string { return render(text, vars) }
 
 // fill escapes a run of text for Telegram's HTML and fills its {variables}, escaped too.
-// One pass over the text: a value that itself holds {something} is not filled again, and
-// the result does not depend on the order the variables are listed in.
 func fill(text string, vars map[string]string) string {
-	rest := html.EscapeString(text)
-	var out strings.Builder
-	for {
-		i := strings.IndexByte(rest, '{')
-		if i < 0 {
-			break
-		}
-		j := strings.IndexByte(rest[i:], '}')
-		if j < 0 {
-			break
-		}
-		if v, ok := vars[rest[i+1:i+j]]; ok {
-			out.WriteString(rest[:i])
-			out.WriteString(html.EscapeString(v))
-			rest = rest[i+j+1:]
-			continue
-		}
-		out.WriteString(rest[:i+1])
-		rest = rest[i+1:]
-	}
-	out.WriteString(rest)
-	return out.String()
+	return textutil.Fill(text, vars, html.EscapeString)
 }
 
 func pick(admin, builtin string) string {
@@ -310,7 +313,9 @@ func pick(admin, builtin string) string {
 	return builtin
 }
 
+// date is t as a day of the panel's zone (textutil.Zone), as the profile's name says it.
 func (w *words) date(t time.Time) string {
+	t = t.In(textutil.Zone)
 	if w == &en {
 		return fmt.Sprintf("%s %d, %d", w.months[t.Month()-1], t.Day(), t.Year())
 	}
@@ -318,6 +323,7 @@ func (w *words) date(t time.Time) string {
 }
 
 func (w *words) shortDate(t time.Time) string {
+	t = t.In(textutil.Zone)
 	if w == &en {
 		return fmt.Sprintf("%s %d", w.months[t.Month()-1][:3], t.Day())
 	}
@@ -341,21 +347,10 @@ func (w *words) days(n int) string {
 }
 
 func (w *words) bytes(n int64) string {
-	units := []string{"Б", "КБ", "МБ", "ГБ", "ТБ"}
-	sep := ","
 	if w == &en {
-		units, sep = []string{"B", "KB", "MB", "GB", "TB"}, "."
+		return textutil.Size(n, "en")
 	}
-	v, i := float64(n), 0
-	for v >= 1024 && i < len(units)-1 {
-		v /= 1024
-		i++
-	}
-	s := fmt.Sprintf("%.0f", v)
-	if i > 0 && v < 100 {
-		s = strings.Replace(strings.TrimSuffix(fmt.Sprintf("%.1f", v), ".0"), ".", sep, 1)
-	}
-	return s + " " + units[i]
+	return textutil.Size(n, "ru")
 }
 
 // period is the unbind window in words: "сутки", "неделю", "10 дней".

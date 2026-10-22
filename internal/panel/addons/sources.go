@@ -23,8 +23,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"mikan/internal/netaddr"
 	"mikan/internal/panel/store/db"
-	"mikan/internal/proto"
 	"mikan/internal/release"
 )
 
@@ -174,11 +174,11 @@ func newSourceNet(dev bool) *sourceNet {
 // allowed says whether the panel may connect to a: public addresses only, and in development
 // 127.0.0.1 too.
 func (n *sourceNet) allowed(a netip.Addr) bool {
-	a = proto.Unwrap4(a)
+	a = netaddr.Unwrap(a)
 	if n.dev && a == netip.MustParseAddr("127.0.0.1") {
 		return true
 	}
-	return proto.PublicAddr(a)
+	return netaddr.IsPublic(a)
 }
 
 // control runs on the address actually dialled, after the name was looked up, so a name
@@ -278,7 +278,7 @@ func (n *sourceNet) parseURL(s string) (canonical string, gh *ghRepo, err error)
 	u.Host = strings.ToLower(u.Host)
 	host := u.Hostname()
 	switch {
-	case u.Scheme == "https" && proto.PublicHost(host):
+	case u.Scheme == "https" && netaddr.PublicHost(host):
 	case n.dev && u.Scheme == "http" && host == "127.0.0.1":
 	default:
 		return "", nil, ErrSourceURL
@@ -408,7 +408,7 @@ func publicRegistry(image string) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	return proto.PublicHost(host)
+	return netaddr.PublicHost(host)
 }
 
 // checkSourceEntry says why a source's entry cannot be installed, "" when it can; on success

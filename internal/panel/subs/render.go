@@ -15,6 +15,7 @@ import (
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/proto"
+	"mikan/internal/textutil"
 )
 
 // Endpoint describes how clients reach one node.
@@ -22,6 +23,9 @@ type Endpoint struct {
 	Host      string // IP or domain the client connects to
 	SNI       string // TLS server name for Hysteria2/TUIC; empty for IP-only nodes
 	PinSHA256 string // hex SHA-256 of the node's self-signed Hysteria2/TUIC certificate
+	// SNIRouter: the node shares its 443 between the inbounds marked for it, which clients
+	// reach on 443.
+	SNIRouter bool
 }
 
 // Node is one server in the subscription.
@@ -31,6 +35,8 @@ type Node struct {
 	// leading flag (or the whole name) prefixes proxy names.
 	Name     string
 	Endpoint Endpoint
+	// SSOneKey: the node is older than the Shadowsocks-2022 key per user (proto.ClientInput).
+	SSOneKey bool
 }
 
 // Groups are the proxy-group names Clash-family apps show; the admin can rename them.
@@ -85,7 +91,7 @@ func (g Groups) WithDefaults(lang string) Groups {
 	}
 	if g.Auto == "" {
 		g.Auto = "Авто"
-		if lang == "en" {
+		if textutil.Lang(lang).En() {
 			g.Auto = "Auto"
 		}
 	}
@@ -130,8 +136,13 @@ type Profile struct {
 	Skip     func(in db.Inbound, err error)
 	Slot     db.Slot
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
-	Nodes    []Node       // enabled nodes in display order; inbounds of other nodes are skipped
-	Direct   []string     // hosts that bypass the tunnel: the panel and every node
+	// What profile read on the way, for the subscription's page (info) to build on rather than
+	// read again: every inbound, the user's access and grants left.
+	all    []db.Inbound
+	access domain.Access
+	grants domain.GrantsLeft
+	Nodes  []Node   // enabled nodes in display order; inbounds of other nodes are skipped
+	Direct []string // hosts that bypass the tunnel: the panel and every node
 	// Fingerprint is the panel's default uTLS profile (proto.ClientInput.Fingerprint).
 	Fingerprint string
 	// Rules are the admin's own Clash rules (ServedRules), before the built-in routing.
@@ -146,6 +157,7 @@ type Profile struct {
 type proxy struct {
 	name string
 	node int64
+	pool int64 // the inbound's server group, 0: none (the main servers)
 	uri  string
 	yaml map[string]any
 }
@@ -173,9 +185,9 @@ func build(p Profile) ([]proxy, error) {
 			if in.NodeID != n.ID {
 				continue
 			}
-			port, err := firstPort(in.Port)
-			if err != nil {
-				p.skip(in, err)
+			port := domain.FirstPort(in.Port)
+			if port == 0 {
+				p.skip(in, fmt.Errorf("bad port %q", in.Port))
 				continue
 			}
 			t, err := parseTemplate(in.Config)
@@ -183,6 +195,10 @@ func build(p Profile) ([]proxy, error) {
 				// Saved configs are validated; one broken inbound must not empty the subscription.
 				p.skip(in, err)
 				continue
+			}
+			spec := in.Port
+			if n.Endpoint.SNIRouter && proto.SNI443(t) {
+				port, spec = 443, "443"
 			}
 			base := domain.ProxyName(in)
 			// A name the admin typed is used as is; preset names get the node's flag.
@@ -194,14 +210,14 @@ func build(p Profile) ([]proxy, error) {
 			for i := 2; used[name]; i++ {
 				name = base + " " + strconv.Itoa(i)
 			}
-			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: in.Port,
-				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot})
+			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: spec,
+				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot, SSOneKey: n.SSOneKey})
 			if err != nil {
 				p.skip(in, err)
 				continue
 			}
 			used[name] = true
-			out = append(out, proxy{name: name, node: n.ID, uri: c.URI, yaml: c.Mihomo})
+			out = append(out, proxy{name: name, node: n.ID, pool: in.PoolID.Int64, uri: c.URI, yaml: c.Mihomo})
 		}
 	}
 	return out, nil
@@ -213,32 +229,30 @@ func (p Profile) skip(in db.Inbound, err error) {
 	}
 }
 
-func firstPort(spec string) (int, error) {
-	head, _, _ := strings.Cut(spec, ",")
-	head, _, _ = strings.Cut(head, "-")
-	p, err := strconv.Atoi(strings.TrimSpace(head))
-	if err != nil || p <= 0 || p > 65535 {
-		return 0, fmt.Errorf("bad port %q", spec)
-	}
-	return p, nil
-}
-
 // URIs renders one share link per inbound.
 func URIs(p Profile) (string, error) {
+	links, _, err := uris(p)
+	return links, err
+}
+
+// uris are the share links of p and the proxies they are of.
+func uris(p Profile) (string, []proxy, error) {
 	ps, err := build(p)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	lines := make([]string, 0, len(ps))
+	in := make([]proxy, 0, len(ps))
 	for _, x := range ps {
 		if x.uri != "" { // the mihomo-only types have no share link
 			lines = append(lines, x.uri)
+			in = append(in, x)
 		}
 	}
 	if len(lines) == 0 {
-		return "", ErrNoProxies
+		return "", nil, ErrNoProxies
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n"), in, nil
 }
 
 // Mihomo renders a complete client profile.
@@ -363,10 +377,10 @@ func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 			"sniff": map[string]any{"HTTP": map[string]any{"ports": []any{80, "8080-8880"}}, "TLS": map[string]any{"ports": []any{443, 8443}},
 				"QUIC": map[string]any{"ports": []any{443, 8443}}}}
 	}
-	// mihomo skips a rule whose group can't carry UDP (XHTTP picked by hand or by url-test)
-	// and sends what falls through to DIRECT: past the tunnel, from the real address. REJECT
-	// makes such apps fall back to TCP instead. In the "blocked" mode the rest goes direct
-	// by design; its tunnel rules get their own REJECT twins (blockedRules).
+	// mihomo skips a rule whose group can't carry UDP (a proxy with udp off, picked by hand
+	// or by url-test) and sends what falls through to DIRECT: past the tunnel, from the real
+	// address. REJECT makes such apps fall back to TCP instead. In the "blocked" mode the
+	// rest goes direct by design; its tunnel rules get their own REJECT twins (blockedRules).
 	last := []string{"MATCH," + g.Main, "MATCH,REJECT"}
 	if r == RoutingBlocked {
 		last = []string{"MATCH,DIRECT"}

@@ -50,7 +50,6 @@ ON CONFLICT (dedupe_key) DO NOTHING;
 SELECT * FROM addon_events
 WHERE id > sqlc.arg(after)::BIGINT
   AND (COALESCE(cardinality(sqlc.arg(types)::TEXT[]), 0) = 0 OR type = ANY(sqlc.arg(types)::TEXT[]))
-  AND (sqlc.arg(bot_too)::BOOLEAN OR type NOT LIKE 'bot.%')
 ORDER BY id LIMIT sqlc.arg(lim)::INT;
 
 -- name: GetAddonCursor :one
@@ -122,6 +121,16 @@ DELETE FROM addon_origins WHERE addon_id = $1;
 
 -- name: DeleteAddonOriginsOf :exec
 DELETE FROM addon_origins WHERE source_id = $1;
+
+-- name: ListAddonCommunity :many
+SELECT * FROM addon_community ORDER BY addon_id;
+
+-- name: UpsertAddonCommunity :exec
+INSERT INTO addon_community (addon_id, repo, key) VALUES ($1, $2, $3)
+ON CONFLICT (addon_id) DO UPDATE SET repo = EXCLUDED.repo, key = EXCLUDED.key;
+
+-- name: DeleteAddonCommunity :exec
+DELETE FROM addon_community WHERE addon_id = $1;
 
 -- name: ListAddonClaims :many
 SELECT * FROM addon_id_claims ORDER BY addon_id;

@@ -25,43 +25,18 @@ import (
 
 type slot struct{ name, uuid, secret string }
 
-// The presets the fixture lists and the settings the node takes for each, as the panel stores
-// them in inbounds.settings and passes them on as they are. Only this generator spells them
-// out: the panel builds its own from internal/panel/presets.
-const (
-	PresetVlessVision = "vless_reality_vision"
-	PresetVlessXHTTP  = "vless_reality_xhttp"
-	PresetHysteria2   = "hysteria2"
-	PresetTUIC        = "tuic_v5"
-)
-
+// RealitySettings are the REALITY keys and target of the fixture's two VLESS inbounds.
 type RealitySettings struct {
-	PrivateKey  string   `json:"private_key"`
-	PublicKey   string   `json:"public_key"`
-	ShortIDs    []string `json:"short_ids"`
-	Dest        string   `json:"dest"`
-	ServerNames []string `json:"server_names"`
+	PrivateKey  string
+	PublicKey   string
+	ShortIDs    []string
+	Dest        string
+	ServerNames []string
 }
 
-type VlessVisionSettings struct {
-	Reality RealitySettings `json:"reality"`
-}
-
-type VlessXHTTPSettings struct {
-	Reality RealitySettings `json:"reality"`
-	Path    string          `json:"path"`
-	Mode    string          `json:"mode"` // "stream-one": "auto" hangs on mihomo v1.19.31 (S-01a)
-}
-
-type Hysteria2Settings struct {
-	ObfsPassword string `json:"obfs_password,omitempty"`
-	UpMbps       int    `json:"up_mbps,omitempty"`
-	DownMbps     int    `json:"down_mbps,omitempty"`
-	Masquerade   string `json:"masquerade,omitempty"`
-}
-
-type TUICSettings struct {
-	CongestionControl string `json:"congestion_control"`
+// reality is the template's reality-config of r.
+func (r RealitySettings) reality() map[string]any {
+	return map[string]any{"dest": r.Dest, "private-key": r.PrivateKey, "short-id": r.ShortIDs, "server-names": r.ServerNames}
 }
 
 func main() {
@@ -82,27 +57,28 @@ func main() {
 		slots[i] = slot{fmt.Sprintf("s%06d", i+1), uuid(), token()}
 	}
 	certPEM, keyPEM := selfSigned()
+	// The templates the node takes (proto.Template as JSON), as the panel sends them.
 	raw := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+	obfs := token()
 	st := nodeapi.DesiredState{
 		Revision: 1,
 		Inbounds: []nodeapi.Inbound{
-			{Name: "vision", Preset: PresetVlessVision, Port: "8443", Settings: raw(VlessVisionSettings{Reality: reality})},
-			{Name: "xhttp", Preset: PresetVlessXHTTP, Port: "8444", Settings: raw(VlessXHTTPSettings{Reality: reality, Path: "/x7kq", Mode: "stream-one"})},
-			{Name: "hy2", Preset: PresetHysteria2, Port: "8445", Settings: raw(Hysteria2Settings{ObfsPassword: token()})},
-			{Name: "tuic", Preset: PresetTUIC, Port: "8446", Settings: raw(TUICSettings{CongestionControl: "bbr"})},
+			{Name: "vision", Port: "8443", Config: raw(map[string]any{"type": "vless", "reality-config": reality.reality(), "mikan": map[string]any{"flow": "xtls-rprx-vision"}})},
+			// "stream-one": "auto" hangs on mihomo v1.19.31 (S-01a).
+			{Name: "xhttp", Port: "8444", Config: raw(map[string]any{"type": "vless", "reality-config": reality.reality(), "xhttp-config": map[string]any{"path": "/x7kq", "mode": "stream-one"}})},
+			{Name: "hy2", Port: "8445", Config: raw(map[string]any{"type": "hysteria2", "alpn": []string{"h3"}, "obfs": "salamander", "obfs-password": obfs})},
+			{Name: "tuic", Port: "8446", Config: raw(map[string]any{"type": "tuic", "alpn": []string{"h3"}, "congestion-controller": "bbr"})},
 		},
 		TLS: &nodeapi.TLSFiles{CertPEM: certPEM, KeyPEM: keyPEM},
 	}
 	for _, s := range slots {
 		st.Slots = append(st.Slots, nodeapi.Slot{Name: s.name, UUID: s.uuid, Secret: s.secret})
 	}
-	var hy2 Hysteria2Settings
-	_ = json.Unmarshal(st.Inbounds[2].Settings, &hy2)
 
 	must(os.MkdirAll(filepath.Join(*out, "clients"), 0o755))
 	must(writeJSON(filepath.Join(*out, "state.json"), st))
 	// Port plan in client configs: 1<slot><proto>, proto 1=vision 2=xhttp 3=hy2 4=tuic.
-	must(os.WriteFile(filepath.Join(*out, "clients", "client.yaml"), []byte(clientConfig(slots, reality, hy2.ObfsPassword)), 0o644))
+	must(os.WriteFile(filepath.Join(*out, "clients", "client.yaml"), []byte(clientConfig(slots, reality, obfs)), 0o644))
 }
 
 func clientConfig(slots []slot, r RealitySettings, obfs string) string {

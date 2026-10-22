@@ -97,6 +97,59 @@ func TestNodeTrafficAddsUpToTheUsers(t *testing.T) {
 	}
 }
 
+// What a node's relay carried for another node's cascade counts as its load, apart: in the
+// relay's columns of its hour and day, once for a batch delivered twice, and nowhere else.
+// The users, their statistics, the node's users' bytes and its running total stay as the
+// source node counted them, so the nodes still add up to the users. The relay's live
+// connections reach the node's health view.
+func TestRelayTrafficIsTheNodesAlone(t *testing.T) {
+	s1, node1, st, users, now := setup(t)
+	ctx := context.Background()
+	q := st.Q
+	tariffs, _ := q.ListTariffs(ctx)
+	u, err := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot, _ := q.GetSlot(ctx, u.SlotID.Int64)
+	node1.batch = nodeapi.Counters{Epoch: "e1", Seq: 1,
+		Slots:       map[string]nodeapi.Traffic{slot.Name: {Up: 10, Down: 100}},
+		Relay:       map[string]nodeapi.Traffic{domain.RelayUserName(2): {Up: 300, Down: 3000}, domain.RelayUserName(3): {Up: 1, Down: 2}},
+		RelayOnline: map[string]int{domain.RelayUserName(2): 4}}
+	s1.pullCounters(ctx)
+	s1.pullCounters(ctx) // the same batch again: counted once
+
+	var up, down, relayUp, relayDown int64
+	for _, table := range []string{"node_traffic_hourly", "node_traffic_daily"} {
+		if err := st.DB.QueryRowContext(ctx, "SELECT up, down, relay_up, relay_down FROM "+table+" WHERE node_id = 1").Scan(&up, &down, &relayUp, &relayDown); err != nil {
+			t.Fatal(table, err)
+		}
+		if up != 10 || down != 100 || relayUp != 301 || relayDown != 3002 {
+			t.Fatalf("%s: users %d/%d, relay %d/%d", table, up, down, relayUp, relayDown)
+		}
+	}
+	var usersUp, usersDown int64
+	if err := st.DB.QueryRowContext(ctx, "SELECT COALESCE(SUM(up),0), COALESCE(SUM(down),0) FROM traffic_daily").Scan(&usersUp, &usersDown); err != nil || usersUp != 10 || usersDown != 100 {
+		t.Fatalf("the users' statistics: %d/%d %v", usersUp, usersDown, err)
+	}
+	got, _ := q.GetUser(ctx, u.ID)
+	n1, _ := q.GetNode(ctx, 1)
+	if got.UsedUp != 10 || got.UsedDown != 100 || n1.TotalUp != 10 || n1.TotalDown != 100 {
+		t.Fatalf("the user %d/%d, the node's total %d/%d", got.UsedUp, got.UsedDown, n1.TotalUp, n1.TotalDown)
+	}
+	if hv := s1.Health(); hv.Relay[domain.RelayUserName(2)] != 4 || len(hv.Relay) != 1 {
+		t.Fatalf("the relay's connections: %v", hv.Relay)
+	}
+
+	// Relay bytes alone still make a batch the panel stores.
+	*now = now.Add(time.Minute)
+	node1.batch = nodeapi.Counters{Epoch: "e1", Seq: 2, Slots: map[string]nodeapi.Traffic{}, Relay: map[string]nodeapi.Traffic{domain.RelayUserName(2): {Up: 5, Down: 5}}}
+	s1.pullCounters(ctx)
+	if err := st.DB.QueryRowContext(ctx, "SELECT COALESCE(SUM(relay_up),0) FROM node_traffic_daily WHERE node_id = 1").Scan(&relayUp); err != nil || relayUp != 306 {
+		t.Fatalf("relay bytes alone: %d %v", relayUp, err)
+	}
+}
+
 // A node that is deleted while its batch is being counted does not fail the batch: the
 // users' traffic still counts, and the node's rows go with the node.
 func TestNodeTrafficSkipsANodeThatIsGone(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/store/db"
 )
@@ -41,7 +42,7 @@ func TestOffersListTheTerms(t *testing.T) {
 	if o.Terms[2].Rub != 0 || o.Stars != 150 {
 		t.Fatalf("prices the providers do not take: %+v", o)
 	}
-	if got := DescribeOffer(o, "en"); got != "7 days – 90 days · 150 GB · devices: 3" {
+	if got := model.DescribeOffer(o.Model(), "en"); got != "7 days – 90 days · 150 GB · devices: 3" {
 		t.Fatalf("offer line %q", got)
 	}
 }
@@ -178,7 +179,7 @@ func TestTermLabel(t *testing.T) {
 		days int64
 		want string
 	}{{plain, 0, "no end date"}, {plain, 7, "7 days"}, {toDay, 30, "1 month"}, {toDay, 90, "3 months"}, {toDay, 0, "no end date"}} {
-		if got := TermLabel(c.t, c.days, "en"); got != c.want {
+		if got := model.TermLabel(model.Tariff(c.t), c.days, "en"); got != c.want {
 			t.Errorf("%d days (billing day %v): %q, want %q", c.days, c.t.BillingDay.Valid, got, c.want)
 		}
 	}
@@ -200,7 +201,7 @@ func TestOfferOfOnlyALaterTerm(t *testing.T) {
 		t.Fatalf("offers %+v", offers)
 	}
 	o := offers[0]
-	if got := DescribeOffer(o, "en"); got != "90 days · 150 GB · devices: 3" {
+	if got := model.DescribeOffer(o.Model(), "en"); got != "90 days · 150 GB · devices: 3" {
 		t.Fatalf("offer line %q", got)
 	}
 	if term, ok := o.Term(nil); ok {

@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mikan/internal/httpjson"
 )
 
 // DefaultAPI is Cloudflare's WARP client API.
@@ -81,26 +83,20 @@ func (c Client) do(ctx context.Context, method, path, token string, in, out any)
 	if hc == nil {
 		hc = &http.Client{Timeout: 20 * time.Second}
 	}
-	resp, err := hc.Do(req)
-	if err != nil {
+	err = httpjson.Do(hc, req, 1<<20, out)
+	var se *httpjson.StatusError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &se) && se.Code == http.StatusTooManyRequests:
+		// Too many registrations has advice of its own: wait, or bring a config.
+		return &Error{Code: "warp_refused_429"}
+	case errors.As(err, &se):
+		return &Error{Code: "warp_refused", Status: se.Code}
+	case httpjson.Unreachable(err):
 		return &Error{Code: "warp_unreachable"}
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode/100 != 2 {
-		// Too many registrations has advice of its own: wait, or bring a config.
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return &Error{Code: "warp_refused_429"}
-		}
-		return &Error{Code: "warp_refused", Status: resp.StatusCode}
-	}
-	if out == nil {
-		return nil
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return &Error{Code: "warp_bad_answer"}
-	}
-	return nil
+	return &Error{Code: "warp_bad_answer"}
 }
 
 type registration struct {

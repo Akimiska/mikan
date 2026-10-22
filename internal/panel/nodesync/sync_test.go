@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -304,6 +305,22 @@ func TestEachNodeGetsItsOwnInbounds(t *testing.T) {
 		t.Fatalf("all nodes get the same slots: %d and %d", len(a.Slots), len(b.Slots))
 	}
 
+	// The 301 on port 80 goes to a remote node that has it on; never to the panel's own,
+	// whose port 80 the panel's certificates use.
+	if a.HTTPRedirect || b.HTTPRedirect {
+		t.Fatal("the redirect is off by default")
+	}
+	for _, id := range []int64{local.id, remote.id} {
+		if err := st.Q.SetNodeHTTPRedirect(ctx, db.SetNodeHTTPRedirectParams{HttpRedirect: 1, ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, _ = local.desired(ctx)
+	b, _ = remote.desired(ctx)
+	if a.HTTPRedirect || !b.HTTPRedirect {
+		t.Fatalf("redirect: local %v, remote %v", a.HTTPRedirect, b.HTTPRedirect)
+	}
+
 	// A disabled node keeps its syncer but serves nothing.
 	n, _ := st.Q.GetNode(ctx, remote.id)
 	if _, err := st.Q.UpdateNode(ctx, db.UpdateNodeParams{Name: n.Name, Address: n.Address, PublicHost: n.PublicHost, Domain: n.Domain, PublicName: n.PublicName, Enabled: 0, ID: n.ID}); err != nil {
@@ -485,12 +502,12 @@ func TestHealthCarriesAppliedPorts(t *testing.T) {
 func TestPolicyCarriesSpeedCap(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	u := db.User{ID: 42, Status: "active", SpeedLimit: sql.NullInt64{Int64: 30, Valid: true}}
-	p := userPolicy(u, 0, "s1", 1, now, nil, nil, nil)
+	p := userPolicy(u, 0, "s1", 1, now, nil, domain.AccessOf(u, domain.AllServers), nil, nil)
 	if p.SpeedMbps != 30 || p.Group != "42" {
 		t.Fatalf("cap and group: %+v", p)
 	}
 	u.SpeedLimit = sql.NullInt64{}
-	if p := userPolicy(u, 0, "s2", 1, now, nil, nil, nil); p.SpeedMbps != 0 || p.Group != "42" {
+	if p := userPolicy(u, 0, "s2", 1, now, nil, domain.AccessOf(u, domain.AllServers), nil, nil); p.SpeedMbps != 0 || p.Group != "42" {
 		t.Fatalf("no cap: %+v", p)
 	}
 	a := policyKey([]nodeapi.Policy{{Slot: "s1", SpeedMbps: 30}})
@@ -503,4 +520,99 @@ func TestPolicyCarriesSpeedCap(t *testing.T) {
 func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 	st, _, err := s.desiredPin(ctx)
 	return st, err
+}
+
+// The bytes by site are kept once per batch, by subscription and day; a slot of nobody and
+// a site no name can be are dropped.
+func TestSitesStoredOnce(t *testing.T) {
+	s, node, st, users, _ := setup(t)
+	s.m.storeInterval = 0
+	ctx := context.Background()
+	tariffs, _ := st.Q.ListTariffs(ctx)
+	u, err := users.Create(ctx, domain.CreateInput{Name: "a", TariffID: tariffs[1].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot, _ := st.Q.GetSlot(ctx, u.SlotID.Int64)
+	long := strings.Repeat("a", 300)
+	node.batch = nodeapi.Counters{Epoch: "e1", Seq: 1, Slots: map[string]nodeapi.Traffic{slot.Name: {Up: 30, Down: 300}},
+		Sites: map[string]map[string]nodeapi.Traffic{slot.Name: {"example.com": {Up: 10, Down: 100}, "*": {Up: 20, Down: 200}, long: {Up: 1}}, "s999999": {"x.com": {Up: 5}}}}
+	s.pullCounters(ctx)
+	s.pullCounters(ctx)
+	rows, err := st.Q.UserSites(ctx, db.UserSitesParams{UserID: u.ID, Since: 0, Lim: 10})
+	if err != nil || len(rows) != 2 || rows[0].Site != "*" || rows[0].Down != 200 || rows[1].Site != "example.com" || rows[1].Up != 10 {
+		t.Fatalf("sites: %+v %v", rows, err)
+	}
+}
+
+// The SNI router takes the inbounds marked for it, each by the names its clients send, the
+// first REALITY one for any other name; nothing marked, no router.
+func TestSNIRouterRoutes(t *testing.T) {
+	in := func(name, cfg string) nodeapi.Inbound {
+		return nodeapi.Inbound{Name: name, Port: "8443", Config: []byte(cfg)}
+	}
+	r := sniRouter([]nodeapi.Inbound{
+		in("plain", `{"type":"vless","reality-config":{"server-names":["www.example.com"]}}`),
+		in("reality", `{"type":"vless","reality-config":{"server-names":["www.microsoft.com","microsoft.com"]},"mikan":{"sni443":true}}`),
+		in("tls", `{"type":"trojan","mikan":{"tls":"node","sni443":true}}`),
+		in("udp", `{"type":"hysteria2","mikan":{"sni443":true}}`),
+	}, "node.example.net", false)
+	if r == nil || len(r.Routes) != 2 || r.Default != "reality" {
+		t.Fatalf("router: %+v", r)
+	}
+	if got := r.Routes[0]; got.Inbound != "reality" || len(got.Names) != 2 || got.Names[0] != "www.microsoft.com" {
+		t.Fatalf("reality route: %+v", got)
+	}
+	if got := r.Routes[1]; got.Inbound != "tls" || len(got.Names) != 1 || got.Names[0] != "node.example.net" {
+		t.Fatalf("tls route: %+v", got)
+	}
+	if !r.Routed("tls") || r.Routed("plain") {
+		t.Fatal("Routed")
+	}
+	if sniRouter([]nodeapi.Inbound{in("plain", `{"type":"vless","reality-config":{}}`)}, "", false) != nil {
+		t.Fatal("a router with nothing behind it")
+	}
+}
+
+// The front page takes the node's own domain and a ClientHello with no name; a domain an
+// inbound asks for stays the inbound's. With nothing marked the page alone keeps the
+// router, unless an inbound of the node's own holds TCP 443.
+func TestSNIRouterFrontPage(t *testing.T) {
+	in := func(name, port, cfg string) nodeapi.Inbound {
+		return nodeapi.Inbound{Name: name, Port: port, Config: []byte(cfg)}
+	}
+	reality := in("reality", "8443", `{"type":"vless","reality-config":{"server-names":["www.microsoft.com"]},"mikan":{"sni443":true}}`)
+	r := sniRouter([]nodeapi.Inbound{reality}, "Node.Example.net.", true)
+	if r == nil || !slices.Equal(r.Stub, []string{"node.example.net", ""}) || r.Default != "reality" {
+		t.Fatalf("page on the domain and with no name: %+v", r)
+	}
+	tls := in("tls", "8443", `{"type":"trojan","mikan":{"tls":"node","sni443":true}}`)
+	if r := sniRouter([]nodeapi.Inbound{reality, tls}, "node.example.net", true); r == nil || !slices.Equal(r.Stub, []string{""}) {
+		t.Fatalf("a domain an inbound asks for stays the inbound's: %+v", r)
+	}
+	if r := sniRouter(nil, "node.example.net", true); r == nil || len(r.Routes) != 0 || len(r.Stub) != 2 {
+		t.Fatalf("the page alone: %+v", r)
+	}
+	if r := sniRouter([]nodeapi.Inbound{in("own", "443", `{"type":"vless","reality-config":{}}`)}, "node.example.net", true); r != nil {
+		t.Fatalf("an inbound of its own on 443 leaves the page no port: %+v", r)
+	}
+	if r := sniRouter([]nodeapi.Inbound{in("hy", "443", `{"type":"hysteria2"}`)}, "node.example.net", true); r == nil {
+		t.Fatal("443 over UDP leaves TCP 443 free")
+	}
+}
+
+// A switch of a node's own (the 301 on port 80, the sums by site, the SNI router) is a
+// change of state the node must get, even with nothing else changed.
+func TestStateKeyHoldsTheNodeSwitches(t *testing.T) {
+	base := nodeapi.DesiredState{}
+	for name, st := range map[string]nodeapi.DesiredState{
+		"redirect": {HTTPRedirect: true},
+		"detail":   {Detail: true},
+		"router":   {Router: &nodeapi.SNIRouter{Routes: []nodeapi.SNIRoute{{Inbound: "a", Names: []string{"x"}}}}},
+		"front":    {FrontPage: "cats"},
+	} {
+		if stateKey(st) == stateKey(base) {
+			t.Errorf("%s does not change the state's key", name)
+		}
+	}
 }

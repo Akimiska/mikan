@@ -1,15 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowUpCircle, LayoutDashboard, LogOut, MoreHorizontal, Network, PanelLeftClose, PanelLeftOpen, Puzzle, Server, SlidersHorizontal, Tag, Users, Wallet } from "lucide-react";
+import { Activity, ArrowUpCircle, LayoutDashboard, LogOut, MoreHorizontal, Network, PanelLeftClose, PanelLeftOpen, Puzzle, Server, SlidersHorizontal, Tag, Users, Wallet } from "lucide-react";
 import { useState } from "react";
-import { api, unwrap } from "../api/client";
+import { api, ApiError, errorText, unwrap } from "../api/client";
 import { meQuery, useNode, useOverview, useUpdates } from "../api/hooks";
+import { useSupportMode } from "../api/support";
 import { Logo } from "../components/atmosphere";
 import { LangSwitch } from "../components/lang";
+import { useToast } from "../components/toast";
 import { Avatar, Bar, Pill } from "../components/ui";
 import { t, useLocale } from "../i18n";
 import { num, uptime } from "../lib/format";
+import { SupportBar } from "./support-bar";
 
 const NAV = [
   { to: "/", key: "overview", icon: LayoutDashboard },
@@ -19,6 +22,7 @@ const NAV = [
   { to: "/nodes", key: "nodes", icon: Network },
   { to: "/payments", key: "payments", icon: Wallet },
   { to: "/addons", key: "addons", icon: Puzzle },
+  { to: "/diagnostics", key: "diagnostics", icon: Activity },
   { to: "/settings", key: "settings", icon: SlidersHorizontal },
 ] as const;
 
@@ -50,6 +54,7 @@ export function Shell() {
   const foldLabel = folded ? t("shell.unfold") : t("shell.fold");
   return (
     <>
+      <SupportBar />
       <div className="app" data-folded={folded || undefined}>
         <aside className="sidebar glass" aria-label={t("shell.sidebar")}>
           <div className="brand">
@@ -170,16 +175,36 @@ function NodeCard() {
 }
 
 function AdminRow() {
-  const me = useQuery(meQuery);
+  // A support operator has no account of their own to show (the admin's data is closed to them).
+  const operator = useSupportMode();
+  const me = useQuery({ ...meQuery, enabled: !operator });
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const toast = useToast();
   const logout = useMutation({
     mutationFn: () => unwrap(api.POST("/api/v1/auth/logout")),
-    onSettled: () => {
+    onSuccess: () => {
       qc.clear();
       void navigate({ to: "/login", search: {} });
     },
+    // A failed sign-out leaves the session alive on the server: the admin stays here with the reason
+    // instead of a login form that would be untrue. A 401 is the session already gone, and the unauthorized event moves them to the login.
+    onError: (e) => {
+      if (!(e instanceof ApiError && e.status === 401)) toast.error(errorText(e));
+    },
   });
+  if (operator) {
+    // No sign-out for an operator: the access ends when the admin revokes it or its time is up.
+    return (
+      <div className="admin-row">
+        <Avatar name={t("support.operator")} seed={2} size="sm" />
+        <div className="who-wrap min-w-0">
+          <div className="truncate text-[13px] font-medium">{t("support.operator")}</div>
+          <div className="text-xs text-[var(--ink-500)]">{t(`support.level.${operator.level}`)}</div>
+        </div>
+      </div>
+    );
+  }
   const name = me.data?.admin.username ?? "…";
   return (
     <div className="admin-row">

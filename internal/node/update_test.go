@@ -17,7 +17,7 @@ import (
 func updateEngine(t *testing.T) (*Engine, http.Handler, string) {
 	t.Helper()
 	dir := t.TempDir()
-	e := &Engine{dataDir: dir, log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now), sys: newSysSampler()}
+	e := &Engine{dataDir: dir, log: quiet(), Reg: NewRegistry("e1", 0, time.Minute, time.Now, &fakeCore{}), sys: newSysSampler()}
 	return e, Handler(e, quiet()), dir
 }
 

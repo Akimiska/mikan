@@ -14,62 +14,48 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
+// The states of a user (State).
 const (
-	StateActive   = "active"
-	StateExpiring = "expiring"
-	StateLimited  = "limited"
-	StateExpired  = "expired"
-	StateDisabled = "disabled"
-
-	expiringWindow = 7 * 24 * time.Hour
-	day            = int64(24 * time.Hour / time.Second)
+	StateActive   = model.StateActive
+	StateExpiring = model.StateExpiring
+	StateLimited  = model.StateLimited
+	StateExpired  = model.StateExpired
+	StateDisabled = model.StateDisabled
 )
 
+const day = int64(24 * time.Hour / time.Second)
+
 var (
-	ErrNotFound = errors.New("not found")
+	ErrNotFound = model.ErrNotFound
 	ErrNoSlots  = errors.New("no free slots")
 )
 
 // State derives what the user can do right now; limited and expired are never stored.
 // grants is what is left of the user's active main grants (GrantsLeft.Main): a user past
-// the base quota with grants left is not limited.
+// the base quota with grants left is not limited. The rule is the model's: the bot addon
+// computes the same.
 func State(u db.User, grants int64, now time.Time) string {
-	switch {
-	case u.Status == "disabled":
-		return StateDisabled
-	case u.ExpiresAt.Valid && now.Unix() >= u.ExpiresAt.Int64:
-		return StateExpired
-	case TrafficLeft(u.TrafficLimit, u.UsedUp+u.UsedDown, grants) == 0:
-		return StateLimited
-	case u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).Sub(now) <= expiringWindow:
-		return StateExpiring
-	}
-	return StateActive
+	return model.State(model.User(u), grants, now)
 }
 
 func CanConnect(state string) bool { return state == StateActive || state == StateExpiring }
 
 // CountStates counts the users in each State in the database, without loading them.
 func CountStates(ctx context.Context, q *db.Queries, now time.Time) (db.CountUserStatesRow, error) {
-	return q.CountUserStates(ctx, db.CountUserStatesParams{Now: now.Unix(), ExpiringWithin: int64(expiringWindow / time.Second)})
+	return q.CountUserStates(ctx, db.CountUserStatesParams{Now: now.Unix(), ExpiringWithin: int64(model.ExpiringWindow / time.Second)})
 }
 
-// NextReset is when the traffic counter of the current period drops to zero.
+// NextReset is when the traffic counter of the current period drops to zero (model.NextReset).
 func NextReset(u db.User, now time.Time) (time.Time, bool) {
-	switch u.ResetStrategy {
-	case "month_start":
-		// Monthly: on the billing day, or the 1st without one.
-		return nextMonthPeriod(MonthPeriodStart(now, u.BillingDay), u.BillingDay), true
-	case "period":
-		return time.Unix(u.PeriodStart+max(u.PeriodDays, 1)*day, 0).UTC(), true
-	}
-	return time.Time{}, false
+	return model.NextReset(model.User(u), now)
 }
 
 // Changes tells the node syncer what to push after a mutation.
@@ -135,14 +121,11 @@ func (s *Users) Create(ctx context.Context, in CreateInput) (db.User, error) {
 		return db.User{}, err
 	}
 	in.Name = name
-	u, err := s.create(ctx, in)
-	if errors.Is(err, ErrNoSlots) {
-		if err := s.pool.Refill(ctx, RefillBatch); err != nil {
-			return db.User{}, err
-		}
-		s.changes.SlotsChanged()
+	var u db.User
+	err = s.WithSlots(ctx, func() (err error) {
 		u, err = s.create(ctx, in)
-	}
+		return err
+	})
 	if err != nil {
 		return db.User{}, err
 	}
@@ -209,7 +192,7 @@ func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, any
 	if source == UserFromImport {
 		return u, nil
 	}
-	return u, events.Emit(ctx, q, s.now(), events.UserCreated, u.ID, in.TgID, events.User{Source: source, TariffID: t.ID},
+	return u, feed.Emit(ctx, q, s.now(), events.UserCreated, u.ID, in.TgID, events.User{Source: source, TariffID: t.ID},
 		events.UserCreated+":"+strconv.FormatInt(u.ID, 10))
 }
 
@@ -231,12 +214,16 @@ type PurchaseInput struct {
 	// ResetTraffic: a renewal also starts a new traffic period (the payment buys a full
 	// quota); off, the counter keeps running.
 	ResetTraffic bool
+	// KeepExtraDevices: devices bought on top of the tariff stay with a renewal of the same
+	// tariff; off, or another tariff, they go with the term they were bought for.
+	KeepExtraDevices bool
 }
 
 // Purchase applies a paid tariff on q's transaction, so the payment and its effect commit
 // together. in.UserID 0 (or a user deleted since the invoice) makes a new subscription
 // named in.Name. A renewal takes the tariff's limits, adds its term after the current one
-// (from now when that already ended) and turns the user on, one the admin switched off too:
+// (from now when that already ended; what is left of another tariff's term is what it is
+// worth on this one, carryOver) and turns the user on, one the admin switched off too:
 // the buyer paid for the term, and the admin who wants someone out deletes the subscription
 // or stops selling to them (decided 2026-10-11). ErrNoSlots: refill and run again.
 // The caller calls Changed after the commit.
@@ -258,19 +245,43 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, in PurchaseInput) (
 	}
 	now := s.now()
 	base := now
-	if u.ExpiresAt.Valid && time.Unix(u.ExpiresAt.Int64, 0).After(now) {
-		base = time.Unix(u.ExpiresAt.Int64, 0)
+	if u.ExpiresAt.Valid && store.Time(u.ExpiresAt.Int64).After(now) {
+		left := store.Time(u.ExpiresAt.Int64).Sub(now)
+		// Another tariff: what is left is worth its price there (carryOver).
+		if u.TariffID.Valid && u.TariffID.Int64 != t.ID {
+			if left, err = carryOver(ctx, q, u.TariffID.Int64, t, termDays(t, in.Term), left); err != nil {
+				return u, false, err
+			}
+		}
+		base = now.Add(left)
 	}
 	billingDay := t.BillingDay
 	if !billingDay.Valid {
 		billingDay = u.BillingDay
 	}
-	u, err = q.UpdateUser(ctx, db.UpdateUserParams{
-		Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: "active", TariffID: sql.NullInt64{Int64: t.ID, Valid: true},
-		TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit, SpeedLimit: t.SpeedLimit, ResetStrategy: t.ResetStrategy, PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart,
-		ExpiresAt: tariffExpiry(base, durationTariff{termDays(t, in.Term), billingDay}), Inbounds: u.Inbounds, BillingDay: billingDay,
-		UpdatedAt: now.Unix(), ID: u.ID,
-	})
+	devices, extra, until := t.DeviceLimit, int64(0), sql.NullInt64{}
+	switch {
+	case in.KeepExtraDevices && u.TariffID.Valid && u.TariffID.Int64 == t.ID && u.ExtraDevices > 0:
+		// They go on with the renewal, paid with it (billing.renewalExtra).
+		extra = u.ExtraDevices
+	case u.ExtraDevices > 0 && u.ExtraDevicesUntil.Valid && u.ExtraDevicesUntil.Int64 > now.Unix():
+		// Bought until the end of the term: they stay until then, and not into the new one
+		// (the maintenance takes them back, Devices.ExpireExtra).
+		extra, until = u.ExtraDevices, u.ExtraDevicesUntil
+	}
+	if devices.Valid {
+		devices.Int64 += extra
+	}
+	if extra != u.ExtraDevices || until != u.ExtraDevicesUntil {
+		if err := q.SetUserExtraDevices(ctx, db.SetUserExtraDevicesParams{ExtraDevices: extra, Until: until, ID: u.ID}); err != nil {
+			return u, false, err
+		}
+	}
+	par := UserParams(u, now.Unix())
+	par.Status, par.TariffID = "active", sql.NullInt64{Int64: t.ID, Valid: true}
+	par.TrafficLimit, par.DeviceLimit, par.SpeedLimit, par.ResetStrategy = t.TrafficLimit, devices, t.SpeedLimit, t.ResetStrategy
+	par.ExpiresAt, par.BillingDay = tariffExpiry(base, durationTariff{termDays(t, in.Term), billingDay}), billingDay
+	u, err = q.UpdateUser(ctx, par)
 	if err != nil {
 		return u, false, err
 	}
@@ -290,12 +301,43 @@ func (s *Users) Purchase(ctx context.Context, q *db.Queries, in PurchaseInput) (
 	return u, false, err
 }
 
+// UserParams is u as it is, to change some of it and write it back with UpdateUser: the
+// one copy of the user's columns, so a column added to UpdateUser is not written as zero by
+// a caller that forgot it.
+func UserParams(u db.User, now int64) db.UpdateUserParams {
+	return db.UpdateUserParams{Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID,
+		TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, SpeedLimit: u.SpeedLimit, ResetStrategy: u.ResetStrategy, PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart,
+		ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds, BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID}
+}
+
 // RefillSlots tops the slot pool up after ErrNoSlots.
 func (s *Users) RefillSlots(ctx context.Context) error {
-	if err := s.pool.Refill(ctx, RefillBatch); err != nil {
+	return refill(ctx, s.pool, s.changes)
+}
+
+// WithSlots runs fn, and once more after the pool is topped up when it ran out of slots
+// (ErrNoSlots): what needs a free slot (a new user, a reissue, a device) takes one either way.
+func (s *Users) WithSlots(ctx context.Context, fn func() error) error {
+	return withSlots(ctx, s.pool, s.changes, fn)
+}
+
+func withSlots(ctx context.Context, pool *Pool, changes Changes, fn func() error) error {
+	err := fn()
+	if errors.Is(err, ErrNoSlots) {
+		if err := refill(ctx, pool, changes); err != nil {
+			return err
+		}
+		err = fn()
+	}
+	return err
+}
+
+// refill tops the pool up and tells the nodes of the new slots.
+func refill(ctx context.Context, pool *Pool, changes Changes) error {
+	if err := pool.Refill(ctx, RefillBatch); err != nil {
 		return err
 	}
-	s.changes.SlotsChanged()
+	changes.SlotsChanged()
 	return nil
 }
 
@@ -336,7 +378,7 @@ func expiry(from, days int64) sql.NullInt64 {
 	if days <= 0 {
 		return sql.NullInt64{}
 	}
-	return sql.NullInt64{Int64: from + days*day, Valid: true}
+	return sql.NullInt64{Int64: store.ClampUnix(from + days*day), Valid: true}
 }
 
 func (s *Users) Get(ctx context.Context, id int64) (db.User, error) {
@@ -391,18 +433,25 @@ type Extension struct {
 // until is where the term ends after the extension, counted from the expiry exp.
 func (e Extension) until(now time.Time, exp sql.NullInt64, billingDay sql.NullInt64) time.Time {
 	base := now
-	if exp.Valid && time.Unix(exp.Int64, 0).After(now) {
-		base = time.Unix(exp.Int64, 0)
+	if exp.Valid {
+		t := store.Time(exp.Int64)
+		if t.After(now) {
+			base = t
+		}
 	}
+	var res time.Time
 	switch {
 	case e.Period && billingDay.Valid:
-		return AddMonths(base, 1, billingDay)
+		res = AddMonths(base, 1, billingDay)
 	case e.Period:
-		return base.Add(30 * 24 * time.Hour)
+		res = base.Add(30 * 24 * time.Hour)
 	case e.Months > 0:
-		return AddMonths(base, e.Months, billingDay)
+		res = AddMonths(base, e.Months, billingDay)
+	default:
+		res = base.Add(time.Duration(e.Days) * 24 * time.Hour)
 	}
-	return base.Add(time.Duration(e.Days) * 24 * time.Hour)
+	res = store.ClampTime(res)
+	return res
 }
 
 // ErrBadBillingDay: a billing day is 1–31.
@@ -446,12 +495,7 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 		return db.User{}, err
 	}
 	now := s.now().Unix()
-	par := db.UpdateUserParams{
-		Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID,
-		TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, SpeedLimit: u.SpeedLimit, ResetStrategy: u.ResetStrategy,
-		PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart, ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds,
-		BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID,
-	}
+	par := UserParams(u, now)
 	mode := u.DeviceMode
 	if p.TariffID != nil {
 		t, err := q.GetTariff(ctx, *p.TariffID)
@@ -532,13 +576,16 @@ func (s *Users) updateOn(ctx context.Context, q *db.Queries, id int64, p Patch) 
 	case p.ClearExpiry:
 		par.ExpiresAt = sql.NullInt64{}
 	case p.ExpiresAt != nil:
-		par.ExpiresAt = sql.NullInt64{Int64: p.ExpiresAt.Unix(), Valid: true}
+		sec := store.ClampUnix(p.ExpiresAt.Unix())
+		par.ExpiresAt = sql.NullInt64{Int64: sec, Valid: true}
 	}
 	if p.Extend != nil {
 		if p.Extend.Days < 0 || p.Extend.Days > MaxExtendDays {
 			return db.User{}, fieldErr("days", "bad_days")
 		}
-		par.ExpiresAt = sql.NullInt64{Int64: p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay).Unix(), Valid: true}
+		res := p.Extend.until(s.now(), par.ExpiresAt, par.BillingDay)
+		sec := store.ClampUnix(res.Unix())
+		par.ExpiresAt = sql.NullInt64{Int64: sec, Valid: true}
 		par.Status = "active"
 	}
 	if p.Inbounds != nil {
@@ -635,14 +682,7 @@ func (s *Users) resetOn(ctx context.Context, q *db.Queries, id int64) error {
 // Reissue gives the user a new slot and subscription token. The old credentials stop
 // working at once: the old slot is burned and stays denied until it is purged.
 func (s *Users) Reissue(ctx context.Context, id int64) (db.User, error) {
-	err := s.reissue(ctx, id)
-	if errors.Is(err, ErrNoSlots) {
-		if err := s.pool.Refill(ctx, RefillBatch); err != nil {
-			return db.User{}, err
-		}
-		s.changes.SlotsChanged()
-		err = s.reissue(ctx, id)
-	}
+	err := s.WithSlots(ctx, func() error { return s.reissue(ctx, id) })
 	if err != nil {
 		return db.User{}, err
 	}

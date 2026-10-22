@@ -31,7 +31,7 @@ func testMonitorStore(t *testing.T) (*store.Store, context.Context) {
 
 func TestFreshMonitorStartsAfterExistingAutotuneEvents(t *testing.T) {
 	st, ctx := testMonitorStore(t)
-	if _, err := st.DB.ExecContext(ctx, `INSERT INTO inbounds(id,node_id,name,preset,port,settings,config,created_at,updated_at) VALUES(1,1,'in','vless-reality',443,'{}','',1,1)`); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO inbounds(id,node_id,name,preset,port,config,created_at,updated_at) VALUES(1,1,'in','vless-reality',443,'',1,1)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.DB.ExecContext(ctx, `INSERT INTO inbound_events(inbound_id,node_id,kind,network,old_value,new_value,reason,created_at) VALUES(1,1,'port','tcp','1','2','blocked',1)`); err != nil {

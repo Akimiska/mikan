@@ -22,10 +22,11 @@ export type UsersSearch = {
   hidden?: Exclude<(typeof USER_HIDDEN)[number], "hide">;
 };
 
-export const SETTINGS_TABS = ["general", "subscription", "page", "routing", "security", "system", "import"] as const;
+export const SETTINGS_TABS = ["general", "subscription", "page", "routing", "security", "support", "system", "import"] as const;
 /** The parts of the sections that have them: the subscription page's editor and the routing. */
 export const SETTINGS_PARTS = {
   page: ["look", "brand", "blocks", "apps", "docs", "css"],
+  routing: ["mode", "lists", "rules", "dns", "advanced", "yaml"],
 } as const;
 export type SettingsSearch = { tab: (typeof SETTINGS_TABS)[number]; part?: string };
 
@@ -33,7 +34,7 @@ export const TARIFF_TABS = ["tariffs", "pools", "packages"] as const;
 export type TariffsSearch = { tab: (typeof TARIFF_TABS)[number] };
 
 /** Payments open on their history; without a way to take payments yet, on setting one up. */
-export const PAYMENT_TABS = ["history", "methods", "rules", "promocodes"] as const;
+export const PAYMENT_TABS = ["history", "topups", "methods", "rules", "promocodes", "campaigns"] as const;
 export type PaymentsSearch = { tab?: (typeof PAYMENT_TABS)[number]; promo?: (typeof PROMO_TABS)[number] };
 
 export const PROMO_TABS = ["codes", "history"] as const;
@@ -41,8 +42,15 @@ export const PROMO_TABS = ["codes", "history"] as const;
 export const TELEGRAM_TABS = ["connect", "menu", "notify", "infra", "broadcast"] as const;
 export type TelegramSearch = { tab: (typeof TELEGRAM_TABS)[number] };
 
-/** The addons open on what is installed; the catalog keeps its search and its filter by kind. */
-export const ADDON_TABS = ["installed", "catalog"] as const;
+/** The addons open on what is installed; the catalog and the community keep their search and filter by kind. */
+export const ADDON_TABS = ["installed", "catalog", "community"] as const;
 export const ADDON_KINDS = ["bot", "payment", "ui"] as const;
 export type AddonKind = (typeof ADDON_KINDS)[number];
 export type AddonsSearch = { tab?: (typeof ADDON_TABS)[number]; q?: string; kind?: AddonKind };
+
+/** Diagnostics: the logs, the server check with the restart, and (for support) the terminal. */
+export const DIAG_TABS = ["logs", "check", "reach", "geo", "terminal"] as const;
+export type DiagSearch = { tab?: (typeof DIAG_TABS)[number]; source?: string };
+
+/** The operator's entry page: `ended` after a link that stopped working under them. */
+export type SupportSearch = { ended?: true };

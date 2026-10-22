@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/domain"
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
@@ -91,6 +93,13 @@ type Manager struct {
 	// The nodes' last hellos (check.go).
 	helloMu sync.Mutex
 	hellos  map[int64]HelloView
+
+	// The panel's own addresses for the nodes' API locks (apilock.go), looked up at most
+	// every panelAddrsTTL; lookup is the resolver, which tests replace.
+	addrMu sync.Mutex
+	addrs  []string
+	addrAt time.Time
+	lookup func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type running struct {
@@ -395,6 +404,17 @@ func (m *Manager) SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, e
 	return c.SpeedTest(ctx)
 }
 
+// ServiceRegions asks the sites from the node what they make of its address.
+func (m *Manager) ServiceRegions(ctx context.Context, id int64) (nodeapi.ServiceRegions, error) {
+	c, err := clientOf[interface {
+		ServiceRegions(context.Context) (nodeapi.ServiceRegions, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.ServiceRegions{}, err
+	}
+	return c.ServiceRegions(ctx)
+}
+
 // clientOf returns a node's client as T: methods beyond Node are optional, and tests
 // stand in for nodes with fakes that have only some of them.
 func clientOf[T any](m *Manager, id int64) (T, error) {
@@ -493,7 +513,7 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 		switch u.ResetStrategy {
 		case "month_start":
 			// Monthly on the billing day, or the 1st without one.
-			monthStart := domain.MonthPeriodStart(now, u.BillingDay).Unix()
+			monthStart := model.MonthPeriodStart(now, u.BillingDay).Unix()
 			if start >= monthStart {
 				continue
 			}

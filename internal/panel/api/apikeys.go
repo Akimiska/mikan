@@ -16,7 +16,9 @@ import (
 
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/secure"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/panel/support"
 )
 
 // API keys let scripts call the API with "Authorization: Bearer <key>" instead of an
@@ -34,7 +36,7 @@ const (
 
 // sessionOnlyTags are the endpoints an API key cannot use, with the operations marked
 // sessionOnly (payment keys and refunds: whoever sets them decides where money goes).
-var sessionOnlyTags = []string{"auth", "api-keys"}
+var sessionOnlyTags = []string{"auth", "api-keys", supportAdminTag}
 
 var (
 	sessionOnly    = map[string]any{"sessionOnly": true}
@@ -85,16 +87,16 @@ func (h *handlers) registerAPIKeys() {
 }
 
 func viewAPIKey(k db.ApiKey) APIKeyView {
-	v := APIKeyView{ID: k.ID, Name: k.Name, Prefix: k.Prefix, Scope: k.Scope, CreatedAt: time.Unix(k.CreatedAt, 0).UTC(), LastIP: k.LastIp}
-	if k.ExpiresAt.Valid {
-		t := time.Unix(k.ExpiresAt.Int64, 0).UTC()
-		v.ExpiresAt = &t
+	return APIKeyView{
+		ID:         k.ID,
+		Name:       k.Name,
+		Prefix:     k.Prefix,
+		Scope:      k.Scope,
+		CreatedAt:  store.Time(k.CreatedAt),
+		LastIP:     k.LastIp,
+		ExpiresAt:  store.TimePtr(k.ExpiresAt),
+		LastUsedAt: store.TimePtr(k.LastUsedAt),
 	}
-	if k.LastUsedAt.Valid {
-		t := time.Unix(k.LastUsedAt.Int64, 0).UTC()
-		v.LastUsedAt = &t
-	}
-	return v
 }
 
 func hashAPIKey(key string) string {
@@ -173,6 +175,11 @@ func (h *handlers) bearer(ctx huma.Context, next func(huma.Context), mutating bo
 	}
 	token, ok := strings.CutPrefix(ctx.Header("Authorization"), "Bearer ")
 	token = strings.TrimSpace(token)
+	// A support grant's token (ms_…) is no API key: it has its own levels and its own refusals.
+	if ok && strings.HasPrefix(token, support.TokenPrefix) {
+		h.supportBearer(ctx, next, mutating, token, ipKey)
+		return
+	}
 	var key db.ApiKey
 	var err error
 	if ok && strings.HasPrefix(token, apiKeyPrefix) && len(token) <= len(apiKeyPrefix)+apiKeyLen+8 {

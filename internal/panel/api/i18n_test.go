@@ -21,6 +21,10 @@ var codeSources = []struct {
 	{"internal/panel/api", []*regexp.Regexp{
 		regexp.MustCompile(`huma\.Error\d{3}[A-Za-z]*\(\s*"([a-z][a-z0-9_]*)"\s*[,)]`),
 		regexp.MustCompile(`Message:\s*"([a-z][a-z0-9_]*)"\s*[,}]`),
+		// fielderr.go and order.go: the code is the last literal of fieldErr and refusal, the
+		// one before the value of fieldErrValue and fieldDetail, and before the func of setOrder.
+		regexp.MustCompile(`\b(?:fieldErr|refusal)\([^\n]*"([a-z][a-z0-9_]*)"\)`),
+		regexp.MustCompile(`\b(?:field(?:ErrValue|Detail)|setOrder)\([^\n]*?,\s*"([a-z][a-z0-9_]*)"\s*,`),
 	}},
 	{"internal/proto", []*regexp.Regexp{failCode, structCode}},
 	{"internal/panel/presets", []*regexp.Regexp{failCode, structCode}},

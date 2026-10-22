@@ -67,9 +67,14 @@ func TestParseIgnoresUnknownFields(t *testing.T) {
 	}
 }
 
-func TestEmbeddedKey(t *testing.T) {
-	if _, err := Key(PublicKey); err != nil {
-		t.Fatalf("the embedded release key: %v", err)
+func TestEmbeddedKeys(t *testing.T) {
+	for _, k := range append([]string{CatalogKey, CommunityKey}, ReleaseKeys...) {
+		if _, err := Key(k); err != nil {
+			t.Fatalf("the embedded key %s: %v", k, err)
+		}
+	}
+	if len(TrustedKeys()) != len(ReleaseKeys) {
+		t.Fatal("TrustedKeys is not ReleaseKeys")
 	}
 }
 
@@ -217,5 +222,13 @@ func TestNotesFor(t *testing.T) {
 	}
 	if n := NotesFor(log, "0.5.0.4"); len(n) != 0 {
 		t.Fatalf("a stable release without a section: %q", n)
+	}
+}
+
+// The support desk knows the official build by this fingerprint (mikan-bot keeps a copy):
+// a changed or an added release key changes it, and the desk must be told.
+func TestKeyFingerprint(t *testing.T) {
+	if got := KeyFingerprint(); got != "0570ab89f762390c" {
+		t.Fatalf("KeyFingerprint() = %s", got)
 	}
 }

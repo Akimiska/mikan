@@ -86,8 +86,9 @@ func (m *Monitor) publicStatus(ctx context.Context, st *persistentState, cfg Ale
 	}
 }
 
-// warp is the node's WARP row: the round's own cache (Monitor.nodeWarp), read once a
-// round, not once per inbound.
+// publicNodeLevel is how a node does for the public status channel: unknown before the
+// monitor has seen it, else by its own state and its inbounds'. warp is the node's WARP row:
+// the round's own cache (Monitor.nodeWarp), read once a round, not once per inbound.
 func publicNodeLevel(ctx context.Context, st *persistentState, warp func(context.Context, int64) (db.NodeWarp, error), nodeID int64, inbounds []db.Inbound) hysteresis.Level {
 	node := stateLevel(st, "node/"+strconv.FormatInt(nodeID, 10))
 	if node == hysteresis.Unknown {

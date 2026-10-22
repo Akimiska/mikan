@@ -163,7 +163,7 @@ func (m PortMap) WithHost(h *nodeapi.HostPorts) PortMap {
 }
 
 func (m *PortMap) add(h PortHolder, spec, network string, off bool) {
-	if lo, hi, ok := parsePort(spec); ok {
+	if lo, hi, ok := ParsePort(spec); ok {
 		m.uses = append(m.uses, portUse{holder: h, lo: lo, hi: hi, network: network, off: off})
 	}
 }
@@ -171,7 +171,7 @@ func (m *PortMap) add(h PortHolder, spec, network string, off bool) {
 // Busy returns what other than self listens on spec, a port or a range, over network.
 // A disabled inbound holds nothing: it is checked when it comes back on.
 func (m PortMap) Busy(spec, network string, self PortHolder) (PortHolder, bool) {
-	lo, hi, ok := parsePort(spec)
+	lo, hi, ok := ParsePort(spec)
 	if !ok {
 		return PortHolder{}, false
 	}
@@ -211,8 +211,9 @@ func CheckPort(ctx context.Context, q *db.Queries, node db.Node, spec, network s
 	return nil
 }
 
-// parsePort reads a port ("443") or a Hysteria2 hopping range ("20000-30000").
-func parsePort(spec string) (lo, hi int, ok bool) {
+// ParsePort reads a port ("443") or a Hysteria2 hopping range ("20000-30000"): the one
+// grammar of an inbound's port, for the panel, its checks and the subscription alike.
+func ParsePort(spec string) (lo, hi int, ok bool) {
 	a, b, isRange := strings.Cut(spec, "-")
 	lo, err := strconv.Atoi(a)
 	if err != nil || lo < 1 || lo > 65535 {
@@ -226,4 +227,14 @@ func parsePort(spec string) (lo, hi int, ok bool) {
 		return 0, 0, false
 	}
 	return lo, hi, true
+}
+
+// FirstPort is the port a client first dials for spec: the port itself, or the start of a
+// hopping range. 0 when spec is neither.
+func FirstPort(spec string) int {
+	lo, _, ok := ParsePort(spec)
+	if !ok {
+		return 0
+	}
+	return lo
 }

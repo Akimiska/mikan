@@ -1,6 +1,6 @@
-// mikan-node runs the VPN data plane: mihomo embedded as a library, controlled by the
-// panel over a unix socket, or over pinned TLS when the node runs on another server.
-// It links mihomo and is therefore distributed under GPL-3.0.
+// mikan-node runs the VPN data plane: the Citrus core (a fork of mihomo) embedded as a
+// library, controlled by the panel over a unix socket, or over pinned TLS when the node runs
+// on another server. It links the core and is therefore distributed under GPL-3.0.
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"mikan/internal/acmechallenge"
+	"mikan/internal/logbuf"
 	"mikan/internal/node"
 	"mikan/internal/nodetls"
 	"mikan/internal/panel/config"
@@ -48,7 +49,9 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// The last lines of the log, secrets cut out, for the panel's Diagnostics page.
+	logs := logbuf.New(logbuf.DefaultLines)
+	log := slog.New(logs.Handler(slog.NewTextHandler(os.Stderr, nil)))
 	dataDir := envOr("MIKAN_DATA_DIR", config.DefaultDataDir)
 	sock := envOr("MIKAN_NODE_SOCKET", config.DefaultNodeSocket)
 
@@ -66,7 +69,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("MIKAN_ACME_LISTEN: %w", err)
 	}
-	eng, err := node.Start(node.Options{DataDir: dataDir, Version: version, Log: log, DeviceRelease: release, AllowPrivate: allowPrivate, ACMEListen: acmeListen})
+	eng, err := node.Start(node.Options{DataDir: dataDir, Version: version, Log: log, DeviceRelease: release, AllowPrivate: allowPrivate, ACMEListen: acmeListen, Logs: logs})
 	if err != nil {
 		return err
 	}
@@ -92,8 +95,14 @@ func run() error {
 	}
 	go serve(ln)
 	log.Info("node started", "version", version, "socket", sock)
+	// The state from before the restart comes back behind the API, which answers already.
+	go eng.Restore()
 	// A remote node also serves the Node API over TCP to its panel (see nodetls).
-	if raw := os.Getenv("MIKAN_NODE_JOIN"); raw != "" {
+	raw, err := config.Secret("MIKAN_NODE_JOIN")
+	if err != nil {
+		return err
+	}
+	if raw != "" {
 		key, err := nodetls.DecodeKey(raw)
 		if err != nil {
 			return fmt.Errorf("MIKAN_NODE_JOIN: %w", err)
@@ -106,7 +115,8 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		go serve(tls.NewListener(tcp, cfg))
+		// With the panel's API lock on, strangers are closed before the TLS handshake.
+		go serve(tls.NewListener(eng.APIListener(tcp), cfg))
 		log.Info("node api for the panel", "port", key.Port)
 		go helloLoop(ctx, key, dataDir, log)
 	}
@@ -119,6 +129,7 @@ func run() error {
 			if err := eng.PersistCounters(); err != nil {
 				log.Error("persist counters", "err", err)
 			}
+			eng.TickAPILock()
 		case <-ctx.Done():
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

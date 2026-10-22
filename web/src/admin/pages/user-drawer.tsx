@@ -17,6 +17,7 @@ import { NoteSection, ProtocolsSection, SubscriptionSection, TelegramSection } f
 import { DevicesSection } from "./user/devices";
 import { OrganiseSection } from "./user/organise";
 import { TorrentSection } from "./user/torrent";
+import { SitesSection } from "./user/sites";
 
 export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }) {
   const user = useUser(id);
@@ -164,6 +165,7 @@ function UserBody({ u, onDeleted, onRename }: { u: User; onDeleted: () => void; 
       <ExpirySection u={u} />
       <TrafficSection u={u} />
       <DevicesSection u={u} />
+      <SitesSection u={u} />
       <TariffSection u={u} />
       <NoteSection u={u} />
       <Disclosure title={t("userDrawer.advanced")} sub={t("userDrawer.advancedSub")}>

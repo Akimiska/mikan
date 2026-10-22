@@ -39,7 +39,7 @@ func SingBox(ctx context.Context, p Profile, g Groups, r Routing, src string) ([
 	var cfg map[string]any
 	var err error
 	if src != "" {
-		cfg, err = templateConfig(p, src)
+		cfg, _, err = templateConfig(p, src)
 	}
 	if src == "" || err != nil && !errors.Is(err, ErrNoProxies) {
 		cfg, _, err = mihomoConfig(p, g.WithDefaults(p.Lang), r)
@@ -133,8 +133,6 @@ func singboxOutbound(m map[string]any) (map[string]any, bool) {
 		if m["encryption"] != nil && str(m["encryption"]) != "none" {
 			return nil, false
 		}
-	case "vmess":
-		o["type"], o["uuid"], o["security"], o["alter_id"] = "vmess", str(m["uuid"]), "auto", 0
 	case "trojan":
 		o["type"], o["password"] = "trojan", str(m["password"])
 	case "hysteria2":

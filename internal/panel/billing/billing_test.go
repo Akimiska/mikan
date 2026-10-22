@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/events"
 	"mikan/internal/panel/promo"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
@@ -29,24 +31,14 @@ func (noChanges) SlotsChanged()    {}
 // fakeTG is the gateway and the bot: Stars links, refunds and what buyers were told.
 type fakeTG struct {
 	mu        sync.Mutex
-	paid      []db.Payment
 	refunds   []string
 	refundErr error
 	invoices  int
-	refunded  []refundNote
-	notGiven  []db.Payment // TrialNotGiven
-	onRefund  func()       // runs after Telegram accepted a refund
+	onRefund  func() // runs after Telegram accepted a refund
 	// The bot's channel: its link ("" none), who is in it, and why it cannot be asked.
 	channel   string
 	members   map[int64]bool
 	memberErr error
-}
-
-// refundNote is what the buyer was told about a refund.
-type refundNote struct {
-	p        db.Payment
-	u        db.User
-	disabled bool
 }
 
 func (f *fakeTG) InvoiceLink(_ context.Context, _, _, payload string, stars int64) (string, error) {
@@ -67,26 +59,6 @@ func (f *fakeTG) RefundStars(_ context.Context, _ int64, charge string) error {
 	f.refunds = append(f.refunds, charge)
 	return nil
 }
-func (f *fakeTG) Paid(_ context.Context, p db.Payment, _ db.User, _ bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.paid = append(f.paid, p)
-}
-func (f *fakeTG) TrialNotGiven(_ context.Context, p db.Payment) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.notGiven = append(f.notGiven, p)
-}
-func (f *fakeTG) Refunded(_ context.Context, p db.Payment, u db.User, disabled bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.refunded = append(f.refunded, refundNote{p, u, disabled})
-}
-func (f *fakeTG) refundNotes() []refundNote {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]refundNote(nil), f.refunded...)
-}
 func (f *fakeTG) BotURL(context.Context) string { return "https://t.me/mikan_test_bot" }
 func (f *fakeTG) Channel(context.Context) (string, bool) {
 	f.mu.Lock()
@@ -97,11 +69,6 @@ func (f *fakeTG) Subscribed(_ context.Context, tgID int64) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.members[tgID], f.memberErr
-}
-func (f *fakeTG) told() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.paid)
 }
 func (f *fakeTG) invoiceCount() int {
 	f.mu.Lock()
@@ -137,7 +104,6 @@ func newEnv(t *testing.T) *env {
 	e.s = New(Deps{Store: e.st, Settings: set, Users: domain.NewUsers(e.st, domain.NewPool(e.st, clock), noChanges{}, clock),
 		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})), Now: clock, MaxLinks: 5})
 	e.s.SetTelegram(e.tg)
-	e.s.SetNotifier(e.tg)
 	must(t, settings.Set(ctx, set, KeyConfig, Config{Enabled: true, Stars: true, AllowNew: true, RenewResetsTraffic: true}))
 	ts, _ := e.st.Q.ListTariffs(ctx)
 	std := ts[1]
@@ -174,6 +140,28 @@ func (e *env) payment(id int64) db.Payment {
 	p, err := e.st.Q.GetPayment(context.Background(), id)
 	must(e.t, err)
 	return p
+}
+
+// toldEvent is a buyer's message billing asked for: an event of the panel's feed, written
+// in the transaction of the change, as the bot addon reads it.
+type toldEvent struct {
+	events.Payment
+	UserID int64
+	TgID   int64
+}
+
+// told are the events of type typ in the feed, oldest first.
+func (e *env) told(typ string) []toldEvent {
+	e.t.Helper()
+	rows, err := e.st.Q.ListAddonEvents(context.Background(), db.ListAddonEventsParams{Types: []string{typ}, Lim: 1000})
+	must(e.t, err)
+	out := make([]toldEvent, 0, len(rows))
+	for _, r := range rows {
+		var p events.Payment
+		must(e.t, json.Unmarshal([]byte(r.Data), &p))
+		out = append(out, toldEvent{Payment: p, UserID: r.UserID.Int64, TgID: r.TgID.Int64})
+	}
+	return out
 }
 
 func (e *env) users() int {
@@ -422,8 +410,8 @@ func TestStarsNewSubscription(t *testing.T) {
 	if got.Status != "applied" || got.ExternalID.String != "ch-1" || !got.UserID.Valid {
 		t.Fatalf("payment: %+v", got)
 	}
-	if e.users() != before+1 || e.tg.told() != 1 {
-		t.Fatalf("users %d (was %d), told %d", e.users(), before, e.tg.told())
+	if paid := e.told(events.PaymentPaid); e.users() != before+1 || len(paid) != 1 {
+		t.Fatalf("users %d (was %d), told %d", e.users(), before, len(paid))
 	}
 	link, err := e.st.Q.GetTgLink(ctx, got.UserID.Int64)
 	if err != nil || link.TgID != 555 {
@@ -529,7 +517,6 @@ func TestConcurrentInvoices(t *testing.T) {
 	ctx := context.Background()
 	other := New(e.s.d)
 	other.SetTelegram(e.tg)
-	other.SetNotifier(e.tg)
 	// Tap i goes through services[i % len]: across services only the database's lock holds.
 	taps := func(n int, tariff func(i int) int64, services ...*Service) []error {
 		var wg sync.WaitGroup

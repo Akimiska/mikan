@@ -2,6 +2,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { DARK_THEMES, isDarkTheme, LIGHT_THEMES, THEMES, type Theme } from "../lib/themes";
+import { CardHead } from "./layout";
 
 /*
  * The panel's theme, kept in this browser. The palettes themselves are in styles/themes.css;
@@ -32,7 +33,10 @@ export function getTheme(): ThemeChoice {
   }
 }
 
-const darkQuery = () => window.matchMedia?.("(prefers-color-scheme: dark)");
+// One list for the whole page: matchMedia returns a new object on every call, so comparing the
+// list in hand with the one followed would always differ and a listener would be added per choice.
+let darkList: MediaQueryList | undefined;
+const darkQuery = () => (darkList ??= window.matchMedia?.("(prefers-color-scheme: dark)"));
 
 function resolve(choice: ThemeChoice): Theme {
   if (choice !== "system") return choice;
@@ -48,7 +52,7 @@ function apply(theme: Theme) {
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg || "#fbf1e8");
 }
 
-let following: MediaQueryList | undefined;
+let following = false;
 const onSchemeChange = () => {
   if (getTheme() === "system") apply(resolve("system"));
 };
@@ -66,9 +70,9 @@ export function setTheme(choice: ThemeChoice, opts: { animate?: boolean; keep?: 
     }
   }
   const mq = darkQuery();
-  if (next === "system" && mq && following !== mq) {
+  if (next === "system" && mq && !following) {
     mq.addEventListener("change", onSchemeChange);
-    following = mq;
+    following = true;
   }
   const theme = resolve(next);
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -179,12 +183,7 @@ export function ThemeCard() {
 
   return (
     <section className="card glass reveal" style={{ "--i": 4 } as React.CSSProperties}>
-      <div className="card-head">
-        <div>
-          <h2 className="card-title">{t("settings.theme")}</h2>
-          <div className="card-sub">{t("settings.themeSub")}</div>
-        </div>
-      </div>
+      <CardHead title={t("settings.theme")} sub={t("settings.themeSub")} />
       <div ref={rows} role="radiogroup" aria-label={t("settings.theme")} className="flex flex-col gap-4">
         {groups.map((g) => (
           <div key={g.label} role="group" aria-label={g.label}>

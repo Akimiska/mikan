@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ChangeEvent, FormEvent } from "react";
 import { api, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useFilters } from "../../api/hooks";
-import { FormActions } from "../../components/layout";
+import { CardHead, FormActions } from "../../components/layout";
 import { QueryBoundary } from "../../components/query";
 import { SwitchRow } from "../../components/switch";
 import { useToast } from "../../components/toast";
@@ -10,16 +10,12 @@ import { Field, PageHeader, Segmented, Skeleton } from "../../components/ui";
 import { t } from "../../i18n";
 import { useDraft } from "../../lib/draft";
 import { fieldErrors } from "../../lib/fields";
+import { splitList } from "../../lib/list";
 import { BackToAddons } from "./addon-row";
+import { TrafficDetailCard } from "./traffic-detail";
 
 type View = Schemas["FiltersView"];
 
-// A list is typed one entry a line (commas also split); the panel puts it in order.
-const lines = (s: string) =>
-  s
-    .split(/[\n,]+/)
-    .map((x) => x.trim())
-    .filter(Boolean);
 const text = (l: string[]) => l.join("\n");
 
 function useSaveFilters() {
@@ -52,6 +48,7 @@ export function FiltersPage() {
           <div className="flex max-w-4xl flex-col gap-4">
             <EgressCard v={v} />
             <IngressCard v={v} />
+            <TrafficDetailCard />
             <p className="text-xs text-[var(--ink-500)]">{t("filters.nodes")}</p>
           </div>
         )}
@@ -71,17 +68,12 @@ function EgressCard({ v }: { v: View }) {
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
     // The panel puts the lists in order: the form takes them as saved.
-    save.mutate({ egress: { enabled: draft.enabled, mail: draft.mail, ports: lines(draft.ports), networks: lines(draft.networks), domains: lines(draft.domains) } }, { onSuccess: (nv) => setDraft(egressDraft(nv)) });
+    save.mutate({ egress: { enabled: draft.enabled, mail: draft.mail, ports: splitList(draft.ports), networks: splitList(draft.networks), domains: splitList(draft.domains) } }, { onSuccess: (nv) => setDraft(egressDraft(nv)) });
   };
   return (
     <section className="card glass reveal" style={{ "--i": 1 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("filters.egress")}</h2>
-            <div className="card-sub">{t("filters.egressSub")}</div>
-          </div>
-        </div>
+        <CardHead title={t("filters.egress")} sub={t("filters.egressSub")} />
         <SwitchRow label={t("filters.egressOn")} sub={t("filters.always")} checked={draft.enabled} onChange={(enabled) => setDraft((d) => ({ ...d, enabled }))} />
         <SwitchRow label={t("filters.mail")} sub={t("filters.mailHint", { ports: v.mail_ports.join(", ") })} checked={draft.mail} onChange={(mail) => setDraft((d) => ({ ...d, mail }))} />
         <Field label={t("filters.ports")} htmlFor="f-ports" hint={t("filters.portsHint")} error={listError(errors, "egress.ports")}>
@@ -105,17 +97,12 @@ function IngressCard({ v }: { v: View }) {
   const errors = save.variables?.ingress ? fieldErrors(save.error) : {};
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
-    save.mutate({ ingress: { enabled: draft.enabled, allow: draft.mode === "allow", networks: lines(draft.networks) } }, { onSuccess: (nv) => setDraft(ingressDraft(nv)) });
+    save.mutate({ ingress: { enabled: draft.enabled, allow: draft.mode === "allow", networks: splitList(draft.networks) } }, { onSuccess: (nv) => setDraft(ingressDraft(nv)) });
   };
   return (
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties}>
       <form onSubmit={submit} noValidate>
-        <div className="card-head">
-          <div>
-            <h2 className="card-title">{t("filters.ingress")}</h2>
-            <div className="card-sub">{t("filters.ingressSub")}</div>
-          </div>
-        </div>
+        <CardHead title={t("filters.ingress")} sub={t("filters.ingressSub")} />
         <SwitchRow label={t("filters.ingressOn")} sub={t("filters.relay")} checked={draft.enabled} onChange={(enabled) => setDraft((d) => ({ ...d, enabled }))} />
         <Field label={t("filters.mode")} hint={draft.mode === "allow" ? t("filters.allowWarn") : t("filters.denyHint")}>
           <Segmented

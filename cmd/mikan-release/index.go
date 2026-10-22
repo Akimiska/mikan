@@ -294,7 +294,8 @@ func legacyCheckFile(args []string) error {
 	if err != nil {
 		return err
 	}
-	pub, err := release.Key(release.PublicKey)
+	// Those versions trust the first release key alone.
+	pub, err := release.Key(release.ReleaseKeys[0])
 	if err != nil {
 		return err
 	}

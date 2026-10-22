@@ -215,18 +215,21 @@ func (q *Queries) EndPeriodGrants(ctx context.Context, arg EndPeriodGrantsParams
 const findOpenPackagePayments = `-- name: FindOpenPackagePayments :many
 SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert FROM payments
 WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
-  AND status = 'pending' AND pay_url <> '' AND created_at > $5
+  AND (status = 'pending' AND pay_url <> '' AND created_at > $5
+    OR provider = 'balance' AND status IN ('paid', 'applied') AND created_at > $6)
 ORDER BY id DESC
 `
 
 type FindOpenPackagePaymentsParams struct {
-	TgID      int64
-	PackageID sql.NullInt64
-	Provider  string
-	UserID    sql.NullInt64
-	Since     int64
+	TgID        int64
+	PackageID   sql.NullInt64
+	Provider    string
+	UserID      sql.NullInt64
+	Since       int64
+	RepeatSince int64
 }
 
+// As FindOpenPayments: the open invoices, and the balance payments of just now.
 func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPackagePaymentsParams) ([]Payment, error) {
 	rows, err := q.db.QueryContext(ctx, findOpenPackagePayments,
 		arg.TgID,
@@ -234,6 +237,7 @@ func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPacka
 		arg.Provider,
 		arg.UserID,
 		arg.Since,
+		arg.RepeatSince,
 	)
 	if err != nil {
 		return nil, err
@@ -303,7 +307,7 @@ func (q *Queries) GetTrafficPackage(ctx context.Context, id int64) (TrafficPacka
 }
 
 const getUserPool = `-- name: GetUserPool :one
-SELECT user_id, pool_id, traffic_limit, used_up, used_down, excluded FROM user_pools WHERE user_id = $1 AND pool_id = $2
+SELECT user_id, pool_id, traffic_limit, used_up, used_down, mode FROM user_pools WHERE user_id = $1 AND pool_id = $2
 `
 
 type GetUserPoolParams struct {
@@ -320,7 +324,7 @@ func (q *Queries) GetUserPool(ctx context.Context, arg GetUserPoolParams) (UserP
 		&i.TrafficLimit,
 		&i.UsedUp,
 		&i.UsedDown,
-		&i.Excluded,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -484,6 +488,32 @@ func (q *Queries) ListUserGrants(ctx context.Context, userID int64) ([]TrafficGr
 		return nil, err
 	}
 	return items, nil
+}
+
+const moveGroupGrantsToMain = `-- name: MoveGroupGrantsToMain :exec
+UPDATE traffic_grants g SET pool_id = NULL
+WHERE g.user_id = ANY($1::bigint[]) AND g.pool_id IS NOT NULL AND g.remaining > 0
+  AND NOT EXISTS (SELECT 1 FROM user_pools up WHERE up.user_id = g.user_id AND up.pool_id = g.pool_id AND up.mode = 'own')
+`
+
+// The traffic bought for a server group that is no longer the user's own limit (the group is
+// in the main traffic, without a limit, or closed) goes to the main traffic: it is paid for,
+// and a group that does not count it would leave it unspent and unseen.
+func (q *Queries) MoveGroupGrantsToMain(ctx context.Context, userIds []int64) error {
+	_, err := q.db.ExecContext(ctx, moveGroupGrantsToMain, pq.Array(userIds))
+	return err
+}
+
+const moveTariffGroupGrantsToMain = `-- name: MoveTariffGroupGrantsToMain :exec
+UPDATE traffic_grants g SET pool_id = NULL
+WHERE g.user_id IN (SELECT u.id FROM users u WHERE u.tariff_id = $1) AND g.pool_id IS NOT NULL AND g.remaining > 0
+  AND NOT EXISTS (SELECT 1 FROM user_pools up WHERE up.user_id = g.user_id AND up.pool_id = g.pool_id AND up.mode = 'own')
+`
+
+// MoveGroupGrantsToMain for every user of a tariff.
+func (q *Queries) MoveTariffGroupGrantsToMain(ctx context.Context, tariffID sql.NullInt64) error {
+	_, err := q.db.ExecContext(ctx, moveTariffGroupGrantsToMain, tariffID)
+	return err
 }
 
 const sumGrantsLeft = `-- name: SumGrantsLeft :many

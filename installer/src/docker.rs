@@ -14,7 +14,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::DIR;
-use crate::envfile::write_private;
+use crate::config::{Config, write_private};
 use crate::system::output;
 
 /// The database's image, pinned to the multi-arch index: compose.yaml and the pull before
@@ -43,6 +43,10 @@ pub const POSTGRES_IMAGE: &str = postgres_image!();
 ///
 /// The panel answers Let's Encrypt on port 80, or where MIKAN_ACME_LISTEN says when a web
 /// server holds that port and passes the challenge on (see acme.rs).
+///
+/// The ${...} are filled from config.json when the file is written (compose_text), so
+/// compose reads no .env; the secrets are files in ./secrets mounted as /run/secrets/*, and
+/// the containers get their paths only.
 pub const PANEL_COMPOSE: &str = concat!(
     r#"name: mikan
 
@@ -81,7 +85,9 @@ services:
       MIKAN_NODE_SOCKET: /run/mikan/node.sock
       MIKAN_PANEL_LISTEN: 0.0.0.0:${PANEL_PORT}
       MIKAN_ACME_LISTEN: "${MIKAN_ACME_LISTEN:-:80}"
-      MIKAN_DATABASE_URL: ${MIKAN_DATABASE_URL}
+      MIKAN_SUPPORT_ACCESS: "${MIKAN_SUPPORT_ACCESS:-on}"
+      MIKAN_DATABASE_URL_FILE: /run/secrets/database_url
+    secrets: [database_url]
     volumes: ["./data/panel:/data/panel", "run:/run/mikan", "pg-run:/run/postgresql:ro"]
     mem_limit: 1g
     pids_limit: 512
@@ -104,9 +110,10 @@ services:
     environment:
       POSTGRES_USER: mikan
       POSTGRES_DB: mikan
-      POSTGRES_PASSWORD: ${MIKAN_POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
     command: ["postgres", "-c", "listen_addresses=", "-c", "unix_socket_directories=/run/postgresql", "-c", "unix_socket_permissions=0777", "-c", "max_connections=50"]
+    secrets: [postgres_password]
     volumes: ["pg-data:/var/lib/postgresql", "pg-run:/run/postgresql"]
     shm_size: 256m
     mem_limit: 1g
@@ -126,6 +133,10 @@ volumes:
   run: {}
   pg-run: {}
   pg-data: {}
+
+secrets:
+  database_url: {file: ./secrets/database_url}
+  postgres_password: {file: ./secrets/postgres_password}
 "#
 );
 
@@ -153,29 +164,59 @@ services:
     environment:
       MIKAN_DATA_DIR: /data/node
       MIKAN_NODE_SOCKET: /run/mikan/node.sock
-      MIKAN_NODE_JOIN: ${MIKAN_NODE_JOIN}
+      MIKAN_NODE_JOIN_FILE: /run/secrets/node_join
       MIKAN_ACME_LISTEN: "${MIKAN_ACME_LISTEN:-:80}"
+    secrets: [node_join]
     volumes: ["./data/node:/data/node", "run:/run/mikan"]
     pids_limit: 1024
 
 volumes:
   run: {}
+
+secrets:
+  node_join: {file: ./secrets/node_join}
 "#;
 
-/// The compose file of this installer for a panel or a node.
-pub fn compose_text(node: bool) -> &'static str {
-    if node { NODE_COMPOSE } else { PANEL_COMPOSE }
+/// The compose file of this installer for a panel or a node, with the server's settings
+/// in it: ${KEY} and ${KEY:-default} take config's values (never a secret's).
+pub fn compose_text(config: &Config) -> Result<String> {
+    let node = config.get("MIKAN_MODE") == Some("node");
+    fill(if node { NODE_COMPOSE } else { PANEL_COMPOSE }, config)
+}
+
+fn fill(template: &str, config: &Config) -> Result<String> {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(at) = rest.find("${") {
+        out.push_str(&rest[..at]);
+        let end = rest[at..].find('}').context("compose.yaml: an unclosed ${")? + at;
+        let inner = &rest[at + 2..end];
+        let (key, def) = match inner.split_once(":-") {
+            Some((k, d)) => (k, Some(d)),
+            None => (inner, None),
+        };
+        match config.compose_value(key).or(def) {
+            Some(v) => out.push_str(v),
+            None => bail!("{key} is not set in {}", crate::config::FILE),
+        }
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// Makes compose.yaml the one this installer writes: it has been written once, at install,
 /// so a server installed by an older mikan keeps that one (the whole ./data mounted in both
-/// containers, no limits) until this runs. Returns the text it replaced, for the caller to
-/// put back if the new one does not start; the old file also stays as compose.yaml.old.
-pub fn ensure_compose(root: &Path, node: bool) -> Result<Option<String>> {
+/// containers, no limits, secrets from .env) until this runs. The settings go into
+/// config.json and secrets/ first, as the new file reads them. Returns the text it
+/// replaced, for the caller to put back if the new one does not start; the old file also
+/// stays as compose.yaml.old.
+pub fn ensure_compose(root: &Path, config: &Config) -> Result<Option<String>> {
     let path = root.join("compose.yaml");
-    let want = compose_text(node);
+    let want = compose_text(config)?;
+    config.save()?;
     let have = fs::read_to_string(&path).ok();
-    if have.as_deref() == Some(want) {
+    if have.as_deref() == Some(want.as_str()) {
         return Ok(None);
     }
     if let Some(old) = &have {
@@ -202,6 +243,14 @@ const ASK_LIMIT: Duration = Duration::from_secs(20);
 fn ask(mut cmd: Command, limit: Duration) -> Option<Output> {
     let child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
     wait_within(child, limit).ok().flatten()
+}
+
+/// The last lines the containers wrote, as compose prints them (each line starts with its
+/// service); None when Docker does not answer in time. Not cleaned of anything: whoever
+/// sends it on does that.
+pub fn recent_logs(tail: usize) -> Option<String> {
+    let out = ask(compose(&["logs", "--no-color", "--tail", &tail.to_string()]), Duration::from_secs(30))?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// The Docker engine's version, None without Docker.
@@ -661,6 +710,7 @@ mod tests {
         assert!(NODE_COMPOSE.contains("./data/node:/data/node") && !NODE_COMPOSE.contains("data/panel"));
         // The node answers the CA for its own certificate, past a web server when told to.
         assert!(NODE_COMPOSE.contains("MIKAN_ACME_LISTEN: \"${MIKAN_ACME_LISTEN:-:80}\""));
+        assert!(NODE_COMPOSE.contains("MIKAN_NODE_JOIN_FILE: /run/secrets/node_join") && !NODE_COMPOSE.contains("MIKAN_NODE_JOIN:"));
     }
 
     fn tmpdir(name: &str) -> std::path::PathBuf {
@@ -670,25 +720,72 @@ mod tests {
         d
     }
 
+    fn panel_config(d: &Path) -> Config {
+        let mut c = Config::from_env_text(
+            d,
+            "MIKAN_IMAGE=ghcr.io/x@sha256:ab
+PANEL_PORT=2053
+MIKAN_POSTGRES_PASSWORD=pw123456
+MIKAN_DATABASE_URL=postgresql://mikan:pw123456@localhost/mikan?host=/run/postgresql
+",
+        );
+        c.set("MIKAN_VERSION", "0.5.1.1").unwrap();
+        c
+    }
+
     // A server installed by 0.4.3 has the old compose.yaml: it is replaced once, the old
-    // text is kept for the caller's rollback and for the admin.
+    // text is kept for the caller's rollback and for the admin. The new one is made of the
+    // settings, which go to config.json and secrets/ first.
     #[test]
     fn an_old_compose_is_replaced_once() {
         use std::os::unix::fs::PermissionsExt;
         let d = tmpdir("compose");
-        let old = "name: mikan\nservices:\n  panel:\n    volumes: [\"./data:/data\"]\n";
+        let old = "name: mikan
+services:
+  panel:
+    volumes: [\"./data:/data\"]
+";
         fs::write(d.join("compose.yaml"), old).unwrap();
-        assert_eq!(ensure_compose(&d, false).unwrap().as_deref(), Some(old));
-        assert_eq!(fs::read_to_string(d.join("compose.yaml")).unwrap(), PANEL_COMPOSE);
+        let config = panel_config(&d);
+        assert_eq!(ensure_compose(&d, &config).unwrap().as_deref(), Some(old));
+        let text = fs::read_to_string(d.join("compose.yaml")).unwrap();
+        assert_eq!(text, compose_text(&config).unwrap());
+        assert!(d.join(crate::config::SECRETS).join("database_url").exists(), "the secrets come first");
         assert_eq!(fs::read_to_string(d.join("compose.yaml.old")).unwrap(), old);
         assert_eq!(fs::metadata(d.join("compose.yaml")).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(ensure_compose(&d, false).unwrap(), None, "nothing to do the second time");
+        assert_eq!(ensure_compose(&d, &config).unwrap(), None, "nothing to do the second time");
         // the rollback puts the old text back
         put_compose(&d, old).unwrap();
         assert_eq!(fs::read_to_string(d.join("compose.yaml")).unwrap(), old);
         // a node's compose is not a panel's
-        assert!(ensure_compose(&d, true).unwrap().is_some());
-        assert_eq!(fs::read_to_string(d.join("compose.yaml")).unwrap(), NODE_COMPOSE);
+        let mut node = Config::new(&d);
+        for (k, v) in [("MIKAN_MODE", "node"), ("MIKAN_IMAGE", "ghcr.io/x@sha256:ab"), ("MIKAN_NODE_JOIN", "mk1.join")] {
+            node.set(k, v).unwrap();
+        }
+        assert!(ensure_compose(&d, &node).unwrap().is_some());
+        assert_eq!(fs::read_to_string(d.join("compose.yaml")).unwrap(), compose_text(&node).unwrap());
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    // The file compose reads holds the settings and no secret: the containers get the
+    // secrets' paths, and a setting that is missing stops it being written.
+    #[test]
+    fn compose_holds_settings_and_no_secret() {
+        let d = tmpdir("fill");
+        let config = panel_config(&d);
+        let text = compose_text(&config).unwrap();
+        assert!(!text.contains("${"), "{text}");
+        assert!(text.contains("image: ghcr.io/x@sha256:ab") && text.contains("MIKAN_PANEL_LISTEN: 0.0.0.0:2053"));
+        assert!(text.contains("MIKAN_ACME_LISTEN: \":80\"") && text.contains("MIKAN_SUPPORT_ACCESS: \"on\""), "defaults: {text}");
+        assert!(!text.contains("pw123456"), "a secret in compose.yaml");
+        assert!(
+            text.contains("MIKAN_DATABASE_URL_FILE: /run/secrets/database_url")
+                && text.contains("POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password")
+        );
+        assert!(text.contains("database_url: {file: ./secrets/database_url}"));
+        let mut bare = Config::new(&d);
+        bare.set("MIKAN_IMAGE", "x").unwrap();
+        assert!(compose_text(&bare).unwrap_err().to_string().contains("PANEL_PORT"));
         fs::remove_dir_all(&d).unwrap();
     }
 

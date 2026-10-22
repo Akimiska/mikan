@@ -136,12 +136,28 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		writeJSON(w, http.StatusOK, res)
 	})
 	mux.HandleFunc("POST /v1/diagnose", diagnoseHandler(e))
+	mux.HandleFunc("GET /v1/logs", logsHandler(e))
+	mux.HandleFunc("POST /v1/doctor", doctorHandler(e))
+	mux.HandleFunc("POST /v1/restart", restartHandler(e))
+	mux.HandleFunc("POST /v1/terminal", terminalHandler(e))
+	mux.HandleFunc("GET /v1/recordings", recordingsHandler(e))
+	mux.HandleFunc("GET /v1/recordings/{name}", recordingHandler(e))
 	mux.HandleFunc("POST /v1/speedtest", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 		res, err := e.SpeedTest(ctx)
 		if errors.Is(err, ErrSpeedTestBusy) {
 			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: "speed_test_busy", Message: "a speed test is running"})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
+	mux.HandleFunc("POST /v1/regions", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+		defer cancel()
+		res, err := e.ServiceRegions(ctx)
+		if errors.Is(err, ErrRegionsBusy) {
+			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: "regions_busy", Message: "the sites are being asked already"})
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
@@ -201,6 +217,11 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		writeJSON(w, http.StatusOK, nodeapi.TargetScan{Scanned: scanned, Results: res})
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Over TLS only the panel's pinned certificate gets this far: the lock learns where
+		// the panel is from it (apilock.go). The unix socket is the panel's own node's.
+		if r.TLS != nil && e != nil {
+			e.PanelContact(r.RemoteAddr)
+		}
 		if r.Method == http.MethodConnect {
 			connectTunnel(w, r)
 			return

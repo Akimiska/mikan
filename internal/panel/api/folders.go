@@ -225,26 +225,13 @@ func (h *handlers) orderFolders(ctx context.Context, in *orderFoldersInput) (*st
 		if err != nil {
 			return err
 		}
-		have := make(map[int64]bool, len(all))
-		for _, f := range all {
-			have[f.ID] = true
+		have := make([]int64, len(all))
+		for i, f := range all {
+			have[i] = f.ID
 		}
-		seen := make(map[int64]bool, len(ids))
-		for _, id := range ids {
-			if !have[id] || seen[id] {
-				return fieldErrValue("body.ids", "folder_order_mismatch", id)
-			}
-			seen[id] = true
-		}
-		if len(ids) != len(all) {
-			return fieldErr("body.ids", "folder_order_mismatch")
-		}
-		for i, id := range ids {
-			if err := q.SetFolderSort(ctx, db.SetFolderSortParams{Sort: int64(i + 1), ID: id}); err != nil {
-				return err
-			}
-		}
-		return nil
+		return setOrder(ids, have, "folder_order_mismatch", func(id, place int64) error {
+			return q.SetFolderSort(ctx, db.SetFolderSortParams{Sort: place, ID: id})
+		})
 	})
 	if err != nil {
 		return nil, err

@@ -41,7 +41,20 @@ const PROTOCOL: u32 = 1;
 const PROTOCOL_2: u32 = 2;
 const KINDS_2: [&str; 3] = ["bot", "ui", "generic"];
 const MODES: [&str; 2] = ["http", "client"];
-const PERMISSIONS: [&str; 9] = ["bot", "users:read", "users:write", "users:all", "users:grant", "billing:invoice", "events", "kv", "ui"];
+const PERMISSIONS: [&str; 12] = [
+    "bot",
+    "users:read",
+    "users:write",
+    "users:all",
+    "users:grant",
+    "nodes:read",
+    "inbounds:read",
+    "inbounds:write",
+    "billing:invoice",
+    "events",
+    "kv",
+    "ui",
+];
 /// What an addon may ask for, in MiB; 0 is DEFAULT_MEM_MB.
 const MEM_MB: std::ops::RangeInclusive<u32> = 64..=256;
 const DEFAULT_MEM_MB: u32 = 128;
@@ -328,10 +341,11 @@ fn valid_component(c: &str) -> bool {
     true
 }
 
-/// Checks the signature over the catalog's exact bytes, then keeps what this panel can run:
-/// a protocol it knows, an image by digest on ghcr.io, a panel new enough.
+/// Checks the signature of the catalog's key over its exact bytes, in the catalog's context,
+/// then keeps what this panel can run: a protocol it knows, an image by digest on ghcr.io, a
+/// panel new enough.
 pub fn parse_catalog(data: &[u8], sig: &str, key: &VerifyingKey, panel: &str) -> Result<Vec<Entry>> {
-    release::verify(data, sig, key, "catalog")?;
+    release::verify_in(release::CATALOG_CONTEXT, data, sig, key, "catalog")?;
     let c: Catalog = serde_json::from_slice(data).context("the catalog is malformed")?;
     Ok(c.adapters
         .into_iter()
@@ -343,8 +357,8 @@ pub fn parse_catalog(data: &[u8], sig: &str, key: &VerifyingKey, panel: &str) ->
 
 pub fn catalog(panel: &str) -> Result<Vec<Entry>> {
     let data = net::get(CATALOG_URL, 1 << 20).context("download the marketplace catalog")?;
-    let sig = net::get(&format!("{CATALOG_URL}.sig"), 4096).context("download the catalog's signature")?;
-    let entries = parse_catalog(&data, &String::from_utf8_lossy(&sig), &release::key()?, panel)?;
+    let sig = net::get(&format!("{CATALOG_URL}{}", release::SIG_SUFFIX), 4096).context("download the catalog's signature")?;
+    let entries = parse_catalog(&data, &String::from_utf8_lossy(&sig), &release::catalog_key()?, panel)?;
     release::not_older(Path::new(CATALOG_SEEN), &data, "updated", "the marketplace's catalog")?;
     Ok(entries)
 }
@@ -578,7 +592,7 @@ fn up(state: &mut State, say: &mut dyn FnMut(&str)) -> Result<()> {
             fs::remove_file(dir.join("compose.yml"))?;
         }
     } else {
-        crate::envfile::write_private(
+        crate::config::write_private(
             &dir.join("compose.yml"),
             compose_yaml(&running, &by_id, &state.panel_api, &state.panel_api_bridge).as_bytes(),
         )?;
@@ -1356,7 +1370,7 @@ mod tests {
     /// A catalog of these entries and its signature.
     fn signed(signer: &SigningKey, entries: &[String]) -> (Vec<u8>, String) {
         let data = format!(r#"{{"version":1,"updated":"2026-10-11T00:00:00Z","adapters":[{}]}}"#, entries.join(",")).into_bytes();
-        let sig = STANDARD.encode(signer.sign(&data).to_bytes());
+        let sig = STANDARD.encode(signer.sign(&[release::CATALOG_CONTEXT.as_bytes(), &data].concat()).to_bytes());
         (data, sig)
     }
 

@@ -195,6 +195,14 @@ func (c *Client) SpeedTest(ctx context.Context) (SpeedTest, error) {
 	return r, err
 }
 
+// ServiceRegions asks the sites from the node, about ten seconds. Nodes that predate it
+// answer 404 (a *StatusError); one already asking answers 409 regions_busy.
+func (c *Client) ServiceRegions(ctx context.Context) (ServiceRegions, error) {
+	var r ServiceRegions
+	err := c.do(ctx, http.MethodPost, "/v1/regions", nil, &r, 45*time.Second)
+	return r, err
+}
+
 func (c *Client) Activity(ctx context.Context) (Activity, error) {
 	var r Activity
 	err := c.do(ctx, http.MethodGet, "/v1/activity", nil, &r, 10*time.Second)
@@ -244,6 +252,15 @@ var TunnelHosts = []string{"api.telegram.org:443"}
 
 // Tunnel opens a TCP stream to addr through the node (HTTP CONNECT on the Node API).
 func (c *Client) Tunnel(ctx context.Context, addr string) (net.Conn, error) {
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: addr}, Host: addr, Header: http.Header{}}
+	return c.upgrade(ctx, req, http.StatusOK, 15*time.Second)
+}
+
+// upgrade sends req on a bare connection to the Node API and, when the node answers with the
+// status want, hands the connection over to the caller: from then on it is a stream (a CONNECT
+// tunnel, an Upgrade). wait bounds the answer when ctx has no deadline. Any other answer is the
+// node's *Error, or a *StatusError of the node that predates the path.
+func (c *Client) upgrade(ctx context.Context, req *http.Request, want int, wait time.Duration) (net.Conn, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
@@ -251,9 +268,11 @@ func (c *Client) Tunnel(ctx context.Context, addr string) (net.Conn, error) {
 	if d, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(d)
 	} else {
-		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+		_ = conn.SetDeadline(time.Now().Add(wait))
 	}
-	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: addr}, Host: addr, Header: http.Header{}}
+	// Cancelling ctx while the node answers closes the connection: the read below ends.
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
 	if err := req.Write(conn); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
@@ -264,13 +283,18 @@ func (c *Client) Tunnel(ctx context.Context, addr string) (net.Conn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != want {
 		defer conn.Close()
 		var e Error
 		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&e) == nil && e.Code != "" {
 			return nil, &e
 		}
-		return nil, fmt.Errorf("node tunnel: status %d", resp.StatusCode)
+		return nil, &StatusError{Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode}
+	}
+	// A caller that gave up while the node answered gets no stream.
+	if !stop() {
+		conn.Close()
+		return nil, ctx.Err()
 	}
 	_ = conn.SetDeadline(time.Time{})
 	if br.Buffered() > 0 {

@@ -1,5 +1,7 @@
 package infraalerts
 
+import "mikan/internal/textutil"
+
 // texts is every sentence the monitor says to the admin or to the public channel, in one
 // language. A round picks the language once (textsFor) and the code below only fills the
 // sentences in: no function branches on the language itself. Everything here is Telegram HTML
@@ -128,11 +130,5 @@ var enTexts = texts{
 	levelUnavailable: "Unavailable",
 }
 
-// textsFor is the texts of lang: English for "en", Russian for anything else, as the alerts
-// have always been.
-func textsFor(lang string) *texts {
-	if lang == "en" {
-		return &enTexts
-	}
-	return &ruTexts
-}
+// textsFor is the texts of lang (textutil.Lang: English for "en", Russian for anything else).
+func textsFor(lang string) *texts { return textutil.ByLang(lang, &ruTexts, &enTexts) }

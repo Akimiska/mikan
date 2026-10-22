@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"mikan/internal/nodeapi"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/textutil"
 )
@@ -47,7 +48,7 @@ func (h *handlers) registerSpeedTests() {
 }
 
 func speedTestView(r db.NodeSpeedtest) SpeedTestView {
-	return SpeedTestView{ID: r.ID, At: time.Unix(r.At, 0).UTC(), PingMs: r.PingMs, JitterMs: r.JitterMs, LossPct: r.LossPct,
+	return SpeedTestView{ID: r.ID, At: store.Time(r.At), PingMs: r.PingMs, JitterMs: r.JitterMs, LossPct: r.LossPct,
 		DownBps: r.DownBps, UpBps: r.UpBps, Error: r.Error}
 }
 

@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -36,10 +35,13 @@ import (
 	"time"
 
 	"mikan/internal/fsutil"
+	"mikan/internal/httpjson"
+	"mikan/internal/panel/model"
 	"mikan/internal/release"
+	"mikan/internal/textutil"
 )
 
-// CatalogURL is where the signed catalog is published, next to its .sig.
+// CatalogURL is where the signed catalog is published, next to its signature (release.SigSuffix).
 const CatalogURL = "https://github.com/getmikan/marketplace/releases/latest/download/index.json"
 
 // Protocol is the payment adapters' protocol; Protocol2 that of every other kind.
@@ -75,7 +77,7 @@ const (
 // users:read and users:write are the bot's: the subscribers it talks to. users:all (read
 // every subscriber) and users:grant (give anyone days and traffic) reach all of them, are
 // implied by neither of those, and the admin is warned of both.
-var Permissions = []string{"bot", "users:read", "users:write", "users:all", "users:grant", "billing:invoice", "events", "kv", "ui"}
+var Permissions = []string{"bot", "users:read", "users:write", "users:all", "users:grant", "nodes:read", "inbounds:read", "inbounds:write", "billing:invoice", "events", "kv", "ui"}
 
 // MinMemMB and MaxMemMB bound what an addon may ask for; 0 is the host's default.
 const (
@@ -94,10 +96,9 @@ var (
 	ErrBadAnswer    = errors.New("addon_bad_answer") // an addon's answer that is too large, not JSON, a redirect, or from another addon
 )
 
-// validID: adapter ids are path and provider-name safe.
-var validID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
-
-func ValidID(id string) bool { return validID.MatchString(id) }
+// ValidID says whether id is an adapter's id: path and provider-name safe
+// (model.ValidAddonID).
+func ValidID(id string) bool { return model.ValidAddonID(id) }
 
 var (
 	validHost      = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::[0-9]{1,5})?$`)
@@ -137,9 +138,10 @@ func ValidURL(u string) bool {
 // Text is a string per language: {"ru": …, "en": …}.
 type Text map[string]string
 
-// In picks the text of lang, else English, else any.
+// In picks the text of lang (textutil.Lang: English for "en", Russian for anything else,
+// "" auto too), else the English one, else any.
 func (t Text) In(lang string) string {
-	if s := t[lang]; s != "" {
+	if s := t[textutil.ByLang(lang, "ru", "en")]; s != "" {
 		return s
 	}
 	if s := t["en"]; s != "" {
@@ -224,10 +226,11 @@ func (e *Entry) normalize() bool {
 	return false
 }
 
-// ParseCatalog checks the signature over the exact bytes, then the entries: what this
-// panel cannot run (another protocol, a newer panel, a malformed entry) is left out.
+// ParseCatalog checks the signature of the catalog's key over the exact bytes, in the
+// catalog's context (release.CatalogContext), then the entries: what this panel cannot run
+// (another protocol, a newer panel, a malformed entry) is left out.
 func ParseCatalog(data []byte, sig string, pub ed25519.PublicKey, panelVersion string) (Catalog, error) {
-	if err := release.Verify(data, sig, pub); err != nil {
+	if err := release.VerifyIn(release.CatalogContext, data, sig, pub); err != nil {
 		return Catalog{}, fmt.Errorf("addons: the catalog signature does not match: %w", err)
 	}
 	var c Catalog
@@ -363,21 +366,27 @@ func (r Request) Valid() bool {
 type Manager struct {
 	dir, updateDir string // "" without a data directory
 	catalogURL     string
-	pub            ed25519.PublicKey
-	version        string
-	hc, peer       *http.Client // peer talks to the addons: no redirects followed
-	log            *slog.Logger
-	now            func() time.Time
+	// catalogKey and communityKey check the signed documents (release.CatalogKey,
+	// release.CommunityKey).
+	catalogKey, communityKey ed25519.PublicKey
+	version                  string
+	hc, peer                 *http.Client // peer talks to the addons: no redirects followed
+	log                      *slog.Logger
+	now                      func() time.Time
 
-	mu      sync.Mutex
-	catalog *Catalog
-	fetched time.Time
-	infos   map[string]described[Info]
-	infos2  map[string]described[InfoV2]
-	src     *sourceNet              // the way out to third-party sources (sources.go)
-	sources map[int64]SourceState   // the last fetch of each source
-	flights map[int64]*sourceFlight // fetches under way
-	noInfo  map[string]noInfo       // a /v2/info that failed, by addon
+	// The signed documents (signeddoc.go): the catalog and the registry of community addons
+	// (community.go).
+	catalog   signedCache[Catalog]
+	community signedCache[Community]
+
+	mu           sync.Mutex
+	communityURL string
+	infos        map[string]described[Info]
+	infos2       map[string]described[InfoV2]
+	src          *sourceNet              // the way out to third-party sources (sources.go)
+	sources      map[int64]SourceState   // the last fetch of each source
+	flights      map[int64]*sourceFlight // fetches under way
+	noInfo       map[string]noInfo       // a /v2/info that failed, by addon
 
 	ask sync.Mutex // one request queued at a time: the number and the busy check
 }
@@ -388,46 +397,49 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 	if catalogURL == "" {
 		catalogURL = CatalogURL
 	}
-	pub, _ := release.Key(release.PublicKey)
-	m := &Manager{catalogURL: catalogURL, pub: pub, version: panelVersion, log: log, now: now,
+	m := &Manager{catalogURL: catalogURL, communityURL: CommunityURL, version: panelVersion, log: log, now: now,
+		catalogKey: release.MustKey(release.CatalogKey), communityKey: release.MustKey(release.CommunityKey),
 		hc:    &http.Client{Timeout: 15 * time.Second},
 		infos: map[string]described[Info]{}, infos2: map[string]described[InfoV2]{}, noInfo: map[string]noInfo{},
 		src: newSourceNet(false), sources: map[int64]SourceState{}, flights: map[int64]*sourceFlight{},
 		// The panel fetches what the addon names and nothing it points elsewhere to.
 		peer: &http.Client{Timeout: AdapterTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	m.catalog = signedCache[Catalog]{name: "catalog", updated: func(c Catalog) time.Time { return c.Updated }}
+	m.community = signedCache[Community]{name: "community", updated: func(c Community) time.Time { return c.Updated }}
 	if dataDir != "" {
 		m.dir, m.updateDir = filepath.Join(dataDir, "addons"), filepath.Join(dataDir, "update")
 	}
 	return m
 }
 
+// seenFile keeps the dates of the newest signed documents seen; "" without a data directory.
+func (m *Manager) seenFile() string {
+	if m.dir == "" {
+		return ""
+	}
+	return filepath.Join(m.dir, "signed-seen.json")
+}
+
 // Supported: the panel sees the server's data directory, so the host can run adapters.
 func (m *Manager) Supported() bool { return m.dir != "" }
 
-// SetKey replaces the catalog key (tests sign with their own).
-func (m *Manager) SetKey(pub ed25519.PublicKey) { m.pub = pub }
+// SetKeys replaces the keys of the catalog and of the community registry (tests sign with
+// their own).
+func (m *Manager) SetKeys(catalog, community ed25519.PublicKey) {
+	m.catalogKey, m.communityKey = catalog, community
+}
 
-// Catalog is the signed catalog, fetched at most every ten minutes.
+// Catalog is the signed catalog, fetched at most every ten minutes (signeddoc.go): the
+// copy at hand while GitHub fails, none older than one seen.
 func (m *Manager) Catalog(ctx context.Context) (Catalog, error) {
-	m.mu.Lock()
-	if m.catalog != nil && m.now().Sub(m.fetched) < 10*time.Minute {
-		c := *m.catalog
-		m.mu.Unlock()
-		return c, nil
-	}
-	m.mu.Unlock()
-	var c Catalog
-	err := release.FetchSigned(ctx, m.get, m.catalogURL, 1<<20, func(data []byte, sig string) (err error) {
-		c, err = ParseCatalog(data, sig, m.pub, m.version)
-		return err
+	return m.catalog.get(ctx, m.now(), m.seenFile(), func(ctx context.Context) (Catalog, error) {
+		var c Catalog
+		err := release.FetchSigned(ctx, m.get, m.catalogURL, release.SigSuffix, 1<<20, func(data []byte, sig string) (err error) {
+			c, err = ParseCatalog(data, sig, m.catalogKey, m.version)
+			return err
+		})
+		return c, err
 	})
-	if err != nil {
-		return Catalog{}, err
-	}
-	m.mu.Lock()
-	m.catalog, m.fetched = &c, m.now()
-	m.mu.Unlock()
-	return c, nil
 }
 
 func (m *Manager) get(ctx context.Context, url string, limit int64) ([]byte, error) {
@@ -435,15 +447,11 @@ func (m *Manager) get(ctx context.Context, url string, limit int64) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	resp, err := m.hc.Do(req)
+	data, err := httpjson.Fetch(m.hc, req, limit)
 	if err != nil {
 		return nil, fmt.Errorf("addons: catalog: %w", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("addons: catalog: HTTP %d", resp.StatusCode)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, limit))
+	return data, nil
 }
 
 // State is what the host reports; nothing installed when it has not written anything.

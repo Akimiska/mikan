@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/settings"
+	"mikan/internal/tgapi"
 )
 
 // How the bot reaches Telegram: straight from the panel's server, through one of the
@@ -143,13 +144,13 @@ func (g *Gateway) CheckRoute(ctx context.Context, r Route, token string) error {
 		return err
 	}
 	if token != "" {
-		_, err := NewClient(g.d.API, token, rt).Me(ctx)
-		var ae *APIError
+		_, err := tgapi.NewClient(g.d.API, token, rt).Me(ctx)
+		var ae *tgapi.APIError
 		if err == nil || errors.As(err, &ae) {
 			return nil
 		}
 		g.routeFailed(r, err)
-		return ErrUnreachable
+		return tgapi.ErrUnreachable
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.d.API+"/", nil)
 	if err != nil {
@@ -161,14 +162,14 @@ func (g *Gateway) CheckRoute(ctx context.Context, r Route, token string) error {
 	resp, err := hc.Do(req)
 	if err != nil {
 		g.routeFailed(r, err)
-		return ErrUnreachable
+		return tgapi.ErrUnreachable
 	}
 	resp.Body.Close()
 	return nil
 }
 
 // routeFailed logs why a route did not reach Telegram: the admin sees only that it did not.
-// The error carries no token: Client.do keeps the cause, not the URL.
+// The error carries no token: tgapi.Client.do keeps the cause, not the URL.
 func (g *Gateway) routeFailed(r Route, err error) {
 	g.d.Log.Warn("telegram: route check failed", "mode", r.Mode, "node", r.NodeID, "err", err)
 }

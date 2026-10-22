@@ -25,8 +25,8 @@ func TestPresetsMatchTheirTemplates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", p.ID, err)
 		}
-		if tpl.Type() != p.Type || tpl.Network() != p.Network || proto.Shared(tpl.Type()) != p.Shared {
-			t.Errorf("%s: catalog says %s/%s shared=%v, the template is %s/%s shared=%v", p.ID, p.Type, p.Network, p.Shared, tpl.Type(), tpl.Network(), proto.Shared(tpl.Type()))
+		if tpl.Type() != p.Type || tpl.Network() != p.Network || proto.Shared(tpl) != p.Shared {
+			t.Errorf("%s: catalog says %s/%s shared=%v, the template is %s/%s shared=%v", p.ID, p.Type, p.Network, p.Shared, tpl.Type(), tpl.Network(), proto.Shared(tpl))
 		}
 		needs := proto.NeedsOf(tpl)
 		if !(App{Family: FamilyMihomo, Core: Version{9, 9, 9}}).Supports(needs) {

@@ -62,15 +62,29 @@ func outbounds(st nodeapi.DesiredState) ([]any, error) {
 	return out, nil
 }
 
-// buildConfig renders the mihomo config as JSON, which mihomo's YAML parser accepts.
-// log-level warning keeps per-connection lines out of mihomo's own output; the ones that
-// still come through are dropped by pumpLogs.
+// speaksHTTP says whether listener l is VLESS or Trojan on an HTTP transport (WebSocket, gRPC,
+// XHTTP): the ones that answer any request of a browser (Citrus' fallback-page).
+func speaksHTTP(l map[string]any) bool {
+	if l["type"] != "vless" && l["type"] != "trojan" {
+		return false
+	}
+	ws, _ := l["ws-path"].(string)
+	grpc, _ := l["grpc-service-name"].(string)
+	_, xhttp := l["xhttp-config"]
+	return ws != "" || grpc != "" || xhttp && l["type"] == "vless"
+}
+
+// buildConfig renders the core's config for st as JSON, which the core's YAML parser
+// accepts, with cert, the node's certificate, and front, the file of the node's front page
+// ("" none) that its inbounds on an HTTP transport give strangers. log-level warning keeps
+// per-connection lines out of the core's own output; the ones that still come through are
+// dropped by pumpLogs.
 //
 // A listener that does not pass the checks is left out and reported in rejected (not OK,
 // with the reason): one broken inbound must not stop the node from taking every other
 // change of the state, new users and policies included. What the whole state needs, the
 // outbounds, is an error as before.
-func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (raw []byte, rejected []nodeapi.ListenerStatus, err error) {
+func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool, front string) (raw []byte, rejected []nodeapi.ListenerStatus, err error) {
 	listeners := make([]map[string]any, 0, len(st.Inbounds)+1)
 	keep := func(name string, l map[string]any, err error) {
 		if err == nil {
@@ -85,6 +99,15 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (r
 	}
 	for _, in := range st.Inbounds {
 		l, err := listenerFor(in, st.Slots, cert, proto.Options{SelfStealPort: st.SelfStealPort})
+		// Behind the SNI router an inbound takes connections from it alone, each with the
+		// client's address in a PROXY header.
+		if err == nil && st.Router.Routed(in.Name) {
+			l["listen"], l["proxy-protocol"], l["proxy-protocol-trusted"] = "127.0.0.1", true, []string{"loopback"}
+		}
+		// A stranger's request on an HTTP transport gets the front page, not a bare 404.
+		if err == nil && front != "" && speaksHTTP(l) {
+			l["fallback-page"] = front
+		}
 		keep(in.Name, l, err)
 	}
 	if st.Relay != nil {
@@ -103,7 +126,8 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (r
 		"mixed-port":        0,
 		"find-process-mode": "off",
 		"profile":           map[string]any{"store-selected": false, "store-fake-ip": false},
-		"dns":               map[string]any{"enable": false},
+		"dns":               dnsConfig(st.DNS),
+		"sniffer":           snifferConfig(st.DNS),
 		"proxies":           proxies,
 		"rules":             rules(st, allowPrivate),
 		"listeners":         listeners,
@@ -124,18 +148,26 @@ func listenerFor(in nodeapi.Inbound, slots []nodeapi.Slot, cert proto.Cert, o pr
 func sharedListeners(st nodeapi.DesiredState) []string {
 	var out []string
 	for _, in := range st.Inbounds {
-		if t, err := template(in); err == nil && proto.Shared(t.Type()) {
+		if t, err := template(in); err == nil && proto.Shared(t) {
 			out = append(out, in.Name)
 		}
 	}
 	return out
 }
 
-// template reads the inbound's listener template; states saved by mikan ≤ 0.1.2 carry
-// a preset with its settings instead.
-func template(in nodeapi.Inbound) (proto.Template, error) {
-	if len(in.Config) > 0 {
-		return proto.FromJSON(in.Config)
+// userListeners are the inbounds whose users are slots, each with whether the core knows
+// them by UUID (TUIC) rather than by name; the ones with one key for everyone are not.
+func userListeners(st nodeapi.DesiredState) map[string]bool {
+	out := map[string]bool{}
+	for _, in := range st.Inbounds {
+		if t, err := template(in); err == nil && !proto.Shared(t) {
+			out[in.Name] = t.Type() == "tuic"
+		}
 	}
-	return proto.FromPreset(in.Preset, in.Settings)
+	return out
+}
+
+// template reads the inbound's listener template.
+func template(in nodeapi.Inbound) (proto.Template, error) {
+	return proto.FromJSON(in.Config)
 }

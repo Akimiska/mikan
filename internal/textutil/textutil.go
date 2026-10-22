@@ -2,7 +2,10 @@
 // needs, so each does not keep its own copy with its own idea of where a string may be cut.
 package textutil
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Clip cuts s to at most maxBytes bytes without splitting a character: a character the cut
 // falls into is dropped whole, and so is any byte that is not valid UTF-8, so the result is
@@ -34,3 +37,8 @@ func ClipRunes(s string, maxRunes int) string {
 	}
 	return strings.ToValidUTF8(s, "")
 }
+
+// Zone is the zone the panel writes dates and hours in for people (the bot's messages, the
+// name of a profile in the apps, the bot's quiet hours): Moscow time, where most users live.
+// One zone for all of them, so a term that ends near midnight is the same day everywhere.
+var Zone = time.FixedZone("MSK", 3*60*60)

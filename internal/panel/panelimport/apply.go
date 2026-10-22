@@ -211,12 +211,11 @@ func Apply(ctx context.Context, st *store.Store, users *domain.Users, now time.T
 		if err != nil {
 			r.Failed.add(describe(raw.Name) + ": " + err.Error())
 		} else {
-			links, err := applyOne(ctx, st, users, now, kind, tariffID, in)
-			if errors.Is(err, domain.ErrNoSlots) {
-				if err = users.RefillSlots(ctx); err == nil {
-					links, err = applyOne(ctx, st, users, now, kind, tariffID, in)
-				}
-			}
+			var links int
+			err := users.WithSlots(ctx, func() (err error) {
+				links, err = applyOne(ctx, st, users, now, kind, tariffID, in)
+				return err
+			})
 			switch {
 			case errors.Is(err, errTaken):
 				r.Skipped.add(in.Name)

@@ -6,7 +6,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -120,9 +119,7 @@ func (h *handlers) registerAddons() {
 }
 
 func (h *handlers) catalog(ctx context.Context) (addons.Catalog, error) {
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	c, err := h.d.Addons.Catalog(cctx)
+	c, err := h.d.Addons.Catalog(ctx)
 	if err != nil {
 		h.d.Log.Warn("addons: catalog", "err", err)
 	}

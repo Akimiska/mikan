@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -20,6 +19,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
+	"mikan/internal/release"
 )
 
 // A panel whose bot is on installs the official bot addon from the catalog by itself, with
@@ -34,14 +34,14 @@ func TestOfficialBotInstallsItself(t *testing.T) {
 		switch r.URL.Path {
 		case "/index.json":
 			_, _ = w.Write(index)
-		case "/index.json.sig":
-			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, index)))
+		case "/index.json" + release.SigSuffix:
+			_, _ = io.WriteString(w, release.SignIn(release.CatalogContext, index, priv))
 		}
 	}))
 	t.Cleanup(catalog.Close)
 	dir := t.TempDir()
 	h := newHarness(t, func(o *Options) { o.DataDir, o.AddonsCatalog = dir, catalog.URL+"/index.json" })
-	h.p.Addons.SetKey(pub)
+	h.p.Addons.SetKeys(pub, pub)
 	ctx := context.Background()
 	host := func(st addons.State) {
 		data, _ := json.Marshal(st)
@@ -114,8 +114,8 @@ func TestRemovedBotStaysRemoved(t *testing.T) {
 		switch r.URL.Path {
 		case "/index.json":
 			_, _ = w.Write(index)
-		case "/index.json.sig":
-			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, index)))
+		case "/index.json" + release.SigSuffix:
+			_, _ = io.WriteString(w, release.SignIn(release.CatalogContext, index, priv))
 		}
 	}))
 	t.Cleanup(catalog.Close)
@@ -128,7 +128,7 @@ func TestRemovedBotStaysRemoved(t *testing.T) {
 	h := newHarness(t, func(o *Options) {
 		o.DataDir, o.AddonsCatalog, o.TelegramAPI = dir, catalog.URL+"/index.json", telegram.URL
 	})
-	h.p.Addons.SetKey(pub)
+	h.p.Addons.SetKeys(pub, pub)
 	ctx := context.Background()
 	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
 		t.Fatal("login")

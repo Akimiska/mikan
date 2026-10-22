@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/billing"
+	"mikan/internal/tgapi"
 )
 
 // Telegram Stars: the invoice links, Telegram's questions and reports about a payment, and
@@ -15,7 +16,7 @@ import (
 // preCheckout answers Telegram's last question before a Stars payment; it has ten seconds,
 // so it runs off the update loop with a deadline of its own: whatever else the loop is
 // busy with, the answer goes out in time or the buyer's payment fails.
-func (g *Gateway) preCheckout(ctx context.Context, c *Client, q *PreCheckoutQuery) {
+func (g *Gateway) preCheckout(ctx context.Context, c *tgapi.Client, q *tgapi.PreCheckoutQuery) {
 	ctx, cancel := context.WithTimeout(ctx, preCheckoutDeadline)
 	defer cancel()
 	err := g.d.Billing.PreCheckout(ctx, q.From.ID, q.InvoicePayload, q.Currency, q.TotalAmount)
@@ -35,7 +36,7 @@ const preCheckoutDeadline = 9 * time.Second
 // An error that may go away (the database busy) is returned: the update is then not
 // acknowledged to Telegram and comes again, so a payment is not left unapplied. A payment
 // that matches no invoice never will, and is only logged.
-func (g *Gateway) starsPaid(ctx context.Context, m *Message) error {
+func (g *Gateway) starsPaid(ctx context.Context, m *tgapi.Message) error {
 	sp := m.SuccessfulPayment
 	if m.From == nil {
 		return nil
@@ -63,7 +64,7 @@ func (g *Gateway) starsPaid(ctx context.Context, m *Message) error {
 // starsRefunded takes Telegram's refunded_payment: the billing takes back what the payment
 // gave and calls Refunded. A refund that is not a payment of ours is only logged; an error
 // that may go away is returned, as for starsPaid, so the update comes again.
-func (g *Gateway) starsRefunded(ctx context.Context, m *Message) error {
+func (g *Gateway) starsRefunded(ctx context.Context, m *tgapi.Message) error {
 	rp := m.RefundedPayment
 	// The private chat is the buyer's: its id is their Telegram id.
 	if err := g.d.Billing.StarsRefunded(ctx, m.Chat.ID, rp.ChargeID); err != nil {

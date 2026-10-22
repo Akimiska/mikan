@@ -6,7 +6,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Atmosphere } from "../components/atmosphere";
 import { Bar, Button, Pill, QR, Ring, Skeleton } from "../components/ui";
 import { t } from "../i18n";
-import { bytes, dateLong, dateShort, days, daysUntil } from "../lib/format";
+import { bytes, dateLong, dateShort, expiryText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { safeHref } from "../lib/url";
 import { APPS, detect, enc, type Platform } from "./apps";
@@ -41,7 +41,7 @@ export function PageShell({ config, brand, logo, right, children }: { config: Pa
       </span>
     ) : b.logo === "none" ? null : (
       <span className="font-display grid h-7 w-7 shrink-0 place-items-center rounded-[9px] bg-[var(--fill)] text-[13px] font-semibold text-[var(--on-fill)]" aria-hidden>
-        {(brand || "V")[0]}
+        {Array.from(brand || "V")[0]}
       </span>
     );
   return (
@@ -77,6 +77,8 @@ type BlocksProps = {
   reissue?: ReactNode;
   /** The shop sells here: "renew" goes to it instead of support. */
   selling?: boolean;
+  /** Traffic packages on sale for the subscription on screen: for the main traffic, for these groups by name; go shows them. */
+  buy?: { main: boolean; pools: Set<string>; go: () => void };
   reload: () => Promise<void>;
   onOpenDoc: (id: number) => void;
   /** The platform tab open first; the admin's choice (or the device) when not given. */
@@ -104,7 +106,7 @@ function block(b: PageBlock, p: BlocksProps): ReactNode {
     case "shop":
       return p.shop ?? null;
     case "traffic":
-      return <Traffic block={b} info={info} />;
+      return <Traffic block={b} info={info} buy={p.buy} />;
     case "devices":
       return info.binding || info.devices?.length ? <Devices info={info} subURL={p.subURL} reload={p.reload} title={b.title} /> : null;
     case "apps":
@@ -149,7 +151,8 @@ function Heading({ children, className = "mb-3" }: { children: ReactNode; classN
 }
 
 function Status({ info, selling }: { info: Info; selling: boolean }) {
-  const d = info.expires_at ? daysUntil(info.expires_at) : null;
+  // What is left in the admin lists' words ("today", "5 days"); a term that has ended has no countdown.
+  const left = info.expires_at ? expiryText(info.expires_at) : null;
   const firstName = info.name.split(/\s+/)[0] ?? "";
   const tone = ({ active: "ok", expiring: "warn", limited: "bad", expired: "bad", disabled: "off" } as const)[info.state];
   // Links from the server are followed only when they are http(s) (or Telegram's own).
@@ -159,7 +162,7 @@ function Status({ info, selling }: { info: Info; selling: boolean }) {
       <h1 className="font-display text-xl leading-7 font-medium tracking-tight">{t(`sub.status.${info.state}`, { name: firstName })}</h1>
       <div className="mt-2 flex items-center justify-between gap-2 text-[13px] text-[var(--ink-600)]">
         <span>{info.expires_at ? t("sub.until", { date: dateLong(info.expires_at) }) : t("sub.forever")}</span>
-        {d !== null && d >= 0 ? <Pill tone={tone}>{days(d)}</Pill> : null}
+        {left && left.tone !== "bad" ? <Pill tone={tone}>{left.text}</Pill> : null}
       </div>
       {(info.state === "expired" || info.state === "limited" || info.state === "disabled") && support && !selling ? (
         <a className="btn btn-primary btn-block mt-4" href={support} target="_blank" rel="noreferrer noopener" {...outside(support)}>
@@ -170,7 +173,7 @@ function Status({ info, selling }: { info: Info; selling: boolean }) {
   );
 }
 
-function Traffic({ block: b, info }: { block: PageBlock; info: Info }) {
+function Traffic({ block: b, info, buy }: { block: PageBlock; info: Info; buy?: BlocksProps["buy"] }) {
   const used = info.used_up + info.used_down;
   const extra = info.extra ?? 0;
   // Traffic packages are spent after the tariff's traffic: they add to what is left.
@@ -181,12 +184,17 @@ function Traffic({ block: b, info }: { block: PageBlock; info: Info }) {
   const [leftValue, leftUnit] = left != null ? bytes(left).split(" ") : ["∞", ""];
   const numbers = (
     <>
-      <Ring size={104} pct={info.limit != null ? pct : 100} label={leftValue} sub={left != null ? t("sub.left", { unit: leftUnit ?? "" }) : t("sub.unlimited")} />
+      <Ring size={104} pct={pct} unlimited={info.limit == null} label={leftValue} sub={left != null ? t("sub.left", { unit: leftUnit ?? "" }) : t("sub.unlimited")} />
       <div className="flex flex-col gap-2 text-xs text-[var(--ink-500)]">
         <div>
           {t("sub.used")}
           <b className="num block text-base font-medium text-[var(--ink-900)]">{info.limit != null ? `${bytes(used)} ${ofTotal(info.limit, extra)}` : bytes(used)}</b>
         </div>
+        {buy?.main && info.limit != null ? (
+          <button type="button" className="btn btn-glass h-9 self-start rounded-xl px-3 text-[13px]" onClick={buy.go} aria-label={t("sub.buyMoreMain")}>
+            {t("sub.buyMore")}
+          </button>
+        ) : null}
         {info.resets_at ? (
           <div>
             {t("sub.resets")}
@@ -226,10 +234,15 @@ function Traffic({ block: b, info }: { block: PageBlock; info: Info }) {
               <li key={pool.name}>
                 <div className="mb-1 flex items-center justify-between gap-2 text-[13px]">
                   <span className="font-medium">{pool.name}</span>
-                  <span className="num text-xs text-[var(--ink-600)]">{pool.limit != null ? `${bytes(pool.used)} ${ofTotal(pool.limit, pool.extra ?? 0)}` : bytes(pool.used)}</span>
+                  <span className="num text-xs text-[var(--ink-600)]">{pool.limit != null ? `${bytes(pool.used)} ${ofTotal(pool.limit, pool.extra ?? 0)}` : `${bytes(pool.used)} · ${t("sub.poolUnlimited")}`}</span>
                 </div>
                 {pool.limit != null ? <Bar label={pool.name} pct={Math.min(100, (pool.used / (Math.max(pool.limit, pool.used) + (pool.extra ?? 0))) * 100)} /> : null}
                 {pool.limit != null && pool.used >= pool.limit && !pool.extra ? <p className="mt-1 text-xs text-[var(--berry-600)]">{t("sub.poolOut")}</p> : null}
+                {pool.limit != null && buy?.pools.has(pool.name) ? (
+                  <button type="button" className="link-btn mt-1 text-xs" onClick={buy.go} aria-label={t("sub.buyMoreOf", { name: pool.name })}>
+                    {t("sub.buyMore")}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>

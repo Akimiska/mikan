@@ -22,6 +22,9 @@ func TestDetectApp(t *testing.T) {
 		"mihomo ClashFest/1.2.0":               {Family: FamilyMihomo}, // a build off a release tag names no core
 		"clash.meta/v1.19.32 SlothClash/0.9.4": {Family: FamilyMihomo, Core: Version{1, 19, 32}},
 		"clash.meta/mihomo SlothClash/0.9.4":   {Family: FamilyMihomo},
+		"mihomo/1.19.32 Mikan/0.1.3":           {Family: FamilyMihomo, Core: Version{1, 19, 32}},
+		"mihomo/1.19.33 Kabosu/1.0.0":          {Family: FamilyMihomo, Core: Version{1, 19, 33}},
+		"kabosu/1.0.0":                         {Family: FamilyMihomo}, // a desktop app that names no core still gets Clash
 		"Happ/3.4.1":                           {Family: FamilyXray},
 		"v2rayNG/1.10.20":                      {Family: FamilyXray},
 		"INCY/2.1.0":                           {Family: FamilyXray},
@@ -96,8 +99,10 @@ func TestSupports(t *testing.T) {
 func TestForApp(t *testing.T) {
 	ins := []db.Inbound{
 		{ID: 1, Config: "type: tuic\n"},
-		{ID: 2, Config: "type: shadowsocks\ncipher: 2022-blake3-aes-128-gcm\npassword: AAAAAAAAAAAAAAAAAAAAAA==\n"},
+		{ID: 2, Config: "type: shadowsocks\ncipher: 2022-blake3-chacha20-poly1305\npassword: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n"},
 		{ID: 3, Config: "type: trusttunnel\n"},
+		// With an AES method every user has a key of its own: no longer shared.
+		{ID: 4, Config: "type: shadowsocks\ncipher: 2022-blake3-aes-128-gcm\npassword: AAAAAAAAAAAAAAAAAAAAAA==\n"},
 	}
 	ids := func(list []db.Inbound) []int64 {
 		out := []int64{}
@@ -110,10 +115,10 @@ func TestForApp(t *testing.T) {
 		ua, state string
 		want      []int64
 	}{
-		{"mihomo/1.19.31", domain.StateActive, []int64{1, 2, 3}},
-		{"mihomo/1.19.31", domain.StateExpired, []int64{1, 3}},
-		{"Happ/3.4.1", domain.StateExpiring, []int64{2}},
-		{"Happ/3.4.1", domain.StateDisabled, []int64{}},
+		{"mihomo/1.19.31", domain.StateActive, []int64{1, 2, 3, 4}},
+		{"mihomo/1.19.31", domain.StateExpired, []int64{1, 3, 4}},
+		{"Happ/3.4.1", domain.StateExpiring, []int64{2, 4}},
+		{"Happ/3.4.1", domain.StateDisabled, []int64{4}},
 	} {
 		if got := ids(forApp(ins, DetectApp(c.ua), c.state)); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s, %s: %v, want %v", c.ua, c.state, got, c.want)
@@ -149,5 +154,24 @@ func TestGeckoOnlyForNewMihomo(t *testing.T) {
 	}
 	if fams := AppsFor(g); len(fams) != 1 || fams[0] != FamilyMihomo {
 		t.Errorf("apps for Gecko: %v", fams)
+	}
+}
+
+// XHTTP that uploads with GET goes to apps that send GET: mihomo from 1.19.32 and the Xray
+// apps; an older core would send POST, which the CDN in front drops.
+func TestGetUplinkOnlyForAppsThatSendIt(t *testing.T) {
+	n := proto.Needs{Type: "vless", Transport: "xhttp", GetUplink: true}
+	for ua, want := range map[string]bool{
+		"mihomo/1.19.32":      true,
+		"clash.meta/v1.19.33": true,
+		"mihomo/1.19.31":      false,
+		"clash-verge/v2.4.0":  false, // the core is not named
+		"Happ/3.4.1":          true,
+		"Stash/3.0":           false,
+		"Hiddify/2.5.7":       false,
+	} {
+		if got := DetectApp(ua).Supports(n); got != want {
+			t.Errorf("%s: %v, want %v", ua, got, want)
+		}
 	}
 }

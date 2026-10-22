@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mikan/internal/panel/events"
+	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
 )
 
@@ -83,10 +84,10 @@ func (s *Server) eventsList(w http.ResponseWriter, r *http.Request) {
 		}
 		after = cur
 	}
-	// The bot's messages (bot.*) carry whole subscriptions and payments: the holder's alone.
+	// The holder of the bot hears of the accounts the events name (feedOf).
 	holder := s.holds(r.Context(), c)
 	rows, err := longPoll(r.Context(), s.d.Hub, time.Duration(wait)*time.Second, func() ([]db.AddonEvent, error) {
-		return s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, BotToo: holder, Lim: pageSize(limit, maxEvents)})
+		return s.d.Store.Q.ListAddonEvents(r.Context(), db.ListAddonEventsParams{After: after, Types: types, Lim: pageSize(limit, maxEvents)})
 	})
 	if r.Context().Err() != nil {
 		return
@@ -108,7 +109,7 @@ func (s *Server) feedOf(rows []db.AddonEvent, holder bool) []events.Event {
 		if holder {
 			s.talk.mark(e.TgID.Int64)
 		}
-		out = append(out, events.Event{ID: e.ID, Type: e.Type, At: time.Unix(e.CreatedAt, 0).UTC(),
+		out = append(out, events.Event{ID: e.ID, Type: e.Type, At: store.Time(e.CreatedAt),
 			UserID: e.UserID.Int64, TgID: e.TgID.Int64, Data: json.RawMessage(e.Data)})
 	}
 	return out

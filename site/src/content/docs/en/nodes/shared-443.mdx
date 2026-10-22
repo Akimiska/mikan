@@ -5,8 +5,8 @@ description: 'Several protocols on one port 443 of a node: how the SNI router wo
 
 import { Steps } from '@astrojs/starlight/components';
 
-:::note[In beta 0.5.1.1]
-The shared port 443 is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::note[New in 0.5.2.0]
+The shared port 443 is new in 0.5.2.0.
 :::
 
 Port 443 looks the most ordinary on a server and is the least often blocked. But by default only one protocol can live on it. The shared port 443 is the node's **SNI router**: the node itself listens on 443 and hands connections to the right protocols by the site name the client gives at the start of the TLS handshake (SNI). So REALITY, VLESS and Trojan with TLS and AnyTLS live on 443 at once, and you need no nginx or HAProxy as in [Connecting behind a proxy](/mikan/en/protocols/behind-proxy/).

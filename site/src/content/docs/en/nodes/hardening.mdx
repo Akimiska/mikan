@@ -3,8 +3,8 @@ title: Hardening a node
 description: The node's API for the panel's address only (an nftables rule, self-lift, mikan api-lockdown) and an HTTP to HTTPS redirect on port 80.
 ---
 
-:::note[In beta 0.5.1.1]
-Both settings are new in beta 0.5.1.1 and exist for remote nodes. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::note[New in 0.5.2.0]
+Both settings are new in 0.5.2.0 and exist for remote nodes.
 :::
 
 Two settings in **Nodes → the node → Configure** make a node's server less visible to scanners. The node on the panel's own server ("Own node") has neither: it talks to the panel over a socket and opens no API port.
@@ -47,7 +47,7 @@ apt install nftables
 
 The rule appears by itself within a minute.
 
-A node server set up before beta 0.5.1.1 gets the system service for the rule after `mikan update` on it, see [Nodes](/mikan/en/nodes/nodes/#updating-nodes-from-the-panel).
+A node server set up before 0.5.2.0 gets the system service for the rule after `mikan update` on it, see [Nodes](/mikan/en/nodes/nodes/#updating-nodes-from-the-panel).
 
 ## HTTP → HTTPS on port 80
 

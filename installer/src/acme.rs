@@ -68,7 +68,7 @@ pub enum Port80 {
     Other(String),
 }
 
-/// What to do about port 80, from who holds it (`ss`), MIKAN_ACME_LISTEN in .env and a
+/// What to do about port 80, from who holds it (`ss`), MIKAN_ACME_LISTEN in config.json and a
 /// free local port for a new rule. A port chosen before is kept: a rule may point there.
 pub fn port80(owner: Option<&str>, listen: Option<&str>, free: impl FnOnce() -> u16) -> Port80 {
     let set = listen.map(str::trim).filter(|l| !l.is_empty() && *l != ":80");
@@ -82,7 +82,7 @@ pub fn port80(owner: Option<&str>, listen: Option<&str>, free: impl FnOnce() -> 
 }
 
 /// What to add by hand when the admin keeps the web server's config to themselves: the
-/// block, where it goes, and the line of .env that makes mikan answer behind it.
+/// block, where it goes, and the setting of config.json that makes mikan answer behind it.
 pub fn manual_text(front: Front, domain: &str, port: u16) -> String {
     let (place, block) = match front {
         Front::Nginx => (
@@ -95,7 +95,7 @@ pub fn manual_text(front: Front, domain: &str, port: u16) -> String {
         "Add this {place}
 
 {block}
-Then set MIKAN_ACME_LISTEN={} in {}/.env and run: mikan restart",
+Then set \"MIKAN_ACME_LISTEN\": \"{}\" in {}/config.json and run: mikan restart",
         listen(port),
         crate::DIR
     )
@@ -729,10 +729,10 @@ mod tests {
     }
 
     #[test]
-    fn the_manual_rule_names_the_port_and_the_env_line() {
+    fn the_manual_rule_names_the_port_and_the_setting() {
         let text = manual_text(Front::Nginx, "node.example.com", 18080);
         assert!(text.contains("server_name node.example.com;") && text.contains("proxy_pass http://127.0.0.1:18080;"), "{text}");
-        assert!(text.contains("MIKAN_ACME_LISTEN=127.0.0.1:18080 in /opt/mikan/.env"), "{text}");
+        assert!(text.contains("\"MIKAN_ACME_LISTEN\": \"127.0.0.1:18080\" in /opt/mikan/config.json"), "{text}");
         let text = manual_text(Front::Caddy, "node.example.com", 18080);
         assert!(text.contains("http://node.example.com {") && text.contains("reverse_proxy 127.0.0.1:18080"), "{text}");
     }

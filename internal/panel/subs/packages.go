@@ -3,7 +3,7 @@ package subs
 import (
 	"context"
 
-	"mikan/internal/panel/billing"
+	"mikan/internal/panel/model"
 )
 
 // shopPackage is a traffic package (GitHub issue #12) the Mini App offers for the
@@ -28,7 +28,7 @@ func (h *Handler) shopPackages(ctx context.Context, userID int64, lang string) (
 		return nil, err
 	}
 	for _, o := range offers {
-		out = append(out, shopPackage{ID: o.Package.ID, Name: o.Package.Name, Description: billing.DescribePackage(o.Package, o.Pool, lang),
+		out = append(out, shopPackage{ID: o.Package.ID, Name: o.Package.Name, Description: model.DescribePackage(model.TrafficPackage(o.Package), o.Pool, lang),
 			Pool: o.Pool, Stars: o.Stars, Rub: o.Rub})
 	}
 	return out, nil

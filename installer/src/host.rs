@@ -166,14 +166,42 @@ fn version_of(path: &Path) -> Result<String> {
     Err(last.map_or_else(|| anyhow::anyhow!("the downloaded command does not run"), Into::into))
 }
 
-const UNIT_NAMES: [&str; 4] = ["mikan-update.service", "mikan-update.timer", "mikan-update-request.service", "mikan-update-request.path"];
+const UNIT_NAMES: [&str; 10] = [
+    "mikan-update.service",
+    "mikan-update.timer",
+    "mikan-update-request.service",
+    "mikan-update-request.path",
+    "mikan-doctor-request.service",
+    "mikan-doctor-request.path",
+    "mikan-restart-request.service",
+    "mikan-restart-request.path",
+    "mikan-terminal-request.service",
+    "mikan-terminal-request.path",
+];
 
-/// The unit files of a panel or of a node: the same four, except that the path unit watches
+/// A node's own units: the firewall rule of its API port (apilock.rs), kept by a path unit on
+/// the node's request and a timer that lifts it when the panel stays away.
+const NODE_UNITS: [&str; 3] = ["mikan-apilock.service", "mikan-apilock.path", "mikan-apilock.timer"];
+
+/// The node's units that are enabled and started.
+const NODE_WATCHES: [&str; 2] = ["mikan-apilock.path", "mikan-apilock.timer"];
+
+/// The path units, which are enabled and started; the timer too.
+const WATCHES: [&str; 5] = [
+    "mikan-update.timer",
+    "mikan-update-request.path",
+    "mikan-doctor-request.path",
+    "mikan-restart-request.path",
+    "mikan-terminal-request.path",
+];
+
+/// The unit files of a panel or of a node: the same, except that each path unit watches
 /// the request of the one the server runs (the panel's Update button, or the panel asking
-/// a node over its API: data/panel/update/request and data/node/update/request).
-fn units(panel: bool) -> [(&'static str, String); 4] {
+/// a node over its API: data/panel/update/request and data/node/update/request; the same
+/// for a doctor run and a restart, hostreq.rs).
+fn units(panel: bool) -> Vec<(&'static str, String)> {
     let (dir, from) = if panel { ("panel", "the panel") } else { ("node", "the panel this node belongs to") };
-    [
+    vec![
         (
             UNIT_NAMES[0],
             "[Unit]
@@ -234,6 +262,149 @@ WantedBy=paths.target
 "
             ),
         ),
+        (
+            UNIT_NAMES[4],
+            "[Unit]
+Description=mikan: run the server check the panel asked for
+After=docker.service
+
+[Service]
+Type=oneshot
+# The checks that wait for the network end within a minute; a stuck one must not hold the
+# unit (and so the next request) for ever.
+TimeoutStartSec=5min
+ExecStart=/usr/local/bin/mikan doctor --requested
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[5],
+            format!(
+                "[Unit]
+Description=mikan: wait for a server check request from {from}
+
+[Path]
+PathExists=/opt/mikan/data/{dir}/doctor/request
+Unit=mikan-doctor-request.service
+
+[Install]
+WantedBy=paths.target
+"
+            ),
+        ),
+        (
+            UNIT_NAMES[6],
+            "[Unit]
+Description=mikan: restart the containers as the panel asked
+After=docker.service
+
+[Service]
+Type=oneshot
+# It waits its turn behind an update (the one lock), which may take two hours.
+TimeoutStartSec=2h
+ExecStart=/usr/local/bin/mikan restart --requested
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[7],
+            format!(
+                "[Unit]
+Description=mikan: wait for a restart request from {from}
+
+[Path]
+PathExists=/opt/mikan/data/{dir}/restart/request
+Unit=mikan-restart-request.service
+
+[Install]
+WantedBy=paths.target
+"
+            ),
+        ),
+        (
+            UNIT_NAMES[8],
+            "[Unit]
+Description=mikan: one support terminal session, opened by the panel for a live grant
+
+[Service]
+Type=simple
+# The agent ends the session by itself (the grant's end, the panel letting go, 15 minutes
+# of silence). This is the backstop for one that is stuck: no grant lasts longer than 24
+# hours. systemd kills the whole cgroup when the agent ends, so a process the shell left
+# behind does not outlive the session.
+RuntimeMaxSec=25h
+TimeoutStartSec=1min
+KillMode=control-group
+SendSIGKILL=yes
+TimeoutStopSec=10s
+ExecStart=/usr/local/bin/mikan terminal-agent
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[9],
+            format!(
+                "[Unit]
+Description=mikan: wait for a support terminal request from {from}
+
+[Path]
+PathExists=/opt/mikan/data/{dir}/support/terminal/request
+Unit=mikan-terminal-request.service
+
+[Install]
+WantedBy=paths.target
+"
+            ),
+        ),
+    ]
+}
+
+/// The units of a node alone (NODE_UNITS).
+fn node_units() -> Vec<(&'static str, String)> {
+    vec![
+        (
+            NODE_UNITS[0],
+            "[Unit]
+Description=mikan: the firewall rule of the node's API port, for its panel alone
+
+[Service]
+Type=oneshot
+# One nft run and a few small files; a stuck one must not hold the next request.
+TimeoutStartSec=1min
+ExecStart=/usr/local/bin/mikan api-lockdown --requested
+"
+            .into(),
+        ),
+        (
+            NODE_UNITS[1],
+            "[Unit]
+Description=mikan: wait for the node to ask for the rule of its API port
+
+[Path]
+PathExists=/opt/mikan/data/node/apilock/request
+Unit=mikan-apilock.service
+
+[Install]
+WantedBy=paths.target
+"
+            .into(),
+        ),
+        (
+            NODE_UNITS[2],
+            "[Unit]
+Description=mikan: lift the rule of the node's API port when the panel stays away
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=mikan-apilock.service
+
+[Install]
+WantedBy=timers.target
+"
+            .into(),
+        ),
     ]
 }
 
@@ -241,31 +412,100 @@ WantedBy=paths.target
 /// (a server updated by an older command has the older ones; a node before 0.5.0.2 has no
 /// request unit at all).
 pub fn units_current(panel: bool) -> bool {
-    units_current_in(Path::new("/etc/systemd/system"), panel)
+    units_current_in(Path::new("/etc/systemd/system"), panel, terminal_off())
 }
 
-fn units_current_in(dir: &Path, panel: bool) -> bool {
-    units(panel).iter().all(|(name, text)| fs::read_to_string(dir.join(name)).is_ok_and(|have| have == *text))
+/// The support terminal's units, which a server with MIKAN_SUPPORT_ACCESS=off in its settings
+/// does not have: nothing there can start a shell for an operator.
+const TERMINAL_UNITS: [&str; 2] = ["mikan-terminal-request.service", "mikan-terminal-request.path"];
+
+/// Whether the server's settings turn support access off (MIKAN_SUPPORT_ACCESS=off).
+fn terminal_off() -> bool {
+    crate::config::Config::load(crate::DIR).is_ok_and(|e| e.get("MIKAN_SUPPORT_ACCESS") == Some("off"))
 }
 
-/// The update timer and the watch on the update request: a panel's (its Update button) or a
-/// node's (the panel asking over the node API).
+/// The units a server should have: all of them, or all but the terminal's (terminal_off); a
+/// node's own on a node only.
+fn wanted(panel: bool, terminal_off: bool) -> Vec<(&'static str, String)> {
+    let mut all: Vec<_> = units(panel).into_iter().filter(|(name, _)| !(terminal_off && TERMINAL_UNITS.contains(name))).collect();
+    if !panel {
+        all.extend(node_units());
+    }
+    all
+}
+
+/// The units a server must not have: the terminal's when it is off, a node's on a panel.
+fn unwanted(panel: bool, terminal_off: bool) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if terminal_off {
+        out.extend(TERMINAL_UNITS);
+    }
+    if panel {
+        out.extend(NODE_UNITS);
+    }
+    out
+}
+
+fn units_current_in(dir: &Path, panel: bool, terminal_off: bool) -> bool {
+    wanted(panel, terminal_off).iter().all(|(name, text)| fs::read_to_string(dir.join(name)).is_ok_and(|have| have == *text))
+        && !unwanted(panel, terminal_off).iter().any(|name| dir.join(name).exists())
+}
+
+/// The update timer and the watches on the requests of a panel (its Update button, a server
+/// check, a restart) or of a node (the panel asking over the node API). Run again, it
+/// leaves a server as it is: the files are written only where they differ, the units
+/// that are enabled stay so.
 pub fn install_units(panel: bool) -> Result<()> {
     if !Path::new("/run/systemd/system").exists() {
         bail!("no systemd");
     }
-    for (name, text) in units(panel) {
-        fs::write(format!("/etc/systemd/system/{name}"), text)?;
+    let off = terminal_off();
+    if off {
+        // Turned off after the units were installed: they go, a session running ends.
+        let _ = systemctl(&["disable", "--now", TERMINAL_UNITS[1], TERMINAL_UNITS[0]]);
     }
+    if panel && Path::new("/etc/systemd/system").join(NODE_UNITS[0]).exists() {
+        // A node's units on what is a panel now: they go before their files.
+        let _ = systemctl(&["disable", "--now", NODE_WATCHES[0], NODE_WATCHES[1], NODE_UNITS[0]]);
+    }
+    write_units(Path::new("/etc/systemd/system"), panel, off)?;
     systemctl(&["daemon-reload"])?;
-    systemctl(&["enable", "--now", "mikan-update.timer"])?;
-    systemctl(&["enable", "--now", "mikan-update-request.path"])?;
+    let watches = WATCHES.iter().chain(if panel { &[][..] } else { &NODE_WATCHES[..] });
+    for name in watches {
+        if !(off && TERMINAL_UNITS.contains(name)) {
+            systemctl(&["enable", "--now", *name])?;
+        }
+    }
     Ok(())
 }
 
+/// Writes the unit files into dir where they are not there or differ, and removes the ones
+/// the server must not have (unwanted); returns how many it wrote. A second run writes none.
+fn write_units(dir: &Path, panel: bool, terminal_off: bool) -> Result<usize> {
+    for name in unwanted(panel, terminal_off) {
+        match fs::remove_file(dir.join(name)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e).with_context(|| format!("remove {name}")),
+            _ => {}
+        }
+    }
+    let mut written = 0;
+    for (name, text) in wanted(panel, terminal_off) {
+        let path = dir.join(name);
+        if fs::read_to_string(&path).is_ok_and(|have| have == text) {
+            continue;
+        }
+        fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
+        written += 1;
+    }
+    Ok(written)
+}
+
 pub fn remove_units() {
-    let _ = systemctl(&["disable", "--now", "mikan-update.timer", "mikan-update-request.path"]);
-    for name in UNIT_NAMES {
+    let mut disable = vec!["disable", "--now"];
+    disable.extend(WATCHES);
+    disable.extend(NODE_WATCHES);
+    let _ = systemctl(&disable);
+    for name in UNIT_NAMES.iter().chain(&NODE_UNITS) {
         let _ = fs::remove_file(format!("/etc/systemd/system/{name}"));
     }
     let _ = systemctl(&["daemon-reload"]);
@@ -368,15 +608,24 @@ mod tests {
         }
     }
 
-    // A panel's path unit watches the panel's request, a node's the node's: the same four
-    // units, the path unit apart.
+    // A panel's path units watch the panel's requests, a node's the node's: the same units,
+    // the path units apart.
     #[test]
     fn the_request_unit_watches_the_directory_of_what_the_server_runs() {
         let (panel, node) = (units(true), units(false));
-        let path = |all: &[(&str, String); 4]| all.iter().find(|(n, _)| *n == "mikan-update-request.path").unwrap().1.clone();
-        assert!(path(&panel).contains("\nPathExists=/opt/mikan/data/panel/update/request\n"));
-        assert!(path(&node).contains("\nPathExists=/opt/mikan/data/node/update/request\n"));
-        assert!(!path(&panel).contains("data/node") && !path(&node).contains("data/panel"));
+        assert_eq!(panel.len(), UNIT_NAMES.len());
+        let unit = |all: &[(&str, String)], name: &str| all.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        for (kind, command) in [("update", "update --requested"), ("doctor", "doctor --requested"), ("restart", "restart --requested")] {
+            let path_unit = format!("mikan-{kind}-request.path");
+            let (p, n) = (unit(&panel, &path_unit), unit(&node, &path_unit));
+            assert!(p.contains(&format!("\nPathExists=/opt/mikan/data/panel/{kind}/request\n")), "{kind}");
+            assert!(n.contains(&format!("\nPathExists=/opt/mikan/data/node/{kind}/request\n")), "{kind}");
+            assert!(!p.contains("data/node") && !n.contains("data/panel"), "{kind}");
+            // both run the same command, which finds out by itself whose request it is
+            let service = unit(&node, &format!("mikan-{kind}-request.service"));
+            assert!(service.contains(&format!("ExecStart=/usr/local/bin/mikan {command}\n")), "{kind}");
+            assert!(n.contains(&format!("Unit=mikan-{kind}-request.service")), "{kind}");
+        }
         for ((pn, pt), (nn, nt)) in panel.iter().zip(&node) {
             assert_eq!(pn, nn);
             assert!(UNIT_NAMES.contains(pn), "{pn}");
@@ -384,10 +633,105 @@ mod tests {
                 assert_eq!(pt, nt, "{pn} is the same on a panel and on a node");
             }
         }
-        // both run the same command, which finds out by itself whose request it is
-        let service = &node.iter().find(|(n, _)| *n == "mikan-update-request.service").unwrap().1;
-        assert!(service.contains("ExecStart=/usr/local/bin/mikan update --requested\n"));
-        assert!(path(&node).contains("Unit=mikan-update-request.service"));
+        // what is enabled is a unit that exists
+        assert!(WATCHES.iter().all(|w| UNIT_NAMES.contains(w)));
+    }
+
+    // The terminal's request lies deeper (support/terminal/), the agent is the one fixed
+    // command, it runs apart from the others and is enabled like them.
+    #[test]
+    fn the_terminal_unit_watches_its_own_request_and_runs_the_agent() {
+        let (panel, node) = (units(true), units(false));
+        let unit = |all: &[(&str, String)], name: &str| all.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        let (p, n) = (unit(&panel, "mikan-terminal-request.path"), unit(&node, "mikan-terminal-request.path"));
+        assert!(p.contains("\nPathExists=/opt/mikan/data/panel/support/terminal/request\n") && !p.contains("data/node"));
+        assert!(n.contains("\nPathExists=/opt/mikan/data/node/support/terminal/request\n") && !n.contains("data/panel"));
+        assert!(p.contains("Unit=mikan-terminal-request.service"));
+        let service = unit(&panel, "mikan-terminal-request.service");
+        assert_eq!(service, unit(&node, "mikan-terminal-request.service"));
+        assert!(service.contains("\nExecStart=/usr/local/bin/mikan terminal-agent\n"));
+        // A session is a long-running process whose whole cgroup goes with it, and that is
+        // stopped at 25 hours whatever happens (a grant lasts 24 at most).
+        for want in ["Type=simple", "KillMode=control-group", "SendSIGKILL=yes", "RuntimeMaxSec=25h"] {
+            assert!(service.contains(want), "{want}");
+        }
+        assert!(WATCHES.contains(&"mikan-terminal-request.path"));
+    }
+
+    // Run again, the install leaves the files alone: a server that is up to date is not
+    // rewritten, one with an older unit set (no doctor or restart unit, a changed text) gets
+    // what is missing and nothing else.
+    #[test]
+    fn writing_the_units_is_idempotent() {
+        let d = tmpdir("write-units");
+        assert_eq!(write_units(&d, true, false).unwrap(), UNIT_NAMES.len());
+        assert_eq!(write_units(&d, true, false).unwrap(), 0, "a second run rewrites nothing");
+        assert!(units_current_in(&d, true, false));
+        // An installer of 0.5.1.0 wrote the update units only.
+        for gone in
+            ["mikan-doctor-request.service", "mikan-doctor-request.path", "mikan-restart-request.service", "mikan-restart-request.path"]
+        {
+            fs::remove_file(d.join(gone)).unwrap();
+        }
+        assert!(!units_current_in(&d, true, false), "an old install is not current: mikan update brings the new units");
+        assert_eq!(write_units(&d, true, false).unwrap(), 4);
+        assert!(units_current_in(&d, true, false));
+        // A changed file is put back, the others stay.
+        fs::write(d.join("mikan-doctor-request.path"), "[Path]\nPathExists=/tmp/x\n").unwrap();
+        assert_eq!(write_units(&d, true, false).unwrap(), 1);
+        assert!(units_current_in(&d, true, false));
+        // The same directory for a node: its own watches, the files that are the same stay.
+        let before = fs::read_to_string(d.join("mikan-update.timer")).unwrap();
+        assert_eq!(
+            write_units(&d, false, false).unwrap(),
+            4 + NODE_UNITS.len(),
+            "only the four path units differ, and the node's own are new"
+        );
+        assert_eq!(fs::read_to_string(d.join("mikan-update.timer")).unwrap(), before);
+        assert!(fs::read_to_string(d.join("mikan-restart-request.path")).unwrap().contains("data/node/restart/request"));
+        assert!(units_current_in(&d, false, false));
+        // Back to a panel: the node's own units go.
+        write_units(&d, true, false).unwrap();
+        assert!(NODE_UNITS.iter().all(|n| !d.join(n).exists()) && units_current_in(&d, true, false));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    // The rule of a node's API port is a node's: its path unit watches the node's request, its
+    // timer lifts the rule within a minute of the panel staying away too long, both run the
+    // same fixed command and are enabled.
+    #[test]
+    fn the_api_lock_units_are_a_nodes() {
+        let (panel, node) = (wanted(true, false), wanted(false, false));
+        assert!(panel.iter().all(|(n, _)| !NODE_UNITS.contains(n)));
+        let unit = |name: &str| node.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        assert!(unit("mikan-apilock.service").contains("\nExecStart=/usr/local/bin/mikan api-lockdown --requested\n"));
+        assert!(unit("mikan-apilock.service").contains("TimeoutStartSec="));
+        assert!(unit("mikan-apilock.path").contains("\nPathExists=/opt/mikan/data/node/apilock/request\nUnit=mikan-apilock.service\n"));
+        let timer = unit("mikan-apilock.timer");
+        assert!(
+            timer.contains("\nOnUnitActiveSec=1min\n")
+                && timer.contains("\nOnBootSec=1min\n")
+                && timer.contains("Unit=mikan-apilock.service")
+        );
+        assert!(NODE_WATCHES.iter().all(|w| NODE_UNITS.contains(w)));
+        for (name, text) in node_units() {
+            assert!(!text.contains("$") && !text.contains("%"), "{name}: nothing is expanded from outside");
+        }
+    }
+
+    // The units that answer a container run mikan with a flag nothing in a request can change.
+    #[test]
+    fn the_new_units_run_a_fixed_command() {
+        for panel in [true, false] {
+            for (name, text) in units(panel) {
+                if name.starts_with("mikan-doctor-request")
+                    || name.starts_with("mikan-restart-request")
+                    || name.starts_with("mikan-terminal-request")
+                {
+                    assert!(!text.contains("$") && !text.contains("%"), "{name}: nothing is expanded from outside");
+                }
+            }
+        }
     }
 
     // A server updated by an older command has the older units: a node with none of the
@@ -395,26 +739,24 @@ mod tests {
     #[test]
     fn units_are_current_for_the_mode_they_were_written_for() {
         let d = tmpdir("units");
-        assert!(!units_current_in(&d, true) && !units_current_in(&d, false), "nothing written yet");
+        assert!(!units_current_in(&d, true, false) && !units_current_in(&d, false, false), "nothing written yet");
         let write = |panel: bool| {
-            for (name, text) in units(panel) {
-                fs::write(d.join(name), text).unwrap();
-            }
+            write_units(&d, panel, false).unwrap();
         };
         write(false);
-        assert!(units_current_in(&d, false));
-        assert!(!units_current_in(&d, true), "a node's units are not a panel's");
+        assert!(units_current_in(&d, false, false));
+        assert!(!units_current_in(&d, true, false), "a node's units are not a panel's");
         write(true);
-        assert!(units_current_in(&d, true) && !units_current_in(&d, false));
+        assert!(units_current_in(&d, true, false) && !units_current_in(&d, false, false));
         // a node of 0.5.0.1: the timer and the services, no path unit
         write(false);
         fs::remove_file(d.join("mikan-update-request.path")).unwrap();
-        assert!(!units_current_in(&d, false), "a node without the request unit gets it on its next update");
+        assert!(!units_current_in(&d, false, false), "a node without the request unit gets it on its next update");
         // an older text of the path unit
         write(false);
         let old = fs::read_to_string(d.join("mikan-update-request.path")).unwrap().replace("data/node/", "data/panel/");
         fs::write(d.join("mikan-update-request.path"), old).unwrap();
-        assert!(!units_current_in(&d, false));
+        assert!(!units_current_in(&d, false, false));
         fs::remove_dir_all(&d).unwrap();
     }
 
@@ -430,5 +772,21 @@ mod tests {
         let u = update_rules();
         assert_eq!(u[0], "80/tcp");
         assert!(u.contains(&"12443/udp".to_string()) && u.iter().all(|r| valid_rule(r)));
+    }
+
+    // MIKAN_SUPPORT_ACCESS=off: the terminal's units are neither written nor left behind.
+    #[test]
+    fn support_access_off_keeps_the_terminal_units_away() {
+        let d = std::env::temp_dir().join(format!("mikan-units-off-{}", std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        write_units(&d, true, false).unwrap();
+        assert!(d.join(TERMINAL_UNITS[1]).exists());
+        assert!(!units_current_in(&d, true, true), "turned off with the units still there");
+        assert_eq!(write_units(&d, true, true).unwrap(), 0, "the other units are the current ones already");
+        assert!(TERMINAL_UNITS.iter().all(|n| !d.join(n).exists()));
+        assert!(units_current_in(&d, true, true));
+        assert!(!units_current_in(&d, true, false), "turned on again: the terminal's units come back");
+        assert_eq!(write_units(&d, true, false).unwrap(), 2);
+        let _ = fs::remove_dir_all(&d);
     }
 }

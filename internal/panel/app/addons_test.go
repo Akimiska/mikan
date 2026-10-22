@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/tgate"
+	"mikan/internal/release"
 )
 
 // The marketplace end to end on the panel's side: the signed catalog, the request to the
@@ -33,8 +33,8 @@ func TestAddonsMarketplace(t *testing.T) {
 		switch r.URL.Path {
 		case "/index.json":
 			_, _ = w.Write(index)
-		case "/index.json.sig":
-			_, _ = io.WriteString(w, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, index)))
+		case "/index.json" + release.SigSuffix:
+			_, _ = io.WriteString(w, release.SignIn(release.CatalogContext, index, priv))
 		default:
 			http.NotFound(w, r)
 		}
@@ -64,7 +64,7 @@ func TestAddonsMarketplace(t *testing.T) {
 
 	dir := t.TempDir()
 	h := newHarness(t, func(o *Options) { o.DataDir, o.AddonsCatalog = dir, catalog.URL+"/index.json" })
-	h.p.Addons.SetKey(pub)
+	h.p.Addons.SetKeys(pub, pub)
 	if resp, _ := h.login(password, ""); resp.StatusCode != http.StatusOK {
 		t.Fatalf("login: %d", resp.StatusCode)
 	}

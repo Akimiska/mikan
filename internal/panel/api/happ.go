@@ -23,7 +23,10 @@ func (h *handlers) registerHapp() {
 // userHappLink: the link opens the subscription like the address does, so a key that may
 // only read does not get it, as it does not get the address.
 func (h *handlers) userHappLink(ctx context.Context, in *userIDInput) (*happLinkOutput, error) {
-	if hidesSecrets(ctx) {
+	if hidesLinks(ctx) {
+		if _, ok := supportGrantOf(ctx); ok {
+			return nil, huma.Error403Forbidden("support_denied")
+		}
 		return nil, huma.Error403Forbidden("read_key")
 	}
 	u, err := h.d.Store.Q.GetUser(ctx, in.ID)

@@ -25,7 +25,7 @@ pub fn interactive() -> bool {
 
 /// `mikan` without a command: the installer on a fresh server, the menu on an installed one.
 pub fn start() -> Result<()> {
-    let installed = Path::new(crate::DIR).join(".env").exists();
+    let installed = crate::config::installed(Path::new(crate::DIR));
     if !interactive() {
         if installed {
             bail!("the menu needs a terminal; the commands are in mikan --help");

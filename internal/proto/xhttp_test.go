@@ -108,7 +108,7 @@ func TestXHTTPSessionSettingsCheck(t *testing.T) {
 		"data without a key":        {XHTTPTuning{Mode: "packet-up", UplinkDataPlacement: "cookie"}, "xhttp_key_needed", "xhttp-config.uplink-data-key"},
 		"same header":               {XHTTPTuning{SessionPlacement: "header", SessionKey: "X-Id", SeqPlacement: "header", SeqKey: "X-Id"}, "xhttp_same_key", "xhttp-config.seq-key"},
 		"same named query":          {XHTTPTuning{SessionPlacement: "query", SessionKey: "id", SeqPlacement: "query", SeqKey: "id"}, "xhttp_same_key", "xhttp-config.seq-key"},
-		"no GET upload":             {XHTTPTuning{Mode: "packet-up", UplinkMethod: "GET", UplinkDataPlacement: "header", UplinkDataKey: "X-D"}, "xhttp_value", "xhttp-config.uplink-http-method"},
+		"GET outside packet-up":     {XHTTPTuning{Mode: "stream-up", UplinkMethod: "GET"}, "xhttp_get_mode", "xhttp-config.uplink-http-method"},
 		"buffered range":            {XHTTPTuning{MaxBufferedPosts: "10-30"}, "xhttp_count", "xhttp-config.sc-max-buffered-posts"},
 		"buffered zero":             {XHTTPTuning{MaxBufferedPosts: "0"}, "xhttp_count", "xhttp-config.sc-max-buffered-posts"},
 		"buffered huge":             {XHTTPTuning{MaxBufferedPosts: "100000"}, "xhttp_count", "xhttp-config.sc-max-buffered-posts"},
@@ -226,6 +226,69 @@ func TestXHTTPSessionSettingsReachTheClient(t *testing.T) {
 	}
 	if strings.Contains(c.URI, "sessionID") {
 		t.Errorf("defaults in the link: %s", c.URI)
+	}
+}
+
+// The apps' own upload over the server's: the node keeps POST with the data in the body,
+// the apps send GET (a CDN that passes only GET and HEAD), in mihomo's profile and in the
+// Xray link's extra. What the server would not take is refused, by field.
+func TestXHTTPClientUplink(t *testing.T) {
+	tpl := xhttpTemplate(t, ", mode: packet-up")
+	x := XHTTPTuning{Mode: "packet-up", UplinkMethod: "POST", UplinkDataPlacement: "body", ClientUplinkMethod: "GET", ClientUplinkPlacement: "body", ClientUplinkChunkSize: "512000"}
+	if err := SetXHTTP(tpl, x); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := XHTTPOf(tpl); got != x {
+		t.Fatalf("read back: %+v", got)
+	}
+	if sec := tpl.section("xhttp-config"); sec["uplink-http-method"] != "POST" || sec["uplink-data-placement"] != "body" {
+		t.Fatalf("the node keeps its own: %v", sec)
+	}
+	c, err := ClientConfig(tpl, ClientInput{Name: "X", Host: "203.0.113.7", Port: 443, Slot: slots[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := c.Mihomo["xhttp-opts"].(map[string]any)
+	if opts["uplink-http-method"] != "GET" || opts["uplink-data-placement"] != "body" || opts["uplink-chunk-size"] != "512000" {
+		t.Fatalf("mihomo: %v", opts)
+	}
+	u, _ := url.Parse(c.URI)
+	var extra map[string]any
+	if err := json.Unmarshal([]byte(u.Query().Get("extra")), &extra); err != nil {
+		t.Fatalf("extra: %v", err)
+	}
+	if extra["uplinkHTTPMethod"] != "GET" || extra["uplinkDataPlacement"] != "body" || extra["uplinkChunkSize"] != "512000" {
+		t.Fatalf("link: %v", extra)
+	}
+	if !NeedsOf(tpl).GetUplink {
+		t.Fatal("the apps' GET picks the apps that can send it")
+	}
+
+	for name, c := range map[string]struct {
+		x           XHTTPTuning
+		code, field string
+	}{
+		"GET outside packet-up":     {XHTTPTuning{Mode: "stream-up", ClientUplinkMethod: "GET"}, "xhttp_get_mode", extKey + ".client.xhttp.uplink-http-method"},
+		"header the server refuses": {XHTTPTuning{Mode: "packet-up", UplinkDataPlacement: "body", ClientUplinkPlacement: "header", ClientUplinkDataKey: "X-Data"}, "xhttp_client_placement", extKey + ".client.xhttp.uplink-data-placement"},
+		"body the server refuses":   {XHTTPTuning{Mode: "packet-up", UplinkDataPlacement: "cookie", UplinkDataKey: "d", ClientUplinkMethod: "GET", ClientUplinkPlacement: "body"}, "xhttp_client_placement", extKey + ".client.xhttp.uplink-data-placement"},
+		"another name":              {XHTTPTuning{Mode: "packet-up", UplinkDataPlacement: "header", UplinkDataKey: "X-D", ClientUplinkDataKey: "X-E"}, "xhttp_client_key", extKey + ".client.xhttp.uplink-data-key"},
+		"header without a name":     {XHTTPTuning{Mode: "packet-up", ClientUplinkPlacement: "header"}, "xhttp_key_needed", extKey + ".client.xhttp.uplink-data-key"},
+		"auto is the server's":      {XHTTPTuning{Mode: "packet-up", ClientUplinkPlacement: "auto"}, "xhttp_value", extKey + ".client.xhttp.uplink-data-placement"},
+		"bad chunk":                 {XHTTPTuning{ClientUplinkChunkSize: "0"}, "xhttp_range", extKey + ".client.xhttp.uplink-chunk-size"},
+		"header into auto":          {XHTTPTuning{Mode: "packet-up", UplinkDataPlacement: "auto", ClientUplinkMethod: "GET", ClientUplinkPlacement: "header", ClientUplinkDataKey: "X-Data"}, "", ""},
+		"cookie by default name":    {XHTTPTuning{Mode: "packet-up", ClientUplinkPlacement: "cookie", ClientUplinkDataKey: "x_data"}, "", ""},
+	} {
+		err := SetXHTTP(xhttpTemplate(t, ""), c.x)
+		if c.code == "" {
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+			continue
+		}
+		var e *Error
+		if !errors.As(err, &e) || e.Code != c.code || e.Field != c.field {
+			t.Errorf("%s: %v, want %s at %s", name, err, c.code, c.field)
+		}
 	}
 }
 

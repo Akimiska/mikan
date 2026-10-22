@@ -31,6 +31,9 @@ type userState struct {
 	ResetStrategy string `json:"reset_strategy"`
 	BillingDay    *int64 `json:"billing_day"`
 	ExpiresAt     *int64 `json:"expires_at"`
+	// The places bought on top: payments before them have none, and the user keeps theirs.
+	ExtraDevices      *int64 `json:"extra_devices,omitempty"`
+	ExtraDevicesUntil *int64 `json:"extra_devices_until,omitempty"`
 }
 
 // revertInfo is payments.revert: the user the payment created, or the user before (Prior)
@@ -43,7 +46,8 @@ type revertInfo struct {
 
 func stateOf(u db.User) *userState {
 	return &userState{Status: u.Status, TariffID: store.Int64Ptr(u.TariffID), TrafficLimit: store.Int64Ptr(u.TrafficLimit), DeviceLimit: store.Int64Ptr(u.DeviceLimit),
-		SpeedLimit: store.Int64Ptr(u.SpeedLimit), DeviceMode: u.DeviceMode, ResetStrategy: u.ResetStrategy, BillingDay: store.Int64Ptr(u.BillingDay), ExpiresAt: store.Int64Ptr(u.ExpiresAt)}
+		SpeedLimit: store.Int64Ptr(u.SpeedLimit), DeviceMode: u.DeviceMode, ResetStrategy: u.ResetStrategy, BillingDay: store.Int64Ptr(u.BillingDay), ExpiresAt: store.Int64Ptr(u.ExpiresAt),
+		ExtraDevices: &u.ExtraDevices, ExtraDevicesUntil: store.Int64Ptr(u.ExtraDevicesUntil)}
 }
 
 // sameOffer: the user still has the tariff and limits the payment set. The term and the
@@ -98,12 +102,31 @@ func (s *Service) takeBack(ctx context.Context, q *db.Queries, p db.Payment) (rv
 	} else if err != nil {
 		return rv, u, err
 	}
+	if p.Kind == KindDevice {
+		// The place goes back; a subscription that has no bought place left keeps its own.
+		taken, err := q.TakeUserExtraDevice(ctx, db.TakeUserExtraDeviceParams{UpdatedAt: s.d.Now().Unix(), ID: u.ID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return rv, u, nil
+		}
+		if err != nil {
+			return rv, u, err
+		}
+		rv.Action, u = "device", taken
+		// The device bound on the place refunded goes with it: the money is back, the access
+		// is not left behind.
+		_, err = domain.TrimBound(ctx, q, u.ID, u.DeviceLimit, s.d.Now())
+		return rv, u, err
+	}
 	if p.Kind == KindPackage {
 		// The grant goes whole: what was used of it is already counted as used.
 		n, err := q.DeleteGrantByPayment(ctx, sql.NullInt64{Int64: p.ID, Valid: true})
 		if n > 0 {
 			rv.Action = "grant"
 		}
+		return rv, u, err
+	}
+	// The tariff's gifts go with the payment that gave them, whole like a package.
+	if _, err := q.DeleteGrantByPayment(ctx, sql.NullInt64{Int64: p.ID, Valid: true}); err != nil {
 		return rv, u, err
 	}
 	return s.takeBackTariff(ctx, q, p, u, rv)
@@ -123,7 +146,7 @@ func (s *Service) takeBackTariff(ctx context.Context, q *db.Queries, p db.Paymen
 	if err != nil {
 		return rv, u, err
 	}
-	par := userParams(u, now)
+	par := domain.UserParams(u, now)
 	if ri.Created && later == 0 {
 		// Disabled, not deleted: the buyer's Telegram link and the subscription stay.
 		par.Status, par.ExpiresAt = "disabled", sql.NullInt64{Int64: now, Valid: true}
@@ -156,6 +179,13 @@ func (s *Service) takeBackTariff(ctx context.Context, q *db.Queries, p db.Paymen
 	if u, err = q.UpdateUser(ctx, par); err != nil {
 		return rv, u, err
 	}
+	if rv.TariffRestored && ri.Prior.ExtraDevices != nil && (*ri.Prior.ExtraDevices != u.ExtraDevices || !eqPtr(ri.Prior.ExtraDevicesUntil, store.Int64Ptr(u.ExtraDevicesUntil))) {
+		// The places bought come back with the limit that counts them.
+		if err = q.SetUserExtraDevices(ctx, db.SetUserExtraDevicesParams{ExtraDevices: *ri.Prior.ExtraDevices, Until: domain.NullInt(ri.Prior.ExtraDevicesUntil), ID: u.ID}); err != nil {
+			return rv, u, err
+		}
+		u.ExtraDevices, u.ExtraDevicesUntil = *ri.Prior.ExtraDevices, domain.NullInt(ri.Prior.ExtraDevicesUntil)
+	}
 	if rv.TariffRestored && ri.Prior.DeviceMode != "" && u.DeviceMode != ri.Prior.DeviceMode {
 		// The mode comes back with the limit it counts.
 		if err = q.SetUserDeviceMode(ctx, db.SetUserDeviceModeParams{DeviceMode: ri.Prior.DeviceMode, UpdatedAt: now, ID: u.ID}); err != nil {
@@ -168,7 +198,9 @@ func (s *Service) takeBackTariff(ctx context.Context, q *db.Queries, p db.Paymen
 	case restoreTariff != 0:
 		err = domain.ApplyTariffPools(ctx, q, u.ID, restoreTariff)
 	default:
-		err = q.ClearUserPoolLimits(ctx, u.ID)
+		if err = q.ResetUserPoolModes(ctx, u.ID); err == nil {
+			err = domain.GroupGrantsToMain(ctx, q, u.ID)
+		}
 	}
 	return rv, u, err
 }
@@ -198,13 +230,6 @@ func (s *Service) termOf(ctx context.Context, q *db.Queries, p db.Payment) (int6
 		return 0, nil
 	}
 	return t.DurationDays, err
-}
-
-// userParams is u as it is, to change some of it.
-func userParams(u db.User, now int64) db.UpdateUserParams {
-	return db.UpdateUserParams{Name: u.Name, Contact: u.Contact, Note: u.Note, Tags: u.Tags, Status: u.Status, TariffID: u.TariffID,
-		TrafficLimit: u.TrafficLimit, DeviceLimit: u.DeviceLimit, SpeedLimit: u.SpeedLimit, ResetStrategy: u.ResetStrategy, PeriodDays: u.PeriodDays, PeriodStart: u.PeriodStart,
-		ExpiresAt: u.ExpiresAt, Inbounds: u.Inbounds, BillingDay: u.BillingDay, UpdatedAt: now, ID: u.ID}
 }
 
 // rolledBack is the end of the user's access (cur) with the term the payment added taken
@@ -278,6 +303,9 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 				return err
 			}
 			done = true
+			if err := refundToBalance(ctx, q, p, at.Int64); err != nil {
+				return err
+			}
 			if rv, u, err = s.takeBack(ctx, q, p); err != nil {
 				return err
 			}
@@ -287,6 +315,9 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 			n, err := q.MarkLatePromoRefunded(ctx, db.MarkLatePromoRefundedParams{RefundedAt: at, ID: id})
 			open = n == 1
 			if err != nil || !open {
+				return err
+			}
+			if err := refundToBalance(ctx, q, p, at.Int64); err != nil {
 				return err
 			}
 			// Still a refund the addons count: told once, in the transaction of the change.
@@ -311,9 +342,5 @@ func (s *Service) refunded(ctx context.Context, id int64) (Reverted, error) {
 	s.d.Events.Kick()
 	s.d.Users.Changed()
 	s.d.Log.Info("billing: refunded", "payment", id, "action", rv.Action, "exact", rv.Exact)
-	if n := s.notifier(); n != nil {
-		p.Status = PaymentRefunded
-		n.Refunded(ctx, p, u, rv.Action == "disabled")
-	}
 	return rv, nil
 }

@@ -33,9 +33,25 @@ export function serverQueue(m: Market | undefined, p: Payments | undefined) {
   return m?.queue ?? p?.queue ?? [];
 }
 
+/**
+ * What an install sends beside the permissions: for an unofficial addon, the admin's word that
+ * they take the risk (every install and every update), and the author's new key they compared.
+ */
+export type InstallArgs = { entry: MarketEntry; ack?: boolean; acceptKey?: string };
+
 /** Install (or update) an addon of the catalog with the permissions its entry asks for. */
-export function installMarket(e: MarketEntry) {
-  return unwrap(api.POST("/api/v1/marketplace/{id}/install", { params: { path: { id: e.id } }, body: { permissions: e.permissions } }));
+export function installMarket({ entry, ack, acceptKey }: InstallArgs) {
+  return unwrap(
+    api.POST("/api/v1/marketplace/{id}/install", {
+      params: { path: { id: entry.id } },
+      body: { permissions: entry.permissions, ...(ack ? { ack } : {}), ...(acceptKey ? { accept_key: acceptKey } : {}) },
+    }),
+  );
+}
+
+/** Code mikan has not looked at: an addon of a source or of the registry of community addons. */
+export function unofficial(e: MarketEntry | undefined): boolean {
+  return !!e?.origin;
 }
 
 /** Install (or update) a payment method from the catalog. */
@@ -64,13 +80,19 @@ export function botStatus(tg: Telegram, words: Record<BotPhase, Key>): State {
 export function entryOf(id: string, d: Market | undefined): MarketEntry | undefined {
   const a = d?.installed.find((x) => x.id === id);
   if (a && a.source !== "official" && !a.origin) return undefined;
+  if (a?.origin?.kind === "community") return d?.community.find((e) => e.id === id);
   return d?.catalog.find((e) => e.id === id && (e.origin?.id ?? 0) === (a?.origin?.id ?? 0));
 }
 
 /** The badge of an unofficial addon: whose it is, short enough for a phone. */
 export function unofficialLabel(o: MarketOrigin): string {
   const title = o.title.length > 24 ? `${o.title.slice(0, 23)}…` : o.title;
-  return t("market.unofficial", { title });
+  return t(o.kind === "community" ? "market.community" : "market.unofficial", { title });
+}
+
+/** Where an installed addon comes from, in words: an image of the registry is not a source's. */
+export function sourceLabel(a: MarketInstalled): string {
+  return a.origin?.kind === "community" ? t("market.source.community") : t(`market.source.${a.source}`);
 }
 
 /** The addon's name in the catalog; an addon of the admin's own is known by its id. */
@@ -87,6 +109,9 @@ export const PERMISSIONS: { id: string; label: Key; text: Key }[] = [
   { id: "users:write", label: "market.perm.usersWrite", text: "market.perm.usersWriteText" },
   { id: "users:all", label: "market.perm.usersAll", text: "market.perm.usersAllText" },
   { id: "users:grant", label: "market.perm.usersGrant", text: "market.perm.usersGrantText" },
+  { id: "nodes:read", label: "market.perm.nodesRead", text: "market.perm.nodesReadText" },
+  { id: "inbounds:read", label: "market.perm.inboundsRead", text: "market.perm.inboundsReadText" },
+  { id: "inbounds:write", label: "market.perm.inboundsWrite", text: "market.perm.inboundsWriteText" },
   { id: "billing:invoice", label: "market.perm.invoice", text: "market.perm.invoiceText" },
   { id: "events", label: "market.perm.events", text: "market.perm.eventsText" },
   { id: "kv", label: "market.perm.kv", text: "market.perm.kvText" },
@@ -106,7 +131,7 @@ export function sortPermissions(perms: string[]): string[] {
  * Talking to the clients for the panel, giving them days (any of them, for users:grant) or
  * reading all of them (users:all): the addon is as good as an admin.
  */
-export const DANGEROUS_PERMISSIONS = ["bot", "users:write", "users:all", "users:grant"];
+export const DANGEROUS_PERMISSIONS = ["bot", "users:write", "users:all", "users:grant", "inbounds:write"];
 
 export function actsAsAdmin(perms: string[]): boolean {
   return perms.some((p) => DANGEROUS_PERMISSIONS.includes(p));

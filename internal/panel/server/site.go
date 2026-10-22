@@ -6,23 +6,29 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	"mikan/internal/frontpage"
 )
 
 // OwnSite serves dir, a site of the admin's own (/opt/mikan/data/panel/www on the host), on
 // every path the panel does not own. In front of a REALITY self-steal the panel is what a
 // stranger sees, and the same bare 404 on "/", robots.txt and favicon.ico is a site with no
 // page at all (GitHub issue #67). A missing file gets dir/404.html with status 404 when
-// there is one. Without dir, or with nothing in it, the panel answers as before: NotFound.
-func OwnSite(dir string) http.Handler {
+// there is one. Without a page of dir at "/", the template the admin chose (template(), ""
+// for none) is that page. Without either, the panel answers as before: NotFound.
+func OwnSite(dir string, template func() string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 		root, err := os.OpenRoot(dir) // no way out of dir, symlinks included
 		if err != nil {
-			NotFound(w)
+			builtIn(w, r, name, template)
 			return
 		}
 		defer root.Close()
 		fsys := root.FS()
-		name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if !servable(fsys, name) && !servable(fsys, ".") && builtIn(w, r, name, template) {
+			return
+		}
 		if !servable(fsys, name) {
 			if !servable(fsys, "404.html") {
 				NotFound(w)
@@ -42,6 +48,34 @@ func OwnSite(dir string) http.Handler {
 		plain(w.Header())
 		http.FileServerFS(fsys).ServeHTTP(w, r)
 	})
+}
+
+// builtIn answers "/" with the chosen template and says whether it did; anything else, or
+// no template, is NotFound.
+func builtIn(w http.ResponseWriter, r *http.Request, name string, template func() string) bool {
+	var page []byte
+	if t := ""; template != nil && (name == "" || name == "index.html") {
+		if t = template(); t != "" {
+			page = frontpage.Page(path.Base(t))
+		}
+	}
+	if page == nil {
+		NotFound(w)
+		return true
+	}
+	plain(w.Header())
+	frontpage.Write(w, r, page)
+	return true
+}
+
+// HasOwnSite says whether dir has a page at "/" of its own: the templates do not apply then.
+func HasOwnSite(dir string) bool {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	return servable(root.FS(), ".")
 }
 
 // servable: a file, or a directory with index.html; never a hidden one (.git, .env).

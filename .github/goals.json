@@ -26,7 +26,7 @@
         "ru": "Команда /admin в боте: клиенты, подписки, устройства и ноды прямо из Telegram, без входа в панель.",
         "en": "An /admin command in the bot: clients, subscriptions, devices and nodes right from Telegram, without opening the panel."
       },
-      "target": 200, "raised": 0, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qU"
+      "target": 200, "raised": 5, "currency": "USD", "status": "open", "url": "https://t.me/tribute/app?startapp=g6qU"
     },
     {
       "id": "device-addon",

@@ -155,7 +155,7 @@ func TestTrialIsTheTariffWhole(t *testing.T) {
 	trial := e.offerTrial()
 	pool, err := e.st.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "trial-pool", CreatedAt: e.now.Unix()})
 	must(t, err)
-	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: trial.ID, PoolID: pool.ID, TrafficLimit: 1 << 20}))
+	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: trial.ID, PoolID: pool.ID, Mode: domain.PoolOwn, TrafficLimit: sql.NullInt64{Int64: 1 << 20, Valid: true}}))
 	// No free slot: the first attempt hits domain.ErrNoSlots.
 	_, err = e.st.DB.ExecContext(ctx, "UPDATE slots SET state = 'assigned' WHERE state = 'free'")
 	must(t, err)

@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"mikan/internal/proto"
+	"mikan/internal/netaddr"
 )
 
 type Result struct {
@@ -68,7 +68,7 @@ func (o Options) lookup(ctx context.Context, host string) ([]netip.Addr, error) 
 
 // allowed: may the check connect to ip on port?
 func (o Options) allowed(ip netip.Addr, port string) bool {
-	if o.Any || proto.PublicAddr(ip) {
+	if o.Any || netaddr.IsPublic(ip) {
 		return true
 	}
 	return o.LoopbackPort > 0 && ip == netip.MustParseAddr("127.0.0.1") && port == strconv.Itoa(o.LoopbackPort)
@@ -103,7 +103,7 @@ func Check(ctx context.Context, dest, sni string, o Options) Result {
 		// The first address the check may use: a name with a private address among its
 		// answers is still dialed on a public one, never on the private one.
 		// A name never leads to loopback, not even to the panel's own port: that is for the literal address.
-		i := slices.IndexFunc(addrs, func(a netip.Addr) bool { return o.Any || proto.PublicAddr(a) })
+		i := slices.IndexFunc(addrs, func(a netip.Addr) bool { return o.Any || netaddr.IsPublic(a) })
 		if i < 0 {
 			r.Error = "private"
 			return r
@@ -204,7 +204,7 @@ func Neighbors(ctx context.Context, ip string, limit int, o Options) (found []Re
 		return nil, 0, errors.New("need an IPv4 address")
 	}
 	// It connects to a /24 around ip: never the neighborhood of this host's own network.
-	if !o.Any && !proto.PublicAddr(self) {
+	if !o.Any && !netaddr.IsPublic(self) {
 		return nil, 0, errors.New("need a public IPv4 address")
 	}
 	own, _ := self.Prefix(24)
@@ -274,7 +274,7 @@ func scanBlock(ctx context.Context, prefix netip.Prefix, self netip.Addr, o Opti
 	for a := prefix.Addr(); prefix.Contains(a); a = a.Next() {
 		last := a.As4()[3]
 		// A /16 may hold addresses that are no one's site (a private or reserved range).
-		if a == self || last == 0 || last == 255 || !o.Any && !proto.PublicAddr(a) {
+		if a == self || last == 0 || last == 255 || !o.Any && !netaddr.IsPublic(a) {
 			continue
 		}
 		if ctx.Err() != nil {

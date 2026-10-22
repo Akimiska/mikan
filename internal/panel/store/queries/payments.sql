@@ -49,10 +49,13 @@ WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4 AND user_id 
 ORDER BY id DESC LIMIT 1;
 
 -- name: FindOpenPayments :many
+-- The open invoices of the purchase, and its balance payments of just now: a second tap or
+-- a retry of the screen gets the payment made, not a second charge.
 SELECT * FROM payments
 WHERE tg_id = sqlc.arg(tg_id) AND tariff_id = sqlc.arg(tariff_id) AND provider = sqlc.arg(provider) AND kind = sqlc.arg(kind)
   AND user_id IS NOT DISTINCT FROM NULLIF(CAST(sqlc.arg(user_id) AS BIGINT), 0)
-  AND status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
+  AND (status = 'pending' AND pay_url <> '' AND created_at > sqlc.arg(since)
+    OR provider = 'balance' AND status IN ('paid', 'applied') AND created_at > sqlc.arg(repeat_since))
 ORDER BY id DESC;
 
 -- name: ListPendingPayments :many
@@ -93,3 +96,34 @@ UPDATE payments SET revert = $1 WHERE id = $2;
 SELECT count(*) FROM payments
 WHERE user_id = sqlc.arg(user_id) AND status = 'applied' AND kind IN ('new', 'renew', 'trial') AND id <> sqlc.arg(id)
   AND (applied_at > CAST(sqlc.arg(applied_at) AS BIGINT) OR (applied_at = CAST(sqlc.arg(applied_at) AS BIGINT) AND id > sqlc.arg(id)));
+
+-- name: SetTariffExtraDevices :exec
+UPDATE tariffs SET device_price_stars = $1, device_price_rub = $2, device_extra_max = $3 WHERE id = $4;
+
+-- name: AddUserExtraDevice :one
+-- One more place bought: the limit grows with it, an unlimited one stays unlimited.
+UPDATE users
+SET device_limit = CASE WHEN device_limit IS NULL THEN NULL ELSE device_limit + 1 END,
+    extra_devices = extra_devices + 1, extra_devices_until = sqlc.narg(until), updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: TakeUserExtraDevice :one
+-- A refunded place goes back; the limit never falls under one.
+UPDATE users
+SET device_limit = CASE WHEN device_limit IS NULL THEN NULL ELSE GREATEST(device_limit - 1, 1) END,
+    extra_devices = extra_devices - 1, updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND extra_devices > 0
+RETURNING *;
+
+-- name: SetUserExtraDevices :exec
+UPDATE users SET extra_devices = sqlc.arg(extra_devices), extra_devices_until = sqlc.narg(until) WHERE id = sqlc.arg(id);
+
+-- name: ExpireExtraDevices :many
+-- Places bought until the end of a term that is over go: the limit falls back by them
+-- (never under one), an unlimited one stays unlimited.
+UPDATE users
+SET device_limit = CASE WHEN device_limit IS NULL THEN NULL ELSE GREATEST(device_limit - extra_devices, 1) END,
+    extra_devices = 0, extra_devices_until = NULL, updated_at = sqlc.arg(now)
+WHERE extra_devices > 0 AND extra_devices_until IS NOT NULL AND extra_devices_until <= sqlc.arg(now)
+RETURNING id, device_limit;

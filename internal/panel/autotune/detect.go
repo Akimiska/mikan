@@ -18,7 +18,7 @@ import (
 // User is what the detector needs to know about one slot: a subscription's own keys,
 // or the keys of one of its bound devices.
 type User struct {
-	Inbounds []int64 // inbound ids in the user's profile; empty = all
+	Inbounds []int64 // inbound ids in the user's profile; nil = all, empty = none
 	// SubFetched: when each of the user's devices (by IP) last took the profile. A device
 	// that did not take it after an inbound changed may still use the old port.
 	SubFetched map[string]int64
@@ -102,7 +102,7 @@ func Detect(e Evidence) map[int64]Verdict {
 			fetched = u.Fetched
 		}
 		for _, x := range e.Inbounds {
-			if len(u.Inbounds) > 0 && !slices.Contains(u.Inbounds, x.ID) || fetched < x.UpdatedAt {
+			if u.Inbounds != nil && !slices.Contains(u.Inbounds, x.ID) || fetched < x.UpdatedAt {
 				continue
 			}
 			others, sameNet := 0, false

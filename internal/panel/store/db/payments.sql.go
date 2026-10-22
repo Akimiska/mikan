@@ -10,6 +10,60 @@ import (
 	"database/sql"
 )
 
+const addUserExtraDevice = `-- name: AddUserExtraDevice :one
+UPDATE users
+SET device_limit = CASE WHEN device_limit IS NULL THEN NULL ELSE device_limit + 1 END,
+    extra_devices = extra_devices + 1, extra_devices_until = $1, updated_at = $2
+WHERE id = $3
+RETURNING id, name, contact, note, tags, status, tariff_id, traffic_limit, device_limit, reset_strategy, period_days, period_start, used_up, used_down, total_up, total_down, expires_at, inbounds, sub_token, slot_id, online_at, created_at, updated_at, billing_day, source, hidden, folder_id, speed_limit, device_mode, extra_devices, extra_devices_until
+`
+
+type AddUserExtraDeviceParams struct {
+	Until     sql.NullInt64
+	UpdatedAt int64
+	ID        int64
+}
+
+// One more place bought: the limit grows with it, an unlimited one stays unlimited.
+func (q *Queries) AddUserExtraDevice(ctx context.Context, arg AddUserExtraDeviceParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, addUserExtraDevice, arg.Until, arg.UpdatedAt, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Contact,
+		&i.Note,
+		&i.Tags,
+		&i.Status,
+		&i.TariffID,
+		&i.TrafficLimit,
+		&i.DeviceLimit,
+		&i.ResetStrategy,
+		&i.PeriodDays,
+		&i.PeriodStart,
+		&i.UsedUp,
+		&i.UsedDown,
+		&i.TotalUp,
+		&i.TotalDown,
+		&i.ExpiresAt,
+		&i.Inbounds,
+		&i.SubToken,
+		&i.SlotID,
+		&i.OnlineAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BillingDay,
+		&i.Source,
+		&i.Hidden,
+		&i.FolderID,
+		&i.SpeedLimit,
+		&i.DeviceMode,
+		&i.ExtraDevices,
+		&i.ExtraDevicesUntil,
+	)
+	return i, err
+}
+
 const countLaterTariffPayments = `-- name: CountLaterTariffPayments :one
 SELECT count(*) FROM payments
 WHERE user_id = $1 AND status = 'applied' AND kind IN ('new', 'renew', 'trial') AND id <> $2
@@ -107,6 +161,44 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 	return i, err
 }
 
+const expireExtraDevices = `-- name: ExpireExtraDevices :many
+UPDATE users
+SET device_limit = CASE WHEN device_limit IS NULL THEN NULL ELSE GREATEST(device_limit - extra_devices, 1) END,
+    extra_devices = 0, extra_devices_until = NULL, updated_at = $1
+WHERE extra_devices > 0 AND extra_devices_until IS NOT NULL AND extra_devices_until <= $1
+RETURNING id, device_limit
+`
+
+type ExpireExtraDevicesRow struct {
+	ID          int64
+	DeviceLimit sql.NullInt64
+}
+
+// Places bought until the end of a term that is over go: the limit falls back by them
+// (never under one), an unlimited one stays unlimited.
+func (q *Queries) ExpireExtraDevices(ctx context.Context, now int64) ([]ExpireExtraDevicesRow, error) {
+	rows, err := q.db.QueryContext(ctx, expireExtraDevices, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExpireExtraDevicesRow{}
+	for rows.Next() {
+		var i ExpireExtraDevicesRow
+		if err := rows.Scan(&i.ID, &i.DeviceLimit); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const expirePayments = `-- name: ExpirePayments :execrows
 UPDATE payments SET status = 'expired' WHERE status = 'pending' AND created_at < $1
 `
@@ -176,19 +268,23 @@ const findOpenPayments = `-- name: FindOpenPayments :many
 SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert FROM payments
 WHERE tg_id = $1 AND tariff_id = $2 AND provider = $3 AND kind = $4
   AND user_id IS NOT DISTINCT FROM NULLIF(CAST($5 AS BIGINT), 0)
-  AND status = 'pending' AND pay_url <> '' AND created_at > $6
+  AND (status = 'pending' AND pay_url <> '' AND created_at > $6
+    OR provider = 'balance' AND status IN ('paid', 'applied') AND created_at > $7)
 ORDER BY id DESC
 `
 
 type FindOpenPaymentsParams struct {
-	TgID     int64
-	TariffID sql.NullInt64
-	Provider string
-	Kind     string
-	UserID   int64
-	Since    int64
+	TgID        int64
+	TariffID    sql.NullInt64
+	Provider    string
+	Kind        string
+	UserID      int64
+	Since       int64
+	RepeatSince int64
 }
 
+// The open invoices of the purchase, and its balance payments of just now: a second tap or
+// a retry of the screen gets the payment made, not a second charge.
 func (q *Queries) FindOpenPayments(ctx context.Context, arg FindOpenPaymentsParams) ([]Payment, error) {
 	rows, err := q.db.QueryContext(ctx, findOpenPayments,
 		arg.TgID,
@@ -197,6 +293,7 @@ func (q *Queries) FindOpenPayments(ctx context.Context, arg FindOpenPaymentsPara
 		arg.Kind,
 		arg.UserID,
 		arg.Since,
+		arg.RepeatSince,
 	)
 	if err != nil {
 		return nil, err
@@ -523,7 +620,7 @@ func (q *Queries) ListPendingPayments(ctx context.Context, createdAt int64) ([]P
 }
 
 const listTariffsOnSale = `-- name: ListTariffsOnSale :many
-SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode FROM tariffs WHERE archived = 0 AND on_sale = 1 ORDER BY sort, id
+SELECT id, name, traffic_limit, duration_days, device_limit, reset_strategy, price_label, sort, archived, created_at, billing_day, price_stars, price_rub, on_sale, speed_limit, description, device_mode, device_price_stars, device_price_rub, device_extra_max, chosen_servers FROM tariffs WHERE archived = 0 AND on_sale = 1 ORDER BY sort, id
 `
 
 func (q *Queries) ListTariffsOnSale(ctx context.Context) ([]Tariff, error) {
@@ -553,6 +650,10 @@ func (q *Queries) ListTariffsOnSale(ctx context.Context) ([]Tariff, error) {
 			&i.SpeedLimit,
 			&i.Description,
 			&i.DeviceMode,
+			&i.DevicePriceStars,
+			&i.DevicePriceRub,
+			&i.DeviceExtraMax,
+			&i.ChosenServers,
 		); err != nil {
 			return nil, err
 		}
@@ -763,4 +864,93 @@ func (q *Queries) SetPaymentStatus(ctx context.Context, arg SetPaymentStatusPara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const setTariffExtraDevices = `-- name: SetTariffExtraDevices :exec
+UPDATE tariffs SET device_price_stars = $1, device_price_rub = $2, device_extra_max = $3 WHERE id = $4
+`
+
+type SetTariffExtraDevicesParams struct {
+	DevicePriceStars sql.NullInt64
+	DevicePriceRub   sql.NullInt64
+	DeviceExtraMax   int64
+	ID               int64
+}
+
+func (q *Queries) SetTariffExtraDevices(ctx context.Context, arg SetTariffExtraDevicesParams) error {
+	_, err := q.db.ExecContext(ctx, setTariffExtraDevices,
+		arg.DevicePriceStars,
+		arg.DevicePriceRub,
+		arg.DeviceExtraMax,
+		arg.ID,
+	)
+	return err
+}
+
+const setUserExtraDevices = `-- name: SetUserExtraDevices :exec
+UPDATE users SET extra_devices = $1, extra_devices_until = $2 WHERE id = $3
+`
+
+type SetUserExtraDevicesParams struct {
+	ExtraDevices int64
+	Until        sql.NullInt64
+	ID           int64
+}
+
+func (q *Queries) SetUserExtraDevices(ctx context.Context, arg SetUserExtraDevicesParams) error {
+	_, err := q.db.ExecContext(ctx, setUserExtraDevices, arg.ExtraDevices, arg.Until, arg.ID)
+	return err
+}
+
+const takeUserExtraDevice = `-- name: TakeUserExtraDevice :one
+UPDATE users
+SET device_limit = CASE WHEN device_limit IS NULL THEN NULL ELSE GREATEST(device_limit - 1, 1) END,
+    extra_devices = extra_devices - 1, updated_at = $1
+WHERE id = $2 AND extra_devices > 0
+RETURNING id, name, contact, note, tags, status, tariff_id, traffic_limit, device_limit, reset_strategy, period_days, period_start, used_up, used_down, total_up, total_down, expires_at, inbounds, sub_token, slot_id, online_at, created_at, updated_at, billing_day, source, hidden, folder_id, speed_limit, device_mode, extra_devices, extra_devices_until
+`
+
+type TakeUserExtraDeviceParams struct {
+	UpdatedAt int64
+	ID        int64
+}
+
+// A refunded place goes back; the limit never falls under one.
+func (q *Queries) TakeUserExtraDevice(ctx context.Context, arg TakeUserExtraDeviceParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, takeUserExtraDevice, arg.UpdatedAt, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Contact,
+		&i.Note,
+		&i.Tags,
+		&i.Status,
+		&i.TariffID,
+		&i.TrafficLimit,
+		&i.DeviceLimit,
+		&i.ResetStrategy,
+		&i.PeriodDays,
+		&i.PeriodStart,
+		&i.UsedUp,
+		&i.UsedDown,
+		&i.TotalUp,
+		&i.TotalDown,
+		&i.ExpiresAt,
+		&i.Inbounds,
+		&i.SubToken,
+		&i.SlotID,
+		&i.OnlineAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BillingDay,
+		&i.Source,
+		&i.Hidden,
+		&i.FolderID,
+		&i.SpeedLimit,
+		&i.DeviceMode,
+		&i.ExtraDevices,
+		&i.ExtraDevicesUntil,
+	)
+	return i, err
 }

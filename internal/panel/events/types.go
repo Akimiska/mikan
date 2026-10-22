@@ -30,17 +30,8 @@ const (
 
 	NodeDown = "node.down"
 	NodeUp   = "node.up"
-)
 
-// The bot's own messages (deprecated), written after the commit by tgbot.Notifications and
-// carrying a whole payment and a whole subscription (so only the addon that holds the bot
-// reads them). They stay for one release so the bot builds released before PaymentPaid,
-// PaymentRefunded and TrialNotGiven carried what the bot needs keep working; the bot addon
-// built with this panel does not read them.
-const (
-	BotPaid          = "bot.paid"
-	BotRefunded      = "bot.refunded"
-	BotTrialNotGiven = "bot.trial_not_given"
+	BalanceTopup = "balance.topup"
 )
 
 // Payment is the data of PaymentPaid and PaymentRefunded: enough to thank, notify or count,
@@ -48,7 +39,7 @@ const (
 // gave to (0 on a refund when it is gone), tg_id the buyer.
 type Payment struct {
 	PaymentID  int64  `json:"payment_id"`
-	Kind       string `json:"kind"`     // new | renew | package | trial
+	Kind       string `json:"kind"`     // new | renew | package | trial | device
 	Provider   string `json:"provider"` // stars | addon:<id> | ...
 	Amount     int64  `json:"amount"`   // minor units
 	Currency   string `json:"currency"`
@@ -133,6 +124,7 @@ const (
 	UnboundByBan        = "ban"
 	UnboundIdle         = "idle"    // not seen for 90 days
 	UnboundReissue      = "reissue" // the subscription got a new link
+	UnboundLimit        = "limit"   // the limit fell: a place bought for a term ended, or was refunded
 )
 
 // Node is the data of NodeDown and NodeUp. Not tied to a subscriber: no user_id and no tg_id.
@@ -146,6 +138,17 @@ type Node struct {
 	DownAt int64  `json:"down_since,omitempty"` // NodeUp: unix seconds, when it went down
 }
 
+// Topup is the data of BalanceTopup: the admin approved or rejected a top-up of an account's
+// balance (the envelope's tg_id). Amount and Balance are in minor units of Currency.
+type Topup struct {
+	TopupID  int64  `json:"topup_id"`
+	Status   string `json:"status"` // approved | rejected
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency"`
+	Balance  int64  `json:"balance"`          // the balance after it
+	Reason   string `json:"reason,omitempty"` // rejected: the admin's words
+}
+
 // Doc describes one event type for the protocol's documentation: Data is an example of its
 // data as it goes on the wire.
 type Doc struct {
@@ -154,7 +157,7 @@ type Doc struct {
 	Data  any
 }
 
-// Docs lists every event type the panel emits (the deprecated BotPaid, BotRefunded and
+// Docs lists every event type the panel emits.
 // BotTrialNotGiven are for the bot addon alone and not listed).
 var Docs = []Doc{
 	{PaymentPaid, "A payment was applied: the subscription is made or extended, or the package credited.",
@@ -176,4 +179,5 @@ var Docs = []Doc{
 	{DeviceUnbound, "A device lost its place on a subscription.", Device{DeviceID: 41, Label: "iPhone 15", By: UnboundBySubscriber}},
 	{NodeDown, "A node stopped answering the panel's health checks.", Node{NodeID: 2, Name: "de-1", Code: "timeout", Since: 1_800_000_000}},
 	{NodeUp, "A node that was down answers again.", Node{NodeID: 2, Name: "de-1", DownAt: 1_800_000_000}},
+	{BalanceTopup, "The admin approved or rejected a top-up of an account's balance.", Topup{TopupID: 5, Status: "approved", Amount: 50000, Currency: "RUB", Balance: 65000}},
 }

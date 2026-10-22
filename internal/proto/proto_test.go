@@ -41,21 +41,23 @@ func code(err error) string {
 	return ""
 }
 
-func TestPresetsConvertAndRender(t *testing.T) {
+func TestPresetsRender(t *testing.T) {
 	priv, pub := realityKey(t)
-	reality := `{"reality":{"private_key":"` + priv + `","short_ids":["a1b2c3d4"],"dest":"www.microsoft.com:443","server_names":["www.microsoft.com"]}`
+	reality := `reality-config:
+  dest: www.microsoft.com:443
+  private-key: ` + priv + `
+  short-id: [a1b2c3d4]
+  server-names: [www.microsoft.com]
+`
 	cases := map[string]string{
-		"vless_reality_vision": reality + `}`,
-		"vless_reality_xhttp":  reality + `,"path":"/x7k2","mode":"stream-one"}`,
-		"hysteria2":            `{"obfs_password":"obfs123"}`,
-		"tuic_v5":              `{"congestion_control":"bbr"}`,
+		"vless_reality_vision": "type: vless\n" + reality + "mikan:\n  flow: xtls-rprx-vision\n",
+		"vless_reality_xhttp":  "type: vless\n" + reality + "xhttp-config:\n  path: /x7k2\n  mode: stream-one\n",
+		"hysteria2":            "type: hysteria2\nalpn: [h3]\nobfs: salamander\nobfs-password: obfs123\n",
+		"tuic_v5":              "type: tuic\nalpn: [h3]\ncongestion-controller: bbr\n",
 	}
 	cert := Cert{CertPath: "/data/tls/cert.pem", KeyPath: "/data/tls/key.pem"}
-	for preset, settings := range cases {
-		tpl, err := FromPreset(preset, []byte(settings))
-		if err != nil {
-			t.Fatalf("%s: %v", preset, err)
-		}
+	for preset, src := range cases {
+		tpl := mustParse(t, src)
 		// Round trip through YAML: what the panel stores and the editor shows.
 		tpl = mustParse(t, Marshal(tpl))
 		if err := Validate(tpl, Options{}); err != nil {
@@ -87,7 +89,7 @@ func TestPresetsConvertAndRender(t *testing.T) {
 				t.Fatalf("vision client: %s %v", c.URI, c.Mihomo)
 			}
 		case "vless_reality_xhttp":
-			if q.Get("type") != "xhttp" || q.Get("path") != "/x7k2" || q.Get("mode") != "stream-one" || q.Get("flow") != "" || c.Mihomo["udp"] != false {
+			if q.Get("type") != "xhttp" || q.Get("path") != "/x7k2" || q.Get("mode") != "stream-one" || q.Get("flow") != "" || c.Mihomo["udp"] != true {
 				t.Fatalf("xhttp client: %s %v", c.URI, c.Mihomo)
 			}
 			if opts := c.Mihomo["xhttp-opts"].(map[string]any); opts["reuse-settings"] == nil {
@@ -124,10 +126,10 @@ func TestRealityReplayWindow(t *testing.T) {
 		}
 		return fmt.Sprintf("%.0f", toFloat(l["reality-config"].(map[string]any)["max-time-difference"]))
 	}
-	if got := window(src); got != "7200000000" {
-		t.Fatalf("default window: %s (mihomo reads microseconds: 2 h = 7200000000)", got)
+	if got := window(src); got != "7200000" {
+		t.Fatalf("default window: %s (the Citrus core reads milliseconds: 2 h = 7200000)", got)
 	}
-	if got := window(src + "  max-time-difference: 60000000\n"); got != "60000000" {
+	if got := window(src + "  max-time-difference: 60000\n"); got != "60000" {
 		t.Fatalf("the template's own window: %s", got)
 	}
 	// The template itself stays as the admin wrote it.
@@ -211,17 +213,12 @@ func TestSelfSignedLinksCarryThePin(t *testing.T) {
 		"type: anytls\n":                                 "pcs=ab12",
 		"type: vless\nws-path: /v\nmikan: {tls: node}\n": "pcs=ab12",
 		"type: hysteria2\n":                              "pinSHA256=ab12",
-		"type: vmess\nws-path: /m\nmikan: {tls: node}\n": `"pcs":"ab12"`,
 	} {
 		c, err := ClientConfig(mustParse(t, src), in)
 		if err != nil {
 			t.Fatalf("%s: %v", src, err)
 		}
 		link := c.URI
-		if strings.HasPrefix(link, "vmess://") {
-			raw, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(link, "vmess://"))
-			link = string(raw)
-		}
 		if !strings.Contains(link, want) || c.Mihomo["fingerprint"] != "ab12" {
 			t.Errorf("%s: %s lacks %s (mihomo %v)", src, link, want, c.Mihomo["fingerprint"])
 		}
@@ -255,23 +252,24 @@ func TestValidateRefusesDangerousTemplates(t *testing.T) {
 	priv, _ := realityKey(t)
 	reality := "reality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
 	cases := map[string]struct{ src, code string }{
-		"managed users":         {"type: vless\n" + reality + "users: []\n", "config_managed"},
-		"cert path":             {"type: hysteria2\ncertificate: /etc/shadow\n", "config_managed"},
-		"routing bypass":        {"type: vless\n" + reality + "proxy: DIRECT\n", "config_key"},
-		"plain vless":           {"type: vless\nws-path: /ws\n", "config_insecure"},
-		"reality and tls":       {"type: vless\n" + reality + "mikan: {tls: node}\n", "config_both_tls"},
-		"private dest":          {strings.Replace("type: vless\n"+reality, "www.microsoft.com:443", "169.254.169.254:80", 1), "reality_dest_private"},
-		"reality proxy":         {"type: vless\n" + reality + "  proxy: DIRECT\n", "config_key"},
-		"file masquerade":       {"type: hysteria2\nmasquerade: file:///etc\n", "config_masquerade"},
-		"private masquerade":    {"type: hysteria2\nmasquerade: https://10.0.0.1/\n", "config_masquerade"},
-		"realm":                 {"type: hysteria2\nrealm-opts: {enable: true}\n", "config_key"},
-		"vision over xhttp":     {"type: vless\n" + reality + "xhttp-config: {path: /x}\nmikan: {flow: xtls-rprx-vision}\n", "config_flow"},
-		"xhttp auto":            {"type: vless\n" + reality + "xhttp-config: {path: /x, mode: auto}\n", "config_xhttp_mode"},
-		"shadowsocks pre-2022":  {"type: shadowsocks\npassword: x\n", "ss_cipher"},
-		"unencrypted socks":     {"type: socks\n", "config_type"},
-		"unknown mikan key":     {"type: tuic\nmikan: {evil: 1}\n", "config_key"},
-		"bad short id":          {strings.Replace("type: vless\n"+reality, "[a1b2]", "[xyz]", 1), "reality_sid"},
-		"obfs without password": {"type: hysteria2\nobfs: salamander\n", "config_obfs"},
+		"managed users":             {"type: vless\n" + reality + "users: []\n", "config_managed"},
+		"cert path":                 {"type: hysteria2\ncertificate: /etc/shadow\n", "config_managed"},
+		"routing bypass":            {"type: vless\n" + reality + "proxy: DIRECT\n", "config_key"},
+		"plain vless":               {"type: vless\nws-path: /ws\n", "config_insecure"},
+		"reality and tls":           {"type: vless\n" + reality + "mikan: {tls: node}\n", "config_both_tls"},
+		"private dest":              {strings.Replace("type: vless\n"+reality, "www.microsoft.com:443", "169.254.169.254:80", 1), "reality_dest_private"},
+		"reality proxy":             {"type: vless\n" + reality + "  proxy: DIRECT\n", "config_key"},
+		"file masquerade":           {"type: hysteria2\nmasquerade: file:///etc\n", "config_masquerade"},
+		"private masquerade":        {"type: hysteria2\nmasquerade: https://10.0.0.1/\n", "config_masquerade"},
+		"realm":                     {"type: hysteria2\nrealm-opts: {enable: true}\n", "config_key"},
+		"vision over xhttp":         {"type: vless\n" + reality + "xhttp-config: {path: /x}\nmikan: {flow: xtls-rprx-vision}\n", "config_flow"},
+		"xhttp auto":                {"type: vless\n" + reality + "xhttp-config: {path: /x, mode: auto}\n", "config_xhttp_mode"},
+		"shadowsocks pre-2022":      {"type: shadowsocks\npassword: x\n", "ss_cipher"},
+		"unencrypted socks":         {"type: socks\n", "config_type"},
+		"vmess, gone from the core": {"type: vmess\nws-path: /m\nmikan: {tls: node}\n", "config_type"},
+		"unknown mikan key":         {"type: tuic\nmikan: {evil: 1}\n", "config_key"},
+		"bad short id":              {strings.Replace("type: vless\n"+reality, "[a1b2]", "[xyz]", 1), "reality_sid"},
+		"obfs without password":     {"type: hysteria2\nobfs: salamander\n", "config_obfs"},
 	}
 	for name, c := range cases {
 		tpl, err := Parse(c.src)
@@ -321,9 +319,9 @@ func TestNewTypes(t *testing.T) {
 				t.Errorf("anytls: %s %v", c.URI, c.Mihomo)
 			}
 		},
-		"type: vmess\nws-path: /v\nmikan: {tls: node, client: {server: cdn.example.com, port: 443}}\n": func(c Client, l map[string]any) {
-			if c.Mihomo["server"] != "cdn.example.com" || c.Mihomo["port"] != 443 || !strings.HasPrefix(c.URI, "vmess://") {
-				t.Errorf("vmess override: %s %v", c.URI, c.Mihomo)
+		"type: vless\nws-path: /v\nmikan: {tls: node, client: {server: cdn.example.com, port: 443}}\n": func(c Client, l map[string]any) {
+			if c.Mihomo["server"] != "cdn.example.com" || c.Mihomo["port"] != 443 || !strings.HasPrefix(c.URI, "vless://") {
+				t.Errorf("vless override: %s %v", c.URI, c.Mihomo)
 			}
 		},
 	}
@@ -354,5 +352,22 @@ func TestParseErrorsAreCodes(t *testing.T) {
 	}
 	if _, err := Parse("# only a comment\n"); code(err) != "config_empty" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// A REALITY server that requires X25519MLKEM768 gets clients that offer it; the others
+// leave it to the app.
+func TestRealityRequiredPostQuantum(t *testing.T) {
+	priv, _ := realityKey(t)
+	src := "type: vless\nreality-config:\n  dest: www.microsoft.com:443\n  private-key: " + priv + "\n  short-id: [a1b2]\n  server-names: [www.microsoft.com]\n"
+	in := ClientInput{Name: "X", Host: "vpn.example.com", Port: 443, Slot: slots[0]}
+	for extra, want := range map[string]any{"": nil, "  require-x25519mlkem768: true\n": true} {
+		c, err := ClientConfig(mustParse(t, src+extra), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.Mihomo["reality-opts"].(map[string]any)["support-x25519mlkem768"]; got != want {
+			t.Fatalf("%q: support-x25519mlkem768 %v, want %v", extra, got, want)
+		}
 	}
 }

@@ -9,7 +9,7 @@ import (
 
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/hysteresis"
-	"mikan/internal/panel/tgate"
+	"mikan/internal/tgapi"
 )
 
 // fakeSender records what the queue sends and answers from fields, so the delivery runs
@@ -21,14 +21,14 @@ type fakeSender struct {
 	message int64
 }
 
-func (f *fakeSender) Send(_ context.Context, chat int64, text string, _ *tgate.Keyboard, _ bool) (tgate.Message, error) {
+func (f *fakeSender) Send(_ context.Context, chat int64, text string, _ *tgapi.Keyboard, _ bool) (tgapi.Message, error) {
 	f.calls = append(f.calls, "send "+text)
-	return tgate.Message{MessageID: f.message}, f.sendErr
+	return tgapi.Message{MessageID: f.message}, f.sendErr
 }
 
-func (f *fakeSender) SendTo(_ context.Context, chat string, text string, silent bool) (tgate.Message, error) {
+func (f *fakeSender) SendTo(_ context.Context, chat string, text string, silent bool) (tgapi.Message, error) {
 	f.calls = append(f.calls, "sendto "+chat+" "+text)
-	return tgate.Message{MessageID: f.message}, f.sendErr
+	return tgapi.Message{MessageID: f.message}, f.sendErr
 }
 
 func (f *fakeSender) EditTo(_ context.Context, chat string, msg int64, text string) error {
@@ -105,9 +105,36 @@ func TestSendPendingRetriesAndDropsStale(t *testing.T) {
 	}
 }
 
+// The wait before a message is tried again doubles from five seconds; a 429 waits as long as
+// Telegram asked when that is longer, and no wait passes the hour.
+func TestRetryDeliveryPauses(t *testing.T) {
+	tooMany := func(after time.Duration) error {
+		return &tgapi.APIError{Code: 429, Description: "Too Many Requests", RetryAfter: after}
+	}
+	for _, c := range []struct {
+		name     string
+		attempts int // made before this failure
+		err      error
+		want     time.Duration
+	}{
+		{"first failure", 0, context.DeadlineExceeded, 5 * time.Second},
+		{"second", 1, context.DeadlineExceeded, 10 * time.Second},
+		{"third", 2, context.DeadlineExceeded, 20 * time.Second},
+		{"last before it is given up", maxDeliveryAttempts - 2, context.DeadlineExceeded, 320 * time.Second},
+		{"429 that asks for more", 0, tooMany(30 * time.Second), 30 * time.Second},
+		{"429 that asks for less", 3, tooMany(time.Second), 40 * time.Second},
+		{"429 that asks for more than the hour", 0, tooMany(3 * time.Hour), time.Hour},
+	} {
+		d := delivery{Attempts: c.attempts}
+		if !retryDelivery(&d, 1000, c.err) || d.Attempts != c.attempts+1 || d.NextAttemptAt != 1000+int64(c.want/time.Second) {
+			t.Errorf("%s: got %+v, want the next attempt %s after now", c.name, d, c.want)
+		}
+	}
+}
+
 func TestSendPendingPermanentErrorIsDropped(t *testing.T) {
 	m := quietMonitor(time.Unix(1000, 0))
-	f := &fakeSender{sendErr: &tgate.APIError{Code: 403, Description: "Forbidden: bot was blocked"}}
+	f := &fakeSender{sendErr: &tgapi.APIError{Code: 403, Description: "Forbidden: bot was blocked"}}
 	cfg := Default()
 	cfg.AdminEnabled = true
 	st := persistentState{Pending: []delivery{{Key: "a", Target: targetAdmin, Text: "x"}}}
@@ -119,7 +146,7 @@ func TestSendPendingPermanentErrorIsDropped(t *testing.T) {
 
 func TestSendSummaryForgetsAMessageTheChannelLost(t *testing.T) {
 	m := quietMonitor(time.Unix(1000, 0))
-	f := &fakeSender{editErr: &tgate.APIError{Code: 400, Description: "Bad Request: message to edit not found"}}
+	f := &fakeSender{editErr: &tgapi.APIError{Code: 400, Description: "Bad Request: message to edit not found"}}
 	cfg := Default()
 	cfg.PublicEnabled, cfg.PublicChannel = true, "@channel"
 	st := persistentState{PublicMessage: 9, PublicPinned: true}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/netaddr"
 	"mikan/internal/nodeapi"
 	"mikan/internal/panel/presets"
 	"mikan/internal/panel/secure"
@@ -99,7 +100,8 @@ type InboundPatch struct {
 	Fingerprint *string
 	Obfs        *string
 	XHTTP       *proto.XHTTPTuning // the whole XHTTP tuning, as the form shows it
-	Client      *ClientEndpoint    // replaces all three
+	Client      *ClientEndpoint    // replaces all of it, the CDN included
+	SNI443      *bool              // behind the node's SNI router on 443
 	DisplayName *string
 	// What only the node uses.
 	Listen     *string
@@ -117,7 +119,7 @@ type InboundPatch struct {
 
 // EditsTemplate: the patch changes the listener's template.
 func (p InboundPatch) EditsTemplate() bool {
-	return p.Config != nil || p.Dest != nil || p.Fingerprint != nil || p.Obfs != nil || p.XHTTP != nil || p.Client != nil
+	return p.Config != nil || p.Dest != nil || p.Fingerprint != nil || p.Obfs != nil || p.XHTTP != nil || p.Client != nil || p.SNI443 != nil
 }
 
 // ForClients: the patch changes what clients get.
@@ -131,6 +133,8 @@ type ClientEndpoint struct {
 	Server string
 	Port   int
 	SNI    string
+	Host   string     // HTTP Host of WebSocket and XHTTP
+	CDN    *proto.CDN // the apps reach the node through a CDN; nil: not
 }
 
 // Create adds an inbound: a preset's with fresh keys, or a custom template.
@@ -189,7 +193,7 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 // with settings.AnyPort on). With none free the preset's port stays and the usual check
 // names what holds it.
 func (s *Inbounds) defaultPort(ctx context.Context, node db.Node, port, network string) (string, error) {
-	lo, hi, ok := parsePort(port)
+	lo, hi, ok := ParsePort(port)
 	if !ok || lo != hi {
 		return port, nil
 	}
@@ -417,12 +421,22 @@ func editTemplate(config string, p InboundPatch) (string, error) {
 	if p.Obfs != nil {
 		edits = append(edits, templateEdit{"obfs", func(t proto.Template) error { return proto.SetObfs(t, *p.Obfs, secure.Token(24)) }})
 	}
+	if p.SNI443 != nil {
+		edits = append(edits, templateEdit{"sni443", func(t proto.Template) error { return proto.SetSNI443(t, *p.SNI443) }})
+	}
 	if p.XHTTP != nil {
 		edits = append(edits, templateEdit{"xhttp", func(t proto.Template) error { return proto.SetXHTTP(t, *p.XHTTP) }})
 	}
 	if c := p.Client; c != nil {
 		edits = append(edits, templateEdit{"client", func(t proto.Template) error {
-			return proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI))
+			if err := proto.SetClientEndpoint(t, strings.TrimSpace(c.Server), c.Port, strings.TrimSpace(c.SNI), strings.TrimSpace(c.Host)); err != nil {
+				return err
+			}
+			if c.CDN != nil && strings.TrimSpace(c.Server) == "" {
+				// The apps connect to the CDN's domain: without it they would go to the node.
+				return &proto.Error{Code: "cdn_server_needed", Field: "mikan.client.server"}
+			}
+			return proto.SetCDN(t, c.CDN)
 		}})
 	}
 	for _, e := range edits {
@@ -476,9 +490,9 @@ func (s *Inbounds) CheckTemplate(ctx context.Context, node db.Node, config, port
 	return t, nil
 }
 
-// SystemResolve looks a name up with the system's resolver: its IPv4 addresses.
+// SystemResolve looks a name up with the system's resolver: its IPv4 and IPv6 addresses.
 func SystemResolve(ctx context.Context, host string) ([]netip.Addr, error) {
-	return net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }
 
 // SetResolver makes a REALITY target given by name be looked up when it is saved; without
@@ -494,17 +508,31 @@ func (s *Inbounds) SetHostLookup(host HostLookup) {
 	s.host = host
 }
 
-// checkDestResolves refuses a REALITY target whose name leads to this host or its
-// network: proto.Validate reads the text, and every DNS name looks public. The node dials
-// the target for every probe of the port, past the rules that fence its users in, so such
-// a name would publish an internal service to the internet. A name that cannot be looked
-// up is let through: the node looks it up where it dials.
+// checkDestResolves refuses a REALITY target, or ShadowQUIC's site of disguise, whose name
+// leads to this host or its network: proto.Validate reads the text, and every DNS name
+// looks public. The node dials the target for every probe of the port, past the rules that
+// fence its users in, so such a name would publish an internal service to the internet.
+// Both families are looked at, and a name the panel cannot look up is refused as well: one
+// that resolves only where the node is (an internal zone, the cloud's metadata name) is
+// exactly what must not pass. The node checks again when it dials (Citrus public-dest).
 func (s *Inbounds) checkDestResolves(ctx context.Context, t proto.Template) error {
 	if s.resolve == nil {
 		return nil
 	}
 	dest, _ := presets.Dest(t)
-	host, _, err := net.SplitHostPort(dest)
+	if err := s.checkResolves(ctx, dest, "reality-config.dest", "reality_dest_private"); err != nil {
+		return err
+	}
+	if up, ok := t["jls-upstream"].(map[string]any); ok {
+		addr, _ := up["addr"].(string)
+		return s.checkResolves(ctx, addr, "jls-upstream.addr", "jls_upstream_private")
+	}
+	return nil
+}
+
+// checkResolves is checkDestResolves for one host:port; private is the code of a refusal.
+func (s *Inbounds) checkResolves(ctx context.Context, hostPort, field, private string) error {
+	host, _, err := net.SplitHostPort(hostPort)
 	if err != nil || host == "" {
 		return nil
 	}
@@ -514,12 +542,12 @@ func (s *Inbounds) checkDestResolves(ctx context.Context, t proto.Template) erro
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	addrs, err := s.resolve(ctx, host)
-	if err != nil {
-		return nil
+	if err != nil || len(addrs) == 0 {
+		return &proto.Error{Code: "dest_unresolved", Field: field, Detail: host}
 	}
 	for _, a := range addrs {
-		if !proto.PublicAddr(a) {
-			return &proto.Error{Code: "reality_dest_private", Field: "reality-config.dest", Detail: host}
+		if !netaddr.IsPublic(a) {
+			return &proto.Error{Code: private, Field: field, Detail: host}
 		}
 	}
 	return nil
@@ -589,7 +617,7 @@ func (s *Inbounds) node(ctx context.Context, id int64) (db.Node, error) {
 
 // ValidPort accepts a port ("443") or a Hysteria2 hopping range ("20000-30000").
 func ValidPort(spec string) bool {
-	_, _, ok := parsePort(spec)
+	_, _, ok := ParsePort(spec)
 	return ok
 }
 
@@ -649,4 +677,49 @@ func FreeName(existing []db.Inbound, base string) string {
 		name = base + "-" + strconv.Itoa(i)
 	}
 	return name
+}
+
+// ExitConflictError is an inbound a bulk exit change cannot take, and why (a cascade
+// refusal, as with UseExit).
+type ExitConflictError struct {
+	Inbound string
+	Err     error
+}
+
+func (e *ExitConflictError) Error() string { return e.Inbound + ": " + e.Err.Error() }
+func (e *ExitConflictError) Unwrap() error { return e.Err }
+
+// SetExits sends the inbounds ids out the same way: straight out, through their node's
+// WARP or through node exit, all of them or none. An inbound on exit itself, or one whose
+// chain would come back, refuses the whole change by its name.
+func (s *Inbounds) SetExits(ctx context.Context, ids []int64, outbound string, exit int64) ([]db.Inbound, error) {
+	var rows []db.Inbound
+	err := s.st.Tx(ctx, func(q *db.Queries) error {
+		rows = rows[:0]
+		for _, id := range ids {
+			in, err := q.GetInbound(ctx, id)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrUnknownInbound
+			}
+			if err != nil {
+				return err
+			}
+			p := db.SetInboundExitParams{Outbound: outbound, ID: id}
+			if outbound == "node" {
+				if err := UseExit(ctx, q, in.NodeID, exit, s.now(), s.host); err != nil {
+					return &ExitConflictError{Inbound: in.Name, Err: err}
+				}
+				p.Outbound, p.ExitNodeID = "direct", sql.NullInt64{Int64: exit, Valid: true}
+			}
+			if err := q.SetInboundExit(ctx, p); err != nil {
+				return err
+			}
+			if in, err = q.GetInbound(ctx, id); err != nil {
+				return err
+			}
+			rows = append(rows, in)
+		}
+		return nil
+	})
+	return rows, err
 }

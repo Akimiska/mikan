@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/exitdns"
 	"mikan/internal/panel/filters"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store/db"
@@ -28,10 +29,13 @@ type snapshot struct {
 	slots    []db.Slot
 	grants   domain.GrantsLeft
 	pools    []db.UserPool
+	servers  map[int64]domain.Servers // the tariffs that include only chosen servers
 	counters map[int64]counterPos
 	torrent  torrent.Config
 	bans     map[int64]int64 // user → when the torrent blocker's ban ends (unix)
 	filters  filters.Config
+	exitDNS  exitdns.Config
+	detail   bool // the nodes sum the bytes by site
 }
 
 type counterPos struct {
@@ -86,10 +90,19 @@ func (m *Manager) readSnapshot(ctx context.Context) (s *snapshot, err error) {
 	if s.pools, err = q.ListAllUserPools(ctx); err != nil {
 		return nil, err
 	}
+	if s.servers, err = domain.AllTariffServers(ctx, q); err != nil {
+		return nil, err
+	}
 	if s.torrent, err = torrent.Load(ctx, settings.New(q)); err != nil {
 		return nil, err
 	}
 	if s.filters, err = filters.Load(ctx, settings.New(q)); err != nil {
+		return nil, err
+	}
+	if s.exitDNS, err = exitdns.Load(ctx, settings.New(q)); err != nil {
+		return nil, err
+	}
+	if s.detail, err = settings.New(q).On(ctx, settings.TrafficDetail); err != nil {
 		return nil, err
 	}
 	if s.torrent.Enabled {

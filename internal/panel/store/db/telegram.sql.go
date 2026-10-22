@@ -95,7 +95,7 @@ func (q *Queries) CountTgLinksOf(ctx context.Context, tgID int64) (int64, error)
 }
 
 const getTgChat = `-- name: GetTgChat :one
-SELECT tg_id, username, first_name, menu_msg_id, current, blocked, created_at, updated_at FROM tg_chats WHERE tg_id = $1
+SELECT tg_id, username, first_name, menu_msg_id, current, blocked, created_at, updated_at, campaign_id, campaign_at FROM tg_chats WHERE tg_id = $1
 `
 
 func (q *Queries) GetTgChat(ctx context.Context, tgID int64) (TgChat, error) {
@@ -110,6 +110,8 @@ func (q *Queries) GetTgChat(ctx context.Context, tgID int64) (TgChat, error) {
 		&i.Blocked,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CampaignID,
+		&i.CampaignAt,
 	)
 	return i, err
 }
@@ -126,8 +128,13 @@ func (q *Queries) GetTgLink(ctx context.Context, userID int64) (TgLink, error) {
 }
 
 const linkTg = `-- name: LinkTg :exec
-INSERT INTO tg_links (user_id, tg_id, created_at) VALUES ($1, $2, $3)
-ON CONFLICT (user_id) DO UPDATE SET tg_id = excluded.tg_id, created_at = excluded.created_at
+WITH linked AS (
+  INSERT INTO tg_links (user_id, tg_id, created_at) VALUES ($1, $2, $3)
+  ON CONFLICT (user_id) DO UPDATE SET tg_id = excluded.tg_id, created_at = excluded.created_at
+  RETURNING tg_id, created_at
+)
+INSERT INTO tg_clients (tg_id, since) SELECT tg_id, created_at FROM linked
+ON CONFLICT (tg_id) DO NOTHING
 `
 
 type LinkTgParams struct {
@@ -136,13 +143,14 @@ type LinkTgParams struct {
 	CreatedAt int64
 }
 
+// The account is a client from now on, whatever happens to the link (tg_clients).
 func (q *Queries) LinkTg(ctx context.Context, arg LinkTgParams) error {
 	_, err := q.db.ExecContext(ctx, linkTg, arg.UserID, arg.TgID, arg.CreatedAt)
 	return err
 }
 
 const listTgLinksOf = `-- name: ListTgLinksOf :many
-SELECT u.id, u.name, u.contact, u.note, u.tags, u.status, u.tariff_id, u.traffic_limit, u.device_limit, u.reset_strategy, u.period_days, u.period_start, u.used_up, u.used_down, u.total_up, u.total_down, u.expires_at, u.inbounds, u.sub_token, u.slot_id, u.online_at, u.created_at, u.updated_at, u.billing_day, u.source, u.hidden, u.folder_id, u.speed_limit, u.device_mode FROM tg_links l JOIN users u ON u.id = l.user_id WHERE l.tg_id = $1 ORDER BY l.created_at, u.id
+SELECT u.id, u.name, u.contact, u.note, u.tags, u.status, u.tariff_id, u.traffic_limit, u.device_limit, u.reset_strategy, u.period_days, u.period_start, u.used_up, u.used_down, u.total_up, u.total_down, u.expires_at, u.inbounds, u.sub_token, u.slot_id, u.online_at, u.created_at, u.updated_at, u.billing_day, u.source, u.hidden, u.folder_id, u.speed_limit, u.device_mode, u.extra_devices, u.extra_devices_until FROM tg_links l JOIN users u ON u.id = l.user_id WHERE l.tg_id = $1 ORDER BY l.created_at, u.id
 `
 
 // The subscriptions a Telegram account owns, oldest link first.
@@ -185,6 +193,8 @@ func (q *Queries) ListTgLinksOf(ctx context.Context, tgID int64) ([]User, error)
 			&i.FolderID,
 			&i.SpeedLimit,
 			&i.DeviceMode,
+			&i.ExtraDevices,
+			&i.ExtraDevicesUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -197,6 +207,16 @@ func (q *Queries) ListTgLinksOf(ctx context.Context, tgID int64) ([]User, error)
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockTgLinks = `-- name: LockTgLinks :exec
+SELECT pg_advisory_xact_lock(hashtextextended('mikan-tg-links:' || CAST($1 AS BIGINT), 0))
+`
+
+// The subscriptions of one Telegram account are linked one transaction at a time.
+func (q *Queries) LockTgLinks(ctx context.Context, tgID int64) error {
+	_, err := q.db.ExecContext(ctx, lockTgLinks, tgID)
+	return err
 }
 
 const pruneTgNotices = `-- name: PruneTgNotices :exec
@@ -299,4 +319,16 @@ func (q *Queries) UpsertTgChat(ctx context.Context, arg UpsertTgChatParams) erro
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const wasClient = `-- name: WasClient :one
+SELECT EXISTS (SELECT 1 FROM tg_clients WHERE tg_id = $1)
+`
+
+// Whether the account ever had a subscription linked, now or before.
+func (q *Queries) WasClient(ctx context.Context, tgID int64) (bool, error) {
+	row := q.db.QueryRowContext(ctx, wasClient, tgID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

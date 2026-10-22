@@ -1,3 +1,11 @@
+// Package tgate is the panel's Telegram gateway: everything that touches the bot's token,
+// money and access. It keeps the way to Telegram (route.go), the update loop with its
+// offset, the outbox with Telegram's limits, the flood guard, the accounts that wrote to
+// the bot, Telegram Stars, link codes and the Mini App's sign-in, the infrastructure
+// admin's chat and the bot's channel. The bot's screens (tgbot) run in the bot addon: the
+// gateway buffers the updates it does not handle itself for the addon, and the addon sends
+// through the gateway's outbox over the Bot API proxy (addons/panelapi,
+// docs/pipeline/addons.md).
 package tgate
 
 import (
@@ -14,11 +22,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"mikan/internal/pace"
 	"mikan/internal/panel/billing"
 	"mikan/internal/panel/secure"
 	"mikan/internal/panel/settings"
 	"mikan/internal/panel/store"
 	"mikan/internal/panel/store/db"
+	"mikan/internal/textutil"
+	"mikan/internal/tgapi"
 )
 
 // Settings keys of the gateway.
@@ -38,9 +49,6 @@ const (
 // Enabled switches the bot on; off until the admin connects it.
 var Enabled = settings.Switch{Key: KeyEnabled}
 
-// MaxLinks: subscriptions one Telegram account may hold.
-const MaxLinks = 5
-
 // ErrOff: the bot is off, or not running yet.
 var ErrOff = errors.New("bot_off")
 
@@ -48,10 +56,10 @@ var ErrOff = errors.New("bot_off")
 type Deps struct {
 	Store    *store.Store
 	Settings *settings.Settings
-	API      string // the Bot API; DefaultAPI unless testing
+	API      string // the Bot API; tgapi.DefaultAPI unless testing
 	Log      *slog.Logger
 	Now      func() time.Time
-	Limits   Limits // zero: DefaultLimits
+	Limits   tgapi.Limits // zero: tgapi.DefaultLimits
 	// Billing takes the Telegram Stars payments.
 	Billing *billing.Service
 	// Tunnel reaches addr through node id, for RouteNode; nil: the panel has no nodes.
@@ -67,22 +75,22 @@ type Handler interface {
 	// Update is a message or a button press in a private chat, past the flood guard, that
 	// the gateway does not handle itself. It is acknowledged to Telegram after the call; an
 	// error offers the update again (the buffer could not take it).
-	Update(ctx context.Context, up Update) error
+	Update(ctx context.Context, up tgapi.Update) error
 }
 
 // Status is what the admin panel shows.
 type Status struct {
 	Running bool
 	Error   string
-	Bot     User
+	Bot     tgapi.User
 }
 
 type Gateway struct {
 	d       Deps
 	polled  *settings.Settings // d.Settings through a short cache, for loops that ask every few seconds
 	reload  chan struct{}
-	out     atomic.Pointer[Outbox] // nil while the bot is off
-	client  atomic.Pointer[Client] // the running bot's, for calls outside the update loop
+	out     atomic.Pointer[tgapi.Outbox] // nil while the bot is off
+	client  atomic.Pointer[tgapi.Client] // the running bot's, for calls outside the update loop
 	handler atomic.Pointer[handlerRef]
 
 	mu     sync.Mutex
@@ -112,10 +120,10 @@ type handlerRef struct{ h Handler }
 
 func New(d Deps) *Gateway {
 	if d.API == "" {
-		d.API = DefaultAPI
+		d.API = tgapi.DefaultAPI
 	}
-	if d.Limits == (Limits{}) {
-		d.Limits = DefaultLimits
+	if d.Limits == (tgapi.Limits{}) {
+		d.Limits = tgapi.DefaultLimits
 	}
 	polled := d.Settings
 	if d.Store != nil {
@@ -149,10 +157,10 @@ func (g *Gateway) setStatus(fn func(*Status)) {
 }
 
 // Outbox is the running bot's outbox; nil while the bot is off.
-func (g *Gateway) Outbox() *Outbox { return g.out.Load() }
+func (g *Gateway) Outbox() *tgapi.Outbox { return g.out.Load() }
 
 // Client is the running bot's client; nil while the bot is off.
-func (g *Gateway) Client() *Client { return g.client.Load() }
+func (g *Gateway) Client() *tgapi.Client { return g.client.Load() }
 
 // Go runs f as work of the gateway's: Run returns only after it has.
 func (g *Gateway) Go(f func()) { g.running.Go(f) }
@@ -190,7 +198,7 @@ func (g *Gateway) Run(ctx context.Context) {
 		}
 		pctx, cancel := context.WithCancel(ctx)
 		stop = cancel
-		c := NewClient(g.d.API, token, rt)
+		c := tgapi.NewClient(g.d.API, token, rt)
 		g.running.Go(func() { g.poll(pctx, c) })
 	}
 	start()
@@ -211,8 +219,8 @@ func (g *Gateway) Run(ctx context.Context) {
 // view is the part of the bot's setup (KeyConfig) the gateway reads itself: the language
 // of its own words and the channel.
 type view struct {
-	Lang    string  `json:"lang"`
-	Channel Channel `json:"channel"`
+	Lang    string        `json:"lang"`
+	Channel tgapi.Channel `json:"channel"`
 }
 
 // ReadSetup reads the bot's setup into T: what was saved over fresh(lang), the defaults in
@@ -221,9 +229,7 @@ type view struct {
 // gateway's view and tgbot.Config both read the setup here.
 func ReadSetup[T any](ctx context.Context, set *settings.Settings, fresh func(lang string) T) (v T, lang string, saved bool) {
 	lang, _ = set.Lang(ctx)
-	if lang != "en" {
-		lang = "ru"
-	}
+	lang = textutil.ByLang(lang, "ru", "en")
 	v, saved, err := settings.GetOver(ctx, set, KeyConfig, fresh(lang))
 	if err != nil || !saved {
 		return fresh(lang), lang, false
@@ -332,7 +338,7 @@ func (g *Gateway) DisconnectInfrastructureAdmin(ctx context.Context) error {
 
 // InfrastructureClient builds a sending client with the same bot token and route used by
 // the subscriber bot. Sending alerts does not require the subscriber bot's polling loop.
-func (g *Gateway) InfrastructureClient(ctx context.Context) (*Client, error) {
+func (g *Gateway) InfrastructureClient(ctx context.Context) (*tgapi.Client, error) {
 	token, err := g.d.Settings.String(ctx, KeyToken)
 	if err != nil || token == "" {
 		return nil, ErrOff
@@ -341,7 +347,7 @@ func (g *Gateway) InfrastructureClient(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewClient(g.d.API, token, rt), nil
+	return tgapi.NewClient(g.d.API, token, rt), nil
 }
 
 // infraTransport is the transport of route for the alerts' deliveries, kept while the
@@ -409,7 +415,7 @@ func (g *Gateway) claimInfrastructureAdmin(ctx context.Context, chat int64, code
 
 // adminLink takes "/start infra_<code>" from BeginInfrastructureAdminConnect: the chat
 // becomes the infrastructure admin's, and is told whether it did. false: not such a message.
-func (g *Gateway) adminLink(ctx context.Context, out *Outbox, m *Message) bool {
+func (g *Gateway) adminLink(ctx context.Context, out *tgapi.Outbox, m *tgapi.Message) bool {
 	chat := m.Chat.ID
 	messageText := strings.TrimSpace(m.Text)
 	if !strings.HasPrefix(messageText, "/start infra_") {
@@ -421,11 +427,14 @@ func (g *Gateway) adminLink(ctx context.Context, out *Outbox, m *Message) bool {
 	if g.claimInfrastructureAdmin(ctx, chat, code) {
 		text = w.adminLinked
 	}
-	out.Reply(chat, "infrastructure-admin", 1, func(ctx context.Context, c *Client) error { _, err := c.Send(ctx, chat, text, nil, false); return err })
+	out.Reply(chat, "infrastructure-admin", 1, func(ctx context.Context, c *tgapi.Client) error {
+		_, err := c.Send(ctx, chat, text, nil, false)
+		return err
+	})
 	return true
 }
 
-func (g *Gateway) poll(ctx context.Context, c *Client) {
+func (g *Gateway) poll(ctx context.Context, c *tgapi.Client) {
 	me, err := c.Me(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -437,8 +446,8 @@ func (g *Gateway) poll(ctx context.Context, c *Client) {
 	}
 	_ = settings.Set(ctx, g.d.Settings, KeyBot, me)
 	_ = c.DropWebhook(ctx)
-	// Every message the bot sends goes through the outbox (see outbox.go).
-	out := NewOutbox(c, g.d.Limits, time.Now, func(chat int64) {
+	// Every message the bot sends goes through the outbox (see tgapi.Outbox).
+	out := tgapi.NewOutbox(c, g.d.Limits, time.Now, func(chat int64) {
 		_ = g.d.Store.Q.SetTgBlocked(context.WithoutCancel(ctx), db.SetTgBlockedParams{Blocked: 1, TgID: chat})
 	}, func(err error) { g.d.Log.Warn("telegram: send", "err", errText(err)) })
 	g.running.Go(func() { out.Run(ctx) })
@@ -449,7 +458,7 @@ func (g *Gateway) poll(ctx context.Context, c *Client) {
 	g.setStatus(func(s *Status) { *s = Status{Running: true, Bot: me} })
 	offset := g.loadOffset(ctx, me.ID)
 	fails := map[int64]int{} // update → times it failed to be handled
-	backoff := time.Second
+	failedPolls := 0
 	var conflictSince time.Time // another program polls this token (or set a webhook) since
 	conflictTold := false
 	for ctx.Err() == nil {
@@ -458,7 +467,7 @@ func (g *Gateway) poll(ctx context.Context, c *Client) {
 			if ctx.Err() != nil {
 				return
 			}
-			var ae *APIError
+			var ae *tgapi.APIError
 			if errors.As(err, &ae) && ae.Code == 401 {
 				g.setStatus(func(s *Status) { *s = Status{Error: "token_revoked"} })
 				return
@@ -478,18 +487,18 @@ func (g *Gateway) poll(ctx context.Context, c *Client) {
 				}
 			}
 			g.setStatus(func(s *Status) { s.Error = code })
-			sleep(ctx, backoff)
-			backoff = min(2*backoff, time.Minute)
+			pace.Sleep(ctx, pollPause.Next(failedPolls))
+			failedPolls++
 			continue
 		}
 		conflictSince, conflictTold = time.Time{}, false
-		backoff = time.Second
+		failedPolls = 0
 		g.setStatus(func(s *Status) { s.Error = "" })
 		for _, up := range ups {
 			if err := g.handle(ctx, c, up); err != nil && ctx.Err() == nil {
 				// Not acknowledged: Telegram sends it again, with whatever came after.
 				if fails[up.UpdateID]++; fails[up.UpdateID] < triesOf(up) {
-					sleep(ctx, min(time.Duration(fails[up.UpdateID])*updateRetryPause, time.Minute))
+					pace.Sleep(ctx, min(time.Duration(fails[up.UpdateID])*updateRetryPause, time.Minute))
 					break
 				}
 				if sp := paymentOf(up); sp != nil {
@@ -522,7 +531,11 @@ const maxPaymentTries = 40
 
 var updateRetryPause = 2 * time.Second
 
-func triesOf(up Update) int {
+// pollPause is how long the poll waits after a getUpdates that failed: a second, then twice
+// that for every failure in a row, up to a minute.
+var pollPause = pace.Backoff{Base: time.Second, Max: time.Minute}
+
+func triesOf(up tgapi.Update) int {
 	if paymentOf(up) != nil {
 		return maxPaymentTries
 	}
@@ -530,7 +543,7 @@ func triesOf(up Update) int {
 }
 
 // paymentOf is the Stars payment an update reports, if any.
-func paymentOf(up Update) *SuccessfulPayment {
+func paymentOf(up tgapi.Update) *tgapi.SuccessfulPayment {
 	if up.Message == nil {
 		return nil
 	}
@@ -568,7 +581,7 @@ func (g *Gateway) saveOffset(ctx context.Context, bot, offset int64) {
 // the bot off until the admin touches it.
 func (g *Gateway) retryLater(ctx context.Context) {
 	g.running.Go(func() {
-		sleep(ctx, time.Minute)
+		pace.Sleep(ctx, time.Minute)
 		if ctx.Err() == nil {
 			g.Reload()
 		}
@@ -580,20 +593,20 @@ var conflictLasting = 2 * time.Minute
 
 // tellConflict tells the admin's chat, once a conflict lasts, that another program takes
 // this bot's updates: sending still works while polling does not.
-func (g *Gateway) tellConflict(ctx context.Context, out *Outbox) {
+func (g *Gateway) tellConflict(ctx context.Context, out *tgapi.Outbox) {
 	chat, ok, err := g.InfrastructureAdminChat(ctx)
 	if err != nil || !ok {
 		return
 	}
 	text := wordsFor(g.Lang(ctx)).tokenConflict
-	out.Notice(chat, func(ctx context.Context, c *Client) error {
+	out.Notice(chat, func(ctx context.Context, c *tgapi.Client) error {
 		_, err := c.Send(ctx, chat, text, nil, false)
 		return err
 	}, func(error) {})
 }
 
 func errText(err error) string {
-	var ae *APIError
+	var ae *tgapi.APIError
 	switch {
 	case errors.As(err, &ae) && ae.Code == 401:
 		return "token_invalid"
@@ -601,15 +614,6 @@ func errText(err error) string {
 		return ae.Description
 	}
 	return "unreachable"
-}
-
-func sleep(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-	case <-t.C:
-	}
 }
 
 // A person taps and types far slower than this; past it a chat is ignored for a while,
@@ -644,7 +648,7 @@ func (g *Gateway) flooding(chat int64) bool {
 // update again for; the rest is answered, or dropped, as it comes. Messages and presses
 // in private chats go to the handler, past the flood guard; a message first makes
 // its account known (tg_chats).
-func (g *Gateway) handle(ctx context.Context, c *Client, up Update) error {
+func (g *Gateway) handle(ctx context.Context, c *tgapi.Client, up tgapi.Update) error {
 	out := g.out.Load()
 	if out == nil {
 		return nil
@@ -680,15 +684,15 @@ func (g *Gateway) handle(ctx context.Context, c *Client, up Update) error {
 
 // CheckTokenVia asks Telegram whose token this is, through route: a route and a token
 // changed together are checked as they will run.
-func (g *Gateway) CheckTokenVia(ctx context.Context, token string, route Route) (User, error) {
+func (g *Gateway) CheckTokenVia(ctx context.Context, token string, route Route) (tgapi.User, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	rt, err := g.transport(route)
 	if err != nil {
-		return User{}, err
+		return tgapi.User{}, err
 	}
-	me, err := NewClient(g.d.API, token, rt).Me(ctx)
-	var ae *APIError
+	me, err := tgapi.NewClient(g.d.API, token, rt).Me(ctx)
+	var ae *tgapi.APIError
 	if err != nil && !errors.As(err, &ae) {
 		g.routeFailed(route, err)
 	}

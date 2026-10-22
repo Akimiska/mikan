@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"net"
+	"runtime/debug"
 	"testing"
 
 	"mikan/internal/nodeapi"
@@ -25,9 +26,6 @@ func TestConnLinesStayOutOfLogs(t *testing.T) {
 			t.Errorf("line must be kept: %q", msg)
 		}
 	}
-	if name, reason, ok := parseListenErr("Listener tuic listen err: bind: address already in use"); !ok || name != "tuic" || reason != "bind: address already in use" {
-		t.Errorf("parseListenErr = %q %q %v", name, reason, ok)
-	}
 }
 
 // A port another program holds reaches the panel as a code, whatever the OS calls it: the
@@ -49,11 +47,7 @@ func TestBusyPortIsReportedByCode(t *testing.T) {
 		if e == nil {
 			t.Fatal("a second listen on a taken port succeeded")
 		}
-		name, reason, ok := parseListenErr("Listener vless-xhttp listen err: " + e.Error())
-		if !ok {
-			t.Fatalf("not a listen error: %v", e)
-		}
-		ls := listenFailed(name, reason)
+		ls := listenFailed("vless-xhttp", e.Error())
 		if ls.OK || ls.Code != nodeapi.ListenerAddrInUse || !ls.Busy() || ls.Error != e.Error() {
 			t.Fatalf("status of %q: %+v", e, ls)
 		}
@@ -67,5 +61,21 @@ func TestBusyPortIsReportedByCode(t *testing.T) {
 	raw, _ := json.Marshal(nodeapi.ListenerStatus{Name: "tuic", OK: true})
 	if string(raw) != `{"name":"tuic","ok":true}` {
 		t.Fatalf("JSON: %s", raw)
+	}
+}
+
+func TestCoreName(t *testing.T) {
+	for _, c := range []struct {
+		m    debug.Module
+		want string
+	}{
+		{debug.Module{Version: "v1.19.32"}, "mihomo v1.19.32"},
+		{debug.Module{Version: "v1.19.32", Replace: &debug.Module{Path: "github.com/getmikan/Citrus", Version: "v1.19.33-0.20261018104129-2cae038ea2a8"}}, "citrus 2cae038"},
+		{debug.Module{Version: "v1.19.32", Replace: &debug.Module{Path: "github.com/getmikan/Citrus", Version: "v1.0.0"}}, "citrus v1.0.0"},
+		{debug.Module{Version: "v1.19.32", Replace: &debug.Module{Path: "github.com/getmikan/Citrus", Version: "v1.0.0-beta.1"}}, "citrus v1.0.0-beta.1"},
+	} {
+		if got := coreName(&c.m); got != c.want {
+			t.Errorf("coreName(%+v) = %q, want %q", c.m.Replace, got, c.want)
+		}
 	}
 }

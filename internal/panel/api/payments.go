@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -17,22 +18,45 @@ import (
 )
 
 type PaymentSettingsView struct {
-	Enabled            bool   `json:"enabled" doc:"Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются"`
-	Stars              bool   `json:"stars" doc:"Telegram Stars: нужен только запущенный бот"`
-	AllowNew           bool   `json:"allow_new" doc:"Новые люди могут купить подписку в боте; иначе — только продление"`
-	RenewResetsTraffic bool   `json:"renew_resets_traffic" doc:"Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок"`
-	TrialTariffID      *int64 `json:"trial_tariff_id" doc:"Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже"`
-	TrialStars         int64  `json:"trial_stars" doc:"Цена пробного периода в Stars; 0 вместе с trial_rub — бесплатно"`
-	TrialRub           int64  `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App, нужна включённая продажа"`
-	Trials             int64  `json:"trials" doc:"Сколько пробных подписок выдано"`
-	FreeTariffID       *int64 `json:"free_tariff_id" doc:"Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже"`
-	FreeCondition      string `json:"free_condition" enum:"none,channel" doc:"Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)"`
-	FreePlans          int64  `json:"free_plans" doc:"Сколько бесплатных подписок выдано"`
+	Enabled            bool            `json:"enabled" doc:"Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются"`
+	Stars              bool            `json:"stars" doc:"Telegram Stars: нужен только запущенный бот"`
+	AllowNew           bool            `json:"allow_new" doc:"Новые люди могут купить подписку в боте; иначе — только продление"`
+	RenewResetsTraffic bool            `json:"renew_resets_traffic" doc:"Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок"`
+	TrialTariffID      *int64          `json:"trial_tariff_id" doc:"Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже"`
+	TrialStars         int64           `json:"trial_stars" doc:"Цена пробного периода в Stars; 0 вместе с trial_rub — бесплатно"`
+	TrialRub           int64           `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App, нужна включённая продажа"`
+	Trials             int64           `json:"trials" doc:"Сколько пробных подписок выдано"`
+	FreeTariffID       *int64          `json:"free_tariff_id" doc:"Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась, и не пока идёт его пробный период; null: бесплатного тарифа нет. Работает и при выключенной продаже"`
+	FreeCondition      string          `json:"free_condition" enum:"none,channel" doc:"Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)"`
+	FreePlans          int64           `json:"free_plans" doc:"Сколько бесплатных подписок выдано"`
+	ExtraDevicesKeep   bool            `json:"extra_devices_keep" doc:"Докупленные устройства остаются при продлении, и продление стоит дороже на их цену; иначе они действуют до конца срока"`
+	Balance            BalanceSettings `json:"balance" doc:"Внутренний баланс клиентов с пополнением по скриншоту"`
 	Available          struct {
-		Stars  bool     `json:"stars"`
-		Addons []string `json:"addons" doc:"Адаптеры маркетплейса, которые принимают оплату прямо сейчас"`
+		Stars   bool     `json:"stars"`
+		Addons  []string `json:"addons" doc:"Адаптеры маркетплейса, которые принимают оплату прямо сейчас"`
+		Balance bool     `json:"balance" doc:"Баланс включён и настроен"`
 	} `json:"available" doc:"Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"`
 	OnSale int `json:"on_sale" doc:"Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату"`
+}
+
+// BalanceSettings is the accounts' balance: its currency, its rate to the tariffs' ruble
+// prices and how to pay for a top-up.
+type BalanceSettings struct {
+	Enabled  bool    `json:"enabled"`
+	Currency string  `json:"currency" enum:"RUB,USD,EUR,UAH,BYN,KZT,UZS,USDT"`
+	Rate     float64 `json:"rate" doc:"Сколько рублей стоит единица валюты баланса; для RUB — 1"`
+	Details  string  `json:"details" doc:"Как перевести деньги: показывается клиенту перед скриншотом"`
+	Min      int64   `json:"min" doc:"Наименьшее пополнение в копейках (сотых); 0 — без границы"`
+	Max      int64   `json:"max" doc:"Наибольшее пополнение в копейках (сотых); 0 — без границы"`
+}
+
+type balanceSettingsBody struct {
+	Enabled  *bool    `json:"enabled,omitempty"`
+	Currency *string  `json:"currency,omitempty" enum:"RUB,USD,EUR,UAH,BYN,KZT,UZS,USDT"`
+	Rate     *float64 `json:"rate,omitempty" minimum:"0.0001" maximum:"1000000"`
+	Details  *string  `json:"details,omitempty" maxLength:"1000"`
+	Min      *int64   `json:"min,omitempty" minimum:"0" maximum:"1000000000"`
+	Max      *int64   `json:"max,omitempty" minimum:"0" maximum:"1000000000"`
 }
 
 type paymentSettingsOutput struct{ Body PaymentSettingsView }
@@ -50,15 +74,17 @@ type patchPaymentSettingsInput struct {
 		TrialRub   *int64 `json:"trial_rub,omitempty" minimum:"0" maximum:"100000000" doc:"Цена пробного периода в копейках, от 100 (1 ₽); 0 — не за рубли. Обе 0 — пробный период бесплатный"`
 		// The free plan: its tariff needs a term, as the trial's does, and the channel
 		// condition a channel set up in the bot.
-		FreeTariffID  *int64  `json:"free_tariff_id,omitempty" minimum:"0" doc:"Тариф бесплатного тарифа, нужен срок; 0: выключить"`
-		FreeCondition *string `json:"free_condition,omitempty" enum:"none,channel" doc:"none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram"`
+		FreeTariffID     *int64               `json:"free_tariff_id,omitempty" minimum:"0" doc:"Тариф бесплатного тарифа, нужен срок; 0: выключить"`
+		FreeCondition    *string              `json:"free_condition,omitempty" enum:"none,channel" doc:"none: без условий; channel: только подписчикам канала бота, канал должен быть указан на странице Telegram"`
+		ExtraDevicesKeep *bool                `json:"extra_devices_keep,omitempty" doc:"Докупленные устройства остаются при продлении (true) или до конца срока (false)"`
+		Balance          *balanceSettingsBody `json:"balance,omitempty"`
 	}
 }
 
 type PaymentView struct {
 	ID         int64      `json:"id"`
-	Provider   string     `json:"provider" doc:"stars или addon:<id> — адаптер маркетплейса"`
-	Kind       string     `json:"kind" enum:"new,renew,package,trial" doc:"package — пакет трафика: tariff_name — название пакета; trial — платный пробный период"`
+	Provider   string     `json:"provider" doc:"stars, balance (с баланса клиента) или addon:<id> — адаптер маркетплейса"`
+	Kind       string     `json:"kind" enum:"new,renew,package,trial,device" doc:"package — пакет трафика: tariff_name — название пакета; trial — платный пробный период; device — докупленное устройство"`
 	Status     string     `json:"status" enum:"pending,paid,applied,expired,failed,refunded"`
 	TgID       int64      `json:"tg_id"`
 	TgUsername string     `json:"tg_username,omitempty"`
@@ -66,8 +92,8 @@ type PaymentView struct {
 	UserName   string     `json:"user_name,omitempty"`
 	TariffName string     `json:"tariff_name"`
 	TermDays   *int64     `json:"term_days,omitempty" doc:"Купленный срок в днях (0 — бессрочно); нет у пакетов и у платежей до сроков в тарифах"`
-	Amount     int64      `json:"amount" doc:"Stars или копейки"`
-	Currency   string     `json:"currency" enum:"XTR,RUB"`
+	Amount     int64      `json:"amount" doc:"Stars или копейки (сотые) валюты"`
+	Currency   string     `json:"currency" doc:"XTR, RUB или валюта баланса"`
 	ExternalID string     `json:"external_id,omitempty" doc:"Номер платежа у провайдера"`
 	Error      string     `json:"error,omitempty" doc:"Почему оплаченный платёж ещё не применён"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -77,14 +103,14 @@ type PaymentView struct {
 }
 
 type PaymentTotal struct {
-	Currency string `json:"currency" enum:"XTR,RUB"`
+	Currency string `json:"currency"`
 	Count    int64  `json:"count"`
 	Total    int64  `json:"total"`
 }
 
 type listPaymentsInput struct {
 	Status   string `query:"status" enum:"pending,paid,applied,expired,failed,refunded,"`
-	Provider string `query:"provider" pattern:"^(stars|addon:[a-z0-9][a-z0-9-]{0,31})?$"`
+	Provider string `query:"provider" pattern:"^(stars|balance|addon:[a-z0-9][a-z0-9-]{0,31})?$"`
 	UserID   int64  `query:"user_id" minimum:"0"`
 	Before   int64  `query:"before" minimum:"0" doc:"id последнего платежа предыдущей страницы"`
 	Limit    int64  `query:"limit" minimum:"1" maximum:"200" default:"50"`
@@ -105,9 +131,9 @@ func (h *handlers) registerPayments() {
 	huma.Register(h.api, op("get-payment-settings", http.MethodGet, "/api/v1/payments/settings", "Настройки оплаты", 0), h.getPaymentSettings)
 	huma.Register(h.api, op("update-payment-settings", http.MethodPatch, "/api/v1/payments/settings", "Изменить настройки оплаты", 0), h.updatePaymentSettings)
 	huma.Register(h.api, huma.Operation{OperationID: "list-payments", Method: http.MethodGet, Path: "/api/v1/payments", Summary: "История платежей", Tags: tags}, h.listPayments)
-	huma.Register(h.api, op("refund-payment", http.MethodPost, "/api/v1/payments/{id}/refund", "Вернуть Stars покупателю", 0), h.refundPayment)
+	huma.Register(h.api, op("refund-payment", http.MethodPost, "/api/v1/payments/{id}/refund", "Вернуть деньги покупателю: Stars, на баланс или через способ оплаты, если он умеет", 0), h.refundPayment)
 	byHand := op("mark-payment-refunded", http.MethodPost, "/api/v1/payments/{id}/refunded-by-hand", "Отметить, что деньги возвращены вручную", 0)
-	byHand.Description = "Оплата через способ оплаты из маркетплейса, оплаченная, но не применённая (например, пробный период, который уже нельзя выдать): админ вернул деньги в кабинете платёжной системы, платёж становится возвращённым, покупателю приходит сообщение. Stars возвращаются через refund."
+	byHand.Description = "Оплата через способ оплаты из маркетплейса: админ вернул деньги в кабинете платёжной системы (или прошёл чарджбэк). Платёж становится возвращённым, выданное им снимается, покупателю приходит сообщение. Stars и баланс возвращаются через refund."
 	huma.Register(h.api, byHand, h.refundedByHand)
 }
 
@@ -127,11 +153,17 @@ func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, er
 		v.FreeTariffID = &t.ID
 	}
 	v.FreeCondition = freeConditionView(c.FreeCondition)
+	v.ExtraDevicesKeep = c.ExtraDevicesKeep
 	if v.FreePlans, err = h.d.Store.Q.CountFreePlans(ctx); err != nil {
 		return v, err
 	}
 	av := h.d.Billing.Available(ctx)
-	v.Available.Stars, v.Available.Addons = av.Stars, av.Addons
+	v.Available.Stars, v.Available.Addons, v.Available.Balance = av.Stars, av.Addons, av.Balance.On()
+	bc := c.Balance
+	if bc.Currency == "" {
+		bc.Currency, bc.Rate = "RUB", 1
+	}
+	v.Balance = BalanceSettings{Enabled: bc.Enabled, Currency: bc.Currency, Rate: bc.Rate, Details: bc.Details, Min: bc.Min, Max: bc.Max}
 	if v.Available.Addons == nil {
 		v.Available.Addons = []string{}
 	}
@@ -207,7 +239,8 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 		if c, err = billing.LoadConfig(ctx, set); err != nil {
 			return err
 		}
-		for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic} {
+		for dst, v := range map[*bool]*bool{&c.Enabled: b.Enabled, &c.Stars: b.Stars, &c.AllowNew: b.AllowNew, &c.RenewResetsTraffic: b.RenewResetsTraffic,
+			&c.ExtraDevicesKeep: b.ExtraDevicesKeep} {
 			if v != nil {
 				*dst = *v
 			}
@@ -234,6 +267,48 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 				c.FreeCondition = billing.FreeChannel
 			}
 		}
+		if bb := b.Balance; bb != nil {
+			bc := &c.Balance
+			if bc.Currency == "" {
+				bc.Currency, bc.Rate = "RUB", 1
+			}
+			if bb.Enabled != nil {
+				bc.Enabled = *bb.Enabled
+			}
+			if bb.Currency != nil && *bb.Currency != bc.Currency {
+				// The balances hold their sums in the currency of the config: a change would
+				// read 500 rubles as 500 dollars. It waits until no money is held in them.
+				held, err := q.BalanceMoneyHeld(ctx)
+				if err != nil {
+					return err
+				}
+				if held {
+					return fieldErr("body.balance.currency", "balance_currency_in_use")
+				}
+				bc.Currency = *bb.Currency
+			}
+			if bb.Rate != nil {
+				bc.Rate = *bb.Rate
+			}
+			if bc.Currency == "RUB" {
+				bc.Rate = 1
+			}
+			if bb.Details != nil {
+				bc.Details = strings.TrimSpace(*bb.Details)
+			}
+			if bb.Min != nil {
+				bc.Min = *bb.Min
+			}
+			if bb.Max != nil {
+				bc.Max = *bb.Max
+			}
+			switch {
+			case bc.Max > 0 && bc.Min > bc.Max:
+				return fieldErr("body.balance.max", "balance_bounds")
+			case bc.Enabled && bc.Details == "":
+				return fieldErr("body.balance.details", "balance_details")
+			}
+		}
 		return settings.Set(ctx, set, billing.KeyConfig, c)
 	})
 	if err != nil {
@@ -241,7 +316,9 @@ func (h *handlers) updatePaymentSettings(ctx context.Context, in *patchPaymentSe
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "payments.settings", "", "", map[string]any{"enabled": c.Enabled, "stars": c.Stars,
 		"allow_new": c.AllowNew, "renew_resets_traffic": c.RenewResetsTraffic, "trial_tariff_id": c.TrialTariffID,
-		"trial_stars": c.TrialStars, "trial_rub": c.TrialRub, "free_tariff_id": c.FreeTariffID, "free_condition": freeConditionView(c.FreeCondition)})
+		"trial_stars": c.TrialStars, "trial_rub": c.TrialRub, "free_tariff_id": c.FreeTariffID, "free_condition": freeConditionView(c.FreeCondition),
+		"extra_devices_keep": c.ExtraDevicesKeep, "balance": map[string]any{"enabled": c.Balance.Enabled, "currency": c.Balance.Currency, "rate": c.Balance.Rate,
+			"min": c.Balance.Min, "max": c.Balance.Max}})
 	v, err := h.paymentSettings(ctx)
 	if err != nil {
 		return nil, err
@@ -280,7 +357,7 @@ func freeConditionView(c string) string {
 // paymentView is a payment without the names; the list's query brings those along.
 func paymentView(p db.Payment) PaymentView {
 	v := PaymentView{ID: p.ID, Provider: p.Provider, Kind: p.Kind, Status: p.Status, TgID: p.TgID, TariffName: p.TariffName, TermDays: store.Int64Ptr(p.TermDays), Amount: p.Amount,
-		Currency: p.Currency, ExternalID: p.ExternalID.String, Error: p.Error, CreatedAt: time.Unix(p.CreatedAt, 0).UTC(),
+		Currency: p.Currency, ExternalID: p.ExternalID.String, Error: p.Error, CreatedAt: store.Time(p.CreatedAt),
 		PaidAt: store.TimePtr(p.PaidAt), AppliedAt: store.TimePtr(p.AppliedAt), RefundedAt: store.TimePtr(p.RefundedAt)}
 	if p.UserID.Valid {
 		id := p.UserID.Int64

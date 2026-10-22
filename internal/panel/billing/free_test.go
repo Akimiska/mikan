@@ -154,6 +154,135 @@ func TestFreePlanTapsAtOnce(t *testing.T) {
 	}
 }
 
+// offerTrialAndFree turns on both the free trial and the free plan on the one seeded trial
+// tariff, as the admin of the report of 2026-10-22 did.
+func (e *env) offerTrialAndFree() db.Tariff {
+	e.t.Helper()
+	ctx := context.Background()
+	ts, err := e.st.Q.ListTariffs(ctx)
+	must(e.t, err)
+	trial := ts[0]
+	must(e.t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{TrialTariffID: trial.ID, FreeTariffID: trial.ID}))
+	return trial
+}
+
+// The trial's subscription counts as the account's free one while it runs: the free plan on
+// top of it was the same subscription twice, both on one tariff (reported 2026-10-22). The
+// free plan comes once the trial has ended or its subscription is deleted, and the other way
+// round the trial is not for an account the free plan gave a subscription.
+func TestFreePlanWaitsForTheTrial(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	trial := e.offerTrialAndFree()
+	if _, ok := e.s.FreeOffer(ctx, 931); !ok || !e.s.TrialOpen(ctx, 931) {
+		t.Fatal("a new account is not offered the trial and the free plan")
+	}
+	u, err := e.s.Trial(ctx, 931)
+	must(t, err)
+	if _, ok := e.s.FreeOffer(ctx, 931); ok {
+		t.Fatal("the free plan is offered while the trial runs")
+	}
+	if _, err := e.s.FreePlan(ctx, 931); !errors.Is(err, ErrFreeActive) {
+		t.Fatalf("a free plan on top of the trial: %v", err)
+	}
+	if links, _ := e.st.Q.ListTgLinksOf(ctx, 931); len(links) != 1 || links[0].ID != u.ID {
+		t.Fatalf("the account holds %+v, want the trial alone", links)
+	}
+	if n, _ := e.st.Q.CountFreePlans(ctx); n != 0 {
+		t.Fatalf("free plans counted %d", n)
+	}
+	// Another account's trial holds nobody else back.
+	if _, err := e.s.FreePlan(ctx, 932); err != nil {
+		t.Fatalf("an account without a trial: %v", err)
+	}
+	// Free plan first: the trial is not for a customer, and nothing is made.
+	if _, err := e.s.Trial(ctx, 932); !errors.Is(err, ErrTrialUsed) || e.s.TrialOpen(ctx, 932) {
+		t.Fatalf("a trial on top of the free plan: %v", err)
+	}
+	if links, _ := e.st.Q.ListTgLinksOf(ctx, 932); len(links) != 1 {
+		t.Fatalf("the free plan's account holds %d subscriptions", len(links))
+	}
+	// A deleted trial subscription has ended.
+	gone, err := e.s.Trial(ctx, 933)
+	must(t, err)
+	_, err = e.st.DB.ExecContext(ctx, "DELETE FROM users WHERE id = $1", gone.ID)
+	must(t, err)
+	if _, err := e.s.FreePlan(ctx, 933); err != nil {
+		t.Fatalf("a free plan after the trial was deleted: %v", err)
+	}
+	// The trial is over: the free plan comes, a subscription of its own.
+	e.now = e.now.Add(time.Duration(trial.DurationDays)*24*time.Hour + time.Second)
+	if _, ok := e.s.FreeOffer(ctx, 931); !ok {
+		t.Fatal("the free plan is not offered after the trial ended")
+	}
+	free, err := e.s.FreePlan(ctx, 931)
+	must(t, err)
+	if free.ID == u.ID || free.Source != domain.UserFromFree {
+		t.Fatalf("free subscription %+v after the trial %+v", free, u)
+	}
+}
+
+// A trial bought for a price counts the same: the free plan waits for it.
+func TestFreePlanWaitsForThePaidTrial(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	ts, err := e.st.Q.ListTariffs(ctx)
+	must(t, err)
+	trial := ts[0]
+	must(t, settings.Set(ctx, e.s.d.Settings, KeyConfig, Config{Enabled: true, Stars: true, TrialTariffID: trial.ID, TrialStars: 1, FreeTariffID: trial.ID}))
+	p, err := e.s.TrialInvoice(ctx, 934, Stars)
+	must(t, err)
+	must(t, e.s.PreCheckout(ctx, 934, p.Payload, "XTR", 1))
+	must(t, e.s.StarsPaid(ctx, 934, p.Payload, "ch-paid-trial", "XTR", 1))
+	if got := e.payment(p.ID); got.Status != PaymentApplied {
+		t.Fatalf("trial payment %+v", got)
+	}
+	if _, ok := e.s.FreeOffer(ctx, 934); ok {
+		t.Fatal("the free plan is offered while the bought trial runs")
+	}
+	if _, err := e.s.FreePlan(ctx, 934); !errors.Is(err, ErrFreeActive) {
+		t.Fatalf("a free plan on top of the bought trial: %v", err)
+	}
+	if links, _ := e.st.Q.ListTgLinksOf(ctx, 934); len(links) != 1 {
+		t.Fatalf("the account holds %d subscriptions", len(links))
+	}
+}
+
+// The trial and the free plan tapped at once (two old messages, the bot and the Mini App)
+// give the account one subscription: each side reads what the other writes on its own
+// serializable transaction, so one of them sees the other's.
+func TestTrialAndFreePlanAtOnce(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.offerTrialAndFree()
+	for tg := int64(940); tg < 950; tg++ {
+		var wg sync.WaitGroup
+		errs := make([]error, 4)
+		for i := range errs {
+			wg.Go(func() {
+				if i%2 == 0 {
+					_, errs[i] = e.s.Trial(ctx, tg)
+				} else {
+					_, errs[i] = e.s.FreePlan(ctx, tg)
+				}
+			})
+		}
+		wg.Wait()
+		given := 0
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				given++
+			case !errors.Is(err, ErrTrialUsed) && !errors.Is(err, ErrFreeActive):
+				t.Fatalf("account %d: a tap failed: %v", tg, err)
+			}
+		}
+		if links, _ := e.st.Q.ListTgLinksOf(ctx, tg); given != 1 || len(links) != 1 {
+			t.Fatalf("account %d: %d given, %d subscriptions", tg, given, len(links))
+		}
+	}
+}
+
 // An account that holds as many subscriptions as it may gets no free one.
 func TestFreePlanLinkLimit(t *testing.T) {
 	e := newEnv(t)

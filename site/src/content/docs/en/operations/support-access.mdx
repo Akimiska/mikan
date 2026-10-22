@@ -16,10 +16,11 @@ Section: **Settings → Support**.
 3. Choose the duration: 2, 6 or 24 hours.
 4. Choose the level:
    - **View**: read everything diagnosis needs (nodes, protocols, logs, server checks), change nothing;
-   - **Change**: also edit nodes, protocols, certificates and addons, start updates and restarts;
+   - **Change**: also edit settings, clients, nodes, protocols and official addons, start updates and restarts;
    - **Terminal**: all of that plus a shell on chosen servers, see [below](#terminal).
 5. The **Show client data** checkbox is off by default: names, Telegram, subscription links, device addresses and the client search are hidden. Turn it on only if the problem cannot be solved without it.
-6. Press "Open access". The panel asks the bot whether the code fits, opens the access and hands it to the ticket. The bot checks that the panel answers at its address and is an official mikan build, and tells you "Access received".
+6. The **Extended mode** (for the Change and Terminal levels) is off by default. Without it the operator cannot reach what outlasts the access or touches money: issuing a node's key, a node's address and domain, own certificates and an own WireGuard exit, the payment settings, payment details, balances and refunds, handing the bot to an addon, addons from outside mikan's catalog, the subscription page and the settings fields that change what every client sees. The mode opens all of it. Through a node key or such an addon, client data becomes reachable to the operator as well, even when it is hidden. The mode takes your password and 2FA code, like the terminal: turn it on only for a ticket that cannot do without it.
+7. Press "Open access". The panel asks the bot whether the code fits, opens the access and hands it to the ticket. The bot checks that the panel answers at its address and is an official mikan build, and tells you "Access received".
 
 If the code does not fit, or the bot does not answer or refuses the access, nothing opens: an access that did not reach the bot is closed by the panel at once. One access is active at a time, a new one cancels the previous. The access covers every node of the panel at once.
 
@@ -27,7 +28,7 @@ The support bot learns your admin panel's secret address. After the support you 
 
 ## Always closed
 
-At every level the operator cannot reach:
+At every level, the extended mode included, the operator cannot reach:
 
 - the password, 2FA, sessions and API keys;
 - the panel's audit log;

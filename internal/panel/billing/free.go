@@ -6,24 +6,26 @@ import (
 	"errors"
 
 	"mikan/internal/panel/domain"
+	"mikan/internal/panel/model"
 	"mikan/internal/panel/store/db"
 )
 
 // What the free plan asks of an account (Config.FreeCondition).
 const (
-	FreeNoCondition = ""
-	FreeChannel     = "channel" // a subscription to the bot's channel
+	FreeNoCondition = model.FreeNoCondition
+	FreeChannel     = model.FreeChannel // a subscription to the bot's channel
 )
 
 var (
 	// ErrFreeOff: the admin offers no free plan, its tariff is gone, or it asks for the
 	// bot's channel while none is set up.
-	ErrFreeOff = errors.New("free_off")
-	// ErrFreeActive: the account's previous free subscription has not ended yet.
-	ErrFreeActive = errors.New("free_active")
+	ErrFreeOff = model.ErrFreeOff
+	// ErrFreeActive: the account's previous free subscription has not ended yet, or the
+	// subscription of its trial, which counts as one (freeHeld).
+	ErrFreeActive = model.ErrFreeActive
 	// ErrFreeChannel: the free plan is for the bot's channel's members, and the account is
 	// not one.
-	ErrFreeChannel = errors.New("free_channel")
+	ErrFreeChannel = model.ErrFreeChannel
 )
 
 // FreeTariff is the tariff the free plan gives, when the admin offers one.
@@ -49,10 +51,10 @@ type FreeOffer struct {
 }
 
 // FreeOffer is the free plan tgID may take now; ok false when it is off, the account's
-// previous free subscription has not ended, or the account holds as many subscriptions as
-// it may. Whether the account is in the channel is not asked here: the offer shows the
-// channel, FreePlan checks. A hint for the bot's buttons and the Mini App; FreePlan
-// decides on its own transaction.
+// previous free subscription or its trial has not ended, or the account holds as many
+// subscriptions as it may. Whether the account is in the channel is not asked here: the
+// offer shows the channel, FreePlan checks. A hint for the bot's buttons and the Mini App;
+// FreePlan decides on its own transaction.
 func (s *Service) FreeOffer(ctx context.Context, tgID int64) (FreeOffer, bool) {
 	t, ok := s.FreeTariff(ctx)
 	if !ok {
@@ -69,7 +71,7 @@ func (s *Service) FreeOffer(ctx context.Context, tgID int64) (FreeOffer, bool) {
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return FreeOffer{}, false
 	}
-	if active, err := s.freeActive(ctx, q, prev); err != nil || active {
+	if held, err := s.freeHeld(ctx, q, tgID, prev); err != nil || held {
 		return FreeOffer{}, false
 	}
 	n, err := q.CountTgLinksOf(ctx, tgID)
@@ -101,10 +103,31 @@ func (s *Service) freeActive(ctx context.Context, q *db.Queries, prev sql.NullIn
 	return !u.ExpiresAt.Valid || u.ExpiresAt.Int64 > s.d.Now().Unix(), nil
 }
 
+// freeHeld: tgID still holds a free subscription, the free plan's last one (prev) or the
+// one its trial gave (free or bought), which counts as the account's free subscription
+// while it runs. Without it an account took the free plan on top of the trial: with both
+// on one tariff the client list had the account twice (reported 2026-10-22).
+func (s *Service) freeHeld(ctx context.Context, q *db.Queries, tgID int64, prev sql.NullInt64) (bool, error) {
+	if active, err := s.freeActive(ctx, q, prev); err != nil || active {
+		return active, err
+	}
+	trial, err := q.GetTrialUser(ctx, tgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return s.freeActive(ctx, q, trial)
+}
+
 // FreePlan gives tgID the free plan: a subscription on its tariff, linked to the account.
-// Again only once the previous free subscription has ended. The account's row is locked
-// on the transaction that makes the subscription, so two taps, or the bot and the Mini
-// App at once, make one.
+// Again only once the previous free subscription has ended, and not while the account's
+// trial runs (freeHeld). The account's row is locked on the transaction that makes the
+// subscription, so two taps, or the bot and the Mini App at once, make one. A trial taken
+// at the same moment is read on the same serializable transaction, as Trial asks on its own
+// whether the account is a client: the two conflict, and the one run again finds the
+// other's subscription.
 func (s *Service) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 	t, ok := s.FreeTariff(ctx)
 	if !ok {
@@ -123,9 +146,9 @@ func (s *Service) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 		if err != nil {
 			return err
 		}
-		if active, err := s.freeActive(ctx, q, prev); err != nil {
+		if held, err := s.freeHeld(ctx, q, tgID, prev); err != nil {
 			return err
-		} else if active {
+		} else if held {
 			return ErrFreeActive
 		}
 		if n, err := q.CountTgLinksOf(ctx, tgID); err != nil {
@@ -145,12 +168,7 @@ func (s *Service) FreePlan(ctx context.Context, tgID int64) (db.User, error) {
 		return q.SetFreePlanUser(ctx, db.SetFreePlanUserParams{UserID: sql.NullInt64{Int64: u.ID, Valid: true},
 			TariffID: sql.NullInt64{Int64: t.ID, Valid: true}, CreatedAt: now.Unix(), TgID: tgID})
 	}
-	err := s.d.Store.Tx(ctx, run)
-	if errors.Is(err, domain.ErrNoSlots) {
-		if err = s.d.Users.RefillSlots(ctx); err == nil {
-			err = s.d.Store.Tx(ctx, run)
-		}
-	}
+	err := s.d.Users.WithSlots(ctx, func() error { return s.d.Store.Tx(ctx, run) })
 	if err != nil {
 		return db.User{}, err
 	}

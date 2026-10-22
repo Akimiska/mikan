@@ -30,6 +30,12 @@ type Config struct {
 	AutotuneScale float64
 	// TelegramAPI is the Bot API the bot talks to; a fake one in tests.
 	TelegramAPI string
+	// SupportOff: MIKAN_SUPPORT_ACCESS=off turns support access off for good on this server,
+	// whatever the panel's setting says.
+	SupportOff bool
+	// SupportBotURL is the support bot (MIKAN_SUPPORT_BOT_URL, for tests and development);
+	// "" is the official one.
+	SupportBotURL string
 }
 
 func FromEnv() (Config, error) {
@@ -52,6 +58,14 @@ func FromEnv() (Config, error) {
 		return c, fmt.Errorf("MIKAN_PANEL_LISTEN: %w", err)
 	}
 	c.TelegramAPI = os.Getenv("MIKAN_TG_API")
+	c.SupportBotURL = os.Getenv("MIKAN_SUPPORT_BOT_URL")
+	switch v := os.Getenv("MIKAN_SUPPORT_ACCESS"); v {
+	case "", "on":
+	case "off":
+		c.SupportOff = true
+	default:
+		return c, fmt.Errorf("MIKAN_SUPPORT_ACCESS: want on or off, got %q", v)
+	}
 	c.AutotuneScale = 1
 	if v := os.Getenv("MIKAN_AUTOTUNE_SCALE"); v != "" {
 		if c.AutotuneScale, err = strconv.ParseFloat(v, 64); err != nil || c.AutotuneScale <= 0 || c.AutotuneScale > 1 {

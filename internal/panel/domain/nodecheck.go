@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"mikan/internal/frontpage"
 	"mikan/internal/hostname"
 	"mikan/internal/panel/dnscheck"
 	"mikan/internal/panel/store"
@@ -139,12 +140,25 @@ type NodePatch struct {
 	Enabled     *bool
 	FairShare   *bool
 	ChannelMbps *int64
+	// HTTPRedirect: plain HTTP on port 80 gets 301 to https. Not on the panel's own node,
+	// whose port 80 the panel's certificates use.
+	HTTPRedirect *bool
+	// SNIRouter shares the node's TCP 443 between the inbounds marked for it.
+	SNIRouter *bool
+	// FrontPage is the built-in page (frontpage.Templates) strangers get on the node's own
+	// domain through the shared 443; "" none.
+	FrontPage *string
+	// APILockdown: the node's API answers only the panel; APIAllow the networks the admin
+	// adds to the panel's own addresses (NormalizeAPIAllow). Not on the panel's own node,
+	// which the panel reaches over its socket.
+	APILockdown *bool
+	APIAllow    *[]string
 	Rules       NodeRules
 }
 
 // UpdateNode changes the fields p names and returns the node. Errors: ErrUnknownNode,
-// ErrLocalNode (a host or domain for the panel's own node), ErrBadHost, ErrBadDomain,
-// *NameError, *DomainError, ErrChannelRequired.
+// ErrLocalNode (a host or domain for the panel's own node), ErrLocalLockdown, ErrBadHost,
+// ErrBadDomain, *NameError, *DomainError, ErrChannelRequired, *APIAllowError, ErrManyAPIAllow.
 //
 // The checks run first, the domain's one over the network included. Only what p names is
 // written, over the row as it is by then and in one transaction: an edit made meanwhile
@@ -169,8 +183,17 @@ func UpdateNode(ctx context.Context, st *store.Store, id int64, p NodePatch, now
 			return db.Node{}, err
 		}
 	}
-	if cur.Address == "" && (p.Host != nil || p.Domain != nil) {
+	if cur.Address == "" && (p.Host != nil || p.Domain != nil || p.HTTPRedirect != nil && *p.HTTPRedirect) {
 		return db.Node{}, ErrLocalNode
+	}
+	var allow []string
+	if p.APIAllow != nil {
+		if allow, err = NormalizeAPIAllow(*p.APIAllow); err != nil {
+			return db.Node{}, err
+		}
+	}
+	if cur.Address == "" && (p.APILockdown != nil && *p.APILockdown || len(allow) > 0) {
+		return db.Node{}, ErrLocalLockdown
 	}
 	if p.Host != nil {
 		if !hostname.Valid(host) {
@@ -228,6 +251,35 @@ func UpdateNode(ctx context.Context, st *store.Store, id int64, p NodePatch, now
 		}
 		if p.FairShare != nil {
 			cur.FairShare = Flag(*p.FairShare)
+		}
+		if p.SNIRouter != nil {
+			if err := q.SetNodeSNIRouter(ctx, db.SetNodeSNIRouterParams{SniRouter: Flag(*p.SNIRouter), UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
+				return err
+			}
+		}
+		if p.FrontPage != nil {
+			if *p.FrontPage != "" && frontpage.Page(*p.FrontPage) == nil {
+				return fieldErr("front_page", "bad_front_page")
+			}
+			if err := q.SetNodeFrontPage(ctx, db.SetNodeFrontPageParams{FrontPage: *p.FrontPage, UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
+				return err
+			}
+		}
+		if p.APILockdown != nil || p.APIAllow != nil {
+			if p.APILockdown != nil {
+				cur.ApiLockdown = Flag(*p.APILockdown)
+			}
+			if p.APIAllow != nil {
+				cur.ApiAllow = allow
+			}
+			if err := q.SetNodeAPILockdown(ctx, db.SetNodeAPILockdownParams{ApiLockdown: cur.ApiLockdown, ApiAllow: cur.ApiAllow, UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
+				return err
+			}
+		}
+		if p.HTTPRedirect != nil {
+			if err := q.SetNodeHTTPRedirect(ctx, db.SetNodeHTTPRedirectParams{HttpRedirect: Flag(*p.HTTPRedirect), UpdatedAt: now.Unix(), ID: cur.ID}); err != nil {
+				return err
+			}
 		}
 		if p.FairShare != nil || p.ChannelMbps != nil {
 			if cur.FairShare != 0 && !cur.ChannelMbps.Valid {

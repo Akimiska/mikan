@@ -88,7 +88,10 @@ func profileRules(cfg Config) []string {
 	var rules []any
 	if cfg.Template != "" {
 		t, err := parseProfileTemplate(cfg.Template)
-		if err == nil && fillTemplate(t, p, ps) == nil {
+		if err == nil {
+			_, err = fillTemplate(t, p, ps)
+		}
+		if err == nil {
 			rules, _ = t["rules"].([]any)
 		}
 	}

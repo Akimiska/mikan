@@ -1,6 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { ExternalLink, Search, Store, Wallet } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Download, ExternalLink, Search, Star, Store, Wallet } from "lucide-react";
 import { errorText, type Schemas } from "../../api/client";
 import type { useAddons } from "../../api/hooks";
 import { Button, EmptyState, ErrorState, Pill, Skeleton } from "../../components/ui";
@@ -8,16 +7,17 @@ import { t } from "../../i18n";
 import { num } from "../../lib/format";
 import { localized } from "../../lib/localized";
 import { safeHref } from "../../lib/url";
+import { useUrlSearchText } from "../../lib/url-search";
 import { ADDON_KINDS, type AddonKind } from "../search";
 import type { AddonActions } from "./addons-installed";
 import { useInstallMarket, useInstallPayment, permLabel } from "./market-dialogs";
-import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, type Kind, type Market, type MarketEntry } from "./market-common";
-import { OriginMark } from "./market-parts";
+import { KIND_ICONS, actsAsAdmin, marketReady, queuedIds, sortPermissions, unofficial, type Kind, type Market, type MarketEntry } from "./market-common";
+import { KindChips, OriginMark } from "./market-parts";
 
 type ItemKind = Kind | "payment";
 
 /** One entry of either catalog, as a card shows it. */
-type Item = {
+export type Item = {
   id: string;
   kind: ItemKind;
   name: string;
@@ -36,7 +36,7 @@ function kindLabel(k: ItemKind): string {
   return k === "payment" ? t("addons.kindPayment") : t(`market.kind.${k}`);
 }
 
-function toItem(e: Schemas["AddonCatalogEntry"] | MarketEntry, kind: ItemKind, market?: MarketEntry): Item {
+export function toItem(e: Schemas["AddonCatalogEntry"] | MarketEntry, kind: ItemKind, market?: MarketEntry): Item {
   return { id: e.id, kind, name: localized(e.name, e.id), text: localized(e.description, ""), version: e.version, homepage: e.homepage, installed: e.installed, update: e.update, market };
 }
 
@@ -61,28 +61,7 @@ export function CatalogTab({
 }) {
   const m = market.data;
   const p = pay.data;
-  const [text, setText] = useState(q);
-  // The last text this tab put into the URL: another one came from outside (Back, a link).
-  const written = useRef(q);
-  // The page hands a new function on every render; the timer below must not restart on it.
-  const search = useRef(onSearch);
-  useEffect(() => {
-    search.current = onSearch;
-  });
-  useEffect(() => {
-    if (q !== written.current) {
-      written.current = q;
-      setText(q);
-    }
-  }, [q]);
-  useEffect(() => {
-    if (text === written.current) return;
-    const timer = window.setTimeout(() => {
-      written.current = text;
-      search.current({ q: text.trim() ? text : undefined });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [text]);
+  const { text, setText, clear } = useUrlSearchText(q, (next) => onSearch({ q: next.trim() ? next : undefined }));
 
   const payFailed = (pay.isError && !p) || !!p?.catalog_error;
   const marketFailed = (market.isError && !m) || !!m?.catalog_error;
@@ -101,14 +80,7 @@ export function CatalogTab({
   return (
     <>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="-mx-3 flex items-center gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 lg:pb-0 [&::-webkit-scrollbar]:hidden" role="group" aria-label={t("addons.filterKind")}>
-          {([undefined, ...ADDON_KINDS] as const).map((k) => (
-            <button key={k ?? "all"} type="button" className="chip shrink-0" aria-pressed={kind === k} onClick={() => onSearch({ kind: k })}>
-              {k ? t(`addons.kinds.${k}`) : t("addons.kinds.all")}
-              {loading ? null : <span className="chip-count num">{num(counts(k))}</span>}
-            </button>
-          ))}
-        </div>
+        <KindChips kinds={ADDON_KINDS} value={kind} count={counts} loading={loading} onChange={(k) => onSearch({ kind: k })} />
         <label className="search-field lg:max-w-[360px]">
           <Search size={16} aria-hidden />
           <input type="search" placeholder={t("addons.searchPlaceholder")} value={text} onChange={(e) => setText(e.target.value)} aria-label={t("addons.searchLabel")} />
@@ -140,8 +112,7 @@ export function CatalogTab({
           <EmptyState search title={t("addons.nothingFound")} text={t("addons.nothingFoundText")}>
             <Button
               onClick={() => {
-                setText("");
-                written.current = "";
+                clear();
                 onSearch({ q: undefined, kind: undefined });
               }}
             >
@@ -160,7 +131,7 @@ export function CatalogTab({
   );
 }
 
-function CatalogSkeleton() {
+export function CatalogSkeleton() {
   return (
     <ul className="addon-catalog" aria-busy aria-label={t("common.loading")}>
       {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -180,18 +151,22 @@ function CatalogSkeleton() {
   );
 }
 
-function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index: number; m: Market | undefined; p: ReturnType<typeof useAddons>["data"]; queued: boolean; act: AddonActions }) {
+export function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index: number; m: Market | undefined; p: ReturnType<typeof useAddons>["data"]; queued: boolean; act: AddonActions }) {
   const install = useInstallPayment();
   const update = useInstallMarket();
   const Icon = i.kind === "payment" ? Wallet : KIND_ICONS[i.kind];
   const href = safeHref(i.homepage);
   const e = i.market;
-  const blocked = i.kind === "payment" ? !p?.supported : !marketReady(m);
+  // An addon mikan revoked installs no more, from the registry or from a source of its repository.
+  const blocked = i.kind === "payment" ? !p?.supported : !marketReady(m) || !!e?.origin?.revoked;
   const busy = install.isPending || update.isPending;
+  const repo = safeHref(e?.origin?.repo);
   const act1 = () => {
     if (!e) install.mutate(i.id);
-    else if (!i.installed || e.wider) act.approve(e);
-    else update.mutate(e);
+    // Code mikan has not looked at goes in only through the dialog that asks the admin to
+    // take the risk, an update as much as an install.
+    else if (!i.installed || e.wider || unofficial(e)) act.approve(e);
+    else update.mutate({ entry: e });
   };
   return (
     <li className="addon-card card glass reveal" style={{ "--i": Math.min(index, 8) } as React.CSSProperties}>
@@ -218,7 +193,22 @@ function CatalogCard({ item: i, index, m, p, queued, act }: { item: Item; index:
             <Pill tone={actsAsAdmin(e.permissions) ? "warn" : "off"}>{t("addons.permsBadge", { n: e.permissions.length })}</Pill>
           </span>
         ) : null}
-        {href ? (
+        {e?.stars ? (
+          <span className="inline-flex items-center gap-1 text-xs text-[var(--ink-500)]" title={t("market.stars")}>
+            <Star size={12} aria-hidden /> <span className="num">{num(e.stars)}</span>
+          </span>
+        ) : null}
+        {e?.downloads ? (
+          <span className="inline-flex items-center gap-1 text-xs text-[var(--ink-500)]" title={t("market.downloads")}>
+            <Download size={12} aria-hidden /> <span className="num">{num(e.downloads)}</span>
+          </span>
+        ) : null}
+        {repo ? (
+          <a className="link-btn ml-1 inline-flex items-center gap-1 text-xs" href={repo} target="_blank" rel="noopener noreferrer">
+            {t("market.repo")} <ExternalLink size={12} aria-hidden />
+          </a>
+        ) : null}
+        {href && href !== repo ? (
           <a className="link-btn ml-1 inline-flex items-center gap-1 text-xs" href={href} target="_blank" rel="noopener noreferrer">
             {t("addons.homepage")} <ExternalLink size={12} aria-hidden />
           </a>

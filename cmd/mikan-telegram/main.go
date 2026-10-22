@@ -18,12 +18,17 @@ import (
 	"syscall"
 	"time"
 
-	"mikan/internal/panel/tgate"
+	"mikan/internal/pace"
 	"mikan/internal/panel/tgbot"
+	"mikan/internal/tgapi"
 )
 
 // version is set at build time (-ldflags -X main.version=...).
 var version = "dev"
+
+// retryPause is how long a call that failed waits before it is made again: a second, then
+// twice that for every failure in a row, up to a minute.
+var retryPause = pace.Backoff{Base: time.Second, Max: time.Minute}
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -48,8 +53,8 @@ func main() {
 // addon is the bot's screens on the panel's data and the Bot API proxy.
 type addon struct {
 	log         *slog.Logger
-	client      *tgate.Client
-	out         *tgate.Outbox
+	client      *tgapi.Client
+	out         *tgapi.Outbox
 	bot         *tgbot.Bot
 	backend     *tgbot.Remote
 	running     sync.WaitGroup
@@ -58,8 +63,8 @@ type addon struct {
 
 func newAddon(panelURL, panelToken, botURL, botToken string, log *slog.Logger) *addon {
 	a := &addon{log: log, updatesWait: 25 * time.Second}
-	a.client = tgate.NewClient(botURL, botToken, nil)
-	a.out = tgate.NewOutbox(a.client, tgate.DefaultLimits, time.Now, func(int64) {},
+	a.client = tgapi.NewClient(botURL, botToken, nil)
+	a.out = tgapi.NewOutbox(a.client, tgapi.DefaultLimits, time.Now, func(int64) {},
 		func(err error) { log.Warn("send", "err", err) })
 	a.backend = tgbot.NewRemote(panelURL, panelToken, nil)
 	a.bot = tgbot.New(tgbot.Deps{Backend: a.backend, Client: a.client, Outbox: a.out, Go: a.running.Go, Log: log, Now: time.Now})
@@ -78,15 +83,13 @@ func (a *addon) Run(ctx context.Context) {
 // setUp sets the chats' commands and menu button, again until it goes through: the panel's
 // gateway may not reach Telegram yet when the addon starts.
 func (a *addon) setUp(ctx context.Context) {
-	backoff := time.Second
-	for {
+	for fails := 0; ; fails++ {
 		err := a.bot.Started(ctx)
 		if err == nil || ctx.Err() != nil {
 			return
 		}
 		a.log.Warn("set up the chats", "err", err)
-		sleep(ctx, backoff)
-		backoff = min(2*backoff, time.Minute)
+		pace.Sleep(ctx, retryPause.Next(fails))
 	}
 }
 
@@ -94,7 +97,7 @@ func (a *addon) setUp(ctx context.Context) {
 // the next call, after the screens took it.
 func (a *addon) updates(ctx context.Context) {
 	var offset int64
-	backoff := time.Second
+	fails := 0 // calls that failed in a row
 	for ctx.Err() == nil {
 		ups, err := a.client.Updates(ctx, offset)
 		if err != nil {
@@ -102,11 +105,11 @@ func (a *addon) updates(ctx context.Context) {
 				return
 			}
 			a.log.Warn("updates", "err", err)
-			sleep(ctx, backoff)
-			backoff = min(2*backoff, time.Minute)
+			pace.Sleep(ctx, retryPause.Next(fails))
+			fails++
 			continue
 		}
-		backoff = time.Second
+		fails = 0
 		for _, up := range ups {
 			a.bot.Update(ctx, up)
 			offset = up.UpdateID + 1
@@ -116,7 +119,7 @@ func (a *addon) updates(ctx context.Context) {
 
 // events reads the feed of the events the bot acts on, and acknowledges what it handled.
 func (a *addon) events(ctx context.Context) {
-	backoff := time.Second
+	fails := 0 // pulls that failed in a row
 	for ctx.Err() == nil {
 		evs, err := a.backend.Events(ctx, a.updatesWait, tgbot.EventTypes)
 		if err != nil {
@@ -124,16 +127,16 @@ func (a *addon) events(ctx context.Context) {
 				return
 			}
 			a.log.Warn("events", "err", err)
-			sleep(ctx, backoff)
-			backoff = min(2*backoff, time.Minute)
+			pace.Sleep(ctx, retryPause.Next(fails))
+			fails++
 			continue
 		}
-		backoff = time.Second
+		fails = 0
 		for _, e := range evs {
 			if err := a.bot.HandleEvent(ctx, e); err != nil {
 				// Not acknowledged: it comes again with the next pull.
 				a.log.Warn("event", "id", e.ID, "type", e.Type, "err", err)
-				sleep(ctx, 5*time.Second)
+				pace.Sleep(ctx, 5*time.Second)
 				break
 			}
 			if err := a.backend.Ack(ctx, e.ID); err != nil {
@@ -141,14 +144,5 @@ func (a *addon) events(ctx context.Context) {
 				break
 			}
 		}
-	}
-}
-
-func sleep(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-	case <-t.C:
 	}
 }

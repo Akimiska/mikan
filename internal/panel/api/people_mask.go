@@ -58,13 +58,21 @@ func (w *maskWriter) WriteHeader(code int) {
 }
 
 func (w *maskWriter) Write(b []byte) (int, error) {
+	rw := w.ResponseWriter
 	if !w.decided {
+		// An answer written without a status of its own goes out with its type said: the
+		// handler's own, or what net/http would sniff from these first bytes, and nosniff.
+		h := rw.Header()
+		if h.Get("Content-Type") == "" {
+			h.Set("Content-Type", http.DetectContentType(b))
+		}
+		h.Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 	}
 	if w.hold {
 		return w.buf.Write(b)
 	}
-	return w.ResponseWriter.Write(b)
+	return rw.Write(b)
 }
 
 func (w *maskWriter) Flush() {

@@ -179,16 +179,20 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 
 func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, notice string) (string, *tgapi.Keyboard) {
 	brand := b.brand(ctx)
-	text := render(pick(cfg.Texts.Welcome, w.welcome), map[string]string{"brand": brand})
-	if notice != "" {
-		text = html.EscapeString(notice) + "\n\n" + text
-	}
 	var rows [][]tgapi.Button
 	shop := b.d.Backend.Shop()
+	trialShown := false
 	if o, _, ok := shop.TrialOffer(ctx, chat); ok {
 		rows = append(rows, []tgapi.Button{{Text: fmt.Sprintf(w.trialPaid, w.cheapest(model.Offer{Stars: o.Stars, Rub: o.Rub})), CallbackData: "tr"}})
+		trialShown = true
 	} else if shop.TrialOpen(ctx, chat) {
 		rows = append(rows, []tgapi.Button{{Text: w.trial, CallbackData: "tr"}})
+		trialShown = true
+	}
+	// AoiVPN fork: {trial_line} — the trial's promise only to whom its button is shown.
+	text := aoiWelcome(render(pick(cfg.Texts.Welcome, w.welcome), map[string]string{"brand": brand, "trial_line": aoiTrialLine(ctx, shop, w, trialShown)}))
+	if notice != "" {
+		text = html.EscapeString(notice) + "\n\n" + text
 	}
 	if btn, ok := b.freeButton(ctx, cfg, w, chat); ok {
 		rows = append(rows, []tgapi.Button{btn})

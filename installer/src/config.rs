@@ -192,7 +192,11 @@ impl Config {
             }
             let value = self.get(s.key).unwrap_or_default();
             write_private(&path, value.as_bytes())?;
-            std::os::unix::fs::chown(&path, Some(s.owner), Some(s.owner)).with_context(|| format!("chown {}", path.display()))?;
+            // Only root can give the file to its reader: the installer is root, a test run by
+            // anyone else keeps it.
+            if rustix::process::geteuid().is_root() {
+                std::os::unix::fs::chown(&path, Some(s.owner), Some(s.owner)).with_context(|| format!("chown {}", path.display()))?;
+            }
             fs::set_permissions(&path, fs::Permissions::from_mode(0o400))?;
         }
         write_private(&self.root.join(FILE), json.as_bytes())
@@ -282,8 +286,11 @@ mod tests {
         assert!(json.contains("\"PANEL_PORT\": \"2053\"") && !json.contains("pw123456"), "{json}");
         let pw = d.join(SECRETS).join("postgres_password");
         let meta = fs::metadata(&pw).unwrap();
-        assert_eq!((meta.mode() & 0o777, meta.uid()), (0o400, POSTGRES_UID));
-        assert_eq!(fs::metadata(d.join(SECRETS).join("database_url")).unwrap().uid(), APP_UID);
+        assert_eq!(meta.mode() & 0o777, 0o400);
+        if rustix::process::geteuid().is_root() {
+            assert_eq!(meta.uid(), POSTGRES_UID);
+            assert_eq!(fs::metadata(d.join(SECRETS).join("database_url")).unwrap().uid(), APP_UID);
+        }
         assert_eq!(fs::metadata(d.join(SECRETS)).unwrap().mode() & 0o777, 0o700);
         assert!(!d.join(SECRETS).join("node_join").exists(), "a panel has no join key");
         c.retire_legacy().unwrap();

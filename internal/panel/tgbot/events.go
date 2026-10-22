@@ -34,6 +34,8 @@ func (b *Bot) HandleEvent(ctx context.Context, e events.Event) error {
 		return nil // AoiVPN fork: a synthetic account of the AoiVPN app (aoiapp) has no chat
 	}
 	switch e.Type {
+	case events.TorrentBanned:
+		return b.aoiTorrentBanned(ctx, e) // AoiVPN fork (aoi_torrent.go)
 	case events.PaymentPaid, events.PaymentRefunded:
 		var p events.Payment
 		if err := json.Unmarshal(e.Data, &p); err != nil || e.TgID == 0 {

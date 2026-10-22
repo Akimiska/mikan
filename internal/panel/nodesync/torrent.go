@@ -138,6 +138,12 @@ func (s *Syncer) pullTorrents(ctx context.Context) {
 			}); err != nil {
 				return err
 			}
+			if until > 0 {
+				// AoiVPN fork: the subscriber is told (aoi_torrent.go).
+				if err := emitTorrentBan(ctx, q, now, uid, until, cfg.BanMinutes, h); err != nil {
+					return err
+				}
+			}
 		}
 		if err := q.SetNodeState(ctx, db.SetNodeStateParams{Key: stateKeyOf("torrent_epoch", s.id), Value: got.Epoch}); err != nil {
 			return err

@@ -3,9 +3,15 @@ package nodesync
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"slices"
+	"strconv"
 	"time"
 
+	"mikan/internal/nodeapi"
+	"mikan/internal/panel/events"
+	"mikan/internal/panel/events/feed"
+	"mikan/internal/panel/store/db"
 	"mikan/internal/panel/subs"
 	"mikan/internal/panel/torrent"
 )
@@ -62,4 +68,21 @@ func withRuleClientsExempt(ctx context.Context, q queryer, cfg torrent.Config) (
 	slices.Sort(exempt)
 	cfg.Exempt = exempt
 	return cfg, nil
+}
+
+// emitTorrentBan (AoiVPN fork) tells the bot addon that a catch banned the user, so the
+// subscriber hears why every server went quiet. One word an hour at most per user: a client
+// that keeps seeding is caught again and again, the message must not come with each catch.
+// A user with no Telegram account linked has nobody to tell.
+func emitTorrentBan(ctx context.Context, q *db.Queries, now time.Time, uid, until, minutes int64, h nodeapi.TorrentHit) error {
+	link, err := q.TgLinkOfUser(ctx, uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	dedupe := "torrent:" + strconv.FormatInt(uid, 10) + ":" + strconv.FormatInt(now.Unix()/3600, 10)
+	return feed.Emit(ctx, q, now, events.TorrentBanned, uid, link.TgID,
+		events.TorrentBan{Until: until, Minutes: minutes, Kind: h.Kind, Inbound: h.Inbound}, dedupe)
 }

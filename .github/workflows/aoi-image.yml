@@ -24,7 +24,7 @@ permissions:
 # default image tag. Bump this on every fork release so a plain push to main
 # still produces a correctly-versioned image instead of a bare git sha.
 env:
-  FORK_VERSION: "0.5.1.1-rc.13.aoi.3"
+  FORK_VERSION: "0.5.1.1-rc.15.aoi.1"
 
 jobs:
   image:

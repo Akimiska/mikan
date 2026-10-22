@@ -1,0 +1,69 @@
+package tgbot
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"html"
+
+	"mikan/internal/panel/events"
+	"mikan/internal/panel/model"
+	"mikan/internal/textutil"
+	"mikan/internal/tgapi"
+)
+
+// AoiVPN fork: the torrent blocker's notice. The nodes turned the subscriber away for a few
+// minutes; the message says why, until when, and that AoiVPN sends torrents past the VPN by
+// itself (the blocker only watches apps without the subscription's rules).
+
+func init() { EventTypes = append(EventTypes, events.TorrentBanned) }
+
+func (b *Bot) aoiTorrentBanned(ctx context.Context, e events.Event) error {
+	if e.TgID == 0 {
+		return nil
+	}
+	var t events.TorrentBan
+	if err := json.Unmarshal(e.Data, &t); err != nil || t.Until == 0 {
+		return nil
+	}
+	u, err := b.d.Backend.User(ctx, e.UserID)
+	if err != nil {
+		if gone(err) {
+			return nil
+		}
+		return err
+	}
+	cfg := b.config(ctx)
+	w := wordsFor(cfg.Lang)
+	text, kb := torrentNotice(w, u, t, b.subURL(ctx, u))
+	silent, chat := cfg.QuietNight && night(b.d.Now()), e.TgID
+	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgapi.Client) error {
+		_, err := c.Send(ctx, chat, text, kb, silent)
+		return err
+	}, nil)
+	return nil
+}
+
+func torrentNotice(w *words, u model.User, t events.TorrentBan, subURL string) (string, *tgapi.Keyboard) {
+	until := model.Time(t.Until).In(textutil.Zone).Format("15:04")
+	name := html.EscapeString(subName(u))
+	var text string
+	if w == &en {
+		text = fmt.Sprintf("⚠️ <b>Torrent traffic noticed</b>\n\n"+
+			"Subscription «%s» is paused for %d min, until %s MSK: torrents are not allowed through our servers.\n\n"+
+			"In <b>AoiVPN</b> torrents go past the VPN by themselves — install it so this does not happen again "+
+			"(<a href=\"https://api.aoimusic.ru/api/version/download?platform=aoivpn\">Android</a> · "+
+			"<a href=\"https://api.aoimusic.ru/api/version/download?platform=aoivpn&amp;os=windows\">Windows</a>).\n\n"+
+			"Not downloading torrents? Look for an app using P2P/DHT: torrent clients, some players and game launchers.",
+			name, t.Minutes, until)
+	} else {
+		text = fmt.Sprintf("⚠️ <b>Замечен торрент-трафик</b>\n\n"+
+			"Подписка «%s» приостановлена на %d мин, до %s МСК: качать торренты через наши серверы нельзя.\n\n"+
+			"В <b>AoiVPN</b> торренты сами идут мимо VPN — установите его, чтобы такого больше не было "+
+			"(<a href=\"https://api.aoimusic.ru/api/version/download?platform=aoivpn\">Android</a> · "+
+			"<a href=\"https://api.aoimusic.ru/api/version/download?platform=aoivpn&amp;os=windows\">Windows</a>).\n\n"+
+			"Не качали торренты? Проверьте приложения с P2P/DHT: торрент-клиенты, некоторые плееры и лаунчеры игр.",
+			name, t.Minutes, until)
+	}
+	return text, &tgapi.Keyboard{InlineKeyboard: aoiConnectRows(w, subURL)}
+}

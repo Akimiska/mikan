@@ -72,7 +72,7 @@ merge — обязательный чек-лист из §6.
 
 ---
 
-## 3. Инвентарь fork-различий (на 22.10.2026, после merge v0.5.1.1-rc.13)
+## 3. Инвентарь fork-различий (на 22.10.2026, после merge v0.5.1.1-rc.15)
 
 ### 3.1 Подписка (`internal/panel/subs/`)
 
@@ -112,7 +112,7 @@ merge — обязательный чек-лист из §6.
 
 - Telegram-identity в списке People + состояние `no_subscription` (`NULL expires_at` = «без подписки», не «active»): `2350e33`, `3284450`, `379d11f`, `371e95c` (openapi) — ✅ в main.
 - Версия форка в сайдбаре («AoiVPN · форк mikan X»), ручная проверка ядер протоколов нод: `23e1963`.
-- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` → тег образа + версия в сайдбаре. Схема с 21.10: **`<версия апстрима>.aoi.<N>`** через точку внутри pre-release (сейчас `0.5.1.1-rc.13.aoi.3`): по semver она новее своей базы rc.13 и старше rc.14/0.5.1.1, т.е. честно показывает, на каком апстриме форк. Новый мерж апстрима → база меняется, N=1; fork-релиз без мержа → N+1. НЕ через дефис (`rc.11-aoi.1`): `11-aoi` — буквенный идентификатор и обгонит любой числовой rc. Раньше форк «спешил» (0.5.1.3 при апстриме 0.5.1.1-rc.x) — это была защита от апдейтера, теперь её роль играет блокировка ниже.
+- Версия форка: `FORK_VERSION` в `.github/workflows/aoi-image.yml` → тег образа + версия в сайдбаре. Схема с 21.10: **`<версия апстрима>.aoi.<N>`** через точку внутри pre-release (сейчас `0.5.1.1-rc.15.aoi.1`): по semver она новее своей базы rc.13 и старше rc.14/0.5.1.1, т.е. честно показывает, на каком апстриме форк. Новый мерж апстрима → база меняется, N=1; fork-релиз без мержа → N+1. НЕ через дефис (`rc.11-aoi.1`): `11-aoi` — буквенный идентификатор и обгонит любой числовой rc. Раньше форк «спешил» (0.5.1.3 при апстриме 0.5.1.1-rc.x) — это была защита от апдейтера, теперь её роль играет блокировка ниже.
 - **Блокировка апдейтера** (`internal/panel/updates/updates.go`, `forkLocked`/`ErrForkManual`): панель показывает, что вышло у апстрима, но `Request()` не пишет файл-запрос для хоста (API → 409 `update_fork_manual`), а `policy.json` всегда `auto:false`. Тест `TestForkLocked`. Не удалять при мерже.
 - CI апстрима `goals.yml`/`pages.yml` (подписанный индекс релизов, сайт) в форке выключены условием `github.repository == 'Miroshka000/mikan'`.
 - Брендинг AoiVPN (логотип/название/favicon вместо mikan) — см. §4.
@@ -163,8 +163,14 @@ merge — обязательный чек-лист из §6.
 - Свои таблицы `aoi_ref_codes`, `aoi_referrals`, `aoi_ref_bank` (создаёт пакет). Фоновый цикл `Referrals.Run` (5 мин) в workers панели.
 - Бот: `Backend.Referral/Refer` (Local + Remote + rpc-ошибка `referral_invalid`; с rc.12 ещё белый список RPC аддона — `addons/panelapi/aoi_botrpc.go`, без него «the method is not open to addons»), `/start ref-…` в `bot.go`, встроенная кнопка `invite` (config.go: builtins, Default, enum; screens.go: меню + `case "rf"`), экран и тексты — `tgbot/aoi_referral.go`; админка: `ACTIONS` в `web/src/admin/pages/telegram.tsx`, `telegram.action.invite` в i18n, enum в `openapi.json`/`schema.d.ts`. При мерже: `grep -rn "aoiref\|invite" internal/panel/tgbot/*.go web/src/admin/pages/telegram.tsx`.
 
-### 3.8 Антиторрент только для клиентов без правил (с 0.5.1.1-rc.13.aoi.3)
+### 3.8 Антиторрент только для клиентов без правил (с 0.5.1.1-rc.15.aoi.1)
 `nodesync/aoi_torrent.go` + `subs/aoi_rules.go`: при загрузке настроек антиторрента (снапшот и пуллер срабатываний) в `Exempt` автоматически добавляются пользователи, у которых ВСЕ приложения из `bound_devices` за последние 7 дней — клиенты с правилами подписки (`subs.ClientRules`: mihomo, Stash, официальный sing-box SFA/SFI/SFM/SFT, голый `sing-box/1.x` = naive-помощник AoiVPN <0.3.1). У них торренты уходят DIRECT по правилу «Торренты» профиля. Хоть одно приложение на v2rayNG/Happ/INCY/прочем → под блокировкой. Не приложения (браузер Mozilla, curl, vkShare и т.п. боты, строка без версии) не учитываются; без приложений за неделю → под блокировкой. Нода не различает приложения (общие ключи), поэтому решение по пользователю. При мерже апстрима — сохранить вызовы `withRuleClientsExempt` в `snapshot.go` и `torrent.go`.
+
+### 3.9 Уведомление о торрент-бане (с 0.5.1.1-rc.15.aoi.1)
+Когда антиторрент банит пользователя (`nodesync/torrent.go` → `emitTorrentBan` в `aoi_torrent.go`), в ленту пишется событие `events.TorrentBanned` = `aoi.torrent_banned` (`events/aoi_types.go`) с tg_id из `tg_links`; дедуп — не чаще раза в час на пользователя. Бот (`tgbot/aoi_torrent.go`, init добавляет тип в `EventTypes`, case в `HandleEvent`) шлёт «Замечен торрент-трафик … до HH:MM МСК» + ссылки на AoiVPN и кнопку «⚡ Открыть в AoiVPN». Обновление образа бот-аддона обязательно — иначе он не запрашивает новый тип.
+
+### 3.10 Merge rc.15 (22.10.2026)
+Конфликты: `subs/handler.go` (форк Bypass/NodeOrder/ProtoOrder + апстрим `ps` для групп серверов Mikan), `api/nodes.go` (форк Core + апстрим Cascade), `web/index.html` (апстрим PWA-манифест, форк title AoiVPN). Имя PWA панели по умолчанию = бренд (AoiVPN).
 
 ## 4. Брендинг (правила с 18.10.2026)
 

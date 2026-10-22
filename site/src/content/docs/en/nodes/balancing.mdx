@@ -1,0 +1,37 @@
+---
+title: Load balancing
+description: 'Groups of nodes that share their clients: places on a node, keeping a client on one node and redistributing.'
+---
+
+:::note[In beta 0.5.1.1]
+Balancing is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+Usually a client gets the protocols of every node in the subscription. When you have several nodes in one country or at one provider, you can put them into a **group**: the group's clients are shared out between its nodes, each client is kept on one node of the group and sees only that one in the subscription. The load spreads over the servers instead of landing on the first one in the list.
+
+## Make a group
+
+In **Nodes → the node → Configure** the **Load balancing** block:
+
+- **Group**: a name, for example "Europe". Nodes with the same name share their clients. Letters, digits, a space and `_ . -`, up to 40 characters. Empty: the node is in no group, every client gets it, as before.
+- **Places**: how many clients the node takes. A whole number from 1. Empty: no limit.
+
+Balancing does not touch nodes outside groups. You can keep a group "Europe" of three nodes and a separate node "USA" with no group beside it: a client gets one node of the group "Europe" and the node "USA".
+
+## How a client lands on a node
+
+- A client is kept on a node of the group when it first asks for the subscription. The node with the most room is picked: the one with the lowest share of places taken, and for a node with no limit the number of clients counts. On a tie the node with the lower number wins.
+- In the subscription the client sees the protocols of that node only (of this group), the group's other nodes are not shown to it.
+- Only enabled nodes count. When a node of a group is turned off, its clients leave it at their next subscription update.
+- A client stays on its node until the node is turned off, deleted or taken out of the group, or until you press "Redistribute".
+- When no places are left anywhere, a new client still gets the node with the most room, and the group gets a "full" mark.
+
+## Load and redistributing
+
+When the panel has at least one group, the **Nodes** page gets a **Load balancing** card at the top. For each group it shows the nodes, the number of clients kept on them ("N of M" or "N, no limit") and a fill bar.
+
+The **Redistribute** button forgets where the group's clients sit: each is placed again on the node with the most room at their next subscription update. The app has to update the subscription to get the new server, so clients move not at once. Use it when you added a node to a group or changed the places and want to even out the load: new nodes do not take old clients by themselves.
+
+## API
+
+`GET /api/v1/balance` (groups and the load of nodes), `PUT /api/v1/nodes/{id}/balance` (a node's group and places), `POST /api/v1/balance/{group}/redistribute` (redistribute a group).

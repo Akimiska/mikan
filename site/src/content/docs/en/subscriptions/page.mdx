@@ -39,6 +39,8 @@ Apps refresh the subscription hourly, which is how new ports and keys reach clie
 - **Support**: a Telegram or website link.
 - **Devices**: binding a subscription to devices, see [Plans and users](/mikan/en/billing/plans/#devices).
 - **Subscription port**: see [Domain and certificates](/mikan/en/start/domain/#subscription-port).
+- **A domain of its own for subscriptions** (beta 0.5.1.1): see [A domain of its own for subscriptions](/mikan/en/subscriptions/domain/).
+- **When a subscription does not work** (beta 0.5.1.1): an entry in place of the servers, see [below](#when-a-subscription-does-not-work).
 
 ## Subscription name in apps
 
@@ -53,12 +55,36 @@ The **Subscription name in apps** field sets the profile name that Happ, v2RayTu
 | `{used}` | traffic used |
 | `{left}` | traffic left; ∞ if unlimited |
 | `{total}` | traffic limit including packages; ∞ if unlimited |
+| `{devices}` | how many devices are bound, "2/3" with a limit |
+| `{tariff}` | the user's plan name; empty if there is no plan (beta 0.5.1.1) |
 
 For example, `{brand} · until {date}` becomes "mikan · until 10.11.2026". An unknown word in curly braces is left as is, and the result is capped at 200 characters.
 
 ## Announcement
 
 The **Announcement** and **Announcement link** (https:// or tg://) are shown inside Happ, v2RayTun and ClashFest. The variables from the table above work here too.
+
+## When a subscription does not work
+
+:::note[In beta 0.5.1.1]
+The notice in place of the servers is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+When the term or traffic is over or the subscription is turned off, an app used to show every server, but none of them connected. Now **Settings → Subscription** has a **When a subscription does not work** card. The **Show a notice in place of the servers** switch replaces the list of servers with one entry that explains what happened and what to do.
+
+While the switch is off, the client sees every server, as before. On, it gives an entry by the reason:
+
+- the term is over: the subscription must be renewed in the bot;
+- the traffic is used up: buy more traffic or renew in the bot;
+- the subscription is turned off: write to support.
+
+The **Own text** field replaces these words with yours. Empty: the words by the reason. The variables from the table above work in the text, for example `{tariff}`, up to 120 characters. An example: `⛔ Plan {tariff} has ended, renew in @your_bot`. The subscription page in a browser does not change: it still shows the term, traffic and devices.
+
+The `{tariff}` variable works in the subscription name and the announcement too, not only in the notice.
+
+## A domain of your own for links
+
+Subscription links can be built on a separate domain with its own certificate, see [A domain of its own for subscriptions](/mikan/en/subscriptions/domain/).
 
 ## Your brand in the apps
 

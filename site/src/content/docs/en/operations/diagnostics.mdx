@@ -34,6 +34,22 @@ The [Globalping](https://globalping.io) service does the check: its points in ho
 The server's address goes to Globalping. The check sees a block of the IP and the port, not a block by protocol and not the whitelists of mobile operators. Without a key Globalping gives about 250 checks an hour from one address; the result is kept for 2 minutes, and one check runs at a time.
 :::
 
+## Geo bases
+
+:::note[In beta 0.5.1.1]
+The geo base check is new in beta 0.5.1.1. How to get the beta: [Updates](/mikan/en/operations/updates/#beta-versions).
+:::
+
+Sites and apps tell a client's country by geo bases, and the bases often disagree. If one base puts your server's IP in another country, a service shows the wrong region or refuses. The **Geo bases** tab shows what the bases think of an address.
+
+Enter the server's IP or domain (the hint offers your nodes' addresses) and press "Check the geo bases". The panel asks ten public bases (MaxMind, ipinfo.io, IP2Location and others), which takes up to ten seconds. The result in one line: "All N bases put the address in: country" or "The bases disagree: country by N of M". Below, each base with its answer, the ones that disagree are marked. A base that did not answer is marked too: did not answer in time, a request limit or no answer. The result of a recent check is shown from the cache.
+
+:::caution[What this check does not see]
+The server's address goes to public geo bases. How services such as YouTube or Netflix see the IP is not shown: they have bases of their own.
+:::
+
+For nodes the same check is in the "Check node" window, see [Nodes](/mikan/en/nodes/nodes/#country-in-the-geo-bases).
+
 ## Terminal
 
 The tab appears for an operator with "Terminal" level access and only for the servers you ticked for it. Details and limits are in [Support access](/mikan/en/operations/support-access/#terminal).

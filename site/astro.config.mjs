@@ -76,13 +76,21 @@ export default defineConfig({
 				{
 					label: 'Ноды',
 					translations: { en: 'Nodes' },
-					items: [{ slug: 'nodes/nodes' }, { slug: 'nodes/cascades' }, { slug: 'nodes/warp' }],
+					items: [
+						{ slug: 'nodes/nodes' },
+						{ slug: 'nodes/balancing' },
+						{ slug: 'nodes/shared-443' },
+						{ slug: 'nodes/hardening' },
+						{ slug: 'nodes/cascades' },
+						{ slug: 'nodes/warp' },
+					],
 				},
 				{
 					label: 'Протоколы',
 					translations: { en: 'Protocols' },
 					items: [
 						{ slug: 'protocols/presets' },
+						{ slug: 'protocols/cdn' },
 						{ slug: 'protocols/autotune' },
 						{ slug: 'protocols/behind-proxy' },
 						{ slug: 'protocols/xhttp-masking' },
@@ -93,6 +101,7 @@ export default defineConfig({
 					translations: { en: 'Subscriptions and apps' },
 					items: [
 						{ slug: 'subscriptions/page' },
+						{ slug: 'subscriptions/domain' },
 						{ slug: 'subscriptions/happ' },
 						{ slug: 'subscriptions/routing' },
 					],
@@ -105,6 +114,8 @@ export default defineConfig({
 						{ slug: 'billing/pools' },
 						{ slug: 'billing/telegram' },
 						{ slug: 'billing/payments' },
+						{ slug: 'billing/balance' },
+						{ slug: 'billing/campaigns' },
 						{ slug: 'billing/promo-codes' },
 					],
 				},
@@ -117,6 +128,8 @@ export default defineConfig({
 						{ slug: 'operations/import' },
 						{ slug: 'operations/alerts' },
 						{ slug: 'operations/diagnostics' },
+						{ slug: 'operations/filters' },
+						{ slug: 'operations/front-page' },
 						{ slug: 'operations/community-addons' },
 						{ slug: 'operations/support-access' },
 						{ slug: 'operations/cli' },

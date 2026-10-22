@@ -459,6 +459,7 @@ func (g *Gateway) poll(ctx context.Context, c *tgapi.Client) {
 	offset := g.loadOffset(ctx, me.ID)
 	fails := map[int64]int{} // update → times it failed to be handled
 	failedPolls := 0
+	var lastPollLog time.Time
 	var conflictSince time.Time // another program polls this token (or set a webhook) since
 	conflictTold := false
 	for ctx.Err() == nil {
@@ -487,6 +488,10 @@ func (g *Gateway) poll(ctx context.Context, c *tgapi.Client) {
 				}
 			}
 			g.setStatus(func(s *Status) { s.Error = code })
+			if failedPolls == 0 || time.Since(lastPollLog) > time.Minute { // AoiVPN fork: seen in the log
+				lastPollLog = time.Now()
+				g.d.Log.Warn("telegram: getUpdates failed", "err", code, "in_a_row", failedPolls+1)
+			}
 			pace.Sleep(ctx, pollPause.Next(failedPolls))
 			failedPolls++
 			continue
@@ -533,7 +538,9 @@ var updateRetryPause = 2 * time.Second
 
 // pollPause is how long the poll waits after a getUpdates that failed: a second, then twice
 // that for every failure in a row, up to a minute.
-var pollPause = pace.Backoff{Base: time.Second, Max: time.Minute}
+// AoiVPN fork: at most 5 s — the panel's server loses Telegram for short spells, and a pause
+// grown to a minute kept the bot silent long after the way was back.
+var pollPause = pace.Backoff{Base: time.Second, Max: 5 * time.Second}
 
 func triesOf(up tgapi.Update) int {
 	if paymentOf(up) != nil {

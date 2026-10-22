@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"mikan/internal/panel/aoiapp"
 	"mikan/internal/panel/aoiref"
+	"mikan/internal/panel/aoitrial"
 	"net"
 	"net/http"
 	"net/netip"
@@ -77,10 +78,12 @@ type Panel struct {
 	Billing  *billing.Service
 	// Referrals is the AoiVPN fork's referral programme (aoiref).
 	Referrals *aoiref.Service
-	Updates   *updates.Checker
-	Alerts    *infraalerts.Monitor
-	Backups   *tgbackup.Service
-	Importer  *panelimport.Importer
+	// Trials deletes the expired trials (AoiVPN fork, aoitrial).
+	Trials   *aoitrial.Service
+	Updates  *updates.Checker
+	Alerts   *infraalerts.Monitor
+	Backups  *tgbackup.Service
+	Importer *panelimport.Importer
 	// Support keeps the support access grants; the operator's terminal hooks into it.
 	Support   *support.Service
 	Addons    *addons.Manager
@@ -322,6 +325,8 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 				return err
 			})
 		}})
+	p.Trials = aoitrial.New(aoitrial.Deps{Store: st, Users: deps.Users, Now: o.Now, Log: o.Log,
+		TrialTariff: func(ctx context.Context) int64 { return p.Billing.Config(ctx).TrialTariffID }})
 	backend := &botpanel.Local{Referrals: p.Referrals, Store: st, Settings: set, Binder: deps.Devices, Users: deps.Users, Billing: p.Billing, Gateway: p.Gateway, SubBase: subBase, Now: o.Now,
 		// Telegram apps refuse a Mini App on a self-signed certificate.
 		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }}
@@ -653,7 +658,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.NodeUpdates != nil {
 		workers = append(workers, p.NodeUpdates.Run)
 	}
-	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.Referrals.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
+	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.Referrals.Run, p.Trials.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			pace.Tick(ctx, 5*time.Second, func(ctx context.Context) {
 				if _, err := p.Apply(ctx); err != nil {

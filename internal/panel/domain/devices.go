@@ -149,7 +149,7 @@ func (d *Devices) bind(ctx context.Context, u db.User, hwid string, in DeviceInf
 	// The usual request: a known device, nothing new about it. Read, no write.
 	if dev, err := d.st.Q.GetBoundDevice(ctx, db.GetBoundDeviceParams{UserID: u.ID, Hwid: hwid}); err == nil &&
 		now-dev.LastSeen < int64(touchEvery/time.Second) && now >= dev.LastSeen &&
-		same(os, dev.Os) && same(osv, dev.OsVersion) && same(model, dev.Model) && same(app, dev.App) && same(ip, dev.LastIp) {
+		same(os, dev.Os) && same(osv, dev.OsVersion) && same(model, dev.Model) && same(aoiApp(app, dev.App), dev.App) && same(ip, dev.LastIp) {
 		slot, err = d.st.Q.GetSlot(ctx, dev.SlotID)
 		return slot, false, err
 	}
@@ -166,7 +166,7 @@ func (d *Devices) bind(ctx context.Context, u db.User, hwid string, in DeviceInf
 				return v
 			}
 			if err := q.TouchBoundDevice(ctx, db.TouchBoundDeviceParams{Os: keep(os, dev.Os), OsVersion: keep(osv, dev.OsVersion), Model: keep(model, dev.Model),
-				App: keep(app, dev.App), LastIp: keep(ip, dev.LastIp), LastSeen: now, ID: dev.ID}); err != nil {
+				App: keep(aoiApp(app, dev.App), dev.App), LastIp: keep(ip, dev.LastIp), LastSeen: now, ID: dev.ID}); err != nil {
 				return err
 			}
 			slot, err = q.GetSlot(ctx, dev.SlotID)

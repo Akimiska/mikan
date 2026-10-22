@@ -187,6 +187,9 @@ func (c *clientBuilder) finishExtra() (Client, bool) {
 			alpn = []string{"h3"}
 		}
 		c.y["username"], c.y["password"], c.y["sni"], c.y["alpn"], c.y["udp"] = s.Name, s.Secret, sni, alpn, true
+		// AoiVPN fork: UDP inside a QUIC stream instead of datagrams, as the legacy
+		// subscription had it — loose datagrams were what got dropped on RF networks.
+		c.y["udp-over-stream"] = true
 		return Client{Mihomo: c.y}, true
 	case "mieru":
 		// The Citrus server knows who sends UDP over Mieru (mihomo's did not).

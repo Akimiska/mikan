@@ -2196,8 +2196,27 @@
       "placeholder": "⛔ The subscription has ended — renew in @your_bot"
     },
     "site": {
-      "title": "Front page",
-      "sub": "What a stranger sees at the panel's address. A bare 404 gives the server away; an ordinary page makes it look like a site.",
+      "title": "Page for strangers",
+      "sub": "What a stranger sees instead of a bare 404: at the panel's address and on the nodes. A bare 404 gives the server away; an ordinary page makes it look like a site.",
+      "forAll": "For the panel and every node",
+      "mixed": "The panel and the nodes have different pages now: see each one below.",
+      "each": "One by one",
+      "panel": "Panel",
+      "pageOf": "Page: {name}",
+      "short": {
+        "none": "None",
+        "maintenance": "Maintenance",
+        "cats": "Cats"
+      },
+      "nodeOld": "The node runs {version}: it shows the page once updated",
+      "nodeHint": "A node gives the page on VLESS and Trojan over XHTTP, WebSocket or gRPC, and with the shared port 443 on its own domain too.",
+      "failed": "Not saved for {names}: {error}",
+      "allNodes": "All nodes ({n})",
+      "nodesTitle": "The nodes' pages",
+      "nodesMeta": "{n, plural, one {# node} other {# nodes}}",
+      "search": "Find a node by name",
+      "notFound": "Nothing found",
+      "notFoundText": "Try a part of the name or the country.",
       "own": "data/panel/www holds files of your own: they are shown, the chosen template does not apply.",
       "option": {
         "none": "Empty (404)",
@@ -2209,7 +2228,7 @@
         "maintenance": "A “Scheduled maintenance” page: the site is down for upkeep and back soon.",
         "cats": "A small game: pet the cat and collect treats. Progress stays in the visitor's browser."
       },
-      "open": "Open the front page"
+      "open": "Open the panel's page"
     },
     "detail": {
       "title": "Where clients go",
@@ -2526,10 +2545,10 @@
     "apiAllowMany": "16 addresses at most",
     "apiLockFailed": "The node closes the port itself, but its server's firewall has no rule: {error}",
     "frontPage": "Front page for strangers",
-    "frontPageHint": "What a stranger who opens the server in a browser sees instead of a bare 404: VLESS and Trojan on XHTTP, WebSocket or gRPC give this page on any domain of theirs.",
+    "frontPageHint": "What a stranger who opens the server in a browser sees instead of a bare 404: VLESS and Trojan on XHTTP, WebSocket or gRPC give this page on any domain of theirs. For every node at once: Settings → Security.",
     "frontPageNone": "None",
     "frontPageMaintenance": "Maintenance",
-    "frontPageCats": "Cats clicker",
+    "frontPageCats": "Cat clicker",
     "frontPageRouter": "With the shared port 443 the node's domain and a request with no name get it too: the node's real certificate, TLS 1.2 or later, HSTS. A domain a protocol on the shared 443 takes stays with the protocol and shows the page too if it is XHTTP, WebSocket or gRPC."
   },
   "telegram": {
@@ -4475,6 +4494,8 @@
   "audit": {
     "title": "Activity log",
     "sub": "What was done in the panel over the last 180 days: sign-ins, support access, changes of clients, servers and settings. Newest first.",
+    "all": "Whole log",
+    "meta": "The last 180 days, newest first",
     "empty": "No entries yet",
     "emptyText": "Sign-ins to the panel and everything changed in it will show up here.",
     "details": "Details",

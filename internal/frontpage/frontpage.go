@@ -16,14 +16,24 @@ var Templates = []string{"maintenance", "cats"}
 
 // Page is the built-in page called name; nil for none ("" included).
 func Page(name string) []byte {
-	if !slices.Contains(Templates, name) {
+	file := File(name)
+	if file == "" {
 		return nil
 	}
-	b, err := pages.ReadFile(name + ".html")
+	b, err := pages.ReadFile(file)
 	if err != nil {
 		return nil
 	}
 	return b
+}
+
+// File is the file of the built-in page called name ("cats.html"), named from Templates and
+// not from name, so a path made of it holds no name a caller sent; "" for none.
+func File(name string) string {
+	if i := slices.Index(Templates, name); i >= 0 {
+		return Templates[i] + ".html"
+	}
+	return ""
 }
 
 // Serve answers "/" (and /index.html) with page, any other path with a plain 404, as a

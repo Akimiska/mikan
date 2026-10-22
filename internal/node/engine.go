@@ -339,7 +339,7 @@ func (e *Engine) apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 	// router's names get it from the page held in memory (front.go).
 	front := ""
 	if page := frontpage.Page(st.FrontPage); page != nil {
-		front = filepath.Join(e.home, "front", st.FrontPage+".html")
+		front = filepath.Join(e.home, "front", frontpage.File(st.FrontPage))
 		if err := os.MkdirAll(filepath.Dir(front), 0o755); err != nil {
 			return nodeapi.ApplyResult{}, err
 		}

@@ -1,12 +1,44 @@
 package node
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"mikan/internal/frontpage"
 	"mikan/internal/nodeapi"
 	"mikan/internal/proto"
 )
+
+// Apply writes the chosen page under the core's home, named after the template; a name that
+// is none of the templates writes no file, there or above it.
+func TestFrontPageFile(t *testing.T) {
+	dir := t.TempDir()
+	e, err := Start(Options{DataDir: dir, Version: "test", Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = e.Apply(nodeapi.DesiredState{Revision: 99}) })
+	if _, err := e.Apply(nodeapi.DesiredState{Revision: 1, FrontPage: "cats"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "mihomo", "front", "cats.html")); err != nil || !bytes.Equal(got, frontpage.Page("cats")) {
+		t.Fatalf("the page's file: %v", err)
+	}
+	if _, err := e.Apply(nodeapi.DesiredState{Revision: 2, FrontPage: "../../escape"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "escape.html")); err == nil {
+		t.Fatal("a file out of the front pages")
+	}
+	if files, _ := os.ReadDir(filepath.Join(dir, "mihomo", "front")); len(files) != 1 {
+		t.Fatalf("front pages: %v", files)
+	}
+}
 
 // The front page goes to the inbounds on an HTTP transport, VLESS and Trojan, as their
 // fallback-page; a plain VLESS and the other protocols take none, and with no page none has

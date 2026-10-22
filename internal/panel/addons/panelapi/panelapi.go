@@ -142,6 +142,10 @@ func New(d Deps) *Server {
 			for k, v := range rec.header {
 				w.Header()[k] = v
 			}
+			// The RPC answers JSON alone (botpanel.RPCHandler): said so whatever the handler
+			// set, so that nothing reads an answer that echoes a method's name as a page.
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.WriteHeader(rec.status)
 			_, _ = w.Write(rec.body.Bytes())
 		})

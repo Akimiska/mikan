@@ -17,3 +17,13 @@ func TestTorrentNotice(t *testing.T) {
 		}
 	}
 }
+
+func TestTorrentSupportKeyboard(t *testing.T) {
+	if kb := torrentSupportKeyboard(&ru, ""); kb != nil {
+		t.Errorf("no support link must give no keyboard, got %+v", kb)
+	}
+	kb := torrentSupportKeyboard(&ru, "https://t.me/aoisupport")
+	if kb == nil || kb.InlineKeyboard[0][0].URL != "https://t.me/aoisupport" {
+		t.Errorf("keyboard = %+v, want the support button", kb)
+	}
+}

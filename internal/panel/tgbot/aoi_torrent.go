@@ -35,11 +35,12 @@ func (b *Bot) aoiTorrentBanned(ctx context.Context, e events.Event) error {
 	cfg := b.config(ctx)
 	w := wordsFor(cfg.Lang)
 	text := torrentNotice(w, u, t)
+	kb := torrentSupportKeyboard(w, b.supportURL(ctx))
 	silent, chat := cfg.QuietNight && night(b.d.Now()), e.TgID
 	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgapi.Client) error {
-		// Без кнопок: сообщение получают клиенты без правил (v2rayNG, Happ) — AoiVPN у них
-		// ещё нет, открывать нечего; ссылки на скачивание — в тексте.
-		_, err := c.Send(ctx, chat, text, nil, silent)
+		// Без «Открыть в AoiVPN»: сообщение получают клиенты без правил (v2rayNG, Happ) —
+		// AoiVPN у них ещё нет; ссылки на скачивание — в тексте. Кнопка — только поддержка.
+		_, err := c.Send(ctx, chat, text, kb, silent)
 		return err
 	}, nil)
 	return nil
@@ -66,4 +67,16 @@ func torrentNotice(w *words, u model.User, t events.TorrentBan) string {
 			t.Minutes, until)
 	}
 	return text
+}
+
+// torrentSupportKeyboard: «это ошибка» ведёт в поддержку панели (её настройка); без неё — без кнопок.
+func torrentSupportKeyboard(w *words, support string) *tgapi.Keyboard {
+	if support == "" {
+		return nil
+	}
+	label := "💬 Это ошибка — написать в поддержку"
+	if w == &en {
+		label = "💬 A mistake? Contact support"
+	}
+	return &tgapi.Keyboard{InlineKeyboard: [][]tgapi.Button{{{Text: label, URL: support}}}}
 }

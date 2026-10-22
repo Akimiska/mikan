@@ -35,16 +35,18 @@ func (b *Bot) aoiTorrentBanned(ctx context.Context, e events.Event) error {
 	}
 	cfg := b.config(ctx)
 	w := wordsFor(cfg.Lang)
-	text, kb := torrentNotice(w, u, t, b.subURL(ctx, u))
+	text := torrentNotice(w, u, t)
 	silent, chat := cfg.QuietNight && night(b.d.Now()), e.TgID
 	b.d.Outbox.Notice(chat, func(ctx context.Context, c *tgapi.Client) error {
-		_, err := c.Send(ctx, chat, text, kb, silent)
+		// Без кнопок: сообщение получают клиенты без правил (v2rayNG, Happ) — AoiVPN у них
+		// ещё нет, открывать нечего; ссылки на скачивание — в тексте.
+		_, err := c.Send(ctx, chat, text, nil, silent)
 		return err
 	}, nil)
 	return nil
 }
 
-func torrentNotice(w *words, u model.User, t events.TorrentBan, subURL string) (string, *tgapi.Keyboard) {
+func torrentNotice(w *words, u model.User, t events.TorrentBan) string {
 	until := model.Time(t.Until).In(textutil.Zone).Format("15:04")
 	name := html.EscapeString(subName(u))
 	var text string
@@ -65,5 +67,5 @@ func torrentNotice(w *words, u model.User, t events.TorrentBan, subURL string) (
 			"Не качали торренты? Проверьте приложения с P2P/DHT: торрент-клиенты, некоторые плееры и лаунчеры игр.",
 			name, t.Minutes, until)
 	}
-	return text, &tgapi.Keyboard{InlineKeyboard: aoiConnectRows(w, subURL)}
+	return text
 }

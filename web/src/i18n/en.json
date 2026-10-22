@@ -2959,7 +2959,7 @@
     "trialsGiven": "Trials given: {n}",
     "trialPrice": "Trial price",
     "free": "Free plan",
-    "freeSub": "A “Free plan” button in the bot and the Mini App: a subscription on the chosen plan. It can be taken again once the account's previous free subscription has ended. Works with selling off too.",
+    "freeSub": "A “Free plan” button in the bot and the Mini App: a subscription on the chosen plan, one at a time per account, the trial counted. It can be taken again once the account's previous free subscription and its trial have ended. Works with selling off too.",
     "freeOff": "Off",
     "freeGiven": "Free subscriptions given: {n}",
     "freeCondition": "Condition",

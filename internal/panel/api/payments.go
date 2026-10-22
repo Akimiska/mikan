@@ -26,7 +26,7 @@ type PaymentSettingsView struct {
 	TrialStars         int64           `json:"trial_stars" doc:"Цена пробного периода в Stars; 0 вместе с trial_rub — бесплатно"`
 	TrialRub           int64           `json:"trial_rub" doc:"Цена пробного периода в копейках; с ценой пробный период покупают один раз в боте и Mini App, нужна включённая продажа"`
 	Trials             int64           `json:"trials" doc:"Сколько пробных подписок выдано"`
-	FreeTariffID       *int64          `json:"free_tariff_id" doc:"Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась; null: бесплатного тарифа нет. Работает и при выключенной продаже"`
+	FreeTariffID       *int64          `json:"free_tariff_id" doc:"Тариф бесплатного тарифа: кнопка в боте и Mini App, снова взять можно, когда прошлая бесплатная подписка аккаунта закончилась, и не пока идёт его пробный период; null: бесплатного тарифа нет. Работает и при выключенной продаже"`
 	FreeCondition      string          `json:"free_condition" enum:"none,channel" doc:"Условие бесплатного тарифа: none: без условий, channel: подписка на канал бота (Telegram → Меню и тексты)"`
 	FreePlans          int64           `json:"free_plans" doc:"Сколько бесплатных подписок выдано"`
 	ExtraDevicesKeep   bool            `json:"extra_devices_keep" doc:"Докупленные устройства остаются при продлении, и продление стоит дороже на их цену; иначе они действуют до конца срока"`

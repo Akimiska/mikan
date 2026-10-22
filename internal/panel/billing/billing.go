@@ -70,8 +70,9 @@ type Config struct {
 	TrialStars int64 `json:"trial_stars,omitempty"`
 	TrialRub   int64 `json:"trial_rub,omitempty"`
 	// FreeTariffID is the tariff of the free plan (free.go): unlike the trial, an account
-	// takes it again once its previous free subscription has ended; 0: no free plan. It
-	// takes no payment, so it works with selling off too.
+	// takes it again once its previous free subscription has ended, and the trial's counts
+	// as one while it runs; 0: no free plan. It takes no payment, so it works with selling
+	// off too.
 	FreeTariffID int64 `json:"free_tariff_id,omitempty"`
 	// FreeCondition is what the free plan asks of an account: FreeNoCondition, or
 	// FreeChannel, a subscription to the bot's channel.

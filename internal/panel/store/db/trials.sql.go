@@ -21,6 +21,18 @@ func (q *Queries) CountTrials(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const getTrialUser = `-- name: GetTrialUser :one
+SELECT user_id FROM trials WHERE tg_id = $1
+`
+
+// The subscription the account's trial gave, NULL once it is deleted; no row: no trial.
+func (q *Queries) GetTrialUser(ctx context.Context, tgID int64) (sql.NullInt64, error) {
+	row := q.db.QueryRowContext(ctx, getTrialUser, tgID)
+	var user_id sql.NullInt64
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const hasTrial = `-- name: HasTrial :one
 SELECT EXISTS (SELECT 1 FROM trials WHERE tg_id = $1)
 `

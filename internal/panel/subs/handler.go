@@ -440,6 +440,12 @@ func forApp(ins []db.Inbound, app App, state string) []db.Inbound {
 // slotFor is whose keys this request gets: its device's own with binding on, the user's
 // otherwise.
 func (h *Handler) slotFor(r *http.Request, u db.User, cfg Config) (db.Slot, error) {
+	// AoiVPN fork: a browser, curl or a link-preview bot is not a device — it took the
+	// subscription's place (and a place in the device limit) when someone only opened the
+	// link (aoi_rules.go). It gets the user's keys as without binding.
+	if client, _ := ClientRules(r.Header.Get("User-Agent")); !client {
+		cfg.Binding = false
+	}
 	if !cfg.Binding || h.devices == nil {
 		// Without binding every device shares the user's keys, yet a device the admin banned
 		// while binding was on still gets none.

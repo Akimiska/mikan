@@ -22,6 +22,24 @@ Next to an addon are the stars of its repository and how many times its image wa
 
 An addon from the registry runs as any unofficial addon: in its own container, on the bridge network, with the permissions you approved. `users:all` and `users:grant` give an addon every subscriber: such addons enter the registry only after a pull request is reviewed by hand, and that is still no review of the code.
 
+## Permissions for addons that look after the servers
+
+:::note[New in 0.5.2.0]
+The permissions `nodes:read`, `inbounds:read` and `inbounds:write` are new in 0.5.2.0, in protocol 2. An older panel does not run an addon that asks for them.
+:::
+
+An addon that looks after the servers (for example, moves a blocked protocol to another port) asks for permissions in its description, and you approve them in the install window like any others. These three permissions give access to the panel's addon API (`/panel/v2`):
+
+| Permission | Method | What it gives |
+|---|---|---|
+| `nodes:read` | `GET /panel/v2/nodes` | a list of nodes **without addresses, keys or secrets**: the number, the name, the public name, whether it is the panel's own node, whether it is enabled, the state (`ok`, `error`, `unknown`), the version and the number of connections |
+| `inbounds:read` | `GET /panel/v2/inbounds` | a list of protocols **without keys or passwords**: the number, the node, the name, the name clients see, the preset, the type, the network, the port, the REALITY camouflage site and SNI, whether it is enabled and its state (`ok`, `error`, `off`, `unknown`) |
+| `inbounds:write` | `PATCH /panel/v2/inbounds/{id}` | turn a protocol on or off, change its port, change its SNI |
+
+The body of the `PATCH` holds any of the fields `enabled` (a boolean), `port` (a port or a range), `server_name` and `reason` (a reason, up to 200 characters); at least one of the first three is needed. The port is checked as when you edit in the panel, and a taken port is refused. Every change goes into the audit log as `inbound.update` under the name `addon:<the addon's id>`, with the reason, and the nodes get it within seconds, as after the panel's own automatic fixes.
+
+The `inbounds:write` permission changes the working setup of the servers, so approve it only for addons you trust as yourself.
+
 ## How an author gets listed
 
 1. Publish the addon on [protocol 2](https://github.com/getmikan/marketplace/blob/main/PROTOCOL-v2.md), with its image on a public registry.

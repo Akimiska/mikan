@@ -795,6 +795,16 @@ fn apply(install: &mut Install, target: &Target, plan: Plan, say: &mut dyn FnMut
     Ok(Outcome::Running)
 }
 
+/// A panel left at the new release after a failure runs on config.json and secrets/, which
+/// the update wrote before it migrated: a .env from before goes (the update's archive keeps
+/// it). Left there, it is what the next update reads, and a move from SQLite whose import
+/// committed would be taken for one not made and imported again over the newer data.
+fn leave_new(install: &mut Install, say: &mut dyn FnMut(&str)) {
+    if let Err(e) = install.config.retire_legacy() {
+        say(&format!("Remove {} by hand: {e:#}", Path::new(DIR).join(crate::config::LEGACY).display()));
+    }
+}
+
 /// Puts things right after a failed step as decide_recovery says, and returns the error the
 /// update ends with.
 fn recover(
@@ -815,12 +825,14 @@ fn recover(
             }
             e.context("the data of the stopped panel could not be saved; the update stopped and the panel runs again")
         }
-        Recovery::RestorePrevious => match restore_previous(root, &install.config, &snapshot.env, &snapshot.compose, footing.was_postgres) {
-            Ok(()) => e.context(format!("the update could not prepare the database; mikan {current} runs again")),
-            Err(back) => e.context(format!(
-                "the update could not prepare the database, and mikan {current} did not start again ({back:#}); backup: {saved}"
-            )),
-        },
+        Recovery::RestorePrevious => {
+            match restore_previous(root, &install.config, &snapshot.env, &snapshot.compose, footing.was_postgres) {
+                Ok(()) => e.context(format!("the update could not prepare the database; mikan {current} runs again")),
+                Err(back) => e.context(format!(
+                    "the update could not prepare the database, and mikan {current} did not start again ({back:#}); backup: {saved}"
+                )),
+            }
+        }
         // The previous version is tried on what this update left: on PostgreSQL already
         // (each migration step commits whole or not at all), and for a panel that did not
         // start only when the schema did not move.
@@ -832,13 +844,17 @@ fn recover(
         }
         // A failed import may have committed before losing its response. Never fall
         // back to stale SQLite or restore a snapshot implicitly after this.
-        Recovery::LeaveStopped => e.context(format!(
-            "database migration did not finish; panel stays stopped, original SQLite and PostgreSQL preserved. Run mikan update again; backup: {saved}"
-        )),
+        Recovery::LeaveStopped => {
+            leave_new(install, say);
+            e.context(format!(
+                "database migration did not finish; panel stays stopped, original SQLite and PostgreSQL preserved. Run mikan update again; backup: {saved}"
+            ))
+        }
         // Going back from SQLite would lose every write since the import, and an older
         // binary refuses a newer schema.
         Recovery::StopPanel => {
             let _ = docker::compose_run(&["stop", "panel"]);
+            leave_new(install, say);
             e.context(format!("PostgreSQL is preserved and the panel is stopped. No automatic database rollback is safe; retry mikan update after fixing startup. Backup: {saved}"))
         }
         // Decided before anything changed (preflight), or nothing to undo.

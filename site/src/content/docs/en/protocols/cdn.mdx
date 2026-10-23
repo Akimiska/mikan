@@ -1,0 +1,72 @@
+---
+title: Behind a CDN
+description: 'Protocols through a CDN (Cloudflare, Yandex, VK, Selectel): the XHTTP presets for a CDN, the CDN''s address for clients and the client''s real IP from a header.'
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+:::note[New in 0.5.2.0]
+The "Behind a CDN" block and the presets for a CDN are new in 0.5.2.0.
+:::
+
+If your server's IP is blocked but the CDN's networks are not, a protocol can go through a CDN: apps connect to the CDN's domain, and the CDN passes the connection on to the node. For the provider it is ordinary traffic to Cloudflare, Yandex, VK or Selectel.
+
+## How it works
+
+- The client goes to the **CDN's domain** (for example `cdn.example.com`) and sees the CDN's certificate.
+- The CDN goes to the node by **the node's domain** and certificate. The CDN's domain and the node's domain must differ.
+- The node sees the addresses of the CDN's servers, not the clients'. So that the device limit and the incoming filter count real clients, the node takes the client's address from a header the CDN adds, and believes it only from the CDN's networks.
+
+A CDN carries HTTP, so only **VLESS and Trojan on the node's certificate** over **XHTTP, WebSocket or gRPC** work. REALITY, Vision and bare TLS do not pass through a CDN, and the panel refuses such settings. The older variant with WebSocket is in [Connecting behind a proxy](/mikan/en/protocols/behind-proxy/#through-a-cdn).
+
+## Presets
+
+**Protocols → Add** has two presets for a CDN. Both use the node's certificate, so the node needs a domain with a public certificate, see [Node certificate](/mikan/en/nodes/nodes/#node-certificate). Their XHTTP mode is `packet-up`: ordinary short requests that a CDN passes and caches nothing of.
+
+| Preset | Default port | When to take it |
+|---|---|---|
+| CDN · VLESS · XHTTP | 2083/tcp | the CDN passes POST to the origin: Cloudflare and most others |
+| CDN · VLESS · XHTTP · GET | 2087/tcp | the CDN does not pass POST to the origin (Yandex Cloud CDN and some others behave so): data goes in GET requests, in the `X-Data` header |
+
+The ports are picked for Cloudflare: it passes only 443, 2053, 2083, 2087, 2096 and 8443 to the origin. The GET variant goes to apps on mihomo 1.19.32+ and on a fresh Xray, the others do not get it.
+
+## Set it up
+
+<Steps>
+
+1. Add the **CDN · VLESS · XHTTP** preset (or the GET one) on a node with a domain and a public certificate.
+
+2. In the CDN, create a domain, for example `cdn.example.com`, pointing to the node's domain, and turn proxying on (the orange cloud in Cloudflare). The SSL mode in Cloudflare: Full. The origin port is the protocol's port.
+
+3. In the protocol's settings open the **Behind a CDN** block and turn on "Clients connect through a CDN".
+
+4. Fill in the block's fields (below) and save. Apps get the new address with their next subscription update.
+
+</Steps>
+
+### Fields of the "Behind a CDN" block
+
+- **CDN domain**: the address apps get in the subscription. It is also the TLS name. It must differ from the node's domain, which the CDN goes to for the data.
+- **CDN port**: the port clients go to, usually 443 (the default).
+- **Host**: the Host header in requests. Empty: the CDN's domain. Protocols on WebSocket and XHTTP have this field.
+- **Real client addresses**: turn it on so the node takes the client's address from the CDN's header. Off, the node sees the addresses of the CDN's servers: the device limit and the incoming filter count those instead of clients.
+- **Address header**: `CF-Connecting-IP` for Cloudflare, `X-Forwarded-For` for most other CDNs. The list also has `X-Real-IP` and `True-Client-IP`.
+- **CDN networks**: the node believes the header only from these addresses, otherwise anyone could pose as another address. The **Cloudflare networks** tick adds the built-in list (it is on by default), your own networks go one a line: a CIDR or an address. Without networks the real addresses cannot be turned on.
+
+The pin of a self-signed certificate is not given to clients through a CDN: they see the CDN's certificate.
+
+:::caution[Cloudflare's limits]
+Cloudflare passes only ports 443, 2053, 2083, 2087, 2096 and 8443 to the origin and drops a connection with no data after 100 seconds. gRPC is turned on in the domain's settings in Cloudflare.
+:::
+
+## If it does not work
+
+| What you see | The reason |
+|---|---|
+| "Only VLESS and Trojan on the node certificate work behind a CDN" | the protocol is on REALITY or has no node certificate |
+| "A CDN carries only XHTTP, WebSocket and gRPC" | the protocol is Vision or bare TLS |
+| "Enter the CDN's networks" | real addresses are on and there is no network |
+| "Enter the CDN domain" | the domain field is empty |
+| "A header name: Latin letters, digits and hyphens" | the header name has extra characters |
+
+If the connection fails though all the fields are filled in, check that the CDN domain's record is proxied, the SSL mode allows the connection to the origin and the protocol's port is open on the node's server.

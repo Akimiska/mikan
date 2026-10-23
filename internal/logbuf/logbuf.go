@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 )
@@ -52,15 +53,16 @@ func (b *Buffer) Tail(n int) []Entry {
 	if n <= 0 || n > have {
 		n = have
 	}
-	out := make([]Entry, 0, n)
-	for i := have - n; i < have; i++ {
-		idx := i
-		if b.full {
-			idx = (b.next + i) % len(b.ring)
-		}
-		out = append(out, b.ring[idx])
+	// Copied out of the ring, oldest first; a full ring starts at next. No allocation is
+	// sized by the n asked for: only what the ring holds is copied.
+	if !b.full {
+		return slices.Clone(b.ring[have-n : have])
 	}
-	return out
+	from := (b.next + have - n) % len(b.ring)
+	if from+n <= len(b.ring) {
+		return slices.Clone(b.ring[from : from+n])
+	}
+	return append(slices.Clone(b.ring[from:]), b.ring[:from+n-len(b.ring)]...)
 }
 
 // Len is how many lines are kept.

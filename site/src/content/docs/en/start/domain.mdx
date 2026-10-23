@@ -93,7 +93,7 @@ The new file is picked up without a restart. `mikan cert show` shows what is ins
 
 The panel itself orders a public certificate for each remote node: for the node's domain if it has one, otherwise for its IP (a six-day Let's Encrypt certificate, renewed automatically). The authority checks the node on the node's port 80 (HTTP-01). The node opens port 80 only for the few seconds of a check and releases it after.
 
-So port 80/tcp must be open on the node's server. The installer opens it in ufw, and `mikan update` opens it on nodes installed earlier. If port 80 on the node is held by another program (nginx, Caddy), the panel says so and names the program when the node can tell. Like on the panel, you can set a port for the check on the node with the line `MIKAN_ACME_LISTEN=127.0.0.1:18080` in `/opt/mikan/.env` on the node's server (then `cd /opt/mikan && docker compose up -d`), and pass `/.well-known/acme-challenge/` there from the web server.
+So port 80/tcp must be open on the node's server. The installer opens it in ufw, and `mikan update` opens it on nodes installed earlier. If port 80 on the node is held by another program (nginx, Caddy), the panel says so and names the program when the node can tell. Like on the panel, you can set a port for the check on the node with the line `"MIKAN_ACME_LISTEN": "127.0.0.1:18080"` in `/opt/mikan/config.json` on the node's server (then `mikan restart`; on a server older than 0.5.2.0 it is the `MIKAN_ACME_LISTEN=127.0.0.1:18080` line in `.env`, see [The mikan command](/mikan/en/operations/cli/#settings-files)), and pass `/.well-known/acme-challenge/` there from the web server.
 
 The certificate used by the node's protocols on TLS is chosen in this order:
 
@@ -124,4 +124,4 @@ The panel suggests the ports opened at install time and marks the ones used by p
 
 ## Your own site on the domain
 
-Put files in `/opt/mikan/data/panel/www`: the panel serves them on all paths it does not use itself, and `404.html` becomes the error page. This way an ordinary website opens at the panel's address.
+Put files in `/opt/mikan/data/panel/www`: the panel serves them on all paths it does not use itself, and `404.html` becomes the error page. This way an ordinary website opens at the panel's address. If you have no site of your own, since 0.5.2.0 you can pick a ready page, see [Front page](/mikan/en/operations/front-page/).

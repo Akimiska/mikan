@@ -15,7 +15,7 @@ The last 2000 lines of the panel's log and of each node's. Tokens, keys, passwor
 
 **Restart** restarts the containers of the panel's server or of a node. The panel or the node is unreachable for a couple of seconds.
 
-How it works: the panel writes a request file into its data directory and a systemd unit on the server runs the command and returns the result. For a node the request goes over the node API. A server installed before 0.5.1.1 needs one `mikan update` for this; until then the check answers "the server did not answer".
+How it works: the panel writes a request file into its data directory and a systemd unit on the server runs the command and returns the result. For a node the request goes over the node API. A server installed before 0.5.2.0 needs one `mikan update` for this; until then the check answers "the server did not answer".
 
 ## Reachability
 
@@ -33,6 +33,22 @@ The [Globalping](https://globalping.io) service does the check: its points in ho
 :::caution[What this check does not see]
 The server's address goes to Globalping. The check sees a block of the IP and the port, not a block by protocol and not the whitelists of mobile operators. Without a key Globalping gives about 250 checks an hour from one address; the result is kept for 2 minutes, and one check runs at a time.
 :::
+
+## Geo bases
+
+:::note[New in 0.5.2.0]
+The geo base check is new in 0.5.2.0.
+:::
+
+Sites and apps tell a client's country by geo bases, and the bases often disagree. If one base puts your server's IP in another country, a service shows the wrong region or refuses. The **Geo bases** tab shows what the bases think of an address.
+
+Enter the server's IP or domain (the hint offers your nodes' addresses) and press "Check the geo bases". The panel asks ten public bases (MaxMind, ipinfo.io, IP2Location and others), which takes up to ten seconds. The result in one line: "All N bases put the address in: country" or "The bases disagree: country by N of M". Below, each base with its answer, the ones that disagree are marked. A base that did not answer is marked too: did not answer in time, a request limit or no answer. The result of a recent check is shown from the cache.
+
+:::caution[What this check does not see]
+The server's address goes to public geo bases. How services such as YouTube or Netflix see the IP is not shown: they have bases of their own.
+:::
+
+For nodes the same check is in the "Check node" window, see [Nodes](/mikan/en/nodes/nodes/#country-in-the-geo-bases).
 
 ## Terminal
 

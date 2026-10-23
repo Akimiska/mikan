@@ -1,0 +1,41 @@
+---
+title: A domain of its own for subscriptions
+description: 'Subscription links on a separate domain with its own certificate: setup, Let''s Encrypt or an uploaded certificate, and what happens to old links.'
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+:::note[New in 0.5.2.0]
+The subscription domain is new in 0.5.2.0.
+:::
+
+By default a subscription link is built on the panel's address. With a separate domain (for example `sub.example.com`) the panel's address is in no subscription link, and when the panel moves it is enough to move the domain: clients keep their links.
+
+## Turn it on
+
+<Steps>
+
+1. Set up a domain or subdomain and point its A record at the panel's server. It must differ from the panel's domain.
+
+2. **Settings → Subscription → A domain of its own for subscriptions**, the **Domain for links** field. Save.
+
+3. The panel orders a certificate for the domain itself, and subscription links start to be built on it.
+
+</Steps>
+
+Links handed out before keep working. This domain opens subscriptions only: the admin panel stays on the panel's address. The **Remove the domain** button puts links back on the panel's address.
+
+## Certificate
+
+The **Certificate for subscriptions** card in the same setting shows how things stand. The panel serves a certificate by the name the client asks for, so the subscription domain has a certificate of its own and the panel another.
+
+- **Automatic.** Let's Encrypt, as for the panel's domain: the check goes through port 80, so it must be open, see [Domain and certificates](/mikan/en/start/domain/). The **Get now** button orders it at once. If the order fails, the card shows the reason and a hint, and the button becomes **Retry**.
+- **Your own.** The **Own certificate** button: paste a certificate and key for the domain, from certbot for example (`fullchain.pem` and `privkey.pem`). The panel serves it only to those who come to the subscription domain. Your own certificate wins over the automatic one. The **Back to the automatic one** button brings back the order from Let's Encrypt; while it is issued, clients get your certificate.
+
+While the domain has no certificate, clients get the panel's, and apps may complain about the name. The subscription port can be moved out separately, see [Subscription port](/mikan/en/start/domain/#subscription-port).
+
+## If it does not work
+
+- The domain's record does not point at this server: Let's Encrypt cannot check the domain.
+- Port 80 is held by another program: the certificate card names it, and the ways out are the same as for the panel.
+- The domain is the panel's own or is an IP address: the panel refuses it, a different domain name is needed.

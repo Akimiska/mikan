@@ -193,6 +193,7 @@ Ejecuta `mikan` para abrir el menú, o usa los comandos directamente:
 | `mikan doctor` | revisar el servidor: Docker, puertos, firewall, reloj, DNS, disco |
 | `mikan support CÓDIGO` | enviar el diagnóstico a un ticket de soporte cuando el panel no responde |
 | `mikan support-access on\|off` | permitir o prohibir el acceso de soporte en este servidor |
+| `mikan api-lockdown [status\|off]` | en un nodo: el estado de la regla «API del nodo solo desde la IP del panel», o quitarla de inmediato |
 | `mikan uninstall` | detener y quitar el comando, conservando los datos |
 
 ## Actualizaciones

@@ -9,7 +9,7 @@ description: Backups on the server and in Telegram, what they contain and how to
 mikan backup
 ```
 
-The archive `mikan-YYYYMMDD-HHMMSS.tar.gz` appears in `/opt/mikan/backups`. It holds `.env`, `compose.yaml`, a consistent database snapshot, the panel's certificates, node data and payment adapter settings. All of the server's secrets are inside, so the folder is accessible only to root.
+The archive `mikan-YYYYMMDD-HHMMSS.tar.gz` appears in `/opt/mikan/backups`. It holds `config.json` and `secrets/` (`.env` on a server set up before 0.5.2.0), `compose.yaml`, a consistent database snapshot, the panel's certificates, node data and payment adapter settings. All of the server's secrets are inside, so the folder is accessible only to root.
 
 Before risky operations mikan makes backups by itself and keeps a few of the latest:
 
@@ -44,7 +44,7 @@ An archive with only the database (like a backup from Telegram) restores only th
 
 - **Encryption password**: at least 20 characters, with a "Generate" button. A lost password cannot be recovered.
 - "Send now" sends a backup right away.
-- The backup holds only the database: users, plans, settings, the bot token. It has no `.env`, certificates or node keys, so keep server backups for those.
+- The backup holds only the database: users, plans, settings, the bot token. It has no settings files (`config.json`, `secrets/`), certificates or node keys, so keep server backups for those.
 - The file is at most 50 MB, which is the limit for Telegram bots.
 
 To restore on the server (you need the [age](https://github.com/FiloSottile/age) utility):

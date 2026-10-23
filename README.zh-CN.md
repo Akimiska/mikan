@@ -190,6 +190,7 @@ flowchart LR
 | `mikan doctor` | 检查服务器：Docker、端口、防火墙、时钟、DNS、磁盘 |
 | `mikan support 代码` | 面板无法访问时，把诊断发送到支持工单 |
 | `mikan support-access on\|off` | 允许或禁止本服务器的支持访问 |
+| `mikan api-lockdown [status\|off]` | 在节点上：查看「节点 API 仅限面板 IP」规则的状态，或立即解除 |
 | `mikan uninstall` | 停止并删除该命令，保留数据 |
 
 ## 更新

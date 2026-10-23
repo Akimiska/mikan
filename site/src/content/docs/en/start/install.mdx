@@ -85,7 +85,8 @@ Full list: `mikan install --help`.
 
 | Path | What is there |
 |---|---|
-| `/opt/mikan/.env`, `compose.yaml` | launch settings and containers |
+| `/opt/mikan/config.json`, `compose.yaml` | launch settings and containers (`.env` on a server set up before 0.5.2.0) |
+| `/opt/mikan/secrets/` | the secrets, a file each: the database's password and address, a node's join key (the folder 0700, the files 0400), see [The mikan command](/mikan/en/operations/cli/#settings-files) |
 | `/opt/mikan/data/panel`, `data/node` | panel and node data |
 | `/opt/mikan/backups` | backups |
 | `/opt/mikan/data/panel/www` | your own site: files are served on paths the panel does not use, `404.html` serves as the error page |

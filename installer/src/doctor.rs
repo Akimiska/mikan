@@ -988,8 +988,9 @@ Anywhere                   ALLOW       10.0.0.0/8
             Item::ok("Container node", format!("Up 3 hours  /{secret}/api")),
         ]);
         let text = serde_json::to_string(&r.json(&install(true), "x")).unwrap();
-        for s in [secret, "hunter2hunter2", "u@h"] {
-            assert!(!text.contains(s), "{s} is in the report: {text}");
+        // A failure names the secret by its place in the list: the test prints no secret either.
+        for (i, s) in [secret, "hunter2hunter2", "u@h"].into_iter().enumerate() {
+            assert!(!text.contains(s), "secret {i} is in the report");
         }
         assert!(text.contains("the panel said") && text.contains("Container node"), "{text}");
     }

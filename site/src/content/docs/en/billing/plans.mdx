@@ -79,3 +79,41 @@ An unbound device takes a place again on its next subscription update. To stop t
 - instead of servers the app shows "⛔ This device is blocked", with binding turned off too.
 
 A ban covers one user: on someone else's subscription the device works. Only a device with an ID can be banned. The "Connection addresses" rows and the shared place of apps without an ID cannot: one address is often shared by many people. The **Banned** list in the card shows when and by whom, and **Unban** lifts the ban. A subscriber cannot lift it. Bans and unbans go to the journal.
+
+## Extra devices
+
+:::note[New in 0.5.2.0]
+Buying extra devices is new in 0.5.2.0.
+:::
+
+A client can buy one more device for a subscription in the bot and the Mini App, without changing the plan or renewing it.
+
+### Set it up
+
+The plan form has an **Extra devices** block. The plan must have a device limit: with no limit there is nothing to buy.
+
+- **How many may be bought**: from 0 to 50. 0 means no buying.
+- **Device price, Stars** and **Device price, ₽**: at least one when buying is on. The price is for one device. The ruble price can be paid from the [balance](/mikan/en/billing/balance/) too.
+
+In **Payments → Sales rules** the switch **Bought devices stay with renewals** chooses how long a bought device lasts:
+
+- **On**: the device stays after a renewal, and a renewal costs more by the price of the bought devices.
+- **Off**: the device lasts to the end of the subscription's paid term and goes with it.
+
+### How a client buys
+
+The subscription card in the bot has a **📱 Buy one more device** button. The bot shows how many devices there are now and how many there will be, until when the device lasts (or that it stays with renewals), how many more can be bought, and the payment methods. After the payment the subscription's device limit grows by one at once. Promo codes do not apply to buying a device.
+
+The button is missing if the subscription has no plan, is off or over, the plan has no price for the payment methods that are on, or the client has bought all that is allowed.
+
+A device payment shows in the [payment history](/mikan/en/billing/payments/#history-and-refunds) as "Device". It can be refunded like other payments: the device is taken off and the buyer gets a message.
+
+## Another subscription in the bot
+
+:::note[New in 0.5.2.0]
+Buying a second subscription is new in 0.5.2.0.
+:::
+
+One Telegram account can hold up to five subscriptions. In the bot the **🔁 Subscriptions** button opens their list, and the list has **➕ Another subscription**: the bot offers the plans as for a first purchase and, once paid, adds the new subscription to the account.
+
+The button shows while there are fewer than five subscriptions, "Sell to new people" is on ([Payments → Sales rules](/mikan/en/billing/payments/)) and at least one plan is for sale. With one subscription the "Subscriptions" button appears as soon as a second one can be bought.

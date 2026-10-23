@@ -71,14 +71,15 @@ jobs:
           sudo apt-get install -y postgresql-client-18
           echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
       # Every package, with the race detector: the panel's background writers, sync and
-      # bot share state across goroutines. -race needs cgo, and the runner has gcc.
+      # bot share state across goroutines. -race needs cgo, and the runner has gcc. The app
+      # package alone takes 8 to 10 minutes under -race: past go test's 10 by default.
       - name: go
         env:
           CGO_ENABLED: "1"
         run: |
           test -z "$(gofmt -l internal cmd test)"
           go vet ./...
-          go test -race ./...
+          go test -race -timeout 30m ./...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 

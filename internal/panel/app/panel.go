@@ -532,7 +532,13 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			}
 			sn := subs.Node{ID: n.ID, Name: n.Name, Endpoint: subs.Endpoint{Host: localHost, SNI: domainName}}
 			if n.Address != "" {
-				sn.Endpoint = subs.Endpoint{Host: domain.NodeHost(n), SNI: n.Domain}
+				// AoiVPN fork: same as the local node — a remote node with its own .ru domain
+				// (pl.aoimusic.ru) is still dialed by IP; the domain is only the cert SNI.
+				host := domain.NodeHost(n)
+				if n.PublicHost != "" {
+					host = n.PublicHost
+				}
+				sn.Endpoint = subs.Endpoint{Host: host, SNI: n.Domain}
 				cfg.Direct = append(cfg.Direct, n.PublicHost, n.Domain)
 			}
 			sn.Endpoint.SNIRouter = n.SniRouter != 0

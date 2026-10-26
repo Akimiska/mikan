@@ -20,6 +20,7 @@ import (
 	"mikan/internal/panel/acme"
 	"mikan/internal/panel/addons"
 	"mikan/internal/panel/addons/pages"
+	"mikan/internal/panel/aoiapp"
 	"mikan/internal/panel/audit"
 	"mikan/internal/panel/auth"
 	"mikan/internal/panel/autotune"
@@ -108,6 +109,8 @@ type Deps struct {
 	Importer *panelimport.Importer
 	// Billing sells tariffs; SubBase is https://host:port/<sub path> ("" without an address).
 	Billing *billing.Service
+	// AoiDirectives are the AoiVPN fork's directives to the installed apps; nil: none.
+	AoiDirectives *aoiapp.Directives
 	// Warp registers WARP accounts with Cloudflare.
 	Warp    warp.Client
 	SubBase func(ctx context.Context) string
@@ -338,6 +341,7 @@ func New(d Deps) (http.Handler, huma.API, error) {
 	h.registerAudit()
 	h.registerSupport()
 	h.registerHostOps()
+	h.registerAoiDirectives()
 	h.registerTerminal(mux)
 	if d.Support != nil {
 		d.Support.SetEndedHook(h.grantEnded)

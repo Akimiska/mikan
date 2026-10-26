@@ -47,6 +47,31 @@
         ],
         "type": "object"
       },
+      "Ack": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          },
+          "at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_id",
+          "status",
+          "detail",
+          "at"
+        ],
+        "type": "object"
+      },
       "AddSourceInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -603,6 +628,139 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "AoiDirectiveAcksOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Ack"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "AoiDirectiveBody": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "description": "target=app: установка",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "expires_hours": {
+            "description": "Сколько часов выдавать; 0 — пока не отменено",
+            "format": "int64",
+            "maximum": 8760,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "from": {
+            "description": "rewrite_url: начало ссылки, которое заменить",
+            "maxLength": 300,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "rewrite_url",
+              "add_profile",
+              "remove_profile",
+              "refresh",
+              "message"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "note": {
+            "description": "Заметка администратора",
+            "maxLength": 300,
+            "type": "string"
+          },
+          "sub_user_id": {
+            "description": "add_profile/remove_profile/refresh: подписка, о которой указание",
+            "format": "int64",
+            "type": "integer"
+          },
+          "target": {
+            "description": "Кому: всем приложениям, установкам подписки (user_id) или одной установке (app_id)",
+            "enum": [
+              "all",
+              "user",
+              "app"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "to": {
+            "description": "rewrite_url: на что заменить",
+            "maxLength": 300,
+            "type": "string"
+          },
+          "url": {
+            "description": "add_profile: ссылка подписки; пусто — ссылка подписки sub_user_id",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "user_id": {
+            "description": "target=user: подписка, чьим установкам",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "target"
+        ],
+        "type": "object"
+      },
+      "AoiDirectivesListOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Directive"
+            },
+            "type": "array"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "AoiInstallsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Install"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
         "type": "object"
       },
       "ApplyTariffInputBody": {
@@ -2383,6 +2541,100 @@
         ],
         "type": "object"
       },
+      "Directive": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          },
+          "canceled_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "done": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/DirectiveParams"
+          },
+          "skipped": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target": {
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "params",
+          "target",
+          "note",
+          "created_at",
+          "done",
+          "failed",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "DirectiveParams": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "tokens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "EgressFilter": {
         "additionalProperties": false,
         "properties": {
@@ -3584,6 +3836,49 @@
           "enabled",
           "allow",
           "networks"
+        ],
+        "type": "object"
+      },
+      "Install": {
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string"
+          },
+          "app_version": {
+            "type": "string"
+          },
+          "first_seen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_seen": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "profiles": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "user_ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "app_id",
+          "first_seen",
+          "last_seen",
+          "app_version",
+          "platform",
+          "profiles",
+          "user_ids"
         ],
         "type": "object"
       },
@@ -11712,6 +12007,253 @@
           "addons"
         ],
         "x-session-only": true
+      }
+    },
+    "/api/v1/aoi/directives": {
+      "get": {
+        "operationId": "list-aoi-directives",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "default": 0,
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AoiDirectivesListOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Указания приложениям AoiVPN",
+        "tags": [
+          "aoi-directives"
+        ]
+      },
+      "post": {
+        "operationId": "create-aoi-directive",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AoiDirectiveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Directive"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отправить указание приложениям AoiVPN",
+        "tags": [
+          "aoi-directives"
+        ]
+      }
+    },
+    "/api/v1/aoi/directives/{id}/acks": {
+      "get": {
+        "operationId": "aoi-directive-acks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AoiDirectiveAcksOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Кто выполнил указание",
+        "tags": [
+          "aoi-directives"
+        ]
+      }
+    },
+    "/api/v1/aoi/directives/{id}/cancel": {
+      "post": {
+        "operationId": "cancel-aoi-directive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Directive"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Отменить указание",
+        "tags": [
+          "aoi-directives"
+        ]
+      }
+    },
+    "/api/v1/aoi/installs": {
+      "get": {
+        "operationId": "list-aoi-installs",
+        "parameters": [
+          {
+            "description": "Установки этой подписки",
+            "explode": false,
+            "in": "query",
+            "name": "user_id",
+            "schema": {
+              "description": "Установки этой подписки",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Часть app_id",
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "description": "Часть app_id",
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "format": "int64",
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AoiInstallsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Установки приложения AoiVPN",
+        "tags": [
+          "aoi-directives"
+        ]
       }
     },
     "/api/v1/api-keys": {

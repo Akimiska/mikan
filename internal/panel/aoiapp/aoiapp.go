@@ -37,6 +37,8 @@ type Deps struct {
 	Now        func() time.Time
 	Log        *slog.Logger
 	TrustProxy bool
+	// Directives are shared with the admin API; nil: the handler keeps its own.
+	Directives *Directives
 }
 
 // Handler serves <sub path>/app/<name>.
@@ -55,6 +57,8 @@ type Handler struct {
 	payLimit   limiter
 	trialLimit limiter
 	orderCheck throttle
+
+	dirs *Directives
 }
 
 const (
@@ -77,7 +81,11 @@ func New(d Deps) *Handler {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
 	h := &Handler{d: d, tariffID: defaultTariff, returnURL: defaultReturnURL,
-		payLimit: limiter{max: 10, window: time.Minute}, trialLimit: limiter{max: 3, window: time.Minute}}
+		payLimit: limiter{max: 10, window: time.Minute}, trialLimit: limiter{max: 3, window: time.Minute},
+		dirs: d.Directives}
+	if h.dirs == nil {
+		h.dirs = NewDirectives(d.Store, d.Now)
+	}
 	if v, err := strconv.ParseInt(os.Getenv("MIKAN_AOI_APP_TARIFF"), 10, 64); err == nil && v > 0 {
 		h.tariffID = v
 	}
@@ -112,6 +120,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.order(w, r)
 	case r.Method == http.MethodPost && name == "core-report":
 		h.coreReport(w, r)
+	case r.Method == http.MethodGet && name == "directives":
+		h.directivesGet(w, r)
+	case r.Method == http.MethodPost && name == "directive-ack":
+		h.directiveAck(w, r)
 	case r.Method == http.MethodPost && name == "test-sub":
 		h.testSub(w, r)
 	default:
@@ -203,6 +215,9 @@ func (h *Handler) installTg(ctx context.Context, appID string, create bool) (int
 	err = h.d.Store.DB.QueryRowContext(ctx, "SELECT tg_id FROM aoi_app_installs WHERE app_id = $1", appID).Scan(&tg)
 	return tg, err == nil, err
 }
+
+// Directives is what the admin API sends the installs through.
+func (h *Handler) Directives() *Directives { return h.dirs }
 
 func validAppID(s string) bool { return appIDRe.MatchString(s) }
 

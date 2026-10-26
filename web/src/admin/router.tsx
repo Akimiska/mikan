@@ -198,11 +198,13 @@ export function createAppRouter(queryClient: QueryClient) {
       promo: PROMO_TABS.includes(s.promo as (typeof PROMO_TABS)[number]) ? (s.promo as PaymentsSearch["promo"]) : undefined,
     }),
   });
+  // AoiVPN fork: directives to the installed apps.
+  const aoiApp = createRoute({ getParentRoute: () => app, path: "/aoi-app", component: page(() => import("./pages/aoi-app"), "AoiAppPage") });
   const apiDocs = createRoute({ getParentRoute: () => app, path: "/settings/api", component: page(() => import("./pages/api"), "ApiPage") });
   // The API section lived in the sidebar until 0.4.2: old links land on its new place.
   const apiDocsOld = createRoute({ getParentRoute: () => app, path: "/api-docs", beforeLoad: () => { throw redirect({ to: "/settings/api" }); } });
 
-  const routeTree = root.addChildren([login, supportEnter, app.addChildren([dashboard, users, tariffs, inbounds, nodes, diagnostics, promocodes, payments, addons, telegram, torrent, filters, market, addonApp, telegramOld, apiDocs, apiDocsOld, settings])]);
+  const routeTree = root.addChildren([login, supportEnter, app.addChildren([dashboard, users, tariffs, inbounds, nodes, diagnostics, promocodes, payments, aoiApp, addons, telegram, torrent, filters, market, addonApp, telegramOld, apiDocs, apiDocsOld, settings])]);
   return createRouter({
     routeTree,
     basepath: basePath || "/",

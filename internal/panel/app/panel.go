@@ -392,6 +392,10 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	}
 	deps.CheckTemplate = func(ctx context.Context, src string) error { return subHandler.CheckTemplate(ctx, src) }
 	deps.HappLink = func(ctx context.Context, u db.User) (string, error) { return subHandler.HappLink(ctx, u) }
+	// The AoiVPN fork's directives to the installed apps: sent from the admin API, given out
+	// on the subscription path (aoiapp).
+	aoiDirectives := aoiapp.NewDirectives(st, o.Now)
+	deps.AoiDirectives = aoiDirectives
 	apiHandler, _, err := api.New(deps)
 	if err != nil {
 		return nil, err
@@ -589,7 +593,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	subHandler.SetShop(p.Billing)
 	subHandler.SetPromo(promos)
 	subHandler.SetPages(pages)
-	subHandler.SetApp(aoiapp.New(aoiapp.Deps{Store: st, Billing: p.Billing, SubBase: subBase, Now: o.Now, Log: o.Log, TrustProxy: o.TrustProxy}))
+	subHandler.SetApp(aoiapp.New(aoiapp.Deps{Store: st, Billing: p.Billing, SubBase: subBase, Now: o.Now, Log: o.Log, TrustProxy: o.TrustProxy, Directives: aoiDirectives}))
 
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/api/", apiHandler)

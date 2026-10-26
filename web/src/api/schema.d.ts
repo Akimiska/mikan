@@ -176,6 +176,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/aoi/directives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Указания приложениям AoiVPN */
+        get: operations["list-aoi-directives"];
+        put?: never;
+        /** Отправить указание приложениям AoiVPN */
+        post: operations["create-aoi-directive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/aoi/directives/{id}/acks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Кто выполнил указание */
+        get: operations["aoi-directive-acks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/aoi/directives/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Отменить указание */
+        post: operations["cancel-aoi-directive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/aoi/installs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Установки приложения AoiVPN */
+        get: operations["list-aoi-installs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/api-keys": {
         parameters: {
             query?: never;
@@ -2813,6 +2882,13 @@ export interface components {
             /** @enum {string} */
             scope: "read" | "full";
         };
+        Ack: {
+            app_id: string;
+            /** Format: int64 */
+            at: number;
+            detail: string;
+            status: string;
+        };
         AddSourceInputBody: {
             /** @description Публичный ключ автора, ed25519 в base64, если админ знает его заранее: источник принимается, только если подписан им */
             key?: string;
@@ -3020,6 +3096,54 @@ export interface components {
             public_channel?: string;
             public_enabled?: boolean;
             public_summary?: boolean;
+        };
+        AoiDirectiveAcksOutputBody: {
+            items: components["schemas"]["Ack"][];
+        };
+        AoiDirectiveBody: {
+            /** @description target=app: установка */
+            app_id?: string;
+            /**
+             * Format: int64
+             * @description Сколько часов выдавать; 0 — пока не отменено
+             */
+            expires_hours?: number;
+            /** @description rewrite_url: начало ссылки, которое заменить */
+            from?: string;
+            /** @enum {string} */
+            kind: "rewrite_url" | "add_profile" | "remove_profile" | "refresh" | "message";
+            label?: string;
+            /** @description Заметка администратора */
+            note?: string;
+            /**
+             * Format: int64
+             * @description add_profile/remove_profile/refresh: подписка, о которой указание
+             */
+            sub_user_id?: number;
+            /**
+             * @description Кому: всем приложениям, установкам подписки (user_id) или одной установке (app_id)
+             * @enum {string}
+             */
+            target: "all" | "user" | "app";
+            text?: string;
+            title?: string;
+            /** @description rewrite_url: на что заменить */
+            to?: string;
+            /** @description add_profile: ссылка подписки; пусто — ссылка подписки sub_user_id */
+            url?: string;
+            /**
+             * Format: int64
+             * @description target=user: подписка, чьим установкам
+             */
+            user_id?: number;
+        };
+        AoiDirectivesListOutputBody: {
+            items: components["schemas"]["Directive"][];
+            /** Format: int64 */
+            total: number;
+        };
+        AoiInstallsOutputBody: {
+            items: components["schemas"]["Install"][];
         };
         ApplyTariffInputBody: {
             /** @description Лимит устройств (докупленные остаются сверху) и как он считается */
@@ -3664,6 +3788,38 @@ export interface components {
             last_seen: string;
             online: boolean;
         };
+        Directive: {
+            app_id?: string;
+            /** Format: int64 */
+            canceled_at?: number;
+            /** Format: int64 */
+            created_at: number;
+            /** Format: int64 */
+            done: number;
+            /** Format: int64 */
+            expires_at?: number;
+            /** Format: int64 */
+            failed: number;
+            /** Format: int64 */
+            id: number;
+            kind: string;
+            note: string;
+            params: components["schemas"]["DirectiveParams"];
+            /** Format: int64 */
+            skipped: number;
+            target: string;
+            /** Format: int64 */
+            user_id?: number;
+        };
+        DirectiveParams: {
+            from?: string;
+            label?: string;
+            text?: string;
+            title?: string;
+            to?: string;
+            tokens?: string[];
+            url?: string;
+        };
         EgressFilter: {
             /** @description Домены вместе с поддоменами: example.com */
             domains: string[];
@@ -4079,6 +4235,18 @@ export interface components {
             enabled: boolean;
             /** @description Сети и адреса. Другие ноды панели (каскад) проверку не проходят: их пускают всегда */
             networks: string[];
+        };
+        Install: {
+            app_id: string;
+            app_version: string;
+            /** Format: int64 */
+            first_seen: number;
+            /** Format: int64 */
+            last_seen: number;
+            platform: string;
+            /** Format: int64 */
+            profiles: number;
+            user_ids: number[];
         };
         JobState: {
             /** Format: int64 */
@@ -7319,6 +7487,168 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddonRPCResult"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-aoi-directives": {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AoiDirectivesListOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-aoi-directive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AoiDirectiveBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Directive"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "aoi-directive-acks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AoiDirectiveAcksOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "cancel-aoi-directive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Directive"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "list-aoi-installs": {
+        parameters: {
+            query?: {
+                /** @description Установки этой подписки */
+                user_id?: number;
+                /** @description Часть app_id */
+                q?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AoiInstallsOutputBody"];
                 };
             };
             /** @description Error */

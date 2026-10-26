@@ -36,7 +36,8 @@
     "telegram": "Telegram",
     "addons": "Addons",
     "payments": "Payments",
-    "diagnostics": "Diagnostics"
+    "diagnostics": "Diagnostics",
+    "aoiApp": "App"
   },
   "navShort": {
     "overview": "Overview",
@@ -47,7 +48,8 @@
     "nodes": "Nodes",
     "addons": "Addons",
     "payments": "Payments",
-    "diagnostics": "Diagnostics"
+    "diagnostics": "Diagnostics",
+    "aoiApp": "AoiVPN"
   },
   "shell": {
     "update": "{v} is out",
@@ -123,6 +125,15 @@
     "pageNotFoundText": "The address is wrong or the page has moved.",
     "toOverview": "To the overview",
     "api": {
+      "no_sub_url": "The subscription has no link: set the subscription address in the settings",
+      "directives_unavailable": "Directives are unavailable",
+      "directive_bad_rewrite": "«From» and «To» are different https:// addresses",
+      "directive_bad_url": "The subscription link is an https:// address",
+      "directive_no_subscription": "Enter the client ID",
+      "directive_empty_text": "The message is empty",
+      "directive_bad_kind": "Unknown kind of directive",
+      "directive_bad_app_id": "app_id is the install's UUID",
+      "directive_bad_target": "Unknown target",
       "addon_no_pages": "The addon is not installed, not running or shows no pages in the panel.",
       "addon_ui_forbidden": "The addon is not approved to show pages in the panel (ui).",
       "addon_bad_answer": "The addon broke the protocol: the answer is too large, not JSON or a redirect.",
@@ -4662,5 +4673,91 @@
       "users": "clients {id}",
       "sub_page_image": "subscription page image {id}"
     }
+  },
+  "aoiApp": {
+    "title": "AoiVPN app",
+    "sub": "Directives to the installed apps: move subscription links, add and remove subscriptions, update, messages. The app picks them up at start and every few minutes.",
+    "send": "New directive",
+    "sendSub": "Each install carries a directive out once and reports the result.",
+    "kind": "What to do",
+    "kinds": {
+      "rewrite_url": "Change address",
+      "add_profile": "Add subscription",
+      "remove_profile": "Remove subscription",
+      "refresh": "Update profiles",
+      "message": "Message"
+    },
+    "kindHints": {
+      "rewrite_url": "Profiles whose link starts with «From» get «To» instead, and are updated. Keep the old address answering until everyone has moved.",
+      "add_profile": "The app imports the subscription. If a profile of it is there already, nothing is added.",
+      "remove_profile": "The app removes the profiles of this subscription (by its tokens, legacy ones too).",
+      "refresh": "The app updates the profiles of this subscription now, or all of them without one.",
+      "message": "The app shows the message and a system notification."
+    },
+    "from": "From",
+    "to": "To",
+    "url": "Subscription link",
+    "urlHint": "Empty: the link of the subscription above",
+    "label": "Profile name",
+    "subUser": "Subscription (client) ID",
+    "subUserHint": "The panel client whose profiles to remove",
+    "subUserAddHint": "The panel client whose subscription to add",
+    "subUserRefreshHint": "Empty: update every profile",
+    "msgTitle": "Title",
+    "msgText": "Text",
+    "target": "To whom",
+    "targets": {
+      "all": "Everyone",
+      "user": "A client's installs",
+      "app": "One install"
+    },
+    "userID": "Client ID",
+    "userIDHint": "Installs holding a profile of this subscription or that bought it",
+    "appID": "Install app_id",
+    "appIDHint": "Pick one in the list of installs below",
+    "hours": "Valid for, hours",
+    "hoursHint": "0: until canceled. Installs that open the app later do not get it",
+    "note": "Note",
+    "sendButton": "Send",
+    "sent": "Directive sent",
+    "confirmAll": "Send to every app?",
+    "confirmAllText": "Every AoiVPN install that reaches the server gets the directive, new ones too.",
+    "history": "History",
+    "historySub": "What was sent and who carried it out",
+    "historyEmpty": "No directives yet",
+    "historyEmptyText": "Sent directives show up here.",
+    "what": "Details",
+    "created": "Sent",
+    "result": "Outcome",
+    "counts": "done {done} · failed {failed} · skipped {skipped}",
+    "state": {
+      "active": "Active",
+      "canceled": "Canceled",
+      "expired": "Expired"
+    },
+    "who": "Who did it",
+    "whoTitle": "Directive #{id}",
+    "nobodyYet": "Nobody has carried it out yet",
+    "ack": {
+      "done": "Done",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    },
+    "cancel": "Cancel",
+    "cancelTitle": "Cancel the directive?",
+    "cancelText": "It is no longer given out. Installs that carried it out stay as they are.",
+    "canceled": "Directive canceled",
+    "allProfiles": "all profiles",
+    "targetUser": "client #{id}",
+    "installs": "Installs",
+    "installsSub": "Apps that reached the server (version, profiles, whose subscriptions)",
+    "byUser": "Client ID",
+    "byApp": "Part of app_id",
+    "installsEmpty": "No installs. They show up once the updated app reaches the server.",
+    "version": "Version",
+    "profiles": "Profiles",
+    "users": "Clients",
+    "lastSeen": "Last seen",
+    "pick": "Pick"
   }
 }

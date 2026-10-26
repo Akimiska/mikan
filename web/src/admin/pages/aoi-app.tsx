@@ -18,7 +18,6 @@ type Target = Schemas["AoiDirectiveBody"]["target"];
 
 const KINDS: Kind[] = ["rewrite_url", "add_profile", "remove_profile", "refresh", "message"];
 const DEFAULT_FROM = "https://sub.aoimusic.ru/sub/";
-const DEFAULT_TO = "https://sub.aoicompany.com/sub/";
 
 const qkDirectives = ["aoi", "directives"] as const;
 const qkInstalls = (user: number, q: string) => ["aoi", "installs", user, q] as const;
@@ -72,7 +71,7 @@ type Draft = {
   note: string;
 };
 
-const emptyDraft: Draft = { kind: "rewrite_url", target: "all", userID: "", appID: "", from: DEFAULT_FROM, to: DEFAULT_TO, url: "", label: "", subUserID: "", title: "", text: "", hours: "", note: "" };
+const emptyDraft: Draft = { kind: "rewrite_url", target: "all", userID: "", appID: "", from: DEFAULT_FROM, to: "", url: "", label: "", subUserID: "", title: "", text: "", hours: "", note: "" };
 
 const int = (s: string) => {
   const n = Number.parseInt(s.trim(), 10);
@@ -132,7 +131,7 @@ function SendCard({ appTarget }: { appTarget: string }) {
               <input id="ad-from" className="input mono" value={d.from} onChange={(e) => set("from", e.target.value)} spellCheck={false} />
             </Field>
             <Field label={t("aoiApp.to")} htmlFor="ad-to">
-              <input id="ad-to" className="input mono" value={d.to} onChange={(e) => set("to", e.target.value)} spellCheck={false} />
+              <input id="ad-to" className="input mono" value={d.to} onChange={(e) => set("to", e.target.value)} spellCheck={false} placeholder="https://sub.example.com/sub/" />
             </Field>
           </div>
         ) : null}

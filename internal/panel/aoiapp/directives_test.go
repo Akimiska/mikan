@@ -9,7 +9,7 @@ func TestDirectiveCheck(t *testing.T) {
 		n    NewDirective
 		code string
 	}{
-		{"rewrite", NewDirective{Kind: KindRewriteURL, Target: "all", Params: DirectiveParams{From: "https://sub.aoimusic.ru/sub/", To: "https://sub.aoicompany.com/sub/"}}, ""},
+		{"rewrite", NewDirective{Kind: KindRewriteURL, Target: "all", Params: DirectiveParams{From: "https://sub.aoimusic.ru/sub/", To: "https://sub.example.com/sub/"}}, ""},
 		{"rewrite same", NewDirective{Kind: KindRewriteURL, Target: "all", Params: DirectiveParams{From: "https://a/", To: "https://a/"}}, "directive_bad_rewrite"},
 		{"rewrite not a link", NewDirective{Kind: KindRewriteURL, Target: "all", Params: DirectiveParams{From: "sub.aoimusic.ru", To: "https://b/"}}, "directive_bad_rewrite"},
 		{"add", NewDirective{Kind: KindAddProfile, Target: "app", AppID: app, Params: DirectiveParams{URL: "https://sub.aoimusic.ru/sub/abcdef12"}}, ""},

@@ -200,7 +200,7 @@ merge — обязательный чек-лист из §6.
 ### 3.19 Заказ приложения проверяется у провайдера сразу (с 0.5.2.1-aoi.4)
 `billing/aoi_check.go` `CheckPendingNow` + `aoiapp/handlers.go` order(): пока заказ pending, каждый опрос `/app/order` (не чаще раза в 5 с на платёж, `throttle` в limiter.go) спрашивает адаптер о счёте. Вебхуков от Platega нет → оплата была видна только на минутном Reconcile (40–120 с).
 
-### 3.20 Указания приложениям AoiVPN (с 0.5.2.1-aoi.5)
+### 3.20 Указания приложениям AoiVPN (с 0.5.2.1-aoi.5; форма без готового домена — aoi.6)
 `aoiapp/directives.go` (таблицы `aoi_app_directives`, `aoi_app_directive_acks`, `aoi_app_seen`, `aoi_app_seen_users` — создаются там же, не миграциями апстрима) + `api/aoi_directives.go` (`/api/v1/aoi/*`) + страница `web/src/admin/pages/aoi-app.tsx` (пункт меню «Приложение»). Приложение: `GET <sub>/app/directives?app_id=&tokens=&profiles=&v=&os=` и `POST <sub>/app/directive-ack`. Виды: `rewrite_url` (from→to префикс ссылок профилей), `add_profile`, `remove_profile`, `refresh`, `message`; цель — все / установки клиента (по токенам профилей или заказам) / одна установка. Создавать и отменять — только сессия админа (`requireOwner`): указание кладёт ссылку в каждое приложение. Типы фронта: `go run ./cmd/mikan openapi > web/src/api/openapi.json` + `openapi-typescript`.
 
 ## 4. Брендинг (правила с 18.10.2026)

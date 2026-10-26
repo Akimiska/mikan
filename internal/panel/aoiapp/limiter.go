@@ -41,3 +41,25 @@ func (l *limiter) allow(key string, now time.Time) bool {
 	l.hits[key] = append(recent, now)
 	return true
 }
+
+// throttle lets one action per key through every 5 seconds (an order's provider check).
+type throttle struct {
+	mu   sync.Mutex
+	last map[int64]time.Time
+}
+
+func (t *throttle) allow(key int64, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.last == nil {
+		t.last = map[int64]time.Time{}
+	}
+	if now.Sub(t.last[key]) < 5*time.Second {
+		return false
+	}
+	if len(t.last) > 1000 {
+		t.last = map[int64]time.Time{}
+	}
+	t.last[key] = now
+	return true
+}

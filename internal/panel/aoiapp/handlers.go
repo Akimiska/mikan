@@ -422,6 +422,15 @@ func (h *Handler) order(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "order_not_found"})
 		return
 	}
+	// Пока покупатель платит, приложение опрашивает заказ: спрашиваем провайдера сразу,
+	// не дожидаясь минутного Reconcile (вебхуков от Platega нет) — не чаще раза в 5 с.
+	if p.Status == billing.PaymentPending && h.d.Billing != nil && h.orderCheck.allow(paymentID, h.d.Now()) {
+		if err := h.d.Billing.CheckPendingNow(ctx, paymentID); err != nil {
+			h.d.Log.Debug("aoiapp: order check", "payment", paymentID, "err", err)
+		} else if fresh, err := h.d.Store.Q.GetPayment(ctx, paymentID); err == nil {
+			p = fresh
+		}
+	}
 	state := "pending"
 	var u db.User
 	switch p.Status {

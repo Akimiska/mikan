@@ -54,6 +54,7 @@ type Handler struct {
 
 	payLimit   limiter
 	trialLimit limiter
+	orderCheck throttle
 }
 
 const (

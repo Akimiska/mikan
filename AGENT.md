@@ -196,6 +196,7 @@ merge — обязательный чек-лист из §6.
 
 ### 3.18 Иконки установленной панели (PWA) — птичка AoiVPN (с 0.5.2.1-aoi.3)
 `web/public/pwa-192.png`, `pwa-512.png`, `pwa-maskable-512.png` (их берёт манифест `server/manifest.go`: ярлык на рабочем столе и сплэш Android) пришли из апстрима в rc.12 уже ПОСЛЕ брендинга и были мандарином mikan. Сгенерированы из `AoiVPN/assets/images/icon.png` (1254 px; maskable = обрезка по 70 px). При мерже апстрима эти три файла и `apple-touch-icon.png`/`favicon.png` — всегда наша сторона.
+С 0.5.2.1-aoi.7 у панели своя иконка (колибри с окном-дашбордом), отдельная от лаунчер-иконки приложения AoiVPN (`web/src/sub/aoivpn.png` не трогается): pwa-192/512, favicon, `src/assets/logo.webp` — из неё с прозрачными углами; maskable-512 и apple-touch — на сплошном фоне #0D0123 с обрезкой по 70 px из 1254.
 
 ### 3.19 Заказ приложения проверяется у провайдера сразу (с 0.5.2.1-aoi.4)
 `billing/aoi_check.go` `CheckPendingNow` + `aoiapp/handlers.go` order(): пока заказ pending, каждый опрос `/app/order` (не чаще раза в 5 с на платёж, `throttle` в limiter.go) спрашивает адаптер о счёте. Вебхуков от Platega нет → оплата была видна только на минутном Reconcile (40–120 с).
